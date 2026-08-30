@@ -190,6 +190,56 @@ const heardOutside = new Map<string, number>();
  */
 const usage = new Map<Brand, PlanUsage>([['claude', NOTHING_KNOWN], ['codex', NOTHING_KNOWN]]);
 
+/**
+ * How long a figure stands on screen without being said again.
+ *
+ * The sidecar says it every thirty seconds whether it moved or not, so silence
+ * is not a number holding still — it is nobody left to say one. Three beats,
+ * because one missed read is ordinary and the chip should not blink over it.
+ *
+ * A closed connection is not the only way the figure stops arriving, and it is
+ * not the common one. The sidecar is its own process behind the app's server,
+ * which retries it quietly; when it goes down, or its own poller stops, the
+ * browser's socket stays open and pinging and the page is told nothing at all.
+ * Waiting on the socket to close meant the chip could sit on a dead reading for
+ * as long as the app stayed up (bw-643q.4).
+ */
+const FIGURE_STANDS_MS = 90_000;
+
+/** One per brand, restarted every time that brand's figure is said. */
+const figureTimers = new Map<Brand, ReturnType<typeof setTimeout>>();
+
+function figureSaid(brand: Brand): void {
+  const standing = figureTimers.get(brand);
+  if (standing) clearTimeout(standing);
+  figureTimers.set(
+    brand,
+    setTimeout(() => {
+      figureTimers.delete(brand);
+      letFigureGo(brand);
+    }, FIGURE_STANDS_MS),
+  );
+}
+
+/** Back to nothing known, which the chip draws as no chip rather than a zero. */
+function letFigureGo(brand: Brand): void {
+  if (usage.get(brand) === NOTHING_KNOWN) return;
+  usage.set(brand, NOTHING_KNOWN);
+  announce();
+}
+
+function everyFigureGoes(): boolean {
+  figureTimers.forEach((t) => clearTimeout(t));
+  figureTimers.clear();
+  let letGo = false;
+  usage.forEach((held, brand) => {
+    if (held === NOTHING_KNOWN) return;
+    usage.set(brand, NOTHING_KNOWN);
+    letGo = true;
+  });
+  return letGo;
+}
+
 /** A project starts being counted for the moment something asks about it. */
 function countFor(project: string): number {
   return heardOutside.get(project) ?? 0;
@@ -315,7 +365,9 @@ function noteMismatch(now: boolean): void {
 
 function absorb(frame: WatchFrame): void {
   if (frame.kind === 'usage') {
-    usage.set(frame.brand ?? 'claude', frame.usage);
+    const brand = frame.brand ?? 'claude';
+    usage.set(brand, frame.usage);
+    figureSaid(brand);
     listeners.forEach((fn) => fn());
     return;
   }
@@ -492,13 +544,7 @@ function dropped(): void {
   // that had stopped being an answer, and nothing but a reload ever moved it
   // again (bw-643q.1). Back to nothing known, which draws no chip at all rather
   // than a stale one, the same choice the chip already makes on an API key.
-  let letGo = false;
-  usage.forEach((held, brand) => {
-    if (held === NOTHING_KNOWN) return;
-    usage.set(brand, NOTHING_KNOWN);
-    letGo = true;
-  });
-  if (letGo) announce();
+  if (everyFigureGoes()) announce();
   // Opening it again is the wire's job, and it keeps its own count: this
   // store is one reader of a connection the whole window shares.
 }

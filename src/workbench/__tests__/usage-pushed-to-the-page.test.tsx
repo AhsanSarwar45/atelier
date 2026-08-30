@@ -130,6 +130,42 @@ describe('the plan figure on a silent chat', () => {
     expect(result.current.session).toBeNull();
   });
 
+  it('lets the figure go when it stops arriving, with the connection still open', async () => {
+    vi.useFakeTimers();
+    try {
+      const { usePlanUsage } = await freshModule();
+      const { result } = renderHook(() => usePlanUsage());
+
+      act(() => opened[0].saysUsage(47));
+      expect(result.current.session?.percent).toBe(47);
+
+      // The sidecar goes on saying it. A figure that has not moved is still an
+      // answer, so it stands.
+      act(() => {
+        vi.advanceTimersByTime(30_000);
+        opened[0].saysUsage(47);
+      });
+      act(() => {
+        vi.advanceTimersByTime(30_000);
+        opened[0].saysUsage(47);
+      });
+      expect(result.current.session?.percent, 'a figure still being said was thrown away').toBe(47);
+
+      // Now it goes quiet, and the socket does NOT close: the sidecar is its own
+      // process behind the app's server, which retries it without telling the
+      // page. Waiting on a close meant the chip could sit on a dead reading for
+      // as long as the app stayed up (bw-643q.4).
+      act(() => {
+        vi.advanceTimersByTime(90_000);
+      });
+      expect(result.current.available, 'the chip kept a figure nobody had said for three beats').toBe(false);
+      expect(result.current.session).toBeNull();
+      expect(opened[0].closed, 'the case proved nothing: the connection had gone too').toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('draws the figure the stream said on the chip itself', async () => {
     const { usePlanUsage } = await freshModule();
     const { PlanChip } = await import('@/workbench/usage-view');
