@@ -7,6 +7,7 @@
 pub mod actor;
 pub mod claude;
 pub mod codex;
+pub mod external;
 pub mod projection;
 pub mod protocol;
 pub mod store;
