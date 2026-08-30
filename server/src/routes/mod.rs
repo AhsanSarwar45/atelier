@@ -142,13 +142,18 @@ fn spellings_of(name: &str, endings: &[String]) -> Vec<String> {
     spellings
 }
 
-/// A tool's name as this computer spells the file behind it: on Windows the
-/// ending is part of the name, and everywhere else it is not.
-fn spelt_here(name: &str) -> Vec<String> {
+/// The endings this computer wears on a name: what PATHEXT says on Windows,
+/// and nothing at all everywhere else, where the name is the whole file name.
+///
+/// Handing the endings to the search rather than asking `cfg!(windows)` inside
+/// it is what lets the Windows rule be read back on a machine that is not
+/// Windows: `spellings_of` given no endings answers with the bare name, which
+/// is exactly what every other computer wants (bw-dwxw).
+fn here_endings() -> Vec<String> {
     if cfg!(windows) {
-        spellings_of(name, &endings(std::env::var_os("PATHEXT").as_deref()))
+        endings(std::env::var_os("PATHEXT").as_deref())
     } else {
-        vec![name.to_string()]
+        vec![]
     }
 }
 
@@ -183,54 +188,79 @@ fn places_on(path: Option<&OsStr>) -> Vec<PathBuf> {
 /// login with no PATH at all reported every dependency missing while all of
 /// them were installed (bw-oxrg.6).
 fn tool_dirs() -> Vec<PathBuf> {
+    let home = UserDirs::new().map(|d| d.home_dir().to_path_buf());
+    let told = |name: &str| std::env::var_os(name).map(PathBuf::from);
+    if cfg!(windows) {
+        windows_dirs(home.as_deref(), &told)
+    } else {
+        unix_dirs(home.as_deref(), cfg!(target_os = "macos"))
+    }
+}
+
+/// The places a tool is looked for on Windows.
+///
+/// The reader's home and the environment are handed in rather than read here,
+/// because none of this had ever been run: every folder below was written from
+/// documentation on a Linux machine, and a rule only Windows reaches is a rule
+/// nobody has read back (bw-dwxw). `told` is what the computer says a variable
+/// holds; where it says nothing, Windows' own default stands in, which is the
+/// case a service started with a stripped environment is actually in.
+fn windows_dirs(home: Option<&Path>, told: &dyn Fn(&str) -> Option<PathBuf>) -> Vec<PathBuf> {
     let mut dirs = vec![];
-    if let Some(home) = UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
+    if let Some(home) = home {
         dirs.push(home.join(".cargo").join("bin"));
         dirs.push(home.join(".local").join("bin"));
         dirs.push(home.join(".beads").join("bin"));
-        if cfg!(windows) {
-            // Where npm puts what it installs for one person on Windows.
-            dirs.push(home.join("AppData").join("Roaming").join("npm"));
-            dirs.push(
-                home.join("AppData")
-                    .join("Local")
-                    .join("Programs")
-                    .join("Git")
-                    .join("cmd"),
-            );
-        }
+        // Where npm puts what it installs for one person, and where Git for
+        // Windows lands when it is installed without an administrator.
+        dirs.push(home.join("AppData").join("Roaming").join("npm"));
+        dirs.push(
+            home.join("AppData")
+                .join("Local")
+                .join("Programs")
+                .join("Git")
+                .join("cmd"),
+        );
     }
-    if cfg!(windows) {
-        // Git for Windows and Node install here and put nothing on a minimal
-        // PATH, which is why git could not be started at all (bw-oxrg.4).
-        let programs = std::env::var_os("ProgramFiles")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
-        dirs.push(programs.join("Git").join("cmd"));
-        dirs.push(programs.join("nodejs"));
-        if let Some(older) = std::env::var_os("ProgramFiles(x86)").map(PathBuf::from) {
-            dirs.push(older.join("Git").join("cmd"));
-            dirs.push(older.join("nodejs"));
-        }
-        let windows = std::env::var_os("SystemRoot")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
-        dirs.push(windows.join("System32"));
-        dirs.push(windows);
-    } else {
-        if cfg!(target_os = "macos") {
-            // Homebrew on an Apple Silicon machine. On an Intel one it is
-            // `/usr/local`, which is already below.
-            dirs.push(PathBuf::from("/opt/homebrew/bin"));
-            dirs.push(PathBuf::from("/opt/homebrew/sbin"));
-        }
-        dirs.push(PathBuf::from("/usr/local/bin"));
-        dirs.push(PathBuf::from("/usr/local/sbin"));
-        dirs.push(PathBuf::from("/usr/bin"));
-        dirs.push(PathBuf::from("/bin"));
-        dirs.push(PathBuf::from("/usr/sbin"));
-        dirs.push(PathBuf::from("/sbin"));
+    // Git for Windows and Node install here and put nothing on a minimal
+    // PATH, which is why git could not be started at all (bw-oxrg.4).
+    let programs = told("ProgramFiles").unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
+    dirs.push(programs.join("Git").join("cmd"));
+    dirs.push(programs.join("nodejs"));
+    if let Some(older) = told("ProgramFiles(x86)") {
+        dirs.push(older.join("Git").join("cmd"));
+        dirs.push(older.join("nodejs"));
     }
+    let windows = told("SystemRoot").unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    dirs.push(windows.join("System32"));
+    dirs.push(windows);
+    dirs
+}
+
+/// The places a tool is looked for everywhere that is not Windows.
+///
+/// `mac` is handed in for the same reason the Windows folders are: Homebrew's
+/// own folder on an Apple Silicon machine is a line no test on a Linux
+/// computer would otherwise reach (bw-dwxw).
+fn unix_dirs(home: Option<&Path>, mac: bool) -> Vec<PathBuf> {
+    let mut dirs = vec![];
+    if let Some(home) = home {
+        dirs.push(home.join(".cargo").join("bin"));
+        dirs.push(home.join(".local").join("bin"));
+        dirs.push(home.join(".beads").join("bin"));
+    }
+    if mac {
+        // Homebrew on an Apple Silicon machine. On an Intel one it is
+        // `/usr/local`, which is already below.
+        dirs.push(PathBuf::from("/opt/homebrew/bin"));
+        dirs.push(PathBuf::from("/opt/homebrew/sbin"));
+    }
+    dirs.push(PathBuf::from("/usr/local/bin"));
+    dirs.push(PathBuf::from("/usr/local/sbin"));
+    dirs.push(PathBuf::from("/usr/bin"));
+    dirs.push(PathBuf::from("/bin"));
+    dirs.push(PathBuf::from("/usr/sbin"));
+    dirs.push(PathBuf::from("/sbin"));
     dirs
 }
 
@@ -265,9 +295,12 @@ fn runnable(file: &Path) -> bool {
 /// Within one spelling the places are walked in turn and each ending tried
 /// there before moving on, which is the order Windows itself resolves a name
 /// in — the nearest directory wins, and inside it the runnable ending does.
-fn search_in(dirs: &[PathBuf], spellings: &[&str]) -> Option<PathBuf> {
+///
+/// `endings` are the ones names are worn with here: PATHEXT's on Windows, and
+/// none anywhere else, where a name is already the whole file name.
+fn search_in(endings: &[String], dirs: &[PathBuf], spellings: &[&str]) -> Option<PathBuf> {
     for name in spellings {
-        let spelt = spelt_here(name);
+        let spelt = spellings_of(name, endings);
         for dir in dirs {
             for spelling in &spelt {
                 let file = dir.join(spelling);
@@ -309,7 +342,7 @@ pub fn find_tool(name: &str, others: &[&str]) -> Option<PathBuf> {
         let mut spellings = vec![name];
         spellings.extend_from_slice(others);
         let dirs = every_place();
-        let found = search_in(&dirs, &spellings);
+        let found = search_in(&here_endings(), &dirs, &spellings);
         match &found {
             Some(path) => tracing::info!("Found {} at: {}", name, path.display()),
             None => tracing::warn!(
@@ -512,7 +545,7 @@ mod tests {
     fn a_tool_installed_late_is_found_once_the_answer_is_dropped() {
         let place = tempfile::tempdir().expect("a directory of our own");
         let name = "atelier-tool-installed-late";
-        let look = || search_in(&[place.path().to_path_buf()], &[name]);
+        let look = || search_in(&here_endings(), &[place.path().to_path_buf()], &[name]);
 
         assert_eq!(remembered(name, look), None, "nothing is there to find yet");
 
@@ -540,14 +573,14 @@ mod tests {
 
         let shorter = install(place.path(), "python");
         assert_eq!(
-            search_in(&dirs, &["python3", "python"]),
+            search_in(&here_endings(), &dirs, &["python3", "python"]),
             Some(shorter),
             "the spelling a Windows computer usually has is the only one here"
         );
 
         let asked_for = install(place.path(), "python3");
         assert_eq!(
-            search_in(&dirs, &["python3", "python"]),
+            search_in(&here_endings(), &dirs, &["python3", "python"]),
             Some(asked_for),
             "and where both are here, the spelling asked for first wins"
         );
@@ -562,7 +595,7 @@ mod tests {
 
         let windows = install(place.path(), "npm.cmd");
         assert_eq!(
-            search_in(&dirs, &["npm", "npm.cmd"]),
+            search_in(&here_endings(), &dirs, &["npm", "npm.cmd"]),
             Some(windows),
             "the only npm here is the one wearing the ending Windows gives it"
         );
@@ -592,7 +625,7 @@ mod tests {
     #[test]
     fn an_empty_place_finds_nothing() {
         let place = tempfile::tempdir().expect("a directory of our own");
-        assert_eq!(search_in(&[place.path().to_path_buf()], &["bd"]), None);
+        assert_eq!(search_in(&here_endings(), &[place.path().to_path_buf()], &["bd"]), None);
     }
 
     /// A computer whose list of places is empty still has its tools on it.
@@ -612,7 +645,7 @@ mod tests {
         );
 
         let shell = if cfg!(windows) { "cmd" } else { "sh" };
-        let found = search_in(&emptied, &[shell]).unwrap_or_else(|| {
+        let found = search_in(&here_endings(), &emptied, &[shell]).unwrap_or_else(|| {
             let looked = emptied
                 .iter()
                 .map(|dir| dir.display().to_string())
@@ -657,6 +690,129 @@ mod tests {
                 "a computer that tells us nothing still runs .exe and .cmd"
             );
         }
+    }
+
+    /// The endings a Windows computer wears names with, for a test standing on
+    /// a computer that is not one.
+    fn windows_endings() -> Vec<String> {
+        endings(Some(OsStr::new(".COM;.EXE;.BAT;.CMD")))
+    }
+
+    /// A Windows computer is looked at where Git, Node and npm actually put
+    /// themselves, and none of those folders is on a minimal PATH.
+    ///
+    /// Every line of this was written from documentation on a Linux machine
+    /// and had never once been run (bw-dwxw). Handing the home folder and the
+    /// environment in is what lets it be read back here.
+    ///
+    /// The folders are built up the same way the code builds them rather than
+    /// written out as `C:\...` text, because a separator is the platform's
+    /// business — a Linux `Path` joins with `/` whatever the root looks like.
+    /// What is being read back is which roots are used and which folders hang
+    /// off them, which is the part that was written from documentation.
+    #[test]
+    fn a_windows_computer_is_looked_at_where_its_programs_install() {
+        let home = PathBuf::from(r"C:\Users\reader");
+        let programs = PathBuf::from(r"C:\Program Files");
+        let older = PathBuf::from(r"C:\Program Files (x86)");
+        let windows = PathBuf::from(r"C:\Windows");
+        let told = |name: &str| match name {
+            "ProgramFiles" => Some(programs.clone()),
+            "ProgramFiles(x86)" => Some(older.clone()),
+            "SystemRoot" => Some(windows.clone()),
+            _ => None,
+        };
+        let dirs = windows_dirs(Some(&home), &told);
+        for wanted in [
+            home.join("AppData").join("Roaming").join("npm"),
+            home.join("AppData").join("Local").join("Programs").join("Git").join("cmd"),
+            programs.join("Git").join("cmd"),
+            programs.join("nodejs"),
+            older.join("Git").join("cmd"),
+            windows.join("System32"),
+        ] {
+            assert!(
+                dirs.contains(&wanted),
+                "{} is not among the places a Windows computer is looked at",
+                wanted.display()
+            );
+        }
+        assert!(
+            dirs.iter().position(|d| d.starts_with(&home))
+                < dirs.iter().position(|d| d == &windows.join("System32")),
+            "the reader's own folders are looked in before the system's"
+        );
+    }
+
+    /// A Windows computer that tells us nothing about itself still gets the
+    /// folders Windows itself ships with — which is the case a service started
+    /// with a stripped environment is actually in.
+    #[test]
+    fn a_silent_windows_computer_falls_back_to_what_windows_ships() {
+        let dirs = windows_dirs(None, &|_| None);
+        assert!(dirs.contains(&PathBuf::from(r"C:\Program Files").join("Git").join("cmd")));
+        assert!(dirs.contains(&PathBuf::from(r"C:\Windows").join("System32")));
+        assert!(
+            !dirs.iter().any(|d| d.starts_with(r"C:\Program Files (x86)")),
+            "a folder the computer never named is not invented for it"
+        );
+    }
+
+    /// Asking for `git` on a Windows computer has to find the file `git.exe`,
+    /// in the folder Git for Windows installs into. The reader never types the
+    /// ending, and no minimal PATH names that folder.
+    #[test]
+    fn git_is_found_as_an_exe_in_the_folder_git_installs_into() {
+        let root = tempfile::tempdir().expect("a directory of our own");
+        let installed = root.path().join("Program Files").join("Git").join("cmd");
+        std::fs::create_dir_all(&installed).expect("make the folder Git installs into");
+        let file = install(&installed, "git.exe");
+
+        assert_eq!(
+            search_in(&windows_endings(), &[installed.clone()], &["git"]),
+            Some(file),
+            "the bare name has to reach the file wearing the ending"
+        );
+        assert_eq!(
+            search_in(&[], &[installed], &["git"]),
+            None,
+            "and without the endings — the way every other computer searches — \
+             the same folder holds no git at all"
+        );
+    }
+
+    /// npm on Windows is `npm.cmd`, and asking for `npm` has to reach it.
+    ///
+    /// The older test here installed `npm.cmd` and then asked for `npm.cmd`,
+    /// which never exercised the rule (bw-dwxw). This asks the way the app
+    /// asks.
+    #[test]
+    fn npm_is_reached_by_its_bare_name_on_windows() {
+        let place = tempfile::tempdir().expect("a directory of our own");
+        let file = install(place.path(), "npm.cmd");
+        assert_eq!(
+            search_in(&windows_endings(), &[place.path().to_path_buf()], &["npm"]),
+            Some(file),
+            "PATHEXT is what says .cmd counts, and it is why we ask it"
+        );
+    }
+
+    /// Homebrew's own folder on an Apple Silicon machine, which no test on a
+    /// Linux computer would otherwise reach, and which is not invented for a
+    /// computer that is not one.
+    #[test]
+    fn an_apple_silicon_computer_is_looked_at_in_homebrews_folder() {
+        let apple = unix_dirs(None, true);
+        assert!(apple.contains(&PathBuf::from("/opt/homebrew/bin")));
+        assert!(
+            apple.iter().position(|d| d == &PathBuf::from("/opt/homebrew/bin"))
+                < apple.iter().position(|d| d == &PathBuf::from("/usr/bin")),
+            "what the reader installed is preferred to what the system shipped"
+        );
+
+        let other = unix_dirs(None, false);
+        assert!(!other.contains(&PathBuf::from("/opt/homebrew/bin")));
+        assert!(other.contains(&PathBuf::from("/usr/bin")) && other.contains(&PathBuf::from("/bin")));
     }
 
     /// A name is written out under every ending it may wear, and one already
