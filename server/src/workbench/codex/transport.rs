@@ -385,6 +385,18 @@ mod tests {
                     }
                 }
                 "thread/read" => json!({"thread":{"id":message["params"]["threadId"],"turns":[]}}),
+                "thread/start" | "thread/resume" => {
+                    json!({"thread":{"id":"thread-live"},"model":"gpt-5","reasoningEffort":"high","cwd":"/project"})
+                }
+                "turn/start" => {
+                    writeln!(stdout, "{}", json!({"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-1"}}})).unwrap();
+                    writeln!(stdout, "{}", json!({"jsonrpc":"2.0","id":88,"method":"item/commandExecution/requestApproval","params":{"itemId":"shell-1","command":"cargo test"}})).unwrap();
+                    json!({"turn":{"id":"turn-1"}})
+                }
+                "turn/steer"
+                | "turn/interrupt"
+                | "thread/settings/update"
+                | "thread/compact/start" => json!({}),
                 "account/usage/read" => json!({"threadUsage":{"groups":[
                     {"inputTokens":2,"outputTokens":3,"totalTokens":5},
                     {"inputTokens":7,"outputTokens":11}
@@ -537,5 +549,50 @@ mod tests {
         assert_eq!(capabilities["collaborationModes"][0]["value"], "plan");
         assert_eq!(capabilities["skills"], json!(["beads"]));
         transport.close().await;
+    }
+
+    #[tokio::test]
+    async fn native_codex_live_driver_starts_sends_steers_answers_and_changes_settings() {
+        use crate::workbench::codex::live::{NativeCodexDriver, StartOptions};
+        let transport = CodexTransport::start(fake_config()).await.unwrap();
+        let (mut driver, opened) = NativeCodexDriver::open(
+            transport,
+            StartOptions {
+                cwd: PathBuf::from("/project"),
+                resume: None,
+                model: Some("gpt-5".into()),
+                permission_mode: "on-request".into(),
+                effort: Some("high".into()),
+                collaboration_mode: Some("plan".into()),
+                instructions: "rules".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(opened[0]["type"], "session.started");
+        driver.send("Build it").await.unwrap();
+        driver.send("And test it").await.unwrap();
+        assert_eq!(driver.set_mode("never").unwrap()["permissionMode"], "never");
+        assert_eq!(driver.set_model("default")["model"], "default");
+        assert_eq!(driver.set_effort("low")["effort"], "low");
+        driver.set_collaboration_mode("plan").await.unwrap();
+        driver.compact().await.unwrap();
+        driver.interrupt().await.unwrap();
+
+        let mut saw_approval = false;
+        for _ in 0..8 {
+            let events = driver.next_events().await.unwrap();
+            if let Some(ask) = events
+                .iter()
+                .find(|event| event["type"] == "ask.permission")
+            {
+                assert_eq!(ask["askId"], "shell-1");
+                driver.answer("shell-1", "allow_once", None).await.unwrap();
+                saw_approval = true;
+                break;
+            }
+        }
+        assert!(saw_approval);
+        driver.close().await;
     }
 }
