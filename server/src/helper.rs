@@ -520,10 +520,35 @@ fn unpack_package(gzipped_tar: &[u8], dest: &Path) -> Result<(), String> {
         if let Some(parent) = out.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
         }
+        // Some npm tarballs record directories as 0666. Letting `tar` apply
+        // that mode creates a directory nobody can traverse, so the next file
+        // beneath it fails with PermissionDenied and every retry repeats the
+        // same partial install. Create directory entries ourselves and always
+        // give the installing user the one execute bit needed to traverse and
+        // repair them. Existing partial directories are fixed on the retry too
+        // (bw-oesd.6.1).
+        if kind == EntryType::Directory {
+            std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+            traversable(&entry, &out)?;
+            continue;
+        }
         entry
             .unpack(&out)
             .map_err(|e| format!("{}: {e}", out.display()))?;
     }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn traversable<R: std::io::Read>(entry: &tar::Entry<'_, R>, out: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let recorded = entry.header().mode().unwrap_or(0o700);
+    let permissions = std::fs::Permissions::from_mode(recorded | 0o100);
+    std::fs::set_permissions(out, permissions).map_err(|e| format!("{}: {e}", out.display()))
+}
+
+#[cfg(not(unix))]
+fn traversable<R: std::io::Read>(_entry: &tar::Entry<'_, R>, _out: &Path) -> Result<(), String> {
     Ok(())
 }
 
@@ -588,11 +613,59 @@ mod tests {
         address
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn unpack_package_directories_are_traversable() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        let contents = b"module.exports = true;\n";
+        let mut tarred = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut tarred);
+            let mut directory = tar::Header::new_gnu();
+            directory.set_entry_type(tar::EntryType::Directory);
+            directory.set_size(0);
+            directory.set_mode(0o666);
+            builder
+                .append_data(&mut directory, "package/lib", std::io::empty())
+                .unwrap();
+
+            let mut file = tar::Header::new_gnu();
+            file.set_size(contents.len() as u64);
+            file.set_mode(0o644);
+            builder
+                .append_data(&mut file, "package/lib/bitmapper.js", &contents[..])
+                .unwrap();
+            builder.finish().unwrap();
+        }
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&tarred).unwrap();
+        let gzipped = encoder.finish().unwrap();
+        let dest = tempfile::tempdir().unwrap();
+
+        unpack_package(&gzipped, dest.path()).unwrap();
+
+        assert_eq!(
+            std::fs::read(dest.path().join("lib/bitmapper.js")).unwrap(),
+            contents
+        );
+        assert_ne!(
+            std::fs::metadata(dest.path().join("lib"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o100,
+            0,
+            "the installing user must be able to traverse the directory"
+        );
+    }
+
     /// A tarball can carry a symlink whose target climbs out of the folder it
     /// unpacks into; if that link were laid down, a later entry written
     /// "through" it would land outside. The unpacker must refuse the link.
     #[test]
-    fn a_tarball_cannot_escape_dest_through_a_symlink_it_creates() {
+    fn unpack_package_refuses_a_tarball_that_escapes_dest_through_its_symlink() {
         use std::io::Write;
 
         // A place outside dest we will try, and fail, to reach.
