@@ -1,9 +1,27 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
+import { useMemo } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { BeadChip } from '@/components/bead-chip-row';
 import { MarkdownBody, type Mentions } from '@/components/markdown-body';
 import { addressedBy, mentionsIn } from '@/workbench/mentions';
+import { useKnownCardStatuses, useKnownCards } from '@/workbench/known-cards';
+
+const loadProjectBeads = vi.fn();
+let boardChanged: (() => void) | undefined;
+
+vi.mock('@/lib/beads-parser', () => ({
+  loadProjectBeads: (...args: unknown[]) => loadProjectBeads(...args),
+}));
+
+vi.mock('@/lib/api', () => ({
+  watch: {
+    beads: (_path: string, changed: () => void) => {
+      boardChanged = changed;
+      return () => {};
+    },
+  },
+}));
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: () => {} }),
@@ -22,6 +40,16 @@ const MENTIONS: Mentions = {
 };
 
 const say = (text: string) => render(<MarkdownBody mentions={MENTIONS}>{text}</MarkdownBody>);
+
+function LiveMention() {
+  const cards = useKnownCards('/project');
+  const statuses = useKnownCardStatuses('/project');
+  const mentions = useMemo<Mentions>(() => ({
+    split: (text) => mentionsIn(text, { card: (id) => cards.has(id) }),
+    card: (id) => <BeadChip id={id} projectId={HERE} status={statuses.get(id)} size="sm" testId="live-mention-card" />,
+  }), [cards, statuses]);
+  return <MarkdownBody mentions={mentions}>Working on bw-1u1</MarkdownBody>;
+}
 
 describe('card names in a rendered message', () => {
   it('draws this project card address as a chip', () => {
@@ -73,6 +101,20 @@ describe('card names in a rendered message', () => {
     say('Working on bw-1u1');
     expect(screen.getByTestId('mention-card')).toHaveAttribute('data-bead-status', 'in_progress');
     expect(screen.getByTestId('mention-card')).toHaveClass('text-status-progress');
+  });
+
+  it('updates an already drawn chip from one shared board change', async () => {
+    loadProjectBeads
+      .mockResolvedValueOnce([{ id: 'bw-1u1', status: 'open' }])
+      .mockResolvedValueOnce([{ id: 'bw-1u1', status: 'closed' }]);
+
+    render(<LiveMention />);
+    await waitFor(() => expect(screen.getByTestId('live-mention-card')).toHaveAttribute('data-bead-status', 'open'));
+
+    act(() => boardChanged?.());
+    await waitFor(() => expect(screen.getByTestId('live-mention-card')).toHaveAttribute('data-bead-status', 'closed'));
+    expect(screen.getByTestId('live-mention-card')).toHaveClass('text-status-closed');
+    expect(loadProjectBeads).toHaveBeenCalledTimes(2);
   });
 
   it('keeps card ids inside fenced commands copyable as code', () => {
