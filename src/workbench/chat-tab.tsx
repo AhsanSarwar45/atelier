@@ -254,7 +254,7 @@ export function Picker({
    */
   options: { value: string; label: string; hint?: string; group?: string; unavailable?: string }[];
   testid: string;
-  /** No agent is attached, so there is nothing to change until he writes. */
+  /** No agent is attached. Picks are stored and applied when the next message wakes it. */
   asleep: boolean;
   onPick: (value: string) => void;
   defaultValue?: string | null;
@@ -272,11 +272,8 @@ export function Picker({
           data-testid={testid}
           data-current={current ?? ''}
           data-asleep={asleep}
-          disabled={asleep && !onDefault}
           aria-label={label}
-          // A sleeping chat has no agent to tell, and the command behind this
-          // would fail silently; sending a message wakes it (bw-f1q.12).
-          title={asleep && !onDefault ? `${label} — send a message to wake this chat first` : label}
+          title={label}
           className="h-7 gap-1.5 rounded-full px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
         >
           {icon}
@@ -295,7 +292,7 @@ export function Picker({
                 data-value={o.value}
                 data-picked={o.value === current}
                 data-unavailable={o.unavailable ? true : undefined}
-                disabled={asleep || Boolean(o.unavailable)}
+                disabled={Boolean(o.unavailable)}
                 onSelect={() => onPick(o.value)}
                 className="group min-w-0 flex-1 flex-col items-start gap-0.5 px-2 py-1.5"
               >
