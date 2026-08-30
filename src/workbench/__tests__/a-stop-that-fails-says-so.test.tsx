@@ -39,6 +39,7 @@ vi.mock('@/workbench/use-session', async (real) => {
 
 vi.mock('@/workbench/live', () => ({
   useHeldFactsAreOld: () => false,
+  useHeardFromOutside: () => 0,
   useHolds: () => new Map(),
   useLiveSessions: () => [],
   usePlanUsage: () => ({ available: false, plan: null, session: null, week: null, opus: null, at: null }),
