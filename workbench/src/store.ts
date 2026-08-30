@@ -173,7 +173,12 @@ const SCHEMA_CAPABILITIES: SchemaCapability[] = [
       const columns = new Set(
         (db.prepare('PRAGMA table_info(session)').all() as Array<{ name: string }>).map((column) => column.name),
       );
-      if (!columns.has('collaboration_mode')) db.exec('ALTER TABLE session ADD COLUMN collaboration_mode TEXT');
+      // Capability tests may deliberately stand up only the table they are
+      // repairing. A missing session table belongs to the legacy schema, not
+      // to this capability; do not manufacture half of it here.
+      if (columns.size > 0 && !columns.has('collaboration_mode')) {
+        db.exec('ALTER TABLE session ADD COLUMN collaboration_mode TEXT');
+      }
     },
   },
   {
