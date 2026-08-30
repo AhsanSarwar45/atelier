@@ -58,7 +58,7 @@ describe('the window as one bar', () => {
     expect(stripesOf(window()).map((s) => [s.name, s.tokens, Math.round(s.width), s.room])).toEqual([
       ['Messages', 100_000, 50, false],
       ['System tools', 28_000, 14, false],
-      ['Room left', 72_000, 36, true],
+      ['Remaining', 72_000, 36, true],
     ]);
   });
 
@@ -91,16 +91,15 @@ describe('saying which number resets', () => {
   it('names the times this chat has forgotten itself', () => {
     expect(resetLine(spent(12))).toContain('12 times');
     expect(resetLine(spent(1))).toContain('once');
-    expect(resetLine(spent(0))).toContain('has not yet');
+    expect(resetLine(spent(0))).toContain('has not reset');
   });
 
   it('still says which of the two resets when there is no record to count', () => {
-    expect(resetLine(null)).toContain('never resets');
+    expect(resetLine(null)).toContain('does not');
   });
 
   it('points at no window when there is no window drawn above it', () => {
-    expect(resetLine(spent(0), false)).not.toContain('above');
-    expect(resetLine(spent(0), false)).toContain('never resets');
-    expect(resetLine(spent(0), true)).toContain('The window above');
+    expect(resetLine(spent(0), false)).toContain('context window');
+    expect(resetLine(spent(0), true)).toContain('Context');
   });
 });

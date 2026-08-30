@@ -90,7 +90,7 @@ export function stripesOf(w: WindowNow): Stripe[] {
     room: false,
   }));
   const left = Math.max(0, w.window - w.used);
-  if (left > 0) bar.push({ name: 'Room left', tokens: left, width: (left / w.window) * 100, room: true });
+  if (left > 0) bar.push({ name: 'Remaining', tokens: left, width: (left / w.window) * 100, room: true });
   return bar;
 }
 
@@ -115,18 +115,18 @@ export function splitRows(s: Split): SplitRow[] {
   return [
     {
       key: 'read',
-      label: 'Read back',
+      label: 'Cached input',
       tokens: s.cacheRead,
-      note: 'The conversation so far, handed to the model again on every single turn. On a long task this is nearly all of the bill.',
+      note: '',
     },
     {
       key: 'kept',
-      label: 'Kept ready',
+      label: 'Cache writes',
       tokens: s.cacheWrite,
-      note: 'Paid once, to save re-sending the same words next turn.',
+      note: '',
     },
-    { key: 'sent', label: 'Sent fresh', tokens: s.input, note: 'What was new: the typing, and what the tools came back with.' },
-    { key: 'written', label: 'Written back', tokens: s.output, note: 'What the models actually wrote, their thinking included.' },
+    { key: 'sent', label: 'Input', tokens: s.input, note: '' },
+    { key: 'written', label: 'Output', tokens: s.output, note: '' },
   ];
 }
 
@@ -142,13 +142,10 @@ export function resetLine(spent: TaskSpend | null, drewWindow = true): string {
   // Points at the picture only when there is one: a chat read from its record
   // has no window drawn above this line, and saying "the window above" sent the
   // reader looking for something that was never there (bw-3ug7.10).
-  const above = drewWindow
-    ? 'The window above empties every time the chat forgets itself and carries on from a summary'
-    : "A chat's window empties every time it forgets itself and carries on from a summary";
-  const below = 'The total below never resets: it is every turn this task has ever taken, the agents it sent off included.';
-  if (spent === null) return `${above}. ${below}`;
-  if (forgot === 0) return `${above} — this one has not yet. ${below}`;
-  return `${above} — this one has, ${times}. ${below}`;
+  const context = drewWindow ? 'Context' : 'The context window';
+  if (spent === null) return `${context} resets after compaction; total usage does not.`;
+  if (forgot === 0) return `${context} has not reset. Total usage does not reset.`;
+  return `${context} reset ${times}. Total usage does not reset.`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -247,7 +244,7 @@ function Window({ window: w }: { window: WindowNow }) {
   const bar = stripesOf(w);
   const mark = w.forgetsAt !== null ? Math.min(100, (w.forgetsAt / w.window) * 100) : null;
   return (
-    <Card title="In the window right now" testId="token-window">
+    <Card title="Context window" testId="token-window">
       <div className="mt-1 flex items-baseline gap-2 text-sm">
         <span className="font-mono text-foreground" data-testid="token-window-figure">
           {reads(w.used, w.window)}
@@ -296,7 +293,7 @@ function Window({ window: w }: { window: WindowNow }) {
       <p className="mt-2 text-[11px] text-muted-foreground">
         {w.forgetsAt !== null
           ? `Forgets itself at ${w.forgetsAt.toLocaleString()} — ${big(Math.max(0, w.forgetsAt - w.used))} of room to go.`
-          : 'Compacting is off: this chat stops at the end of the window rather than forgetting itself.'}
+          : 'Compaction off'}
       </p>
 
       {(w.memory.length > 0 || w.servers.length > 0 || w.waiting.length > 0) && (
@@ -316,7 +313,7 @@ function Window({ window: w }: { window: WindowNow }) {
 function Spent({ spent }: { spent: TaskSpend }) {
   const rows = splitRows(spent.total);
   return (
-    <Card title="This task, from its first word" testId="token-spent">
+    <Card title="Total task usage" testId="token-spent">
       <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="font-mono text-2xl text-foreground" data-testid="token-spent-total" data-total={spent.total.total}>
           {big(spent.total.total)}
@@ -340,17 +337,17 @@ function Spent({ spent }: { spent: TaskSpend }) {
             <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-muted">
               <div className="h-full rounded-full bg-primary" style={{ width: `${pctWidth(r.tokens, spent.total.total)}%` }} />
             </div>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">{r.note}</p>
+            {r.note && <p className="mt-0.5 text-[11px] text-muted-foreground">{r.note}</p>}
           </li>
         ))}
       </ul>
 
       <div className="mt-3 grid grid-cols-1 gap-3 border-t border-border/60 pt-3 sm:grid-cols-2">
         <Weights
-          title="Where it went"
+          title="By source"
           rows={[
-            { name: 'This chat itself', tokens: spent.own.total },
-            { name: 'The agents it sent off', tokens: spent.helpers.total },
+            { name: 'Current chat', tokens: spent.own.total },
+            { name: 'Subagents', tokens: spent.helpers.total },
           ].filter((r) => r.tokens > 0)}
           of={spent.total.total}
         />
@@ -425,12 +422,6 @@ export function TokenView({ sessionId, onClose }: { sessionId: string; onClose: 
 
             {picture.spent ? <Spent spent={picture.spent} /> : <Missing note={picture.spentNote ?? 'No spend to show.'} testId="token-no-spend" />}
 
-            <p className="text-[11px] text-muted-foreground">
-              {/* Two brands, one arithmetic, no price: what a token costs in
-                  money is never worked out here (decision 12). */}
-              Counted in tokens and never in money, and read from this chat alone — the plan chip beside the gauge is
-              the whole account&apos;s.
-            </p>
           </>
         )}
         </div>

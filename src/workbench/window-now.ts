@@ -176,7 +176,7 @@ export interface TokenPicture {
 
 /** Said of a chat nobody here is driving — the honest answer, not a guess. */
 export const NOT_OURS_TO_ASK =
-  'Only the program driving a chat can say what is in its window. This chat is being read from its record, so its window can only be asked of whoever is running it.';
+  'Context details are unavailable for archived chats.';
 
 /* ------------------------------------------------------------------ *
  * Reading one into the other.
