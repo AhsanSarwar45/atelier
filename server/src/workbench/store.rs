@@ -4,6 +4,7 @@
 //! helper. Moving the writer into Axum must not make an existing conversation
 //! disappear or require an export/import step.
 
+use crate::workbench::projection::fold_all;
 use crate::workbench::protocol::Event;
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{
@@ -151,6 +152,14 @@ pub struct Spend {
     pub brand: String,
     pub usd: f64,
     pub tokens: i64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TranscriptItemPage {
+    pub items: Vec<serde_json::Value>,
+    pub cursor: Option<i64>,
+    pub has_older: bool,
+    pub newest_seq: i64,
 }
 
 impl Store {
@@ -517,6 +526,146 @@ impl Store {
         Ok(grouped)
     }
 
+    /// Materialise the canonical fold when the event tail has moved.
+    ///
+    /// The event table remains the source of truth. Projection rows are a
+    /// disposable read cache with the same all-or-nothing transaction used by
+    /// the helper this replaces.
+    fn ensure_transcript_projection(&self, session_id: &str) -> rusqlite::Result<i64> {
+        let (newest_seq, reset_seq) = self.connection.query_row(
+            r#"SELECT COALESCE(MAX(seq), 0),
+                      COALESCE(MAX(CASE WHEN type = 'transcript.reset' THEN seq END), 0)
+                 FROM event WHERE session_id = ?1"#,
+            [session_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )?;
+        let held = self
+            .connection
+            .query_row(
+                "SELECT projected_seq, reset_seq FROM transcript_projection WHERE session_id = ?1",
+                [session_id],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()?;
+        if held == Some((newest_seq, reset_seq)) {
+            return Ok(newest_seq);
+        }
+
+        let events = self.events_since(session_id, reset_seq)?;
+        let projection = fold_all(&events);
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
+            "DELETE FROM transcript_item WHERE session_id = ?1",
+            [session_id],
+        )?;
+        transaction.execute(
+            "DELETE FROM transcript_agent WHERE session_id = ?1",
+            [session_id],
+        )?;
+        {
+            let mut put = transaction.prepare(
+                r#"INSERT INTO transcript_item
+                     (session_id, item_key, position, updated_seq, visible, json)
+                   VALUES (?1,?2,?3,?4,?5,?6)"#,
+            )?;
+            for (index, item) in projection.items().iter().enumerate() {
+                let kind = item["kind"].as_str().unwrap_or_default();
+                let id = item["id"].as_str().unwrap_or_default();
+                let visible = !(kind == "note" && item["rank"] == "detail");
+                put.execute(params![
+                    session_id,
+                    format!("{kind}:{id}"),
+                    index as i64 + 1,
+                    newest_seq,
+                    visible,
+                    serde_json::to_string(item).map_err(json_error)?,
+                ])?;
+            }
+        }
+        {
+            let mut put = transaction.prepare(
+                r#"INSERT INTO transcript_agent (session_id, agent_id, tool_call_id, json)
+                   VALUES (?1,?2,?3,?4)"#,
+            )?;
+            for agent in projection.agents() {
+                put.execute(params![
+                    session_id,
+                    agent["id"].as_str().unwrap_or_default(),
+                    agent["toolCallId"].as_str(),
+                    serde_json::to_string(agent).map_err(json_error)?,
+                ])?;
+            }
+        }
+        transaction.execute(
+            r#"INSERT INTO transcript_projection (session_id, projected_seq, reset_seq)
+               VALUES (?1,?2,?3)
+               ON CONFLICT(session_id) DO UPDATE SET
+                 projected_seq = excluded.projected_seq,
+                 reset_seq = excluded.reset_seq"#,
+            params![session_id, newest_seq, reset_seq],
+        )?;
+        transaction.commit()?;
+        Ok(newest_seq)
+    }
+
+    /// A fixed-size page of complete visible transcript items, in reading order.
+    pub fn transcript_items(
+        &self,
+        session_id: &str,
+        before: Option<i64>,
+        limit: usize,
+    ) -> rusqlite::Result<TranscriptItemPage> {
+        let newest_seq = self.ensure_transcript_projection(session_id)?;
+        let ceiling = before.unwrap_or(i64::MAX);
+        let mut statement = self.connection.prepare(
+            r#"SELECT position, json FROM transcript_item
+                 WHERE session_id = ?1 AND visible = 1 AND position < ?2
+                 ORDER BY position DESC LIMIT ?3"#,
+        )?;
+        let mut rows: Vec<(i64, serde_json::Value)> = statement
+            .query_map(params![session_id, ceiling, limit as i64], |row| {
+                let position = row.get(0)?;
+                let json: String = row.get(1)?;
+                let item = serde_json::from_str(&json).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        1,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?;
+                Ok((position, item))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        rows.reverse();
+        let oldest = rows.first().map(|row| row.0);
+        let has_older = match oldest {
+            Some(cursor) => self.connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM transcript_item WHERE session_id = ?1 AND visible = 1 AND position < ?2)",
+                params![session_id, cursor],
+                |row| row.get::<_, bool>(0),
+            )?,
+            None => false,
+        };
+        Ok(TranscriptItemPage {
+            items: rows.into_iter().map(|row| row.1).collect(),
+            cursor: if has_older { oldest } else { None },
+            has_older,
+            newest_seq,
+        })
+    }
+
+    pub fn projected_agents(&self, session_id: &str) -> rusqlite::Result<Vec<serde_json::Value>> {
+        self.ensure_transcript_projection(session_id)?;
+        let mut statement = self
+            .connection
+            .prepare("SELECT json FROM transcript_agent WHERE session_id = ?1 ORDER BY rowid")?;
+        let found = statement
+            .query_map([session_id], |row| row.get::<_, String>(0))?
+            .map(|row| serde_json::from_str(&row?).map_err(json_error))
+            .collect();
+        found
+    }
+
     #[cfg(test)]
     fn connection(&self) -> &Connection {
         &self.connection
@@ -855,6 +1004,64 @@ mod tests {
 
         store.retract_message("chat-1", "answer-1").unwrap();
         assert!(store.search("kept", 100).unwrap().is_empty());
+    }
+
+    #[test]
+    fn workbench_core_projection_pages_visible_rows_and_persists_agents() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/workbench-contract.json"))
+                .unwrap();
+        let events = fixture["events"].as_array().unwrap();
+        for source in &events[..events.len() - 1] {
+            let event: Event = serde_json::from_value(source.clone()).unwrap();
+            assert!(store.append_event(&event).unwrap());
+        }
+
+        let newest = store.transcript_items("session-1", None, 3).unwrap();
+        assert_eq!(newest.newest_seq, 37);
+        assert_eq!(newest.items.len(), 3);
+        assert!(newest.has_older);
+        assert_eq!(
+            newest
+                .items
+                .iter()
+                .map(|item| item["kind"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["plan", "provider_message", "notice"]
+        );
+        // The detail note exists in the durable projection but cannot consume
+        // a visible transcript page slot.
+        assert_eq!(
+            store
+                .connection()
+                .query_row(
+                    "SELECT visible FROM transcript_item WHERE item_key = 'note:note-1'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+        let older = store
+            .transcript_items("session-1", newest.cursor, 20)
+            .unwrap();
+        assert_eq!(older.items.len(), 5);
+        assert!(!older.has_older);
+        let agents = store.projected_agents("session-1").unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0]["state"], "done");
+        assert_eq!(agents[0]["result"], "Looks good");
+
+        let reset: Event = serde_json::from_value(events.last().unwrap().clone()).unwrap();
+        assert!(store.append_event(&reset).unwrap());
+        assert!(store
+            .transcript_items("session-1", None, 40)
+            .unwrap()
+            .items
+            .is_empty());
+        assert!(store.projected_agents("session-1").unwrap().is_empty());
     }
 
     fn count(connection: &Connection, table: &str) -> i64 {
