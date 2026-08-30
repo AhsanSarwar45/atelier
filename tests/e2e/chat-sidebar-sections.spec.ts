@@ -154,7 +154,7 @@ test.describe('the sections of a chat’s right rail', () => {
       expect(
         await page.getByTestId('chat-right-rail-body').locator('h3').allTextContents(),
         'the rail’s sections are not in the order the reader is promised',
-      ).toEqual(['Cards it has touched', 'Sent away']);
+      ).toEqual(['Related cards', 'Subagents']);
 
       // Said twice, because a heading above a panel is not the same claim as
       // the panel being above the other panel: in the words, and on the glass.
@@ -189,7 +189,7 @@ test.describe('the sections of a chat’s right rail', () => {
       await expect(over, 'the finished helper is listed before anyone asked for it').toBeHidden();
       await expect(stopped).toBeHidden();
       await expect(control, 'the control does not say how many are behind it').toHaveText(
-        /Show the one that has finished/,
+        /Show 1 completed/,
       );
       await expect(control).toHaveAttribute('aria-expanded', 'false');
       // The running rows are ABOVE the control, not under it.
@@ -205,7 +205,7 @@ test.describe('the sections of a chat’s right rail', () => {
       await expect(stopped).toBeVisible();
       await expect(over, 'the finished helper stayed hidden after the control was clicked').toBeVisible();
       await expect(control).toHaveAttribute('aria-expanded', 'true');
-      await expect(control).toHaveText(/Hide the one that has finished/);
+      await expect(control).toHaveText(/Hide 1 completed/);
       await expect(going, 'opening the finished ones took the running one away').toBeVisible();
       await page.screenshot({ path: `${SHOTS}/chat-rail-sections-opened.png`, fullPage: false });
 
@@ -214,7 +214,7 @@ test.describe('the sections of a chat’s right rail', () => {
       await expect(over, 'the finished helper stayed on the rail after a second click').toBeHidden();
       await expect(stopped).toBeHidden();
       await expect(control).toHaveAttribute('aria-expanded', 'false');
-      await expect(control).toHaveText(/Show the one that has finished/);
+      await expect(control).toHaveText(/Show 1 completed/);
       await expect(going).toBeVisible();
     } finally {
       written.remove();

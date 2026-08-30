@@ -183,7 +183,7 @@ describe('the pane itself', () => {
         onClose={() => {}}
       />,
     );
-    expect(screen.getByTestId('agent-view-nothing')).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-view-nothing')).not.toBeInTheDocument();
   });
 
   it('counts a running agent off the same clock as the row that was clicked', () => {

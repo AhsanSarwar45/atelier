@@ -397,12 +397,12 @@ describe('the running ones on top, the finished ones behind a control', () => {
 
   it('carries the count in the words, so the reader knows before opening it', () => {
     draw(ended('stopped'));
-    expect(control()).toHaveTextContent('Show the one that has finished');
+    expect(control()).toHaveTextContent('Show 1 completed');
   });
 
   it('says how many when there is more than one', () => {
     draw(ended('done', 'failed', 'stopped'));
-    expect(control()).toHaveTextContent('Show the 3 that have finished');
+    expect(control()).toHaveTextContent('Show 3 completed');
   });
 
   it('opens on a click and shuts on the next one', () => {
@@ -412,7 +412,7 @@ describe('the running ones on top, the finished ones behind a control', () => {
     expect(screen.getByTestId('sent-away-stopped')).toHaveClass('flex');
     expect(screen.getByTestId('sent-away-stopped')).not.toHaveClass('hidden');
     expect(control()).toHaveAttribute('aria-expanded', 'true');
-    expect(control()).toHaveTextContent('Hide the 2 that have finished');
+    expect(control()).toHaveTextContent('Hide 2 completed');
 
     act(() => control().click());
     expect(screen.getByTestId('sent-away-stopped')).toHaveClass('hidden');
@@ -441,7 +441,7 @@ describe('the running ones on top, the finished ones behind a control', () => {
 
     expect(inside('sent-away-running')).toEqual([]);
     expect(screen.getByTestId('sent-away-running')).toBeEmptyDOMElement();
-    expect(control()).toHaveTextContent('Show the one that has finished');
+    expect(control()).toHaveTextContent('Show 1 completed');
   });
 });
 

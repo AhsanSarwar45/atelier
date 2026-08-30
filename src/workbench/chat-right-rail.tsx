@@ -180,7 +180,6 @@ export function ChatRightRail({
 }: ChatRightRailProps) {
   const jobs = useMemo(() => byJob(cards), [cards]);
   const cardStatuses = useKnownCardStatuses(projectPath);
-  const empty = cards.length === 0 && agents.length === 0;
   return (
     <div
       data-testid="chat-right-rail"
@@ -231,7 +230,7 @@ export function ChatRightRail({
               size="sm"
               mode="icon"
               variant="ghost"
-              aria-label="Close what this chat has touched"
+              aria-label="Close details"
               data-testid="chat-right-rail-close"
               onClick={onToggle}
             >
@@ -249,7 +248,7 @@ export function ChatRightRail({
               (bw-pl2v.1). Wrapped chips are one short block whatever the
               session has done; the list below them is not. */}
           {jobs.length > 0 && (
-            <Section title="Cards it has touched">
+            <Section title="Related cards">
               {/* One chip per JOB, and all of them: the column exists so nothing
                   has to be hidden behind a count (§8.2.1), and a job's pieces
                   are folded into it because a dozen chips reading bw-uiyz.N say
@@ -270,7 +269,7 @@ export function ChatRightRail({
           )}
 
           {agents.length > 0 && (
-            <Section title="Sent away">
+            <Section title="Subagents">
               <SentAwayPanel
                 agents={agents}
                 items={items}
@@ -281,11 +280,6 @@ export function ChatRightRail({
             </Section>
           )}
 
-          {empty && (
-            <p className="px-3 py-3 text-xs text-muted-foreground" data-testid="rail-empty">
-              Nothing from this chat yet.
-            </p>
-          )}
             </>
           )}
       </div>

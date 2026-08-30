@@ -763,7 +763,7 @@ export function ChatSidebar({
                           size="xs"
                           data-testid="row-close"
                           aria-label={`Close ${row.title ?? 'Untitled chat'}`}
-                          title="Close this chat. It stays in the list."
+                          title="Close chat"
                           disabled={ending === key}
                           className="absolute -right-1.5 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100"
                           onClick={(e) => {

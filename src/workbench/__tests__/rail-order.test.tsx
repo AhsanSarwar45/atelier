@@ -71,19 +71,19 @@ describe('what the rail holds, in order', () => {
   it('puts the part that cannot grow at the top', () => {
     rail(oneAgent(), ['bw-uiyz.1']);
 
-    expect(sections()).toEqual(['Cards it has touched', 'Sent away']);
+    expect(sections()).toEqual(['Related cards', 'Subagents']);
   });
 
   it('keeps that order when a section has nothing in it', () => {
     // A missing section is missing, not blank: the ones that are there keep
     // their places rather than shuffling up into a fixed slot.
     rail(oneAgent(), []);
-    expect(sections()).toEqual(['Sent away']);
+    expect(sections()).toEqual(['Subagents']);
   });
 
   it('says so plainly when the chat has touched nothing at all', () => {
     rail([], []);
     expect(sections()).toEqual([]);
-    expect(screen.getByTestId('rail-empty')).toBeInTheDocument();
+    expect(screen.queryByTestId('rail-empty')).not.toBeInTheDocument();
   });
 });

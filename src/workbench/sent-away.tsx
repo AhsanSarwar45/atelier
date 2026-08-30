@@ -66,7 +66,7 @@ export const KINDS: Record<AgentKind, { label: string; Icon: typeof Bot }> = {
 export const STATES: Record<AgentState, { label: string; variant: 'secondary' | 'warning' | 'destructive' | 'success' }> = {
   running: { label: 'running', variant: 'secondary' },
   waiting: { label: 'waiting on you', variant: 'warning' },
-  parked: { label: 'in background', variant: 'secondary' },
+  parked: { label: 'background', variant: 'secondary' },
   done: { label: 'done', variant: 'success' },
   failed: { label: 'failed', variant: 'destructive' },
   stopped: { label: 'stopped', variant: 'secondary' },
@@ -225,7 +225,7 @@ export function AgentSteering({
             variant="ghost"
             data-testid="sent-away-park"
             disabled={busy !== null}
-            title="Let it run on in the background and take the turn back"
+            title="Run in background"
             onClick={() => act('park')}
           >
             <SendToBack className="h-3 w-3" aria-hidden="true" />
@@ -238,7 +238,7 @@ export function AgentSteering({
             variant="ghost"
             data-testid="sent-away-stop"
             disabled={busy !== null}
-            title="End this one. The chat and everything else it sent away carry on"
+            title="Stop subagent"
             onClick={() => act('stop')}
           >
             <Square className="h-3 w-3" aria-hidden="true" />
@@ -410,7 +410,7 @@ export interface SentAwayPanelProps {
  */
 export function finishedLabel(showing: boolean, count: number): string {
   const verb = showing ? 'Hide' : 'Show';
-  return count === 1 ? `${verb} the one that has finished` : `${verb} the ${count} that have finished`;
+  return `${verb} ${count} completed`;
 }
 
 export function SentAwayPanel({ agents, items, sessionId, controls, onOpen }: SentAwayPanelProps) {

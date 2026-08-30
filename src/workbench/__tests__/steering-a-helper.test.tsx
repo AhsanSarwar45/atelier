@@ -265,7 +265,7 @@ describe('typing something for a running agent', () => {
 
     const shown = screen.getByTestId('agent-view-relayed');
     expect(shown).toHaveAttribute('data-count', '1');
-    expect(shown.textContent).toContain('Relayed to the chat that sent it');
+    expect(shown.textContent).toContain('Messages');
     expect(shown.textContent).toContain('only the first column');
     // And it is not in what the agent itself said, because it did not say it.
     expect(screen.getByTestId('agent-view-said').textContent).not.toContain('only the first column');

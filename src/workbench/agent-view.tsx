@@ -92,16 +92,12 @@ function RelayBox({ row, sessionId }: { row: SentAway; sessionId: string }) {
 
   return (
     <div className="border-t border-border/60 px-4 py-3" data-testid="agent-view-relay">
-      <p className="text-[11px] text-muted-foreground">
-        Nothing can hand words to an agent that is already running. What you type goes to the chat that sent this
-        one, naming it.
-      </p>
-      <div className="mt-2 flex items-end gap-2">
+      <div className="flex items-end gap-2">
         <Textarea
           rows={2}
           value={text}
           data-testid="agent-view-relay-text"
-          placeholder="A word for this agent, by way of the chat that sent it"
+          placeholder="Message subagent"
           className="min-h-0 flex-1 resize-none text-xs"
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
@@ -118,7 +114,7 @@ function RelayBox({ row, sessionId }: { row: SentAway; sessionId: string }) {
           onClick={send}
         >
           <Send className="h-3.5 w-3.5" aria-hidden="true" />
-          Relay
+          Send
         </Button>
       </div>
       {refused && (
@@ -205,13 +201,6 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
           {said.map((item) => (
             <TranscriptRow key={item.id} item={item} sessionId={sessionId} mentions={mentions} onLook={() => {}} />
           ))}
-          {said.length === 0 && (
-            <p className="text-xs text-muted-foreground" data-testid="agent-view-nothing">
-              {isOver(row.state)
-                ? 'This one said nothing of its own — only what it answered, below.'
-                : 'Nothing said yet. Its own words draw here as they arrive.'}
-            </p>
-          )}
         </div>
 
         {/* Words the reader typed FOR it, and where they actually went. Drawn
@@ -219,7 +208,7 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
         {row.relayed.length > 0 && (
           <div className="border-t border-border/60 px-4 py-3" data-testid="agent-view-relayed" data-count={row.relayed.length}>
             <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              Relayed to the chat that sent it
+              Messages
             </h3>
             {row.relayed.map((said, i) => (
               <p key={i} className="mt-1 whitespace-pre-wrap text-xs text-foreground">
@@ -235,7 +224,7 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
             at the end of what it said, not scrolled back into the chat. */}
         {row.result && (
           <div className="border-t border-border/60 px-4 py-3">
-            <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">What it answered</h3>
+            <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Result</h3>
             <p className="mt-1 whitespace-pre-wrap text-xs text-foreground" data-testid="agent-view-result">
               {row.result}
             </p>
