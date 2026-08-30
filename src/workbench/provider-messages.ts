@@ -85,6 +85,27 @@ export function providerMessageIsCurrent(signal: ProviderMessageSignal, now = Da
   return !Number.isFinite(retryAt) || retryAt > now;
 }
 
+const STATUS_LABEL: Record<ProviderMessageKind, string> = {
+  usage_limit: 'Limit reached', rate_limit: 'Rate limited', authentication: 'Sign-in required',
+  authorization: 'Not allowed', service_unavailable: 'Provider unavailable', network: 'Connection lost',
+  provider_error: 'Provider failed', retrying: 'Retrying', interrupted: 'Interrupted',
+  model_unavailable: 'Model unavailable', context_limit: 'Context full', unknown: 'Provider problem',
+};
+
+/** The same condition reduced to the compact, colored session-status vocabulary. */
+export function providerMessageStatus(signal: ProviderMessageSignal): {
+  state: 'stopped' | 'errored' | 'running_tool';
+  label: string;
+  priority: number;
+} {
+  const priority = signal.severity === 'blocking' ? 4 : signal.severity === 'error' ? 3 : signal.severity === 'warning' ? 2 : 1;
+  return {
+    state: signal.severity === 'blocking' ? 'stopped' : signal.severity === 'error' ? 'errored' : 'running_tool',
+    label: STATUS_LABEL[signal.kind],
+    priority,
+  };
+}
+
 /**
  * Compatibility reader for providers that still expose only prose. New
  * adapters should prefer their structured signal and use this only at their

@@ -19,6 +19,7 @@ import { chatState, counting, type ChatState, type HeldChat } from '@/workbench/
 import { onWorkbench } from '@/workbench/live-wire';
 import { cacheSessionEvent } from '@/workbench/use-session';
 import { NOTHING_KNOWN, type PlanUsage } from '@/workbench/plan-usage';
+import { providerMessageIsCurrent, providerMessageStatus, type ProviderMessageSignal } from '@/workbench/provider-messages';
 import type { Brand, SessionState, SessionSummary, WatchFrame } from '@/workbench/protocol';
 
 /** What one chat is doing, as every global view needs it. */
@@ -106,6 +107,9 @@ export function isLive(s: LiveSession): boolean {
 
 const listeners = new Set<() => void>();
 let sessions: LiveSession[] = [];
+const providerConditions = new Map<string, Map<string, ProviderMessageSignal>>();
+const providerBase = new Map<string, Pick<LiveSession, 'state' | 'activity' | 'busySince'>>();
+const providerTimers = new Map<string, ReturnType<typeof setTimeout>>();
 /** How to stop reading the helper's feed off the window's one connection. */
 let stop: (() => void) | null = null;
 /** Rebuilt on every change so `useSyncExternalStore` sees a new reference. */
@@ -303,6 +307,37 @@ function patch(id: string, change: Partial<LiveSession>): void {
   sessions = sessions.map((s, i) => (i === at ? { ...s, ...change } : s));
 }
 
+function activeProviderCondition(id: string, now = Date.now()): ProviderMessageSignal | null {
+  const active = [...(providerConditions.get(id)?.values() ?? [])].filter((signal) => providerMessageIsCurrent(signal, now));
+  return active.sort((a, b) => providerMessageStatus(b).priority - providerMessageStatus(a).priority)[0] ?? null;
+}
+
+function applyProviderCondition(id: string): void {
+  const timer = providerTimers.get(id);
+  if (timer) clearTimeout(timer);
+  providerTimers.delete(id);
+
+  const active = activeProviderCondition(id);
+  if (active) {
+    const status = providerMessageStatus(active);
+    patch(id, { state: status.state, activity: status.label, busySince: null });
+    const expiries = [...(providerConditions.get(id)?.values() ?? [])]
+      .filter((signal) => providerMessageIsCurrent(signal) && signal.retryAt)
+      .map((signal) => new Date(signal.retryAt!).getTime())
+      .filter(Number.isFinite);
+    if (expiries.length) {
+      const delay = Math.min(2_147_483_647, Math.max(0, Math.min(...expiries) - Date.now() + 10));
+      providerTimers.set(id, setTimeout(() => { applyProviderCondition(id); announce(); }, delay));
+    }
+    return;
+  }
+
+  const base = providerBase.get(id);
+  if (base) patch(id, base);
+  providerBase.delete(id);
+  providerConditions.delete(id);
+}
+
 /**
  * Whether a chat's own clock moves on this event.
  *
@@ -396,6 +431,10 @@ function absorb(frame: WatchFrame): void {
     return;
   }
   if (frame.kind === 'snapshot') {
+    for (const timer of providerTimers.values()) clearTimeout(timer);
+    providerTimers.clear();
+    providerConditions.clear();
+    providerBase.clear();
     sessions = frame.sessions.map(fromSummary);
     announce();
     // The sidecar stops watching the tools' folders the moment the last browser
@@ -470,12 +509,31 @@ function absorb(frame: WatchFrame): void {
       break;
     case 'session.state': {
       const had = sessions.find((s) => s.id === e.sessionId);
-      patch(e.sessionId, {
+      const base = {
         state: e.state,
         activity: e.label,
         busySince: countingFrom(had, { state: e.state, label: e.label, at: e.at }),
+      };
+      if (activeProviderCondition(e.sessionId)) {
+        providerBase.set(e.sessionId, base);
+        applyProviderCondition(e.sessionId);
+      } else patch(e.sessionId, {
+        ...base,
         ...(moves(e.sessionId, e.state) ? { lastActiveAt: e.at } : {}),
       });
+      break;
+    }
+    case 'provider.message': {
+      const conditions = providerConditions.get(e.sessionId) ?? new Map<string, ProviderMessageSignal>();
+      if (e.signal.phase === 'resolved') conditions.delete(e.signal.id);
+      else conditions.set(e.signal.id, e.signal);
+      if (conditions.size) providerConditions.set(e.sessionId, conditions);
+      else providerConditions.delete(e.sessionId);
+      if (!providerBase.has(e.sessionId)) {
+        const had = sessions.find((s) => s.id === e.sessionId);
+        if (had) providerBase.set(e.sessionId, { state: had.state, activity: had.activity, busySince: had.busySince });
+      }
+      applyProviderCondition(e.sessionId);
       break;
     }
     case 'ask.permission':
