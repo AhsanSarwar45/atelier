@@ -57,7 +57,7 @@ describe('screen-check evidence', () => {
   });
 
   it.runIf(Boolean(browserExecutable()))('captures a live before/after pair only under one reproducible browser configuration', async () => {
-    const server = createServer((_request, response) => { response.writeHead(200, { 'content-type': 'text/html' }); response.end('<main id="state">Before</main><button onclick="state.textContent=\'After\';state.style.background=\'red\'">Change</button>'); });
+    const server = createServer((_request, response) => { response.writeHead(200, { 'content-type': 'text/html' }); response.end('<main id="state">Before</main><button onclick="state.textContent=\'After\';state.style.background=\'red\';state.style.height=\'1600px\'">Change</button>'); });
     server.listen(0, '127.0.0.1'); await once(server, 'listening'); const address = server.address();
     if (!address || typeof address === 'string') throw new Error('fixture did not bind'); const url = `http://127.0.0.1:${address.port}/`;
     const before = Buffer.from(JSON.stringify({ url, settle: { network_idle_ms: 0, layout_stable_ms: 100 } }));
@@ -69,6 +69,9 @@ describe('screen-check evidence', () => {
       expect((result.captures as any[]).map((capture) => capture.evidence.final_url)).toEqual([url, url]);
       const incompatible = Buffer.from(JSON.stringify({ url, device: 'mobile' }));
       await expect(screenCheckUploaded(['compare', '--before-recipe', 'before.json', '--after-recipe', 'mobile.json', '--expect', 'State changes'], { 'before.json': before, 'mobile.json': incompatible }, media, judge)).rejects.toThrow('COMPARISON_NOT_ALIGNED');
+      const beforeFull = Buffer.from(JSON.stringify({ url, settle: { network_idle_ms: 0, layout_stable_ms: 100 }, capture: { mode: 'full_page' } }));
+      const afterFull = Buffer.from(JSON.stringify({ url, actions: [{ action: 'click', selector: 'button' }], settle: { network_idle_ms: 0, layout_stable_ms: 100 }, capture: { mode: 'full_page' } }));
+      await expect(screenCheckUploaded(['compare', '--before-recipe', 'before-full.json', '--after-recipe', 'after-full.json', '--expect', 'State changes'], { 'before-full.json': beforeFull, 'after-full.json': afterFull }, media, judge)).rejects.toThrow('equal decoded dimensions');
     } finally { server.closeAllConnections(); server.close(); await once(server, 'close'); }
   }, 20_000);
 });

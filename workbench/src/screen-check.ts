@@ -260,11 +260,13 @@ export async function screenCheckUploaded(args: string[], files: Uploaded, media
     (() => { const bytes = uploaded(value(args, '--before'), files, '--before'); return { bytes, label: 'Before', diagnostics: [], evidence: staticEvidence('image', bytes) }; })(),
     (() => { const bytes = uploaded(value(args, '--after'), files, '--after'); return { bytes, label: 'After', diagnostics: [], evidence: staticEvidence('image', bytes) }; })(),
   ]; else captures = [await capture(args, files)];
+  const measured = request.action === 'compare' ? comparePng(captures[0].bytes, captures[1].bytes) : null;
+  if (beforeRecipe && measured && !measured.aligned) throw new Error(`COMPARISON_NOT_ALIGNED: paired recipe images must have equal decoded dimensions (${measured.alignment.reason ?? 'alignment failed'})`);
   const stored = captures.map((item) => ({ asset: importImageBytes(item.bytes, item.label, media), label: item.label, evidence: item.evidence }));
   const base: Record<string, unknown> = { check_id: `check_${stored.map((item) => item.asset.slice(0, 12)).join('_')}`,
     diagnostics: captures.flatMap((item) => item.diagnostics), captures: stored };
   if (request.action === 'compare') {
-    const measured = comparePng(captures[0].bytes, captures[1].bytes); const { diff, ...comparison } = measured;
+    const { diff, ...comparison } = measured!;
     base.comparison = { ...comparison, capture_configuration: pairConfiguration };
     if (diff) base.diff_asset = importImageBytes(diff, 'Objective pixel difference', media);
   }
