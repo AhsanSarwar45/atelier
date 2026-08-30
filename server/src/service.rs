@@ -159,8 +159,9 @@ fn as_text(value: &str) -> String {
 ///
 /// A user unit rather than a system one: writing into `/etc` needs a password,
 /// and a board with one person's projects in it belongs to that person's
-/// session. Starting before anybody logs in is what lingering is for, which
-/// `install` turns on.
+/// session. The desktop owns the display settings file and folder launchers
+/// need, so this is ordered with and installed into the graphical session —
+/// not the earlier default user target.
 ///
 /// It comes back however it stopped, not only when it died. A running copy
 /// stands down of its own accord the moment a newer build is installed over
@@ -178,7 +179,7 @@ pub fn systemd_unit(exe: &str, carried: &[(String, String)]) -> String {
     format!(
         "[Unit]\n\
          Description={DISPLAY} — the board, the screens and the chat\n\
-         After=network.target\n\
+         After=network.target graphical-session.target\n\
          \n\
          [Service]\n\
          Type=simple\n\
@@ -188,7 +189,7 @@ pub fn systemd_unit(exe: &str, carried: &[(String, String)]) -> String {
          RestartSec=5\n\
          \n\
          [Install]\n\
-         WantedBy=default.target\n"
+         WantedBy=graphical-session.target\n"
     )
 }
 
@@ -798,8 +799,15 @@ mod tests {
     }
 
     #[test]
-    fn it_starts_at_login_rather_than_waiting_to_be_asked() {
-        assert!(systemd_unit("/usr/bin/atelier", &at(3008)).contains("WantedBy=default.target"));
+    fn systemd_unit_starts_with_the_desktop_rather_than_before_it() {
+        let unit = systemd_unit("/usr/bin/atelier", &at(3008));
+        assert!(unit.contains("After=network.target graphical-session.target"));
+        assert!(unit.contains("WantedBy=graphical-session.target"));
+        assert!(!unit.contains("WantedBy=default.target"));
+    }
+
+    #[test]
+    fn launch_agent_starts_at_login_rather_than_waiting_to_be_asked() {
         assert!(launch_agent("/usr/bin/atelier", &at(3008), "x").contains("<key>RunAtLoad</key>"));
     }
 
