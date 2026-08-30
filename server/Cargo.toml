@@ -28,6 +28,8 @@ mime_guess = "2"
 notify = "6"
 tokio-stream = "0.1"
 futures = "0.3"
+# Directly speaks Chromium's DevTools WebSocket protocol without Playwright.
+tokio-tungstenite = "0.24"
 rusqlite = { version = "0.31", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
@@ -44,6 +46,8 @@ tar = "0.4"
 sha2 = "0.10"
 portable-pty = "0.9"
 libc = "0.2"
+# Objective screen-check comparison and diff encoding without pngjs/pixelmatch.
+png = "0.18"
 
 [dev-dependencies]
 tempfile = "3"
@@ -53,9 +57,6 @@ tokio = { version = "1", features = ["test-util"] }
 # Drives a router in-process, so the guard over the terminal can be proved
 # without binding a port on a machine that may be running the real app.
 tower = { version = "0.4", features = ["util"] }
-# The browser's end of the one connection, so the case that proves the route
-# speaks to it speaks the same protocol the browser does.
-tokio-tungstenite = "0.24"
 # A whole HTTP connection over a pipe rather than a socket. `tower`'s `oneshot`
 # calls the router as a function and so can never upgrade one: the extension
 # that hands a request its side of the connection is put there by hyper when a

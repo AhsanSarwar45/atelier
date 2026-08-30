@@ -7,12 +7,15 @@
 pub mod actor;
 pub mod agent_files;
 pub mod beads_links;
+pub mod browser;
 pub mod claude;
 pub mod codex;
 pub mod external;
+pub mod media;
 pub mod metadata;
 pub mod projection;
 pub mod protocol;
+pub mod screen_check;
 pub mod store;
 pub mod summary;
 pub mod usage;
