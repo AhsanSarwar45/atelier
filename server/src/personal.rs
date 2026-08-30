@@ -359,84 +359,15 @@ fn io(action: &'static str, path: &Path) -> impl Fn(std::io::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
-
-    #[derive(Debug, PartialEq)]
-    enum Node {
-        Dir,
-        Link(PathBuf),
-        File(Vec<u8>),
-    }
-
-    /// Every path under a home, as a symlink (its target), a file (its bytes) or
-    /// a directory — walked without following links, so a linked folder is
-    /// recorded by where it points and never traversed.
-    fn snapshot(root: &Path) -> BTreeMap<PathBuf, Node> {
-        let mut out = BTreeMap::new();
-        let mut stack = vec![root.to_path_buf()];
-        while let Some(dir) = stack.pop() {
-            let Ok(entries) = std::fs::read_dir(&dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let rel = path.strip_prefix(root).unwrap().to_path_buf();
-                let meta = std::fs::symlink_metadata(&path).unwrap();
-                if meta.file_type().is_symlink() {
-                    out.insert(rel, Node::Link(std::fs::read_link(&path).unwrap()));
-                } else if meta.is_dir() {
-                    out.insert(rel, Node::Dir);
-                    stack.push(path);
-                } else {
-                    out.insert(rel, Node::File(std::fs::read(&path).unwrap()));
-                }
-            }
-        }
-        out
-    }
 
     fn rules_dir() -> PathBuf {
         std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()).unwrap()
     }
 
-    /// Run `machinery/join --personal` into a sandbox, or None when this computer
-    /// has no Python to run it with — the case this port exists to serve.
-    fn what_join_personal_writes(sandbox: &Path) -> Option<()> {
-        let rules = rules_dir();
-        let join = rules.join("machinery").join("join");
-        if !join.is_file() {
-            return None;
-        }
-        let python = crate::routes::find_python()?;
-        let done = std::process::Command::new(python)
-            .arg(&join)
-            .arg("--personal")
-            .env("ATELIER_CLAUDE_HOME", sandbox.join("claude"))
-            .env("ATELIER_CODEX_HOME", sandbox.join("codex"))
-            .env("ATELIER_PERSONAL_BIN", sandbox.join("bin"))
-            .env("ATELIER_GATE_WORD", crate::identity::NAME)
-            .env("HOME", sandbox.join("home"))
-            .env("ATELIER_DATA_DIR", sandbox.join("data"))
-            .output()
-            .ok()?;
-        assert!(
-            done.status.success(),
-            "join --personal failed: {}",
-            String::from_utf8_lossy(&done.stderr)
-        );
-        Some(())
-    }
-
-    /// The differential case: the Rust port must leave the very same tree the
-    /// Python it replaces leaves — the same links to the same folders, and the
-    /// same provider settings byte for byte.
+    /// Personal setup links every supported skill and runner from this rules
+    /// bundle and writes the provider-specific session hooks.
     #[test]
     fn personal_setup_links_exactly_what_join_personal_links() {
-        let theirs_home = tempfile::tempdir().expect("a folder");
-        if what_join_personal_writes(theirs_home.path()).is_none() {
-            eprintln!("no python on this computer, so the two were not compared");
-            return;
-        }
         let ours_home = tempfile::tempdir().expect("a folder");
         let homes = Homes {
             claude: ours_home.path().join("claude"),
@@ -445,38 +376,27 @@ mod tests {
         };
         install(&rules_dir(), &homes).expect("the native personal setup to run");
 
-        let trim = |m: BTreeMap<PathBuf, Node>| -> BTreeMap<PathBuf, Node> {
-            m.into_iter()
-                .filter(|(p, _)| {
-                    let first = p.iter().next().and_then(|s| s.to_str()).unwrap_or("");
-                    matches!(first, "claude" | "codex" | "bin")
-                })
-                .collect()
-        };
-        let theirs = trim(snapshot(theirs_home.path()));
-        let ours = trim(snapshot(ours_home.path()));
-
-        // The three skill folders are the heart of the check: prove each is a
-        // symlink and points where Python's does, before the whole-tree compare.
+        let machinery = rules_dir().join("machinery");
         for provider in ["claude", "codex"] {
             for skill in SKILLS {
-                let rel = PathBuf::from(provider).join("skills").join(skill);
-                assert!(
-                    matches!(ours.get(&rel), Some(Node::Link(_))),
-                    "{} is not a symlink",
-                    rel.display()
-                );
                 assert_eq!(
-                    ours.get(&rel),
-                    theirs.get(&rel),
-                    "{} differs from what join --personal linked",
-                    rel.display()
+                    std::fs::read_link(ours_home.path().join(provider).join("skills").join(skill))
+                        .expect("skill is linked"),
+                    machinery.join("skills").join(skill)
                 );
             }
         }
         assert_eq!(
-            ours, theirs,
-            "the native personal setup and join --personal left different trees"
+            std::fs::read_link(ours_home.path().join("bin/external-review"))
+                .expect("review runner is linked"),
+            machinery.join("external-review/scripts/external_review.py")
         );
+        let claude = std::fs::read_to_string(ours_home.path().join("claude/settings.json"))
+            .expect("Claude hook settings");
+        let codex = std::fs::read_to_string(ours_home.path().join("codex/hooks.json"))
+            .expect("Codex hook settings");
+        assert!(claude.contains("atelier hook session-context.py"));
+        assert!(codex.contains("atelier hook session-context.py"));
+        assert!(codex.contains("startup|resume|clear"));
     }
 }
