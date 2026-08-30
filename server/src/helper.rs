@@ -442,11 +442,15 @@ fn verify_integrity(bytes: &[u8], integrity: &str) -> Result<(), String> {
 ///
 /// Every npm tarball is a gzipped tar whose files all sit under a single
 /// top-level `package/` directory; `dest` is where that directory's contents
-/// belong. Any entry that tries to climb out of `dest` with `..` or an absolute
-/// path is refused rather than followed, so a bad tarball cannot write outside
-/// the folder it was given.
+/// belong. Two ways a tarball could reach outside `dest` are both refused: an
+/// entry whose own stripped path climbs out with `..` or an absolute path, and
+/// a symlink or hardlink whose *target* is absolute or climbs out with `..` --
+/// left unchecked, that link would be created verbatim and a later entry
+/// written through it would land outside the folder we were given. Only a link
+/// that stays inside `dest` is laid down.
 fn unpack_package(gzipped_tar: &[u8], dest: &Path) -> Result<(), String> {
     use std::path::Component;
+    use tar::EntryType;
     let decoder = flate2::read::GzDecoder::new(gzipped_tar);
     let mut archive = tar::Archive::new(decoder);
     let entries = archive
@@ -477,6 +481,33 @@ fn unpack_package(gzipped_tar: &[u8], dest: &Path) -> Result<(), String> {
                 named.display()
             ));
         }
+        // A symlink or hardlink names a second path -- where it points. Left to
+        // `unpack`, tar creates the link exactly as written, including one that
+        // points at an absolute path or climbs out of `dest`; a later entry
+        // written through such a link lands outside the folder we were given.
+        // Refuse any link whose target is not a plain relative path.
+        let kind = entry.header().entry_type();
+        if kind == EntryType::Symlink || kind == EntryType::Link {
+            let target = entry
+                .link_name()
+                .map_err(|e| format!("a link in the tarball has an unreadable target: {e}"))?
+                .ok_or_else(|| {
+                    format!("a link in the tarball names no target: {}", named.display())
+                })?;
+            if target.components().any(|c| {
+                matches!(
+                    c,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            }) {
+                return Err(format!(
+                    "the tarball holds a link that points outside itself: {} -> {}",
+                    named.display(),
+                    target.display()
+                ));
+            }
+        }
+
         let out = dest.join(relative);
         if let Some(parent) = out.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
@@ -547,6 +578,72 @@ mod tests {
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         address
+    }
+
+    /// A tarball can carry a symlink whose target climbs out of the folder it
+    /// unpacks into; if that link were laid down, a later entry written
+    /// "through" it would land outside. The unpacker must refuse the link.
+    #[test]
+    fn a_tarball_cannot_escape_dest_through_a_symlink_it_creates() {
+        use std::io::Write;
+
+        // A place outside dest we will try, and fail, to reach.
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("secret");
+        std::fs::write(&secret, b"before\n").unwrap();
+
+        // Build a tarball by hand: first a symlink `package/evil` pointing at the
+        // outside directory, then a regular file `package/evil/loot` that -- were
+        // the link followed -- would land next to `secret`, outside dest.
+        let mut tarred = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut tarred);
+
+            let mut link = tar::Header::new_gnu();
+            link.set_entry_type(tar::EntryType::Symlink);
+            link.set_size(0);
+            link.set_mode(0o777);
+            builder
+                .append_link(&mut link, "package/evil", outside.path())
+                .unwrap();
+
+            let loot = b"owned\n";
+            let mut file = tar::Header::new_gnu();
+            file.set_entry_type(tar::EntryType::Regular);
+            file.set_size(loot.len() as u64);
+            file.set_mode(0o644);
+            builder
+                .append_data(&mut file, "package/evil/loot", &loot[..])
+                .unwrap();
+
+            builder.finish().unwrap();
+        }
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&tarred).unwrap();
+        let gzipped = encoder.finish().unwrap();
+
+        let dest = tempfile::tempdir().unwrap();
+        let result = unpack_package(&gzipped, dest.path());
+
+        assert!(
+            result.is_err(),
+            "unpacking a tarball with an escaping symlink must fail, got {result:?}"
+        );
+        // The link was never laid down inside dest ...
+        assert!(
+            !dest.path().join("evil").exists(),
+            "the escaping symlink must not be created inside dest"
+        );
+        // ... and nothing was written outside dest through it.
+        assert!(
+            !outside.path().join("loot").exists(),
+            "no file may be written outside dest"
+        );
+        assert_eq!(
+            std::fs::read(&secret).unwrap(),
+            b"before\n",
+            "a file outside dest must be untouched"
+        );
     }
 
     #[tokio::test]
