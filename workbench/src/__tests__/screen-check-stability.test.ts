@@ -24,12 +24,15 @@ function harness(frames: Buffer[] = [A, A]) {
     addStyleTag: async (value: any) => calls.push({ name: 'style', value }),
     locator: (selector: string) => { calls.push({ name: 'locator', value: selector }); return locator; },
     getByText: (text: string) => { calls.push({ name: 'text', value: text }); return locator; },
-    evaluate: async (input: unknown) => { calls.push({ name: typeof input === 'string' ? 'layout' : 'resources' }); return typeof input === 'string' ? 'same-layout' : undefined; },
+    evaluate: async (input: unknown) => {
+      const source = String(input); const name = typeof input === 'string' ? 'layout' : source.includes('devicePixelRatio') ? 'dpr' : source.includes('querySelectorAll') ? 'semantic' : 'resources'; calls.push({ name });
+      return typeof input === 'string' ? 'same-layout' : name === 'dpr' ? 1 : name === 'semantic' ? { text: 'Complete', nodes: [] } : undefined;
+    },
     screenshot: async (value: any) => { calls.push({ name: 'page-shot', value }); return frames.shift() ?? A; },
-    url: () => 'https://app.test/ready',
+    url: () => 'https://app.test/ready', viewportSize: () => ({ width: 1280, height: 800 }), mainFrame: () => page,
   };
   const context: any = { newPage: async () => page, close: vi.fn() };
-  const browser: any = { newContext: vi.fn(async () => context), close: vi.fn() };
+  const browser: any = { newContext: vi.fn(async () => context), close: vi.fn(), version: () => 'test-chromium' };
   return { runtime: { launch: vi.fn(async () => browser) }, browser, calls };
 }
 

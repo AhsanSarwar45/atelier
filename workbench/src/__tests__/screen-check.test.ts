@@ -29,7 +29,7 @@ describe('screen-check', () => {
   });
 
   it('returns the isolated visual worker verdict and forwards provider choice', async () => {
-    const judge = vi.fn<VisualJudge>().mockResolvedValue({ verdict: 'PASS', summary: 'Visible.', observations: ['Button is shown.'] });
+    const judge = vi.fn<VisualJudge>().mockResolvedValue({ verdict: 'PASS', summary: 'Visible.', observations: ['Button is shown.'], visible_text: { source: 'vision', lines: ['Save'] } });
     const result = await screenCheckUploaded(
       ['check', '--type', 'image', '--target', 'screen.png', '--expect', 'Save is visible', '--provider', 'codex'],
       { 'screen.png': PNG }, media, judge,
@@ -40,14 +40,14 @@ describe('screen-check', () => {
 
   it('compares before and after in stable order', async () => {
     const after = Buffer.concat([PNG, Buffer.from([4])]);
-    const judge = vi.fn<VisualJudge>().mockResolvedValue({ verdict: 'FAIL', summary: 'Clipped.', observations: [] });
+    const judge = vi.fn<VisualJudge>().mockResolvedValue({ verdict: 'FAIL', summary: 'Clipped.', observations: [], visible_text: { source: 'vision', lines: [] } });
     const result = await screenCheckUploaded(
       ['compare', '--before', 'before.png', '--after', 'after.png', '--expect', 'No clipping'],
       { 'before.png': PNG, 'after.png': after }, media, judge,
     );
     expect(result.verdict).toBe('FAIL');
     expect((result.captures as unknown[])).toHaveLength(2);
-    expect(judge).toHaveBeenCalledWith(expect.objectContaining({ images: [PNG, after] }));
+    expect(judge).toHaveBeenCalledWith(expect.objectContaining({ images: [PNG, after], evidence: expect.any(Array) }));
   });
 
   it('refuses ambiguous and unsafe capture requests before doing work', async () => {
@@ -61,7 +61,7 @@ describe('screen-check', () => {
     await expect(screenCheckUploaded(['capture', '--surprise', 'yes'], {}, media)).rejects.toThrow('unknown option');
     await expect(screenCheckUploaded(['capture', '--type', 'image', '--type', 'web'], {}, media)).rejects.toThrow('duplicate option');
     await expect(screenCheckUploaded(['capture', '--type'], {}, media)).rejects.toThrow('missing value');
-    await expect(screenCheckUploaded(['compare', '--type', 'web', '--before', 'a', '--after', 'b', '--expect', 'x'], { a: PNG, b: PNG }, media)).rejects.toThrow('only uploaded');
+    await expect(screenCheckUploaded(['compare', '--type', 'web', '--before', 'a', '--after', 'b', '--expect', 'x'], { a: PNG, b: PNG }, media)).rejects.toThrow('accepts either uploaded');
   });
 
   it('exposes concise help and a machine-readable schema without capture', async () => {

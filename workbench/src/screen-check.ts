@@ -1,29 +1,35 @@
 /** Deterministic capture plus isolated visual judgment for `atelier tool screen-check`. */
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
 import { imageKind, importImageBytes } from './present.ts';
-import { captureBrowserRecipe, parseBrowserRecipe } from './screen-check-browser.ts';
+import { captureBrowserRecipe, parseBrowserRecipe, type BrowserCapture } from './screen-check-browser.ts';
+import { comparePng, staticEvidence, type StaticEvidence } from './screen-check-evidence.ts';
 import { nativeWindowAdapter, stableWindowCapture } from './screen-check-window.ts';
 
 type Verdict = 'PASS' | 'FAIL' | 'INDETERMINATE';
-export type VisualVerdict = { verdict: Verdict; summary: string; observations: string[] };
-export type VisualJudge = (input: { expect: string; images: Buffer[]; provider: 'claude' | 'codex' }) => Promise<VisualVerdict>;
+export type VisualVerdict = { verdict: Verdict; summary: string; observations: string[]; visible_text: { source: 'vision'; lines: string[] } };
+export type VisualJudge = (input: { expect: string; images: Buffer[]; evidence: Array<BrowserCapture['evidence'] | StaticEvidence>; provider: 'claude' | 'codex' }) => Promise<VisualVerdict>;
 type Uploaded = Record<string, Buffer>;
-type Capture = { bytes: Buffer; label: string; diagnostics: string[] };
+type Capture = { bytes: Buffer; label: string; diagnostics: string[]; evidence: BrowserCapture['evidence'] | StaticEvidence; comparisonUrl?: string };
 
 const RESULT_SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['verdict', 'summary', 'observations'],
+  type: 'object', additionalProperties: false, required: ['verdict', 'summary', 'observations', 'visible_text'],
   properties: {
-    verdict: { enum: ['PASS', 'FAIL', 'INDETERMINATE'] }, summary: { type: 'string' },
-    observations: { type: 'array', items: { type: 'string' } },
+    verdict: { enum: ['PASS', 'FAIL', 'INDETERMINATE'] }, summary: { type: 'string', maxLength: 2000 },
+    observations: { type: 'array', maxItems: 100, items: { type: 'string', maxLength: 1000 } },
+    visible_text: { type: 'object', additionalProperties: false, required: ['source', 'lines'], properties: {
+      source: { const: 'vision' }, lines: { type: 'array', maxItems: 500, items: { type: 'string', maxLength: 1000 } },
+    } },
   },
 };
 
 const FALLBACK_JUDGMENT = `You inspect screenshots against one stated expectation. Return only the requested JSON.
 Inspect frame, layout, visible text, colour, selection/loading/focus state, overlaps, clipping, and what is missing.
+Transcribe readable visible text into visible_text.lines and set visible_text.source to vision.
 PASS only when the expectation is visibly satisfied and no visible regression contradicts it.
 FAIL only for a visible contradiction. Use INDETERMINATE when the pixels cannot settle the claim. Never guess.`;
 
@@ -50,13 +56,17 @@ function parseResult(value: unknown): VisualVerdict {
   const got = value as Record<string, unknown>;
   if (!['PASS', 'FAIL', 'INDETERMINATE'].includes(String(got.verdict))
       || typeof got.summary !== 'string'
-      || !Array.isArray(got.observations) || got.observations.some((item) => typeof item !== 'string')) {
+      || !Array.isArray(got.observations) || got.observations.some((item) => typeof item !== 'string')
+      || !got.visible_text || typeof got.visible_text !== 'object'
+      || (got.visible_text as Record<string, unknown>).source !== 'vision'
+      || !Array.isArray((got.visible_text as Record<string, unknown>).lines)
+      || ((got.visible_text as Record<string, unknown>).lines as unknown[]).some((item) => typeof item !== 'string')) {
     throw new Error('visual worker returned a malformed verdict');
   }
   return got as VisualVerdict;
 }
 
-async function claudeJudge(input: { expect: string; images: Buffer[] }): Promise<VisualVerdict> {
+async function claudeJudge(input: { expect: string; images: Buffer[]; evidence: unknown[] }): Promise<VisualVerdict> {
   const { query } = await import('@anthropic-ai/claude-agent-sdk');
   async function* prompt() {
     yield {
@@ -65,7 +75,7 @@ async function claudeJudge(input: { expect: string; images: Buffer[] }): Promise
         ...input.images.map((bytes) => ({ type: 'image' as const, source: {
           type: 'base64' as const, media_type: mime(bytes), data: bytes.toString('base64'),
         } })),
-        { type: 'text' as const, text: `Expectation: ${input.expect}` },
+        { type: 'text' as const, text: `Expectation: ${input.expect}\nCapture metadata and semantic evidence: ${JSON.stringify(input.evidence).slice(0, 30_000)}` },
       ] },
     };
   }
@@ -82,7 +92,7 @@ async function claudeJudge(input: { expect: string; images: Buffer[] }): Promise
   throw new Error('visual worker ended without a result');
 }
 
-function codexJudge(input: { expect: string; images: Buffer[] }): VisualVerdict {
+function codexJudge(input: { expect: string; images: Buffer[]; evidence: unknown[] }): VisualVerdict {
   const root = mkdtempSync(join(tmpdir(), 'atelier-screen-judge-'));
   try {
     const schema = join(root, 'schema.json'); const output = join(root, 'result.json');
@@ -95,7 +105,7 @@ function codexJudge(input: { expect: string; images: Buffer[] }): VisualVerdict 
     const command = ['exec', '--ephemeral', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check',
       '--sandbox', 'read-only', '--output-schema', schema, '--output-last-message', output];
     for (const path of paths) command.push('--image', path);
-    command.push(`${judgmentInstructions()}\nExpectation: ${input.expect}`);
+    command.push(`${judgmentInstructions()}\nExpectation: ${input.expect}\nCapture metadata and semantic evidence: ${JSON.stringify(input.evidence).slice(0, 30_000)}`);
     const run = spawnSync(process.env.CODEX_PATH || 'codex', command, { encoding: 'utf8', timeout: 600_000 });
     if (run.error) throw run.error;
     if (run.status !== 0) throw new Error(`Codex visual worker failed (${run.status}): ${(run.stderr || '').trim()}`);
@@ -110,7 +120,7 @@ function value(args: string[], name: string): string | undefined {
   const at = args.indexOf(name); return at < 0 ? undefined : args[at + 1];
 }
 
-const OPTIONS = new Set(['--type', '--target', '--window-id', '--before', '--after', '--expect', '--provider', '--viewport', '--theme', '--recipe', '--stable-ms', '--stable-retries']);
+const OPTIONS = new Set(['--type', '--target', '--window-id', '--before', '--after', '--before-recipe', '--after-recipe', '--expect', '--provider', '--viewport', '--theme', '--recipe', '--stable-ms', '--stable-retries']);
 
 function validateArgs(args: string[]): void {
   const seen = new Set<string>();
@@ -136,10 +146,28 @@ function parsed(args: string[]): { action: string; type: string; provider: 'clau
   if (['check', 'compare'].includes(action) && !expect) throw new Error('--expect is required');
   const theme = value(args, '--theme');
   if (theme && !['light', 'dark', 'system'].includes(theme)) throw new Error('--theme must be light, dark, or system');
-  if (action === 'compare' && (value(args, '--target') || value(args, '--window-id') || type !== 'image')) {
-    throw new Error('compare accepts only uploaded --before and --after images');
+  if (action === 'compare') {
+    const recipes = Boolean(value(args, '--before-recipe') || value(args, '--after-recipe'));
+    if (recipes && (!value(args, '--before-recipe') || !value(args, '--after-recipe'))) throw new Error('compare requires both --before-recipe and --after-recipe');
+    if (value(args, '--target') || value(args, '--window-id') || type !== 'image' || (recipes && (value(args, '--before') || value(args, '--after')))) {
+      throw new Error('compare accepts either uploaded --before/--after images or a --before-recipe/--after-recipe pair');
+    }
   }
   return { action, type, provider: provider as 'claude' | 'codex', expect };
+}
+
+function comparisonConfiguration(recipe: ReturnType<typeof parseBrowserRecipe>): { serialized: string; fingerprint: string } {
+  const capture = recipe.capture ?? {}; const config = { url: recipe.url, viewport: recipe.viewport ?? null, device: recipe.device ?? 'desktop', locale: recipe.locale ?? 'en-US', timezone: recipe.timezone ?? 'UTC', theme: recipe.theme ?? 'system',
+    capture: { mode: capture.mode ?? 'viewport', selector: capture.selector ?? null, clip: capture.clip ?? null } };
+  const serialized = JSON.stringify(config); return { serialized, fingerprint: createHash('sha256').update(serialized).digest('hex').slice(0, 16) };
+}
+
+async function captureRecipe(name: string, files: Uploaded, label: string): Promise<Capture> {
+  const recipe = parseBrowserRecipe(uploaded(name, files, label)); const scoped = { ...files };
+  const references = [recipe.auth?.storage_state, ...(recipe.actions ?? []).filter((action) => action.action === 'upload').map((action) => action.file)].filter((item): item is string => Boolean(item));
+  for (const reference of references) if (files[`${name}::${reference}`]) scoped[reference] = files[`${name}::${reference}`];
+  const result = await captureBrowserRecipe(recipe, scoped);
+  return { bytes: result.bytes, label, diagnostics: result.diagnostics, evidence: result.evidence, comparisonUrl: result.comparisonUrl };
 }
 
 function capturePlan(args: string[], files: Uploaded): Record<string, unknown> {
@@ -184,7 +212,7 @@ async function webCapture(url: string, viewport: string, theme: string): Promise
   const width = Number(match[1]); const height = Number(match[2]);
   if (width < 100 || width > 7680 || height < 100 || height > 4320) throw new Error('--viewport dimensions are out of range');
   const result = await captureBrowserRecipe({ url, viewport: { width, height }, theme: theme as 'light' | 'dark' | 'system' }, {});
-  return { bytes: result.bytes, label: `Web screen ${result.finalUrl}`, diagnostics: result.diagnostics };
+  return { bytes: result.bytes, label: `Web screen ${result.finalUrl}`, diagnostics: result.diagnostics, evidence: result.evidence };
 }
 
 async function windowCapture(id: string | undefined, args: string[]): Promise<Capture> {
@@ -193,7 +221,7 @@ async function windowCapture(id: string | undefined, args: string[]): Promise<Ca
   if (!Number.isInteger(interval) || interval < 50 || interval > 5000) throw new Error('--stable-ms must be an integer from 50 through 5000');
   if (!Number.isInteger(retries) || retries < 2 || retries > 20) throw new Error('--stable-retries must be an integer from 2 through 20');
   const result = await stableWindowCapture(id, nativeWindowAdapter(), interval, retries);
-  return { bytes: result.bytes, label: `${result.window.owner}: ${result.window.title || id}`, diagnostics: result.diagnostics };
+  return { bytes: result.bytes, label: `${result.window.owner}: ${result.window.title || id}`, diagnostics: result.diagnostics, evidence: staticEvidence('window', result.bytes) };
 }
 
 async function capture(args: string[], files: Uploaded): Promise<Capture> {
@@ -203,10 +231,10 @@ async function capture(args: string[], files: Uploaded): Promise<Capture> {
     if (type !== 'auto' && type !== 'web') throw new Error('--recipe requires web capture');
     const recipe = parseBrowserRecipe(uploaded(recipeName, files, '--recipe'));
     const result = await captureBrowserRecipe(recipe, files);
-    return { bytes: result.bytes, label: `Web screen ${result.finalUrl}`, diagnostics: result.diagnostics };
+    return { bytes: result.bytes, label: `Web screen ${result.finalUrl}`, diagnostics: result.diagnostics, evidence: result.evidence };
   }
   if (type === 'auto') type = target && /^https?:\/\//.test(target) ? 'web' : target && files[target] ? 'image' : '';
-  if (type === 'image') return { bytes: uploaded(target, files, '--target'), label: basename(target!), diagnostics: [] };
+  if (type === 'image') { const bytes = uploaded(target, files, '--target'); return { bytes, label: basename(target!), diagnostics: [], evidence: staticEvidence('image', bytes) }; }
   if (type === 'web') return webCapture(target ?? '', value(args, '--viewport') ?? '1280x800', value(args, '--theme') ?? 'system');
   if (type === 'window') return windowCapture(value(args, '--window-id'), args);
   throw new Error('ambiguous target; use --type web, window, or image');
@@ -218,28 +246,44 @@ export async function screenCheckUploaded(args: string[], files: Uploaded, media
   const request = parsed(args);
   if (request.action === 'windows') return { windows: nativeWindowAdapter().list(), safeguards: ['explicit ID required', 'capture permission is preflighted', 'hidden, minimized, and non-foreground windows are refused', 'two matching frames required', 'no whole-display fallback'] };
   if (request.action === 'plan') return capturePlan(args, files);
-  let captures: Capture[];
-  if (request.action === 'compare') captures = [
-    { bytes: uploaded(value(args, '--before'), files, '--before'), label: 'Before', diagnostics: [] },
-    { bytes: uploaded(value(args, '--after'), files, '--after'), label: 'After', diagnostics: [] },
+  let captures: Capture[]; let pairConfiguration = 'uploaded-pair; pixel alignment verified from decoded dimensions';
+  const beforeRecipe = value(args, '--before-recipe'); const afterRecipe = value(args, '--after-recipe');
+  if (request.action === 'compare' && beforeRecipe && afterRecipe) {
+    const beforeParsed = parseBrowserRecipe(uploaded(beforeRecipe, files, '--before-recipe')); const afterParsed = parseBrowserRecipe(uploaded(afterRecipe, files, '--after-recipe'));
+    const beforeConfig = comparisonConfiguration(beforeParsed); const afterConfig = comparisonConfiguration(afterParsed);
+    if (beforeConfig.serialized !== afterConfig.serialized) throw new Error('COMPARISON_NOT_ALIGNED: paired recipes must use the same URL, device/viewport, locale, timezone, theme and capture mode');
+    captures = [await captureRecipe(beforeRecipe, files, 'Before'), await captureRecipe(afterRecipe, files, 'After')];
+    const beforeUrl = captures[0].comparisonUrl; const afterUrl = captures[1].comparisonUrl;
+    if (beforeUrl !== afterUrl) throw new Error('COMPARISON_NOT_ALIGNED: paired recipes ended at different URLs');
+    pairConfiguration = `paired-browser-recipes; configuration=${beforeConfig.fingerprint}`;
+  } else if (request.action === 'compare') captures = [
+    (() => { const bytes = uploaded(value(args, '--before'), files, '--before'); return { bytes, label: 'Before', diagnostics: [], evidence: staticEvidence('image', bytes) }; })(),
+    (() => { const bytes = uploaded(value(args, '--after'), files, '--after'); return { bytes, label: 'After', diagnostics: [], evidence: staticEvidence('image', bytes) }; })(),
   ]; else captures = [await capture(args, files)];
-  const evidence = captures.map((item) => ({ asset: importImageBytes(item.bytes, item.label, media), label: item.label }));
-  const base = { check_id: `check_${evidence.map((item) => item.asset.slice(0, 12)).join('_')}`,
-    diagnostics: captures.flatMap((item) => item.diagnostics), captures: evidence };
+  const stored = captures.map((item) => ({ asset: importImageBytes(item.bytes, item.label, media), label: item.label, evidence: item.evidence }));
+  const base: Record<string, unknown> = { check_id: `check_${stored.map((item) => item.asset.slice(0, 12)).join('_')}`,
+    diagnostics: captures.flatMap((item) => item.diagnostics), captures: stored };
+  if (request.action === 'compare') {
+    const measured = comparePng(captures[0].bytes, captures[1].bytes); const { diff, ...comparison } = measured;
+    base.comparison = { ...comparison, capture_configuration: pairConfiguration };
+    if (diff) base.diff_asset = importImageBytes(diff, 'Objective pixel difference', media);
+  }
   if (request.action === 'capture') return base;
-  return { ...base, ...await judge({ expect: request.expect!, images: captures.map((item) => item.bytes), provider: request.provider }) };
+  return { ...base, ...await judge({ expect: request.expect!, images: captures.map((item) => item.bytes), evidence: captures.map((item) => item.evidence), provider: request.provider }) };
 }
 
 export const SCREEN_CHECK_SCHEMA = {
   actions: ['windows', 'plan', 'capture', 'check', 'compare'], capture_types: ['auto', 'web', 'window', 'image'],
   providers: ['claude', 'codex'], verdicts: ['PASS', 'FAIL', 'INDETERMINATE'],
-  required: { capture: ['target or window-id'], check: ['expect', 'target or window-id'], compare: ['expect', 'before', 'after'] },
+  required: { capture: ['target or window-id'], check: ['expect', 'target or window-id'], compare: ['expect', 'before+after or before-recipe+after-recipe'] },
   browser_recipe: { required: ['url'], optional: ['timeout_ms', 'viewport', 'device', 'locale', 'timezone', 'theme', 'auth', 'actions', 'settle', 'capture'],
     auth: ['storage_state', 'headers', 'http_credentials'],
     actions: ['goto', 'click', 'fill', 'type', 'press', 'select', 'check', 'uncheck', 'hover', 'upload', 'wait', 'wait_for', 'wait_for_text'],
     devices: ['desktop', 'tablet', 'mobile'], capture_modes: ['viewport', 'full_page', 'element', 'clip'],
     settling: ['load', 'network quiet', 'fonts', 'images', 'selector', 'text', 'animations', 'layout', 'matching frames'],
     limits: { actions: 50, timeout_ms: 120000, wait_ms: 30000, matching_frames: 5 } },
+  evidence: { browser: ['final_url', 'status', 'redirects', 'timing_ms', 'browser', 'dimensions', 'console', 'network', 'visible_text:dom', 'accessibility'],
+    visual_judgment: ['visible_text:vision'], comparison: ['aligned', 'threshold', 'changed_pixels', 'total_pixels', 'difference_ratio', 'diff_asset', 'capture_configuration'] },
 };
 
 export const SCREEN_CHECK_HELP = `atelier tool screen-check windows
@@ -247,6 +291,7 @@ atelier tool screen-check plan [--target URL|FILE] [--window-id ID] [--recipe FI
 atelier tool screen-check capture|check [--type auto|web|window|image] [--target URL|FILE] [--window-id ID] [--recipe FILE]
   [--expect TEXT] [--provider claude|codex] [--viewport WIDTHxHEIGHT] [--theme light|dark|system] [--stable-ms 200] [--stable-retries 5]
 atelier tool screen-check compare --before FILE --after FILE --expect TEXT [--provider claude|codex]
+atelier tool screen-check compare --before-recipe FILE --after-recipe FILE --expect TEXT [--provider claude|codex]
 Use plan when the capture route is unclear and --schema for the complete machine-readable contract.
 A browser recipe supports explicit authentication and bounded navigation, click, fill, type, key, selection, check, hover, upload and wait steps.
 Every web capture waits for load, network, fonts, images, layout stability and matching frames. Recipes add semantic waits, device presets and viewport, full-page, element or clipped capture.

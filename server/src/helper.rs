@@ -129,7 +129,10 @@ fn presentation_request(rest: &[String], stdin: String) -> Result<PresentationRe
 fn screen_check_request(rest: &[String]) -> Result<PresentationRequest<'_>, String> {
     let mut files = std::collections::BTreeMap::new();
     for (at, word) in rest.iter().enumerate() {
-        if !matches!(word.as_str(), "--target" | "--before" | "--after" | "--recipe") {
+        if !matches!(
+            word.as_str(),
+            "--target" | "--before" | "--after" | "--recipe" | "--before-recipe" | "--after-recipe"
+        ) {
             continue;
         }
         let path = rest
@@ -143,7 +146,7 @@ fn screen_check_request(rest: &[String]) -> Result<PresentationRequest<'_>, Stri
             path.clone(),
             base64::engine::general_purpose::STANDARD.encode(&bytes),
         );
-        if word == "--recipe" {
+        if matches!(word.as_str(), "--recipe" | "--before-recipe" | "--after-recipe") {
             let recipe: serde_json::Value = serde_json::from_slice(&bytes)
                 .map_err(|error| format!("{path}: {error}"))?;
             let mut referenced = Vec::new();
@@ -176,8 +179,13 @@ fn screen_check_request(rest: &[String]) -> Result<PresentationRequest<'_>, Stri
                 }
                 let referenced_bytes = std::fs::read(&canonical)
                     .map_err(|error| format!("{referenced_path}: {error}"))?;
+                let upload_key = if word == "--recipe" {
+                    referenced_path
+                } else {
+                    format!("{path}::{referenced_path}")
+                };
                 files.insert(
-                    referenced_path,
+                    upload_key,
                     base64::engine::general_purpose::STANDARD.encode(referenced_bytes),
                 );
             }
@@ -897,6 +905,47 @@ mod tests {
         assert!(request.files.contains_key(&recipe.display().to_string()));
         assert!(request.files.contains_key(&state.display().to_string()));
         assert!(request.files.contains_key(&upload.display().to_string()));
+    }
+
+    #[test]
+    fn screen_check_contract_carries_both_comparison_recipes() {
+        let temporary = tempfile::tempdir().unwrap();
+        let before_dir = temporary.path().join("before");
+        let after_dir = temporary.path().join("after");
+        std::fs::create_dir_all(&before_dir).unwrap();
+        std::fs::create_dir_all(&after_dir).unwrap();
+        let before = before_dir.join("recipe.json");
+        let after = after_dir.join("recipe.json");
+        std::fs::write(before_dir.join("state.json"), b"before-state").unwrap();
+        std::fs::write(after_dir.join("state.json"), b"after-state").unwrap();
+        std::fs::write(&before, br#"{"url":"https://example.test","auth":{"storage_state":"state.json"}}"#).unwrap();
+        std::fs::write(&after, br#"{"url":"https://example.test","auth":{"storage_state":"state.json"}}"#).unwrap();
+        let args = vec![
+            "compare".to_string(),
+            "--before-recipe".to_string(),
+            before.display().to_string(),
+            "--after-recipe".to_string(),
+            after.display().to_string(),
+            "--expect".to_string(),
+            "the state changed".to_string(),
+        ];
+
+        let request = screen_check_request(&args).unwrap();
+
+        assert!(request.files.contains_key(&before.display().to_string()));
+        assert!(request.files.contains_key(&after.display().to_string()));
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(&request.files[&format!("{}::state.json", before.display())])
+                .unwrap(),
+            b"before-state"
+        );
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(&request.files[&format!("{}::state.json", after.display())])
+                .unwrap(),
+            b"after-state"
+        );
     }
 
     #[test]

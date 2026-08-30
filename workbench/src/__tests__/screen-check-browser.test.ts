@@ -21,11 +21,11 @@ function fakeRuntime() {
     on: vi.fn(), goto: async (url: string) => calls.push(`goto:${url}`), locator: () => locator,
     getByText: () => locator, waitForTimeout: async (ms: number) => calls.push(`wait:${ms}`),
     waitForLoadState: async () => calls.push('load'), addStyleTag: async () => calls.push('styles'),
-    evaluate: async (input: unknown) => typeof input === 'string' ? 'stable-layout' : undefined,
-    screenshot: async () => PNG, url: () => 'https://app.test/home',
+    evaluate: async (input: unknown) => typeof input === 'string' ? 'stable-layout' : String(input).includes('devicePixelRatio') ? 1 : String(input).includes('querySelectorAll') ? { text: 'Home', nodes: [] } : undefined,
+    screenshot: async () => PNG, url: () => 'https://app.test/home', viewportSize: () => ({ width: 1280, height: 800 }), mainFrame: () => page,
   };
   const context: any = { newPage: async () => page, close: vi.fn() };
-  const browser: any = { newContext: vi.fn(async () => context), close: vi.fn() };
+  const browser: any = { newContext: vi.fn(async () => context), close: vi.fn(), version: () => 'test-chromium' };
   return { runtime: { launch: vi.fn(async () => browser) }, browser, calls };
 }
 

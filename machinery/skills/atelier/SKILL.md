@@ -247,6 +247,12 @@ when the state under test depends on either.
   `atelier tool screen-check check --type web|image --target URL|FILE --expect TEXT [--provider claude|codex]`.
 - Judge a change:
   `atelier tool screen-check compare --before FILE --after FILE --expect TEXT [--provider claude|codex]`.
+  For live pages, prefer two recipe files with identical URL, device/viewport,
+  locale, timezone, theme, and capture configuration:
+  `compare --before-recipe BEFORE.json --after-recipe AFTER.json --expect TEXT`.
+  The tool captures both in isolated contexts and refuses configuration, final
+  URL, or decoded-dimension mismatches. Keep each recipe's auth and upload files
+  beside that recipe; equal relative names remain separately scoped.
 - Capture one OS window only with
   `atelier tool screen-check windows`, bring the intended window fully to the
   foreground without covering it, then run
@@ -264,6 +270,20 @@ permission errors as tool failures, not failed product assertions. Do not ask
 the parent agent to open or reinterpret returned images. Reuse each returned
 `captures[].asset` with `atelier tool present image --asset ...` or
 `present compare --before-asset ... --after-asset ...`.
+
+Treat the result as evidence with explicit provenance:
+
+- Browser captures report redacted final URL and redirects, final status,
+  bounded timings, Chromium version, CSS dimensions and scale, console/network
+  failure counts, visible DOM text, and a value-free accessibility outline.
+- Image and native-window captures report decoded PNG dimensions when present
+  and label text extraction as `vision-required` until a check runs.
+- `check` and `compare` return `visible_text.source=vision`; do not present it as
+  DOM text or silently merge the two sources.
+- PNG comparisons return an objective pixelmatch threshold, decoded alignment,
+  changed/total pixels, difference ratio, and a content-addressed diff asset.
+  An uploaded non-PNG or dimension mismatch remains visually judgeable but is
+  explicitly marked objectively unaligned.
 
 Screen-check may navigate the exact web URL requested, but must not start,
 restart, stop, install, or reconfigure the target application. Web capture uses

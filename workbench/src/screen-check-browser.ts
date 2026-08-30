@@ -50,6 +50,20 @@ export type BrowserCapture = {
   bytes: Buffer;
   diagnostics: string[];
   finalUrl: string;
+  comparisonUrl: string;
+  evidence: {
+    source: 'browser';
+    final_url: string;
+    status: number | null;
+    redirects: Array<{ url: string; status: number }>;
+    timing_ms: { total: number; actions: number; settle: number };
+    browser: { engine: 'chromium'; version: string };
+    dimensions: { width: number; height: number; device_scale_factor: number; mode: string };
+    console: { error_count: number };
+    network: { failure_count: number };
+    visible_text: { source: 'dom'; text: string };
+    accessibility: { source: 'dom-accessibility-outline'; nodes: Array<{ role: string; name: string }> };
+  };
 };
 
 type Runtime = {
@@ -296,6 +310,33 @@ async function stableScreenshot(page: Page, recipe: BrowserRecipe, deadline: num
   throw new Error(`WEB_CAPTURE_UNSTABLE: 10 screenshots did not produce ${required} matching frames`);
 }
 
+function safeUrl(raw: string): string {
+  try {
+    const url = new URL(raw); url.username = ''; url.password = '';
+    for (const key of Array.from(url.searchParams.keys())) url.searchParams.set(key, '[redacted]');
+    url.hash = '';
+    return url.toString();
+  } catch { return raw.split(/[?#]/, 1)[0]; }
+}
+
+async function semanticEvidence(page: Page): Promise<{ visible_text: { source: 'dom'; text: string }; accessibility: { source: 'dom-accessibility-outline'; nodes: Array<{ role: string; name: string }> } }> {
+  const result = await page.evaluate(() => {
+    const visible = (element: Element) => { const style = getComputedStyle(element); const rect = element.getBoundingClientRect(); return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0; };
+    const role = (element: Element) => {
+      const explicit = element.getAttribute('role'); if (explicit) return explicit;
+      if (element.tagName === 'INPUT') return ({ checkbox: 'checkbox', radio: 'radio', button: 'button', submit: 'button', range: 'slider' } as Record<string, string>)[(element as HTMLInputElement).type] || 'textbox';
+      return ({ A: 'link', BUTTON: 'button', SELECT: 'combobox', TEXTAREA: 'textbox', IMG: 'img', H1: 'heading', H2: 'heading', H3: 'heading', NAV: 'navigation', MAIN: 'main' } as Record<string, string>)[element.tagName] || '';
+    };
+    const nodes = Array.from(document.querySelectorAll('[role],a,button,input,select,textarea,img,h1,h2,h3,nav,main')).filter(visible).slice(0, 500).map((element) => {
+      const input = element as HTMLInputElement; const label = input.labels?.[0]?.innerText;
+      const name = element.getAttribute('aria-label') || element.getAttribute('alt') || label || (['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName) ? '' : (element as HTMLElement).innerText) || element.getAttribute('title') || '';
+      return { role: role(element), name: String(name).replace(/\s+/g, ' ').trim().slice(0, 500) };
+    }).filter((node) => node.role || node.name).slice(0, 200).map((node) => ({ ...node, name: node.name.slice(0, 200) }));
+    return { text: document.body?.innerText?.replace(/\s+\n/g, '\n').trim().slice(0, 10_000) || '', nodes };
+  });
+  return { visible_text: { source: 'dom', text: result.text }, accessibility: { source: 'dom-accessibility-outline', nodes: result.nodes } };
+}
+
 export async function captureBrowserRecipe(recipe: BrowserRecipe, files: Record<string, Buffer>, runtime?: Runtime): Promise<BrowserCapture> {
   const executable = browserExecutable(); if (!executable) throw new Error('WEB_CAPTURE_UNAVAILABLE: Chrome or Chromium not found');
   const driver = runtime ?? { launch: async (path: string) => (await import('playwright-core')).chromium.launch({ executablePath: path, headless: true }) };
@@ -303,15 +344,29 @@ export async function captureBrowserRecipe(recipe: BrowserRecipe, files: Record<
   try {
     const context = await contextFor(browser, recipe, files);
     try {
-      const page = await context.newPage(); const errors: string[] = []; const tracker = networkTracker(page);
-      page.on('console', (message) => { if (message.type() === 'error') errors.push('console-error=reported'); });
-      page.on('requestfailed', (request) => errors.push(`network-error=${request.failure()?.errorText ?? 'request failed'}`));
+      const page = await context.newPage(); const errors: string[] = []; const tracker = networkTracker(page); const started = Date.now();
+      const navigationResponses: Array<{ request: any; url: string; status: number }> = []; let status: number | null = null; let networkFailures = 0; let consoleErrors = 0;
+      page.on('console', (message) => { if (message.type() === 'error') { consoleErrors += 1; if (errors.length < 100) errors.push('console-error=reported'); } });
+      page.on('requestfailed', (request) => { networkFailures += 1; if (errors.length < 100) errors.push(`network-error=${request.failure()?.errorText ?? 'request failed'}`); });
+      page.on('response', (response) => {
+        const request = response.request(); if (!request.isNavigationRequest() || response.frame() !== page.mainFrame()) return;
+        status = response.status(); navigationResponses.push({ request, url: safeUrl(response.url()), status });
+      });
       await page.goto(recipe.url, { waitUntil: 'domcontentloaded', timeout: remaining(deadline) });
       for (const action of recipe.actions ?? []) await perform(page, action, files, deadline);
-      const settled = await settlePage(page, recipe, tracker, deadline); const shot = await stableScreenshot(page, recipe, deadline);
+      const actionsDone = Date.now(); const settled = await settlePage(page, recipe, tracker, deadline); const settleDone = Date.now();
+      const shot = await stableScreenshot(page, recipe, deadline); const semantic = await semanticEvidence(page);
       const mode = recipe.capture?.mode ?? 'viewport';
-      return { bytes: shot.bytes, finalUrl: page.url(),
-        diagnostics: [`final-url=${page.url()}`, `actions=${recipe.actions?.length ?? 0}`, `device=${recipe.device ?? 'desktop'}`, `capture=${mode}`, ...settled, `matching-frame-attempts=${shot.attempts}`, ...errors] };
+      const viewport = page.viewportSize() ?? recipe.viewport ?? DEVICES[recipe.device ?? 'desktop'].viewport;
+      const dpr = await page.evaluate(() => window.devicePixelRatio);
+      const comparisonUrl = page.url(); const finalUrl = safeUrl(comparisonUrl);
+      const redirects = navigationResponses.filter((entry) => entry.request.redirectedTo()).map(({ url, status: redirectStatus }) => ({ url, status: redirectStatus }));
+      return { bytes: shot.bytes, finalUrl, comparisonUrl,
+        diagnostics: [`final-url=${finalUrl}`, `status=${status ?? 'unknown'}`, `actions=${recipe.actions?.length ?? 0}`, `device=${recipe.device ?? 'desktop'}`, `capture=${mode}`, ...settled, `matching-frame-attempts=${shot.attempts}`, ...errors],
+        evidence: { source: 'browser', final_url: finalUrl, status, redirects,
+          timing_ms: { total: Date.now() - started, actions: actionsDone - started, settle: settleDone - actionsDone },
+          browser: { engine: 'chromium', version: browser.version() }, dimensions: { width: viewport.width, height: viewport.height, device_scale_factor: dpr, mode },
+          console: { error_count: consoleErrors }, network: { failure_count: networkFailures }, ...semantic } };
     } finally { await context.close(); }
   } finally { await browser.close(); }
 }
