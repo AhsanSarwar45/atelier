@@ -105,7 +105,12 @@ fn strip(path: &Path) -> Result<(), String> {
 
 fn wire(path: &Path, table: &[(&str, &str, &[&str])]) -> Result<(), String> {
     let mut value = read(path)?;
-    strip_value(&mut value);
+    wire_value(&mut value, table, path.ends_with("settings.json"));
+    write(path, &value)
+}
+
+fn wire_value(value: &mut Value, table: &[(&str, &str, &[&str])], claude: bool) {
+    strip_value(value);
     if !value["hooks"].is_object() { value["hooks"] = json!({}); }
     for (event, matcher, names) in table {
         if !value["hooks"][event].is_array() { value["hooks"][event] = json!([]); }
@@ -116,10 +121,9 @@ fn wire(path: &Path, table: &[(&str, &str, &[&str])]) -> Result<(), String> {
         let hooks = blocks[at]["hooks"].as_array_mut().unwrap();
         for name in *names { hooks.push(json!({"type":"command","command":command_for(name)})); }
     }
-    if path.ends_with("settings.json") {
+    if claude {
         value.as_object_mut().unwrap().entry("autoCompactWindow").or_insert(json!(200000));
     }
-    write(path, &value)
 }
 
 fn write(path: &Path, value: &Value) -> Result<(), String> {
@@ -175,6 +179,37 @@ mod tests {
         let commands = value["hooks"]["PreToolUse"][0]["hooks"].as_array().unwrap();
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0]["command"], "my-project-hook");
+    }
+
+    fn pretool(value: &Value) -> Vec<&str> {
+        value["hooks"]["PreToolUse"].as_array().into_iter().flatten()
+            .flat_map(|block| block["hooks"].as_array().into_iter().flatten())
+            .filter_map(|hook| hook["command"].as_str()).collect()
+    }
+
+    #[test]
+    fn native_machinery_provider_wiring_has_equivalent_repository_gates() {
+        let mut claude = json!({});
+        let mut codex = json!({});
+        wire_value(&mut claude, CLAUDE, true);
+        wire_value(&mut codex, CODEX, false);
+        let required = ["atelier hook workflow-gate", "atelier hook board-actor",
+            "atelier hook board-merge-gate", "atelier hook board-status-gate"];
+        for command in required {
+            assert!(pretool(&claude).contains(&command), "Claude lacks {command}");
+            assert!(pretool(&codex).contains(&command), "Codex lacks {command}");
+        }
+    }
+
+    #[test]
+    fn native_machinery_wiring_preserves_neighboring_user_hooks() {
+        for (table, claude) in [(CLAUDE, true), (CODEX, false)] {
+            let mut value = json!({"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[
+                {"type":"command","command":"my-project-hook"}
+            ]}]}});
+            wire_value(&mut value, table, claude);
+            assert!(pretool(&value).contains(&"my-project-hook"));
+        }
     }
 
     #[test]
