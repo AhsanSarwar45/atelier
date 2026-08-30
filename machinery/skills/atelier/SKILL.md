@@ -222,8 +222,12 @@ recipe or storage-state file, never in a shell argument or final response.
 - Judge a change:
   `atelier tool screen-check compare --before FILE --after FILE --expect TEXT [--provider claude|codex]`.
 - Capture one OS window only with
-  `capture|check --type window --window-id ID`; never infer a window, capture a
-  whole display, dismiss privacy prompts, or change screen-capture permissions.
+  `atelier tool screen-check windows`, bring the intended window fully to the
+  foreground without covering it, then run
+  `capture|check --type window --window-id ID`. The tool preflights permission,
+  refuses hidden, minimized, non-foreground, missing, or unstable windows, and
+  requires two identical frames. Never infer a window, capture a whole display,
+  dismiss privacy prompts, or change screen-capture permissions.
 - Use `--type auto` only when `--target` is an unambiguous HTTP(S) URL or an
   uploaded image. Otherwise name the type.
 
@@ -238,8 +242,9 @@ the parent agent to open or reinterpret returned images. Reuse each returned
 Screen-check may navigate the exact web URL requested, but must not start,
 restart, stop, install, or reconfigure the target application. Web capture uses
 a fresh browser profile and does not inherit the user's cookies or browser
-session. Use an uploaded image when authentication or interaction was prepared
-by another authorized tool.
+session. Use a bounded browser recipe for authentication and interaction; use
+an uploaded image only when another authorized tool already prepared the exact
+pixels that need inspection.
 
 For every visual change, capture the relevant screen before editing and again
 afterward. Run `atelier tool present compare` with those two project images and

@@ -3,10 +3,11 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, join } from 'node:path';
+import { basename, isAbsolute, join } from 'node:path';
 
 import { imageKind, importImageBytes } from './present.ts';
 import { captureBrowserRecipe, parseBrowserRecipe } from './screen-check-browser.ts';
+import { nativeWindowAdapter, stableWindowCapture } from './screen-check-window.ts';
 
 type Verdict = 'PASS' | 'FAIL' | 'INDETERMINATE';
 export type VisualVerdict = { verdict: Verdict; summary: string; observations: string[] };
@@ -110,7 +111,7 @@ function value(args: string[], name: string): string | undefined {
   const at = args.indexOf(name); return at < 0 ? undefined : args[at + 1];
 }
 
-const OPTIONS = new Set(['--type', '--target', '--window-id', '--before', '--after', '--expect', '--provider', '--viewport', '--theme', '--recipe']);
+const OPTIONS = new Set(['--type', '--target', '--window-id', '--before', '--after', '--expect', '--provider', '--viewport', '--theme', '--recipe', '--stable-ms', '--stable-retries']);
 
 function validateArgs(args: string[]): void {
   const seen = new Set<string>();
@@ -126,7 +127,7 @@ function validateArgs(args: string[]): void {
 
 function parsed(args: string[]): { action: string; type: string; provider: 'claude' | 'codex'; expect?: string } {
   const action = args[0] ?? '';
-  if (!['plan', 'capture', 'check', 'compare'].includes(action)) throw new Error('usage: atelier tool screen-check plan|capture|check|compare [options]');
+  if (!['windows', 'plan', 'capture', 'check', 'compare'].includes(action)) throw new Error('usage: atelier tool screen-check windows|plan|capture|check|compare [options]');
   validateArgs(args);
   const type = value(args, '--type') ?? (action === 'compare' ? 'image' : 'auto');
   if (!['auto', 'web', 'window', 'image'].includes(type)) throw new Error('--type must be auto, web, window, or image');
@@ -269,17 +270,13 @@ async function webCapture(url: string, viewport: string, theme: string): Promise
   }
 }
 
-function windowCapture(id: string | undefined): Capture {
+async function windowCapture(id: string | undefined, args: string[]): Promise<Capture> {
   if (!id) throw new Error('--window-id is required');
-  const out = join(mkdtempSync(join(tmpdir(), 'atelier-screen-window-')), 'window.png');
-  try {
-    let run;
-    if (process.platform === 'darwin') run = spawnSync('screencapture', ['-x', '-l', id, out]);
-    else if (process.platform === 'linux') run = spawnSync('import', ['-window', id, out]);
-    else throw new Error('WINDOW_CAPTURE_UNAVAILABLE: unsupported platform');
-    if (run.error || run.status !== 0) throw new Error('CAPTURE_PERMISSION_REQUIRED: capture failed');
-    return { bytes: readFileSync(out), label: `Window ${id}`, diagnostics: [`window=${id}`] };
-  } finally { rmSync(dirname(out), { recursive: true, force: true }); }
+  const interval = Number(value(args, '--stable-ms') ?? 200); const retries = Number(value(args, '--stable-retries') ?? 5);
+  if (!Number.isInteger(interval) || interval < 50 || interval > 5000) throw new Error('--stable-ms must be an integer from 50 through 5000');
+  if (!Number.isInteger(retries) || retries < 2 || retries > 20) throw new Error('--stable-retries must be an integer from 2 through 20');
+  const result = await stableWindowCapture(id, nativeWindowAdapter(), interval, retries);
+  return { bytes: result.bytes, label: `${result.window.owner}: ${result.window.title || id}`, diagnostics: result.diagnostics };
 }
 
 async function capture(args: string[], files: Uploaded): Promise<Capture> {
@@ -294,7 +291,7 @@ async function capture(args: string[], files: Uploaded): Promise<Capture> {
   if (type === 'auto') type = target && /^https?:\/\//.test(target) ? 'web' : target && files[target] ? 'image' : '';
   if (type === 'image') return { bytes: uploaded(target, files, '--target'), label: basename(target!), diagnostics: [] };
   if (type === 'web') return webCapture(target ?? '', value(args, '--viewport') ?? '1280x800', value(args, '--theme') ?? 'system');
-  if (type === 'window') return windowCapture(value(args, '--window-id'));
+  if (type === 'window') return windowCapture(value(args, '--window-id'), args);
   throw new Error('ambiguous target; use --type web, window, or image');
 }
 
@@ -302,6 +299,7 @@ export async function screenCheckUploaded(args: string[], files: Uploaded, media
   if (args.length === 1 && ['help', '--help', '-h'].includes(args[0])) return { help: SCREEN_CHECK_HELP };
   if (args.length === 1 && args[0] === '--schema') return { schema: SCREEN_CHECK_SCHEMA };
   const request = parsed(args);
+  if (request.action === 'windows') return { windows: nativeWindowAdapter().list(), safeguards: ['explicit ID required', 'capture permission is preflighted', 'hidden, minimized, and non-foreground windows are refused', 'two matching frames required', 'no whole-display fallback'] };
   if (request.action === 'plan') return capturePlan(args, files);
   let captures: Capture[];
   if (request.action === 'compare') captures = [
@@ -316,7 +314,7 @@ export async function screenCheckUploaded(args: string[], files: Uploaded, media
 }
 
 export const SCREEN_CHECK_SCHEMA = {
-  actions: ['plan', 'capture', 'check', 'compare'], capture_types: ['auto', 'web', 'window', 'image'],
+  actions: ['windows', 'plan', 'capture', 'check', 'compare'], capture_types: ['auto', 'web', 'window', 'image'],
   providers: ['claude', 'codex'], verdicts: ['PASS', 'FAIL', 'INDETERMINATE'],
   required: { capture: ['target or window-id'], check: ['expect', 'target or window-id'], compare: ['expect', 'before', 'after'] },
   browser_recipe: { required: ['url'], optional: ['timeout_ms', 'viewport', 'theme', 'auth', 'actions'],
@@ -325,9 +323,10 @@ export const SCREEN_CHECK_SCHEMA = {
     limits: { actions: 50, timeout_ms: 120000, wait_ms: 30000 } },
 };
 
-export const SCREEN_CHECK_HELP = `atelier tool screen-check plan [--target URL|FILE] [--window-id ID] [--recipe FILE]
+export const SCREEN_CHECK_HELP = `atelier tool screen-check windows
+atelier tool screen-check plan [--target URL|FILE] [--window-id ID] [--recipe FILE]
 atelier tool screen-check capture|check [--type auto|web|window|image] [--target URL|FILE] [--window-id ID] [--recipe FILE]
-  [--expect TEXT] [--provider claude|codex] [--viewport WIDTHxHEIGHT] [--theme light|dark|system]
+  [--expect TEXT] [--provider claude|codex] [--viewport WIDTHxHEIGHT] [--theme light|dark|system] [--stable-ms 200] [--stable-retries 5]
 atelier tool screen-check compare --before FILE --after FILE --expect TEXT [--provider claude|codex]
 Use plan when the capture route is unclear and --schema for the complete machine-readable contract.
 A browser recipe supports explicit authentication and bounded navigation, click, fill, type, key, selection, check, hover, upload and wait steps.
