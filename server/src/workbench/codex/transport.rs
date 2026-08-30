@@ -385,8 +385,11 @@ mod tests {
                     }
                 }
                 "thread/read" => json!({"thread":{"id":message["params"]["threadId"],"turns":[]}}),
-                "thread/start" | "thread/resume" => {
+                "thread/start" => {
                     json!({"thread":{"id":"thread-live"},"model":"gpt-5","reasoningEffort":"high","cwd":"/project"})
+                }
+                "thread/resume" => {
+                    json!({"thread":{"id":message["params"]["threadId"]},"model":"gpt-5","reasoningEffort":"high","cwd":"/project"})
                 }
                 "turn/start" => {
                     writeln!(stdout, "{}", json!({"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-1"}}})).unwrap();
@@ -419,6 +422,7 @@ mod tests {
                     writeln!(stdout, "{}", json!({"jsonrpc":"2.0", "id":"ask-1", "method":"currentTime/read", "params":{}})).unwrap();
                     json!({"sent": true})
                 }
+                "drop/stream" => json!({"dropping": true}),
                 _ => Value::Null,
             };
             writeln!(
@@ -428,6 +432,9 @@ mod tests {
             )
             .unwrap();
             stdout.flush().unwrap();
+            if method == "drop/stream" {
+                break;
+            }
         }
     }
 
@@ -594,5 +601,136 @@ mod tests {
         }
         assert!(saw_approval);
         driver.close().await;
+    }
+
+    #[tokio::test]
+    async fn native_codex_process_resumes_a_named_chat_and_reaps_the_child() {
+        use crate::workbench::codex::live::{NativeCodexDriver, StartOptions};
+        let transport = CodexTransport::start(fake_config()).await.unwrap();
+        let pid = transport.child_id();
+        let (driver, opened) = NativeCodexDriver::open(
+            transport,
+            StartOptions {
+                cwd: PathBuf::from("/project"),
+                resume: Some("resume-me".into()),
+                model: None,
+                permission_mode: "on-request".into(),
+                effort: None,
+                collaboration_mode: None,
+                instructions: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(opened[0]["externalId"], "resume-me");
+        driver.close().await;
+        #[cfg(target_os = "linux")]
+        assert!(!Path::new(&format!("/proc/{pid}")).exists());
+    }
+
+    #[tokio::test]
+    async fn native_codex_process_keeps_bad_lines_diagnostic_and_reports_a_dropped_stream() {
+        let transport = CodexTransport::start(fake_config()).await.unwrap();
+        let mut inbound = transport.take_inbound().unwrap();
+        transport
+            .call("events", json!({}), Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert!(matches!(
+            inbound_matching(&mut inbound, |message| message
+                == &CodexInbound::ProtocolLine("not-json".into()))
+            .await,
+            CodexInbound::ProtocolLine(_)
+        ));
+        transport
+            .call("drop/stream", json!({}), Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert!(matches!(
+            inbound_matching(&mut inbound, |message| matches!(
+                message,
+                CodexInbound::Exited(_)
+            ))
+            .await,
+            CodexInbound::Exited(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn native_codex_process_commits_a_chat_only_after_the_provider_is_ready() {
+        use crate::workbench::actor::ChatDb;
+        use crate::workbench::codex::live::StartOptions;
+        use crate::workbench::codex::session::NativeCodexSession;
+        use crate::workbench::store::Session;
+        let directory = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
+        let row = Session {
+            id: "chat-1".into(),
+            brand: "codex".into(),
+            external_id: None,
+            project_id: "project-1".into(),
+            project_path: "/project".into(),
+            cwd: "/project".into(),
+            model: Some("gpt-5".into()),
+            permission_mode: "on-request".into(),
+            effort: Some("high".into()),
+            collaboration_mode: None,
+            title: Some("Chat".into()),
+            state: "idle".into(),
+            origin: "app".into(),
+            created_at: "2026-08-30T00:00:00.000Z".into(),
+            last_active_at: "2026-08-30T00:00:00.000Z".into(),
+            last_spoke_at: None,
+        };
+        let mut session = NativeCodexSession::start(
+            database.clone(),
+            fake_config(),
+            StartOptions {
+                cwd: PathBuf::from("/project"),
+                resume: None,
+                model: Some("gpt-5".into()),
+                permission_mode: "on-request".into(),
+                effort: Some("high".into()),
+                collaboration_mode: None,
+                instructions: "rules".into(),
+            },
+            row,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            database.list_sessions(None).await.unwrap()[0]
+                .external_id
+                .as_deref(),
+            Some("thread-live")
+        );
+        assert_eq!(
+            database
+                .events_since("chat-1".into(), 0)
+                .await
+                .unwrap()
+                .iter()
+                .map(|event| event.fields["seq"].as_i64().unwrap())
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+        session.send("Build it").await.unwrap();
+        for _ in 0..8 {
+            let events = session.next().await.unwrap();
+            if events.iter().any(|event| {
+                matches!(
+                    event.kind,
+                    crate::workbench::protocol::EventKind::AskPermission
+                )
+            }) {
+                session.answer("shell-1", "allow_once", None).await.unwrap();
+                break;
+            }
+        }
+        let events = database.events_since("chat-1".into(), 0).await.unwrap();
+        assert!(events
+            .windows(2)
+            .all(|pair| pair[0].fields["seq"].as_i64() < pair[1].fields["seq"].as_i64()));
+        session.close().await;
     }
 }
