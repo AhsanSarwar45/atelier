@@ -1,7 +1,7 @@
 //! What the product carries, told to cargo.
 //!
 //! The screens, the working rules, the craft beside them, the report tools and
-//! the chat helper are all read out of these folders while this crate compiles,
+//! the native chat implementation is compiled with the server, while these external folders
 //! and travel inside the binary. Cargo cannot see that on its own: it watches
 //! this crate's own source and nothing else, so a build after a change to any
 //! of these folders was answered with the previous binary, and the installed
@@ -20,8 +20,6 @@ fn main() {
         "../machinery",       // the working rules
         "../.claude",         // the craft beside them
         "../reporting/tools", // the tools that build a report
-        "../workbench",       // the chat helper
-        "../src/workbench",   // the helper's own screens
     ] {
         println!("cargo:rerun-if-changed={carried}");
     }

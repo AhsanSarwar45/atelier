@@ -90,15 +90,13 @@ pub fn carried_settings() -> Vec<(String, String)> {
 /// The names that travel, in the order they are written down.
 ///
 /// `PATH` is one of them because this program is a front onto command-line
-/// tools it does not carry: the chat helper is started with `node` and its kit
-/// fetched once with `npm`, the boards are read with `bd`, the database is
-/// `dolt`. Every one of those is a bare name looked up on a list of places.
+/// tools it does not carry: providers and `bd` are bare names looked up on a
+/// list of places.
 /// A service is started by something that never read the reader's shell, so
 /// with the list left behind the board comes up with a dead chat and no boards
 /// on it (bw-w5zs). It is carried exactly as the reader had it when they
 /// registered, because that is the list their own tools were found on.
-const CARRIED: [&str; 4] =
-    ["ATELIER_HOST", "ATELIER_DATA_DIR", "BEADS_WORKBENCH_PORT", "PATH"];
+const CARRIED: [&str; 3] = ["ATELIER_HOST", "ATELIER_DATA_DIR", "PATH"];
 
 /// The rule behind it, kept apart from the environment so it can be tested
 /// without one test's variable reaching another running beside it.
@@ -568,20 +566,17 @@ mod tests {
         // registered has to be written into the definition or it is gone.
         let carried = settings_from(|name| match name {
             "ATELIER_DATA_DIR" => Some("/somewhere/else".to_string()),
-            "BEADS_WORKBENCH_PORT" => Some("4009".to_string()),
             _ => None,
         });
 
         let unit = systemd_unit("/usr/bin/atelier", &carried);
         assert!(unit.contains("Environment=\"ATELIER_DATA_DIR=/somewhere/else\""), "{unit}");
-        assert!(unit.contains("Environment=\"BEADS_WORKBENCH_PORT=4009\""), "{unit}");
         assert!(unit.contains("Environment=\"ATELIER_PORT="), "{unit}");
     }
 
     #[test]
     fn the_places_the_reader_s_own_tools_were_found_travel_too() {
-        // The chat helper is started with `node`, its kit fetched with `npm`,
-        // the boards read with `bd`. Every one is a bare name looked up on a
+        // Providers and boards are bare names looked up on a
         // list, and a service is started by something that never read the
         // reader's shell — so with the list left behind the board comes up
         // with a dead chat and no boards on it (bw-w5zs).

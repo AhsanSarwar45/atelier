@@ -469,10 +469,10 @@ pub fn hook(name: &str, rest: &[String]) -> Result<i32, String> {
 /// a general script runner over application data.
 pub async fn tool(name: &str, rest: &[String]) -> Result<i32, String> {
     if name == "present" {
-        return crate::helper::present(rest).await;
+        return crate::workbench::cli::present(rest).await;
     }
     if name == "screen-check" {
-        return crate::helper::screen_check(rest).await;
+        return crate::workbench::cli::screen_check(rest).await;
     }
     let dir = crate::identity::rules_dir()
         .ok_or_else(|| "this computer names no folder for Atelier's working rules".to_string())?;

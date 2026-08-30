@@ -269,7 +269,7 @@ fn capture_once(id: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-pub trait WindowSource {
+pub trait WindowSource: Send {
     fn list(&mut self) -> Result<Vec<NativeWindow>, String>;
     fn capture(&mut self, id: &str) -> Result<Vec<u8>, String>;
     fn name(&self) -> &str;

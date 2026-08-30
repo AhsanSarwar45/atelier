@@ -9,6 +9,7 @@ pub mod agent_files;
 pub mod beads_links;
 pub mod browser;
 pub mod claude;
+pub mod cli;
 pub mod codex;
 pub mod external;
 pub mod media;

@@ -10,7 +10,7 @@
 //! reading our code. Nothing could be asked. This is the thing that answers
 //! it, for a person at a terminal now and for the screens later (bw-dwxw).
 
-use crate::routes::{find_runtime, find_tool};
+use crate::routes::find_tool;
 use std::path::PathBuf;
 
 /// One outside program the app starts, and what it is started for.
@@ -27,12 +27,7 @@ pub struct Need {
 
 /// Every outside program the app starts, in the order a reader meets them.
 ///
-/// `git` is first because without it a project cannot be read at all; the one
-/// the chat tab rests on comes last, because the board and every other screen
-/// works without it. The chat runtime is looked for the way the server itself
-/// resolves it -- the copy the release carried beside the program first -- so a
-/// computer with no node of its own still reports it `found`, and npm is not
-/// listed at all because nothing in the product runs npm any more (bw-oesd.2).
+/// `git` is first because without it a project cannot be read at all.
 pub const NEEDED: &[Need] = &[
     Need {
         name: "git",
@@ -52,12 +47,6 @@ pub const NEEDED: &[Need] = &[
         carries: "the board, for projects that opt into one",
         from: "https://github.com/gastownhall/beads",
     },
-    Need {
-        name: "node",
-        also: &[],
-        carries: "the chat tab; carried beside the program, so you need not install it",
-        from: "https://nodejs.org/",
-    },
 ];
 
 /// One need, and where this computer holds it.
@@ -75,15 +64,7 @@ pub fn looked() -> Vec<Found> {
         .iter()
         .map(|need| Found {
             need,
-            // The chat runtime is resolved the way the server starts it -- the
-            // carried copy beside the program before any the reader installed --
-            // so a machine with no node of its own still reports it found. Every
-            // other program is an ordinary search of the reader's places.
-            at: if need.name == "node" {
-                find_runtime()
-            } else {
-                find_tool(need.name, need.also)
-            },
+            at: find_tool(need.name, need.also),
         })
         .collect()
 }

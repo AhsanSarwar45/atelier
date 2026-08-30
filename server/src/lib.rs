@@ -8,7 +8,6 @@ pub mod doing;
 pub mod dolt;
 pub mod dolt_lifecycle;
 pub mod handover;
-pub mod helper;
 pub mod identity;
 pub mod laid_down;
 pub mod local_host;

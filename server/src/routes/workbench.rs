@@ -16,7 +16,9 @@ use axum::{
     Json, Router,
 };
 use futures::{stream, Stream, StreamExt};
+use base64::Engine;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use serde_json::{json, Value};
 use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};
 use tokio::sync::broadcast;
@@ -56,6 +58,8 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/history", get(history))
         .route("/events", get(events))
         .route("/watch", get(watch))
+        .route("/present", post(present))
+        .route("/screen-check", post(screen_check))
         .route("/command", post(command))
         .with_state(state)
 }
@@ -278,6 +282,80 @@ async fn command(
     Ok(Json(state.registry.execute(&command).await?))
 }
 
+#[derive(Deserialize)]
+struct UploadedRequest {
+    args: Vec<String>,
+    #[serde(default)]
+    stdin: String,
+    #[serde(default)]
+    files: BTreeMap<String, String>,
+}
+
+fn decoded(files: BTreeMap<String, String>) -> Result<BTreeMap<String, Vec<u8>>, String> {
+    files.into_iter().map(|(path, encoded)| {
+        let label = path.clone();
+        base64::engine::general_purpose::STANDARD.decode(encoded)
+            .map(|bytes| (path, bytes)).map_err(|error| format!("{label}: {error}"))
+    }).collect()
+}
+
+async fn present(State(state): State<WorkbenchState>, Json(request): Json<UploadedRequest>) -> Result<Json<Value>, ApiError> {
+    let files = decoded(request.files)?;
+    Ok(Json(json!({"output":state.registry.present(&request.args, &request.stdin, &files)?})))
+}
+
+fn option<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
+    args.iter().position(|word| word == name).and_then(|at| args.get(at + 1)).map(String::as_str)
+}
+
+async fn screen_check(State(state): State<WorkbenchState>, Json(request): Json<UploadedRequest>) -> Result<Json<Value>, ApiError> {
+    let files = decoded(request.files)?;
+    let action = request.args.first().map(String::as_str).unwrap_or("help");
+    if matches!(action, "help" | "--help" | "-h") {
+        return Ok(Json(json!({"result":{"help":"atelier tool screen-check windows|capture|check|compare"}})));
+    }
+    if action == "--schema" {
+        return Ok(Json(json!({"result":{"schema":{"actions":["windows","capture","check","compare"],"capture_types":["web","window","image"]}}})));
+    }
+    if action == "windows" {
+        let windows = crate::workbench::screen_check::native_windows()?;
+        return Ok(Json(json!({"result":{"windows":windows,"safeguards":["explicit ID required","two matching frames required","no whole-display fallback"]}})));
+    }
+
+    let mut captures = Vec::new();
+    if action == "compare" {
+        let before = option(&request.args, "--before").ok_or_else(|| "--before is required".to_string())?;
+        let after = option(&request.args, "--after").ok_or_else(|| "--after is required".to_string())?;
+        let before_bytes = files.get(before).ok_or_else(|| format!("no upload for {before}"))?;
+        let after_bytes = files.get(after).ok_or_else(|| format!("no upload for {after}"))?;
+        let before_stored = state.registry.store_capture(before_bytes, "Before", "image")?;
+        let after_stored = state.registry.store_capture(after_bytes, "After", "image")?;
+        let comparison = state.registry.compare_captures(before_bytes, after_bytes)?;
+        captures.push(json!({"asset":before_stored.asset,"label":"Before","evidence":before_stored.evidence}));
+        captures.push(json!({"asset":after_stored.asset,"label":"After","evidence":after_stored.evidence}));
+        return Ok(Json(json!({"result":{"check_id":format!("check_{}_{}", before_stored.asset.chars().take(12).collect::<String>(), after_stored.asset.chars().take(12).collect::<String>()),"captures":captures,"comparison":comparison.objective,"diff_asset":comparison.diff_asset,"verdict":"INDETERMINATE"}})));
+    }
+
+    let stored = if let Some(recipe) = option(&request.args, "--recipe") {
+        let bytes = files.get(recipe).ok_or_else(|| format!("no upload for {recipe}"))?;
+        let recipe = crate::workbench::browser::parse_recipe(bytes)?;
+        let capture = state.registry.capture_browser(&recipe, &files).await?;
+        state.registry.store_capture(&capture.bytes, "Browser capture", "browser")?
+    } else if let Some(window_id) = option(&request.args, "--window-id") {
+        let stable_ms = option(&request.args, "--stable-ms").and_then(|value| value.parse().ok()).unwrap_or(200);
+        let retries = option(&request.args, "--stable-retries").and_then(|value| value.parse().ok()).unwrap_or(5);
+        let mut source = crate::workbench::screen_check::NativeWindowSource;
+        let (bytes, _, _) = crate::workbench::screen_check::stable_window_capture(&mut source, window_id, Duration::from_millis(stable_ms), retries).await?;
+        state.registry.store_capture(&bytes, "Window capture", "window")?
+    } else {
+        let target = option(&request.args, "--target").ok_or_else(|| "--target, --window-id or --recipe is required".to_string())?;
+        let bytes = files.get(target).ok_or_else(|| format!("no upload for {target}"))?;
+        state.registry.store_capture(bytes, "Image capture", "image")?
+    };
+    captures.push(json!({"asset":stored.asset,"label":"Capture","evidence":stored.evidence}));
+    Ok(Json(json!({"result":{"check_id":format!("check_{}", stored.asset.chars().take(12).collect::<String>()),"captures":captures,"verdict":if action == "capture" { Value::Null } else { json!("INDETERMINATE") }}})))
+}
+
 struct ApiError {
     status: StatusCode,
     message: String,
@@ -301,45 +379,6 @@ impl From<String> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response<Body> {
         (self.status, Json(json!({"error":self.message}))).into_response()
-    }
-}
-
-// Kept only while the existing `/api/live` compatibility tests still exercise
-// an explicitly supplied test helper. Production installs use the native state
-// above; this seam is removed with the helper packaging in bw-oesd.12.3.
-fn compatibility_upstream() -> &'static std::sync::RwLock<Option<String>> {
-    static UPSTREAM: std::sync::OnceLock<std::sync::RwLock<Option<String>>> =
-        std::sync::OnceLock::new();
-    UPSTREAM.get_or_init(|| std::sync::RwLock::new(None))
-}
-
-pub fn spawn_sidecar(_: Option<crate::helper::Laid>) {
-    let supplied = std::env::var("BEADS_WORKBENCH_URL")
-        .ok()
-        .map(|value| value.trim_end_matches('/').to_string());
-    if let Ok(mut slot) = compatibility_upstream().write() {
-        *slot = supplied;
-    }
-}
-
-pub async fn upstream(path_and_query: &str) -> Result<reqwest::Response, String> {
-    let base = compatibility_upstream()
-        .read()
-        .ok()
-        .and_then(|slot| slot.clone())
-        .ok_or_else(|| "no compatibility helper configured".to_string())?;
-    let response = reqwest::Client::new()
-        .get(format!("{base}{path_and_query}"))
-        .send()
-        .await
-        .map_err(|error| error.to_string())?;
-    if response.status().is_success() {
-        Ok(response)
-    } else {
-        Err(format!(
-            "the compatibility helper answered {}",
-            response.status()
-        ))
     }
 }
 

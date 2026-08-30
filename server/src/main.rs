@@ -12,7 +12,6 @@ mod doing;
 mod dolt;
 mod dolt_lifecycle;
 mod handover;
-mod helper;
 mod identity;
 mod laid_down;
 mod local_host;
@@ -450,26 +449,6 @@ async fn serve(open_browser: bool) {
 
     // Initialize version check cache
     let version_cache = routes::version::new_cache();
-
-    // The chat helper travels inside the product too, and is written out
-    // beside the data. Before this it was started from the checkout it was
-    // BUILT in, so on anybody else's computer the Chat tab had nothing behind
-    // it (bw-8um.3.9). A copy that cannot write there still serves the board.
-    let helper = match helper::install() {
-        Ok(laid) => {
-            info!("Chat helper ready at {}", laid.entry.display());
-            Some(laid)
-        }
-        Err(e) => {
-            tracing::warn!(
-                "The chat helper was not laid down, so the Chat tab will not answer: {}",
-                e
-            );
-            None
-        }
-    };
-
-    routes::workbench::spawn_sidecar(helper);
 
     // The first read of a board costs a `bd` run, and the reader used to pay
     // it on whichever board they opened first. It is paid here instead, with

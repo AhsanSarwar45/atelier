@@ -111,15 +111,6 @@ pub fn settings_db() -> Option<PathBuf> {
     data_dir().map(|dir| dir.join("settings.db"))
 }
 
-/// Where the chat helper lives.
-///
-/// The product carries it and lays it down here, so a copy installed on a
-/// computer that has never held the source still has something to start.
-/// `HELPER_DIR` overrides it, for tests.
-pub fn helper_dir() -> Option<PathBuf> {
-    resolve_dir(std::env::var("HELPER_DIR").ok(), data_dir(), "helper")
-}
-
 /// Where the working rules live — the board tools, the session gates, and the
 /// workers and skills a session reads.
 ///
