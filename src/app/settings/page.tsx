@@ -116,8 +116,7 @@ export default function SettingsPage() {
           <Panel inset="md" className="flex items-center gap-4">
             <FileCode2 className="size-5 shrink-0 text-t-muted" aria-hidden="true" />
             <div className="min-w-0 flex-1">
-              <p className="font-medium text-t-secondary">Claude and Codex configuration</p>
-              <p className="text-sm text-t-tertiary">Read personal and project instructions, settings, agents, skills, and related files.</p>
+              <p className="font-medium text-t-secondary">Claude and Codex files</p>
             </div>
             <Button asChild size="sm" variant="outline"><a href="/settings/agent-files">Browse <ExternalLink /></a></Button>
           </Panel>

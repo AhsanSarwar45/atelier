@@ -22,7 +22,7 @@ function skillsRoot(): string {
     resolve(here, '../../machinery/skills'),
   ].filter((candidate): candidate is string => Boolean(candidate));
   const root = candidates.find((candidate) => existsSync(join(candidate, 'atelier', 'SKILL.md')));
-  if (!root) throw new Error('Atelier session policy is unavailable; reinstall or repair Atelier');
+  if (!root) throw new Error('Session policy unavailable. Reinstall Atelier.');
   return root;
 }
 

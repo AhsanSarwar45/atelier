@@ -25,7 +25,7 @@ const panelOut = process.argv[3] ?? 'tests/results/plan-panel.png';
 const usage = await (await fetch(`${api}/api/workbench/usage`)).json();
 console.log(`usage: ${JSON.stringify(usage.session)} week=${JSON.stringify(usage.week)}`);
 if (!usage.available) {
-  console.log('this machine reports no plan allowance, so there is no chip to photograph');
+  console.log('SKIP: plan usage unavailable');
   process.exit(1);
 }
 

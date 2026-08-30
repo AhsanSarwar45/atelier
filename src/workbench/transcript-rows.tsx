@@ -775,7 +775,7 @@ export function WorkingLine({
       {turnSeconds > 0 && (
         <span
           data-testid="working-turn"
-          title="How long this whole turn has been running"
+          title="Turn duration"
           className="shrink-0 font-mono text-xs tabular-nums opacity-40"
         >
           {forHowLong(turnSeconds)} turn
@@ -798,7 +798,7 @@ export function WorkingLine({
         data-fill={Math.round(filling * 100)}
         data-held={held}
         role="progressbar"
-        aria-label="How far through summarising this conversation is"
+        aria-label="Compaction progress"
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(filling * 100)}

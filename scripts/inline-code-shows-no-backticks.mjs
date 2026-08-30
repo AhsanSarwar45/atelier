@@ -235,11 +235,11 @@ async function main() {
 
     let failed = false;
     if (inline.length === 0) {
-      console.error('FAIL: no inline code chip was found to inspect — the fabricated message and card drew nothing');
+      console.error('FAIL: inline code chip missing');
       failed = true;
     }
     if (result.fenced.length === 0) {
-      console.error('FAIL: no fenced code block was found — the sanity control has nothing to compare against');
+      console.error('FAIL: fenced code block missing');
       failed = true;
     }
     if (badFenced.length > 0) {

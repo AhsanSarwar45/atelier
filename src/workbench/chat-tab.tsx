@@ -1028,7 +1028,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   }
 
   if (!projectId || !projectPath) {
-    return <div className="p-8 text-muted-foreground">Pick a project to start a chat.</div>;
+    return <div className="p-8 text-muted-foreground">Select a project</div>;
   }
 
   /**
@@ -1261,7 +1261,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   if (!sessionId) {
     return shell(
       <div className="flex flex-1 flex-col items-center justify-center gap-4">
-        <p className="text-muted-foreground">No chat open for this project.</p>
+        <p className="text-muted-foreground">No chat selected</p>
         <div className="flex items-center gap-2" role="group" aria-label="Coding agent">
           {(['claude', 'codex'] as const).map((brand) => (
             <Button
@@ -1396,7 +1396,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               data-testid="cost-chip"
               data-kind={view.cost.kind}
               data-total={view.cost.kind === 'usd' ? view.cost.usd : view.cost.total}
-              title="What this conversation has spent so far, counting every agent it sent off"
+              title="Total usage including subagents"
               className="hidden font-mono sm:inline-flex"
             >
               <Coins />

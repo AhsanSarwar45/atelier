@@ -174,7 +174,7 @@ async function webCapture(url: string, viewport: string, theme: string): Promise
   const browser = executable(process.platform === 'darwin'
     ? ['google-chrome', 'chromium', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']
     : process.platform === 'win32' ? ['chrome.exe', 'msedge.exe'] : ['google-chrome', 'chromium', 'chromium-browser']);
-  if (!browser || !existsSync(browser)) throw new Error('WEB_CAPTURE_UNAVAILABLE: no supported Chrome or Chromium executable was found');
+  if (!browser || !existsSync(browser)) throw new Error('WEB_CAPTURE_UNAVAILABLE: Chrome or Chromium not found');
   const match = /^(\d+)x(\d+)$/.exec(viewport);
   if (!match) throw new Error('--viewport must be WIDTHxHEIGHT');
   const port = await freePort(); const profile = mkdtempSync(join(tmpdir(), 'atelier-screen-web-'));
@@ -187,11 +187,11 @@ async function webCapture(url: string, viewport: string, theme: string): Promise
       try { tabs = await fetch(`http://127.0.0.1:${port}/json`).then((response) => response.json()) as any[]; }
       catch { await new Promise((resolveWait) => setTimeout(resolveWait, 100)); }
     }
-    if (!tabs) throw new Error('WEB_CAPTURE_UNAVAILABLE: browser did not expose its debugging endpoint');
+    if (!tabs) throw new Error('WEB_CAPTURE_UNAVAILABLE: debugging endpoint unavailable');
     const endpoint = tabs.find((tab) => tab.type === 'page')?.webSocketDebuggerUrl;
     if (!endpoint) throw new Error('WEB_CAPTURE_UNAVAILABLE: browser exposed no page');
     const Socket = (globalThis as any).WebSocket;
-    if (!Socket) throw new Error('WEB_CAPTURE_UNAVAILABLE: this Node runtime has no WebSocket client');
+    if (!Socket) throw new Error('WEB_CAPTURE_UNAVAILABLE: WebSocket unavailable');
     const ws = new Socket(endpoint); let next = 0;
     const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
     const diagnostics: string[] = [];
@@ -241,14 +241,14 @@ async function webCapture(url: string, viewport: string, theme: string): Promise
 }
 
 function windowCapture(id: string | undefined): Capture {
-  if (!id) throw new Error('--window-id is required; full-desktop capture is never implicit');
+  if (!id) throw new Error('--window-id is required');
   const out = join(mkdtempSync(join(tmpdir(), 'atelier-screen-window-')), 'window.png');
   try {
     let run;
     if (process.platform === 'darwin') run = spawnSync('screencapture', ['-x', '-l', id, out]);
     else if (process.platform === 'linux') run = spawnSync('import', ['-window', id, out]);
-    else throw new Error('WINDOW_CAPTURE_UNAVAILABLE: this platform has no Atelier window adapter');
-    if (run.error || run.status !== 0) throw new Error('CAPTURE_PERMISSION_REQUIRED: the named window could not be captured');
+    else throw new Error('WINDOW_CAPTURE_UNAVAILABLE: unsupported platform');
+    if (run.error || run.status !== 0) throw new Error('CAPTURE_PERMISSION_REQUIRED: capture failed');
     return { bytes: readFileSync(out), label: `Window ${id}`, diagnostics: [`window=${id}`] };
   } finally { rmSync(dirname(out), { recursive: true, force: true }); }
 }
@@ -259,7 +259,7 @@ async function capture(args: string[], files: Uploaded): Promise<Capture> {
   if (type === 'image') return { bytes: uploaded(target, files, '--target'), label: basename(target!), diagnostics: [] };
   if (type === 'web') return webCapture(target ?? '', value(args, '--viewport') ?? '1280x800', value(args, '--theme') ?? 'system');
   if (type === 'window') return windowCapture(value(args, '--window-id'));
-  throw new Error('screen target is ambiguous; pass --type web, window, or image');
+  throw new Error('Specify --type web, window, or image');
 }
 
 export async function screenCheckUploaded(args: string[], files: Uploaded, media: string, judge: VisualJudge = defaultVisualJudge): Promise<Record<string, unknown>> {

@@ -65,7 +65,7 @@ const ASSET = /^[0-9a-f]{64}\.(png|jpg|gif|webp)$/;
 
 function existingImage(asset: string, directory: string): string {
   const match = ASSET.exec(asset);
-  if (!match) throw new Error('--asset must be a lowercase content-addressed PNG, JPEG, GIF, or WebP name');
+  if (!match) throw new Error('--asset must name a stored PNG, JPEG, GIF, or WebP');
   const path = join(directory, asset);
   if (!existsSync(path)) throw new Error(`presentation asset does not exist: ${asset}`);
   const bytes = readFileSync(path);
@@ -88,7 +88,7 @@ function importArtifact(path: string, read: ReadPresentationFile, directory: str
   let value: unknown;
   try { value = JSON.parse(bytes.toString('utf8')); } catch (error) { throw new Error(`artifact is not valid JSON: ${error instanceof Error ? error.message : String(error)}`); }
   const artifact = visualArtifact(value); const canonical = canonicalArtifact(value);
-  if (!artifact || !canonical) throw new Error('artifact does not match Atelier’s visual artifact contract or contains unknown fields');
+  if (!artifact || !canonical) throw new Error('Invalid visual artifact');
   mkdirSync(directory, { recursive: true });
   const asset = `${createHash('sha256').update(canonical).digest('hex')}.artifact.json`;
   try { writeFileSync(join(directory, asset), canonical, { flag: 'wx' }); } catch (error) {
@@ -103,13 +103,13 @@ function rendered(args: string[], stdin: string, read: ReadPresentationFile, dir
   if (args[0] === 'widget') {
     const file = inputFile(args);
     const source = file ? read(file).toString('utf8') : stdin;
-    if (!source.trim()) throw new Error('widget input is empty; pass one object on stdin or with --input FILE');
+    if (!source.trim()) throw new Error('Widget input required on stdin or with --input');
     let value: unknown;
     try { value = JSON.parse(source); } catch (error) {
       throw new Error(`widget input is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
     const rendered = widgetBlock(value);
-    if (!rendered) throw new Error('widget input does not match Atelier’s contract or contains unknown fields');
+    if (!rendered) throw new Error('Invalid widget input');
     return `${rendered}\n`;
   }
   if (args[0] === 'image') {

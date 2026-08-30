@@ -77,7 +77,7 @@ function terminalTurn(args, cwd) {
 }
 
 if (!DB) {
-  console.error('FAIL: set BEADS_WORKBENCH_DB to the workbench store of the instance being looked at.');
+  console.error('FAIL: set BEADS_WORKBENCH_DB');
   console.error('      Never the owner\'s own: this script writes chats into it.');
   process.exit(1);
 }
@@ -90,7 +90,7 @@ if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 const projects = await (await fetch(`${API}/api/projects`)).json();
 const project = projects[0];
 if (!project) {
-  console.error('FAIL: the instance has no projects, so there is no chat to draw.');
+  console.error('FAIL: no projects');
   process.exit(1);
 }
 
@@ -462,7 +462,7 @@ await check(9, 'reading a chat leaves it where it was, and its row keeps its own
  * ------------------------------------------------------------------ */
 
 if (wanted(10) && process.env.NO_TERMINAL) {
-  console.log('SKIP  .10 a chat also running in a terminal keeps growing — NO_TERMINAL=1 was set');
+  console.log('SKIP  .10 NO_TERMINAL=1');
   results.push({ n: 10, what: 'terminal growth', ok: false, detail: 'not run' });
 } else {
   await check(10, 'a chat also running in a terminal keeps growing inside the app', async () => {

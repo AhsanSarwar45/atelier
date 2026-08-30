@@ -133,47 +133,32 @@ pub fn help() -> String {
 {DISPLAY} — the board, the screens and the chat, in one program.
 
 Usage:
-  atelier run                 Start everything and open the board in your browser
-  atelier run --no-browser    The same, without opening a browser
-  atelier                     The same as `run --no-browser`
-  atelier init [folder]       Choose whether this project uses Beads; chat and
-                              Atelier presentation remain available either way
+  atelier run                 Start Atelier and open it
+  atelier run --no-browser    Start without opening a browser
+  atelier                     Same as `run --no-browser`
+  atelier init [folder]       Configure a project
   atelier project mode [folder]
                               Print `beads` or `chat` for this folder
-  atelier tool <name> [...]   Run a board workflow command installed with Atelier
-                              (`present` validates rich output; `screen-check`
-                              captures visual evidence; `review` runs an
-                              isolated external code review)
-  atelier where               Print the addresses to open it at, and start nothing
-  atelier tools               Print each program Atelier starts, and where it is
-  atelier service install     Have this computer start it at login, and keep it up
-  atelier service uninstall   Stop having it started, and leave nothing behind
-  atelier service status      Say whether this computer starts it
-  atelier --data-dir          Print where this computer keeps {DISPLAY}'s data
-  atelier --version           Print which build this is
-  atelier --help              This
+  atelier tool <name> [...]   Run an Atelier tool
+  atelier where               Show app addresses
+  atelier tools               Show dependencies
+  atelier service install     Start at login
+  atelier service uninstall   Disable start at login
+  atelier service status      Show service status
+  atelier --data-dir          Show the data directory
+  atelier --version           Show the version
+  atelier --help              Show help
 
-There is nothing else to start. The screens live inside this program and the
-chat helper is started beside it, so one command is the whole product.
+`atelier run` starts the app and chat service.
 
-`init` asks one question: whether this project uses Beads. Chat-only projects
-are changed in no way and have no board tab. A Beads project is registered once;
-its linked Git worktrees share that board. Personal SessionStart hooks inject
-the Atelier skill in Atelier-owned chats and the Beads skill only in registered
-projects; no CLAUDE.md or AGENTS.md is edited. `--beads` and `--chat` answer the
-question non-interactively. Beads setup needs python3 and `bd` installed —
-`atelier tools` says whether they are, and where; init can be run again safely.
+`init` selects Beads or chat-only mode. Use `--beads` or `--chat` to skip the
+prompt. Run `atelier tools` to check Beads dependencies.
 
-Where it listens:
-  ATELIER_PORT                the port (default {PORT})
-  ATELIER_HOST                who may reach it (default 0.0.0.0, everyone on
-                              your network; 127.0.0.1 for this computer alone)
+Environment:
+  ATELIER_PORT                Port (default {PORT})
+  ATELIER_HOST                Host (default 0.0.0.0; use 127.0.0.1 for local only)
 
-It answers the whole network by default, so the board opens on your phone.
-Starting it prints the address to type there, and `atelier where` prints it
-again for a copy this computer started on its own. The name it prints follows
-this computer; the number beside it changes when the router hands out a new
-one. If nothing answers, your computer's firewall is holding the port shut.
+Use `atelier where` to show available addresses.
 "
     )
 }
@@ -380,10 +365,10 @@ mod tests {
     }
 
     #[test]
-    fn the_help_screen_says_there_is_no_second_thing_to_start() {
+    fn the_help_screen_says_run_starts_both_services() {
         assert!(
-            help().contains("nothing else to start"),
-            "the help screen does not say the frontend needs no separate process"
+            help().contains("`atelier run` starts the app and chat service"),
+            "the help screen does not describe what run starts"
         );
     }
 }

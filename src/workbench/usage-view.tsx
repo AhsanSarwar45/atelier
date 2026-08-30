@@ -164,7 +164,7 @@ export function UsageView({ brand = 'claude', onClose }: { brand?: Brand; onClos
           </Panel>
         ) : (
           <Panel inset="md" className="text-sm text-muted-foreground">
-            No plan allowance to report: this account may use API billing, or the agent did not provide allowance data.
+            Plan usage unavailable
           </Panel>
         )}
 
@@ -221,7 +221,7 @@ export function PlanChip({ usage, onOpen }: { usage: PlanUsage; onOpen: () => vo
   const title = [
     five ? `This session: ${windowReads(five, now)}` : null,
     week ? `This week: ${windowReads(week, now)}` : null,
-    'Click for the whole picture',
+    'View plan usage',
   ]
     .filter(Boolean)
     .join('\n');

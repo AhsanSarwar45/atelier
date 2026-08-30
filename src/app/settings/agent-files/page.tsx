@@ -13,7 +13,7 @@ export default function AgentFilesPage() {
     <header className="flex h-14 shrink-0 items-center gap-3 px-4 sm:px-6">
       <Button asChild variant="ghost" mode="icon" size="sm"><Link href="/settings" aria-label="Back to settings"><ArrowLeft /></Link></Button>
       <FileCode2 className="size-5 text-t-muted" />
-      <div><h1 className="text-base font-semibold text-t-primary">Agent files</h1><p className="hidden text-xs text-t-muted sm:block">Read Claude and Codex configuration. Files open outside Atelier for changes.</p></div>
+      <h1 className="text-base font-semibold text-t-primary">Agent files</h1>
     </header>
     <AgentFilesBrowser projects={projects.filter((project) => !project.archivedAt).map(({ id, name, localPath, path }) => ({ id, name, path: localPath || path }))} />
   </div>;

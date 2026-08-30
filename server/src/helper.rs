@@ -177,11 +177,11 @@ async fn present_to(rest: &[String], stdin: String, base: &str) -> Result<String
         .send()
         .await
         .map_err(|error| {
-            format!("the running Atelier app could not receive the presentation: {error}")
+            format!("Presentation failed: {error}")
         })?;
     let status = response.status();
     let value: serde_json::Value = response.json().await.map_err(|error| {
-        format!("Atelier returned an unreadable presentation response: {error}")
+        format!("Invalid presentation response: {error}")
     })?;
     if !status.is_success() {
         return Err(value
@@ -220,11 +220,11 @@ async fn screen_check_to(rest: &[String], base: &str) -> Result<serde_json::Valu
         .send()
         .await
         .map_err(|error| {
-            format!("the running Atelier app could not perform the screen check: {error}")
+            format!("Screen check failed: {error}")
         })?;
     let status = response.status();
     let value: serde_json::Value = response.json().await.map_err(|error| {
-        format!("Atelier returned an unreadable screen-check response: {error}")
+        format!("Invalid screen-check response: {error}")
     })?;
     if !status.is_success() {
         return Err(value
@@ -282,7 +282,7 @@ pub async fn fetch_kit(package: &Path) -> Result<(), String> {
     let Some(npm) = crate::routes::find_npm() else {
         crate::routes::forget_tools();
         return Err(
-            "this computer has no npm on it; the chat needs it once, to fetch its kit".to_string(),
+            "npm not found".to_string(),
         );
     };
     let named = npm.display().to_string();
@@ -300,7 +300,7 @@ pub async fn fetch_kit(package: &Path) -> Result<(), String> {
         .output()
         .await
         .map_err(|e| {
-            format!("{named} could not be run ({e}); the chat needs it once, to fetch its kit")
+            format!("Could not run {named}: {e}")
         })?;
 
     if !run.status.success() {

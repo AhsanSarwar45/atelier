@@ -49,13 +49,13 @@ const n = (x) => x.toLocaleString('en-US');
 
 console.log(`record      ${path}`);
 console.log(`lines       ${n(lines.length)}`);
-console.log(`turns       ${n(picture.turns)} answered, ${n(picture.toolCalls)} tool calls, ${picture.forgettings} forgetting(s)`);
-console.log(`over lines  ${n(overLines)}   <- what the chip used to say`);
-console.log(`over turns  ${n(picture.total.total)}   <- what it says now`);
+console.log(`turns       ${n(picture.turns)}, ${n(picture.toolCalls)} tool calls, ${picture.forgettings} compactions`);
+console.log(`line total  ${n(overLines)}`);
+console.log(`task total  ${n(picture.total.total)}`);
 console.log(
-  `            sent ${n(picture.total.input)} · kept ready ${n(picture.total.cacheWrite)} · read back ${n(
+  `            input ${n(picture.total.input)} · cache writes ${n(picture.total.cacheWrite)} · cached input ${n(
     picture.total.cacheRead,
-  )} · written ${n(picture.total.output)}`,
+  )} · output ${n(picture.total.output)}`,
 );
 const high = overLines - picture.total.total;
 console.log(`gap         ${n(high)} (${((high / picture.total.total) * 100).toFixed(1)}% high)`);

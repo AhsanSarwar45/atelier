@@ -373,7 +373,7 @@ pub fn worth_registering(exe: &str, named: &[(String, String)]) -> String {
 /// The same question, asked of this computer.
 fn program_to_register() -> Result<String, String> {
     let exe = std::env::current_exe()
-        .map_err(|e| format!("this program cannot find its own path, so nothing can be registered to start it: {e}"))?;
+        .map_err(|e| format!("Could not locate the Atelier executable: {e}"))?;
     let exe = std::fs::canonicalize(&exe).unwrap_or(exe).display().to_string();
     let named: Vec<(String, String)> = std::env::var_os("PATH")
         .map(|path| std::env::split_paths(&path).collect::<Vec<_>>())

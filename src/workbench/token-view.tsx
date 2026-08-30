@@ -227,14 +227,6 @@ function Conversation({ inside }: { inside: Inside }) {
         <Weights title="Costliest tools" rows={inside.byTool} of={inside.total} />
         <Weights title="Costliest attachments" rows={inside.byAttachment} of={inside.total} />
       </div>
-      <p className="mt-2 text-[11px] text-muted-foreground">
-        {/* Said plainly rather than quietly reconciled: the kit counts these by
-            walking the messages and the band above by measuring the prompt, and
-            the two disagree by a few thousand on a chat that has barely
-            started. A screen that hid that would be inventing agreement. */}
-        Counted by walking the messages, so these add to {big(inside.total)} rather than exactly to the conversation
-        band above.
-      </p>
     </div>
   );
 }
@@ -273,7 +265,7 @@ function Window({ window: w }: { window: WindowNow }) {
             className="absolute -top-0.5 h-4 w-px bg-foreground"
             style={{ left: `${mark}%` }}
             data-testid="token-forgets-mark"
-            title={`Forgets itself at ${w.forgetsAt?.toLocaleString()} tokens`}
+            title={`Compacts at ${w.forgetsAt?.toLocaleString()} tokens`}
           />
         )}
       </div>
@@ -292,7 +284,7 @@ function Window({ window: w }: { window: WindowNow }) {
 
       <p className="mt-2 text-[11px] text-muted-foreground">
         {w.forgetsAt !== null
-          ? `Forgets itself at ${w.forgetsAt.toLocaleString()} — ${big(Math.max(0, w.forgetsAt - w.used))} of room to go.`
+          ? `Compacts at ${w.forgetsAt.toLocaleString()} · ${big(Math.max(0, w.forgetsAt - w.used))} remaining`
           : 'Compaction off'}
       </p>
 
@@ -300,7 +292,7 @@ function Window({ window: w }: { window: WindowNow }) {
         <div className="mt-3 grid grid-cols-1 gap-3 border-t border-border/60 pt-3 sm:grid-cols-3">
           <Weights title="Memory files" rows={w.memory} of={w.window} />
           <Weights title="Tool servers" rows={w.servers} of={w.window} />
-          <Weights title="Waiting, costs nothing yet" rows={w.waiting} of={w.window} />
+          <Weights title="Pending" rows={w.waiting} of={w.window} />
         </div>
       )}
 
@@ -320,8 +312,7 @@ function Spent({ spent }: { spent: TaskSpend }) {
         </span>
         <span className="text-xs text-muted-foreground">
           {spent.turns.toLocaleString()} turns · {spent.toolCalls.toLocaleString()} tool calls ·{' '}
-          {spent.helperCount.toLocaleString()} agents sent off · forgot itself {spent.forgettings.toLocaleString()}{' '}
-          {spent.forgettings === 1 ? 'time' : 'times'}
+          {spent.helperCount.toLocaleString()} subagents · {spent.forgettings.toLocaleString()} compactions
         </span>
       </div>
 
@@ -400,27 +391,24 @@ export function TokenView({ sessionId, onClose }: { sessionId: string; onClose: 
       <div className={cn(overlayPanel, 'max-w-3xl')}>
         <div className="flex items-center gap-2 border-b border-border/60 p-4">
           <h2 className="text-base font-semibold text-foreground">Tokens</h2>
-          <Badge variant="secondary" appearance="light" size="sm">
-            this chat
-          </Badge>
           <Button size="xs" variant="ghost" className="ml-auto" data-testid="token-close" aria-label="Close" onClick={onClose}>
             <X className="h-4 w-4" aria-hidden="true" />
           </Button>
         </div>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4" data-testid="token-scroll">
-        {broke && <Missing note="This chat could not be asked about its tokens just now." testId="token-broke" />}
+        {broke && <Missing note="Token usage unavailable" testId="token-broke" />}
         {!broke && picture === null && <p className="p-3 text-sm text-muted-foreground">Reading…</p>}
 
         {picture !== null && (
           <>
-            {picture.window ? <Window window={picture.window} /> : <Missing note={picture.windowNote ?? 'No window to show.'} testId="token-no-window" />}
+            {picture.window ? <Window window={picture.window} /> : <Missing note={picture.windowNote ?? 'Context unavailable'} testId="token-no-window" />}
 
             <p className="text-xs text-muted-foreground" data-testid="token-reset-line">
               {resetLine(picture.spent, picture.window !== null)}
             </p>
 
-            {picture.spent ? <Spent spent={picture.spent} /> : <Missing note={picture.spentNote ?? 'No spend to show.'} testId="token-no-spend" />}
+            {picture.spent ? <Spent spent={picture.spent} /> : <Missing note={picture.spentNote ?? 'Usage unavailable'} testId="token-no-spend" />}
 
           </>
         )}

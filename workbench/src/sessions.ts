@@ -1528,7 +1528,7 @@ export class Sessions {
       if (alive.length === 0) return;
       await new Promise((wake) => setTimeout(wake, 50));
     }
-    throw new Error('The other program did not release this chat, so Atelier did not start a second agent.');
+    throw new Error('Chat is still active elsewhere.');
   }
 
   answer(sessionId: string, askId: string, optionId: string, value?: string): void {

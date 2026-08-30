@@ -110,7 +110,7 @@ console.log(
 );
 
 if (!busySeconds.length) {
-  console.error('FAIL: the agent never started working — nothing was measured.');
+  console.error('FAIL: agent did not start');
   process.exit(1);
 }
 if (silent.length) {
@@ -128,4 +128,4 @@ if (thoughtSeconds > 2 && !thinkingEver && !thoughtEver) {
   );
   process.exit(1);
 }
-console.log('PASS: every working second said what it was doing, and the thinking was drawn.');
+console.log('PASS: activity and thinking remained visible');

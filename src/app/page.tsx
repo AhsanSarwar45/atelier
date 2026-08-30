@@ -241,15 +241,9 @@ export default function ProjectsPage() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <Panel inset="none" className="border-dashed p-6 text-center text-t-tertiary">
                 {hasActiveFilters ? (
-                  <>
-                    <p>No matching projects</p>
-                    <p className="mt-1 text-sm text-t-muted">Try adjusting your search or filters</p>
-                  </>
+                  <p>No matching projects</p>
                 ) : (
-                  <>
-                    <p>No projects yet</p>
-                    <p className="mt-1 text-sm text-t-muted">Click the Add Project button above to get started</p>
-                  </>
+                  <p>No projects</p>
                 )}
               </Panel>
             </div>

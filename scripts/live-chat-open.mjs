@@ -150,7 +150,7 @@ try {
   console.log(`  first click   ${first}ms`);
   console.log(`  second click  ${second}ms`);
   if (drawn === 0) {
-    console.log('NOTHING was drawn: the record was not read at all, so these numbers say nothing');
+    console.log('FAIL: record not loaded');
     stop(1);
   }
   const over = [first, second].filter((ms) => ms > BUDGET_MS);

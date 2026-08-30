@@ -176,7 +176,7 @@ async fn main() {
             }
             if action == service::Action::Install {
                 if let Err(e) = rules::install_personal() {
-                    eprintln!("warning: Atelier's legacy provider artifacts could not be cleaned up safely: {e}");
+                    eprintln!("warning: legacy cleanup failed: {e}");
                 }
             }
         }
@@ -273,14 +273,14 @@ fn whereabouts() -> String {
     let port = bind_port();
     let network = reachable::on_this_network();
     let name = reachable::name_on_this_network(network);
-    let mut said = format!("{} — where to open it.\n", identity::DISPLAY);
+    let mut said = format!("{} addresses\n", identity::DISPLAY);
     for line in reachable::openable_at(&bind_host(), port, network, name.as_deref()) {
         said.push_str(&format!("  {line}\n"));
     }
     said.push_str(if answering(port) {
-        "It is answering there now.\n"
+        "Status: running\n"
     } else {
-        "Nothing is answering on that port. Start it with `atelier run`.\n"
+        "Status: stopped (run `atelier run`)\n"
     });
     said
 }
@@ -550,7 +550,7 @@ async fn serve(open_browser: bool) {
     for line in reachable::openable_at(&host, port, network, name.as_deref()) {
         println!("  {line}");
     }
-    println!("The screens and the chat are inside this program; there is nothing else to start.");
+    println!("Ready.");
 
     // What a chat says it is doing only reaches the screen if the session is
     // told to say it, and being told is one line in a settings file nobody

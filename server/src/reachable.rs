@@ -146,7 +146,7 @@ pub fn openable_at(
     match Listening::from(host) {
         Listening::OnlyHere => vec![
             here,
-            "Only this computer can reach it. Set ATELIER_HOST=0.0.0.0 to open it on your phone."
+            "Local access only. Set ATELIER_HOST=0.0.0.0 for network access."
                 .to_string(),
         ],
         Listening::Everywhere => {
@@ -156,24 +156,24 @@ pub fn openable_at(
                 // The number stays beside it, because a phone that cannot look
                 // the name up needs something to type today.
                 (Some(name), address) => {
-                    lines.push(format!("On your network    http://{name}:{port}   — phone, tablet, another computer"));
+                    lines.push(format!("Network            http://{name}:{port}"));
                     if let Some(address) = address {
-                        lines.push(format!("If that name is not found   http://{}:{port}   — this number changes when the router hands out a new one", shown(address)));
+                        lines.push(format!("Network fallback   http://{}:{port}", shown(address)));
                     }
                 }
                 (None, Some(address)) => lines.push(format!(
-                    "On your network    http://{}:{port}   — phone, tablet, another computer",
+                    "Network            http://{}:{port}",
                     shown(address)
                 )),
                 (None, None) => lines.push(format!(
-                    "On your network    this computer's own address, port {port} — it has no route out to work it out from"
+                    "Network            unavailable (port {port})"
                 )),
             }
             lines
         }
         Listening::AtOneAddress => vec![
             here,
-            format!("On your network    http://{host}:{port}   — phone, tablet, another computer"),
+            format!("Network            http://{host}:{port}"),
         ],
     }
 }
@@ -221,7 +221,7 @@ mod tests {
         let said = lines("0.0.0.0", Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 11))));
         assert!(said.contains("http://192.168.1.11:3008"), "{said}");
         assert!(said.contains("http://localhost:3008"), "{said}");
-        assert!(said.contains("phone"), "{said}");
+        assert!(said.contains("Network"), "{said}");
     }
 
     #[test]
@@ -242,7 +242,7 @@ mod tests {
             !said.contains("192.168.1.11"),
             "an address was offered that would not answer: {said}"
         );
-        assert!(said.contains("Only this computer"), "{said}");
+        assert!(said.contains("Local access only"), "{said}");
         assert!(said.contains("ATELIER_HOST=0.0.0.0"), "it does not say how to change it: {said}");
     }
 
@@ -256,7 +256,7 @@ mod tests {
     fn a_computer_with_no_route_out_is_told_that_rather_than_a_wrong_address() {
         let said = lines("0.0.0.0", None);
         assert!(said.contains("http://localhost:3008"), "{said}");
-        assert!(said.contains("no route out"), "{said}");
+        assert!(said.contains("unavailable"), "{said}");
         assert!(!said.contains("http://:"), "half an address was printed: {said}");
     }
 

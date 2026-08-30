@@ -81,7 +81,7 @@ function linesInTheRecord() {
   // on this machine for as long as its default path was wrong (bw-cx70.4).
   if (!existsSync(STORE)) {
     console.error(`There is no record at ${STORE}.`);
-    console.error('Point STORE= at the chat store this app writes, and run it again.');
+    console.error('Set STORE to the chat database');
     process.exit(2);
   }
   const db = new DatabaseSync(STORE, { readOnly: true });
