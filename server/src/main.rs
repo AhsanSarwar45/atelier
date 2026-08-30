@@ -15,6 +15,7 @@ mod laid_down;
 mod local_host;
 mod needs;
 mod personal;
+mod project_manifest;
 mod published;
 mod reachable;
 mod registry;

@@ -841,7 +841,13 @@ def protected_by(where):
             # Somebody else's repository, sitting inside one of ours. It has said
             # nothing about itself, and a permission it never gave is not its own.
             return frozenset(project.DEFAULT_PROTECTED)
-        return project.of(where).protected
+        decl = project.of(where)
+        protected = decl.protected
+        # Permission is deliberately narrow: it opens only the completed-work
+        # branch, and the board-specific checks below still admit only its
+        # serialized fast-forward landing. Production and every other protected
+        # branch remain protected.
+        return protected - {decl.lands_on} if decl.agent_merges else protected
     except Exception:
         # A declaration that cannot be read is not permission. The default set is
         # what an undeclared project gets, and this is less known than that.
@@ -1276,7 +1282,7 @@ def main():
     # Pointing the line at a commit is not a landing that skipped the slot; it is
     # not a landing at all, and taking the slot first would not make it one. So it
     # is refused on its own, before the slot is ever asked about (bw-7e8.4).
-    if any(verb in POINTED for verb, _ in here):
+    if any(verb in POINTED or verb == "commit" for verb, _ in here):
         deny(BY_HAND % lands_on)
         return
     # Folds. The slot exists so two sessions never resolve conflicts in the same

@@ -143,7 +143,18 @@ def registered_root(path):
 
 
 def declaration_path(path):
-    """External declaration path for one registered Git identity."""
+    """Personal manifest path for one registered Git identity."""
+    key = git_identity(path) or os.path.realpath(path)
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    return os.path.join(os.path.dirname(REGISTRY), "projects", digest, "project.toml")
+
+
+def repository_declaration_path(path):
+    return os.path.join(working_tree(path), ".atelier", "project.toml")
+
+
+def old_external_declaration_path(path):
+    """The one-time migration source used by installations predating schema 1."""
     key = git_identity(path) or os.path.realpath(path)
     digest = hashlib.sha256(key.encode()).hexdigest()
     return os.path.join(os.path.dirname(REGISTRY), "projects", digest + ".toml")
@@ -171,16 +182,26 @@ class Declaration:
 
     def __init__(self, path, data):
         self.path = path
-        self.name = data.get("name") or os.path.basename(path.rstrip("/"))
-        self.prefix = data.get("prefix") or ""
+        shaped = data.get("project") or {}
+        git = data.get("git") or {}
+        beads = data.get("beads") or {}
+        verify = data.get("verification") or {}
+        review = data.get("review") or {}
+        cross = data.get("cross_project") or {}
+        modern = bool(shaped) or data.get("schema_version") == 1
+        self.name = (shaped.get("display_name") if modern else data.get("name")) \
+            or os.path.basename(path.rstrip("/"))
+        self.use_beads = bool(shaped.get("use_beads")) if modern else True
+        self.summary = shaped.get("summary") or ""
+        self.prefix = (beads.get("issue_id_prefix") if modern else data.get("prefix")) or ""
         # A pre-external-metadata project still has an authoritative landing
         # checkout: use the branch currently checked out in its main tree.
-        self.lands_on = data.get("lands_on") or \
+        self.lands_on = (git.get("completed_work_branch") if modern else data.get("lands_on")) or \
             _git(["branch", "--show-current"], path) or DEFAULT_LANDS_ON
-        self.areas = list(data.get("areas") or [])
-        self.places = list(data.get("places") or [])
-        self.brand = (data.get("brand") or "").upper()
-        self.lands_elsewhere = list(data.get("lands_elsewhere") or [])
+        self.areas = list((beads.get("work_areas") if modern else data.get("areas")) or [])
+        self.places = list(data.get("places") or []) if not modern else []
+        self.brand = (data.get("brand") or self.name).upper().replace("-", "_").replace(" ", "_")
+        self.lands_elsewhere = list((cross.get("delivery_projects") if modern else data.get("lands_elsewhere")) or [])
         # Where this project's own quality-rule modules live, relative to its
         # root. Empty means `quality.py` runs with the shared measures only.
         self.rules = data.get("rules") or ""
@@ -189,19 +210,25 @@ class Declaration:
         # front of the reader, so nothing here is paid per edit or per commit.
         # A project that declares none still runs the step; its note says what
         # was run by hand instead.
-        self.checks = data.get("checks") or ""
+        commands = verify.get("commands") or []
+        self.checks = (" && ".join(row.get("command", "") for row in commands
+                                   if row.get("command")) if modern else data.get("checks")) or ""
         # Whether an agent may put work onto this project's shipping lines itself.
         # False everywhere it is not said, so a checkout that has never been
         # thought about is protected rather than open.
-        self.agent_merges = bool(data.get("agent_merges"))
+        self.agent_merges = bool(git.get("agents_may_merge_completed_work")) \
+            if modern else bool(data.get("agent_merges"))
         # A project whose shipping lines are not called the usual things says so
         # here. Absent is not the same as empty: absent takes the default set,
         # empty would mean nothing is protected, which is what `agent_merges` is
         # for.
-        self.data_protected = data.get("protected")
-        review = data.get("review") or {}
-        self.persona = review.get("persona") or self.name
-        self.proves = review.get("proves") or ""
+        self.data_protected = git.get("protected_branches") if modern else data.get("protected")
+        self.persona = self.summary or review.get("persona") or self.name
+        self.proves = review.get("evidence_requirements") or review.get("proves") or ""
+        self.external_review = review.get("external_review") or "agent_decides"
+        self.visual_proof = bool(verify.get("visual_proof_for_ui_changes"))
+        self.development = data.get("development") or {}
+        self.deployment = data.get("deployment") or {}
         self.declared = bool(data)
 
     @property
@@ -215,8 +242,6 @@ class Declaration:
         `lands_on`. Silence adds it, so a project shipping from a line of its own
         name is covered without naming it twice.
         """
-        if self.agent_merges:
-            return frozenset()
         if self.data_protected is not None:
             return frozenset(self.data_protected)
         return frozenset(DEFAULT_PROTECTED) | {self.lands_on}
@@ -241,16 +266,19 @@ def _read(path):
 def of(path=None):
     """The declaration of the project holding `path`."""
     where = root(path)
-    data = _read(declaration_path(where))
+    repository = repository_declaration_path(path or where)
+    personal = declaration_path(where)
+    source = repository if os.path.isfile(repository) else personal
+    data = _read(source)
     declared_at = where
     key = ("external", where)
     if not data:
-        # Compatibility for a project not migrated by `atelier init` yet. A
-        # linked worktree may be changing its checks declaration as part of the
-        # work, so this fallback must read that checkout rather than main.
+        # One-time upgrade sources. Runtime behavior is immediately projected
+        # into the schema-1 Declaration above; writers publish only schema 1.
         declared_at = working_tree(path)
         key = ("legacy", os.path.realpath(declared_at))
-        data = _read(legacy_declaration_path(declared_at))
+        data = _read(old_external_declaration_path(where)) or \
+            _read(legacy_declaration_path(declared_at))
     if key not in _DECLS:
         _DECLS[key] = Declaration(declared_at, data)
     return _DECLS[key]
