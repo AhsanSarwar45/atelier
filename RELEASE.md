@@ -90,16 +90,17 @@ entering the version (e.g. `v0.12.0`) — the commit still has to be online firs
 
 1. **build** job — for each of macOS arm64, macOS x64, Linux x64, Windows x64:
    `npm ci` → `npm run build` (static export → `out/`) → `cargo build --release`
-   → upload the binary as an artifact.
+   → bundle the program and a checked Node 24.20.0 runtime side by side into
+   `atelier-<platform>.tar.gz` → upload the archive as an artifact.
 2. **release** job (Ubuntu):
-   - downloads all four binaries,
+   - downloads all four archives,
    - generates `SHA256SUMS.txt`,
-   - creates the GitHub Release (binaries + checksums + auto-generated notes),
+   - creates the GitHub Release (archives + checksums + auto-generated notes),
    - renders the Homebrew formula from `packaging/homebrew/atelier.rb.tmpl` and
      pushes it to the tap repo (skipped if `HOMEBREW_TAP_TOKEN` is unset).
 
 Homebrew is the only package manager this project publishes to. Windows users
-take `atelier-win-x64.exe` straight from the release page.
+take `atelier-win-x64.tar.gz` straight from the release page.
 
 Separately, `.github/workflows/ci.yml` runs on every push to `main` and checks the
 Nix `npmDepsHash` is current. When it has drifted the run fails and prints the
@@ -107,7 +108,7 @@ value to use; it holds read-only rights and cannot write to the published line.
 
 ### 4. After the release
 
-- Confirm the GitHub Release has all four binaries + `SHA256SUMS.txt`.
+- Confirm the GitHub Release has all four archives + `SHA256SUMS.txt`.
 - Homebrew: `brew update && brew upgrade atelier`.
 
 A copy the computer starts at login takes the new build over by itself, within

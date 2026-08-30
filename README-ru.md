@@ -119,27 +119,31 @@ brew install AhsanSarwar45/atelier/atelier
 
 ### Скачать
 
-Скачайте бинарник для вашей платформы со страницы [GitHub Releases](https://github.com/AhsanSarwar45/atelier/releases/latest):
+Скачайте архив для вашей платформы со страницы [GitHub Releases](https://github.com/AhsanSarwar45/atelier/releases/latest):
 
 | Платформа | Файл |
 |----------|------|
-| Windows x64 | `atelier-win-x64.exe` |
-| macOS Apple Silicon | `atelier-darwin-arm64` |
-| macOS Intel | `atelier-darwin-x64` |
-| Linux x64 | `atelier-linux-x64` |
+| Windows x64 | `atelier-win-x64.tar.gz` |
+| macOS Apple Silicon | `atelier-darwin-arm64.tar.gz` |
+| macOS Intel | `atelier-darwin-x64.tar.gz` |
+| Linux x64 | `atelier-linux-x64.tar.gz` |
+
+Каждый архив несёт рядом с программой проверенную среду Node, поэтому для чата
+ничего доустанавливать не нужно.
 
 ### Запуск
 
 ```bash
-# macOS/Linux — сделайте исполняемым, затем запустите
-chmod +x atelier-*
-./atelier-darwin-arm64
+# macOS/Linux — распакуйте, затем запустите
+tar -xzf atelier-darwin-arm64.tar.gz
+./atelier
 
 # Windows
-atelier-win-x64.exe
+tar -xzf atelier-win-x64.tar.gz
+atelier.exe
 ```
 
-Откройте http://localhost:3008. Frontend встроен в бинарник — Rust не нужен, доска и остальные экраны работают без Node.js. Node.js нужен только чату: помощник запускается через `node`, а `npm` один раз скачивает его комплект.
+Откройте http://localhost:3008. Frontend встроен в программу — Rust не нужен, а доске и остальным экранам не нужен Node.js. Чату Node нужен, но свой устанавливать не требуется: релиз несёт проверенную среду Node рядом с программой и запускает помощника через неё.
 
 ## Разработка
 

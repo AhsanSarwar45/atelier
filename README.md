@@ -121,15 +121,15 @@ The first two are once per computer. The third is once per project.
   `atelier init` installs the project's rules with it, and every board
   transition is checked by it
 - [Beads CLI](https://github.com/gastownhall/beads) (`bd`) only for projects that opt into a board
-- [Node.js](https://nodejs.org/) 22.6+ — the board and every other
-  screen run without it, but the chat helper is started with `node
-  --experimental-strip-types`, which no earlier release understands, and `npm`
-  fetches its kit once on first run
+
+The Chat tab runs on Node.js, but you do not install one: every release carries
+a checked Node runtime beside the program and starts the chat helper with it, so
+a computer with no Node of its own still runs the chat.
 
 None of them has to be on your PATH. Atelier looks there first, then in the
 ordinary places an installer writes to: `~/.cargo/bin`, `~/.local/bin`,
 `~/.beads/bin`, Homebrew's folder, `/usr/local/bin`, `/usr/bin` and `/bin`,
-and on Windows the folders Git, Node and npm install into, plus `System32`.
+and on Windows the folders Git and Node install into, plus `System32`.
 That is what lets the copy your computer starts at login find them, since a
 service inherits no shell and so no PATH at all. What it cannot find is a
 runtime a version manager hides: an `nvm`, `fnm`, `volta` or `asdf` Node is
@@ -149,20 +149,22 @@ brew install AhsanSarwar45/atelier/atelier
 
 Update later with `brew upgrade atelier`.
 
-On Windows, take the file from the table below and put it somewhere on your PATH.
+On Windows, take the archive from the table below, unpack it, and put the program somewhere on your PATH.
 
 ### Download
 
-Download the binary for your platform from [GitHub Releases](https://github.com/AhsanSarwar45/atelier/releases/latest):
+Download the archive for your platform from [GitHub Releases](https://github.com/AhsanSarwar45/atelier/releases/latest):
 
 | Platform | File |
 |----------|------|
-| Windows x64 | `atelier-win-x64.exe` |
-| macOS Apple Silicon | `atelier-darwin-arm64` |
-| macOS Intel | `atelier-darwin-x64` |
-| Linux x64 | `atelier-linux-x64` |
+| Windows x64 | `atelier-win-x64.tar.gz` |
+| macOS Apple Silicon | `atelier-darwin-arm64.tar.gz` |
+| macOS Intel | `atelier-darwin-x64.tar.gz` |
+| Linux x64 | `atelier-linux-x64.tar.gz` |
 
-Each release also ships a `SHA256SUMS.txt` to verify your download.
+Each archive carries the program and its Node runtime side by side, so nothing
+else has to be installed for the chat. Each release also ships a
+`SHA256SUMS.txt` to verify your download.
 
 ### Run
 
@@ -170,18 +172,19 @@ One command brings the whole thing up — the board, the screens and the chat �
 and opens it in your browser:
 
 ```bash
-# macOS/Linux — make executable, then run
-chmod +x atelier-*
-./atelier-darwin-arm64 run
+# macOS/Linux — unpack, then run
+tar -xzf atelier-darwin-arm64.tar.gz
+./atelier run
 
 # Windows
-atelier-win-x64.exe run
+tar -xzf atelier-win-x64.tar.gz
+atelier.exe run
 ```
 
-There is nothing else to start: the screens are embedded in the binary and the
-chat helper is started beside it. Nothing needs Rust, and the board needs no
-Node.js — the chat is the one part that does, because the helper is started
-with `node` and its kit fetched once with `npm`.
+There is nothing else to start or install: the screens are embedded in the
+program, and the chat helper and the Node runtime it needs are unpacked beside
+it. Nothing needs Rust, and nothing needs a Node.js of your own — the release
+carries its own for the chat.
 
 | Command | What it does |
 |---------|--------------|
