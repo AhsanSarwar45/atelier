@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 
 import { imageKind, importImageBytes } from './present.ts';
+import { captureBrowserRecipe, parseBrowserRecipe } from './screen-check-browser.ts';
 
 type Verdict = 'PASS' | 'FAIL' | 'INDETERMINATE';
 export type VisualVerdict = { verdict: Verdict; summary: string; observations: string[] };
@@ -109,7 +110,7 @@ function value(args: string[], name: string): string | undefined {
   const at = args.indexOf(name); return at < 0 ? undefined : args[at + 1];
 }
 
-const OPTIONS = new Set(['--type', '--target', '--window-id', '--before', '--after', '--expect', '--provider', '--viewport', '--theme']);
+const OPTIONS = new Set(['--type', '--target', '--window-id', '--before', '--after', '--expect', '--provider', '--viewport', '--theme', '--recipe']);
 
 function validateArgs(args: string[]): void {
   const seen = new Set<string>();
@@ -255,6 +256,13 @@ function windowCapture(id: string | undefined): Capture {
 
 async function capture(args: string[], files: Uploaded): Promise<Capture> {
   let type = value(args, '--type') ?? 'auto'; const target = value(args, '--target');
+  const recipeName = value(args, '--recipe');
+  if (recipeName) {
+    if (type !== 'auto' && type !== 'web') throw new Error('--recipe requires web capture');
+    const recipe = parseBrowserRecipe(uploaded(recipeName, files, '--recipe'));
+    const result = await captureBrowserRecipe(recipe, files);
+    return { bytes: result.bytes, label: `Web screen ${result.finalUrl}`, diagnostics: result.diagnostics };
+  }
   if (type === 'auto') type = target && /^https?:\/\//.test(target) ? 'web' : target && files[target] ? 'image' : '';
   if (type === 'image') return { bytes: uploaded(target, files, '--target'), label: basename(target!), diagnostics: [] };
   if (type === 'web') return webCapture(target ?? '', value(args, '--viewport') ?? '1280x800', value(args, '--theme') ?? 'system');
@@ -283,7 +291,7 @@ export const SCREEN_CHECK_SCHEMA = {
   required: { capture: ['target or window-id'], check: ['expect', 'target or window-id'], compare: ['expect', 'before', 'after'] },
 };
 
-export const SCREEN_CHECK_HELP = `atelier tool screen-check capture|check [--type auto|web|window|image] [--target URL|FILE] [--window-id ID]
+export const SCREEN_CHECK_HELP = `atelier tool screen-check capture|check [--type auto|web|window|image] [--target URL|FILE] [--window-id ID] [--recipe FILE]
   [--expect TEXT] [--provider claude|codex] [--viewport WIDTHxHEIGHT] [--theme light|dark|system]
 atelier tool screen-check compare --before FILE --after FILE --expect TEXT [--provider claude|codex]
 Use --schema for the machine-readable contract. Window capture always requires an explicit window ID.`;

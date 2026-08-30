@@ -129,7 +129,7 @@ fn presentation_request(rest: &[String], stdin: String) -> Result<PresentationRe
 fn screen_check_request(rest: &[String]) -> Result<PresentationRequest<'_>, String> {
     let mut files = std::collections::BTreeMap::new();
     for (at, word) in rest.iter().enumerate() {
-        if !matches!(word.as_str(), "--target" | "--before" | "--after") {
+        if !matches!(word.as_str(), "--target" | "--before" | "--after" | "--recipe") {
             continue;
         }
         let path = rest
@@ -141,8 +141,47 @@ fn screen_check_request(rest: &[String]) -> Result<PresentationRequest<'_>, Stri
         let bytes = std::fs::read(path).map_err(|error| format!("{path}: {error}"))?;
         files.insert(
             path.clone(),
-            base64::engine::general_purpose::STANDARD.encode(bytes),
+            base64::engine::general_purpose::STANDARD.encode(&bytes),
         );
+        if word == "--recipe" {
+            let recipe: serde_json::Value = serde_json::from_slice(&bytes)
+                .map_err(|error| format!("{path}: {error}"))?;
+            let mut referenced = Vec::new();
+            if let Some(state) = recipe.pointer("/auth/storage_state").and_then(|v| v.as_str()) {
+                referenced.push(state.to_string());
+            }
+            if let Some(actions) = recipe.get("actions").and_then(|v| v.as_array()) {
+                referenced.extend(actions.iter().filter_map(|action| {
+                    action.get("file").and_then(|value| value.as_str()).map(str::to_string)
+                }));
+            }
+            let recipe_dir = std::path::Path::new(path)
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .canonicalize()
+                .map_err(|error| format!("{path}: {error}"))?;
+            for referenced_path in referenced {
+                let candidate = if std::path::Path::new(&referenced_path).is_absolute() {
+                    std::path::PathBuf::from(&referenced_path)
+                } else {
+                    recipe_dir.join(&referenced_path)
+                };
+                let canonical = candidate
+                    .canonicalize()
+                    .map_err(|error| format!("{referenced_path}: {error}"))?;
+                if !canonical.starts_with(&recipe_dir) {
+                    return Err(format!(
+                        "{referenced_path}: recipe files must stay beside the recipe"
+                    ));
+                }
+                let referenced_bytes = std::fs::read(&canonical)
+                    .map_err(|error| format!("{referenced_path}: {error}"))?;
+                files.insert(
+                    referenced_path,
+                    base64::engine::general_purpose::STANDARD.encode(referenced_bytes),
+                );
+            }
+        }
     }
     Ok(PresentationRequest {
         args: rest,
@@ -729,6 +768,38 @@ mod tests {
         ];
         let request = screen_check_request(&args).unwrap();
         assert!(request.files.is_empty());
+    }
+
+    #[test]
+    fn screen_check_recipe_carries_only_its_explicit_state_and_upload_files() {
+        let temporary = tempfile::tempdir().unwrap();
+        let state = temporary.path().join("state.json");
+        let upload = temporary.path().join("proof.txt");
+        let recipe = temporary.path().join("recipe.json");
+        std::fs::write(&state, br#"{"cookies":[],"origins":[]}"#).unwrap();
+        std::fs::write(&upload, b"proof").unwrap();
+        std::fs::write(
+            &recipe,
+            serde_json::to_vec(&serde_json::json!({
+                "url": "https://example.test",
+                "auth": { "storage_state": state.display().to_string() },
+                "actions": [{ "action": "upload", "selector": "input", "file": upload.display().to_string() }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let args = vec![
+            "capture".to_string(),
+            "--recipe".to_string(),
+            recipe.display().to_string(),
+        ];
+
+        let request = screen_check_request(&args).unwrap();
+
+        assert_eq!(request.files.len(), 3);
+        assert!(request.files.contains_key(&recipe.display().to_string()));
+        assert!(request.files.contains_key(&state.display().to_string()));
+        assert!(request.files.contains_key(&upload.display().to_string()));
     }
 
     #[test]

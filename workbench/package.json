@@ -8,7 +8,8 @@
     "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/server.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.232"
+    "@anthropic-ai/claude-agent-sdk": "^0.3.232",
+    "playwright-core": "^1.62.1"
   },
   "devDependencies": {
     "@types/node": "^22.9.0"
