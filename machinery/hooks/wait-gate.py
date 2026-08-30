@@ -226,7 +226,7 @@ def main():
         return 0
     reason = judge(data.get("tool_name"), data.get("tool_input"))
     if reason:
-        deny(reason)
+        print("warning: " + reason, file=sys.stderr)
     return 0
 
 

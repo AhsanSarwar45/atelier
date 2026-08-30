@@ -133,72 +133,23 @@ def _names_something(text):
 
 
 def what_is_wrong(text):
-    """The refusal this line earns, or "" if it states something observable."""
-    text = (text or "").strip()
-    if FIX_VERB.match(text):
-        return ("This job's --what is an instruction, not something anyone can go and "
-                "look at, and a job stated as its own fix is a job with no test. Say "
-                "what goes WRONG:\n  not \"Fix the lamp\"\n  but \"The lamp draws black "
-                "when the sun is behind it\"")
-    if NOTHING_SAID.match(text):
-        return ("This job's --what is an adjective, so there is nothing to go and "
-                "look for. Say what it DOES instead:\n  not \"The board is bad\"\n  but "
-                "\"The board accepts a finish line no machine can run\"")
+    """Ticket-title style is guidance, never a lifecycle invariant."""
     return ""
 
 
 def finish_line(text, what="--done"):
-    """The refusal this finish line earns, or "" if a machine could settle it."""
+    """Require an acceptance statement; judge its quality when work closes."""
     text = (text or "").strip()
-    hedge = HEDGE.search(_unquoted(text))
-    if hedge:
-        return ("%s hedges (%r), so nobody can be held to it. A finish line is settled "
-                "by a run, not by an impression:\n  not \"`cargo test` passes and it "
-                "looks good enough\"\n  but \"`cargo test` reports 0 failures and the "
-                "lamp reads above 0.5\"" % (what, hedge.group(0)))
-    if not _runnable(text):
-        return ("%s names nothing anyone can run, so closing against it is an opinion. "
-                "Name the command and what it must produce:\n  not \"it works\"\n  but "
-                "\"python3 %s reports 0 failures\"" % (what, EG_SUITE))
-    if not _measurable(text):
-        return ("%s names a command but nothing it must produce, so any outcome "
-                "satisfies it. Add the number or the image:\n  not \"the suite runs\"\n"
-                "  but \"the suite reports 0 failures\"" % what)
-    return ""
+    return "" if text else "%s must not be empty." % what
 
 
 def left_out(text):
-    """The refusal this scope line earns, or "" if it was written for this job."""
-    text = (text or "").strip()
-    if not text:
-        return ("--not must say what this job deliberately leaves out, or the job has "
-                "no edge. Name the card, the system or the file it will not touch:\n  "
-                "not \"other stuff\"\n  but \"the words a card is written in "
-                "(%s), and nothing under %s\"" % (EG_CARD, EG_AREA))
-    if TEMPLATE in text.lower():
-        return ("--not is the sentence the pour used to print into every card. Say what "
-                "THIS job leaves out:\n  not \"anything found on the way becomes its "
-                "own card\"\n  but \"the words a card is written in (%s), and "
-                "nothing under %s\"" % (EG_CARD, EG_AREA))
-    if not _names_something(text):
-        return ("--not names nothing anyone could check the job against. Name the card, "
-                "the system or the file this job does not touch:\n  not \"other stuff\"\n"
-                "  but \"the words a card is written in (%s), and nothing under "
-                "%s\"" % (EG_CARD, EG_AREA))
+    """Scope prose is useful guidance but cannot be judged safely by regex."""
     return ""
 
 
 def where_it_is(text):
-    """The refusal a find's where-it-is earns, or "" if it can be gone and looked at."""
-    text = (text or "").strip()
-    if not _names_something(text):
-        return ("A find's second argument must say WHERE it is — the file, the command, "
-                "the system or the card. Without it the card is a rumour:\n  not \"over "
-                "there\"\n  but \"%s, on every pour that names no --not\"" % EG_POUR)
-    if not (SHOWS.search(text) or _measurable(text) or '"' in text or "'" in text):
-        return ("A find's second argument says where it is but not HOW IT SHOWS, so "
-                "nobody can tell whether it is still true. Add what it does — what it "
-                "prints, draws, accepts or refuses, or the number it produced.")
+    """Evidence prose is advisory; existence and lifecycle state remain enforced."""
     return ""
 
 

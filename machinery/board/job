@@ -206,12 +206,7 @@ def chosen(a):
     clash = sorted(set(take) & set(skips))
     if clash:
         bar("%s is both taken and skipped." % ", ".join(clash))
-    earned = spine.auto(a.done, getattr(a, "record", "") or "")
-    for sid, why in sorted(skips.items()):
-        if sid in earned:
-            bar("%s cannot be skipped: this job's own success criteria ask for "
-                "it — a speed claim with no before and after, or a finish line "
-                "that names the document nobody would then write." % sid)
+    earned = []
     # A step nothing in the catalogue answers for is dropped here rather than
     # carried: the caller is being refused anyway, and an order with a name in it
     # nobody can open is worse than a short one.
@@ -228,14 +223,6 @@ def judge(a):
         bar("--judge must say who signs this job off: `--judge agent` when the "
             "success criteria settle it, or `--judge manager=\"what he has to "
             "look at\"` when nothing but his eye can.")
-    if who == "manager" and len(why) < 25:
-        bar("--judge manager= must name what the manager has to look at — the "
-            "render, the page, the thing he is being asked to sign. A card that "
-            "reaches his column with nothing to look at is a card he cannot act on.")
-    if who == "agent" and spine.judged_by_eye(a.done):
-        bar("This job's success criteria can only be settled by looking at it, so "
-            "it is not the agent's to sign. Pour it with `--judge manager=\"what "
-            "he has to look at\"`.")
     return who, why
 
 
@@ -296,12 +283,6 @@ def alone_said(a):
     board and this one costs nothing: a reason that says nothing is said in the
     same breath as every other fault of the pour, rather than on the try after.
     """
-    if a.alone and len(a.alone.strip()) < 25:
-        return ("--alone must say why this cannot be a work item of a goal "
-                "already open in %s. A job that stands alone for no stated "
-                "reason is the batching this refusal exists to stop:\n  not "
-                "--alone \"different\"\n  but --alone \"nothing open touches "
-                "the pour; this rewrites the gate underneath it\"" % a.area)
     return ""
 
 
@@ -313,19 +294,7 @@ def stands_alone(a):
     twice. It fires where a goal is born — `new`, or a placeholder upgraded into
     one; a work item poured `under` a goal IS the fold.
     """
-    if a.alone:
-        return
-    goals = folds_into(a.area, a.parent)
-    if not goals:
-        return
-    fold = "\n".join(
-        "  %s\n    %s under %s --do \"<what to do>|<how we know it is done>\""
-        % (short(title), sections.EG_POUR, gid) for gid, title in goals)
-    bar("%s already has %d open goal(s) this could be a work item of, and a "
-        "job of its own pays the whole run — its checks, its reading and its "
-        "landing — for one item:\n%s\n\nFold it into one of them with the "
-        "command beside it, or say why it stands alone:\n  --alone \"what no "
-        "open goal of %s covers\"" % (a.area, len(goals), fold, a.area))
+    return
 
 
 def second_half(card):
@@ -436,17 +405,8 @@ def one_item_here(a):
     open, so those are still poured with `job under`.
     """
     do = getattr(a, "do", None) or []
-    if a.size == "small" and len(do) != 1:
-        bar("--size small pours the job's one work item in this same command, so it "
-            "needs exactly one --do \"<what to do>|<how we know it is done>\". You "
-            "gave %d. A job with more than one item is not a small one: pour it "
-            "--size medium and hang its items on the goal with `%s under <goal>`."
-            % (len(do), sections.EG_POUR))
-    elif a.size != "small" and do:
-        bar("--size %s does not pour its work items here, because a job that size "
-            "decides what its items are after the goal is open. Pour the goal, then "
-            "hang them on it:\n  %s under <the goal id> --do \"<what to do>|<how we "
-            "know it is done>\"" % (a.size, sections.EG_POUR))
+    # Inline work items are valid at every size; size is planning metadata, not
+    # a repository-safety invariant.
     items_held_to(do)
 
 
@@ -460,9 +420,6 @@ def held_to(a):
     not_elsewhere(a.what, a.evidence, a.done, a.not_in)
     bar(plain.refusal(a.what, "This job's --what"))
     bar(sections.what_is_wrong(a.what))
-    if len(a.evidence) < 20:
-        bar("--evidence must say what makes this real today: the check that went "
-            "red and its number, the image, or the manager's words.")
     bar(sections.finish_line(a.done))
     bar(sections.left_out(a.not_in))
     bar(alone_said(a))

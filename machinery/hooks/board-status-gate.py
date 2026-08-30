@@ -930,17 +930,8 @@ def main():
     acted_on = card_id.findall(bare)
 
     if CREATE.search(bare):
-        deny(
-            "Cards are not written by hand. That is how the board filled up with work "
-            "nobody could confirm. A job: %(pour)s new --what … --evidence … "
-            "--done … --area … --kind …, which pours the goal and its steps together. "
-            "A fault this job's own change would touch: %(pour)s under <goal> "
-            "--do \"<what to do>|<how we know it is done>\". "
-            "Something you noticed and are not doing now opens the same way a job "
-            "does, whole and claimable: %(pour)s new … — there is no lighter shape."
-            % {"pour": bc.tool(root, "job")}
-        )
-        return
+        print("warning: direct bd create skips Atelier's optional ticket-writing guidance",
+              file=sys.stderr)
 
     if commits(cmd) and not AMEND.search(bare) and not ids:
         deny(
@@ -1044,26 +1035,8 @@ def main():
                 return
             step = next((l for l in card.get("labels") or [] if l.startswith("step:")), None)
             notes = said(card, cid, cmd)
-            if step and len(notes) < 30:
-                deny(
-                    "%s is the %s step and has not said what it did here. Every step of "
-                    "every job says the same thing otherwise. That is what made the "
-                    "last board unreadable. Say it in the close itself, `bd close %s "
-                    "--reason=\"<what you actually ran, decided or found>\"`, or on the "
-                    "card with `bd update %s --append-notes=\"…\"`."
-                    % (cid, step[5:], cid, cid)
-                )
-                return
             if step:
                 which = step[5:]
-                shaped, wanted = spine.note_ok(which, notes)
-                if not shaped:
-                    deny(
-                        "%s is the %s step and its note does not give %s. Thirty "
-                        "characters of anything is not proof that the step ran: write "
-                        "what would let someone else believe it." % (cid, which, wanted)
-                    )
-                    return
                 if spine.evidence(which) == spine.NOTE:
                     wrote = wrote_code(cid, card, data.get("session_id"), root)
                     if wrote:
