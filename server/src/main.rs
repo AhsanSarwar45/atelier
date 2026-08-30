@@ -3,6 +3,7 @@
 //! An Axum-based HTTP server that serves the screens and answers the API
 //! behind them. The one name the product answers to lives in `identity.rs`.
 
+mod board_gate;
 mod command_line;
 mod db;
 mod doing;

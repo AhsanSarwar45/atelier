@@ -16,11 +16,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 use tokio::process::Command;
-use tokio::io::AsyncWriteExt;
 
 use super::validate_path_security;
 use crate::db::{CachedCounts, Database, Project};
@@ -1205,55 +1203,16 @@ fn lifecycle_status(status: Option<&str>) -> bool {
     matches!(status, Some("inreview" | "in_review" | "manager_review" | "closed"))
 }
 
+/// The board lifecycle check for a person dragging a card in the browser.
+///
+/// This once shelled out to `machinery/hooks/board-status-gate.py`, feeding it a
+/// synthetic `atelier-api` Bash session. That gate is agent-session governance
+/// and demands a Python interpreter the release cannot assume, so on a host
+/// without one the whole review/done half of the board was refused. The check
+/// is now native and deliberately narrowed to the parts that mean something for
+/// a hand drag -- see `crate::board_gate` for exactly what it keeps and drops.
 async fn lifecycle_denial(project: &Path, id: &str, status: &str) -> Option<String> {
-    let local = project.join("machinery").join("hooks").join("board-status-gate.py");
-    let installed = crate::identity::rules_dir()
-        .map(|p| p.join("machinery").join("hooks").join("board-status-gate.py"));
-    let Some(gate) = std::iter::once(local).chain(installed).find(|p| p.is_file()) else {
-        return Some("Atelier cannot verify this lifecycle transition on this host; run project setup here first".to_string());
-    };
-    let input = serde_json::json!({
-        "tool_name": "Bash",
-        "tool_input": {"command": format!("bd update {} --status {}", id, status)},
-        "cwd": project,
-        "session_id": "atelier-api"
-    });
-    let Some(python) = super::find_python() else {
-        super::forget_tools();
-        return Some("Atelier found no python on this computer, and its lifecycle gate is written in it".to_string());
-    };
-    let mut child = match Command::new(python)
-        .arg(gate).current_dir(project).stdin(Stdio::piped())
-        .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
-    {
-        Ok(child) => child,
-        Err(e) => return Some(format!("Atelier could not run its lifecycle gate: {e}")),
-    };
-    if let Some(mut stdin) = child.stdin.take() {
-        if let Err(e) = stdin.write_all(input.to_string().as_bytes()).await {
-            return Some(format!("Atelier could not ask its lifecycle gate: {e}"));
-        }
-    }
-    let output = match tokio::time::timeout(Duration::from_secs(30), child.wait_with_output()).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(e)) => return Some(format!("Atelier's lifecycle gate failed: {e}")),
-        Err(_) => return Some("Atelier's lifecycle gate timed out".to_string()),
-    };
-    if !output.status.success() {
-        return Some(format!("Atelier's lifecycle gate failed: {}",
-                            String::from_utf8_lossy(&output.stderr).trim()));
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let answer: serde_json::Value = match serde_json::from_str(text.trim()) {
-        Ok(answer) => answer,
-        Err(_) if text.trim().is_empty() => return None,
-        Err(_) => return Some("Atelier's lifecycle gate returned an unreadable answer".to_string()),
-    };
-    answer.pointer("/hookSpecificOutput/permissionDecision")
-        .and_then(|v| v.as_str()).filter(|v| *v == "deny")
-        .map(|_| answer.pointer("/hookSpecificOutput/permissionDecisionReason")
-             .and_then(|v| v.as_str()).unwrap_or("The lifecycle gate rejected this transition")
-             .to_string())
+    crate::board_gate::human_drag_denial(project, id, status).await
 }
 
 /// PATCH /api/beads/update

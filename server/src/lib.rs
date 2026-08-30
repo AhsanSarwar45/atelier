@@ -1,4 +1,5 @@
 // Library entry point — exposes modules for integration tests.
+pub mod board_gate;
 pub mod command_line;
 pub mod db;
 pub mod dolt;
