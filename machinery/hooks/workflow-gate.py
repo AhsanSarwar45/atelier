@@ -110,14 +110,49 @@ def deny(reason):
     }}))
 
 
+# Switches that make a line of work, rename one, remove one, or move where it
+# follows from. Anything else this command does, it does by reading.
+BRANCH_CHANGES = {"-d", "-D", "-m", "-M", "-c", "-C", "--delete", "--move",
+                  "--copy", "-f", "--force", "-u", "--set-upstream-to",
+                  "--unset-upstream", "--edit-description"}
+# Questions, each taking the word after it as its subject: which lines hold this
+# change, which have been taken in, what shape of name is wanted.
+BRANCH_ASKS = {"--contains", "--no-contains", "--merged", "--no-merged",
+               "--points-at", "--sort", "--format"}
+
+
 def branch_mutates(argv):
-    """Whether a git branch call changes a ref rather than listing it."""
+    """Whether a git branch call changes a line of work, or only asks about them.
+
+    Asking takes words too. `--merged main` names the line being asked about and
+    `--list bw-1` the shape of the names wanted, and a reader that saw only "a
+    word which is not a switch" called both of them a line being created — which
+    is how asking whether a finished branch still existed came to be refused as
+    a change to the repository (bw-p6pv).
+
+    `-l` is left out deliberately. Git spells `--list` that way now, but older
+    Git spelled `--create-reflog` that way, and under that spelling
+    `git branch -l x` makes x. A switch that means opposite things in two
+    versions is not one to read either way.
+    """
     if bc.git_verb(argv) != "branch":
         return False
-    args = argv[argv.index("branch") + 1:]
-    changing = {"-d", "-D", "-m", "-M", "-c", "-C", "--delete", "--move",
-                "--copy", "-f", "--force"}
-    return any(a in changing for a in args) or any(not a.startswith("-") for a in args)
+    rest, left, asked = argv[argv.index("branch") + 1:], [], False
+    rest = list(rest)
+    while rest:
+        word, rest = rest[0], rest[1:]
+        head = word.split("=", 1)[0]
+        if word in BRANCH_CHANGES or head in BRANCH_CHANGES:
+            return True
+        if word == "--list":
+            asked = True
+        elif head in BRANCH_ASKS:
+            asked = True
+            if "=" not in word:
+                rest = rest[1:]
+        elif not word.startswith("-"):
+            left.append(word)
+    return bool(left) and not asked
 
 
 def operands(name, argv):

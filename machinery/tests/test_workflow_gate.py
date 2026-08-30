@@ -423,5 +423,47 @@ class ACopyAlreadyGone(unittest.TestCase):
         self.assertFalse(gate.already_removed(self.root, path, "bw-1"))
 
 
+class AskingAboutLinesOfWork(unittest.TestCase):
+    """`git branch` reads take words too, and a word is not a name being made.
+
+    Every question below was refused as a repository change because it carried
+    something that was not a switch — including the one asked to confirm a
+    finished line had been removed, in the middle of removing it (bw-p6pv).
+    """
+
+    def test_asking_which_lines_exist_by_name_is_reading(self):
+        for command in ("git branch --list bw-1", "git branch -r --list origin/*"):
+            self.assertIsNone(gate.reason(bash(command)), command)
+
+    def test_asking_which_lines_are_taken_in_or_hold_a_change_is_reading(self):
+        for command in ("git branch --merged main", "git branch --no-merged main",
+                        "git branch --contains HEAD", "git branch --points-at HEAD",
+                        "git branch --format %(refname)"):
+            self.assertIsNone(gate.reason(bash(command)), command)
+
+    def test_a_question_with_no_subject_is_still_a_question(self):
+        self.assertIsNone(gate.reason(bash("git branch --merged")))
+
+    def test_making_renaming_or_removing_a_line_is_still_a_change(self):
+        for command in ("git branch newthing", "git branch -d bw-1",
+                        "git branch --delete bw-1", "git branch -m a b",
+                        "git branch -f main HEAD~1", "git branch -D bw-1",
+                        "git branch -c a b"):
+            self.assertIn("dedicated ticket worktree", gate.reason(bash(command)),
+                          command)
+
+    def test_moving_where_a_line_follows_from_is_a_change(self):
+        for command in ("git branch -u origin/main",
+                        "git branch --set-upstream-to=origin/main",
+                        "git branch --unset-upstream"):
+            self.assertIn("dedicated ticket worktree", gate.reason(bash(command)),
+                          command)
+
+    def test_a_switch_that_two_versions_of_git_disagree_about_is_not_read(self):
+        # `-l` is `--list` now and was `--create-reflog` before, and under the
+        # older spelling this makes a line rather than listing one.
+        self.assertIn("dedicated ticket worktree", gate.reason(bash("git branch -l bw-1")))
+
+
 if __name__ == "__main__":
     unittest.main()
