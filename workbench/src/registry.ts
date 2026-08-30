@@ -84,7 +84,7 @@ function loggedCodexThreads(pids: number[]): Map<number, string> {
        WHERE process_uuid GLOB ? AND thread_id IS NOT NULL AND thread_id != ''
        ORDER BY ts DESC, ts_nanos DESC, id DESC`,
     );
-    for (const pid of pids) rows.push(...query.all(`pid:${pid}:*`) as CodexProcessLog[]);
+    for (const pid of pids) rows.push(...query.all(`pid:${pid}:*`) as unknown as CodexProcessLog[]);
     return latestCodexThreadsByPid(rows);
   } catch {
     return new Map();
