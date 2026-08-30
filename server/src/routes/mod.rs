@@ -351,6 +351,15 @@ fn every_place() -> Vec<PathBuf> {
 /// walk over one list, so that nothing in the search needs a tool to find a
 /// tool.
 pub fn find_tool(name: &str, others: &[&str]) -> Option<PathBuf> {
+    let environment = match name {
+        "claude" => std::env::var_os("CLAUDE_PATH"),
+        "codex" => std::env::var_os("CODEX_PATH"),
+        "browser" => std::env::var_os("ATELIER_BROWSER_PATH"),
+        _ => None,
+    };
+    if let Some(path) = environment.map(PathBuf::from).filter(|path| runnable(path)) {
+        return Some(path);
+    }
     if let Some(path) = TOOL_OVERRIDES
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock().ok()

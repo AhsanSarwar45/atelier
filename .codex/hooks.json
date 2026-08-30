@@ -5,7 +5,7 @@
         "matcher": "Bash|apply_patch|Edit|Write",
         "hooks": [
           {
-            "command": "atelier hook workflow-gate.py",
+            "command": "atelier hook workflow-gate",
             "statusMessage": "Checking ticket worktree",
             "type": "command"
           }
@@ -15,16 +15,16 @@
         "matcher": "Bash",
         "hooks": [
           {
-            "command": "atelier hook board-actor.py",
+            "command": "atelier hook board-actor",
             "type": "command"
           },
           {
-            "command": "atelier hook board-merge-gate.py",
+            "command": "atelier hook board-merge-gate",
             "statusMessage": "Checking protected branches",
             "type": "command"
           },
           {
-            "command": "atelier hook board-status-gate.py",
+            "command": "atelier hook board-status-gate",
             "statusMessage": "Checking board lifecycle",
             "type": "command"
           }
@@ -36,7 +36,7 @@
         "matcher": "Bash|apply_patch|Edit|Write",
         "hooks": [
           {
-            "command": "atelier hook board-touch.py",
+            "command": "atelier hook board-touch",
             "type": "command"
           },
           {

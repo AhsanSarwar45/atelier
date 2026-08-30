@@ -7,7 +7,7 @@
 use serde_json::Value;
 use std::io::Read;
 
-pub const GATE: &str = "completion-gate.py";
+pub const GATE: &str = "completion-gate";
 
 const DEFERRALS: &[&str] = &[
     "future agent",
@@ -26,7 +26,7 @@ const DEFERRALS: &[&str] = &[
 ];
 
 pub fn is_ours(name: &str) -> bool {
-    name == GATE
+    name == GATE || name == "completion-gate.py"
 }
 
 pub fn run() -> i32 {

@@ -10,8 +10,7 @@
  * "nothing else lists them": every file that names two or more states in a row
  * has to be reading STATES instead.
  */
-import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -46,16 +45,17 @@ const ALLOWED = new Set([
 const NAMES = STATES.map((s) => s.id);
 
 function sourceFiles(): string[] {
-  const out = execFileSync("git", ["ls-files", "src", "server/src"], {
-    cwd: ROOT, encoding: "utf8",
-  });
-  // `git ls-files` names what the index knows, not what the working tree still
-  // holds: a file removed ahead of its own commit stays listed until that
-  // commit lands, and reading it would fail for a reason this test has
-  // nothing to say about.
-  return out.split("\n")
-    .filter((p) => /\.(ts|tsx|rs)$/.test(p))
-    .filter((p) => existsSync(join(ROOT, p)));
+  const found: string[] = [];
+  const walk = (relative: string) => {
+    for (const entry of readdirSync(join(ROOT, relative), { withFileTypes: true })) {
+      const path = join(relative, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (/\.(ts|tsx|rs)$/.test(entry.name)) found.push(path.replaceAll("\\", "/"));
+    }
+  };
+  walk("src");
+  walk("server/src");
+  return found;
 }
 
 /** The code of a file: no comments, and for Rust none of its own test module. */

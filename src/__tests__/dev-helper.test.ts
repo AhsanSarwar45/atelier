@@ -11,18 +11,17 @@ interface PackageScripts {
 const project = resolve(import.meta.dirname, '../..');
 const pkg = JSON.parse(readFileSync(resolve(project, 'package.json'), 'utf8')) as PackageScripts;
 
-describe('the development chat helper', () => {
-  it('is selected from the active checkout by the backend launcher', () => {
-    expect(pkg.scripts['server:dev']).toContain(
-      'BEADS_WORKBENCH_ENTRY=../workbench/src/server.ts cargo run',
-    );
+describe('the native development server', () => {
+  it('starts the Rust server without selecting a helper runtime', () => {
+    expect(pkg.scripts['server:dev']).toBe('cd server && cargo run');
+    expect(pkg.scripts['server:dev']).not.toContain('BEADS_WORKBENCH_ENTRY');
   });
 
   it('is also selected by the combined frontend/backend launcher', () => {
     expect(pkg.scripts['dev:full']).toContain('npm run server:dev');
   });
 
-  it('does not change the ordinary packaged server command', () => {
+  it('keeps the static frontend preview command separate', () => {
     expect(pkg.scripts.start).toBe('next start -p 3007');
   });
 });

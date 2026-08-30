@@ -31,21 +31,25 @@ pub struct ToolStatus {
     hint: &'static str,
 }
 
-const TOOLS: [(&str, &str, &str); 4] = [
+const TOOLS: [(&str, &str, &str); 5] = [
     ("git", "projects and history", "Install Git from https://git-scm.com/downloads."),
     ("bd", "Beads boards", "Install here, or install Beads from https://github.com/gastownhall/beads."),
     ("claude", "Claude chats", "Install and sign in at https://docs.anthropic.com/en/docs/claude-code."),
     ("codex", "Codex chats", "Install and sign in at https://developers.openai.com/codex/cli."),
+    ("browser", "screen checks", "Install Chrome, Chromium, or Edge to capture browser evidence."),
 ];
 
 fn key(tool: &str) -> String { format!("tool.{tool}.path") }
 
 async fn inspect(tool: &'static str, required_for: &'static str, hint: &'static str) -> ToolStatus {
-    let path = super::find_tool(tool, &[]);
+    let path = if tool == "browser" {
+        crate::workbench::browser::browser_executable()
+    } else {
+        super::find_tool(tool, &[])
+    };
     let version = if let Some(program) = path.as_ref() {
-        tokio::process::Command::new(program)
-            .arg("--version")
-            .output().await.ok()
+        tokio::time::timeout(std::time::Duration::from_secs(3),
+            tokio::process::Command::new(program).arg("--version").output()).await.ok().and_then(Result::ok)
             .map(|output| {
                 let text = if output.stdout.is_empty() { &output.stderr } else { &output.stdout };
                 String::from_utf8_lossy(text).trim().to_string()
@@ -64,15 +68,15 @@ pub async fn read(Extension(db): Extension<Arc<Database>>) -> Json<Vec<ToolStatu
             super::set_tool_override(tool, path.map(PathBuf::from));
         }
     }
-    let mut answer = Vec::with_capacity(TOOLS.len());
-    for (tool, required_for, hint) in TOOLS {
-        answer.push(inspect(tool, required_for, hint).await);
-    }
-    Json(answer)
+    Json(futures::future::join_all(TOOLS.map(|(tool, required_for, hint)|
+        inspect(tool, required_for, hint))).await)
 }
 
 #[derive(Deserialize)]
 pub struct ToolChoice { path: Option<String> }
+
+#[derive(Deserialize)]
+pub struct InstallConsent { consent: bool }
 
 pub async fn choose(
     Path(tool): Path<String>, Extension(db): Extension<Arc<Database>>, Json(choice): Json<ToolChoice>,
@@ -83,8 +87,8 @@ pub async fn choose(
     let chosen = choice.path.map(|path| path.trim().to_string()).filter(|path| !path.is_empty());
     if let Some(path) = chosen.as_ref() {
         let candidate = PathBuf::from(path);
-        if !candidate.is_file() {
-            return (StatusCode::BAD_REQUEST, Json(json!({"error":format!("{} is not a file", candidate.display())})));
+        if !super::runnable(&candidate) {
+            return (StatusCode::BAD_REQUEST, Json(json!({"error":format!("{} is not an executable file", candidate.display())})));
         }
     }
     if let Err(error) = db.set_setting(&key(&tool), chosen.as_deref()) {
@@ -118,7 +122,7 @@ fn extract_bd(archive: &FsPath, destination: &FsPath, zip: bool) -> Result<(), S
         for index in 0..archive.len() {
             let mut entry = archive.by_index(index).map_err(|e| e.to_string())?;
             let Some(name) = entry.enclosed_name() else { continue };
-            if name.file_name().and_then(|n| n.to_str()) == Some("bd.exe") {
+            if entry.is_file() && name.file_name().and_then(|n| n.to_str()) == Some("bd.exe") {
                 let mut output = std::fs::File::create(&staged).map_err(|e| e.to_string())?;
                 std::io::copy(&mut entry, &mut output).map_err(|e| e.to_string())?;
                 std::fs::rename(&staged, destination).map_err(|e| e.to_string())?;
@@ -132,7 +136,8 @@ fn extract_bd(archive: &FsPath, destination: &FsPath, zip: bool) -> Result<(), S
         for item in archive.entries().map_err(|e| e.to_string())? {
             let mut entry = item.map_err(|e| e.to_string())?;
             let path = entry.path().map_err(|e| e.to_string())?;
-            if safe_relative(&path) && path.file_name().and_then(|n| n.to_str()) == Some("bd") {
+            if entry.header().entry_type().is_file() && safe_relative(&path)
+                && path.file_name().and_then(|n| n.to_str()) == Some("bd") {
                 let mut output = std::fs::File::create(&staged).map_err(|e| e.to_string())?;
                 std::io::copy(&mut entry, &mut output).map_err(|e| e.to_string())?;
                 output.flush().map_err(|e| e.to_string())?;
@@ -153,7 +158,12 @@ fn progress(bus: &BootstrapBus, phase: &str, detail: impl Into<String>) {
     let _ = bus.0.send(json!({"tool":"bd","phase":phase,"detail":detail.into()}));
 }
 
-pub async fn install_bd(Extension(bus): Extension<BootstrapBus>) -> (StatusCode, Json<Value>) {
+pub async fn install_bd(
+    Extension(bus): Extension<BootstrapBus>, Json(consent): Json<InstallConsent>,
+) -> (StatusCode, Json<Value>) {
+    if !consent.consent {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error":"Beads installation requires explicit consent"})));
+    }
     if let Some(path) = super::find_bd() {
         return (StatusCode::OK, Json(json!({"ok":true,"path":path})));
     }
@@ -192,4 +202,23 @@ pub async fn install_bd(Extension(bus): Extension<BootstrapBus>) -> (StatusCode,
 fn failed(bus: &BootstrapBus, error: String) -> (StatusCode, Json<Value>) {
     progress(bus, "error", error.clone());
     (StatusCode::BAD_GATEWAY, Json(json!({"error":error})))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn environment_bootstrap_reports_every_real_external_dependency() {
+        assert_eq!(TOOLS.iter().map(|row| row.0).collect::<Vec<_>>(),
+            ["git", "bd", "claude", "codex", "browser"]);
+        assert!(TOOLS.iter().all(|row| !matches!(row.0, "node" | "npm" | "python" | "python3")));
+    }
+
+    #[test]
+    fn environment_bootstrap_rejects_archive_traversal() {
+        assert!(safe_relative(FsPath::new("beads/bd")));
+        assert!(!safe_relative(FsPath::new("../bd")));
+        assert!(!safe_relative(FsPath::new("/tmp/bd")));
+    }
 }

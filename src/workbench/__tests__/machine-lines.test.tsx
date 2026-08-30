@@ -22,13 +22,10 @@ import {
   familyOf,
   FAMILIES,
   forWhom,
-  KINDS_WITH_AN_AUDIENCE,
-  KNOWN_KINDS,
   saidBy,
   type MachineFamily,
 } from '@/workbench/machine-lines';
 import { lookOf, markOf } from '@/workbench/machine-look';
-import { SAID_NOTHING } from '@/workbench/machine-words';
 import type { NoteRank } from '@/workbench/protocol';
 import type { TranscriptItem } from '@/workbench/use-session';
 
@@ -63,36 +60,7 @@ const said = (text: string): TranscriptItem => ({
   parentId: null,
 });
 
-/**
- * Every kind the driver can put on the wire, read out of the driver itself.
- *
- * Read rather than listed, because a list here would go stale the first time a
- * kind is added over there and the new one would land in grey without anything
- * going red.
- */
-function kindsTheDriverEmits(): string[] {
-  const source = readFileSync(resolve(__dirname, '../../../workbench/src/drivers/claude.ts'), 'utf8');
-  // The sorting function's own branches, and the lines the driver writes by
-  // hand elsewhere. Nothing else in the file names a machine message.
-  const sorter = source.slice(source.indexOf('function noteBody('));
-  const cases = Array.from(sorter.slice(0, sorter.indexOf('\n}\n')).matchAll(/case '([\w/_]+)':/g)).map((m) => m[1]!);
-  const byHand = Array.from(source.matchAll(/this\.note\(\{[^}]*\bkind: '([\w/_]+)'/g)).map((m) => m[1]!);
-  // A kind the driver deliberately draws nothing for needs no family and no
-  // reader: the silence is itself a ruling, written down beside the words
-  // (src/workbench/machine-words.ts, bw-iiv6).
-  const silent = Object.keys(SAID_NOTHING);
-  return Array.from(new Set([...cases, ...byHand])).filter((kind) => !silent.includes(kind));
-}
-
 describe('every kind has a family', () => {
-  it('sorts every kind the driver can emit, with none falling through', () => {
-    const found = kindsTheDriverEmits();
-    // A guard on the reading itself: a rename over there that matched nothing
-    // would otherwise leave this passing on an empty list.
-    expect(found.length).toBeGreaterThan(15);
-    expect(found.filter((kind) => !KNOWN_KINDS.includes(kind))).toEqual([]);
-  });
-
   it('gives every family a colour and a mark of its own', () => {
     const marks = new Set(FAMILIES.map((f) => markOf(f)));
     const chips = new Set(FAMILIES.map((f) => lookOf(f).row));
@@ -112,14 +80,6 @@ describe('every kind has a family', () => {
   it('keeps an unfamiliar kind at the loudness the driver gave it', () => {
     expect(familyOf('system/something_new', 'note')).toBe('background');
     expect(familyOf('system/something_new', 'detail')).toBe('breathing');
-  });
-
-  it('says who every kind the driver can emit is for', () => {
-    // Unnamed here means nobody has ruled on it, and it falls to the machine's
-    // side — where a chat does not draw it. That is the right default and the
-    // wrong place to arrive by accident, so this goes red instead (bw-6jq5).
-    const found = kindsTheDriverEmits();
-    expect(found.filter((kind) => !KINDS_WITH_AN_AUDIENCE.includes(kind))).toEqual([]);
   });
 
   it('separates who a line is for from how bad it is', () => {

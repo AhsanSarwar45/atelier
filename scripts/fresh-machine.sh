@@ -50,18 +50,24 @@ BD="$(command -v bd 2>/dev/null || true)"
 [ -n "$BD" ] && BD="$(readlink -f "$BD")"
 [ -x "$BD" ] || { fail "no bd executable to mount"; exit 1; }
 
-say "A git+bd machine with no language runtime"
+say "Fresh images with no language runtime"
+EMPTY_IMAGE="atelier-fresh-empty"
 IMAGE_NAME="atelier-fresh-native"
+if ! docker image inspect "$EMPTY_IMAGE" >/dev/null 2>&1; then
+  if printf 'FROM %s\nRUN rpm -e --nodeps python3 python-unversioned-command 2>/dev/null || true\nRUN dnf clean all\n' "$BASE" |
+      docker build -q -t "$EMPTY_IMAGE" - >/dev/null 2>&1; then
+    pass "built $EMPTY_IMAGE"
+  else
+    fail "could not build $EMPTY_IMAGE"; exit 1
+  fi
+fi
 if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
-  if printf 'FROM %s\nRUN dnf -y install git-core && rpm -e --nodeps python3 python-unversioned-command || true\nRUN dnf clean all\n' "$BASE" |
+  if printf 'FROM %s\nRUN dnf -y install git-core && dnf clean all\n' "$EMPTY_IMAGE" |
       docker build -q -t "$IMAGE_NAME" - >/dev/null 2>&1; then
     pass "built $IMAGE_NAME"
   else
-    fail "could not build $IMAGE_NAME"
-    exit 1
+    fail "could not build $IMAGE_NAME"; exit 1
   fi
-else
-  pass "$IMAGE_NAME is already built"
 fi
 
 RUN="$(mktemp -d "${TMPDIR:-/tmp}/atelier-fresh.XXXXXX")" || exit 1
@@ -78,7 +84,43 @@ cleanup() {
 }
 trap cleanup EXIT
 
-CONTAINER="$(docker run -d -p 127.0.0.1::3008 \
+matrix_case() { # label, image, bd-present, providers-present, expected-found words
+  local label="$1" image="$2" with_bd="$3" with_providers="$4" expected="$5"
+  local case_dir="$RUN/matrix-${label//+/-}" args=() url port answer found tool
+  mkdir -p "$case_dir/home" "$case_dir/data"
+  chmod 777 "$case_dir/home" "$case_dir/data"
+  args=(-d --user "$(id -u):$(id -g)" -p 127.0.0.1::3008 -e ATELIER_HOST=0.0.0.0 -e ATELIER_PORT=3008
+    -e HOME=/case/home -e ATELIER_DATA_DIR=/case/data -e PATH=/usr/local/bin:/usr/bin:/bin
+    -v "$BINARY":/opt/atelier:ro -v "$case_dir":/case)
+  [ "$with_bd" = yes ] && args+=(-v "$BD":/usr/local/bin/bd:ro)
+  if [ "$with_providers" = yes ]; then
+    args+=(-e CLAUDE_PATH=/fixtures/claude -e CODEX_PATH=/fixtures/codex
+      -v "$FIXTURE":/opt/atelier-tests:ro -v "$RUN/providers":/fixtures:ro)
+  fi
+  CONTAINER="$(docker run "${args[@]}" "$image" /opt/atelier)" || { fail "$label did not start"; return; }
+  port="$(docker port "$CONTAINER" 3008/tcp | sed 's/.*://')"; url="http://127.0.0.1:$port"
+  for _ in $(seq 1 80); do curl -sf "$url/api/health" >/dev/null && break; sleep 0.25; done
+  if ! answer="$(curl -fsS "$url/api/environment")"; then
+    fail "$label environment did not answer"
+  else
+    found=""
+    for tool in git bd claude codex browser; do
+      if printf '%s' "$answer" | grep -q "\"tool\":\"$tool\"[^}]*\"found\":true"; then found="$found $tool"; fi
+    done
+    found="${found# }"
+    [ "$found" = "$expected" ] && pass "$label reports exactly: ${expected:-no tools}" || fail "$label reported '$found', expected '$expected'"
+    curl -sf "$url/" >/dev/null && pass "$label serves the board shell" || fail "$label board shell did not serve"
+  fi
+  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; CONTAINER=""
+}
+
+say "Environment matrix"
+matrix_case nothing "$EMPTY_IMAGE" no no ""
+matrix_case git-only "$IMAGE_NAME" no no "git"
+matrix_case git+bd "$IMAGE_NAME" yes no "git bd"
+matrix_case everything "$IMAGE_NAME" yes yes "git bd claude codex"
+
+CONTAINER="$(docker run -d --user "$(id -u):$(id -g)" -p 127.0.0.1::3008 \
   -e ATELIER_HOST=0.0.0.0 -e ATELIER_PORT=3008 \
   -e HOME=/fresh/home -e ATELIER_DATA_DIR=/fresh/data \
   -e CLAUDE_CONFIG_DIR=/fresh/claude -e CODEX_HOME=/fresh/codex \

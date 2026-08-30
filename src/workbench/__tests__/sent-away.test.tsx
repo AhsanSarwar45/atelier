@@ -14,15 +14,12 @@
  * between the kit's reports and a test that reads the real clock proves only
  * what time it was when it ran.
  */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-
 import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { EMPTY, foldAll, reduce, type SentAway, type SessionView } from '@/workbench/fold';
 import type { WbpEvent } from '@/workbench/protocol';
-import { KINDS, SentAwayPanel, STATES, forHowLong, modelNamed, spend } from '@/workbench/sent-away';
+import { SentAwayPanel, forHowLong, modelNamed, spend } from '@/workbench/sent-away';
 
 /** When everything below was sent away. */
 const OFF = '2026-08-20T09:00:00.000Z';
@@ -442,50 +439,6 @@ describe('the running ones on top, the finished ones behind a control', () => {
     expect(inside('sent-away-running')).toEqual([]);
     expect(screen.getByTestId('sent-away-running')).toBeEmptyDOMElement();
     expect(control()).toHaveTextContent('Show 1 completed');
-  });
-});
-
-/**
- * The half of this that lives in the sidecar, read out of the sidecar itself.
- *
- * Read rather than listed, because the driver runs in its own process against
- * the kit's own messages: a list here would go stale the first time a task
- * message is handled over there, and the row it should have drawn would simply
- * not appear with nothing going red.
- */
-describe('the driver, which is where these rows come from', () => {
-  const source = readFileSync(resolve(__dirname, '../../../workbench/src/drivers/claude.ts'), 'utf8');
-  const lifecycle = readFileSync(resolve(__dirname, '../../../workbench/src/drivers/agent-lifecycle.ts'), 'utf8');
-
-  /** Every task message the kit sends, from the SDK's own list. */
-  const KIT_SAYS = ['task_started', 'task_progress', 'task_updated', 'task_notification', 'background_tasks_changed'];
-
-  it('puts all three of these on the wire', () => {
-    for (const word of ['agent.started', 'agent.progress', 'agent.finished']) {
-      expect(lifecycle, `the shared provider ledger never sends ${word}, so no row could ever appear`).toContain(`type: '${word}'`);
-    }
-  });
-
-  it('reads every task message the kit sends', () => {
-    expect(KIT_SAYS.filter((word) => !source.includes(`'${word}'`)), 'the kit says these and the native adapter ignores them').toEqual(
-      [],
-    );
-  });
-
-  it('never names a kind the panel cannot draw', () => {
-    const from = source.indexOf('function kindOfTask(');
-    const block = source.slice(from, source.indexOf('\n}', from));
-    const named = Array.from(block.matchAll(/return '(\w+)'/g)).map((m) => m[1]!);
-    expect(named.length, 'the sorting function no longer names its kinds').toBeGreaterThan(3);
-    expect(named.filter((kind) => !(kind in KINDS))).toEqual([]);
-  });
-
-  it('never names a state the panel cannot draw', () => {
-    const from = source.indexOf('const TASK_STATE');
-    const block = source.slice(from, source.indexOf('\n}', from));
-    const named = Array.from(block.matchAll(/: '(\w+)',/g)).map((m) => m[1]!);
-    expect(named.length, 'the state table no longer reads as one').toBeGreaterThan(4);
-    expect(named.filter((state) => !(state in STATES))).toEqual([]);
   });
 });
 

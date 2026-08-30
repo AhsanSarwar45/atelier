@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const MANAGED: &[&str] = &[
+    "workflow-gate", "board-actor", "board-merge-gate", "board-status-gate",
+    "wait-gate", "board-touch", "board-prime", "board-push", "completion-gate",
+    "board-gate", "landing-gate",
     "workflow-gate.py", "board-actor.py", "board-merge-gate.py",
     "board-status-gate.py", "wait-gate.py", "board-touch.py",
     "board-prime.py", "board-push.py", "completion-gate.py", "board-gate.py",
@@ -15,21 +18,23 @@ const MANAGED: &[&str] = &[
 ];
 
 const CLAUDE: &[(&str, &str, &[&str])] = &[
-    ("PreToolUse", "Bash|Edit|Write|MultiEdit|NotebookEdit", &["workflow-gate.py"]),
-    ("PreToolUse", "Bash", &["board-actor.py", "board-merge-gate.py", "board-status-gate.py"]),
-    ("PostToolUse", "Edit|Write|MultiEdit|NotebookEdit|Bash|AskUserQuestion|ExitPlanMode|Agent|Task|Monitor|TaskCreate|SendMessage", &["board-touch.py"]),
-    ("SubagentStop", "", &["board-touch.py"]),
-    ("SessionStart", "", &["board-prime.py"]),
-    ("SessionEnd", "", &["board-push.py"]),
-    ("Stop", "", &["board-gate.py"]),
+    ("PreToolUse", "Bash|Edit|Write|MultiEdit|NotebookEdit", &["workflow-gate"]),
+    ("PreToolUse", "Bash", &["board-actor", "board-merge-gate", "board-status-gate"]),
+    ("PostToolUse", "Edit|Write|MultiEdit|NotebookEdit|Bash|AskUserQuestion|ExitPlanMode|Agent|Task|Monitor|TaskCreate|SendMessage", &["board-touch"]),
+    ("SubagentStop", "", &["board-touch"]),
+    ("SessionStart", "", &["board-prime"]),
+    ("SessionEnd", "", &["board-push"]),
+    ("Stop", "", &["board-gate"]),
 ];
 
 const CODEX: &[(&str, &str, &[&str])] = &[
-    ("PreToolUse", "Bash|apply_patch|Edit|Write", &["workflow-gate.py"]),
-    ("PreToolUse", "Bash", &["board-actor.py", "board-merge-gate.py", "board-status-gate.py"]),
-    ("PostToolUse", "Bash|apply_patch|Edit|Write", &["board-touch.py"]),
-    ("SubagentStop", "", &["board-touch.py"]),
+    ("PreToolUse", "Bash|apply_patch|Edit|Write", &["workflow-gate"]),
+    ("PreToolUse", "Bash", &["board-actor", "board-merge-gate", "board-status-gate"]),
+    ("PostToolUse", "Bash|apply_patch|Edit|Write", &["board-touch"]),
+    ("SubagentStop", "", &["board-touch"]),
 ];
+
+const GUARD_MARK: &str = "# Atelier landing guard";
 
 pub fn install(root: &Path, manifest: &ProjectManifest) -> Result<(), String> {
     let bd = crate::routes::find_bd().ok_or_else(|| "Beads is required for this project".to_string())?;
@@ -51,7 +56,7 @@ pub fn remove(root: &Path) -> Result<(), String> {
     strip(&root.join(".claude/settings.json"))?;
     strip(&root.join(".codex/hooks.json"))?;
     let hook = git_hook(root);
-    if std::fs::read_to_string(&hook).is_ok_and(|text| text.contains("atelier hook landing-gate.py")) {
+    if std::fs::read_to_string(&hook).is_ok_and(|text| text.starts_with(GUARD_MARK)) {
         std::fs::remove_file(&hook).map_err(|error| format!("could not remove {}: {error}", hook.display()))?;
     }
     Ok(())
@@ -140,7 +145,12 @@ fn git_hook(root: &Path) -> PathBuf {
 fn guard(root: &Path) -> Result<(), String> {
     let path = git_hook(root);
     if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|error| error.to_string())?; }
-    let body = "#!/bin/sh\n[ \"$1\" = prepared ] || exit 0\ncommand -v atelier >/dev/null 2>&1 || exit 0\nexec atelier hook landing-gate.py \"$@\"\n";
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        if !existing.starts_with(GUARD_MARK) {
+            return Err(format!("kept {} unchanged because it is a project-owned Git hook", path.display()));
+        }
+    }
+    let body = format!("{GUARD_MARK}\n#!/bin/sh\n[ \"$1\" = prepared ] || exit 0\ncommand -v atelier >/dev/null 2>&1 || exit 0\nexec atelier hook landing-gate \"$@\"\n");
     std::fs::write(&path, body).map_err(|error| format!("could not write {}: {error}", path.display()))?;
     #[cfg(unix)] {
         use std::os::unix::fs::PermissionsExt;
@@ -149,4 +159,34 @@ fn guard(root: &Path) -> Result<(), String> {
         std::fs::set_permissions(&path, permissions).map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_machinery_hook_wiring_preserves_neighboring_commands() {
+        let mut value = json!({"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[
+            {"type":"command","command":"my-project-hook"},
+            {"type":"command","command":"python3 /old/machinery/hooks/board-status-gate.py"}
+        ]}]}});
+        strip_value(&mut value);
+        let commands = value["hooks"]["PreToolUse"][0]["hooks"].as_array().unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0]["command"], "my-project-hook");
+    }
+
+    #[test]
+    fn native_machinery_guard_refuses_to_overwrite_a_project_hook() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join(".git")).unwrap();
+        let hooks = root.path().join(".git/hooks");
+        std::fs::create_dir_all(&hooks).unwrap();
+        let path = hooks.join("reference-transaction");
+        std::fs::write(&path, "#!/bin/sh\necho project\n").unwrap();
+        let error = guard(root.path()).unwrap_err();
+        assert!(error.contains("project-owned"));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "#!/bin/sh\necho project\n");
+    }
 }

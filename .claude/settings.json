@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "atelier hook workflow-gate.py"
+            "command": "atelier hook workflow-gate"
           }
         ]
       },
@@ -16,15 +16,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "atelier hook board-actor.py"
+            "command": "atelier hook board-actor"
           },
           {
             "type": "command",
-            "command": "atelier hook board-merge-gate.py"
+            "command": "atelier hook board-merge-gate"
           },
           {
             "type": "command",
-            "command": "atelier hook board-status-gate.py"
+            "command": "atelier hook board-status-gate"
           }
         ]
       }
@@ -35,7 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "atelier hook board-touch.py"
+            "command": "atelier hook board-touch"
           }
         ]
       },
@@ -48,13 +48,13 @@
         ]
       }
     ],
-    "SessionStart": [{ "matcher": "", "hooks": [{ "type": "command", "command": "atelier hook board-prime.py" }] }],
+    "SessionStart": [{ "matcher": "", "hooks": [{ "type": "command", "command": "atelier hook board-prime" }] }],
     "SubagentStop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "atelier hook board-touch.py"
+            "command": "atelier hook board-touch"
           }
         ]
       }
@@ -62,10 +62,6 @@
     "UserPromptSubmit": [
       {
         "hooks": [
-          {
-            "type": "command",
-            "command": "atelier hook board-push.py"
-          },
           {
             "type": "command",
             "command": "atelier hook doing"
@@ -78,11 +74,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "atelier hook completion-gate.py"
-          },
-          {
-            "type": "command",
-            "command": "atelier hook board-gate.py"
+            "command": "atelier hook board-push"
           },
           {
             "type": "command",
@@ -94,6 +86,10 @@
     "Stop": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "atelier hook board-gate"
+          },
           {
             "type": "command",
             "command": "atelier hook doing"

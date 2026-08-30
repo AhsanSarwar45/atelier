@@ -5,9 +5,10 @@ import { Download, ExternalLink, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { request } from '@/lib/api';
+import { onBootstrap } from '@/workbench/live-wire';
 
 interface ToolStatus {
-  tool: 'git' | 'bd' | 'claude' | 'codex';
+  tool: 'git' | 'bd' | 'claude' | 'codex' | 'browser';
   requiredFor: string;
   found: boolean;
   path: string | null;
@@ -21,6 +22,7 @@ const docs: Record<ToolStatus['tool'], string> = {
   bd: 'https://github.com/gastownhall/beads',
   claude: 'https://docs.anthropic.com/en/docs/claude-code',
   codex: 'https://developers.openai.com/codex/cli',
+  browser: 'https://www.chromium.org/getting-involved/download-chromium/',
 };
 
 export function DependenciesSettings() {
@@ -40,14 +42,11 @@ export function DependenciesSettings() {
 
   useEffect(() => { void load().catch((e) => setError(e instanceof Error ? e.message : String(e))); }, [load]);
   useEffect(() => {
-    if (typeof EventSource === 'undefined') return;
-    const events = new EventSource('/api/live?bootstrap=1');
-    events.addEventListener('bootstrap', (event) => {
-      const update = JSON.parse((event as MessageEvent).data) as { phase: string; detail: string };
+    return onBootstrap((data) => {
+      const update = JSON.parse(data) as { phase: string; detail: string };
       setProgress(update.detail);
       if (update.phase === 'complete') void load();
     });
-    return () => events.close();
   }, [load]);
 
   async function save(tool: string) {
@@ -64,12 +63,15 @@ export function DependenciesSettings() {
   }
 
   async function installBd() {
-    if (!window.confirm('Download the latest verified Beads CLI and install it in ~/.beads/bin?')) return;
-    setBusy('bd'); setError(null); setProgress('Starting Beads installation…');
+    if (!window.confirm('Download the latest verified task tracker CLI and install it in ~/.beads/bin?')) return;
+    setBusy('bd'); setError(null); setProgress('Starting tracker installation…');
     try {
-      const response = await request('/api/environment/bd/install', { method: 'POST' });
+      const response = await request('/api/environment/bd/install', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ consent: true }),
+      });
       const answer = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(answer.error ?? 'Beads installation failed');
+      if (!response.ok) throw new Error(answer.error ?? 'Tracker installation failed');
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(null); }

@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const GATES: &[&str] = &[
+    "workflow-gate", "board-actor", "board-merge-gate", "board-status-gate",
+    "wait-gate", "board-touch", "board-prime", "board-gate", "landing-gate",
     "workflow-gate.py", "board-actor.py", "board-merge-gate.py",
     "board-status-gate.py", "wait-gate.py", "board-touch.py",
     "board-prime.py", "board-gate.py", "landing-gate.py",
@@ -22,14 +24,14 @@ pub fn run(name: &str) -> i32 {
     if std::io::stdin().read_to_string(&mut input).is_err() { return 0; }
     let data: Value = serde_json::from_str(&input).unwrap_or_else(|_| json!({}));
     let output = match name {
-        "board-actor.py" => actor(&data),
-        "workflow-gate.py" => workflow(&data),
-        "board-merge-gate.py" | "landing-gate.py" => merge_gate(&data),
-        "board-status-gate.py" => status_gate(&data),
-        "board-touch.py" => { touch(&data); None },
-        "board-prime.py" => prime(&data),
-        "board-gate.py" => stop_gate(&data),
-        "wait-gate.py" => { wait_warning(&data); None },
+        "board-actor" | "board-actor.py" => actor(&data),
+        "workflow-gate" | "workflow-gate.py" => workflow(&data),
+        "board-merge-gate" | "board-merge-gate.py" | "landing-gate" | "landing-gate.py" => merge_gate(&data),
+        "board-status-gate" | "board-status-gate.py" => status_gate(&data),
+        "board-touch" | "board-touch.py" => { touch(&data); None },
+        "board-prime" | "board-prime.py" => prime(&data),
+        "board-gate" | "board-gate.py" => stop_gate(&data),
+        "wait-gate" | "wait-gate.py" => { wait_warning(&data); None },
         // Presentation and interaction-style hooks are deliberately retired.
         // Existing joined projects may still name them, so they answer here
         // rather than falling through to a Python script.
@@ -260,5 +262,23 @@ fn wait_warning(data: &Value) {
     let text = shell(data);
     if text.contains("sleep ") && (text.contains("while ") || text.contains("until ")) {
         eprintln!("warning: this foreground polling loop can consume an agent turn; use a background command when practical");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_machinery_updated_hook_input_is_an_explicit_allow() {
+        let value = pretool("allow", "board identity", Some(json!({"command":"bd --actor s-test show x-1"})));
+        assert_eq!(value["hookSpecificOutput"]["permissionDecision"], "allow");
+        assert!(value["hookSpecificOutput"]["updatedInput"].is_object());
+    }
+
+    #[test]
+    fn native_machinery_ticket_prose_is_not_a_hard_gate() {
+        let data = json!({"tool_name":"Bash","tool_input":{"command":"bd create --title 'Fix duplicate cards'"}});
+        assert!(status_gate(&data).is_none());
     }
 }

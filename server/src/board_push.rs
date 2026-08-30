@@ -9,10 +9,10 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-pub const GATE: &str = "board-push.py";
+pub const GATE: &str = "board-push";
 
 pub fn is_ours(name: &str) -> bool {
-    name == GATE
+    name == GATE || name == "board-push.py"
 }
 
 pub fn run() -> i32 {
@@ -50,11 +50,11 @@ fn board_root(cwd: &Path) -> PathBuf {
     } else {
         cwd.parent().unwrap_or(cwd)
     };
-    let common = Command::new("git")
+    let common = crate::routes::find_git().and_then(|git| Command::new(git)
         .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .current_dir(here)
         .output()
-        .ok()
+        .ok())
         .filter(|output| output.status.success())
         .map(|output| PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()))
         .filter(|path| !path.as_os_str().is_empty());

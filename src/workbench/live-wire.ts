@@ -64,6 +64,7 @@ interface ChatListener {
 const boards = new Map<string, Set<BoardListener>>();
 const workbenchers = new Set<WorkbenchListener>();
 const chats = new Map<string, Set<ChatListener>>();
+const bootstrappers = new Set<(data: string) => void>();
 
 let source: WebSocket | null = null;
 /** The shape the open connection was opened with, so a change is visible. */
@@ -96,6 +97,7 @@ function shape(): string {
   const params = new URLSearchParams();
   if (boards.size > 0) params.set('board', Array.from(boards.keys()).join('\n'));
   if (workbenchers.size > 0) params.set('workbench', '1');
+  if (bootstrappers.size > 0) params.set('bootstrap', '1');
   const chat = openChat();
   if (chat) {
     params.set('chat', chat);
@@ -213,6 +215,9 @@ function heard(raw: string): void {
     case 'workbench':
       workbenchers.forEach((w) => w.frame(said));
       return;
+    case 'bootstrap':
+      bootstrappers.forEach((tell) => tell(said));
+      return;
     case 'chat': {
       const chat = frame.scope;
       if (chat) chats.get(chat)?.forEach((c) => c.event(said));
@@ -247,7 +252,7 @@ function dropped(): void {
 }
 
 function nothingWanted(): boolean {
-  return boards.size === 0 && workbenchers.size === 0 && chats.size === 0;
+  return boards.size === 0 && workbenchers.size === 0 && chats.size === 0 && bootstrappers.size === 0;
 }
 
 /** Opens the one connection, or reopens it in the shape now wanted. */
@@ -359,6 +364,16 @@ export function onWorkbench(listener: WorkbenchListener): () => void {
   };
 }
 
+/** Watch dependency-install progress on the window's existing connection. */
+export function onBootstrap(tell: (data: string) => void): () => void {
+  bootstrappers.add(tell);
+  reshape();
+  return () => {
+    bootstrappers.delete(tell);
+    reshape();
+  };
+}
+
 /** Watch one chat: the conversation as it stands, then the live tail. */
 export function onChat(chat: string, listener: ChatListener): () => void {
   const listeners = chats.get(chat) ?? new Set<ChatListener>();
@@ -390,6 +405,7 @@ export function forgetEverything(): void {
   boards.clear();
   workbenchers.clear();
   chats.clear();
+  bootstrappers.clear();
   close();
   if (again !== null) {
     clearTimeout(again);

@@ -376,7 +376,7 @@ async fn serve(open_browser: bool) {
 
     // Initialize the database
     let database = Arc::new(db::Database::new().expect("Failed to initialize database"));
-    for tool in ["git", "bd", "claude", "codex"] {
+    for tool in ["git", "bd", "claude", "codex", "browser"] {
         if let Ok(Some(path)) = database.setting(&format!("tool.{tool}.path")) {
             routes::set_tool_override(tool, Some(std::path::PathBuf::from(path)));
         }

@@ -251,12 +251,6 @@ fn validate_action(action: &Value, at: usize) -> Result<(), String> {
 }
 
 pub fn browser_executable() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("ATELIER_BROWSER_PATH")
-        .map(PathBuf::from)
-        .filter(|p| p.is_file())
-    {
-        return Some(path);
-    }
     let names: &[&str] = if cfg!(target_os = "macos") {
         &[
             "google-chrome",
@@ -268,6 +262,9 @@ pub fn browser_executable() -> Option<PathBuf> {
     } else {
         &["google-chrome", "chromium", "chromium-browser"]
     };
+    if let Some(path) = crate::routes::find_tool("browser", names) {
+        return Some(path);
+    }
     for name in names {
         let path = Path::new(name);
         if path.is_absolute() && path.is_file() {

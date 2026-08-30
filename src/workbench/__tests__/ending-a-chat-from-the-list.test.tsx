@@ -193,7 +193,8 @@ describe('clicking it', () => {
 
     await act(async () => void fireEvent.click(closeOn('Another chat')!));
 
-    expect(asked).toEqual([{ type: 'session.close', sessionId: 'other' }]);
+    expect(asked.filter((command) => command.type !== 'providers.list'))
+      .toEqual([{ type: 'session.close', sessionId: 'other' }]);
   });
 
   it('does not open the chat it is closing', async () => {

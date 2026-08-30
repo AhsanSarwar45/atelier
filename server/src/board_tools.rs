@@ -102,8 +102,10 @@ fn job(rest: &[String]) -> Result<i32, String> {
     }
     if action == "cancel" {
         let id = rest.get(1).ok_or_else(|| "board/job cancel needs an id".to_string())?;
-        let reason = flag(rest, "--reason").unwrap_or_else(|| "cancelled by manager".into());
-        print!("{}", bd(&root, &["close".into(), id.clone(), "--force".into(), "--reason".into(), reason])?);
+        let reason = flag(rest, "--reason").filter(|reason| !reason.trim().is_empty())
+            .ok_or_else(|| "board/job cancel needs --reason explaining why the work is being dropped".to_string())?;
+        cancel_tree(&root, id, &reason)?;
+        println!("{id} cancelled");
         return Ok(0);
     }
     if action == "upgrade" {
@@ -160,6 +162,24 @@ fn job(rest: &[String]) -> Result<i32, String> {
     for item in items { println!("{}", make_item(&root, &id, &item, &area, &kind, &priority)?); }
     advance_goal(&root, &id)?;
     Ok(0)
+}
+
+fn children(root: &Path, id: &str) -> Result<Vec<Value>, String> {
+    let value: Value = serde_json::from_str(&bd(root, &["list".into(), "--parent".into(), id.into(),
+        "--status".into(), "all".into(), "--limit".into(), "0".into(), "--json".into()])?)
+        .map_err(|error| format!("bd returned unreadable children for {id}: {error}"))?;
+    Ok(value.as_array().cloned().unwrap_or_default())
+}
+
+fn cancel_tree(root: &Path, id: &str, reason: &str) -> Result<(), String> {
+    for child in children(root, id)? {
+        if child["status"].as_str() != Some("closed") {
+            if let Some(child_id) = child["id"].as_str() { cancel_tree(root, child_id, reason)?; }
+        }
+    }
+    bd(root, &["update".into(), id.into(), "--add-label".into(), "cancelled".into()])?;
+    bd(root, &["close".into(), id.into(), "--force".into(), "--reason".into(), format!("cancelled: {reason}")])?;
+    Ok(())
 }
 
 fn card(root: &Path, id: &str) -> Result<Value, String> {
@@ -266,10 +286,23 @@ fn land(rest: &[String]) -> Result<i32, String> {
     let id = rest.first().ok_or_else(|| "board/land needs a card id".to_string())?;
     let work = root()?;
     let item = card(&work, id)?;
-    let goal = item["parent"].as_str().or_else(|| item["parent_id"].as_str()).map(str::to_string);
+    let goal = labels(&item).iter().find_map(|label| label.strip_prefix("of:"))
+        .or_else(|| item["parent"].as_str()).or_else(|| item["parent_id"].as_str())
+        .unwrap_or(id).to_string();
     if !git(&work, &["status", "--porcelain"])?.is_empty() { return Err("the worktree has uncommitted changes".into()); }
     let branch = git(&work, &["branch", "--show-current"])?;
     let landing = landing_name(&work);
+    if branch == landing { return Err(format!("{landing} is the landing branch; run board/land from the branch carrying the work")); }
+    let subjects = git(&work, &["log", "--format=%s", &format!("{landing}..{branch}")])?;
+    if !subjects.lines().any(|subject| subject_names(subject, id)) {
+        return Err(format!("no commit subject on {branch} names {id}"));
+    }
+    let open_work: Vec<Value> = children(&work, &goal)?.into_iter().filter(|row| {
+        row["status"].as_str() != Some("closed") && labels(row).iter().any(|label| *label == "step:work")
+    }).collect();
+    let carried: Vec<String> = open_work.iter().filter_map(|row| row["id"].as_str())
+        .filter(|work_id| subjects.lines().any(|subject| subject_names(subject, work_id)))
+        .map(str::to_string).collect();
     git(&work, &["rebase", &landing])?;
     let main = main_copy(&work, &landing)?;
     let actor = std::env::var("BEADS_ACTOR").unwrap_or_else(|_| "atelier-land".into());
@@ -277,10 +310,21 @@ fn land(rest: &[String]) -> Result<i32, String> {
     let merged = git(&main, &["merge", "--ff-only", &branch]);
     let _ = bd(&work, &["--actor".into(), actor.clone(), "merge-slot".into(), "release".into()]);
     merged?;
-    bd(&work, &["--actor".into(), actor, "close".into(), id.clone(), "--reason".into(), format!("landed on {landing}")])?;
-    if let Some(goal) = goal { advance_goal(&work, &goal)?; }
-    println!("landed {id} on {landing}");
+    for work_id in &carried {
+        bd(&work, &["--actor".into(), actor.clone(), "close".into(), work_id.clone(),
+            "--reason".into(), format!("commit naming {work_id} landed on {landing}")])?;
+    }
+    advance_goal(&work, &goal)?;
+    if carried.is_empty() {
+        println!("landed {id} on {landing}; closed nothing because no open work-item id was named by a landed commit subject");
+    } else {
+        println!("landed {id} on {landing}; closed {}", carried.join(", "));
+    }
     Ok(0)
+}
+
+fn subject_names(subject: &str, id: &str) -> bool {
+    card_ids(subject).iter().any(|word| word == id)
 }
 
 fn manifest(root: &Path) -> Result<crate::project_manifest::ProjectManifest, String> {
@@ -314,6 +358,12 @@ fn result_token(name: &str, output: &str, ok: bool) -> String {
     }
     if !ok && failed == 0 { failed = 1; }
     if passed == 0 && failed == 0 { format!("{name}=ran-ok") } else { format!("{name}={passed}/{failed}") }
+}
+
+fn card_ids(text: &str) -> Vec<String> {
+    text.split(|character: char| !(character.is_ascii_alphanumeric() || character == '-' || character == '.'))
+        .filter(|word| word.contains('-') && word.chars().any(|character| character.is_ascii_digit()))
+        .map(str::to_string).collect()
 }
 
 fn checks(rest: &[String]) -> Result<i32, String> {
@@ -479,4 +529,22 @@ fn review(rest: &[String]) -> Result<i32, String> {
         println!("filed findings: {}", made.join(", "));
     }
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_machinery_commit_subjects_name_exact_cards_only() {
+        assert!(subject_names("bw-one.12: finish native machinery", "bw-one.12"));
+        assert!(!subject_names("bw-one.123: a different card", "bw-one.12"));
+        assert!(!subject_names("mention bw-one.12 only in a body we did not pass", "bw-one.1"));
+    }
+
+    #[test]
+    fn native_machinery_prose_preferences_do_not_change_the_required_spine() {
+        let steps = chosen_spine(&["--steps".into(), "design,review".into()]);
+        assert_eq!(steps, ["design", "work", "checks", "review", "land"]);
+    }
 }

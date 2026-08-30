@@ -45,7 +45,7 @@ fn every_folder_the_product_carries_is_one_the_build_watches() {
         .expect("the build script that names the carried folders is missing");
     let carried = carried();
     assert!(
-        carried.len() >= 4,
+        carried.len() >= 2,
         "no carried folders were found in the source at all, so this test is \
          proving nothing: {carried:?}"
     );

@@ -12,6 +12,12 @@ scripts.
 Before changing repository files, find an existing ready card with `bd ready`,
 `bd list`, or `bd search`. Claim the ready leaf in its isolated worktree.
 
+```bash
+git -C . worktree add worktrees/WORK-ID -b WORK-ID
+cd worktrees/WORK-ID
+bd update WORK-ID --claim
+```
+
 Create work with the native command:
 
 ```bash

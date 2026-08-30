@@ -29,8 +29,11 @@ fn installed_machinery_contains_no_interpreter_scripts() {
     while let Some(directory) = pending.pop() {
         for entry in std::fs::read_dir(directory).unwrap() {
             let path = entry.unwrap().path();
-            if path.is_dir() { pending.push(path); continue; }
-            assert!(!matches!(path.extension().and_then(|part| part.to_str()), Some("py" | "js" | "mjs" | "cjs" | "ts")),
+            if path.is_dir() {
+                if path.file_name().and_then(|name| name.to_str()) != Some("__pycache__") { pending.push(path); }
+                continue;
+            }
+            assert!(!matches!(path.extension().and_then(|part| part.to_str()), Some("py" | "pyc" | "pyo" | "js" | "mjs" | "cjs" | "ts")),
                 "runtime interpreter source remains: {}", path.display());
         }
     }
