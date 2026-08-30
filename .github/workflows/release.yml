@@ -83,7 +83,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path stage | Out-Null
           Copy-Item "server/target/${{ matrix.target }}/release/atelier.exe" stage/atelier.exe
           Copy-Item "nodedir/$base/node.exe" stage/node.exe
-          Compress-Archive -Path stage/* -DestinationPath "${{ matrix.artifact }}.zip"
+          tar -czf "${{ matrix.artifact }}.tar.gz" -C stage atelier.exe node.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

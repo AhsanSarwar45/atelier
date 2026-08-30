@@ -14,8 +14,9 @@
 # archive, and checks the Node it carries reports the pinned version -- the one
 # thing a build machine cannot lie about and still ship a working chat.
 #
-# Windows is bundled by the workflow itself (a .zip, in PowerShell); this script
-# is the three Unix platforms and the self-test.
+# Windows is bundled by the workflow itself (a .tar.gz built with tar, after a
+# PowerShell SHA-256 check of Node's zip); this script is the three Unix
+# platforms and the self-test.
 set -euo pipefail
 
 # The one runtime this release carries. Kept here as the single source the
