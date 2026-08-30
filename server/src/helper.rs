@@ -771,7 +771,7 @@ mod tests {
     }
 
     #[test]
-    fn screen_check_recipe_carries_only_its_explicit_state_and_upload_files() {
+    fn screen_check_contract_carries_only_explicit_recipe_local_files() {
         let temporary = tempfile::tempdir().unwrap();
         let state = temporary.path().join("state.json");
         let upload = temporary.path().join("proof.txt");

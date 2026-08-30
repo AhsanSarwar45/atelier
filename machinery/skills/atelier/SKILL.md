@@ -176,6 +176,44 @@ Atelier app. The app stores only content-addressed evidence and returns asset
 references. Run `atelier tool screen-check --help` for concise syntax or
 `atelier tool screen-check --schema` for its machine-readable contract.
 
+Ask the command to choose when the route is unclear:
+`atelier tool screen-check plan [--target URL|FILE] [--window-id ID] [--recipe FILE]`.
+Follow the returned next command; do not improvise a broader capture.
+
+| Need | Use |
+|---|---|
+| Public page already in the right state | `--type web --target URL` |
+| Login, cookies, headers, clicks, typing, navigation, uploads, or explicit waits | `--recipe FILE` |
+| Native app, simulator, remote desktop, or an authenticated browser already open | Discover and select one window ID, then `--type window --window-id ID` |
+| Pixels prepared by another authorized tool | `--type image --target FILE` |
+| Before and after already captured | `compare --before FILE --after FILE` |
+
+Browser recipes run in a fresh profile and allow only bounded declarative
+actions—never arbitrary script execution. Authentication must be explicit via
+recipe-local storage state, headers, or HTTP credentials. Put the recipe,
+storage state, and upload files in one private temporary directory; references
+outside that directory are refused. The result never repeats typed values,
+credentials, headers, cookies, or storage contents.
+
+```json
+{
+  "url": "http://127.0.0.1:4173/login",
+  "auth": { "storage_state": "state.json" },
+  "actions": [
+    { "action": "fill", "selector": "#email", "value": "person@example.test" },
+    { "action": "fill", "selector": "#password", "value": "secret" },
+    { "action": "click", "selector": "button[type=submit]" },
+    { "action": "wait_for_text", "text": "Dashboard" }
+  ]
+}
+```
+
+Supported actions are `goto`, `click`, `fill`, `type`, `press`, `select`,
+`check`, `uncheck`, `hover`, `upload`, `wait`, `wait_for`, and
+`wait_for_text`. Use selectors tied to accessible names or stable test IDs;
+avoid generated classes and screen coordinates. Keep secrets in a temporary
+recipe or storage-state file, never in a shell argument or final response.
+
 - Capture without judgment:
   `atelier tool screen-check capture --type web --target URL [--viewport 1280x800] [--theme light|dark|system]`
   or `capture --type image --target FILE`.

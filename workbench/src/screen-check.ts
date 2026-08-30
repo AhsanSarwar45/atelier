@@ -126,20 +126,48 @@ function validateArgs(args: string[]): void {
 
 function parsed(args: string[]): { action: string; type: string; provider: 'claude' | 'codex'; expect?: string } {
   const action = args[0] ?? '';
-  if (!['capture', 'check', 'compare'].includes(action)) throw new Error('usage: atelier tool screen-check capture|check|compare [options]');
+  if (!['plan', 'capture', 'check', 'compare'].includes(action)) throw new Error('usage: atelier tool screen-check plan|capture|check|compare [options]');
   validateArgs(args);
   const type = value(args, '--type') ?? (action === 'compare' ? 'image' : 'auto');
   if (!['auto', 'web', 'window', 'image'].includes(type)) throw new Error('--type must be auto, web, window, or image');
   const provider = value(args, '--provider') ?? 'claude';
   if (!['claude', 'codex'].includes(provider)) throw new Error('--provider must be claude or codex');
   const expect = value(args, '--expect');
-  if (action !== 'capture' && !expect) throw new Error('--expect is required');
+  if (['check', 'compare'].includes(action) && !expect) throw new Error('--expect is required');
   const theme = value(args, '--theme');
   if (theme && !['light', 'dark', 'system'].includes(theme)) throw new Error('--theme must be light, dark, or system');
   if (action === 'compare' && (value(args, '--target') || value(args, '--window-id') || type !== 'image')) {
     throw new Error('compare accepts only uploaded --before and --after images');
   }
   return { action, type, provider: provider as 'claude' | 'codex', expect };
+}
+
+function capturePlan(args: string[], files: Uploaded): Record<string, unknown> {
+  const recipeName = value(args, '--recipe'); const target = value(args, '--target'); const windowId = value(args, '--window-id');
+  if (recipeName) {
+    const recipe = parseBrowserRecipe(uploaded(recipeName, files, '--recipe'));
+    return { recommended_type: 'web-recipe', reason: 'The request includes explicit browser state and actions.',
+      next_command: `atelier tool screen-check capture --recipe ${recipeName}`,
+      preparation: { authenticated: Boolean(recipe.auth), actions: recipe.actions?.length ?? 0 },
+      safeguards: ['fresh browser profile', 'bounded actions only', 'recipe-local files only', 'secrets omitted from diagnostics'] };
+  }
+  if (windowId) return { recommended_type: 'window', reason: 'An explicit native window ID was supplied.',
+    next_command: `atelier tool screen-check capture --type window --window-id ${windowId}`,
+    safeguards: ['one explicit window only', 'no whole-display fallback', 'permission failures stop capture'] };
+  if (target && /^https?:\/\//.test(target)) return { recommended_type: 'web', reason: 'A direct public URL needs no prepared interaction state.',
+    next_command: `atelier tool screen-check capture --type web --target ${target}`,
+    upgrade_when: 'Use --recipe FILE when authentication, navigation, clicks, typing, uploads, or application-specific waits are needed.',
+    safeguards: ['fresh browser profile', 'no inherited cookies'] };
+  if (target && files[target]) return { recommended_type: 'image', reason: 'The target is an explicitly uploaded image.',
+    next_command: `atelier tool screen-check capture --type image --target ${target}`,
+    safeguards: ['input magic validated', 'content-addressed durable evidence'] };
+  return { recommended_type: 'choose', reason: 'No unambiguous capture target was supplied.',
+    choices: [
+      { use: 'web recipe', when: 'authentication, interaction, state preparation, deterministic waits, element or full-page capture is required' },
+      { use: 'web URL', when: 'a public page is already in the exact state to capture' },
+      { use: 'window', when: 'a native, simulator, remote-desktop or already-authenticated browser window must be captured' },
+      { use: 'image', when: 'another authorized tool already prepared the pixels' },
+    ] };
 }
 
 function uploaded(path: string | undefined, files: Uploaded, label: string): Buffer {
@@ -273,7 +301,9 @@ async function capture(args: string[], files: Uploaded): Promise<Capture> {
 export async function screenCheckUploaded(args: string[], files: Uploaded, media: string, judge: VisualJudge = defaultVisualJudge): Promise<Record<string, unknown>> {
   if (args.length === 1 && ['help', '--help', '-h'].includes(args[0])) return { help: SCREEN_CHECK_HELP };
   if (args.length === 1 && args[0] === '--schema') return { schema: SCREEN_CHECK_SCHEMA };
-  const request = parsed(args); let captures: Capture[];
+  const request = parsed(args);
+  if (request.action === 'plan') return capturePlan(args, files);
+  let captures: Capture[];
   if (request.action === 'compare') captures = [
     { bytes: uploaded(value(args, '--before'), files, '--before'), label: 'Before', diagnostics: [] },
     { bytes: uploaded(value(args, '--after'), files, '--after'), label: 'After', diagnostics: [] },
@@ -286,12 +316,19 @@ export async function screenCheckUploaded(args: string[], files: Uploaded, media
 }
 
 export const SCREEN_CHECK_SCHEMA = {
-  actions: ['capture', 'check', 'compare'], capture_types: ['auto', 'web', 'window', 'image'],
+  actions: ['plan', 'capture', 'check', 'compare'], capture_types: ['auto', 'web', 'window', 'image'],
   providers: ['claude', 'codex'], verdicts: ['PASS', 'FAIL', 'INDETERMINATE'],
   required: { capture: ['target or window-id'], check: ['expect', 'target or window-id'], compare: ['expect', 'before', 'after'] },
+  browser_recipe: { required: ['url'], optional: ['timeout_ms', 'viewport', 'theme', 'auth', 'actions'],
+    auth: ['storage_state', 'headers', 'http_credentials'],
+    actions: ['goto', 'click', 'fill', 'type', 'press', 'select', 'check', 'uncheck', 'hover', 'upload', 'wait', 'wait_for', 'wait_for_text'],
+    limits: { actions: 50, timeout_ms: 120000, wait_ms: 30000 } },
 };
 
-export const SCREEN_CHECK_HELP = `atelier tool screen-check capture|check [--type auto|web|window|image] [--target URL|FILE] [--window-id ID] [--recipe FILE]
+export const SCREEN_CHECK_HELP = `atelier tool screen-check plan [--target URL|FILE] [--window-id ID] [--recipe FILE]
+atelier tool screen-check capture|check [--type auto|web|window|image] [--target URL|FILE] [--window-id ID] [--recipe FILE]
   [--expect TEXT] [--provider claude|codex] [--viewport WIDTHxHEIGHT] [--theme light|dark|system]
 atelier tool screen-check compare --before FILE --after FILE --expect TEXT [--provider claude|codex]
-Use --schema for the machine-readable contract. Window capture always requires an explicit window ID.`;
+Use plan when the capture route is unclear and --schema for the complete machine-readable contract.
+A browser recipe supports explicit authentication and bounded navigation, click, fill, type, key, selection, check, hover, upload and wait steps.
+Window capture always requires an explicit window ID. No mode inherits a personal browser profile or captures a whole display.`;
