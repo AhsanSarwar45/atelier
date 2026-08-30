@@ -170,7 +170,7 @@ export function UsageView({ brand = 'claude', onClose }: { brand?: Brand; onClos
 
         {usage.credits && (
           <Panel inset="md" className="text-sm" data-testid="usage-credits" data-enabled={usage.credits.enabled}>
-            <h3 className="text-sm font-semibold text-foreground">Extra usage credits</h3>
+            <h3 className="text-sm font-semibold text-foreground">Overage</h3>
             <p className="mt-1 text-xs text-muted-foreground">
               {usage.credits.enabled
                 ? `${usage.credits.percent === null ? 'Available' : `${percentReads(usage.credits.percent)} used`}${
@@ -178,7 +178,7 @@ export function UsageView({ brand = 'claude', onClose }: { brand?: Brand; onClos
                       ? ` · ${usage.credits.currency ?? ''}${usage.credits.used ?? 0} of ${usage.credits.currency ?? ''}${usage.credits.limit}`
                       : ''
                   }`
-                : 'Off — work stops at the plan limit rather than spending past it.'}
+                : 'Off'}
             </p>
           </Panel>
         )}
@@ -187,10 +187,6 @@ export function UsageView({ brand = 'claude', onClose }: { brand?: Brand; onClos
           <Spending key={d.span} driving={d} />
         ))}
 
-        <p className="text-[11px] text-muted-foreground">
-          This is the whole account’s allowance, not this chat’s: every chat on this machine spends it, and every
-          chat shows the same figure. Read {clockReads(usage.at) ?? 'just now'}.
-        </p>
         </div>
       </div>
     </Overlay>
