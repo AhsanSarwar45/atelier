@@ -4,6 +4,7 @@
 //! the Node-to-Rust migration. Keep those contracts here while individual
 //! services move behind them.
 
+pub mod actor;
 pub mod projection;
 pub mod protocol;
 pub mod store;
