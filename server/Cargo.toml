@@ -13,7 +13,13 @@ axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.5", features = ["cors", "fs"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `preserve_order` keeps a settings object's keys in the order they were written,
+# so the session-context hook `personal.rs` merges into a provider's settings is
+# written back the way `machinery/join` (a Python dict) wrote it, not alphabetised.
+serde_json = { version = "1", features = ["preserve_order"] }
+# Reads the project registry (`projects.toml`) natively, so the mode lookup in
+# `rules.rs` no longer shells out to `machinery/join --mode`.
+toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 rust-embed = { version = "8", features = ["include-exclude", "debug-embed"] }

@@ -149,11 +149,9 @@ pub fn init(rest: &[String]) -> Result<i32, String> {
 /// Remove exact legacy Atelier-owned provider artifacts without joining a repository.
 pub fn install_personal() -> Result<i32, String> {
     let dir = install()?;
-    let join = dir.join(MACHINERY).join("join");
-    run_python(
-        &[join.display().to_string(), "--personal".to_string()],
-        &[(GATE_WORD, crate::identity::NAME)],
-    )
+    let homes = crate::personal::Homes::resolve()?;
+    crate::personal::install(&dir, &homes)?;
+    Ok(0)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -194,10 +192,19 @@ fn init_with(
         .map_err(|e| format!("that folder cannot be read: {e}"))?;
 
     let join = join_for(&root, &dir);
-    run_python(
-        &[join.display().to_string(), "--personal".to_string()],
-        &[(GATE_WORD, crate::identity::NAME)],
-    )?;
+    // Personal skills and hooks are pure filesystem work now, so this no longer
+    // needs Python and — mirroring `main.rs`'s service-install path — only warns
+    // rather than aborting init when it cannot be done (bw-oesd.1.3).
+    match crate::personal::Homes::resolve() {
+        Ok(homes) => {
+            if let Err(e) = crate::personal::install(&dir, &homes) {
+                eprintln!(
+                    "warning: Atelier's personal skills and hooks could not be installed: {e}"
+                );
+            }
+        }
+        Err(e) => eprintln!("warning: {e}"),
+    }
     let mode = match chosen {
         Some(mode) => mode,
         None => {
@@ -206,6 +213,17 @@ fn init_with(
         }
     };
     if mode == Mode::Chat {
+        // Removing a project's external Beads registration is the one board-only
+        // step chat-only setup still runs Python for. A chat project has no
+        // registration to remove, so on a machine without Python we warn and
+        // finish rather than abort (bw-oesd.1.3).
+        if crate::routes::find_python().is_none() {
+            eprintln!(
+                "warning: Python is not installed, so any external Beads registration for {} was left unchanged",
+                root.display()
+            );
+            return Ok(0);
+        }
         return run_python(
             &[
                 join.display().to_string(),
@@ -282,18 +300,19 @@ fn ask_for_mode(
 }
 
 fn mode_from(join: &Path, root: &Path) -> Result<Mode, String> {
-    let said = run_python_output(&[
-        join.display().to_string(),
-        "--mode".to_string(),
-        root.display().to_string(),
-    ])?;
-    match said.trim() {
-        "beads" => Ok(Mode::Beads),
-        "chat" => Ok(Mode::Chat),
-        other => Err(format!(
-            "Atelier could not determine this project's mode: {other}"
-        )),
-    }
+    // The registry lookup `join --mode` prints, done natively so determining a
+    // project's mode needs no Python (bw-oesd.1.2). `join` reads the machinery
+    // beside it and the personal data dir; so do we.
+    let machinery = join
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from(MACHINERY));
+    let data_dir = crate::identity::data_dir()
+        .ok_or_else(|| "this computer names no folder for Atelier's data".to_string())?;
+    Ok(match crate::registry::mode(root, &data_dir, &machinery) {
+        "beads" => Mode::Beads,
+        _ => Mode::Chat,
+    })
 }
 
 pub fn project_mode(rest: &[String]) -> Result<String, String> {
@@ -309,15 +328,6 @@ pub fn project_mode(rest: &[String]) -> Result<String, String> {
         Mode::Chat => "chat",
     }
     .into())
-}
-
-fn run_python_output(args: &[String]) -> Result<String, String> {
-    let python = python()?;
-    match Command::new(&python).args(args).output() {
-        Ok(out) if out.status.success() => Ok(String::from_utf8_lossy(&out.stdout).into_owned()),
-        Ok(out) => Err(String::from_utf8_lossy(&out.stderr).into_owned()),
-        Err(e) => Err(format!("{}: {e}", python.display())),
-    }
 }
 
 /// Run one session gate by name, on behalf of a project wired to a word.
