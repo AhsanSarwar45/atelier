@@ -74,9 +74,9 @@ fingerprint() {
   [ -n "$found" ] || die "$TAG lists no file called $file"
   printf '%s' "$found"
 }
-ARM=$(fingerprint atelier-darwin-arm64) || exit 1
-INTEL=$(fingerprint atelier-darwin-x64) || exit 1
-LINUX=$(fingerprint atelier-linux-x64) || exit 1
+ARM=$(fingerprint atelier-darwin-arm64.tar.gz) || exit 1
+INTEL=$(fingerprint atelier-darwin-x64.tar.gz) || exit 1
+LINUX=$(fingerprint atelier-linux-x64.tar.gz) || exit 1
 ok "three files, fingerprinted by the build itself"
 
 step "The recipe"
