@@ -115,9 +115,6 @@ fn word(ch: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use std::path::PathBuf;
-    use std::process::{Command, Stdio};
 
     #[test]
     fn completion_gate_refuses_only_explicit_deferral_language() {
@@ -138,40 +135,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn completion_gate_matches_the_python_gate_byte_for_byte() {
-        let Some(python) = crate::routes::find_python() else {
-            eprintln!("no python on this computer, so the two were not compared");
-            return;
-        };
-        let gate =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../machinery/hooks/completion-gate.py");
-        if !gate.is_file() {
-            eprintln!("no Python completion gate to compare against");
-            return;
-        }
-        for heard in [
-            r#"{"last_assistant_message":"A future agent can finish it."}"#,
-            r#"{"last_assistant_message":"I completed it in this session."}"#,
-            r#"{"last_assistant_message":"TODO for later"}"#,
-            r#"{"stop_hook_active":true,"last_assistant_message":"next session will finish"}"#,
-            r#"{"last_assistant_message":null}"#,
-        ] {
-            let mut child = Command::new(&python)
-                .arg(&gate)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .spawn()
-                .expect("run Python completion gate");
-            child
-                .stdin
-                .take()
-                .unwrap()
-                .write_all(heard.as_bytes())
-                .unwrap();
-            let theirs = child.wait_with_output().unwrap();
-            assert!(theirs.status.success());
-            assert_eq!(answer(heard).unwrap().as_bytes(), theirs.stdout, "{heard}");
-        }
-    }
 }

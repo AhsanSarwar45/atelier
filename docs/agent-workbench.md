@@ -1,5 +1,12 @@
 # Agent workbench
 
+> Runtime note (August 2026): the Node sidecar described in the historical
+> design below has been replaced by `server/src/workbench/`. Atelier drives
+> Claude Code and Codex directly from its Rust binary; no Node/npm runtime or
+> helper process is shipped or started. The wire contract and UI behavior below
+> remain authoritative, while sidecar-specific sections are implementation
+> history.
+
 The app becomes the place the owner talks to coding agents. Per project, two
 tabs: **Chat** and **Board**. A chat knows the cards it worked on, a card knows
 the chats that touched it, and a report links to both. Claude Code and OpenAI

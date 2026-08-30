@@ -1,6 +1,7 @@
 // Library entry point — exposes modules for integration tests.
 pub mod board_gate;
 pub mod board_push;
+pub mod board_tools;
 pub mod command_line;
 pub mod completion_gate;
 pub mod db;
@@ -10,6 +11,8 @@ pub mod dolt_lifecycle;
 pub mod handover;
 pub mod identity;
 pub mod laid_down;
+pub mod join;
+pub mod lifecycle;
 pub mod local_host;
 pub mod needs;
 pub mod personal;

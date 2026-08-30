@@ -41,6 +41,7 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"], defau
 base64 = "0.22"
 flate2 = "1"
 tar = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 # The fingerprints a release publishes for its own files, checked before
 # anything downloaded is kept (`src/published.rs`).
 sha2 = "0.10"

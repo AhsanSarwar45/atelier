@@ -67,7 +67,11 @@ impl NativeCodexSession {
             driver,
             session_id: session.id,
         };
-        native.persist(opened).await?;
+        if let Err(error) = native.persist(opened).await {
+            native.close().await;
+            if create { let _ = native.database.delete_session(native.session_id.clone()).await; }
+            return Err(error);
+        }
         Ok(native)
     }
 

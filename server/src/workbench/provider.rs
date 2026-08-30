@@ -162,11 +162,15 @@ struct ClaudeDriver {
 
 impl ClaudeDriver {
     async fn connect(database: ChatDb, session: Session, create: bool) -> Result<Self, String> {
+        let executable = std::env::var_os("CLAUDE_PATH").map(PathBuf::from)
+            .or_else(|| crate::routes::find_tool("claude", &[]))
+            .ok_or_else(|| "Claude Code is not installed. Install and sign in at https://docs.anthropic.com/en/docs/claude-code, then choose its path in Settings → Dependencies.".to_string())?;
         let mut options = ClaudeSessionOptions {
             cwd: PathBuf::from(&session.cwd), resume: session.external_id.clone(), model: session.model.clone(),
             permission_mode: Some(session.permission_mode.clone()), effort: session.effort.clone(), instructions: String::new(),
         };
-        let config = ClaudeTransportConfig::session(&options);
+        let mut config = ClaudeTransportConfig::session(&options);
+        config.executable = executable;
         let native = if create {
             NativeClaudeSession::start(database.clone(), config, session.clone()).await?
         } else {
@@ -234,8 +238,12 @@ struct CodexDriver {
 
 impl CodexDriver {
     async fn connect(database: ChatDb, session: Session, create: bool) -> Result<Self, String> {
+        let executable = std::env::var_os("CODEX_PATH").map(PathBuf::from)
+            .or_else(|| crate::routes::find_tool("codex", &[]))
+            .ok_or_else(|| "Codex CLI is not installed. Install and sign in at https://developers.openai.com/codex/cli, then choose its path in Settings → Dependencies.".to_string())?;
         let mut options = CodexStartOptions { cwd: PathBuf::from(&session.cwd), resume: session.external_id.clone(), model: session.model.clone(), permission_mode: session.permission_mode.clone(), effort: session.effort.clone(), collaboration_mode: session.collaboration_mode.clone(), instructions: String::new() };
-        let config = CodexTransportConfig::app_server(Path::new(&session.cwd));
+        let mut config = CodexTransportConfig::app_server(Path::new(&session.cwd));
+        config.executable = executable;
         let native = if create {
             NativeCodexSession::start(database.clone(), config.clone(), options.clone(), session.clone()).await?
         } else {

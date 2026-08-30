@@ -4,8 +4,8 @@
 //! Three things had to be true at once for a teammate to get a working project
 //! out of one install. The rules had to travel inside the binary, because a
 //! machine that has never held this repository has nowhere to read them from.
-//! They had to land in a shape the rules themselves already understand — `join`
-//! and `project.py` work out where they live from their own file's path.
+//! They land as provider-readable skills and worker instructions. Executable
+//! workflow logic lives in this binary.
 //! Provider-facing policy is injected when Atelier starts a session rather than
 //! placed where a provider scans the user's home. The gates a project ends up
 //! wired to could not be paths, because a path is one person's home folder
@@ -19,7 +19,6 @@
 use rust_embed::Embed;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// The board tools and the session gates, as they sit in the repository.
 ///
@@ -28,23 +27,19 @@ use std::process::Command;
 /// and project policy that do not belong to their machine.
 #[derive(Embed)]
 #[folder = "../machinery/"]
-#[exclude = "projects.toml"]
-#[exclude = "__pycache__/*"]
-#[exclude = "*/__pycache__/*"]
-#[exclude = "**/__pycache__/**"]
-#[exclude = "**/*.pyc"]
+#[include = "README.md"]
+#[include = "project.example.toml"]
+#[include = "skills/**"]
+#[include = "workers/*.md"]
 struct Machinery;
 
 /// Where the machinery lands under the rules folder.
 ///
-/// `project.py` reads its own file's path to find the registry beside it and
-/// `join` reads its own to find the gates, so this name is part of the
-/// contract and not a label.
+/// Kept as the stable location used by existing skill links.
 pub const MACHINERY: &str = "machinery";
 
 /// The word `join` writes into a project's gates instead of a path, when this
 /// program is the one running it.
-const GATE_WORD: &str = "ATELIER_GATE_WORD";
 
 const RETIRED_RULE_FILES: &[&str] = &[
     ".claude/agents/general-purpose.md",
@@ -100,38 +95,8 @@ pub fn install() -> Result<PathBuf, String> {
     let files = crate::laid_down::gather::<Machinery>(MACHINERY)?;
     crate::laid_down::install(&dir, &files)?;
     remove_retired_rule_files(&dir)?;
-    runnable(&dir, &files);
     Ok(dir)
 }
-
-/// Give back the execute bit to everything that is meant to be typed.
-///
-/// What travels in the binary is bytes and nothing else — a file's mode is not
-/// carried — so `machinery/board/job` arrives unrunnable and the board tools
-/// the gates tell a reader to type answer "permission denied". Anything opening
-/// with a shebang is something somebody runs, which is the whole rule.
-#[cfg(unix)]
-fn runnable(dir: &Path, files: &crate::laid_down::Carried) {
-    use std::os::unix::fs::PermissionsExt;
-    for (name, bytes) in files {
-        if !bytes.starts_with(b"#!") {
-            continue;
-        }
-        let dest = dir.join(name);
-        if let Ok(held) = std::fs::metadata(&dest) {
-            let mut mode = held.permissions();
-            if mode.mode() & 0o111 == 0o111 {
-                continue;
-            }
-            mode.set_mode(0o755);
-            let _ = std::fs::set_permissions(&dest, mode);
-        }
-    }
-}
-
-/// Windows runs a script by its extension, so there is no bit to give back.
-#[cfg(not(unix))]
-fn runnable(_dir: &Path, _files: &crate::laid_down::Carried) {}
 
 /// Set a project up: lay the rules down, then join that project to them.
 ///
@@ -210,9 +175,8 @@ fn init_with(
     let root = std::fs::canonicalize(where_.unwrap_or_else(|| ".".to_string()))
         .map_err(|e| format!("that folder cannot be read: {e}"))?;
 
-    let join = join_for(&root, &dir);
-    // Personal skills and hooks are pure filesystem work now, so this no longer
-    // needs Python and — mirroring `main.rs`'s service-install path — only warns
+    // Personal skills and hooks are pure filesystem work. Mirroring the service
+    // install path, failure warns
     // rather than aborting init when it cannot be done (bw-oesd.1.3).
     match crate::personal::Homes::resolve() {
         Ok(homes) => {
@@ -273,27 +237,9 @@ fn init_with(
         None => { crate::project_manifest::create(&root, &data_dir, storage, &manifest)?; }
     }
     if mode == Mode::Chat {
-        // Removing a project's external Beads registration is the one board-only
-        // step chat-only setup still runs Python for. A chat project has no
-        // registration to remove, so on a machine without Python we warn and
-        // finish rather than abort (bw-oesd.1.3).
-        if crate::routes::find_python().is_none() {
-            eprintln!(
-                "warning: Python is not installed, so any external Beads registration for {} was left unchanged",
-                root.display()
-            );
-            return Ok(0);
-        }
-        let code = run_python(
-            &[
-                join.display().to_string(),
-                "--chat-only".to_string(),
-                root.display().to_string(),
-            ],
-            &[],
-        )?;
-        if code == 0 { show_project(&root, &manifest)?; }
-        return Ok(code);
+        crate::join::remove(&root)?;
+        show_project(&root, &manifest)?;
+        return Ok(0);
     }
 
     // Only a Beads project belongs on the board screen. Creating its list is
@@ -304,18 +250,12 @@ fn init_with(
     // project working on the rules: joining either through the installed copy
     // would move it onto whatever version happens to be installed, which is
     // the one thing somebody editing the rules must not have happen to them.
-    let mine = root.join(MACHINERY).join("join");
-    let word: &[(&str, &str)] = match mine.is_file() {
-        true => &[],
-        // Named rather than pathed: what `join` writes into the project is a
-        // word every machine has, so the file it writes can be committed.
-        false => &[(GATE_WORD, crate::identity::NAME)],
-    };
-    let mut args: Vec<String> = vec![join.display().to_string(), root.display().to_string()];
-    args.extend(said);
-    let code = run_python(&args, word)?;
-    if code == 0 { show_project(&root, &manifest)?; }
-    Ok(code)
+    if !said.is_empty() {
+        eprintln!("warning: obsolete join arguments ignored: {}", said.join(" "));
+    }
+    crate::join::install(&root, &manifest)?;
+    show_project(&root, &manifest)?;
+    Ok(0)
 }
 
 fn ask_with_default(input: &mut dyn BufRead, output: &mut dyn Write, label: &str, default: &str) -> Result<String, String> {
@@ -342,15 +282,6 @@ fn ask_yes_no(input: &mut dyn BufRead, output: &mut dyn Write, label: &str, defa
 
 fn ask_repository_storage(input: &mut dyn BufRead, output: &mut dyn Write) -> Result<bool, String> {
     ask_yes_no(input, output, "Store shared settings in .atelier/project.toml?", false)
-}
-
-fn join_for(root: &Path, dir: &Path) -> PathBuf {
-    let mine = root.join(MACHINERY).join("join");
-    if mine.is_file() {
-        mine
-    } else {
-        dir.join(MACHINERY).join("join")
-    }
 }
 
 fn show_project(root: &Path, manifest: &crate::project_manifest::ProjectManifest) -> Result<(), String> {
@@ -423,10 +354,8 @@ pub fn hook(name: &str, rest: &[String]) -> Result<i32, String> {
     if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
         return Err(format!("`{name}` is not the name of a gate"));
     }
-    // The gates the program answers to itself. Everything else here is a
-    // script laid down beside the data and run with the reader's own python;
-    // these have to work on a computer that has no python at all, which is
-    // most of the computers this ships to (bw-14ij.1, bw-oesd.4.1).
+    // Every executable gate is native. Unknown legacy names stand down so a
+    // stale settings file can never make an interpreter a runtime dependency.
     if crate::doing::is_ours(name) {
         return Ok(crate::doing::run());
     }
@@ -436,30 +365,12 @@ pub fn hook(name: &str, rest: &[String]) -> Result<i32, String> {
     if crate::board_push::is_ours(name) {
         return Ok(crate::board_push::run());
     }
-    let mut looked = Vec::new();
-    let mut found = None;
-    for place in gate_places(name) {
-        if place.is_file() {
-            found = Some(place);
-            break;
-        }
-        looked.push(place);
+    if crate::lifecycle::is_ours(name) {
+        return Ok(crate::lifecycle::run(name));
     }
-    let Some(gate) = found else {
-        eprintln!(
-            "{}: no gate called `{name}` — looked in {}",
-            crate::identity::NAME,
-            looked
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-        return Ok(0);
-    };
-    let mut args = vec![gate.display().to_string()];
-    args.extend(rest.iter().cloned());
-    run_python(&args, &[])
+    eprintln!("{}: retired or unknown hook `{name}` stood down", crate::identity::NAME);
+    let _ = rest;
+    Ok(0)
 }
 
 /// Run one deliberately public workflow command from the installed rules.
@@ -474,71 +385,10 @@ pub async fn tool(name: &str, rest: &[String]) -> Result<i32, String> {
     if name == "screen-check" {
         return crate::workbench::cli::screen_check(rest).await;
     }
-    let dir = crate::identity::rules_dir()
-        .ok_or_else(|| "this computer names no folder for Atelier's working rules".to_string())?;
-    let script = tool_path(name, &dir)?;
-    if !script.is_file() {
-        return Err(format!(
-            "the installed workflow tool is missing: {}",
-            script.display()
-        ));
+    if let Some(result) = crate::board_tools::run(name, rest) {
+        return result;
     }
-    let mut args = vec![script.display().to_string()];
-    args.extend(rest.iter().cloned());
-    run_python(&args, &[])
-}
-
-fn tool_path(name: &str, dir: &Path) -> Result<PathBuf, String> {
-    let relative = match name {
-        "board/job" => Path::new("board").join("job"),
-        "board/land" => Path::new("board").join("land"),
-        "checks" => PathBuf::from("checks"),
-        "review" => Path::new("workers").join("review.py"),
-        _ => return Err(format!("`{name}` is not an Atelier workflow tool")),
-    };
-    Ok(dir.join(MACHINERY).join(relative))
-}
-
-fn gate_places(name: &str) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    if let Some(dir) = crate::identity::rules_dir() {
-        out.push(dir.join(MACHINERY).join("hooks").join(name));
-    }
-    out
-}
-
-/// Run python with these arguments, standard input and all, and give back what
-/// it exited with.
-///
-/// Python is the reader's own program, the same posture the chat helper takes
-/// with node: a version pinned here would be a second python on their machine
-/// to keep up to date.
-fn run_python(args: &[String], env: &[(&str, &str)]) -> Result<i32, String> {
-    let python = python()?;
-    let mut cmd = Command::new(&python);
-    cmd.args(args);
-    for (name, value) in env {
-        cmd.env(name, value);
-    }
-    match cmd.status() {
-        Ok(status) => Ok(status.code().unwrap_or(1)),
-        Err(e) => Err(format!("{}: {e}", python.display())),
-    }
-}
-
-/// The reader's own python, or what to tell them when there is none.
-///
-/// Asked of the one lookup the whole program shares rather than by a bare name
-/// here: both spellings are tried, and the places an installer puts a program
-/// without touching a shell profile as well as the reader's own list — which a
-/// copy the machine starts at login was never handed (bw-oxrg). The remembered
-/// answer is dropped on the way out, so a python installed on this advice is
-/// found without a restart.
-fn python() -> Result<PathBuf, String> {
-    crate::routes::find_python().ok_or_else(|| {
-        crate::routes::forget_tools();
-        "this computer has no python on it, and the working rules are written in it".to_string()
-    })
+    Err(format!("`{name}` is not an Atelier workflow tool"))
 }
 
 #[cfg(test)]
@@ -554,10 +404,6 @@ mod tests {
     fn the_rules_travel_in_the_binary() {
         let files = carried();
         for want in [
-            "machinery/join",
-            "machinery/project.py",
-            "machinery/hooks/board-gate.py",
-            "machinery/board/job",
             "machinery/skills/atelier/SKILL.md",
             "machinery/skills/beads/SKILL.md",
             "machinery/workers/external-review.md",
@@ -619,62 +465,31 @@ mod tests {
     }
 
     #[test]
-    fn nothing_pythons_own_cache_left_behind_is_carried() {
+    fn no_runtime_script_is_carried() {
         let files = carried();
         let junk: Vec<&String> = files
             .iter()
             .map(|(name, _)| name)
-            .filter(|name| name.contains("__pycache__") || name.ends_with(".pyc"))
+            .filter(|name| name.ends_with(".py") || name.ends_with(".pyc") || name.ends_with(".ts"))
             .collect();
-        assert!(junk.is_empty(), "carried python's own cache: {junk:?}");
+        assert!(junk.is_empty(), "carried runtime scripts: {junk:?}");
     }
 
     #[test]
-    fn everything_a_reader_types_arrives_runnable() {
-        // Only the bytes travel; a file's mode does not. Anything opening with
-        // a shebang is something somebody runs.
+    fn the_carried_rules_are_read_only_material() {
         let files = carried();
         let shebanged = files
             .iter()
             .filter(|(_, bytes)| bytes.starts_with(b"#!"))
             .count();
-        assert!(
-            shebanged > 10,
-            "only {shebanged} carried files open with a shebang"
-        );
+        assert_eq!(shebanged, 0, "read-only rules unexpectedly contain executables");
     }
 
     #[test]
-    fn a_project_that_ships_the_rules_is_joined_by_its_own_copy() {
-        // Somebody editing the rules runs this on the checkout they are editing.
-        // Joining that through the installed copy would move it onto whatever
-        // version is installed and quietly stop their edits being the ones
-        // running.
-        let root = std::env::current_dir()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .to_path_buf();
-        assert!(
-            root.join(MACHINERY).join("join").is_file(),
-            "{}",
-            root.display()
-        );
-    }
-
-    #[test]
-    fn a_gate_is_looked_for_under_the_rules() {
-        let places = gate_places("board-gate.py");
-        assert!(!places.is_empty());
-        assert!(places[0].to_string_lossy().contains("machinery"));
-    }
-
-    #[test]
-    fn the_one_gate_the_program_answers_to_itself_is_not_looked_for_on_disk() {
-        // It is the only one that has to run where there is no python, so it
-        // cannot be a script under the rules folder like the others.
+    fn executable_gates_are_not_looked_for_on_disk() {
         assert!(crate::doing::is_ours("doing"));
         assert!(!crate::doing::is_ours("board-gate.py"));
+        assert!(crate::lifecycle::is_ours("board-gate.py"));
     }
 
     #[test]
@@ -684,32 +499,6 @@ mod tests {
         assert!(hook("../thing.py", &[]).is_err());
         assert!(hook("hooks/board-gate.py", &[]).is_err());
         assert!(hook("", &[]).is_err());
-    }
-
-    #[test]
-    fn only_the_workflow_tools_named_in_project_instructions_are_public() {
-        let dir = Path::new("/installed/rules");
-        assert_eq!(
-            tool_path("board/job", dir).unwrap(),
-            dir.join("machinery/board/job")
-        );
-        assert_eq!(
-            tool_path("board/land", dir).unwrap(),
-            dir.join("machinery/board/land")
-        );
-        assert_eq!(
-            tool_path("checks", dir).unwrap(),
-            dir.join("machinery/checks")
-        );
-        assert_eq!(
-            tool_path("review", dir).unwrap(),
-            dir.join("machinery/workers/review.py")
-        );
-        for name in ["../join", "hooks/board-gate.py", "board/review", ""] {
-            assert!(tool_path(name, dir)
-                .unwrap_err()
-                .contains("not an Atelier workflow tool"));
-        }
     }
 
     #[test]

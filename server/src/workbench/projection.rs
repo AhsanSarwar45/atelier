@@ -589,8 +589,6 @@ pub fn fold_all(events: &[Event]) -> Projection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
-    use std::process::Command;
 
     fn contract_events() -> Vec<Event> {
         let fixture: Value =
@@ -623,36 +621,4 @@ mod tests {
         assert_eq!(after_reset.view["cost"]["total"], 30);
     }
 
-    #[test]
-    fn workbench_core_projection_is_byte_semantic_with_the_reader_it_replaces() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        let script = r#"
-          import fs from 'node:fs';
-          import { foldAll } from './src/workbench/fold.ts';
-          const fixture = JSON.parse(fs.readFileSync('./server/tests/fixtures/workbench-contract.json', 'utf8'));
-          process.stdout.write(JSON.stringify(foldAll(fixture.events.slice(0, -1))));
-        "#;
-        let Ok(output) = Command::new("node")
-            .args([
-                "--experimental-strip-types",
-                "--input-type=module",
-                "-e",
-                script,
-            ])
-            .current_dir(root)
-            .output()
-        else {
-            eprintln!("no node in this development checkout; golden cases still ran");
-            return;
-        };
-        assert!(
-            output.status.success(),
-            "TypeScript reference fold failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let theirs: Value = serde_json::from_slice(&output.stdout).unwrap();
-        let events = contract_events();
-        let ours = fold_all(&events[..events.len() - 1]);
-        assert_eq!(ours.view, theirs);
-    }
 }

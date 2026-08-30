@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/workflow-gate.py"
+            "command": "atelier hook workflow-gate.py"
           }
         ]
       },
@@ -16,19 +16,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/board-actor.py"
+            "command": "atelier hook board-actor.py"
           },
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/board-merge-gate.py"
+            "command": "atelier hook board-merge-gate.py"
           },
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/board-status-gate.py"
+            "command": "atelier hook board-status-gate.py"
           }
         ]
-      },
-      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/wait-gate.py" }] }
+      }
     ],
     "PostToolUse": [
       {
@@ -36,7 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/board-touch.py"
+            "command": "atelier hook board-touch.py"
           }
         ]
       },
@@ -44,18 +43,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/workbench/hooks/session-doing.py"
+            "command": "atelier hook doing"
           }
         ]
       }
     ],
-    "SessionStart": [{ "matcher": "", "hooks": [{ "type": "command", "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/board-prime.py" }] }],
+    "SessionStart": [{ "matcher": "", "hooks": [{ "type": "command", "command": "atelier hook board-prime.py" }] }],
     "SubagentStop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/board-touch.py"
+            "command": "atelier hook board-touch.py"
           }
         ]
       }
@@ -65,11 +64,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/board-push.py"
+            "command": "atelier hook board-push.py"
           },
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/workbench/hooks/session-doing.py"
+            "command": "atelier hook doing"
           }
         ]
       }
@@ -79,15 +78,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/completion-gate.py"
+            "command": "atelier hook completion-gate.py"
           },
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/board-gate.py"
+            "command": "atelier hook board-gate.py"
           },
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/workbench/hooks/session-doing.py"
+            "command": "atelier hook doing"
           }
         ]
       }
@@ -97,7 +96,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/workbench/hooks/session-doing.py"
+            "command": "atelier hook doing"
           }
         ]
       }
@@ -108,7 +107,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/workbench/hooks/session-doing.py"
+            "command": "atelier hook doing"
           }
         ]
       }
@@ -119,7 +118,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/workbench/hooks/session-doing.py"
+            "command": "atelier hook doing"
           }
         ]
       }
@@ -130,7 +129,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/workbench/hooks/session-doing.py"
+            "command": "atelier hook doing"
           }
         ]
       }

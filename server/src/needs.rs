@@ -36,16 +36,22 @@ pub const NEEDED: &[Need] = &[
         from: "https://git-scm.com/downloads",
     },
     Need {
-        name: "python3",
-        also: &["python"],
-        carries: "setting a project up, and checking every move on the board",
-        from: "https://www.python.org/downloads/",
-    },
-    Need {
         name: "bd",
         also: &[],
         carries: "the board, for projects that opt into one",
         from: "https://github.com/gastownhall/beads",
+    },
+    Need {
+        name: "claude",
+        also: &[],
+        carries: "Claude chats (optional when Codex is installed)",
+        from: "https://docs.anthropic.com/en/docs/claude-code",
+    },
+    Need {
+        name: "codex",
+        also: &[],
+        carries: "Codex chats (optional when Claude is installed)",
+        from: "https://developers.openai.com/codex/cli",
     },
 ];
 
@@ -128,7 +134,7 @@ mod tests {
         assert_eq!(words.len(), 2, "one readable line for each program, in:\n{said}");
         assert_eq!(words[0][0], "git");
         assert_eq!(words[0][1], "found");
-        assert_eq!(words[1][0], "python3");
+        assert_eq!(words[1][0], "bd");
         assert_eq!(words[1][1], "missing");
     }
 

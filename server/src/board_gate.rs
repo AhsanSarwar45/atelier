@@ -20,8 +20,8 @@
 //! silently no-opped (there is no edit-session record to read).
 //!
 //! So this port keeps ONLY the checks that sensibly apply to a hand drag, and
-//! drops the rest. It replaces board-status-gate.py for the human-drag path
-//! alone; the agent session path still runs the embedded Python gate unchanged.
+//! drops the rest. Agent sessions use the separate native lifecycle hook,
+//! narrowed to machine-verifiable repository and completion invariants.
 //!
 //! What it enforces:
 //!

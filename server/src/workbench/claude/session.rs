@@ -88,14 +88,21 @@ impl NativeClaudeSession {
             inbound,
             session_id: session.id,
         };
-        native
-            .persist(vec![
+        if let Err(error) = native.persist(vec![
                 native.live.menu(),
                 json!({"type":"session.state","state":"idle","label":"Ready"}),
             ])
-            .await?;
+            .await {
+            native.close().await;
+            if create { let _ = native.database.delete_session(native.session_id.clone()).await; }
+            return Err(error);
+        }
         if let Some(resume) = resume {
-            native.import_history(&resume).await?;
+            if let Err(error) = native.import_history(&resume).await {
+                native.close().await;
+                if create { let _ = native.database.delete_session(native.session_id.clone()).await; }
+                return Err(error);
+            }
         }
         Ok(native)
     }

@@ -5,6 +5,7 @@
 
 mod board_gate;
 mod board_push;
+mod board_tools;
 mod command_line;
 mod completion_gate;
 mod db;
@@ -14,6 +15,8 @@ mod dolt_lifecycle;
 mod handover;
 mod identity;
 mod laid_down;
+mod join;
+mod lifecycle;
 mod local_host;
 mod needs;
 mod personal;
@@ -296,10 +299,8 @@ fn answering(port: u16) -> bool {
 
 /// Bring the whole product up.
 ///
-/// The server, the screens it serves and the chat helper behind them, in one
-/// process tree. There is no second thing to start: the screens are embedded
-/// in this binary and the helper is a child of this process, which is what
-/// makes `atelier run` the whole of it (bw-8um.3.12).
+/// The server, screens, chat storage and provider protocols in one process.
+/// Provider CLIs remain user-owned child processes; there is no app sidecar.
 async fn serve(open_browser: bool) {
     // Initialize tracing subscriber for logging
     let subscriber = FmtSubscriber::builder()
@@ -315,9 +316,9 @@ async fn serve(open_browser: bool) {
     //
     // It used to be taken last. A reader whose computer was already serving
     // watched several healthy lines go by — the database, the tracker, the
-    // chat helper laid down and its sidecar started — and then
+    // chat runtime initialized — and then
     // the program died on a bind error with a debugger hint, having started a
-    // helper it then abandoned. Nothing it had said was untrue and none of it
+    // work it then abandoned. Nothing it had said was untrue and none of it
     // was the point (bw-8um.3.10.2).
     let addr = format!("{}:{}", host, port);
     let listener = match tokio::net::TcpListener::bind(&addr).await {
@@ -375,9 +376,14 @@ async fn serve(open_browser: bool) {
 
     // Initialize the database
     let database = Arc::new(db::Database::new().expect("Failed to initialize database"));
+    for tool in ["git", "bd", "claude", "codex"] {
+        if let Ok(Some(path)) = database.setting(&format!("tool.{tool}.path")) {
+            routes::set_tool_override(tool, Some(std::path::PathBuf::from(path)));
+        }
+    }
     info!("Database initialized");
 
-    // The native workbench opens the helper's existing database, so an
+    // The native workbench opens the existing chat database, so an
     // upgrade changes the process serving chats without changing their home.
     let data_dir = identity::data_dir().expect("Failed to resolve Atelier data directory");
     let chat_db = workbench::actor::ChatDb::open(&data_dir.join("workbench.db"))
@@ -434,7 +440,7 @@ async fn serve(open_browser: bool) {
             if !trimmed.is_empty() && !trimmed.starts_with('[') {
                 tracing::warn!("⚠ bd CLI does not support --json output");
                 tracing::warn!("  Beads will not load for filesystem projects");
-                tracing::warn!("  Please update: npm install -g beads");
+                tracing::warn!("  Update Beads from Settings → Dependencies or https://github.com/gastownhall/beads");
             }
         }
     } else {
@@ -449,6 +455,7 @@ async fn serve(open_browser: bool) {
 
     // Initialize version check cache
     let version_cache = routes::version::new_cache();
+    let bootstrap_bus = routes::environment::bootstrap_bus();
 
     // The first read of a board costs a `bd` run, and the reader used to pay
     // it on whichever board they opened first. It is paid here instead, with
@@ -463,6 +470,9 @@ async fn serve(open_browser: bool) {
     // Build the router
     let app = Router::new()
         .route("/api/health", get(routes::health))
+        .route("/api/environment", get(routes::environment::read))
+        .route("/api/environment/:tool", axum::routing::put(routes::environment::choose))
+        .route("/api/environment/bd/install", post(routes::environment::install_bd))
         .nest(
             "/api",
             routes::project_routes().with_state(database.clone()),
@@ -523,7 +533,7 @@ async fn serve(open_browser: bool) {
         .route("/api/git/worktrees", get(routes::worktree::list_worktrees))
         // PR endpoints
         .route("/api/watch/beads", get(routes::watch_beads))
-        // One connection for a whole window: the board, the helper's feed and
+        // One connection for a whole window: the board, the native chat feed and
         // the open chat, each event tagged (routes/live.rs, bw-zkh4).
         .route("/api/live", get(routes::live::live))
         .nest(
@@ -545,6 +555,7 @@ async fn serve(open_browser: bool) {
         .layer(middleware::from_fn(said_not_to_keep))
         .layer(Extension(workbench_state))
         .layer(Extension(version_cache))
+        .layer(Extension(bootstrap_bus))
         .layer(Extension(database))
         .layer(Extension(dolt_manager))
         .layer(cors);

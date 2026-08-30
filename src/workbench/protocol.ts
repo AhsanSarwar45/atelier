@@ -634,6 +634,7 @@ export type WbpCommand =
   | { type: 'agent-files.read'; path: string; projectPath?: string }
   | { type: 'provider-defaults.read'; brand: Brand }
   | { type: 'provider-defaults.write'; brand: Brand; kind: 'model' | 'effort'; value: string }
+  | { type: 'providers.list' }
   | {
       type: 'session.start';
       projectId: string;

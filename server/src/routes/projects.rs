@@ -88,8 +88,8 @@ fn data_dir() -> Result<std::path::PathBuf, String> {
 }
 
 fn board_has_issues(root: &std::path::Path) -> bool {
-    std::process::Command::new("bd").arg("list").args(["--limit", "1", "--json"])
-        .current_dir(root).output().map(|out| out.status.success() && String::from_utf8_lossy(&out.stdout).trim() != "[]").unwrap_or(false)
+    crate::routes::find_bd().and_then(|bd| std::process::Command::new(bd).arg("list").args(["--limit", "1", "--json"])
+        .current_dir(root).output().ok()).map(|out| out.status.success() && String::from_utf8_lossy(&out.stdout).trim() != "[]").unwrap_or(false)
 }
 
 fn has_linked_worktrees(root: &std::path::Path) -> bool {
@@ -99,20 +99,9 @@ fn has_linked_worktrees(root: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
-fn apply_beads_mode(root: &std::path::Path, enabled: bool) -> Result<(), String> {
-    let join = if root.join("machinery/board/job").is_file() {
-        root.join("machinery/join")
-    } else {
-        crate::rules::install()?.join("machinery/join")
-    };
-    let python = crate::routes::find_python().ok_or_else(|| "Python is required to change Beads registration".to_string())?;
-    let mut command = std::process::Command::new(python);
-    command.arg(join);
-    if !enabled { command.arg("--chat-only"); }
-    let done = command.arg(root).output().map_err(|error| error.to_string())?;
-    if done.status.success() { Ok(()) } else {
-        Err(String::from_utf8_lossy(&done.stderr).trim().to_string())
-    }
+fn apply_beads_mode(root: &std::path::Path, manifest: &ProjectManifest) -> Result<(), String> {
+    if manifest.project.use_beads { crate::join::install(root, manifest) }
+    else { crate::join::remove(root) }
 }
 
 pub async fn probe_project(
@@ -186,7 +175,7 @@ pub async fn initialize_project(
         (input.manifest, Some(path), None)
     };
     if !virtual_project {
-        if let Err(error) = apply_beads_mode(root.as_ref().unwrap(), manifest.project.use_beads) {
+        if let Err(error) = apply_beads_mode(root.as_ref().unwrap(), &manifest) {
             if let Some(path) = created_path { let _ = std::fs::remove_file(path); }
             if let Some((old, storage)) = previous {
                 if let Some(current) = project_manifest::locate(root.as_ref().unwrap(), &data) {
@@ -239,7 +228,7 @@ pub async fn update_project_settings(
     }
     project_manifest::write_atomic(&located.path, &manifest).map_err(manifest_error)?;
     if !virtual_project && located.manifest.project.use_beads != manifest.project.use_beads {
-        if let Err(error) = apply_beads_mode(root.as_ref().unwrap(), manifest.project.use_beads) {
+        if let Err(error) = apply_beads_mode(root.as_ref().unwrap(), &manifest) {
             let _ = project_manifest::write_atomic(&located.path, &located.manifest);
             return Err(manifest_error(error));
         }

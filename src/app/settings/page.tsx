@@ -21,6 +21,7 @@ import {
   MIN_FONT_SIZE,
 } from "@/lib/font-size";
 import { TerminalSettings } from "@/workbench/terminal-settings";
+import { DependenciesSettings } from "@/workbench/dependencies-settings";
 
 export default function SettingsPage() {
   const [tags, setTags] = useState<Tag[]>([]);
@@ -111,6 +112,11 @@ export default function SettingsPage() {
 
       {/* Settings Content */}
       <main className="mx-auto max-w-2xl p-6">
+        <section className="mb-8">
+          <h2 className="mb-4 text-lg font-medium text-t-primary">Dependencies</h2>
+          <Panel inset="md"><DependenciesSettings /></Panel>
+        </section>
+
         <section className="mb-8">
           <h2 className="mb-4 text-lg font-medium text-t-primary">Agent files</h2>
           <Panel inset="md" className="flex items-center gap-4">

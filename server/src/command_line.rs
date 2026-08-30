@@ -8,9 +8,9 @@
 //! the thing itself (bw-8um.3.12).
 //!
 //! The shape is deliberately small. `run` is the whole product: the server,
-//! the screens it serves and the chat helper behind them come up together
-//! under one process tree, because they always did — the frontend is inside
-//! the binary and the helper is started beside it. What `run` adds is a name
+//! the screens it serves and native chat services come up together
+//! under one process, because the frontend and provider protocols are inside
+//! the binary. What `run` adds is a name
 //! for that, and a browser pointed at the right port so the reader does not
 //! have to know one.
 //!

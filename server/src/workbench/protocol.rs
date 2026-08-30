@@ -23,6 +23,7 @@ wire_kinds!(CommandKind {
     AgentFilesRead => "agent-files.read",
     ProviderDefaultsRead => "provider-defaults.read",
     ProviderDefaultsWrite => "provider-defaults.write",
+    ProvidersList => "providers.list",
     SessionStart => "session.start",
     PromptSend => "prompt.send",
     AskAnswer => "ask.answer",

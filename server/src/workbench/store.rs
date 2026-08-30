@@ -240,6 +240,14 @@ impl Store {
         Ok(())
     }
 
+    pub fn delete_session(&mut self, id: &str) -> rusqlite::Result<()> {
+        let transaction = self.connection.transaction()?;
+        transaction.execute("DELETE FROM event WHERE session_id = ?1", [id])?;
+        transaction.execute("DELETE FROM bead_link WHERE session_id = ?1", [id])?;
+        transaction.execute("DELETE FROM session WHERE id = ?1", [id])?;
+        transaction.commit()
+    }
+
     pub fn update_session(
         &self,
         id: &str,

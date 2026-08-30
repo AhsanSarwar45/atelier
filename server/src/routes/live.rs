@@ -24,6 +24,7 @@
 //! | `workbench`      | one frame of the helper's all-sessions stream      |
 //! | `chat`           | one event in the open chat                         |
 //! | `chat.snapshot`  | the open chat's conversation as it stands          |
+//! | `bootstrap`      | dependency installation progress                   |
 //!
 //! A named upstream event keeps its name after the tag, which is where
 //! `chat.snapshot` comes from: the helper names that frame `snapshot`.
@@ -48,6 +49,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use super::workbench;
 use crate::db::Database;
 use crate::dolt::DoltManager;
+use super::environment::BootstrapBus;
 
 /// One thing a feed said, and which feed said it.
 ///
@@ -113,6 +115,8 @@ pub struct LiveParams {
     pub since: Option<u64>,
     /// Whether anything on screen reads the helper's all-sessions feed.
     pub workbench: Option<String>,
+    /// Whether this screen is showing dependency installation progress.
+    pub bootstrap: Option<String>,
 }
 
 /// Whether a query flag was written as a yes.
@@ -227,6 +231,7 @@ pub async fn live(
     Extension(dolt_manager): Extension<Arc<DoltManager>>,
     Extension(db): Extension<Arc<Database>>,
     Extension(native): Extension<workbench::WorkbenchState>,
+    Extension(bootstrap): Extension<BootstrapBus>,
     Query(params): Query<LiveParams>,
     upgrade: Option<WebSocketUpgrade>,
 ) -> Response {
@@ -244,6 +249,20 @@ pub async fn live(
 
     if asked(&params.workbench) {
         tokio::spawn(relay_native_watch(native.clone(), tx.clone()));
+    }
+
+    if asked(&params.bootstrap) {
+        let mut updates = bootstrap.0.subscribe();
+        let bootstrap_tx = tx.clone();
+        tokio::spawn(async move {
+            loop {
+                match updates.recv().await {
+                    Ok(value) => if bootstrap_tx.send(Tagged::new(Some("bootstrap"), value.to_string())).await.is_err() { return; },
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                }
+            }
+        });
     }
 
     if let Some(chat) = params.chat.filter(|c| !c.is_empty()) {

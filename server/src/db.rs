@@ -329,6 +329,32 @@ impl Database {
 
     // ===== Settings =====
 
+    pub fn setting(&self, key: &str) -> Result<Option<String>, DbError> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()?
+            .map(|value: String| value.trim().to_string())
+            .filter(|value| !value.is_empty()))
+    }
+
+    pub fn set_setting(&self, key: &str, value: Option<&str>) -> Result<(), DbError> {
+        let conn = self.conn.lock().unwrap();
+        match value.map(str::trim).filter(|value| !value.is_empty()) {
+            Some(value) => conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![key, value],
+            )?,
+            None => conn.execute("DELETE FROM settings WHERE key = ?1", params![key])?,
+        };
+        Ok(())
+    }
+
     /// Which shell the terminal opens, or `None` for whatever this computer
     /// records for the person (`terminal/shell.rs`).
     ///

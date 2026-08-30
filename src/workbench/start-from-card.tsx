@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import type { Bead } from '@/types';
 import { sendCommand } from '@/workbench/use-session';
 import type { Brand } from '@/workbench/protocol';
+import { useProviders } from '@/workbench/providers';
 
 /**
  * What the agent is told. Plain prose rather than a dump of fields: the card's
@@ -40,6 +41,7 @@ interface StartFromCardProps {
 }
 
 export function StartFromCard({ bead, projectId, projectPath }: StartFromCardProps) {
+  const providers = useProviders();
   const [starting, setStarting] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const [brand, setBrand] = useState<Brand>('claude');
@@ -50,8 +52,8 @@ export function StartFromCard({ bead, projectId, projectPath }: StartFromCardPro
   return (
     <div className="mt-6">
       <div className="mb-2 flex gap-2" role="group" aria-label="Coding agent">
-        {(['claude', 'codex'] as const).map((choice) => (
-          <Button key={choice} size="sm" variant={brand === choice ? 'primary' : 'secondary'} onClick={() => setBrand(choice)}>
+        {providers.map(({ brand: choice, available, installUrl }) => (
+          <Button key={choice} size="sm" variant={brand === choice ? 'primary' : 'secondary'} disabled={!available} title={available ? undefined : `Install ${choice}: ${installUrl}`} onClick={() => setBrand(choice)}>
             {choice === 'claude' ? 'Claude' : 'Codex'}
           </Button>
         ))}

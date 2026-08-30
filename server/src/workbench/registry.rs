@@ -50,10 +50,8 @@ pub trait SessionFactory: Send + Sync {
     fn launch<'a>(&'a self, database: ChatDb, command: &'a Command) -> LaunchFuture<'a>;
 }
 
-/// Temporary production seam while provider processes move in-process.
-/// Read-only chat history and provider-independent commands remain available;
-/// starting or resuming a provider reports an honest error instead of falling
-/// back to the Node helper we are removing.
+/// Test seam for a build deliberately constructed without provider process
+/// supervision. Production uses `NativeProviderFactory`.
 pub struct UnavailableFactory;
 
 impl SessionFactory for UnavailableFactory {
@@ -273,6 +271,16 @@ impl WorkbenchRegistry {
                 let value = Self::field(command, "value")?;
                 serde_json::to_value(self.defaults.write(brand, kind, value)?)
                     .map_err(|e| e.to_string())
+            }
+            CommandKind::ProvidersList => {
+                let providers = [
+                    ("claude", "Claude", "https://docs.anthropic.com/en/docs/claude-code"),
+                    ("codex", "Codex", "https://developers.openai.com/codex/cli"),
+                ].into_iter().map(|(brand, name, install_url)| {
+                    let path = crate::routes::find_tool(brand, &[]);
+                    json!({"brand":brand,"name":name,"available":path.is_some(),"path":path,"installUrl":install_url})
+                }).collect::<Vec<_>>();
+                Ok(json!({"providers":providers}))
             }
             CommandKind::SessionStart | CommandKind::SessionOpen | CommandKind::SessionResume => {
                 self.launch(command).await

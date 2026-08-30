@@ -1,12 +1,11 @@
 {
   "hooks": {
     "PreToolUse": [
-      { "matcher": "spawn_agent", "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/agent-fence.py\"" }] },
       {
         "matcher": "Bash|apply_patch|Edit|Write",
         "hooks": [
           {
-            "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/workflow-gate.py\"",
+            "command": "atelier hook workflow-gate.py",
             "statusMessage": "Checking ticket worktree",
             "type": "command"
           }
@@ -16,33 +15,32 @@
         "matcher": "Bash",
         "hooks": [
           {
-            "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/board-actor.py\"",
+            "command": "atelier hook board-actor.py",
             "type": "command"
           },
           {
-            "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/board-merge-gate.py\"",
+            "command": "atelier hook board-merge-gate.py",
             "statusMessage": "Checking protected branches",
             "type": "command"
           },
           {
-            "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/board-status-gate.py\"",
+            "command": "atelier hook board-status-gate.py",
             "statusMessage": "Checking board lifecycle",
             "type": "command"
           }
         ]
-      },
-      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/wait-gate.py\"" }] }
+      }
     ],
     "PostToolUse": [
       {
         "matcher": "Bash|apply_patch|Edit|Write",
         "hooks": [
           {
-            "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/board-touch.py\"",
+            "command": "atelier hook board-touch.py",
             "type": "command"
           },
           {
-            "command": "python3 \"$(git rev-parse --show-toplevel)/workbench/hooks/session-doing.py\"",
+            "command": "atelier hook doing",
             "type": "command"
           }
         ]
@@ -51,7 +49,7 @@
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "command": "python3 \"$(git rev-parse --show-toplevel)/workbench/hooks/session-doing.py\"", "type": "command" }
+          { "command": "atelier hook doing", "type": "command" }
         ]
       }
     ],
@@ -59,7 +57,7 @@
       {
         "hooks": [
           {
-            "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/board-touch.py\"",
+            "command": "atelier hook board-touch.py",
             "type": "command"
           }
         ]

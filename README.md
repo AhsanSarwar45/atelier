@@ -117,23 +117,23 @@ The first two are once per computer. The third is once per project.
 
 - [Git](https://git-scm.com/) — Atelier reads and writes your project
   through it, and cuts the worktree each ticket is worked in
-- [Python](https://www.python.org/) 3.11+, as `python3` or `python` —
-  `atelier init` installs the project's rules with it, and every board
-  transition is checked by it
-- [Beads CLI](https://github.com/gastownhall/beads) (`bd`) only for projects that opt into a board
+- [Beads CLI](https://github.com/gastownhall/beads) (`bd`) only for projects
+  that opt into a board; Settings can download a checksum-verified copy after
+  one confirmation
+- Claude Code or Codex CLI, installed and signed in, for chat
 
-The Chat tab runs on Node.js, but you do not install one: every release carries
-a checked Node runtime beside the program and starts the chat helper with it, so
-a computer with no Node of its own still runs the chat.
+Chat, provider protocols, board lifecycle, hooks and project setup all run in
+the Atelier binary. Python, Node.js and npm are not runtime dependencies and
+are not carried in release archives.
 
 None of them has to be on your PATH. Atelier looks there first, then in the
 ordinary places an installer writes to: `~/.cargo/bin`, `~/.local/bin`,
 `~/.beads/bin`, Homebrew's folder, `/usr/local/bin`, `/usr/bin` and `/bin`,
-and on Windows the folders Git and Node install into, plus `System32`.
+and on Windows the usual per-user program folders, plus `System32`.
 That is what lets the copy your computer starts at login find them, since a
 service inherits no shell and so no PATH at all. What it cannot find is a
-runtime a version manager hides: an `nvm`, `fnm`, `volta` or `asdf` Node is
-picked up only when your own PATH names it.
+provider installed through a version manager is picked up when your own PATH
+names it; its exact path can also be saved in Settings → Dependencies.
 
 `atelier tools` prints each of them, whether it is here, and where — so a
 missing one is something you can see rather than something you infer from a
@@ -162,9 +162,8 @@ Download the archive for your platform from [GitHub Releases](https://github.com
 | macOS Intel | `atelier-darwin-x64.tar.gz` |
 | Linux x64 | `atelier-linux-x64.tar.gz` |
 
-Each archive carries the program and its Node runtime side by side, so nothing
-else has to be installed for the chat. Each release also ships a
-`SHA256SUMS.txt` to verify your download.
+Each archive carries one Atelier program. Each release also ships a
+`SHA256SUMS.txt` to verify the download.
 
 ### Run
 
@@ -181,10 +180,9 @@ tar -xzf atelier-win-x64.tar.gz
 atelier.exe run
 ```
 
-There is nothing else to start or install: the screens are embedded in the
-program, and the chat helper and the Node runtime it needs are unpacked beside
-it. Nothing needs Rust, and nothing needs a Node.js of your own — the release
-carries its own for the chat.
+There is nothing else to start: the screens, chat drivers, hooks and board
+workflow are embedded in the program. The installed app needs no Rust, Python,
+Node.js or npm.
 
 | Command | What it does |
 |---------|--------------|
@@ -283,12 +281,12 @@ project registered for Beads receives the separate `beads` workflow skill,
 including from any linked worktree. Inferred project metadata remains in
 Atelier's external data directory rather than the repository.
 
-It needs `bd` and Python 3.11+ (as `python3` or `python`) installed, on your
-PATH or in one of the ordinary places above.
+Board projects need `bd`; Atelier can install it from Settings after asking.
 
 ## Development
 
-Prerequisites: Node.js 22.6+, Python 3.11+, Git, [Rust toolchain](https://rustup.rs/), and the [Beads CLI](https://github.com/gastownhall/beads) (`bd`) in PATH.
+Development prerequisites: Node.js 22.6+ for building the web assets, Git,
+[Rust toolchain](https://rustup.rs/), and the [Beads CLI](https://github.com/gastownhall/beads) (`bd`) in PATH.
 
 ```bash
 git clone https://github.com/AhsanSarwar45/atelier.git
@@ -334,21 +332,16 @@ The Next.js dev server (port 3007) serves the frontend with hot-reload; the Rust
 
    ```bash
    npm run dev              # Terminal 1 — frontend on http://localhost:3007
-   npm run server:dev       # Terminal 2 — backend/API + this checkout's helper
+   npm run server:dev       # Terminal 2 — native backend/API
    ```
 
 5. Open **http://localhost:3007**. Frontend edits hot-reload; API requests go to the backend on :3008.
-
-`server:dev` sets `BEADS_WORKBENCH_ENTRY` to this checkout's
-`workbench/src/server.ts`. That gives the development backend its own helper
-process and makes helper edits visible after restarting the development
-backend. Packaged builds continue to run the helper embedded in their binary.
 
 > The `.env.local` / `NEXT_PUBLIC_BACKEND_URL` step is **dev-only**. Remove it (or leave it unset) for a release build, where frontend and backend share one origin.
 
 ### Build from Source (release binary)
 
-Produces the same self-contained binary that CI publishes to [Releases](https://github.com/AhsanSarwar45/atelier/releases/latest) — the frontend is embedded, so nothing needs Rust at runtime and the board needs no Node.js. The chat helper still does.
+Produces the same self-contained binary that CI publishes to [Releases](https://github.com/AhsanSarwar45/atelier/releases/latest). The frontend and all runtime services are embedded.
 
 ```bash
 npm install

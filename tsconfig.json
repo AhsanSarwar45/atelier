@@ -1,7 +1,6 @@
 {
   "compilerOptions": {
-    // The runtime everything here actually runs on: the browser build, and Node
-    // 22 reading the sidecar's TypeScript as it stands. Left unsaid, tsc checks
+    // The language target for the browser build. Left unsaid, tsc checks
     // against ES5 — which reports `for (const x of aSet)` as an error in every
     // file the sidecar has, and hid a real one behind them (bw-sxzv.3).
     "target": "es2022",
@@ -15,10 +14,6 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    // Some files under src/workbench are read twice: once by the browser's
-    // build and once by the chat's own server, which is Node running the
-    // TypeScript as it stands. Node resolves the exact filename or nothing, so
-    // those files name theirs (bw-7ks.22.35).
     "allowImportingTsExtensions": true,
     "jsx": "preserve",
     "incremental": true,
@@ -32,15 +27,5 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  // `workbench` is the chat's own server, a package of its own with its own
-  // dependencies. It is typechecked by its own settings file, which extends
-  // this one, and `npm run typecheck` runs both — because while it was read
-  // from here instead, it was checked only where its dependencies happened to
-  // be installed: green on a developer's machine, red in the packaging
-  // sandbox, which installs the app's dependencies and nothing else, so every
-  // push failed the online build (bw-r6mi). Before that, it was excluded here
-  // and typechecked nowhere, and a null handed to a rule that measures a
-  // string killed a live conversation before anyone read a type error
-  // (bw-sxzv).
-  "exclude": ["node_modules", "tests", "playwright.config.ts", "worktrees", "workbench"]
+  "exclude": ["node_modules", "tests", "playwright.config.ts", "worktrees"]
 }

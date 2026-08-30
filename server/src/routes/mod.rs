@@ -6,6 +6,7 @@
 pub mod beads;
 pub mod cli;
 pub mod dolt;
+pub mod environment;
 pub mod fs;
 pub mod git;
 pub mod live;
@@ -70,6 +71,18 @@ pub async fn health() -> impl IntoResponse {
 /// installed the tool while Atelier was up had to restart it before their
 /// boards would load (bw-oxrg). An answer kept here can be dropped.
 static TOOLS: OnceLock<Mutex<HashMap<String, Option<PathBuf>>>> = OnceLock::new();
+static TOOL_OVERRIDES: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
+
+pub fn set_tool_override(name: &str, path: Option<PathBuf>) {
+    let overrides = TOOL_OVERRIDES.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(mut overrides) = overrides.lock() {
+        match path {
+            Some(path) => { overrides.insert(name.to_string(), path); }
+            None => { overrides.remove(name); }
+        }
+    }
+    forget_tools();
+}
 
 /// Drop every remembered answer, so the next lookup searches this computer
 /// afresh.
@@ -338,6 +351,14 @@ fn every_place() -> Vec<PathBuf> {
 /// walk over one list, so that nothing in the search needs a tool to find a
 /// tool.
 pub fn find_tool(name: &str, others: &[&str]) -> Option<PathBuf> {
+    if let Some(path) = TOOL_OVERRIDES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock().ok()
+        .and_then(|overrides| overrides.get(name).cloned())
+        .filter(|path| runnable(path))
+    {
+        return Some(path);
+    }
     remembered(name, || {
         let mut spellings = vec![name];
         spellings.extend_from_slice(others);
@@ -365,16 +386,6 @@ pub const BD_MISSING: &str =
 /// Where the `bd` CLI is, if this computer has it.
 pub fn find_bd() -> Option<PathBuf> {
     find_tool("bd", &[])
-}
-
-/// Where python is, if this computer has it.
-///
-/// Both spellings are tried, because the one on a Windows path is usually the
-/// shorter. With only `python3` asked for, `atelier init` succeeds there and
-/// then every board lifecycle transition is denied by a gate that could not be
-/// started (bw-oxrg).
-pub fn find_python() -> Option<PathBuf> {
-    find_tool("python3", &["python"])
 }
 
 /// What to tell a reader whose computer has no git on it.

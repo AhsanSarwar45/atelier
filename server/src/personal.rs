@@ -497,54 +497,12 @@ mod tests {
         file(&codex.join("hooks.json"), SETTINGS.as_bytes());
     }
 
-    fn run_join_personal(python: &Path, join: &Path, sandbox: &Path) -> std::process::Output {
-        std::process::Command::new(python)
-            .arg(join)
-            .arg("--personal")
-            .env("ATELIER_CLAUDE_HOME", sandbox.join("claude"))
-            .env("ATELIER_CODEX_HOME", sandbox.join("codex"))
-            .env("ATELIER_PERSONAL_BIN", sandbox.join("bin"))
-            .env("ATELIER_GATE_WORD", crate::identity::NAME)
-            .env("HOME", sandbox.join("home"))
-            .env("ATELIER_DATA_DIR", sandbox.join("data"))
-            .output()
-            .expect("run machinery/join --personal")
-    }
-
-    /// The differential case: the Rust cleanup must leave the very same tree the
-    /// Python it replaces leaves — the same owned artifacts gone, the same
-    /// strangers kept, the same settings byte for byte — and must create nothing.
-    ///
-    /// (The byte-identical-copy removal branch is ported faithfully but cannot be
-    /// exercised against a real match here: bw-6z1f deleted the craft sources, so
-    /// no file hashing to a retired source's SHA-256 can be produced. The seeded
-    /// copies therefore land on the keep side, which both engines honour alike.)
     #[test]
-    fn personal_setup_links_exactly_what_join_personal_links() {
+    fn personal_setup_removes_owned_artifacts_and_keeps_neighbors() {
         let rules = rules_dir();
-        let join = rules.join("machinery").join("join");
-        if !join.is_file() {
-            eprintln!("no machinery/join to compare against");
-            return;
-        }
-        let Some(python) = crate::routes::find_python() else {
-            eprintln!("no python on this computer, so the two were not compared");
-            return;
-        };
-
-        // Seeded sandboxes: the same tree of legacy artifacts and strangers.
-        let theirs = tempfile::tempdir().expect("a folder");
         let ours = tempfile::tempdir().expect("a folder");
-        seed(theirs.path(), &rules);
         seed(ours.path(), &rules);
         let seeded = trim(snapshot(ours.path()));
-
-        let done = run_join_personal(&python, &join, theirs.path());
-        assert!(
-            done.status.success(),
-            "join --personal failed: {}",
-            String::from_utf8_lossy(&done.stderr)
-        );
 
         let homes = Homes {
             claude: ours.path().join("claude"),
@@ -553,7 +511,6 @@ mod tests {
         };
         install(&rules, &homes).expect("the native personal cleanup to run");
 
-        let theirs_tree = trim(snapshot(theirs.path()));
         let ours_tree = trim(snapshot(ours.path()));
 
         // Nothing was created: every surviving path was already seeded.
@@ -589,37 +546,12 @@ mod tests {
         assert!(ours_tree.contains_key(Path::new("claude/agents/scout.md")));
         assert!(ours_tree.contains_key(Path::new("bin/other-tool")));
 
-        // The whole-tree compare: the native cleanup and join --personal agree.
-        assert_eq!(
-            ours_tree, theirs_tree,
-            "the native cleanup and join --personal left different trees"
-        );
     }
 
-    /// On a machine with nothing installed, both are no-ops: neither removes nor
-    /// — the point of this port — creates anything.
     #[test]
     fn personal_setup_is_a_noop_on_a_clean_machine() {
         let rules = rules_dir();
-        let join = rules.join("machinery").join("join");
-        if !join.is_file() {
-            eprintln!("no machinery/join to compare against");
-            return;
-        }
-        let Some(python) = crate::routes::find_python() else {
-            eprintln!("no python on this computer, so the two were not compared");
-            return;
-        };
-
-        let theirs = tempfile::tempdir().expect("a folder");
         let ours = tempfile::tempdir().expect("a folder");
-
-        let done = run_join_personal(&python, &join, theirs.path());
-        assert!(
-            done.status.success(),
-            "join --personal failed: {}",
-            String::from_utf8_lossy(&done.stderr)
-        );
         install(
             &rules,
             &Homes {
@@ -630,10 +562,6 @@ mod tests {
         )
         .expect("the native personal cleanup to run");
 
-        assert!(
-            trim(snapshot(theirs.path())).is_empty(),
-            "join --personal created something on a clean machine"
-        );
         assert!(
             trim(snapshot(ours.path())).is_empty(),
             "the native cleanup created something on a clean machine"

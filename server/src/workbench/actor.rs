@@ -25,6 +25,7 @@ pub struct StoreUpdate {
 
 enum Command {
     CreateSession(Session, Reply<()>),
+    DeleteSession(String, Reply<()>),
     GetSession(String, Reply<Option<Session>>),
     SessionByExternalId(String, Reply<Option<Session>>),
     UpdateSession(String, SessionPatch, Option<String>, Reply<()>),
@@ -109,6 +110,10 @@ impl ChatDb {
     pub async fn create_session(&self, session: Session) -> Result<(), String> {
         self.request(|reply| Command::CreateSession(session, reply))
             .await
+    }
+
+    pub async fn delete_session(&self, id: String) -> Result<(), String> {
+        self.request(|reply| Command::DeleteSession(id, reply)).await
     }
 
     pub async fn get_session(&self, id: String) -> Result<Option<Session>, String> {
@@ -229,7 +234,7 @@ fn apply_session_fact(store: &Store, session_id: &str, event: &Event) -> rusqlit
 }
 
 fn run(
-    store: Store,
+    mut store: Store,
     mut commands: mpsc::UnboundedReceiver<Command>,
     global: broadcast::Sender<StoreUpdate>,
     sessions: Arc<Mutex<HashMap<String, broadcast::Sender<Event>>>>,
@@ -239,6 +244,7 @@ fn run(
             Command::CreateSession(session, reply) => {
                 respond(reply, store.create_session(&session))
             }
+            Command::DeleteSession(id, reply) => respond(reply, store.delete_session(&id)),
             Command::GetSession(id, reply) => respond(reply, store.get_session(&id)),
             Command::SessionByExternalId(id, reply) => {
                 respond(reply, store.session_by_external_id(&id))

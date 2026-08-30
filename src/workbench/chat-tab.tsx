@@ -93,6 +93,7 @@ import { BrandIcon, ProviderBadge, brandName } from '@/workbench/brand-icon';
 import { workingLine } from '@/workbench/working-line';
 import { PictureViewer } from '@/workbench/picture-viewer';
 import { useEpicChecklist } from '@/workbench/epic-checklist';
+import { useProviders } from '@/workbench/providers';
 
 export { PictureViewer } from '@/workbench/picture-viewer';
 
@@ -508,6 +509,7 @@ export function enterSubmits(
 }
 
 export default function ChatTab({ projectId, projectPath, openSessionId }: ChatTabProps) {
+  const providers = useProviders();
   const shellRef = useRef<HTMLDivElement | null>(null);
   const [leftWidth, setLeftWidth] = useState(DEFAULT_PANEL_WIDTH);
   const [rightWidth, setRightWidth] = useState(DEFAULT_PANEL_WIDTH);
@@ -1105,12 +1107,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             <DialogDescription>This choice applies to this new chat.</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-2">
-            {(['claude', 'codex'] as const).map((brand) => (
+            {providers.map(({ brand, available, installUrl }) => (
               <Button
                 key={brand}
                 variant={newBrand === brand ? 'primary' : 'outline'}
                 data-testid={`new-chat-provider-${brand}`}
                 onClick={() => setNewBrand(brand)}
+                disabled={!available}
+                title={available ? undefined : `Install ${brandName(brand)}: ${installUrl}`}
               >
                 <BrandIcon brand={brand} /> {brandName(brand)}
               </Button>
@@ -1262,12 +1266,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       <div className="flex flex-1 flex-col items-center justify-center gap-4">
         <p className="text-muted-foreground">No chat selected</p>
         <div className="flex items-center gap-2" role="group" aria-label="Coding agent">
-          {(['claude', 'codex'] as const).map((brand) => (
+          {providers.map(({ brand, available, installUrl }) => (
             <Button
               key={brand}
               variant={newBrand === brand ? 'primary' : 'secondary'}
               onClick={() => setNewBrand(brand)}
-              disabled={starting}
+              disabled={starting || !available}
+              title={available ? undefined : `Install ${brandName(brand)}: ${installUrl}`}
               data-testid={`agent-${brand}`}
             >
               {brand === 'claude' ? 'Claude' : 'Codex'}

@@ -56,6 +56,7 @@ import { byWhatIsWorking, folderOf, laterOf, laterSpoke, whenHeSpoke, type Brand
 import { heldElsewhere, sessionOwnership } from '@/workbench/running';
 import { sendCommand } from '@/workbench/use-session';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
+import { useProviders } from '@/workbench/providers';
 
 /**
  * How many rows are drawn before the reader asks for more. A 288px rail shows
@@ -338,6 +339,7 @@ export function ChatSidebar({
   startingNewChat = false,
   onClose,
 }: ChatSidebarProps) {
+  const providers = useProviders();
   const [fetched, setFetched] = useState<RestoreRow[]>([]);
   const live = useLiveSessions();
   const running = useRunningElsewhere();
@@ -580,8 +582,8 @@ export function ChatSidebar({
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-56">
                     <DropdownMenuLabel>Start with</DropdownMenuLabel>
-                    {(['claude', 'codex'] as const).map((brand) => (
-                      <DropdownMenuItem key={brand} onSelect={() => onNewChat(brand)}>
+                    {providers.map(({ brand, available, installUrl }) => (
+                      <DropdownMenuItem key={brand} disabled={!available} title={available ? undefined : `Install ${brandName(brand)}: ${installUrl}`} onSelect={() => onNewChat(brand)}>
                         <BrandIcon brand={brand} /> New {brandName(brand)} chat
                       </DropdownMenuItem>
                     ))}
