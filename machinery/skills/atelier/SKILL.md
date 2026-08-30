@@ -168,6 +168,41 @@ data URLs in an explainer.
 
 ## Visual proof
 
+Use `atelier tool screen-check` to acquire visual evidence. It is a real
+capture tool, not a prompt shortcut: web targets use an isolated headless
+Chrome/Chromium profile over the DevTools protocol, named windows use the
+platform capture adapter, and existing images are uploaded through the running
+Atelier app. The app stores only content-addressed evidence and returns asset
+references. Run `atelier tool screen-check --help` for concise syntax or
+`atelier tool screen-check --schema` for its machine-readable contract.
+
+- Capture without judgment:
+  `atelier tool screen-check capture --type web --target URL [--viewport 1280x800] [--theme light|dark|system]`
+  or `capture --type image --target FILE`.
+- Capture and judge one frame:
+  `atelier tool screen-check check --type web|image --target URL|FILE --expect TEXT [--provider claude|codex]`.
+- Judge a change:
+  `atelier tool screen-check compare --before FILE --after FILE --expect TEXT [--provider claude|codex]`.
+- Capture one OS window only with
+  `capture|check --type window --window-id ID`; never infer a window, capture a
+  whole display, dismiss privacy prompts, or change screen-capture permissions.
+- Use `--type auto` only when `--target` is an unambiguous HTTP(S) URL or an
+  uploaded image. Otherwise name the type.
+
+State one observable expectation. The isolated visual worker returns `PASS`
+only for visible satisfaction, `FAIL` only for a visible contradiction, and
+`INDETERMINATE` when pixels cannot settle the claim. Treat capture and
+permission errors as tool failures, not failed product assertions. Do not ask
+the parent agent to open or reinterpret returned images. Reuse each returned
+`captures[].asset` with `atelier tool present image --asset ...` or
+`present compare --before-asset ... --after-asset ...`.
+
+Screen-check may navigate the exact web URL requested, but must not start,
+restart, stop, install, or reconfigure the target application. Web capture uses
+a fresh browser profile and does not inherit the user's cookies or browser
+session. Use an uploaded image when authentication or interaction was prepared
+by another authorized tool.
+
 For every visual change, capture the relevant screen before editing and again
 afterward. Run `atelier tool present compare` with those two project images and
 copy its stdout byte-for-byte into the final response. Use `side_by_side` by

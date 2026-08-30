@@ -38,11 +38,11 @@
 //! the reader already has the one they signed into. `workbench/src/claude-program.ts`
 //! is where the helper goes looking for theirs.
 
+use base64::Engine;
 use rust_embed::Embed;
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use base64::Engine;
-use serde::Serialize;
 
 /// The helper's own files: everything it runs, and the two package files that
 /// say what it needs. Its tests stay behind — they are for this repository,
@@ -98,26 +98,71 @@ struct PresentationRequest<'a> {
     files: std::collections::BTreeMap<String, String>,
 }
 
-fn presentation_request(rest: &[String], stdin: String) -> Result<PresentationRequest<'_>, String> {
+fn uploaded_request<'a>(
+    rest: &'a [String],
+    stdin: String,
+    upload_flags: &[&str],
+) -> Result<PresentationRequest<'a>, String> {
     let mut files = std::collections::BTreeMap::new();
     for (at, word) in rest.iter().enumerate() {
-        if matches!(word.as_str(), "--file" | "--input" | "--before" | "--after") {
-            let path = rest.get(at + 1).ok_or_else(|| format!("missing value for {word}"))?;
+        if upload_flags.contains(&word.as_str()) {
+            let path = rest
+                .get(at + 1)
+                .ok_or_else(|| format!("missing value for {word}"))?;
             let bytes = std::fs::read(path).map_err(|error| format!("{path}: {error}"))?;
-            files.insert(path.clone(), base64::engine::general_purpose::STANDARD.encode(bytes));
+            files.insert(
+                path.clone(),
+                base64::engine::general_purpose::STANDARD.encode(bytes),
+            );
         }
     }
-    Ok(PresentationRequest { args: rest, stdin, files })
+    Ok(PresentationRequest {
+        args: rest,
+        stdin,
+        files,
+    })
+}
+
+fn presentation_request(rest: &[String], stdin: String) -> Result<PresentationRequest<'_>, String> {
+    uploaded_request(rest, stdin, &["--file", "--input", "--before", "--after"])
+}
+
+fn screen_check_request(rest: &[String]) -> Result<PresentationRequest<'_>, String> {
+    let mut files = std::collections::BTreeMap::new();
+    for (at, word) in rest.iter().enumerate() {
+        if !matches!(word.as_str(), "--target" | "--before" | "--after") {
+            continue;
+        }
+        let path = rest
+            .get(at + 1)
+            .ok_or_else(|| format!("missing value for {word}"))?;
+        if word == "--target" && (path.starts_with("http://") || path.starts_with("https://")) {
+            continue;
+        }
+        let bytes = std::fs::read(path).map_err(|error| format!("{path}: {error}"))?;
+        files.insert(
+            path.clone(),
+            base64::engine::general_purpose::STANDARD.encode(bytes),
+        );
+    }
+    Ok(PresentationRequest {
+        args: rest,
+        stdin: String::new(),
+        files,
+    })
 }
 
 /// Hand temporary files to the running app; only its sidecar writes durable media.
 pub async fn present(rest: &[String]) -> Result<i32, String> {
     use std::io::Read;
     let mut stdin = String::new();
-    std::io::stdin().read_to_string(&mut stdin).map_err(|error| format!("stdin: {error}"))?;
+    std::io::stdin()
+        .read_to_string(&mut stdin)
+        .map_err(|error| format!("stdin: {error}"))?;
     let port = std::env::var("ATELIER_PORT")
         .or_else(|_| std::env::var("BEADS_WEB_PORT"))
-        .ok().and_then(|value| value.parse::<u16>().ok())
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or(crate::command_line::PORT);
     let output = present_to(rest, stdin, &format!("http://127.0.0.1:{port}")).await?;
     print!("{output}");
@@ -129,16 +174,69 @@ async fn present_to(rest: &[String], stdin: String, base: &str) -> Result<String
     let response = reqwest::Client::new()
         .post(format!("{base}/api/workbench/present"))
         .json(&request)
-        .send().await.map_err(|error| format!("the running Atelier app could not receive the presentation: {error}"))?;
+        .send()
+        .await
+        .map_err(|error| {
+            format!("the running Atelier app could not receive the presentation: {error}")
+        })?;
     let status = response.status();
-    let value: serde_json::Value = response.json().await
-        .map_err(|error| format!("Atelier returned an unreadable presentation response: {error}"))?;
+    let value: serde_json::Value = response.json().await.map_err(|error| {
+        format!("Atelier returned an unreadable presentation response: {error}")
+    })?;
     if !status.is_success() {
-        return Err(value.get("error").and_then(|error| error.as_str()).unwrap_or("Atelier refused the presentation").to_string());
+        return Err(value
+            .get("error")
+            .and_then(|error| error.as_str())
+            .unwrap_or("Atelier refused the presentation")
+            .to_string());
     }
-    let output = value.get("output").and_then(|output| output.as_str())
+    let output = value
+        .get("output")
+        .and_then(|output| output.as_str())
         .ok_or_else(|| "Atelier returned no presentation output".to_string())?;
     Ok(output.to_string())
+}
+
+/// Capture or assess a screen through the running app and print its evidence manifest.
+pub async fn screen_check(rest: &[String]) -> Result<i32, String> {
+    let port = std::env::var("ATELIER_PORT")
+        .or_else(|_| std::env::var("BEADS_WEB_PORT"))
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(crate::command_line::PORT);
+    let output = screen_check_to(rest, &format!("http://127.0.0.1:{port}")).await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&output).map_err(|error| error.to_string())?
+    );
+    Ok(0)
+}
+
+async fn screen_check_to(rest: &[String], base: &str) -> Result<serde_json::Value, String> {
+    let request = screen_check_request(rest)?;
+    let response = reqwest::Client::new()
+        .post(format!("{base}/api/workbench/screen-check"))
+        .json(&request)
+        .send()
+        .await
+        .map_err(|error| {
+            format!("the running Atelier app could not perform the screen check: {error}")
+        })?;
+    let status = response.status();
+    let value: serde_json::Value = response.json().await.map_err(|error| {
+        format!("Atelier returned an unreadable screen-check response: {error}")
+    })?;
+    if !status.is_success() {
+        return Err(value
+            .get("error")
+            .and_then(|error| error.as_str())
+            .unwrap_or("Atelier refused the screen check")
+            .to_string());
+    }
+    value
+        .get("result")
+        .cloned()
+        .ok_or_else(|| "Atelier returned no screen-check result".to_string())
 }
 
 /// Lay the helper down beside the data.
@@ -154,7 +252,10 @@ pub fn install() -> Result<Laid, String> {
     files.extend(crate::laid_down::gather::<Shared>("src/workbench")?);
     crate::laid_down::install(&dir, &files)?;
 
-    Ok(Laid { entry: dir.join(ENTRY), package: dir.join(PACKAGE) })
+    Ok(Laid {
+        entry: dir.join(ENTRY),
+        package: dir.join(PACKAGE),
+    })
 }
 
 /// Fetch the kit the helper talks to Claude with, if it is not already there.
@@ -180,17 +281,27 @@ pub async fn fetch_kit(package: &Path) -> Result<(), String> {
     // this advice is found without a restart.
     let Some(npm) = crate::routes::find_npm() else {
         crate::routes::forget_tools();
-        return Err("this computer has no npm on it; the chat needs it once, to fetch its kit"
-            .to_string());
+        return Err(
+            "this computer has no npm on it; the chat needs it once, to fetch its kit".to_string(),
+        );
     };
     let named = npm.display().to_string();
     let run = tokio::process::Command::new(&npm)
-        .args(["ci", "--omit=optional", "--omit=dev", "--no-audit", "--no-fund", "--loglevel=error"])
+        .args([
+            "ci",
+            "--omit=optional",
+            "--omit=dev",
+            "--no-audit",
+            "--no-fund",
+            "--loglevel=error",
+        ])
         .current_dir(package)
         .stdin(Stdio::null())
         .output()
         .await
-        .map_err(|e| format!("{named} could not be run ({e}); the chat needs it once, to fetch its kit"))?;
+        .map_err(|e| {
+            format!("{named} could not be run ({e}); the chat needs it once, to fetch its kit")
+        })?;
 
     if !run.status.success() {
         let said = String::from_utf8_lossy(&run.stderr);
@@ -227,10 +338,13 @@ mod tests {
 
         let seen = Arc::new(Mutex::new(None));
         let received = seen.clone();
-        let app = Router::new().route("/api/workbench/present", post(move |Json(body): Json<serde_json::Value>| {
-            *received.lock().unwrap() = Some(body);
-            async { Json(serde_json::json!({ "output": "validated transcript\n" })) }
-        }));
+        let app = Router::new().route(
+            "/api/workbench/present",
+            post(move |Json(body): Json<serde_json::Value>| {
+                *received.lock().unwrap() = Some(body);
+                async { Json(serde_json::json!({ "output": "validated transcript\n" })) }
+            }),
+        );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -238,13 +352,86 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let image = temporary.path().join("agent-picture.png");
         std::fs::write(&image, b"temporary bytes").unwrap();
-        let args = vec!["image".to_string(), "--file".to_string(), image.display().to_string(), "--alt".to_string(), "Proof".to_string()];
-        let output = present_to(&args, String::new(), &format!("http://{address}")).await.unwrap();
+        let args = vec![
+            "image".to_string(),
+            "--file".to_string(),
+            image.display().to_string(),
+            "--alt".to_string(),
+            "Proof".to_string(),
+        ];
+        let output = present_to(&args, String::new(), &format!("http://{address}"))
+            .await
+            .unwrap();
 
         assert_eq!(output, "validated transcript\n");
         let request = seen.lock().unwrap().take().unwrap();
-        let uploaded = request["files"][image.display().to_string()].as_str().unwrap();
-        assert_eq!(base64::engine::general_purpose::STANDARD.decode(uploaded).unwrap(), b"temporary bytes");
+        let uploaded = request["files"][image.display().to_string()]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(uploaded)
+                .unwrap(),
+            b"temporary bytes"
+        );
+    }
+
+    #[tokio::test]
+    async fn screen_check_files_go_to_the_running_app_and_return_its_manifest() {
+        use axum::{routing::post, Json, Router};
+        use std::sync::{Arc, Mutex};
+
+        let seen = Arc::new(Mutex::new(None));
+        let received = seen.clone();
+        let app = Router::new().route(
+            "/api/workbench/screen-check",
+            post(move |Json(body): Json<serde_json::Value>| {
+                *received.lock().unwrap() = Some(body);
+                async { Json(serde_json::json!({ "result": { "check_id": "check_123", "captures": [] } })) }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let temporary = tempfile::tempdir().unwrap();
+        let image = temporary.path().join("temporary.png");
+        std::fs::write(&image, b"temporary bytes").unwrap();
+        let args = vec![
+            "capture".to_string(),
+            "--type".to_string(),
+            "image".to_string(),
+            "--target".to_string(),
+            image.display().to_string(),
+        ];
+        let output = screen_check_to(&args, &format!("http://{address}"))
+            .await
+            .unwrap();
+
+        assert_eq!(output["check_id"], "check_123");
+        let request = seen.lock().unwrap().take().unwrap();
+        let uploaded = request["files"][image.display().to_string()]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(uploaded)
+                .unwrap(),
+            b"temporary bytes"
+        );
+    }
+
+    #[test]
+    fn screen_check_does_not_treat_a_web_target_as_a_local_file() {
+        let args = vec![
+            "capture".to_string(),
+            "--type".to_string(),
+            "web".to_string(),
+            "--target".to_string(),
+            "https://example.test/screen".to_string(),
+        ];
+        let request = screen_check_request(&args).unwrap();
+        assert!(request.files.is_empty());
     }
 
     #[test]
@@ -254,7 +441,11 @@ mod tests {
             names.iter().any(|n| n == "src/server.ts"),
             "the helper's entry is not in this build; it carries {names:?}"
         );
-        for driver in ["src/drivers/claude.ts", "src/drivers/codex.ts", "src/drivers/index.ts"] {
+        for driver in [
+            "src/drivers/claude.ts",
+            "src/drivers/codex.ts",
+            "src/drivers/index.ts",
+        ] {
             assert!(names.iter().any(|n| n == driver), "{driver} is not carried");
         }
     }
@@ -263,17 +454,26 @@ mod tests {
     fn the_build_carries_what_says_which_kit_to_fetch() {
         let names: Vec<String> = Helper::iter().map(|n| n.to_string()).collect();
         for needed in ["package.json", "package-lock.json"] {
-            assert!(names.iter().any(|n| n == needed), "{needed} is not carried; it has {names:?}");
+            assert!(
+                names.iter().any(|n| n == needed),
+                "{needed} is not carried; it has {names:?}"
+            );
         }
     }
 
     #[test]
     fn nothing_written_for_this_repository_is_carried() {
         for name in Helper::iter() {
-            assert!(!name.contains("__tests__"), "{name} is a test of ours, not part of the helper");
+            assert!(
+                !name.contains("__tests__"),
+                "{name} is a test of ours, not part of the helper"
+            );
         }
         for name in Shared::iter() {
-            assert!(!name.contains("__tests__"), "{name} is a test of ours, not part of the helper");
+            assert!(
+                !name.contains("__tests__"),
+                "{name} is a test of ours, not part of the helper"
+            );
         }
     }
 
@@ -298,14 +498,20 @@ mod tests {
             "window-now.ts",
             "chat-widgets.ts",
         ] {
-            assert!(names.iter().any(|n| n == needed), "{needed} is not carried; it has {names:?}");
+            assert!(
+                names.iter().any(|n| n == needed),
+                "{needed} is not carried; it has {names:?}"
+            );
         }
     }
 
     #[test]
     fn no_screen_is_carried_into_a_program_with_no_browser() {
         for name in Shared::iter() {
-            assert!(!name.ends_with(".tsx"), "{name} is a screen, not something the helper runs");
+            assert!(
+                !name.ends_with(".tsx"),
+                "{name} is a screen, not something the helper runs"
+            );
         }
     }
 
@@ -331,7 +537,11 @@ mod tests {
         // silently.
         let entry = PathBuf::from(ENTRY);
         let from = entry.parent().expect("the entry is inside a folder");
-        assert_eq!(from.parent().expect("and that folder is inside the package"), Path::new(PACKAGE));
+        assert_eq!(
+            from.parent()
+                .expect("and that folder is inside the package"),
+            Path::new(PACKAGE)
+        );
         assert!(KIT.starts_with("node_modules/"));
     }
 
@@ -341,9 +551,15 @@ mod tests {
         // `../../../src/workbench/protocol.ts`, so three steps up from the
         // driver's own folder has to land where they are laid down.
         let driver = PathBuf::from("workbench/src/drivers/claude.ts");
-        let mut up = driver.parent().expect("the driver is inside a folder").to_path_buf();
+        let mut up = driver
+            .parent()
+            .expect("the driver is inside a folder")
+            .to_path_buf();
         for _ in 0..3 {
-            up = up.parent().expect("and there is somewhere above it").to_path_buf();
+            up = up
+                .parent()
+                .expect("and there is somewhere above it")
+                .to_path_buf();
         }
         assert_eq!(up.join("src/workbench"), PathBuf::from("src/workbench"));
     }

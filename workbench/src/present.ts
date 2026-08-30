@@ -35,7 +35,7 @@ function validateOptions(args: string[], allowed: string[]): void {
   }
 }
 
-function imageKind(bytes: Buffer): 'png' | 'jpg' | 'gif' | 'webp' | null {
+export function imageKind(bytes: Buffer): 'png' | 'jpg' | 'gif' | 'webp' | null {
   if (bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'png';
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpg';
   if (['GIF87a', 'GIF89a'].includes(bytes.subarray(0, 6).toString('ascii'))) return 'gif';
@@ -46,10 +46,13 @@ function imageKind(bytes: Buffer): 'png' | 'jpg' | 'gif' | 'webp' | null {
 type ReadPresentationFile = (path: string) => Buffer;
 
 function importImage(path: string, read: ReadPresentationFile, directory: string): string {
-  const bytes = read(path);
-  if (bytes.length > 25 * 1024 * 1024) throw new Error(`${path} is larger than 25 MiB`);
+  return importImageBytes(read(path), path, directory);
+}
+
+export function importImageBytes(bytes: Buffer, label: string, directory: string): string {
+  if (bytes.length > 25 * 1024 * 1024) throw new Error(`${label} is larger than 25 MiB`);
   const kind = imageKind(bytes);
-  if (!kind) throw new Error(`${path} is not a PNG, JPEG, GIF, or WebP image`);
+  if (!kind) throw new Error(`${label} is not a PNG, JPEG, GIF, or WebP image`);
   mkdirSync(directory, { recursive: true });
   const asset = `${createHash('sha256').update(bytes).digest('hex')}.${kind}`;
   try { writeFileSync(join(directory, asset), bytes, { flag: 'wx' }); } catch (error) {

@@ -141,7 +141,8 @@ Usage:
   atelier project mode [folder]
                               Print `beads` or `chat` for this folder
   atelier tool <name> [...]   Run a board workflow command installed with Atelier
-                              (`present` validates rich chat output)
+                              (`present` validates rich output; `screen-check`
+                              captures and assesses visual evidence)
   atelier where               Print the addresses to open it at, and start nothing
   atelier tools               Print each program Atelier starts, and where it is
   atelier service install     Have this computer start it at login, and keep it up

@@ -30,6 +30,7 @@ import { readProviderDefaults, writeProviderDefault } from './provider-defaults.
 import { transcriptPage } from './transcript-page.ts';
 import { discoverAgentFiles, readAgentFile } from './agent-files.ts';
 import { presentUploaded } from './present.ts';
+import { screenCheckUploaded } from './screen-check.ts';
 
 // The operating system picks the port unless somebody names one. It used to be
 // 3009 always, and the app forwarded there on trust: whatever program held that
@@ -101,6 +102,25 @@ async function presentFromCommand(req: IncomingMessage, res: ServerResponse): Pr
     }));
     const output = presentUploaded(request.args, request.stdin, files, join(dataDir, 'presentation-media'));
     json(res, 200, { output });
+  } catch (error) {
+    json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+async function screenCheckFromCommand(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const dataDir = process.env.ATELIER_DATA_DIR;
+  if (!dataDir) return json(res, 500, { error: 'Atelier did not provide its data directory' });
+  try {
+    const request = JSON.parse(await readBody(req, 70 * 1024 * 1024)) as PresentationRequest;
+    if (!Array.isArray(request.args) || !request.files || typeof request.files !== 'object') {
+      throw new Error('screen-check request is malformed');
+    }
+    const files = Object.fromEntries(Object.entries(request.files).map(([path, encoded]) => {
+      if (typeof encoded !== 'string') throw new Error(`uploaded file ${path} is malformed`);
+      return [path, Buffer.from(encoded, 'base64')];
+    }));
+    const result = await screenCheckUploaded(request.args, files, join(dataDir, 'presentation-media'));
+    json(res, 200, { result });
   } catch (error) {
     json(res, 400, { error: error instanceof Error ? error.message : String(error) });
   }
@@ -400,6 +420,8 @@ const server = createServer((req, res) => {
         json(res, 200, { status: 'ok', sidecar: 'workbench' });
       } else if (path === '/present' && req.method === 'POST') {
         await presentFromCommand(req, res);
+      } else if (path === '/screen-check' && req.method === 'POST') {
+        await screenCheckFromCommand(req, res);
       } else if (path === '/events' && req.method === 'GET') {
         const sessionId = url.searchParams.get('session');
         if (!sessionId) return json(res, 400, { error: 'session is required' });

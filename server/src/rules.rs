@@ -344,6 +344,9 @@ pub async fn tool(name: &str, rest: &[String]) -> Result<i32, String> {
     if name == "present" {
         return crate::helper::present(rest).await;
     }
+    if name == "screen-check" {
+        return crate::helper::screen_check(rest).await;
+    }
     let dir = crate::identity::rules_dir()
         .ok_or_else(|| "this computer names no folder for Atelier's working rules".to_string())?;
     let script = tool_path(name, &dir)?;
