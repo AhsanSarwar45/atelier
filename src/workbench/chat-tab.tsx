@@ -70,6 +70,7 @@ import { useKnownCards, useKnownCardStatuses } from '@/workbench/known-cards';
 import { drawnRows } from '@/workbench/machine-lines';
 import { inWords, PERMISSION_MODE } from '@/workbench/machine-words';
 import { addressedBy, openableIn } from '@/workbench/mentions';
+import { providerMessageIsCurrent } from '@/workbench/provider-messages';
 import { PathChip, openPathClicked } from '@/workbench/path-chip';
 import { askableIn, pathsIn, type Rooted } from '@/workbench/paths';
 import { usePathsOnDisk } from '@/workbench/paths-on-disk';
@@ -716,6 +717,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    * conversation (bw-qdim).
    */
   const [offKinds, setOffKinds] = useState<ReadonlySet<KindId>>(EVERYTHING);
+  const [providerNow, setProviderNow] = useState(() => Date.now());
 
   useEffect(() => {
     setOffKinds(remembered());
@@ -727,8 +729,25 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     setOffKinds(off);
   }, []);
 
-  /** The rows this conversation draws, once the reader's switches are obeyed. */
-  const rows = useMemo(() => stillShowing(view.items, offKinds), [view.items, offKinds]);
+  const nextProviderExpiry = useMemo(() => view.items.reduce<number | null>((nearest, item) => {
+    if (item.kind !== 'provider_message' || !item.signal.retryAt || !providerMessageIsCurrent(item.signal, providerNow)) return nearest;
+    const at = new Date(item.signal.retryAt).getTime();
+    return Number.isFinite(at) && (nearest === null || at < nearest) ? at : nearest;
+  }, null), [view.items, providerNow]);
+
+  // A reset time is itself a clearing signal. Wake exactly then even if the
+  // provider sends no new packet and this chat is otherwise silent.
+  useEffect(() => {
+    if (nextProviderExpiry === null) return;
+    const timer = window.setTimeout(() => setProviderNow(Date.now()), Math.min(2_147_483_647, Math.max(0, nextProviderExpiry - Date.now() + 10)));
+    return () => window.clearTimeout(timer);
+  }, [nextProviderExpiry]);
+
+  /** The rows this conversation draws, once the reader's switches and current conditions are obeyed. */
+  const rows = useMemo(() => stillShowing(
+    view.items.filter((item) => item.kind !== 'provider_message' || providerMessageIsCurrent(item.signal, providerNow)),
+    offKinds,
+  ), [view.items, offKinds, providerNow]);
 
   /**
    * The same rows as they are drawn: every machine line carrying the family that

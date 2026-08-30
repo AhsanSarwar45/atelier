@@ -405,6 +405,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
     case 'session.state':
       next.state = e.state;
       next.stateLabel = e.label;
+      if (e.state !== 'errored') next.error = null;
       // A turn that is over owes no thinking count to the next one.
       if (e.state === 'idle' || e.state === 'errored' || e.state === 'stopped') next.thinkingTokens = 0;
       return next;
@@ -850,6 +851,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
       case 'session.state':
         view.state = e.state;
         view.stateLabel = e.label;
+        if (e.state !== 'errored') view.error = null;
         if (e.state === 'idle' || e.state === 'errored' || e.state === 'stopped') view.thinkingTokens = 0;
         break;
 

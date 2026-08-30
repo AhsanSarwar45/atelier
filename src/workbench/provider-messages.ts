@@ -78,6 +78,13 @@ export function isProviderMessageKind(value: string): value is ProviderMessageKi
   return (PROVIDER_MESSAGE_KINDS as readonly string[]).includes(value);
 }
 
+export function providerMessageIsCurrent(signal: ProviderMessageSignal, now = Date.now()): boolean {
+  if (signal.phase !== 'active') return false;
+  if (!signal.retryAt) return true;
+  const retryAt = new Date(signal.retryAt).getTime();
+  return !Number.isFinite(retryAt) || retryAt > now;
+}
+
 /**
  * Compatibility reader for providers that still expose only prose. New
  * adapters should prefer their structured signal and use this only at their

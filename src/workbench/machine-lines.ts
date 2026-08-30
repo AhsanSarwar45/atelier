@@ -41,7 +41,7 @@ import {
   whenItComesBack,
   whoFor,
 } from '@/workbench/machine-words';
-import { providerMessageReads } from '@/workbench/provider-messages';
+import { providerMessageIsCurrent, providerMessageReads } from '@/workbench/provider-messages';
 import type { Audience, MachineFamily, NoteRank } from '@/workbench/protocol';
 import type { TranscriptItem } from '@/workbench/use-session';
 
@@ -577,7 +577,7 @@ function machineLine(item: TranscriptItem): {
 } | null {
   if (item.kind === 'provider_message') {
     const signal = item.signal;
-    if (signal.phase === 'resolved' || (signal.retryAt && new Date(signal.retryAt).getTime() <= Date.now())) return null;
+    if (!providerMessageIsCurrent(signal)) return null;
     const family: MachineFamily = signal.severity === 'blocking' ? 'stopped'
       : signal.severity === 'error' ? 'failed'
         : signal.severity === 'warning' ? 'waiting' : 'breathing';
