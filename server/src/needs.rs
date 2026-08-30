@@ -5,12 +5,12 @@
 //! install and system folders, so a copy the machine starts at login — which
 //! inherits no shell and so no list at all — still finds them.
 //!
-//! It exists as one list rather than as five lookups scattered through the
+//! It exists as one list rather than as four lookups scattered through the
 //! server because "what must I install?" had only ever been answered by
 //! reading our code. Nothing could be asked. This is the thing that answers
 //! it, for a person at a terminal now and for the screens later (bw-dwxw).
 
-use crate::routes::find_tool;
+use crate::routes::{find_runtime, find_tool};
 use std::path::PathBuf;
 
 /// One outside program the app starts, and what it is started for.
@@ -27,9 +27,12 @@ pub struct Need {
 
 /// Every outside program the app starts, in the order a reader meets them.
 ///
-/// `git` is first because without it a project cannot be read at all; the two
-/// the chat tab rests on come last, because the board and every other screen
-/// work without them.
+/// `git` is first because without it a project cannot be read at all; the one
+/// the chat tab rests on comes last, because the board and every other screen
+/// works without it. The chat runtime is looked for the way the server itself
+/// resolves it -- the copy the release carried beside the program first -- so a
+/// computer with no node of its own still reports it `found`, and npm is not
+/// listed at all because nothing in the product runs npm any more (bw-oesd.2).
 pub const NEEDED: &[Need] = &[
     Need {
         name: "git",
@@ -52,13 +55,7 @@ pub const NEEDED: &[Need] = &[
     Need {
         name: "node",
         also: &[],
-        carries: "the chat tab; 22.6 or newer",
-        from: "https://nodejs.org/",
-    },
-    Need {
-        name: "npm",
-        also: &["npm.cmd"],
-        carries: "fetching the chat helper's kit, once, on first run",
+        carries: "the chat tab; carried beside the program, so you need not install it",
         from: "https://nodejs.org/",
     },
 ];
@@ -78,7 +75,15 @@ pub fn looked() -> Vec<Found> {
         .iter()
         .map(|need| Found {
             need,
-            at: find_tool(need.name, need.also),
+            // The chat runtime is resolved the way the server starts it -- the
+            // carried copy beside the program before any the reader installed --
+            // so a machine with no node of its own still reports it found. Every
+            // other program is an ordinary search of the reader's places.
+            at: if need.name == "node" {
+                find_runtime()
+            } else {
+                find_tool(need.name, need.also)
+            },
         })
         .collect()
 }
