@@ -318,6 +318,40 @@ impl WorkbenchRegistry {
         Ok(())
     }
 
+    async fn pin_saved_session(&self, command: &Command) -> Result<Value, String> {
+        let session_id = Self::field(command, "sessionId")?;
+        let mut session = self
+            .database
+            .get_session(session_id.to_string())
+            .await?
+            .ok_or_else(|| format!("session {session_id} does not exist"))?;
+        match command.kind {
+            CommandKind::SessionMode => {
+                session.permission_mode = Self::field(command, "mode")?.to_string();
+            }
+            CommandKind::SessionModel => {
+                let model = Self::field(command, "model")?;
+                session.model = (model != "default").then(|| model.to_string());
+            }
+            CommandKind::SessionEffort => {
+                session.effort = Some(Self::field(command, "effort")?.to_string());
+            }
+            CommandKind::SessionCollaborationMode => {
+                session.collaboration_mode = Some(Self::field(command, "mode")?.to_string());
+            }
+            _ => return Err("command is not a session setting".into()),
+        }
+        let event: crate::workbench::protocol::Event = serde_json::from_value(json!({
+            "type":"session.pinned", "sessionId":session.id, "seq":0,
+            "at":chrono::Utc::now().to_rfc3339(),
+            "permissionMode":session.permission_mode, "model":session.model,
+            "effort":session.effort, "collaborationMode":session.collaboration_mode
+        }))
+        .map_err(|error| error.to_string())?;
+        self.database.append(event).await?;
+        Ok(json!({"ok":true}))
+    }
+
     /// Execute one already-decoded WBP command and return the exact JSON body
     /// the former helper returned. Unknown discriminators have already been
     /// refused by `protocol::Command` before they can reach this registry.
@@ -411,6 +445,14 @@ impl WorkbenchRegistry {
                 self.refuse_external_owner(command).await?;
                 self.launch(command).await?;
                 self.driver_command(command).await
+            }
+            CommandKind::SessionMode
+            | CommandKind::SessionModel
+            | CommandKind::SessionEffort
+            | CommandKind::SessionCollaborationMode
+                if !self.has_driver(Self::field(command, "sessionId")?).await =>
+            {
+                self.pin_saved_session(command).await
             }
             _ => self.driver_command(command).await,
         }
@@ -571,6 +613,76 @@ mod tests {
             .await
             .is_err());
         assert!(!registry.has_driver("session-1").await);
+    }
+
+    #[tokio::test]
+    async fn native_workbench_registry_pins_settings_without_waking_a_saved_chat() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        database
+            .create_session(crate::workbench::store::Session {
+                id: "saved".into(),
+                brand: "claude".into(),
+                external_id: Some("external".into()),
+                project_id: "project".into(),
+                project_path: "/project".into(),
+                cwd: "/project".into(),
+                model: Some("opus".into()),
+                permission_mode: "default".into(),
+                effort: Some("high".into()),
+                collaboration_mode: None,
+                title: Some("Saved".into()),
+                state: "dormant".into(),
+                origin: "terminal".into(),
+                created_at: "2026-08-30T00:00:00Z".into(),
+                last_active_at: "2026-08-30T00:00:00Z".into(),
+                last_spoke_at: None,
+            })
+            .await
+            .unwrap();
+        let registry = WorkbenchRegistry::new(
+            database.clone(),
+            RegistryPaths {
+                home: root.path().into(),
+                claude_config: root.path().join("claude"),
+                codex_home: root.path().join("codex"),
+                media: root.path().join("media"),
+            },
+            Arc::new(FakeFactory {
+                calls: Arc::new(AtomicUsize::new(0)),
+            }),
+        );
+
+        for (kind, fields) in [
+            (
+                CommandKind::SessionMode,
+                json!({"sessionId":"saved","mode":"plan"}),
+            ),
+            (
+                CommandKind::SessionEffort,
+                json!({"sessionId":"saved","effort":"xhigh"}),
+            ),
+            (
+                CommandKind::SessionModel,
+                json!({"sessionId":"saved","model":"default"}),
+            ),
+        ] {
+            assert_eq!(
+                registry.execute(&command(kind, fields)).await.unwrap(),
+                json!({"ok":true})
+            );
+        }
+        assert!(!registry.has_driver("saved").await);
+        let saved = database.get_session("saved".into()).await.unwrap().unwrap();
+        assert_eq!(saved.permission_mode, "plan");
+        assert_eq!(saved.effort.as_deref(), Some("xhigh"));
+        assert_eq!(saved.model, None);
+        let view = crate::workbench::projection::fold_all(
+            &database.view_events("saved".into()).await.unwrap(),
+        );
+        assert_eq!(view.view["permissionMode"], "plan");
+        assert_eq!(view.view["effort"], "xhigh");
+        assert!(view.view["model"].is_null());
     }
 
     struct DroppedDriver {

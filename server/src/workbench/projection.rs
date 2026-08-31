@@ -573,11 +573,7 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
             }
             EventKind::SessionPinned => {
                 for field in ["permissionMode", "model", "effort", "collaborationMode"] {
-                    if event
-                        .fields
-                        .get(field)
-                        .is_some_and(|value| !value.is_null())
-                    {
+                    if event.fields.contains_key(field) {
                         view.insert(field.into(), value(event, field));
                     }
                 }
