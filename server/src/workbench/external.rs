@@ -78,6 +78,146 @@ fn words(message: &Value) -> String {
         .join(" ")
 }
 
+const RECORD_QUIET_MS: i64 = 10_000;
+const HELPER_QUIET_MS: i64 = 120_000;
+
+fn answer_owed(row: &Value) -> bool {
+    if row["type"] == "assistant" {
+        let Some(content) = row["message"]["content"].as_array() else {
+            return false;
+        };
+        let mut thought = false;
+        let mut spoke = false;
+        for block in content {
+            match block["type"].as_str() {
+                Some("tool_use") => return true,
+                Some("thinking") => thought = true,
+                Some("text") => spoke = true,
+                _ => {}
+            }
+        }
+        return thought && !spoke;
+    }
+    if row["type"] != "user" || row["isCompactSummary"] == true {
+        return false;
+    }
+    let content = &row["message"]["content"];
+    if content
+        .as_array()
+        .is_some_and(|blocks| blocks.iter().any(|block| block["type"] == "tool_result"))
+    {
+        return true;
+    }
+    let spoken = if let Some(text) = content.as_str() {
+        vec![text]
+    } else {
+        content
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|block| block["type"] == "text")
+            .filter_map(|block| block["text"].as_str())
+            .collect()
+    };
+    if spoken.is_empty() {
+        return true;
+    }
+    spoken.into_iter().any(|text| {
+        let text = text.replace('\n', " ");
+        let text = text.trim();
+        !text.is_empty()
+            && !text.starts_with("[Request interrupted by user")
+            && ![
+                "<command-name",
+                "<command-message",
+                "<command-args",
+                "<local-command-stdout",
+                "<local-command-stderr",
+            ]
+            .iter()
+            .any(|tag| text.starts_with(tag))
+    })
+}
+
+fn helper_brief(block: &Value) -> String {
+    let text = block["input"]["description"]
+        .as_str()
+        .or_else(|| block["input"]["subagent_type"].as_str())
+        .unwrap_or("1 helper")
+        .trim();
+    if text.chars().count() <= 48 {
+        return text.to_string();
+    }
+    let cut = text
+        .char_indices()
+        .take_while(|(at, _)| *at < 47)
+        .filter(|(_, ch)| ch.is_whitespace())
+        .map(|(at, _)| at)
+        .last()
+        .unwrap_or_else(|| text.char_indices().nth(47).map_or(text.len(), |(at, _)| at));
+    format!("{}…", text[..cut].trim_end())
+}
+
+fn helper_tail(row: &Value) -> Option<String> {
+    let helpers = row["message"]["content"]
+        .as_array()?
+        .iter()
+        .filter(|block| {
+            block["type"] == "tool_use" && matches!(block["name"].as_str(), Some("Agent" | "Task"))
+        })
+        .collect::<Vec<_>>();
+    match helpers.as_slice() {
+        [] => None,
+        [helper] => Some(helper_brief(helper)),
+        many => Some(format!("{} helpers", many.len())),
+    }
+}
+
+fn helpers_working(path: &Path, now_ms: i64) -> (usize, Option<i64>) {
+    let Some(stem) = path.file_stem() else {
+        return (0, None);
+    };
+    let Ok(entries) = fs::read_dir(path.with_file_name(stem).join("subagents")) else {
+        return (0, None);
+    };
+    let mut count = 0;
+    let mut since = None;
+    for entry in entries.flatten() {
+        let helper = entry.path();
+        let Some(name) = helper.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.starts_with("agent-") || !name.ends_with(".jsonl") {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let Some(moved) = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|time| time.as_millis() as i64)
+        else {
+            continue;
+        };
+        if now_ms - moved > HELPER_QUIET_MS
+            || !last_record_row(&helper).is_some_and(|row| answer_owed(&row))
+        {
+            continue;
+        }
+        count += 1;
+        let began = metadata
+            .created()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|time| time.as_millis() as i64)
+            .unwrap_or(moved);
+        since = Some(since.map_or(began, |old: i64| old.min(began)));
+    }
+    (count, since)
+}
+
 fn record_doing(path: &Path, now_ms: i64) -> Option<(HeldDoing, Option<i64>, Option<String>)> {
     let row = last_record_row(path)?;
     let moved = fs::metadata(path)
@@ -107,18 +247,8 @@ fn record_doing(path: &Path, now_ms: i64) -> Option<(HeldDoing, Option<i64>, Opt
                 return Some((HeldDoing::Retrying, Some(moved), detail));
             }
         }
-        if let Some(block) = content.into_iter().flatten().rev().find(|block| {
-            block["type"] == "tool_use" && matches!(block["name"].as_str(), Some("Agent" | "Task"))
-        }) {
-            let detail = block["input"]["description"]
-                .as_str()
-                .or_else(|| block["input"]["subagent_type"].as_str())
-                .map(|text| text.chars().take(120).collect());
-            return Some((
-                HeldDoing::Helping,
-                Some(moved),
-                detail.or_else(|| Some("1 helper".into())),
-            ));
+        if let Some(detail) = helper_tail(&row) {
+            return Some((HeldDoing::Helping, Some(moved), Some(detail)));
         }
         let owes = content.is_some_and(|blocks| {
             let tool = blocks.iter().any(|block| block["type"] == "tool_use");
@@ -148,15 +278,25 @@ fn record_doing(path: &Path, now_ms: i64) -> Option<(HeldDoing, Option<i64>, Opt
             return Some((HeldDoing::Working, Some(moved), None));
         }
     }
-    Some((
-        if now_ms - moved < 10_000 {
-            HeldDoing::Working
-        } else {
-            HeldDoing::Idle
-        },
-        (now_ms - moved < 10_000).then_some(moved),
-        None,
-    ))
+    if answer_owed(&row) {
+        return Some((HeldDoing::Working, Some(moved), None));
+    }
+    if now_ms - moved < RECORD_QUIET_MS {
+        return Some((HeldDoing::Working, Some(moved), None));
+    }
+    let (helpers, since) = helpers_working(path, now_ms);
+    if helpers > 0 {
+        return Some((
+            HeldDoing::Helping,
+            since,
+            Some(if helpers == 1 {
+                "1 helper".into()
+            } else {
+                format!("{helpers} helpers")
+            }),
+        ));
+    }
+    Some((HeldDoing::Idle, None, None))
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -843,6 +983,98 @@ mod tests {
         let (doing, _, detail) = record_doing(&record, i64::MAX).unwrap();
         assert_eq!(doing, HeldDoing::Helping);
         assert_eq!(detail.as_deref(), Some("Check the migration"));
+
+        fs::write(
+            &record,
+            serde_json::json!({
+                "type":"assistant","message":{"content":[
+                    {"type":"tool_use","name":"Agent","input":{"description":"Review the driver"}},
+                    {"type":"tool_use","name":"Task","input":{"description":"Review the rows"}}
+                ]}
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+        let (_, _, detail) = record_doing(&record, i64::MAX).unwrap();
+        assert_eq!(detail.as_deref(), Some("2 helpers"));
+
+        fs::write(
+            &record,
+            serde_json::json!({
+                "type":"assistant","message":{"content":[{"type":"tool_use","name":"Agent","input":{
+                    "description":"Work out why the summarising bar holds at the end"
+                }}]}
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+        let (_, _, detail) = record_doing(&record, i64::MAX).unwrap();
+        assert_eq!(
+            detail.as_deref(),
+            Some("Work out why the summarising bar holds at the…")
+        );
+    }
+
+    #[test]
+    fn native_workbench_services_external_claude_counts_only_live_detached_helpers() {
+        let root = tempfile::tempdir().unwrap();
+        let record = root.path().join("chat.jsonl");
+        fs::write(&record, serde_json::json!({
+            "type":"assistant","message":{"content":[{"type":"text","text":"I sent those off."}]}
+        }).to_string()+"\n").unwrap();
+        let helpers = root.path().join("chat/subagents");
+        fs::create_dir_all(&helpers).unwrap();
+        fs::write(helpers.join("agent-working.jsonl"), serde_json::json!({
+            "type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{}}]}
+        }).to_string()+"\n").unwrap();
+        fs::write(
+            helpers.join("agent-finished.jsonl"),
+            serde_json::json!({
+                "type":"assistant","message":{"content":[{"type":"text","text":"Done."}]}
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+        fs::write(helpers.join("agent-working.meta.json"), "{}").unwrap();
+
+        let moved = fs::metadata(&record)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let (doing, since, detail) = record_doing(&record, moved + RECORD_QUIET_MS + 1).unwrap();
+        assert_eq!(doing, HeldDoing::Helping);
+        assert!(since.is_some());
+        assert_eq!(detail.as_deref(), Some("1 helper"));
+    }
+
+    #[test]
+    fn native_workbench_services_external_claude_drops_killed_helper_ghosts() {
+        let root = tempfile::tempdir().unwrap();
+        let record = root.path().join("chat.jsonl");
+        fs::write(&record, serde_json::json!({
+            "type":"assistant","message":{"content":[{"type":"text","text":"Waiting elsewhere."}]}
+        }).to_string()+"\n").unwrap();
+        let helpers = root.path().join("chat/subagents");
+        fs::create_dir_all(&helpers).unwrap();
+        let helper = helpers.join("agent-killed.jsonl");
+        fs::write(&helper, serde_json::json!({
+            "type":"assistant","message":{"content":[{"type":"thinking","thinking":"unfinished"}]}
+        }).to_string()+"\n").unwrap();
+        let moved = fs::metadata(&helper)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let (doing, since, detail) = record_doing(&record, moved + HELPER_QUIET_MS + 1).unwrap();
+        assert_eq!((doing, since, detail), (HeldDoing::Idle, None, None));
     }
 
     #[test]
