@@ -676,7 +676,98 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
     events
 }
 
-fn helper_events(record: &Path) -> Vec<Value> {
+#[derive(Clone)]
+struct HelperFacts {
+    agent_id: String,
+    tool_call_id: Option<String>,
+    first_at: String,
+    events: Vec<Value>,
+    finish: Value,
+}
+
+fn helper_facts(path: &Path) -> Option<HelperFacts> {
+    let name = path.file_name()?.to_str()?;
+    let agent_id = name
+        .strip_prefix("agent-")?
+        .strip_suffix(".jsonl")?
+        .to_string();
+    let rows = jsonl(path);
+    let meta_path = path.with_file_name(format!("agent-{agent_id}.meta.json"));
+    let meta: Value = fs::read_to_string(meta_path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or(Value::Null);
+    let tool = as_nonempty(&meta["toolUseId"]);
+    let model = rows
+        .iter()
+        .find_map(|row| as_nonempty(&row["message"]["model"]));
+    let first = rows.iter().find_map(|row| as_nonempty(&row["timestamp"]));
+    let last = rows
+        .iter()
+        .rev()
+        .find_map(|row| as_nonempty(&row["timestamp"]));
+    let seconds = first
+        .as_deref()
+        .and_then(|first| DateTime::parse_from_rfc3339(first).ok())
+        .zip(
+            last.as_deref()
+                .and_then(|last| DateTime::parse_from_rfc3339(last).ok()),
+        )
+        .map(|(first, last)| (last - first).num_seconds().max(0))
+        .unwrap_or_default();
+    let spent = usage(&rows);
+    let calls = rows
+        .iter()
+        .flat_map(|row| row["message"]["content"].as_array().into_iter().flatten())
+        .filter(|block| block["type"] == "tool_use")
+        .count();
+    let result = rows
+        .iter()
+        .rev()
+        .filter(|row| row["type"] == "assistant")
+        .map(|row| message_text(&row["message"]))
+        .find(|text| !text.is_empty())
+        .and_then(|text| text.lines().next().map(str::to_string));
+    let under = tool.as_deref().unwrap_or(&agent_id);
+    let mut events = vec![json!({
+        "type":"agent.started", "agentId":agent_id, "toolCallId":tool,
+        "kind":"helper", "what":as_nonempty(&meta["description"]).and_then(|text| text.lines().next().map(str::to_string)).unwrap_or_default(),
+        "agentType":as_nonempty(&meta["agentType"]), "model":model
+    })];
+    events.extend(transcript_events(&rows, Some(under)));
+    events.push(json!({
+        "type":"agent.progress", "agentId":agent_id, "state":"running",
+        "seconds":seconds, "tokens":spent.total, "calls":calls, "model":model
+    }));
+    let finish = json!({
+        "type":"agent.finished", "agentId":agent_id,
+        "seconds":seconds, "tokens":spent.total, "calls":calls,
+        "model":model, "result":result
+    });
+    Some(HelperFacts {
+        agent_id,
+        tool_call_id: tool,
+        first_at: first.unwrap_or_default(),
+        events,
+        finish,
+    })
+}
+
+fn tool_outcomes(rows: &[Value]) -> HashMap<String, bool> {
+    let mut outcomes = HashMap::new();
+    for row in rows {
+        for block in row["message"]["content"].as_array().into_iter().flatten() {
+            if block["type"] == "tool_result" {
+                if let Some(id) = block["tool_use_id"].as_str() {
+                    outcomes.insert(id.to_string(), block["is_error"] != true);
+                }
+            }
+        }
+    }
+    outcomes
+}
+
+fn helper_events(record: &Path, outcomes: &HashMap<String, bool>) -> Vec<Value> {
     let Some(stem) = record.file_stem().and_then(|stem| stem.to_str()) else {
         return Vec::new();
     };
@@ -686,72 +777,141 @@ fn helper_events(record: &Path) -> Vec<Value> {
     };
     let mut helpers = Vec::new();
     for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        let Some(mut helper) = helper_facts(&entry.path()) else {
             continue;
         };
-        let Some(agent_id) = name
-            .strip_prefix("agent-")
-            .and_then(|name| name.strip_suffix(".jsonl"))
-        else {
-            continue;
-        };
-        // Import is an explicit, one-time read. Keep discovery and following
-        // bounded, but do not lose an old helper's command/result pairs merely
-        // because its record exceeds the follower window.
-        let rows = jsonl(&path);
-        let meta_path = path.with_file_name(format!("agent-{agent_id}.meta.json"));
-        let meta: Value = fs::read_to_string(meta_path)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or(Value::Null);
-        let tool = as_nonempty(&meta["toolUseId"]);
-        let model = rows
-            .iter()
-            .find_map(|row| as_nonempty(&row["message"]["model"]));
-        let first = rows.iter().find_map(|row| as_nonempty(&row["timestamp"]));
-        let last = rows
-            .iter()
-            .rev()
-            .find_map(|row| as_nonempty(&row["timestamp"]));
-        let seconds = first
-            .as_deref()
-            .and_then(|first| DateTime::parse_from_rfc3339(first).ok())
-            .zip(
-                last.as_deref()
-                    .and_then(|last| DateTime::parse_from_rfc3339(last).ok()),
-            )
-            .map(|(first, last)| (last - first).num_seconds().max(0))
-            .unwrap_or_default();
-        let spent = usage(&rows);
-        let calls = rows
-            .iter()
-            .flat_map(|row| row["message"]["content"].as_array().into_iter().flatten())
-            .filter(|block| block["type"] == "tool_use")
-            .count();
-        let result = rows
-            .iter()
-            .rev()
-            .filter(|row| row["type"] == "assistant")
-            .map(|row| message_text(&row["message"]))
-            .find(|text| !text.is_empty())
-            .and_then(|text| text.lines().next().map(str::to_string));
-        let under = tool.as_deref().unwrap_or(agent_id);
-        let mut events = vec![json!({
-            "type":"agent.started", "agentId":agent_id, "toolCallId":tool,
-            "kind":"helper", "what":as_nonempty(&meta["description"]).and_then(|text| text.lines().next().map(str::to_string)).unwrap_or_default(),
-            "agentType":as_nonempty(&meta["agentType"]), "model":model
-        })];
-        events.extend(transcript_events(&rows, Some(under)));
-        events.push(json!({
-            "type":"agent.finished", "agentId":agent_id, "state":"done",
-            "seconds":seconds, "tokens":spent.total, "calls":calls,
-            "model":model, "result":result
-        }));
-        helpers.push((first.unwrap_or_default(), events));
+        if let Some(ok) = helper
+            .tool_call_id
+            .as_ref()
+            .and_then(|call| outcomes.get(call))
+        {
+            helper.finish["state"] = json!(if *ok { "done" } else { "failed" });
+            helper.events.push(helper.finish);
+        }
+        helpers.push((helper.first_at, helper.events));
     }
     helpers.sort_by(|a, b| a.0.cmp(&b.0));
     helpers.into_iter().flat_map(|(_, events)| events).collect()
+}
+
+/// Incremental view of the helper records beside one externally-owned chat.
+///
+/// Claude writes a detached helper's turns into its own JSONL. The parent file
+/// contains only the dispatch and its eventual result, so following only that
+/// file loses every child turn. A tick lists and stats the helper directory,
+/// reads only files whose size changed, and content-addresses the normalized
+/// events so growing files do not replay their already-seen prefix.
+pub struct HelperFollower {
+    record: PathBuf,
+    sizes: HashMap<String, u64>,
+    calls: HashMap<String, String>,
+    outcomes: HashMap<String, bool>,
+    ended: HashSet<String>,
+    seen: HashSet<String>,
+}
+
+impl HelperFollower {
+    pub fn after_import(record: &Path) -> Self {
+        let rows = jsonl(record);
+        let outcomes = tool_outcomes(&rows);
+        Self {
+            record: record.to_path_buf(),
+            sizes: HashMap::new(),
+            calls: HashMap::new(),
+            outcomes,
+            ended: HashSet::new(),
+            seen: HashSet::new(),
+        }
+    }
+
+    fn paths(&self) -> Vec<PathBuf> {
+        let Some(stem) = self.record.file_stem() else {
+            return Vec::new();
+        };
+        let Ok(entries) = fs::read_dir(self.record.with_file_name(stem).join("subagents")) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("agent-") && name.ends_with(".jsonl"))
+            })
+            .collect()
+    }
+
+    /// New child transcript/progress events, then completions that must follow
+    /// the parent `tool.completed` events supplied by this same beat.
+    pub fn poll(&mut self, parent_events: &[Value]) -> (Vec<Value>, Vec<Value>) {
+        for event in parent_events {
+            if event["type"] == "tool.completed" {
+                if let (Some(call), Some(ok)) =
+                    (event["toolCallId"].as_str(), event["ok"].as_bool())
+                {
+                    self.outcomes.insert(call.to_string(), ok);
+                }
+            } else if event["type"] == "agent.finished" {
+                if let Some(agent) = event["agentId"].as_str() {
+                    self.ended.insert(agent.to_string());
+                }
+            }
+        }
+
+        let mut updates = Vec::new();
+        let mut facts = HashMap::new();
+        for path in self.paths() {
+            let Ok(size) = fs::metadata(&path).map(|meta| meta.len()) else {
+                continue;
+            };
+            let Some(helper) = helper_facts(&path) else {
+                continue;
+            };
+            let changed = self.sizes.get(&helper.agent_id).copied() != Some(size);
+            self.sizes.insert(helper.agent_id.clone(), size);
+            if let Some(call) = &helper.tool_call_id {
+                self.calls.insert(call.clone(), helper.agent_id.clone());
+            }
+            if changed {
+                for event in &helper.events {
+                    if self.ended.contains(&helper.agent_id) && event["type"] == "agent.progress" {
+                        continue;
+                    }
+                    let id = crate::workbench::protocol::record_event_id(event);
+                    if self.seen.insert(id) {
+                        updates.push(event.clone());
+                    }
+                }
+            }
+            facts.insert(helper.agent_id.clone(), helper);
+        }
+
+        let mut finished = Vec::new();
+        for (call, agent) in self.calls.clone() {
+            let Some(ok) = self.outcomes.get(&call).copied() else {
+                continue;
+            };
+            if !self.ended.insert(agent.clone()) {
+                continue;
+            }
+            let helper = facts.get(&agent).cloned().or_else(|| {
+                self.paths()
+                    .into_iter()
+                    .find_map(|path| helper_facts(&path).filter(|helper| helper.agent_id == agent))
+            });
+            let Some(mut helper) = helper else {
+                self.ended.remove(&agent);
+                continue;
+            };
+            helper.finish["state"] = json!(if ok { "done" } else { "failed" });
+            let id = crate::workbench::protocol::record_event_id(&helper.finish);
+            if self.seen.insert(id) {
+                finished.push(helper.finish);
+            }
+        }
+        (updates, finished)
+    }
 }
 
 pub fn read_history(record: &Path) -> ClaudeHistory {
@@ -762,7 +922,7 @@ pub fn read_history(record: &Path) -> ClaudeHistory {
     let rows = jsonl(record);
     let spent = usage(&rows);
     let mut events = transcript_events(&rows, None);
-    events.extend(helper_events(record));
+    events.extend(helper_events(record, &tool_outcomes(&rows)));
     if let Some(used) = spent.context {
         events.push(json!({"type":"context", "used":used, "window":spent.window}));
     }
@@ -846,7 +1006,8 @@ pub fn replay_lines(lines: &[String]) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::{create_dir_all, write};
+    use std::fs::{create_dir_all, write, OpenOptions};
+    use std::io::Write as _;
     use tempfile::tempdir;
 
     const CHAT: &str = "123e4567-e89b-12d3-a456-426614174000";
@@ -1025,5 +1186,140 @@ mod tests {
             .events
             .iter()
             .any(|event| event["type"] == "agent.finished" && event["seconds"] == 2));
+    }
+
+    #[test]
+    fn native_claude_history_does_not_finish_a_helper_before_its_parent_result() {
+        let home = tempdir().unwrap();
+        let record = home.path().join(format!("{CHAT}.jsonl"));
+        write(&record, json!({
+            "type":"assistant","message":{"content":[{
+                "type":"tool_use","id":"call-live","name":"Agent","input":{"description":"Inspect"}
+            }]}
+        }).to_string()+"\n").unwrap();
+        let helper_dir = record.with_file_name(CHAT).join("subagents");
+        create_dir_all(&helper_dir).unwrap();
+        write(
+            helper_dir.join("agent-live.meta.json"),
+            json!({
+                "toolUseId":"call-live","description":"Inspect"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        write(helper_dir.join("agent-live.jsonl"), json!({
+            "type":"assistant","timestamp":"2026-08-30T00:00:00Z",
+            "message":{"model":"haiku","content":[{"type":"tool_use","id":"inside","name":"Read","input":{}}]}
+        }).to_string()+"\n").unwrap();
+
+        let events = read_history(&record).events;
+        assert!(events.iter().any(|event| event["type"] == "agent.progress"
+            && event["agentId"] == "live"
+            && event["state"] == "running"));
+        assert!(!events
+            .iter()
+            .any(|event| event["type"] == "agent.finished" && event["agentId"] == "live"));
+    }
+
+    #[test]
+    fn native_claude_history_uses_the_parent_result_for_helper_failure() {
+        let home = tempdir().unwrap();
+        let record = home.path().join(format!("{CHAT}.jsonl"));
+        write(&record, [
+            json!({"type":"assistant","message":{"content":[{
+                "type":"tool_use","id":"call-failed","name":"Agent","input":{}
+            }]}}),
+            json!({"type":"user","message":{"content":[{
+                "type":"tool_result","tool_use_id":"call-failed","is_error":true,"content":"failed"
+            }]}})
+        ].iter().map(Value::to_string).collect::<Vec<_>>().join("\n")+"\n").unwrap();
+        let helper_dir = record.with_file_name(CHAT).join("subagents");
+        create_dir_all(&helper_dir).unwrap();
+        write(
+            helper_dir.join("agent-bad.meta.json"),
+            json!({"toolUseId":"call-failed"}).to_string(),
+        )
+        .unwrap();
+        write(
+            helper_dir.join("agent-bad.jsonl"),
+            json!({
+                "type":"assistant","message":{"content":[{"type":"text","text":"Could not do it"}]}
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+
+        assert!(read_history(&record).events.iter().any(|event| {
+            event["type"] == "agent.finished"
+                && event["agentId"] == "bad"
+                && event["state"] == "failed"
+        }));
+    }
+
+    #[test]
+    fn native_claude_helper_follower_reads_only_growth_and_settles_by_parent_call() {
+        let home = tempdir().unwrap();
+        let record = home.path().join(format!("{CHAT}.jsonl"));
+        write(&record, "").unwrap();
+        let helper_dir = record.with_file_name(CHAT).join("subagents");
+        create_dir_all(&helper_dir).unwrap();
+        write(
+            helper_dir.join("agent-h1.meta.json"),
+            json!({
+                "toolUseId":"call-1","description":"Watch it"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let helper = helper_dir.join("agent-h1.jsonl");
+        write(
+            &helper,
+            json!({
+                "type":"user","uuid":"helper-user","timestamp":"2026-08-30T00:00:00Z",
+                "message":{"content":"Start"}
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+        let mut follower = HelperFollower::after_import(&record);
+
+        let (first, done) = follower.poll(&[]);
+        assert!(done.is_empty());
+        assert!(first.iter().any(|event| event["type"] == "agent.started"));
+        assert!(first
+            .iter()
+            .any(|event| event["type"] == "text.delta" && event["text"] == "Start"));
+        assert!(follower.poll(&[]).0.is_empty());
+
+        let next = json!({
+            "type":"assistant","uuid":"helper-answer","timestamp":"2026-08-30T00:00:03Z",
+            "message":{"model":"haiku","content":[{"type":"text","text":"Done"}]}
+        });
+        let mut file = OpenOptions::new().append(true).open(&helper).unwrap();
+        writeln!(file, "{next}").unwrap();
+        let (growth, done) = follower.poll(&[]);
+        assert!(done.is_empty());
+        assert_eq!(
+            growth
+                .iter()
+                .filter(|event| event["type"] == "text.delta" && event["text"] == "Start")
+                .count(),
+            0
+        );
+        assert!(growth
+            .iter()
+            .any(|event| event["type"] == "text.delta" && event["text"] == "Done"));
+
+        let parent = vec![json!({
+            "type":"tool.completed","toolCallId":"call-1","ok":true,"output":"Done"
+        })];
+        let (growth, done) = follower.poll(&parent);
+        assert!(growth.is_empty());
+        assert!(done.iter().any(|event| event["type"] == "agent.finished"
+            && event["agentId"] == "h1"
+            && event["state"] == "done"));
+        assert!(follower.poll(&parent).1.is_empty());
     }
 }

@@ -384,6 +384,10 @@ async fn relay_native_chat(
             tail
         });
     let mut claude_lines: VecDeque<String> = VecDeque::new();
+    let mut claude_helpers = followed
+        .as_ref()
+        .filter(|(session, _)| session.brand == "claude")
+        .map(|(_, record)| crate::workbench::claude::history::HelperFollower::after_import(record));
     let mut codex_tail = followed
         .as_ref()
         .filter(|(session, _)| session.brand == "codex")
@@ -432,7 +436,7 @@ async fn relay_native_chat(
     loop {
         tokio::select! {
         _ = record_tick.tick(), if followed.is_some() => {
-            let (session, _record) = followed.as_ref().unwrap();
+            let (session, record) = followed.as_ref().unwrap();
             // A native driver is the one live source while Atelier owns the
             // provider. Keep the durable file cursor current without replaying
             // the same prompt/answer a second time from the provider record.
@@ -445,13 +449,39 @@ async fn relay_native_chat(
                 if let Some(at)=at{let _=state.database().remember_followed(session.id.clone(),at as i64).await;}
                 continue;
             }
-            let fresh = if session.brand=="claude" {
+            let mut fresh = if session.brand=="claude" {
                 let growth=claude_tail.as_mut().and_then(|tail|tail.grown().ok());
-                if growth.as_ref().is_some_and(|growth|growth.rewritten){if !state.database().was_driven_here(session.id.clone()).await.unwrap_or(true){let reset:Result<crate::workbench::protocol::Event,_>=serde_json::from_value(serde_json::json!({"type":"transcript.reset","sessionId":session.id,"seq":0,"at":chrono::Utc::now().to_rfc3339()}));if let Ok(reset)=reset{let _=state.database().append(reset).await;}if let Some(tail)=claude_tail.as_mut(){tail.seek(0)}claude_lines.clear();}else if let Some(tail)=claude_tail.as_mut(){tail.to_end()}Vec::new()}else{if let Some(growth)=growth{for line in growth.lines{claude_lines.push_back(line)}}let fresh=crate::workbench::claude::history::replay_lines(claude_lines.make_contiguous());while claude_lines.len()>256{claude_lines.pop_front();}fresh}
+                if growth.as_ref().is_some_and(|growth|growth.rewritten) {
+                    if !state.database().was_driven_here(session.id.clone()).await.unwrap_or(true) {
+                        let reset:Result<crate::workbench::protocol::Event,_>=serde_json::from_value(serde_json::json!({"type":"transcript.reset","sessionId":session.id,"seq":0,"at":chrono::Utc::now().to_rfc3339()}));
+                        if let Ok(reset)=reset{let _=state.database().append(reset).await;}
+                        if let Some(tail)=claude_tail.as_mut(){tail.seek(0)}
+                        claude_lines.clear();
+                        // A reset removes child rows with the parent transcript.
+                        // Re-observe every current helper on this same beat.
+                        claude_helpers=Some(crate::workbench::claude::history::HelperFollower::after_import(record));
+                    } else if let Some(tail)=claude_tail.as_mut(){tail.to_end()}
+                    Vec::new()
+                } else {
+                    if let Some(growth)=growth{for line in growth.lines{claude_lines.push_back(line)}}
+                    let fresh=crate::workbench::claude::history::replay_lines(claude_lines.make_contiguous());
+                    while claude_lines.len()>256{claude_lines.pop_front();}
+                    fresh
+                }
             } else {
                 let growth=codex_tail.as_mut().and_then(|tail|tail.grown().ok());
                 if growth.as_ref().is_some_and(|growth|growth.rewritten){if !state.database().was_driven_here(session.id.clone()).await.unwrap_or(true){let reset:Result<crate::workbench::protocol::Event,_>=serde_json::from_value(serde_json::json!({"type":"transcript.reset","sessionId":session.id,"seq":0,"at":chrono::Utc::now().to_rfc3339()}));if let Ok(reset)=reset{let _=state.database().append(reset).await;}if let Some(tail)=codex_tail.as_mut(){tail.seek(0)}codex_lines.clear();}else if let Some(tail)=codex_tail.as_mut(){tail.to_end()}Vec::new()}else{if let Some(growth)=growth{for line in growth.lines{codex_lines.push_back(line)}}let fresh=crate::workbench::codex::normalize::replay_rollout(&codex_lines.make_contiguous().join("\n"));while codex_lines.len()>512{codex_lines.pop_front();}fresh}
             };
+            if let Some(helpers) = claude_helpers.as_mut() {
+                let (updates, finished) = helpers.poll(&fresh);
+                if !updates.is_empty() || !finished.is_empty() {
+                    let mut together = Vec::with_capacity(updates.len() + fresh.len() + finished.len());
+                    together.extend(updates);
+                    together.extend(fresh);
+                    together.extend(finished);
+                    fresh = together;
+                }
+            }
             for mut value in fresh {
                 let event_id=crate::workbench::protocol::record_event_id(&value);
                 let Some(object) = value.as_object_mut() else { continue; };
