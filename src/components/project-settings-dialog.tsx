@@ -179,7 +179,7 @@ export function ProjectSettingsDialog({
             <Button
               type="button"
               variant="foreground"
-              size="xs"
+              size="inherit"
               onClick={() => setBrowsing(null)}
               className="h-auto min-h-0 p-0 text-xs font-normal text-t-muted transition-colors hover:text-t-secondary"
             >

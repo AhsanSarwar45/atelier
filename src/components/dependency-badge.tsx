@@ -62,7 +62,7 @@ export function DependencyBadge({ deps, blockers, isBlocked, onNavigate }: Depen
                   key={depId}
                   type="button"
                   variant="foreground"
-                  size="xs"
+                  size="inherit"
                   onClick={(e) => {
                     e.stopPropagation();
                     onNavigate?.(depId);
@@ -103,7 +103,7 @@ export function DependencyBadge({ deps, blockers, isBlocked, onNavigate }: Depen
                 key={blockerId}
                 type="button"
                 variant="foreground"
-                size="xs"
+                size="inherit"
                 onClick={(e) => {
                   e.stopPropagation();
                   onNavigate?.(blockerId);

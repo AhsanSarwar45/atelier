@@ -369,9 +369,40 @@ test.describe('how a chat scrolls', () => {
 
       const began = performance.now();
       await page.reload();
-      await page.locator(`[data-testid="restore-row"][data-external-id="${chat.sessionId}"]`).waitFor();
+      const row = page.locator(`[data-testid="restore-row"][data-external-id="${chat.sessionId}"]`);
+      await row.waitFor();
       const elapsed = performance.now() - began;
       expect(elapsed, `the saved chat list took ${elapsed.toFixed(1)}ms to return`).toBeLessThan(1_000);
+
+      // The shared Button used for the name must preserve the native button's
+      // inherited type. The control-library migration accidentally applied
+      // its xs preset here, shrinking every chat name from 14px to 12px and
+      // changing its line box even though no screen typography was intended
+      // to change.
+      const type = await row.getByTestId('row-name').evaluate((name) => {
+        const own = getComputedStyle(name);
+        const parent = getComputedStyle(name.parentElement!);
+        return {
+          size: own.fontSize,
+          weight: own.fontWeight,
+          line: own.lineHeight,
+          family: own.fontFamily,
+          parentSize: parent.fontSize,
+          parentWeight: parent.fontWeight,
+          parentLine: parent.lineHeight,
+          parentFamily: parent.fontFamily,
+        };
+      });
+      expect(type).toEqual({
+        size: '14px',
+        weight: type.parentWeight,
+        line: type.parentLine,
+        family: type.parentFamily,
+        parentSize: '14px',
+        parentWeight: type.parentWeight,
+        parentLine: type.parentLine,
+        parentFamily: type.parentFamily,
+      });
     } finally {
       await kept.away();
     }

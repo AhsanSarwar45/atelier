@@ -45,6 +45,11 @@ const buttonVariants = cva(
         dashed: '',
       },
       size: {
+        // A semantic replacement for a native text button. Tailwind's
+        // preflight makes native buttons inherit the surrounding typography;
+        // the shared control must offer the same contract or adopting it
+        // silently changes font size, weight, line height and baseline.
+        inherit: 'h-auto min-h-0 min-w-0 px-0 [font:inherit] [letter-spacing:inherit]',
         lg: 'h-10 px-4 text-sm gap-1.5 [&_svg:not([class*=size-])]:size-4',
         md: 'h-9 px-3 gap-1.5 text-sm [&_svg:not([class*=size-])]:size-4',
         sm: 'h-8 px-2.5 gap-1.5 text-xs [&_svg:not([class*=size-])]:size-3.5',

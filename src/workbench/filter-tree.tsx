@@ -138,9 +138,9 @@ function Line({
         <Button
           type="button"
           variant="foreground"
-          size="xs"
+          size="inherit"
           onClick={() => onFlip(node)}
-          className="h-auto min-h-0 min-w-0 flex-1 justify-start gap-2 p-0 text-left font-normal"
+          className="flex-1 justify-start gap-2 p-0 text-left"
         >
           <span className={cn('truncate', state === 'off' && 'text-t-tertiary')}>{node.label}</span>
           {/* The count sits at the far end so the numbers line up and the eye

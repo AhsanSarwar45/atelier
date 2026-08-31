@@ -17,7 +17,7 @@ import { memo, useContext, useEffect, useReducer, useState, type ReactNode } fro
 
 import { request } from '@/lib/api';
 
-import { Brain, Check, ChevronRight, Hand, Loader2 } from 'lucide-react';
+import { Brain, ChevronRight, Hand, Loader2 } from 'lucide-react';
 
 import { MarkdownBody, type Mentions } from '@/components/markdown-body';
 import { Badge } from '@/components/ui/badge';
@@ -477,7 +477,7 @@ export const ToolRow = memo(function ToolRow({
         <Button
           type="button"
           variant="foreground"
-          size="xs"
+          size="inherit"
           data-testid="tool-toggle"
           disabled={!hasBody}
           onClick={() => {
@@ -491,7 +491,7 @@ export const ToolRow = memo(function ToolRow({
               });
             }
           }}
-          className="h-auto w-full min-h-0 justify-start gap-2 rounded-none p-0 text-left font-mono font-normal enabled:hover:text-foreground"
+          className="w-full justify-start gap-2 rounded-none p-0 text-left enabled:hover:text-foreground"
         >
           <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
           {hasBody && (
@@ -587,12 +587,12 @@ export const MachineLine = memo(
           <Button
             type="button"
             variant="foreground"
-            size="xs"
+            size="inherit"
             data-testid="note-toggle"
             disabled={!opens}
             onClick={() => setOpen(!open)}
             title={row.kind}
-            className="h-auto w-full min-h-0 justify-start gap-2 rounded-none p-0 text-left font-mono font-normal enabled:hover:brightness-125"
+            className="w-full justify-start gap-2 rounded-none p-0 text-left enabled:hover:brightness-125"
           >
             <Mark className="h-3 w-3 shrink-0" />
             {opens && (
@@ -665,10 +665,10 @@ export const ThinkingBlock = memo(function ThinkingBlock({ item }: { item: Extra
       <Button
         type="button"
         variant="foreground"
-        size="xs"
+        size="inherit"
         data-testid="thinking-toggle"
         onClick={() => setOpenedByHand(!open)}
-        className="h-auto w-full min-h-0 justify-start gap-2 rounded-none p-0 text-left text-xs font-normal uppercase tracking-wide text-muted-foreground hover:text-foreground"
+        className="w-full justify-start gap-2 rounded-none p-0 text-left text-xs uppercase tracking-wide text-muted-foreground hover:text-foreground"
       >
         <Brain className="h-3.5 w-3.5 shrink-0" />
         <span className="shrink-0">{item.done ? 'Thought' : 'Thinking'}</span>

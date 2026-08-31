@@ -669,14 +669,17 @@ test.describe('a chat another program is in', () => {
         // The badge saying whose chat this is stays beside all five, because it
         // was never an answer to what the chat is doing (bw-96is).
         await expect(row.getByTestId('chat-external')).toBeVisible();
-        // Which one it is — "auto", "3 helpers" — is not said here. The rail is
-        // 288px wide and the clause arrived truncated to a stub of itself, so
-        // it moved to the chat's own bar, which is checked below on the one
-        // chat this test opens (the manager, 2026-08-23).
-        await expect(
-          pill.getByTestId('chat-state-detail'),
-          `${one.doing} spent the rail's width on a clause it cannot finish`,
-        ).toHaveCount(0);
+        // Which one it is — "auto", "3 helpers", the reset time — is part of
+        // the rich status, not expendable decoration. The chip preserves both
+        // ends with a middle ellipsis when the fixed rail is narrow.
+        if (one.detail) {
+          await expect(
+            pill.getByTestId('chat-state-detail'),
+            `${one.doing} dropped the clause that distinguishes this state`,
+          ).toContainText(one.detail);
+        } else {
+          await expect(pill.getByTestId('chat-state-detail')).toHaveCount(0);
+        }
       }
 
       // The picture the manager judges the job by: five rows, five states.
@@ -688,8 +691,7 @@ test.describe('a chat another program is in', () => {
       const summarising = made[0]!;
       await rowFor(page, summarising.chat.id).getByTestId('row-name').click();
       await expect(page.getByTestId('working-line')).toContainText('Summarising', { timeout: 30_000 });
-      // And here, where there is room for it, which compaction it is: the rail
-      // dropping the clause must not mean nobody says it at all.
+      // And the open chat repeats the same clause from the same state reader.
       await expect(
         page.getByTestId('session-state-chip').getByTestId('chat-state-detail'),
         'the chat that dropped the clause from the rail does not say it anywhere',

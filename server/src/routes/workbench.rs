@@ -43,6 +43,7 @@ pub struct WorkbenchState {
             HashMap<std::path::PathBuf, crate::workbench::codex::transport::CodexTransport>,
         >,
     >,
+    codex_records: Arc<std::sync::Mutex<HashMap<String, std::path::PathBuf>>>,
 }
 
 #[derive(Default)]
@@ -58,6 +59,7 @@ impl WorkbenchState {
             hold_memory: Arc::new(tokio::sync::Mutex::new(HoldMemory::default())),
             usage_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             codex_readers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            codex_records: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
     pub fn database(&self) -> &ChatDb {
@@ -93,14 +95,38 @@ impl WorkbenchState {
             }
             None
         }
-        find(
+        let key = id.to_lowercase();
+        if let Some(path) = self
+            .codex_records
+            .lock()
+            .ok()
+            .and_then(|records| records.get(&key).filter(|path| path.is_file()).cloned())
+        {
+            return Some(path);
+        }
+        let found = find(
             self.registry
                 .codex_home_directory()
                 .join("sessions")
                 .as_path(),
             id,
             5,
-        )
+        );
+        if let Some(path) = &found {
+            if let Ok(mut records) = self.codex_records.lock() {
+                records.insert(key, path.clone());
+            }
+        }
+        found
+    }
+
+    fn enrich_unknown_codex_hold(&self, hold: &mut crate::workbench::external::ProviderHold) {
+        if hold.doing != crate::workbench::external::HeldDoing::Unknown {
+            return;
+        }
+        if let Some(path) = self.codex_record(&hold.id) {
+            hold.doing = crate::workbench::external::codex_doing_from_path(&path);
+        }
     }
 
     /// One read-only app-server per working directory. Initializing Codex is
@@ -160,6 +186,14 @@ impl WorkbenchState {
         let mut holds = self
             .registry
             .provider_holds(std::path::Path::new("/proc"), now);
+        // `codex resume` usually has neither the thread id in argv nor its
+        // rollout held open. Its process log supplies ownership, and the
+        // indexed rollout path supplies the rich activity word. Keep the path
+        // after the first lookup so the two-second hold beat stays a bounded
+        // tail read rather than a repeated history scan.
+        for hold in &mut holds {
+            self.enrich_unknown_codex_hold(hold);
+        }
         let sessions = self
             .database()
             .list_sessions(None)
@@ -1137,6 +1171,38 @@ mod tests {
     async fn first_chunk(response: Response<Body>) -> String {
         let mut body = response.into_body().into_data_stream();
         String::from_utf8(body.next().await.unwrap().unwrap().to_vec()).unwrap()
+    }
+
+    #[test]
+    fn native_workbench_restores_rich_codex_status_when_no_rollout_fd_is_open() {
+        let (directory, state) = fixture();
+        let id = "6f729ab8-6b7d-4ad6-a78e-5dc8cc05eddb";
+        let rollout = directory
+            .path()
+            .join("codex/sessions/2026/09/01")
+            .join(format!("rollout-{id}.jsonl"));
+        std::fs::create_dir_all(rollout.parent().unwrap()).unwrap();
+        std::fs::write(
+            &rollout,
+            "{\"payload\":{\"type\":\"task_started\"}}\n{\"payload\":{\"type\":\"reasoning\"}}\n",
+        )
+        .unwrap();
+        let mut hold = crate::workbench::external::ProviderHold {
+            id: id.into(),
+            holder: crate::workbench::external::Holder::Terminal,
+            doing: crate::workbench::external::HeldDoing::Unknown,
+            detail: None,
+            told: false,
+            since: None,
+            turn_since: None,
+            typical_ms: None,
+            pids: std::collections::BTreeSet::from([42]),
+        };
+
+        state.enrich_unknown_codex_hold(&mut hold);
+
+        assert_eq!(hold.doing, crate::workbench::external::HeldDoing::Thinking);
+        assert_eq!(state.codex_record(id).as_deref(), Some(rollout.as_path()));
     }
 
     #[tokio::test]

@@ -232,8 +232,8 @@ export function PlanChip({ usage, onOpen }: { usage: PlanUsage; onOpen: () => vo
           <Button
             type="button"
             variant="foreground"
-            size="xs"
-            className="h-auto min-h-0 p-0 font-mono font-normal"
+            size="inherit"
+            className="p-0"
             data-testid="plan-chip"
             data-percent={five.percent ?? ''}
             data-severity={five.severity}
@@ -250,8 +250,8 @@ export function PlanChip({ usage, onOpen }: { usage: PlanUsage; onOpen: () => vo
           <Button
             type="button"
             variant="foreground"
-            size="xs"
-            className="h-auto min-h-0 p-0 font-mono font-normal"
+            size="inherit"
+            className="p-0"
             data-testid="plan-chip-week"
             data-percent={week.percent ?? ''}
             data-severity={week.severity}

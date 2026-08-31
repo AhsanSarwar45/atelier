@@ -465,13 +465,16 @@ pub fn codex_doing_from_lines<'a>(lines: impl IntoIterator<Item = &'a str>) -> H
             ended = Some(at);
         }
     }
-    let Some(started) = started else {
-        return HeldDoing::Idle;
-    };
-    if ended.is_some_and(|ended| ended > started) {
+    if ended.is_some_and(|ended| started.is_none_or(|started| ended > started)) {
         return HeldDoing::Idle;
     }
-    for row in rows[started + 1..].iter().rev() {
+    // Long tool-heavy turns routinely exceed the bounded tail above. Their
+    // task_started anchor is then outside the window while current reasoning
+    // and command rows remain inside it. A completion is always written at the
+    // end and is the decisive idle anchor; without one, classify the activity
+    // visible in the tail instead of flattening a live turn to Idle.
+    let after = started.map_or(0, |at| at + 1);
+    for row in rows[after..].iter().rev() {
         let payload = row.get("payload").unwrap_or(row);
         let kind = payload
             .get("type")
@@ -513,7 +516,11 @@ pub fn codex_doing_from_lines<'a>(lines: impl IntoIterator<Item = &'a str>) -> H
             return HeldDoing::Thinking;
         }
     }
-    HeldDoing::Working
+    if rows.is_empty() {
+        HeldDoing::Idle
+    } else {
+        HeldDoing::Working
+    }
 }
 
 fn tail_lines(path: &Path, limit: u64) -> Vec<String> {
@@ -539,6 +546,17 @@ fn tail_lines(path: &Path, limit: u64) -> Vec<String> {
     lines
 }
 
+/// Honest activity from the bounded tail of one Codex rollout.
+///
+/// A resumed CLI normally closes its rollout descriptor between writes, so
+/// process-FD discovery alone cannot supply this path. The caller also keeps
+/// paths learned from the provider index and uses this same bounded reader,
+/// matching the former runtime without loading the transcript.
+pub fn codex_doing_from_path(path: &Path) -> HeldDoing {
+    let lines = tail_lines(path, 256 * 1024);
+    codex_doing_from_lines(lines.iter().map(String::as_str))
+}
+
 /// One provider-neutral ownership snapshot. A UUID is case-insensitive and
 /// duplicate provider observations are merged instead of drawing two owners.
 pub fn provider_holds(
@@ -555,8 +573,7 @@ pub fn provider_holds(
     for (id, pids) in codex {
         let doing = rollouts
             .get(&id)
-            .map(|path| tail_lines(path, 256 * 1024))
-            .map(|lines| codex_doing_from_lines(lines.iter().map(String::as_str)))
+            .map(|path| codex_doing_from_path(path))
             .unwrap_or(HeldDoing::Unknown);
         holds
             .entry(id.clone())
@@ -786,6 +803,22 @@ mod tests {
         assert_eq!(
             codex_doing_from_lines([
                 r#"{"payload":{"type":"task_started"}}"#,
+                r#"{"payload":{"type":"task_complete"}}"#,
+            ]),
+            HeldDoing::Idle
+        );
+        // The start of a long turn may be older than the bounded status tail.
+        // Current activity without a later completion is still current.
+        assert_eq!(
+            codex_doing_from_lines([
+                r#"{"payload":{"type":"item_completed","item":{"type":"CommandExecution"}}}"#,
+                r#"{"payload":{"type":"reasoning"}}"#,
+            ]),
+            HeldDoing::Thinking
+        );
+        assert_eq!(
+            codex_doing_from_lines([
+                r#"{"payload":{"type":"reasoning"}}"#,
                 r#"{"payload":{"type":"task_complete"}}"#,
             ]),
             HeldDoing::Idle

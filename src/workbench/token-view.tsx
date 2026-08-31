@@ -455,10 +455,10 @@ export function ContextChip({
       <Button
         type="button"
         variant="foreground"
-        size="xs"
+        size="inherit"
         data-testid="context-chip-open"
         aria-label={`Context — ${used.toLocaleString()} of ${room.toLocaleString()} tokens in use. Opens the whole token picture.`}
-        className="h-auto min-h-0 gap-1 p-0 font-mono font-normal"
+        className="gap-1 p-0"
         onClick={onOpen}
       >
         {/* Its own mark, like the coins on the cost chip beside it: three bare

@@ -738,9 +738,9 @@ export function ChatSidebar({
                     <Button
                       type="button"
                       variant="foreground"
-                      size="xs"
+                      size="inherit"
                       data-testid="row-name"
-                      className="h-auto min-h-0 min-w-0 flex-1 justify-start truncate p-0 text-left font-normal text-foreground"
+                      className="flex-1 justify-start truncate p-0 text-left text-foreground"
                       disabled={busy === key}
                       onClick={() => enter(row)}
                     >
@@ -852,11 +852,12 @@ export function ChatSidebar({
                         // when the rail is genuinely too narrow for it
                         // (bw-jaoz.14.14).
                         //
-                        // The rail is the glanceable state word. Its specific
-                        // clause belongs on the open chat's wider header and
-                        // footer; putting it here crowds the external badge and
-                        // leaves neither readable at the list's fixed width.
-                        <ChatStateChip state={{ ...rowState, detail: null }} testId="row-pill" className="min-w-0 shrink" />
+                        // The word without its clause is not a rich status:
+                        // "Helping", "Retrying" or "Summarising" only becomes
+                        // actionable when the helper, reset time, or current
+                        // work remains visible. ChatStateChip middle-ellipsizes
+                        // that clause so it and the external badge can coexist.
+                        <ChatStateChip state={rowState} testId="row-pill" className="min-w-0 shrink" />
                       )}
                       {ownership.kind === 'elsewhere' && state.external && (
                         <ExternalBadge holder={state.external.holder} className="ml-auto shrink-0" />

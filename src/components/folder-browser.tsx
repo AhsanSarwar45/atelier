@@ -265,8 +265,8 @@ export function FolderBrowser({
                   <Button
                     type="button"
                     variant="foreground"
-                    size="xs"
-                    className="h-auto min-h-0 p-0 font-inherit"
+                    size="inherit"
+                    className="p-0"
                     onClick={() => navigateToDirectory(root)}
                     title={root}
                   >
