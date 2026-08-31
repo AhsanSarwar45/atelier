@@ -177,15 +177,24 @@ fn init_with(
     let data_dir = crate::identity::data_dir()
         .ok_or_else(|| "this computer names no folder for Atelier's data".to_string())?;
     let existing = crate::project_manifest::locate(&root, &data_dir);
-    let mut manifest = existing.as_ref().map(|found| found.manifest.clone())
+    let mut manifest = existing
+        .as_ref()
+        .map(|found| found.manifest.clone())
         .unwrap_or_else(|| crate::project_manifest::infer(&root));
     let mode = match chosen {
         Some(mode) => mode,
         None => ask_for_mode(input, output, manifest.project.use_beads)?,
     };
     manifest.project.use_beads = mode == Mode::Beads;
-    manifest.project.display_name = chosen_name.unwrap_or_else(|| ask_with_default(
-        input, output, "Project name", &manifest.project.display_name).unwrap_or_else(|_| manifest.project.display_name.clone()));
+    manifest.project.display_name = chosen_name.unwrap_or_else(|| {
+        ask_with_default(
+            input,
+            output,
+            "Project name",
+            &manifest.project.display_name,
+        )
+        .unwrap_or_else(|_| manifest.project.display_name.clone())
+    });
     let storage = storage.unwrap_or_else(|| {
         if existing.as_ref().map(|found| found.storage)
             == Some(crate::project_manifest::ManifestStorage::Repository)
@@ -197,31 +206,65 @@ fn init_with(
         }
     });
     if mode == Mode::Beads {
-        manifest.beads.issue_id_prefix = chosen_prefix.unwrap_or_else(|| ask_with_default(
-            input, output, "Issue ID prefix", &manifest.beads.issue_id_prefix).unwrap_or_else(|_| manifest.beads.issue_id_prefix.clone()));
-        manifest.git.completed_work_branch = chosen_branch.unwrap_or_else(|| ask_with_default(
-            input, output, "Completed-work branch", &manifest.git.completed_work_branch).unwrap_or_else(|_| manifest.git.completed_work_branch.clone()));
-        manifest.git.agents_may_merge_completed_work = agent_merges.unwrap_or_else(|| ask_yes_no(
-            input, output, "May agents merge completed work?", manifest.git.agents_may_merge_completed_work).unwrap_or(false));
+        manifest.beads.issue_id_prefix = chosen_prefix.unwrap_or_else(|| {
+            ask_with_default(
+                input,
+                output,
+                "Issue ID prefix",
+                &manifest.beads.issue_id_prefix,
+            )
+            .unwrap_or_else(|_| manifest.beads.issue_id_prefix.clone())
+        });
+        manifest.git.completed_work_branch = chosen_branch.unwrap_or_else(|| {
+            ask_with_default(
+                input,
+                output,
+                "Completed-work branch",
+                &manifest.git.completed_work_branch,
+            )
+            .unwrap_or_else(|_| manifest.git.completed_work_branch.clone())
+        });
+        manifest.git.agents_may_merge_completed_work = agent_merges.unwrap_or_else(|| {
+            ask_yes_no(
+                input,
+                output,
+                "May agents merge completed work?",
+                manifest.git.agents_may_merge_completed_work,
+            )
+            .unwrap_or(false)
+        });
         if !crate::project_manifest::branch_exists(&root, &manifest.git.completed_work_branch) {
-            return Err(format!("Completed-work branch `{}` does not exist in this project",
-                               manifest.git.completed_work_branch));
+            return Err(format!(
+                "Completed-work branch `{}` does not exist in this project",
+                manifest.git.completed_work_branch
+            ));
         }
     }
-    writeln!(output, "\nProject settings: {} · {} · config: {:?}",
+    writeln!(
+        output,
+        "\nProject settings: {} · {} · config: {:?}",
         manifest.project.display_name,
-        if manifest.project.use_beads { "Beads enabled" } else { "Beads disabled" }, storage)
-        .map_err(|error| error.to_string())?;
+        if manifest.project.use_beads {
+            "Beads enabled"
+        } else {
+            "Beads disabled"
+        },
+        storage
+    )
+    .map_err(|error| error.to_string())?;
     match existing {
         Some(found) => {
             if found.storage != storage {
                 crate::project_manifest::move_to(&root, &data_dir, storage)?;
             }
-            let located = crate::project_manifest::locate(&root, &data_dir)
-                .ok_or_else(|| "the project manifest disappeared while it was being updated".to_string())?;
+            let located = crate::project_manifest::locate(&root, &data_dir).ok_or_else(|| {
+                "the project manifest disappeared while it was being updated".to_string()
+            })?;
             crate::project_manifest::write_atomic(&located.path, &manifest)?;
         }
-        None => { crate::project_manifest::create(&root, &data_dir, storage, &manifest)?; }
+        None => {
+            crate::project_manifest::create(&root, &data_dir, storage, &manifest)?;
+        }
     }
     if mode == Mode::Chat {
         crate::join::remove(&root)?;
@@ -238,50 +281,103 @@ fn init_with(
     // would move it onto whatever version happens to be installed, which is
     // the one thing somebody editing the rules must not have happen to them.
     if !said.is_empty() {
-        eprintln!("warning: obsolete join arguments ignored: {}", said.join(" "));
+        eprintln!(
+            "warning: obsolete join arguments ignored: {}",
+            said.join(" ")
+        );
     }
     crate::join::install(&root, &manifest)?;
     show_project(&root, &manifest)?;
     Ok(0)
 }
 
-fn ask_with_default(input: &mut dyn BufRead, output: &mut dyn Write, label: &str, default: &str) -> Result<String, String> {
+fn ask_with_default(
+    input: &mut dyn BufRead,
+    output: &mut dyn Write,
+    label: &str,
+    default: &str,
+) -> Result<String, String> {
     write!(output, "{label} [{default}]: ").map_err(|error| error.to_string())?;
     output.flush().map_err(|error| error.to_string())?;
     let mut answer = String::new();
-    input.read_line(&mut answer).map_err(|error| error.to_string())?;
+    input
+        .read_line(&mut answer)
+        .map_err(|error| error.to_string())?;
     let answer = answer.trim();
-    Ok(if answer.is_empty() { default.to_string() } else { answer.to_string() })
+    Ok(if answer.is_empty() {
+        default.to_string()
+    } else {
+        answer.to_string()
+    })
 }
 
-fn ask_yes_no(input: &mut dyn BufRead, output: &mut dyn Write, label: &str, default: bool) -> Result<bool, String> {
+fn ask_yes_no(
+    input: &mut dyn BufRead,
+    output: &mut dyn Write,
+    label: &str,
+    default: bool,
+) -> Result<bool, String> {
     loop {
-        write!(output, "{label} [{}]: ", if default { "Y/n" } else { "y/N" }).map_err(|error| error.to_string())?;
+        write!(
+            output,
+            "{label} [{}]: ",
+            if default { "Y/n" } else { "y/N" }
+        )
+        .map_err(|error| error.to_string())?;
         output.flush().map_err(|error| error.to_string())?;
         let mut answer = String::new();
-        input.read_line(&mut answer).map_err(|error| error.to_string())?;
+        input
+            .read_line(&mut answer)
+            .map_err(|error| error.to_string())?;
         match answer.trim().to_ascii_lowercase().as_str() {
-            "" => return Ok(default), "y" | "yes" => return Ok(true), "n" | "no" => return Ok(false),
+            "" => return Ok(default),
+            "y" | "yes" => return Ok(true),
+            "n" | "no" => return Ok(false),
             _ => writeln!(output, "Please answer yes or no.").map_err(|error| error.to_string())?,
         }
     }
 }
 
 fn ask_repository_storage(input: &mut dyn BufRead, output: &mut dyn Write) -> Result<bool, String> {
-    ask_yes_no(input, output, "Store shared settings in .atelier/project.toml?", false)
+    ask_yes_no(
+        input,
+        output,
+        "Store shared settings in .atelier/project.toml?",
+        false,
+    )
 }
 
-fn show_project(root: &Path, manifest: &crate::project_manifest::ProjectManifest) -> Result<(), String> {
+fn show_project(
+    root: &Path,
+    manifest: &crate::project_manifest::ProjectManifest,
+) -> Result<(), String> {
     let db = crate::db::Database::new().map_err(|error| error.to_string())?;
     let path = root.to_string_lossy().to_string();
-    if let Some(existing) = db.get_project_by_path(&path).map_err(|error| error.to_string())? {
-        db.update_project(&existing.id, crate::db::UpdateProjectInput {
-            name: Some(manifest.project.display_name.clone()), path: None, local_path: None,
-        }).map_err(|error| error.to_string())?;
-        if existing.archived_at.is_some() { db.unarchive_project(&existing.id).map_err(|error| error.to_string())?; }
+    if let Some(existing) = db
+        .get_project_by_path(&path)
+        .map_err(|error| error.to_string())?
+    {
+        db.update_project(
+            &existing.id,
+            crate::db::UpdateProjectInput {
+                name: Some(manifest.project.display_name.clone()),
+                path: None,
+                local_path: None,
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        if existing.archived_at.is_some() {
+            db.unarchive_project(&existing.id)
+                .map_err(|error| error.to_string())?;
+        }
     } else {
-        db.create_project(crate::db::CreateProjectInput { name: manifest.project.display_name.clone(),
-            path, local_path: None, is_test: false }).map_err(|error| error.to_string())?;
+        db.create_project(crate::db::CreateProjectInput {
+            name: manifest.project.display_name.clone(),
+            path,
+            local_path: None,
+            is_test: false,
+        })
+        .map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -353,9 +449,16 @@ pub fn hook(name: &str, rest: &[String]) -> Result<i32, String> {
         return Ok(crate::board_push::run());
     }
     if crate::lifecycle::is_ours(name) {
+        if rest == ["--version"] {
+            println!("{}", crate::lifecycle::version());
+            return Ok(0);
+        }
         return Ok(crate::lifecycle::run(name));
     }
-    eprintln!("{}: retired or unknown hook `{name}` stood down", crate::identity::NAME);
+    eprintln!(
+        "{}: retired or unknown hook `{name}` stood down",
+        crate::identity::NAME
+    );
     let _ = rest;
     Ok(0)
 }
@@ -470,7 +573,10 @@ mod tests {
             .iter()
             .filter(|(_, bytes)| bytes.starts_with(b"#!"))
             .count();
-        assert_eq!(shebanged, 0, "read-only rules unexpectedly contain executables");
+        assert_eq!(
+            shebanged, 0,
+            "read-only rules unexpectedly contain executables"
+        );
     }
 
     #[test]
