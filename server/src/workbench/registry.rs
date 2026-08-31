@@ -31,8 +31,8 @@ pub trait ProviderDriver: Send {
             unreachable!()
         })
     }
-    fn reconnect<'a>(&'a mut self) -> DriverFuture<'a> {
-        Box::pin(async { Err("provider cannot reconnect".to_string()) })
+    fn window_now<'a>(&'a mut self) -> DriverFuture<'a> {
+        Box::pin(async { Err("This chat's brand cannot say what is in its window.".into()) })
     }
     fn close<'a>(&'a mut self) -> DriverFuture<'a>;
 }
@@ -72,16 +72,24 @@ pub struct RegistryPaths {
 
 enum DriverRequest {
     Command(Command, oneshot::Sender<Result<Value, String>>),
+    WindowNow(oneshot::Sender<Result<Value, String>>),
     Close(Command, oneshot::Sender<Result<Value, String>>),
 }
 
 type Driver = mpsc::UnboundedSender<DriverRequest>;
 
-async fn supervise_driver(mut driver: Box<dyn ProviderDriver>, mut requests: mpsc::UnboundedReceiver<DriverRequest>) {
+async fn supervise_driver(
+    mut driver: Box<dyn ProviderDriver>,
+    mut requests: mpsc::UnboundedReceiver<DriverRequest>,
+) {
     loop {
         match requests.try_recv() {
             Ok(DriverRequest::Command(command, reply)) => {
                 let _ = reply.send(driver.command(&command).await);
+                continue;
+            }
+            Ok(DriverRequest::WindowNow(reply)) => {
+                let _ = reply.send(driver.window_now().await);
                 continue;
             }
             Ok(DriverRequest::Close(command, reply)) => {
@@ -99,10 +107,13 @@ async fn supervise_driver(mut driver: Box<dyn ProviderDriver>, mut requests: mps
 
         match tokio::time::timeout(Duration::from_millis(50), driver.next()).await {
             Ok(Ok(_)) => {}
+            // A closed provider stream is terminal for this process handle.
+            // Retire it; the registry's lazy prompt path will attach one fresh
+            // run to the durable conversation. Keeping a dead handle around
+            // makes later prompts claim to be Thinking with nobody reading.
             Ok(Err(_)) => {
-                if driver.reconnect().await.is_err() {
-                    tokio::time::sleep(Duration::from_millis(250)).await;
-                }
+                let _ = tokio::time::timeout(Duration::from_millis(250), driver.close()).await;
+                return;
             }
             Err(_) => {}
         }
@@ -112,7 +123,7 @@ async fn supervise_driver(mut driver: Box<dyn ProviderDriver>, mut requests: mps
 pub struct WorkbenchRegistry {
     database: ChatDb,
     factory: Arc<dyn SessionFactory>,
-    drivers: RwLock<HashMap<String, Driver>>,
+    drivers: Arc<RwLock<HashMap<String, Driver>>>,
     paths: RegistryPaths,
     defaults: ProviderDefaultFiles,
 }
@@ -120,10 +131,30 @@ pub struct WorkbenchRegistry {
 impl WorkbenchRegistry {
     pub fn new(database: ChatDb, paths: RegistryPaths, factory: Arc<dyn SessionFactory>) -> Self {
         let defaults = ProviderDefaultFiles::new(&paths.claude_config, &paths.codex_home);
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let db = database.clone();
+            let mut updates = database.subscribe_all();
+            handle.spawn(async move {
+                while let Ok(update) = updates.recv().await {
+                    if update.event.kind != super::protocol::EventKind::ToolStarted { continue; }
+                    let name=update.event.fields.get("name").and_then(Value::as_str).unwrap_or("");
+                    let input=update.event.fields.get("input").unwrap_or(&Value::Null);
+                    let candidates=super::beads_links::candidates(name,input);
+                    if candidates.is_empty(){continue} let Some(session)=db.get_session(update.session_id.clone()).await.ok().flatten() else{continue};
+                    let runner=super::beads_links::BdRunner::default();
+                    for id in candidates {
+                        if super::beads_links::issue_exists(&runner,Path::new(&session.cwd),&id).await.is_none(){continue}
+                        if !super::beads_links::record_link(&runner,Path::new(&session.cwd),&id,&session.id,"workbench-tool").await{continue}
+                        let event:super::protocol::Event=match serde_json::from_value(json!({"type":"link.bead","sessionId":session.id,"seq":0,"at":chrono::Utc::now().to_rfc3339(),"beadId":id,"via":"tool"})){Ok(event)=>event,Err(_)=>continue};
+                        let _=db.append(event).await;
+                    }
+                }
+            });
+        }
         Self {
             database,
             factory,
-            drivers: RwLock::new(HashMap::new()),
+            drivers: Arc::new(RwLock::new(HashMap::new())),
             paths,
             defaults,
         }
@@ -137,12 +168,30 @@ impl WorkbenchRegistry {
         &self.paths.media
     }
 
+    pub fn claude_config_directory(&self) -> &Path {
+        &self.paths.claude_config
+    }
+    pub fn codex_home_directory(&self) -> &Path {
+        &self.paths.codex_home
+    }
+
     pub fn provider_holds(&self, proc_root: &Path, now_ms: i64) -> Vec<ProviderHold> {
         external::provider_holds(
             &self.paths.claude_config,
             proc_root,
             &self.paths.codex_home,
             now_ms,
+        )
+    }
+
+    pub async fn window_now(&self, session_id: &str) -> Option<Result<Value, String>> {
+        let driver = self.drivers.read().await.get(session_id).cloned()?;
+        let (reply, receive) = oneshot::channel();
+        driver.send(DriverRequest::WindowNow(reply)).ok()?;
+        Some(
+            receive
+                .await
+                .unwrap_or_else(|_| Err("provider stopped before replying".into())),
         )
     }
 
@@ -197,8 +246,14 @@ impl WorkbenchRegistry {
             return Err(format!("session {} is already open", launched.session_id));
         }
         let (requests, receiver) = mpsc::unbounded_channel();
-        tokio::spawn(supervise_driver(driver, receiver));
-        drivers.insert(launched.session_id, requests);
+        let session_id = launched.session_id;
+        drivers.insert(session_id.clone(), requests);
+        drop(drivers);
+        let live = self.drivers.clone();
+        tokio::spawn(async move {
+            supervise_driver(driver, receiver).await;
+            live.write().await.remove(&session_id);
+        });
         Ok(launched.reply)
     }
 
@@ -232,6 +287,35 @@ impl WorkbenchRegistry {
         receive
             .await
             .map_err(|_| format!("provider for {session_id} stopped before replying"))?
+    }
+
+    async fn refuse_external_owner(&self, command: &Command) -> Result<(), String> {
+        let session = if let Ok(id) = Self::field(command, "sessionId") {
+            self.database.get_session(id.to_string()).await?
+        } else if let Ok(id) = Self::field(command, "externalId") {
+            self.database.session_by_external_id(id.to_string()).await?
+        } else {
+            None
+        };
+        let external_id = session
+            .as_ref()
+            .and_then(|row| row.external_id.as_deref())
+            .or_else(|| command.fields.get("externalId").and_then(Value::as_str));
+        let Some(external_id) = external_id else {
+            return Ok(());
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        if self
+            .provider_holds(Path::new("/proc"), now)
+            .iter()
+            .any(|hold| hold.id.eq_ignore_ascii_case(external_id))
+        {
+            return Err("Another program has this chat open".into());
+        }
+        Ok(())
     }
 
     /// Execute one already-decoded WBP command and return the exact JSON body
@@ -283,7 +367,50 @@ impl WorkbenchRegistry {
                 Ok(json!({"providers":providers}))
             }
             CommandKind::SessionStart | CommandKind::SessionOpen | CommandKind::SessionResume => {
+                if command.kind != CommandKind::SessionOpen {
+                    self.refuse_external_owner(command).await?;
+                }
                 self.launch(command).await
+            }
+            CommandKind::SessionClose
+                if !self.has_driver(Self::field(command, "sessionId")?).await =>
+            {
+                self.refuse_external_owner(command).await?;
+                let session_id = Self::field(command, "sessionId")?;
+                let session = self
+                    .database
+                    .get_session(session_id.to_string())
+                    .await?
+                    .ok_or_else(|| format!("no session {session_id}"))?;
+                if session.state != "dormant" {
+                    self.database
+                        .update_session(
+                            session_id.to_string(),
+                            crate::workbench::store::SessionPatch {
+                                state: Some("dormant".into()),
+                                ..Default::default()
+                            },
+                            None,
+                        )
+                        .await?;
+                    let event: crate::workbench::protocol::Event = serde_json::from_value(json!({
+                        "type":"session.state","sessionId":session_id,"seq":0,
+                        "at":chrono::Utc::now().to_rfc3339(),"state":"dormant","label":"Asleep"
+                    }))
+                    .map_err(|error| error.to_string())?;
+                    self.database.append(event).await?;
+                }
+                Ok(json!({"ok":true}))
+            }
+            // Opening a saved conversation is deliberately read-only. The
+            // first prompt is what wakes (or resumes) its provider, so lazily
+            // attach the driver here before forwarding that prompt.
+            CommandKind::PromptSend
+                if !self.has_driver(Self::field(command, "sessionId")?).await =>
+            {
+                self.refuse_external_owner(command).await?;
+                self.launch(command).await?;
+                self.driver_command(command).await
             }
             _ => self.driver_command(command).await,
         }
@@ -446,10 +573,9 @@ mod tests {
         assert!(!registry.has_driver("session-1").await);
     }
 
-    struct ReconnectDriver {
+    struct DroppedDriver {
         database: ChatDb,
         phase: usize,
-        reconnects: Arc<AtomicUsize>,
     }
 
     fn provider_event(identity: &str, text: &str) -> Event {
@@ -460,8 +586,10 @@ mod tests {
         })).unwrap()
     }
 
-    impl ProviderDriver for ReconnectDriver {
-        fn brand(&self) -> &'static str { "codex" }
+    impl ProviderDriver for DroppedDriver {
+        fn brand(&self) -> &'static str {
+            "codex"
+        }
         fn command<'a>(&'a mut self, _: &'a Command) -> DriverFuture<'a> {
             Box::pin(async { Ok(json!({"ok":true})) })
         }
@@ -469,15 +597,11 @@ mod tests {
             Box::pin(async move {
                 match self.phase {
                     0 => {
-                        self.database.append(provider_event("same", "before drop")).await?;
+                        self.database
+                            .append(provider_event("same", "before drop"))
+                            .await?;
                         self.phase = 1;
                         Err("stream dropped".into())
-                    }
-                    2 => {
-                        assert!(self.database.append(provider_event("same", "replayed")).await?.is_none());
-                        self.database.append(provider_event("next", "after reconnect")).await?;
-                        self.phase = 3;
-                        Ok(json!({"ok":true}))
                     }
                     _ => {
                         std::future::pending::<()>().await;
@@ -486,40 +610,36 @@ mod tests {
                 }
             })
         }
-        fn reconnect<'a>(&'a mut self) -> DriverFuture<'a> {
-            Box::pin(async move {
-                self.reconnects.fetch_add(1, Ordering::SeqCst);
-                self.phase = 2;
-                Ok(json!({"ok":true}))
-            })
-        }
         fn close<'a>(&'a mut self) -> DriverFuture<'a> {
             Box::pin(async { Ok(json!({"ok":true})) })
         }
     }
 
     #[tokio::test]
-    async fn native_workbench_supervisor_reconnects_without_duplicate_sequence_numbers() {
+    async fn native_workbench_supervisor_retires_a_dropped_provider_stream() {
         let root = tempfile::tempdir().unwrap();
         let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
-        let reconnects = Arc::new(AtomicUsize::new(0));
         let (send, receive) = mpsc::unbounded_channel();
-        let task = tokio::spawn(supervise_driver(Box::new(ReconnectDriver {
-            database: database.clone(), phase: 0, reconnects: reconnects.clone(),
-        }), receive));
-
-        tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                if database.events_since("session-1".into(), 0).await.unwrap().len() == 2 { break; }
-                tokio::task::yield_now().await;
-            }
-        }).await.unwrap();
+        let task = tokio::spawn(supervise_driver(
+            Box::new(DroppedDriver {
+                database: database.clone(),
+                phase: 0,
+            }),
+            receive,
+        ));
+        tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .expect("a dead provider is released promptly")
+            .unwrap();
         let events = database.events_since("session-1".into(), 0).await.unwrap();
-        assert_eq!(events.iter().map(|event| event.fields["seq"].as_i64().unwrap()).collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.fields["seq"].as_i64().unwrap())
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
         assert_eq!(events[0].fields["text"], "before drop");
-        assert_eq!(events[1].fields["text"], "after reconnect");
-        assert_eq!(reconnects.load(Ordering::SeqCst), 1);
         drop(send);
-        task.await.unwrap();
     }
 }

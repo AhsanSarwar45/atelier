@@ -8,6 +8,8 @@ use crate::workbench::protocol::Event;
 use crate::workbench::store::Session;
 use chrono::Utc;
 use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use tokio::sync::mpsc;
 
 pub struct NativeClaudeSession {
@@ -16,6 +18,10 @@ pub struct NativeClaudeSession {
     live: ClaudeLiveState,
     inbound: mpsc::UnboundedReceiver<ClaudeInbound>,
     session_id: String,
+    cwd: PathBuf,
+    words: HashMap<String, String>,
+    assistant_messages: HashSet<String>,
+    root_assistant_messages: HashSet<String>,
 }
 
 impl NativeClaudeSession {
@@ -54,6 +60,7 @@ impl NativeClaudeSession {
                 .find(|pair| pair[0] == "--resume")
                 .map(|pair| pair[1].clone())
         });
+        let cwd = config.cwd.clone();
         let transport = ClaudeTransport::start(config)
             .await
             .map_err(|error| error.to_string())?;
@@ -87,20 +94,36 @@ impl NativeClaudeSession {
             live,
             inbound,
             session_id: session.id,
+            cwd,
+            words: HashMap::new(),
+            assistant_messages: HashSet::new(),
+            root_assistant_messages: HashSet::new(),
         };
-        if let Err(error) = native.persist(vec![
+        if let Err(error) = native
+            .persist(vec![
                 native.live.menu(),
                 json!({"type":"session.state","state":"idle","label":"Ready"}),
             ])
-            .await {
+            .await
+        {
             native.close().await;
-            if create { let _ = native.database.delete_session(native.session_id.clone()).await; }
+            if create {
+                let _ = native
+                    .database
+                    .delete_session(native.session_id.clone())
+                    .await;
+            }
             return Err(error);
         }
         if let Some(resume) = resume {
             if let Err(error) = native.import_history(&resume).await {
                 native.close().await;
-                if create { let _ = native.database.delete_session(native.session_id.clone()).await; }
+                if create {
+                    let _ = native
+                        .database
+                        .delete_session(native.session_id.clone())
+                        .await;
+                }
                 return Err(error);
             }
         }
@@ -114,16 +137,76 @@ impl NativeClaudeSession {
         let Some(record) = find_record(&config, external_id) else {
             return Ok(());
         };
-        self.persist(read_history(&record).events).await?;
+        let events=read_history(&record).events.into_iter().map(|mut event|{let event_id=crate::workbench::protocol::replay_event_id(&event);if let Some(object)=event.as_object_mut(){object.insert("providerEvent".into(),json!({"provider":"claude","threadId":external_id,"eventId":event_id,"delivery":"replay"}));}event}).collect();
+        self.persist(events).await?;
         Ok(())
     }
 
     async fn persist(&mut self, events: Vec<DriverEvent>) -> Result<Vec<Event>, String> {
         let mut appended = Vec::new();
         for bare in events {
+            let replayed = bare["providerEvent"].is_object();
+            let kind = bare["type"].as_str().unwrap_or_default().to_string();
+            let message = bare["messageId"].as_str().map(str::to_string);
+            if kind == "message.started" && bare["role"] == "assistant" {
+                if let Some(id) = message.as_ref() {
+                    self.assistant_messages.insert(id.clone());
+                    if bare["parentToolCallId"].is_null() {
+                        self.root_assistant_messages.insert(id.clone());
+                    }
+                }
+            }
+            if kind == "text.delta" {
+                if let (Some(id), Some(text)) = (message.as_ref(), bare["text"].as_str()) {
+                    self.words.entry(id.clone()).or_default().push_str(text)
+                }
+            }
             let event = envelop(&self.session_id, bare)?;
             if let Some(event) = self.database.append(event).await? {
                 appended.push(event);
+            }
+            if kind == "message.completed" {
+                if let Some(id) = message {
+                    let text = self.words.remove(&id).unwrap_or_default();
+                    let assistant = self.assistant_messages.remove(&id);
+                    let root = self.root_assistant_messages.remove(&id);
+                    if assistant && !replayed {
+                        if root {
+                            if let Some(mut signal) =
+                                crate::workbench::provider_messages::from_text(&text)
+                            {
+                                signal["sourceMessageId"] = json!(id);
+                                let event = envelop(
+                                    &self.session_id,
+                                    json!({"type":"provider.message","signal":signal}),
+                                )?;
+                                if let Some(event) = self.database.append(event).await? {
+                                    appended.push(event)
+                                }
+                            }
+                        }
+                        for widget in crate::workbench::media::widget_specs(&text) {
+                            let event = envelop(
+                                &self.session_id,
+                                json!({"type":"widget","messageId":id,"widget":widget}),
+                            )?;
+                            if let Some(event) = self.database.append(event).await? {
+                                appended.push(event)
+                            }
+                        }
+                        for comparison in
+                            crate::workbench::media::comparison_specs(&text, &self.cwd)
+                        {
+                            let event = envelop(
+                                &self.session_id,
+                                json!({"type":"image.compare","messageId":id,"comparison":comparison}),
+                            )?;
+                            if let Some(event) = self.database.append(event).await? {
+                                appended.push(event)
+                            }
+                        }
+                    }
+                }
             }
         }
         Ok(appended)
@@ -134,11 +217,16 @@ impl NativeClaudeSession {
     }
 
     pub async fn send(&mut self, text: &str, images: &[Value]) -> Result<Vec<Event>, String> {
+        self.live.validate_prompt(text)?;
         let events = self
             .live
             .send_prompt(&self.transport, text, images)
             .map_err(|error| error.to_string())?;
         self.persist(events).await
+    }
+
+    pub fn validate_prompt(&self, text: &str) -> Result<(), String> {
+        self.live.validate_prompt(text)
     }
 
     /// Wait for exactly one provider frame and commit every WBP event it
@@ -241,6 +329,16 @@ impl NativeClaudeSession {
 
     pub async fn close(&self) {
         self.transport.close().await;
+    }
+
+    pub async fn window_now(&self) -> Result<Value, String> {
+        self.transport
+            .call(
+                json!({"subtype":"get_context_usage"}),
+                std::time::Duration::from_secs(15),
+            )
+            .await
+            .map_err(|e| e.to_string())
     }
 }
 

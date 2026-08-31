@@ -5,7 +5,9 @@
 //! per-chat tails and the app-wide watch all observe one monotone order.
 
 use super::protocol::{Event, EventKind};
-use super::store::{Session, SessionPatch, Store, TranscriptItemPage};
+use super::store::{
+    SearchHit, Session, SessionActivity, SessionPatch, Spend, Store, TokenStats, TranscriptItemPage,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -32,8 +34,27 @@ enum Command {
     MarkSpoke(String, String, Reply<()>),
     ListSessions(Option<String>, Reply<Vec<Session>>),
     BeadsForSessions(Vec<String>, Reply<HashMap<String, Vec<String>>>),
+    BeadsForSession(String, Reply<Vec<String>>),
+    RememberBeadLink(String, String, String, String, Reply<()>),
+    SessionsForBead(String, Reply<Vec<Session>>),
+    Search(String, usize, Reply<Vec<SearchHit>>),
+    Spend(Reply<Vec<Spend>>),
+    ToolDetails(String, String, Reply<Option<serde_json::Value>>),
     Append(Event, Reply<Option<Event>>),
     EventsSince(String, i64, Reply<Vec<Event>>),
+    EventCount(String, Reply<i64>),
+    TimelineCount(String, Reply<i64>),
+    FollowedTo(String, Reply<Option<i64>>),
+    ImportedBy(String, Reply<Option<i64>>),
+    MarkImported(String, Reply<()>),
+    RememberFollowed(String, i64, Reply<()>),
+    WasDrivenHere(String, Reply<bool>),
+    SessionActivity(String, Reply<SessionActivity>),
+    SessionActivities(Reply<HashMap<String, SessionActivity>>),
+    TokenStats(String, Reply<TokenStats>),
+    NoteSummaryRun(String, String, String, i64, Reply<()>),
+    SummaryRuns(String, usize, Reply<Vec<i64>>),
+    ViewEvents(String, Reply<Vec<Event>>),
     TranscriptItems(String, Option<i64>, usize, Reply<TranscriptItemPage>),
     ProjectedAgents(String, Reply<Vec<serde_json::Value>>),
     Shutdown,
@@ -113,7 +134,8 @@ impl ChatDb {
     }
 
     pub async fn delete_session(&self, id: String) -> Result<(), String> {
-        self.request(|reply| Command::DeleteSession(id, reply)).await
+        self.request(|reply| Command::DeleteSession(id, reply))
+            .await
     }
 
     pub async fn get_session(&self, id: String) -> Result<Option<Session>, String> {
@@ -139,7 +161,8 @@ impl ChatDb {
     }
 
     pub async fn mark_spoke(&self, id: String, at: String) -> Result<(), String> {
-        self.request(|reply| Command::MarkSpoke(id, at, reply)).await
+        self.request(|reply| Command::MarkSpoke(id, at, reply))
+            .await
     }
 
     pub async fn list_sessions(&self, project_id: Option<String>) -> Result<Vec<Session>, String> {
@@ -151,7 +174,42 @@ impl ChatDb {
         &self,
         session_ids: Vec<String>,
     ) -> Result<HashMap<String, Vec<String>>, String> {
-        self.request(|reply| Command::BeadsForSessions(session_ids, reply)).await
+        self.request(|reply| Command::BeadsForSessions(session_ids, reply))
+            .await
+    }
+
+    pub async fn beads_for_session(&self, id: String) -> Result<Vec<String>, String> {
+        self.request(|reply| Command::BeadsForSession(id, reply))
+            .await
+    }
+    pub async fn remember_bead_link(
+        &self,
+        session: String,
+        bead: String,
+        via: String,
+        at: String,
+    ) -> Result<(), String> {
+        self.request(|reply| Command::RememberBeadLink(session, bead, via, at, reply))
+            .await
+    }
+    pub async fn sessions_for_bead(&self, id: String) -> Result<Vec<Session>, String> {
+        self.request(|reply| Command::SessionsForBead(id, reply))
+            .await
+    }
+    pub async fn search(&self, query: String, limit: usize) -> Result<Vec<SearchHit>, String> {
+        self.request(|reply| Command::Search(query, limit, reply))
+            .await
+    }
+    pub async fn spend(&self) -> Result<Vec<Spend>, String> {
+        self.request(Command::Spend).await
+    }
+    pub async fn tool_details(
+        &self,
+        session: String,
+        tool: String,
+    ) -> Result<Option<serde_json::Value>, String> {
+        self.request(|reply| Command::ToolDetails(session, tool, reply))
+            .await
     }
 
     /// Append a provider event after assigning its durable sequence number.
@@ -162,6 +220,65 @@ impl ChatDb {
 
     pub async fn events_since(&self, session_id: String, since: i64) -> Result<Vec<Event>, String> {
         self.request(|reply| Command::EventsSince(session_id, since, reply))
+            .await
+    }
+
+    pub async fn event_count(&self, session_id: String) -> Result<i64, String> {
+        self.request(|reply| Command::EventCount(session_id, reply))
+            .await
+    }
+    pub async fn timeline_count(&self, session_id: String) -> Result<i64, String> {
+        self.request(|reply| Command::TimelineCount(session_id, reply))
+            .await
+    }
+    pub async fn followed_to(&self, session_id: String) -> Result<Option<i64>, String> {
+        self.request(|reply| Command::FollowedTo(session_id, reply))
+            .await
+    }
+    pub async fn imported_by(&self, session_id: String) -> Result<Option<i64>, String> {
+        self.request(|reply| Command::ImportedBy(session_id, reply))
+            .await
+    }
+    pub async fn mark_imported(&self, session_id: String) -> Result<(), String> {
+        self.request(|reply| Command::MarkImported(session_id, reply))
+            .await
+    }
+    pub async fn remember_followed(&self, session_id: String, at: i64) -> Result<(), String> {
+        self.request(|reply| Command::RememberFollowed(session_id, at, reply))
+            .await
+    }
+    pub async fn was_driven_here(&self, session_id: String) -> Result<bool, String> {
+        self.request(|reply| Command::WasDrivenHere(session_id, reply))
+            .await
+    }
+    pub async fn session_activity(&self, session_id: String) -> Result<SessionActivity, String> {
+        self.request(|reply| Command::SessionActivity(session_id, reply))
+            .await
+    }
+    pub async fn session_activities(&self) -> Result<HashMap<String, SessionActivity>, String> {
+        self.request(Command::SessionActivities).await
+    }
+    pub async fn token_stats(&self, session_id: String) -> Result<TokenStats, String> {
+        self.request(|reply| Command::TokenStats(session_id, reply))
+            .await
+    }
+    pub async fn note_summary_run(
+        &self,
+        project: String,
+        session_id: String,
+        at: String,
+        ms: i64,
+    ) -> Result<(), String> {
+        self.request(|reply| Command::NoteSummaryRun(project, session_id, at, ms, reply))
+            .await
+    }
+    pub async fn summary_runs(&self, project: String, limit: usize) -> Result<Vec<i64>, String> {
+        self.request(|reply| Command::SummaryRuns(project, limit, reply))
+            .await
+    }
+
+    pub async fn view_events(&self, session_id: String) -> Result<Vec<Event>, String> {
+        self.request(|reply| Command::ViewEvents(session_id, reply))
             .await
     }
 
@@ -207,25 +324,47 @@ fn respond<T>(reply: Reply<T>, result: rusqlite::Result<T>) {
 }
 
 fn string(event: &Event, name: &str) -> Option<String> {
-    event.fields.get(name).and_then(serde_json::Value::as_str).map(str::to_string)
+    event
+        .fields
+        .get(name)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
 }
 
 fn apply_session_fact(store: &Store, session_id: &str, event: &Event) -> rusqlite::Result<()> {
     let mut patch = SessionPatch::default();
     match event.kind {
         EventKind::SessionStarted => {
-            if event.fields.contains_key("externalId") { patch.external_id = Some(string(event, "externalId")); }
-            if event.fields.contains_key("model") { patch.model = Some(string(event, "model")); }
-            if let Some(mode) = string(event, "permissionMode") { patch.permission_mode = Some(mode); }
-            if event.fields.contains_key("effort") { patch.effort = Some(string(event, "effort")); }
-            if event.fields.contains_key("collaborationMode") { patch.collaboration_mode = Some(string(event, "collaborationMode")); }
+            if event.fields.contains_key("externalId") {
+                patch.external_id = Some(string(event, "externalId"));
+            }
+            if event.fields.contains_key("model") {
+                patch.model = Some(string(event, "model"));
+            }
+            if let Some(mode) = string(event, "permissionMode") {
+                patch.permission_mode = Some(mode);
+            }
+            if event.fields.contains_key("effort") {
+                patch.effort = Some(string(event, "effort"));
+            }
+            if event.fields.contains_key("collaborationMode") {
+                patch.collaboration_mode = Some(string(event, "collaborationMode"));
+            }
         }
         EventKind::SessionState => patch.state = string(event, "state"),
         EventKind::SessionPinned => {
-            if event.fields.contains_key("model") { patch.model = Some(string(event, "model")); }
-            if let Some(mode) = string(event, "permissionMode") { patch.permission_mode = Some(mode); }
-            if event.fields.contains_key("effort") { patch.effort = Some(string(event, "effort")); }
-            if event.fields.contains_key("collaborationMode") { patch.collaboration_mode = Some(string(event, "collaborationMode")); }
+            if event.fields.contains_key("model") {
+                patch.model = Some(string(event, "model"));
+            }
+            if let Some(mode) = string(event, "permissionMode") {
+                patch.permission_mode = Some(mode);
+            }
+            if event.fields.contains_key("effort") {
+                patch.effort = Some(string(event, "effort"));
+            }
+            if event.fields.contains_key("collaborationMode") {
+                patch.collaboration_mode = Some(string(event, "collaborationMode"));
+            }
         }
         EventKind::SessionEnded => patch.state = Some("dormant".into()),
         _ => return Ok(()),
@@ -239,6 +378,7 @@ fn run(
     global: broadcast::Sender<StoreUpdate>,
     sessions: Arc<Mutex<HashMap<String, broadcast::Sender<Event>>>>,
 ) {
+    let mut agent_lifecycles: HashMap<String, super::lifecycle::AgentLifecycle> = HashMap::new();
     while let Some(command) = commands.blocking_recv() {
         match command {
             Command::CreateSession(session, reply) => {
@@ -256,26 +396,93 @@ fn run(
             Command::ListSessions(project_id, reply) => {
                 respond(reply, store.list_sessions(project_id.as_deref()))
             }
-            Command::BeadsForSessions(ids, reply) => {
-                respond(reply, store.beads_for_sessions(&ids))
+            Command::BeadsForSessions(ids, reply) => respond(reply, store.beads_for_sessions(&ids)),
+            Command::BeadsForSession(id, reply) => respond(reply, store.beads_for_session(&id)),
+            Command::RememberBeadLink(session, bead, via, at, reply) => respond(
+                reply,
+                store
+                    .remember_bead_link(&session, &bead, &via, &at)
+                    .map(|_| ()),
+            ),
+            Command::SessionsForBead(id, reply) => respond(reply, store.sessions_for_bead(&id)),
+            Command::Search(query, limit, reply) => respond(reply, store.search(&query, limit)),
+            Command::Spend(reply) => respond(reply, store.spend()),
+            Command::ToolDetails(session, tool, reply) => {
+                respond(reply, store.tool_details(&session, &tool))
             }
             Command::Append(mut event, reply) => {
+                super::wire::bound_event(&mut event);
                 let session_id = event
                     .fields
                     .get("sessionId")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or_default()
                     .to_string();
+                if matches!(
+                    event.kind,
+                    EventKind::AgentStarted | EventKind::AgentProgress | EventKind::AgentFinished
+                ) {
+                    if !agent_lifecycles.contains_key(&session_id) {
+                        let history = match store.agent_lifecycle_events(&session_id) {
+                            Ok(history) => history,
+                            Err(error) => {
+                                let _ = reply.send(Err(error.to_string()));
+                                continue;
+                            }
+                        };
+                        let mut lifecycle = super::lifecycle::AgentLifecycle::default();
+                        let prior = history
+                            .into_iter()
+                            .filter_map(|event| serde_json::to_value(event).ok())
+                            .collect();
+                        let _ = lifecycle.accept(prior);
+                        agent_lifecycles.insert(session_id.clone(), lifecycle);
+                    }
+                    let raw = match serde_json::to_value(&event) {
+                        Ok(raw) => raw,
+                        Err(error) => {
+                            let _ = reply.send(Err(error.to_string()));
+                            continue;
+                        }
+                    };
+                    let Some(canonical) = agent_lifecycles
+                        .entry(session_id.clone())
+                        .or_default()
+                        .accept(vec![raw])
+                        .into_iter()
+                        .next()
+                    else {
+                        let _ = reply.send(Ok(None));
+                        continue;
+                    };
+                    event = match serde_json::from_value(canonical) {
+                        Ok(event) => event,
+                        Err(error) => {
+                            let _ = reply.send(Err(error.to_string()));
+                            continue;
+                        }
+                    };
+                }
                 let result = store.next_seq(&session_id).and_then(|seq| {
                     event
                         .fields
                         .insert("seq".to_string(), serde_json::json!(seq));
-                    store
-                        .append_event(&event)
-                        .and_then(|appended| {
-                            if appended { apply_session_fact(&store, &session_id, &event)?; }
-                            Ok(appended.then_some((seq, event)))
-                        })
+                    store.append_event(&event).and_then(|appended| {
+                        if appended {
+                            apply_session_fact(&store, &session_id, &event)?;
+                            if event.kind == EventKind::LinkBead {
+                                if let Some(bead_id) = string(&event, "beadId") {
+                                    store.remember_bead_link(
+                                        &session_id,
+                                        &bead_id,
+                                        string(&event, "via").as_deref().unwrap_or("tool"),
+                                        string(&event, "at").as_deref().unwrap_or(""),
+                                    )?;
+                                }
+                            }
+                        }
+                        Ok(appended.then_some((seq, event)))
+                    })
                 });
                 match result {
                     Ok(Some((seq, event))) => {
@@ -301,6 +508,44 @@ fn run(
             }
             Command::EventsSince(session_id, since, reply) => {
                 respond(reply, store.events_since(&session_id, since))
+            }
+            Command::EventCount(session_id, reply) => {
+                respond(reply, store.event_count(&session_id))
+            }
+            Command::TimelineCount(session_id, reply) => {
+                respond(reply, store.timeline_count(&session_id))
+            }
+            Command::FollowedTo(session_id, reply) => {
+                respond(reply, store.followed_to(&session_id))
+            }
+            Command::ImportedBy(session_id, reply) => {
+                respond(reply, store.imported_by(&session_id))
+            }
+            Command::MarkImported(session_id, reply) => {
+                respond(reply, store.mark_imported(&session_id).map(|_| ()))
+            }
+            Command::RememberFollowed(session_id, at, reply) => {
+                respond(reply, store.remember_followed(&session_id, at).map(|_| ()))
+            }
+            Command::WasDrivenHere(session_id, reply) => {
+                respond(reply, store.was_driven_here(&session_id))
+            }
+            Command::SessionActivity(session_id, reply) => {
+                respond(reply, store.session_activity(&session_id))
+            }
+            Command::SessionActivities(reply) => respond(reply, store.session_activities()),
+            Command::TokenStats(session_id, reply) => {
+                respond(reply, store.token_stats(&session_id))
+            }
+            Command::NoteSummaryRun(project, session_id, at, ms, reply) => respond(
+                reply,
+                store.note_summary_run(&project, &session_id, &at, ms),
+            ),
+            Command::SummaryRuns(project, limit, reply) => {
+                respond(reply, store.summary_runs(&project, limit))
+            }
+            Command::ViewEvents(session_id, reply) => {
+                respond(reply, store.view_events(&session_id))
             }
             Command::TranscriptItems(session_id, before, limit, reply) => {
                 respond(reply, store.transcript_items(&session_id, before, limit))
@@ -383,5 +628,26 @@ mod tests {
         assert!(!stopped.load(Ordering::SeqCst));
         drop(clone);
         assert!(stopped.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn workbench_core_actor_keeps_agent_tombstones_across_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        {
+            let database = ChatDb::open(&path).unwrap();
+            for value in [
+                json!({"type":"agent.started","sessionId":"chat","seq":0,"at":"now","agentId":"a","toolCallId":"t","kind":"helper","what":"Inspect","agentType":null,"model":null}),
+                json!({"type":"agent.finished","sessionId":"chat","seq":0,"at":"now","agentId":"a","state":"done","seconds":1,"tokens":2,"calls":3,"model":null,"result":"done"}),
+            ] {
+                database
+                    .append(serde_json::from_value(value).unwrap())
+                    .await
+                    .unwrap();
+            }
+        }
+        let database = ChatDb::open(&path).unwrap();
+        let late:Event=serde_json::from_value(json!({"type":"agent.started","sessionId":"chat","seq":0,"at":"later","agentId":"a","toolCallId":"t","kind":"helper","what":"Late","agentType":null,"model":null})).unwrap();
+        assert!(database.append(late).await.unwrap().is_none());
     }
 }

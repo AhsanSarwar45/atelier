@@ -15,16 +15,16 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use futures::{stream, Stream, StreamExt};
 use base64::Engine;
+use futures::{stream, Stream, StreamExt};
 use serde::Deserialize;
-use std::collections::BTreeMap;
 use serde_json::{json, Value};
+use std::collections::{BTreeMap, HashMap};
 use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};
 use tokio::sync::broadcast;
 
 use crate::workbench::{
-    actor::{ChatDb, StoreUpdate},
+    actor::ChatDb,
     projection::fold_all,
     protocol::{Command, Event},
     registry::WorkbenchRegistry,
@@ -36,16 +36,200 @@ pub type EventStream = Pin<Box<dyn Stream<Item = Result<SseEvent, Infallible>> +
 #[derive(Clone)]
 pub struct WorkbenchState {
     registry: Arc<WorkbenchRegistry>,
+    hold_memory: Arc<tokio::sync::Mutex<HoldMemory>>,
+    usage_cache: Arc<tokio::sync::Mutex<HashMap<String, (std::time::Instant, Value)>>>,
+}
+
+#[derive(Default)]
+struct HoldMemory {
+    bursts: HashMap<String, i64>,
+    summaries: crate::workbench::summary::SummaryTracker,
 }
 
 impl WorkbenchState {
     pub fn new(registry: WorkbenchRegistry) -> Self {
         Self {
             registry: Arc::new(registry),
+            hold_memory: Arc::new(tokio::sync::Mutex::new(HoldMemory::default())),
+            usage_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
     pub fn database(&self) -> &ChatDb {
         self.registry.database()
+    }
+    pub(crate) async fn has_driver(&self, session_id: &str) -> bool {
+        self.registry.has_driver(session_id).await
+    }
+    pub(crate) fn claude_config_directory(&self) -> &std::path::Path {
+        self.registry.claude_config_directory()
+    }
+    pub(crate) fn codex_home_directory(&self) -> &std::path::Path {
+        self.registry.codex_home_directory()
+    }
+    pub(crate) fn codex_record(&self, id: &str) -> Option<std::path::PathBuf> {
+        fn find(root: &std::path::Path, id: &str, depth: u8) -> Option<std::path::PathBuf> {
+            if depth == 0 {
+                return None;
+            }
+            for entry in std::fs::read_dir(root).ok()?.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Some(found) = find(&path, id, depth - 1) {
+                        return Some(found);
+                    }
+                } else if path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|name| name.contains(id) && name.ends_with(".jsonl"))
+                {
+                    return Some(path);
+                }
+            }
+            None
+        }
+        find(
+            self.registry
+                .codex_home_directory()
+                .join("sessions")
+                .as_path(),
+            id,
+            5,
+        )
+    }
+
+    pub(crate) async fn provider_holds(&self) -> Vec<crate::workbench::external::ProviderHold> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        let mut holds = self
+            .registry
+            .provider_holds(std::path::Path::new("/proc"), now);
+        let sessions = self
+            .database()
+            .list_sessions(None)
+            .await
+            .unwrap_or_default();
+        let by_external: HashMap<_, _> = sessions
+            .iter()
+            .filter_map(|s| s.external_id.as_ref().map(|id| (id.to_lowercase(), s)))
+            .collect();
+        let mut memory = self.hold_memory.lock().await;
+        let mut beats = Vec::with_capacity(holds.len());
+        let mut present = std::collections::HashSet::new();
+        for hold in &mut holds {
+            present.insert(hold.id.to_lowercase());
+            let busy = !matches!(
+                hold.doing,
+                crate::workbench::external::HeldDoing::Idle
+                    | crate::workbench::external::HeldDoing::Unknown
+            );
+            let key = hold.id.to_lowercase();
+            if busy {
+                let began = *memory
+                    .bursts
+                    .entry(key.clone())
+                    .or_insert(hold.since.unwrap_or(now));
+                hold.turn_since = Some(began);
+            } else {
+                memory.bursts.remove(&key);
+            }
+            let project = by_external
+                .get(&key)
+                .map(|s| s.project_path.clone())
+                .unwrap_or_default();
+            beats.push(crate::workbench::summary::Beat {
+                id: hold.id.clone(),
+                project: project.clone(),
+                summarising: hold.doing == crate::workbench::external::HeldDoing::Summarising,
+                since: hold.since,
+            });
+            if hold.doing == crate::workbench::external::HeldDoing::Summarising
+                && !project.is_empty()
+            {
+                let runs = self
+                    .database()
+                    .summary_runs(project, 20)
+                    .await
+                    .unwrap_or_default();
+                hold.typical_ms = crate::workbench::summary::median(
+                    &runs,
+                    crate::workbench::summary::RUNS_ENOUGH,
+                );
+            }
+        }
+        memory.bursts.retain(|id, _| present.contains(id));
+        let finished = memory.summaries.observe(&beats, now);
+        drop(memory);
+        for run in finished {
+            if !run.project.is_empty() {
+                let _ = self
+                    .database()
+                    .note_summary_run(
+                        run.project,
+                        run.session_id,
+                        chrono::Utc::now().to_rfc3339(),
+                        run.ms,
+                    )
+                    .await;
+            }
+        }
+        holds
+    }
+
+    pub(crate) async fn account_usage(&self, brand: &str) -> Result<Value, String> {
+        // Hold the lock through a refresh: simultaneous browser connections
+        // share one provider query, exactly as the former sidecar's inFlight
+        // promise did. A cached answer stands for one usage beat.
+        let mut cache = self.usage_cache.lock().await;
+        if let Some((at, value)) = cache.get(brand) {
+            if at.elapsed() < Duration::from_secs(30) {
+                return Ok(value.clone());
+            }
+        }
+        let at = chrono::Utc::now().to_rfc3339();
+        let value = if brand == "codex" {
+            let mut config = crate::workbench::codex::transport::CodexTransportConfig::app_server(
+                std::path::Path::new("."),
+            );
+            if let Some(executable) = crate::routes::find_tool("codex", &[]) {
+                config.executable = executable;
+            }
+            let transport = crate::workbench::codex::transport::CodexTransport::start(config)
+                .await
+                .map_err(|e| e.to_string())?;
+            let result = crate::workbench::usage::read_codex(&transport, at).await;
+            transport.close().await;
+            serde_json::to_value(result?).map_err(|e| e.to_string())?
+        } else {
+            let options = crate::workbench::claude::transport::ClaudeSessionOptions {
+                cwd: std::env::current_dir().map_err(|e| e.to_string())?,
+                resume: None,
+                model: None,
+                permission_mode: Some("default".into()),
+                effort: None,
+                instructions: String::new(),
+            };
+            let mut config =
+                crate::workbench::claude::transport::ClaudeTransportConfig::session(&options);
+            if let Some(executable) = crate::routes::find_tool("claude", &[]) {
+                config.executable = executable;
+            }
+            let transport = crate::workbench::claude::transport::ClaudeTransport::start(config)
+                .await
+                .map_err(|e| e.to_string())?;
+            let result = crate::workbench::usage::read_claude(&transport, at).await;
+            transport.close().await;
+            serde_json::to_value(result?).map_err(|e| e.to_string())?
+        };
+        cache.insert(
+            brand.to_string(),
+            (std::time::Instant::now(), value.clone()),
+        );
+        Ok(value)
+    }
+    async fn window_now(&self, session: &str) -> Option<Result<Value, String>> {
+        self.registry.window_now(session).await
     }
 }
 
@@ -55,6 +239,13 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/sessions", get(sessions))
         .route("/restore", get(restore))
         .route("/session/:id", get(session))
+        .route("/search", get(search))
+        .route("/tool", get(tool))
+        .route("/spend", get(spend))
+        .route("/usage", get(usage))
+        .route("/tokens", get(tokens))
+        .route("/links/bead/:id", get(chats_for_bead))
+        .route("/links/session/:id", get(beads_for_chat))
         .route("/history", get(history))
         .route("/events", get(events))
         .route("/watch", get(watch))
@@ -69,6 +260,158 @@ async fn health() -> Json<Value> {
 }
 
 #[derive(Deserialize)]
+struct SearchQuery {
+    q: Option<String>,
+}
+async fn search(
+    State(state): State<WorkbenchState>,
+    Query(query): Query<SearchQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let q = query.q.unwrap_or_default().trim().to_string();
+    Ok(Json(if q.is_empty() {
+        json!([])
+    } else {
+        serde_json::to_value(state.database().search(q, 100).await?).map_err(|e| e.to_string())?
+    }))
+}
+
+#[derive(Deserialize)]
+struct ToolQuery {
+    session: String,
+    tool: String,
+}
+async fn tool(
+    State(state): State<WorkbenchState>,
+    Query(query): Query<ToolQuery>,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .database()
+        .tool_details(query.session, query.tool)
+        .await?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("no such tool call".into()))
+}
+
+async fn spend(State(state): State<WorkbenchState>) -> Result<Json<Value>, ApiError> {
+    Ok(Json(
+        serde_json::to_value(state.database().spend().await?).map_err(|e| e.to_string())?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct UsageQuery {
+    brand: Option<String>,
+}
+async fn usage(
+    State(state): State<WorkbenchState>,
+    Query(query): Query<UsageQuery>,
+) -> Result<Json<Value>, ApiError> {
+    Ok(Json(
+        state
+            .account_usage(query.brand.as_deref().unwrap_or("claude"))
+            .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct TokensQuery {
+    session: String,
+}
+async fn tokens(
+    State(state): State<WorkbenchState>,
+    Query(query): Query<TokensQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let session = state
+        .database()
+        .get_session(query.session.clone())
+        .await?
+        .ok_or_else(|| ApiError::not_found("no such session".into()))?;
+    let stats = state.database().token_stats(query.session).await?;
+    let record = session
+        .external_id
+        .as_deref()
+        .filter(|_| session.brand == "claude")
+        .and_then(|id| {
+            crate::workbench::claude::history::find_record(state.claude_config_directory(), id)
+        });
+    let spent = record.as_deref().and_then(crate::workbench::claude::history::token_spend).or_else(||stats.cost.as_ref().map(|cost| {
+        let own = json!({"input":cost["input"],"cacheWrite":0,"cacheRead":0,"output":cost["output"],"thinking":0,"total":cost["total"]});
+        json!({"own":own,"helpers":{"input":0,"cacheWrite":0,"cacheRead":0,"output":0,"thinking":0,"total":0},"total":own,
+            "turns":stats.turns,"toolCalls":stats.tool_calls,"forgettings":stats.forgettings,"helperCount":stats.helper_count,"models":[{"model":session.model.unwrap_or_else(||"unnamed".into()),"spend":own,"turns":stats.turns}]})
+    }));
+    let (window, window_note) = match state.window_now(&session.id).await {
+        None => (
+            Value::Null,
+            json!("Context details are unavailable for archived chats."),
+        ),
+        Some(Ok(raw)) => match crate::workbench::usage::window_now(&raw) {
+            Some(window) => (window, Value::Null),
+            None => (
+                Value::Null,
+                json!("The program driving this chat did not say what is in its window."),
+            ),
+        },
+        Some(Err(_)) => (
+            Value::Null,
+            json!("This chat could not be asked what is in its window just now."),
+        ),
+    };
+    Ok(Json(json!({"window":window,"windowNote":window_note,
+        "spent":spent,"spentNote":if spent.is_some(){Value::Null}else if record.is_none(){json!("This chat has no record on disk yet.")}else{json!("This chat's record could not be read.")}})))
+}
+
+#[derive(Deserialize)]
+struct LinkQuery {
+    path: Option<String>,
+}
+async fn chats_for_bead(
+    State(state): State<WorkbenchState>,
+    Path(id): Path<String>,
+    Query(query): Query<LinkQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let cached = state.database().sessions_for_bead(id.clone()).await?;
+    let board = if let Some(path) = query.path {
+        crate::workbench::beads_links::sessions_for_issue(
+            &Default::default(),
+            std::path::Path::new(&path),
+            &id,
+        )
+        .await
+    } else {
+        vec![]
+    };
+    let wanted = if board.is_empty() {
+        cached.iter().map(|s| s.id.clone()).collect()
+    } else {
+        board
+    };
+    Ok(Json(json!(wanted.into_iter().map(|session_id| {
+        let row = cached.iter().find(|s|s.id == session_id);
+        json!({"sessionId":session_id,"title":row.and_then(|s|s.title.clone()),"brand":row.map(|s|s.brand.clone()),"lastActiveAt":row.map(|s|s.last_active_at.clone()),"projectId":row.map(|s|s.project_id.clone())})
+    }).collect::<Vec<_>>())))
+}
+
+async fn beads_for_chat(
+    State(state): State<WorkbenchState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let mut beads = state.database().beads_for_session(id.clone()).await?;
+    if let Some(session) = state.database().get_session(id.clone()).await? {
+        beads.extend(
+            crate::workbench::beads_links::issues_for_session(
+                &Default::default(),
+                std::path::Path::new(&session.cwd),
+                &id,
+            )
+            .await,
+        );
+    }
+    beads.sort();
+    beads.dedup();
+    Ok(Json(json!(beads)))
+}
+
+#[derive(Deserialize)]
 struct SessionsQuery {
     project: Option<String>,
 }
@@ -77,22 +420,39 @@ async fn sessions(
     State(state): State<WorkbenchState>,
     Query(query): Query<SessionsQuery>,
 ) -> Result<Json<Vec<Value>>, ApiError> {
-    Ok(Json(session_summaries(state.database(), query.project).await?))
+    Ok(Json(
+        session_summaries(state.database(), query.project).await?,
+    ))
 }
 
-pub(crate) async fn session_summaries(database: &ChatDb, project: Option<String>) -> Result<Vec<Value>, String> {
+pub(crate) async fn session_summaries(
+    database: &ChatDb,
+    project: Option<String>,
+) -> Result<Vec<Value>, String> {
     let sessions = database.list_sessions(project).await?;
     let ids = sessions.iter().map(|session| session.id.clone()).collect();
     let mut beads = database.beads_for_sessions(ids).await?;
-    sessions.into_iter().map(|session| {
+    let mut activities = database.session_activities().await?;
+    let mut values = Vec::with_capacity(sessions.len());
+    for session in sessions {
         let linked = beads.remove(&session.id).unwrap_or_default();
+        let activity =
+            activities
+                .remove(&session.id)
+                .unwrap_or(crate::workbench::store::SessionActivity {
+                    label: String::new(),
+                    busy_since: None,
+                });
         let mut value = serde_json::to_value(session).map_err(|error| error.to_string())?;
-        let object = value.as_object_mut().ok_or_else(|| "session was not an object".to_string())?;
-        object.insert("activity".into(), json!(""));
-        object.insert("busySince".into(), Value::Null);
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| "session was not an object".to_string())?;
+        object.insert("activity".into(), json!(activity.label));
+        object.insert("busySince".into(), json!(activity.busy_since));
         object.insert("beads".into(), json!(linked));
-        Ok(value)
-    }).collect()
+        values.push(value);
+    }
+    Ok(values)
 }
 
 #[derive(Deserialize)]
@@ -111,28 +471,132 @@ fn folder_of(path: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn restore_row(session: Session, beads: Vec<String>) -> Value {
+fn restore_row(
+    session: Session,
+    beads: Vec<String>,
+    holds: &[crate::workbench::external::ProviderHold],
+) -> Value {
     let folder = folder_of(&session.cwd);
+    let held = session
+        .external_id
+        .as_deref()
+        .and_then(|id| holds.iter().find(|hold| hold.id.eq_ignore_ascii_case(id)));
     json!({
         "sessionId": session.id, "externalId": session.external_id, "brand": session.brand,
         "title": session.title, "lastActiveAt": session.last_active_at,
         "lastSpokeAt": session.last_spoke_at, "state": session.state, "origin": session.origin,
         "projectId": session.project_id, "cwdHint": session.cwd, "folder": folder,
-        "branch": Value::Null, "beads": beads, "runningElsewhere": false, "held": Value::Null,
+        "branch": Value::Null, "beads": beads, "runningElsewhere": held.is_some(), "held": held,
     })
+}
+
+async fn provider_sessions(
+    state: &WorkbenchState,
+    project: Option<&str>,
+    everything: bool,
+) -> Vec<Value> {
+    let project_owned = project.map(std::path::PathBuf::from);
+    let claude_config = state.registry.claude_config_directory().to_path_buf();
+    let claude = tokio::task::spawn_blocking(move || {
+        crate::workbench::claude::history::list_sessions(
+            &claude_config,
+            project_owned.as_deref(),
+            everything,
+        )
+        .into_iter()
+        .map(|session| json!({
+            "brand":"claude", "externalId":session.session_id, "lastActiveAt":session.last_modified,
+            "name":session.name, "cwd":session.cwd, "branch":session.git_branch,"lastSpokeAt":session.last_spoke_at,
+        }))
+        .collect::<Vec<_>>()
+    });
+    let project_path = project.map(std::path::Path::new);
+    let mut codex_rows = Vec::new();
+    let cwd = project_path.unwrap_or_else(|| std::path::Path::new("."));
+    let mut config = crate::workbench::codex::transport::CodexTransportConfig::app_server(cwd);
+    if let Some(executable) = crate::routes::find_tool("codex", &[]) {
+        config.executable = executable;
+    }
+    if let Ok(transport) = crate::workbench::codex::transport::CodexTransport::start(config).await {
+        if let Ok(threads) =
+            crate::workbench::codex::history::list_threads(&transport, project_path, everything)
+                .await
+        {
+            codex_rows.extend(threads.into_iter().filter_map(|thread| {
+                let id = thread["id"].as_str()?;
+                let updated = thread["updatedAt"].as_i64().map(|seconds| chrono::DateTime::from_timestamp(seconds, 0).map(|at| at.to_rfc3339())).flatten();
+                let preview = thread["preview"].as_str().unwrap_or_default();
+                Some(json!({"brand":"codex","externalId":id,"lastActiveAt":updated,
+                    "name":thread.get("name").filter(|v|!v.is_null()).cloned().unwrap_or_else(||json!(crate::workbench::metadata::conversation_title(preview))),
+                    "cwd":thread["cwd"],"branch":thread["gitInfo"]["branch"],"lastSpokeAt":thread["path"].as_str().and_then(|path|crate::workbench::codex::history::last_spoke_at(std::path::Path::new(path)))}))
+            }));
+        }
+        transport.close().await;
+    }
+    let mut rows = claude.await.unwrap_or_default();
+    rows.extend(codex_rows);
+    rows
 }
 
 async fn restore(
     State(state): State<WorkbenchState>,
     Query(query): Query<RestoreQuery>,
 ) -> Result<Json<Vec<Value>>, ApiError> {
-    let sessions = state.database().list_sessions(query.project).await?;
+    let sessions = state
+        .database()
+        .list_sessions(query.project.clone())
+        .await?;
+    let holds = state.provider_holds().await;
     let ids = sessions.iter().map(|session| session.id.clone()).collect();
     let mut beads = state.database().beads_for_sessions(ids).await?;
-    let rows = sessions.into_iter().map(|session| {
-        let linked = beads.remove(&session.id).unwrap_or_default();
-        restore_row(session, linked)
-    }).collect();
+    let mut rows: Vec<Value> = sessions
+        .into_iter()
+        .map(|session| {
+            let linked = beads.remove(&session.id).unwrap_or_default();
+            restore_row(session, linked, &holds)
+        })
+        .collect();
+    for known in provider_sessions(&state, query.path.as_deref(), query.all.is_some()).await {
+        let key = format!(
+            "{}:{}",
+            known["brand"].as_str().unwrap_or_default(),
+            known["externalId"].as_str().unwrap_or_default()
+        );
+        let held = known["externalId"]
+            .as_str()
+            .and_then(|id| holds.iter().find(|hold| hold.id.eq_ignore_ascii_case(id)));
+        if let Some(row) = rows.iter_mut().find(|row| {
+            format!(
+                "{}:{}",
+                row["brand"].as_str().unwrap_or_default(),
+                row["externalId"].as_str().unwrap_or_default()
+            ) == key
+        }) {
+            if !known["name"].is_null() {
+                row["title"] = known["name"].clone();
+            }
+            if known["lastActiveAt"].as_str() > row["lastActiveAt"].as_str() {
+                row["lastActiveAt"] = known["lastActiveAt"].clone();
+            }
+            if known["lastSpokeAt"].as_str() > row["lastSpokeAt"].as_str() {
+                row["lastSpokeAt"] = known["lastSpokeAt"].clone();
+            }
+            if !known["cwd"].is_null() {
+                row["cwdHint"] = known["cwd"].clone();
+                row["folder"] = json!(known["cwd"].as_str().and_then(folder_of));
+            }
+            row["branch"] = known["branch"].clone();
+            row["runningElsewhere"] = json!(held.is_some());
+            row["held"] = json!(held);
+            continue;
+        }
+        rows.push(json!({"sessionId":Value::Null,"externalId":known["externalId"],"brand":known["brand"],
+            "title":known["name"],"lastActiveAt":known["lastActiveAt"],"lastSpokeAt":known["lastSpokeAt"],
+            "state":"dormant","origin":"terminal","projectId":query.project,"cwdHint":known["cwd"],
+            "folder":known["cwd"].as_str().and_then(folder_of),"branch":known["branch"],"beads":[],
+            "runningElsewhere":held.is_some(),"held":held}));
+    }
+    rows.sort_by(|a, b| b["lastActiveAt"].as_str().cmp(&a["lastActiveAt"].as_str()));
     Ok(Json(rows))
 }
 
@@ -142,18 +606,86 @@ async fn session(
 ) -> Result<Json<Value>, ApiError> {
     let found = state
         .database()
-        .list_sessions(None)
+        .get_session(id.clone())
         .await?
-        .into_iter()
-        .find(|session| session.id == id)
         .ok_or_else(|| ApiError::not_found(format!("no session {id}")))?;
-    let folder = folder_of(&found.cwd);
-    let mut linked = state.database().beads_for_sessions(vec![found.id.clone()]).await?;
-    let beads = linked.remove(&found.id).unwrap_or_default();
+    let known = provider_sessions(&state, Some(&found.project_path), false)
+        .await
+        .into_iter()
+        .find(|known| {
+            known["brand"] == found.brand
+                && found.external_id.as_ref().is_some_and(|id| {
+                    known["externalId"]
+                        .as_str()
+                        .is_some_and(|external| external.eq_ignore_ascii_case(id))
+                })
+        });
+    let cwd = known
+        .as_ref()
+        .and_then(|row| row["cwd"].as_str())
+        .unwrap_or(&found.cwd)
+        .to_string();
+    let folder = folder_of(&cwd);
+    let mut linked = state
+        .database()
+        .beads_for_sessions(vec![found.id.clone()])
+        .await?;
+    let mut beads = linked.remove(&found.id).unwrap_or_default();
+    beads.extend(
+        crate::workbench::beads_links::issues_for_session(
+            &Default::default(),
+            std::path::Path::new(&cwd),
+            &found.id,
+        )
+        .await,
+    );
+    beads.sort();
+    beads.dedup();
+    for bead in &beads {
+        let _ = state
+            .database()
+            .remember_bead_link(
+                found.id.clone(),
+                bead.clone(),
+                "claim".into(),
+                chrono::Utc::now().to_rfc3339(),
+            )
+            .await;
+    }
+    let sweep = state.database().clone();
+    tokio::spawn(async move {
+        let Ok(sessions) = sweep.list_sessions(None).await else {
+            return;
+        };
+        for session in sessions {
+            for bead in crate::workbench::beads_links::issues_for_session(
+                &Default::default(),
+                std::path::Path::new(&session.cwd),
+                &session.id,
+            )
+            .await
+            {
+                let _ = sweep
+                    .remember_bead_link(
+                        session.id.clone(),
+                        bead,
+                        "claim".into(),
+                        chrono::Utc::now().to_rfc3339(),
+                    )
+                    .await;
+            }
+        }
+    });
+    let holds = state.provider_holds().await;
+    let held = found
+        .external_id
+        .as_deref()
+        .and_then(|id| holds.iter().find(|hold| hold.id.eq_ignore_ascii_case(id)));
     Ok(Json(json!({
         "sessionId": found.id, "origin": found.origin, "brand": found.brand,
-        "externalId": found.external_id, "runningElsewhere": false, "held": Value::Null,
-        "title": found.title, "cwd": found.cwd, "folder": folder, "branch": Value::Null, "beads": beads,
+        "externalId": found.external_id, "runningElsewhere": held.is_some(), "held": held,
+        "title": known.as_ref().and_then(|row|row["name"].as_str()).map(str::to_string).or(found.title),
+        "cwd": cwd, "folder": folder, "branch": known.as_ref().map(|row|row["branch"].clone()).unwrap_or(Value::Null), "beads": beads,
     })))
 }
 
@@ -202,16 +734,29 @@ fn snapshot_frame(view: &Value) -> SseEvent {
         .expect("projection serializes")
 }
 
-fn session_tail(receiver: broadcast::Receiver<Event>) -> EventStream {
-    Box::pin(stream::unfold(receiver, |mut receiver| async move {
-        loop {
-            match receiver.recv().await {
-                Ok(event) => return Some((Ok(event_frame(&event)), receiver)),
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => return None,
+fn session_tail(receiver: broadcast::Receiver<Event>, after: i64) -> EventStream {
+    Box::pin(stream::unfold(
+        (receiver, after),
+        |(mut receiver, after)| async move {
+            loop {
+                match receiver.recv().await {
+                    Ok(event) => {
+                        let seq = event
+                            .fields
+                            .get("seq")
+                            .and_then(Value::as_i64)
+                            .unwrap_or_default();
+                        if seq <= after {
+                            continue;
+                        }
+                        return Some((Ok(event_frame(&event)), (receiver, seq)));
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return None,
+                }
             }
-        }
-    }))
+        },
+    ))
 }
 
 async fn events(
@@ -221,19 +766,27 @@ async fn events(
     // Subscribe before replay so an append racing the snapshot cannot fall in the gap.
     let receiver = state.database().subscribe_session(&query.session);
     let since = query.since.unwrap_or(0).max(0);
-    let initial = if since == 0 {
+    let (initial, watermark) = if since == 0 {
         let view = snapshot(state.database(), &query.session).await?;
-        vec![Ok(snapshot_frame(&view))]
+        let watermark = view["lastSeq"].as_i64().unwrap_or_default();
+        (vec![Ok(snapshot_frame(&view))], watermark)
     } else {
-        state
+        let replay = state
             .database()
             .events_since(query.session.clone(), since)
-            .await?
-            .iter()
-            .map(|event| Ok(event_frame(event)))
-            .collect()
+            .await?;
+        let watermark = replay
+            .last()
+            .and_then(|event| event.fields.get("seq"))
+            .and_then(Value::as_i64)
+            .unwrap_or(since);
+        (
+            replay.iter().map(|event| Ok(event_frame(event))).collect(),
+            watermark,
+        )
     };
-    let output: EventStream = Box::pin(stream::iter(initial).chain(session_tail(receiver)));
+    let output: EventStream =
+        Box::pin(stream::iter(initial).chain(session_tail(receiver, watermark)));
     Ok(Sse::new(output).keep_alive(
         KeepAlive::new()
             .interval(Duration::from_secs(30))
@@ -242,12 +795,14 @@ async fn events(
 }
 
 pub(crate) async fn snapshot(database: &ChatDb, session_id: &str) -> Result<Value, String> {
-    let history = database.events_since(session_id.to_string(), 0).await?;
+    let history = database.view_events(session_id.to_string()).await?;
     let page = database
         .transcript_items(session_id.to_string(), None, 40)
         .await?;
+    let agents = database.projected_agents(session_id.to_string()).await?;
     let mut view = fold_all(&history).view;
     view["items"] = json!(page.items);
+    view["agents"] = json!(agents);
     view["lastSeq"] = json!(page.newest_seq);
     view["historyCursor"] = json!(page.cursor);
     view["hasOlder"] = json!(page.has_older);
@@ -260,31 +815,35 @@ fn watch_frame(value: Value) -> SseEvent {
         .expect("watch frame serializes")
 }
 
-fn all_tail(receiver: broadcast::Receiver<StoreUpdate>) -> EventStream {
-    Box::pin(stream::unfold(receiver, |mut receiver| async move {
-        loop {
-            match receiver.recv().await {
-                Ok(update) => {
-                    return Some((
-                        Ok(watch_frame(json!({"kind":"event","event":update.event}))),
-                        receiver,
-                    ))
-                }
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => return None,
+async fn watch(State(state): State<WorkbenchState>) -> Result<Sse<EventStream>, ApiError> {
+    let mut receiver = state.database().subscribe_all();
+    let sessions = session_summaries(state.database(), None).await?;
+    let holds = state.provider_holds().await;
+    let (tx, rx) = tokio::sync::mpsc::channel(100);
+    tokio::spawn(async move {
+        let mut last_holds = serde_json::to_value(&holds).unwrap_or_default();
+        for frame in [
+            json!({"kind":"snapshot","sessions":sessions}),
+            json!({"kind":"running","holds":holds}),
+        ] {
+            if tx.send(Ok(watch_frame(frame))).await.is_err() {
+                return;
             }
         }
-    }))
-}
-
-async fn watch(State(state): State<WorkbenchState>) -> Result<Sse<EventStream>, ApiError> {
-    let receiver = state.database().subscribe_all();
-    let sessions = session_summaries(state.database(), None).await?;
-    let initial = stream::iter(vec![
-        Ok(watch_frame(json!({"kind":"snapshot","sessions":sessions}))),
-        Ok(watch_frame(json!({"kind":"running","holds":[]}))),
-    ]);
-    let output: EventStream = Box::pin(initial.chain(all_tail(receiver)));
+        let mut hold_tick = tokio::time::interval(Duration::from_secs(2));
+        let mut usage_tick = tokio::time::interval(Duration::from_secs(30));
+        loop {
+            tokio::select! {
+                _=hold_tick.tick()=>{
+                    let current=serde_json::to_value(state.provider_holds().await).unwrap_or_default();
+                    if current!=last_holds {last_holds=current.clone();if tx.send(Ok(watch_frame(json!({"kind":"running","holds":current})))).await.is_err(){return}}
+                },
+                _=usage_tick.tick()=>{for brand in ["claude","codex"]{if let Ok(usage)=state.account_usage(brand).await{if tx.send(Ok(watch_frame(json!({"kind":"usage","brand":brand,"usage":usage})))).await.is_err(){return}}}},
+                received=receiver.recv()=>match received{Ok(update)=>{if update.event.kind==crate::workbench::protocol::EventKind::SessionStarted{if let Ok(Some(session))=state.database().get_session(update.session_id.clone()).await{let beads=state.database().beads_for_session(update.session_id.clone()).await.unwrap_or_default();if tx.send(Ok(watch_frame(json!({"kind":"opened","session":{"id":session.id,"brand":session.brand,"externalId":session.external_id,"projectId":session.project_id,"projectPath":session.project_path,"cwd":session.cwd,"model":session.model,"permissionMode":session.permission_mode,"effort":session.effort,"collaborationMode":session.collaboration_mode,"title":session.title,"state":session.state,"origin":session.origin,"createdAt":session.created_at,"lastActiveAt":session.last_active_at,"lastSpokeAt":session.last_spoke_at,"activity":"","busySince":Value::Null,"beads":beads}})))).await.is_err(){return}}}if tx.send(Ok(watch_frame(json!({"kind":"event","event":update.event})))).await.is_err(){return}},Err(broadcast::error::RecvError::Lagged(_))=>continue,Err(broadcast::error::RecvError::Closed)=>return}
+            }
+        }
+    });
+    let output: EventStream = Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx));
     Ok(Sse::new(output).keep_alive(
         KeepAlive::new()
             .interval(Duration::from_secs(30))
@@ -309,68 +868,129 @@ struct UploadedRequest {
 }
 
 fn decoded(files: BTreeMap<String, String>) -> Result<BTreeMap<String, Vec<u8>>, String> {
-    files.into_iter().map(|(path, encoded)| {
-        let label = path.clone();
-        base64::engine::general_purpose::STANDARD.decode(encoded)
-            .map(|bytes| (path, bytes)).map_err(|error| format!("{label}: {error}"))
-    }).collect()
+    files
+        .into_iter()
+        .map(|(path, encoded)| {
+            let label = path.clone();
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .map(|bytes| (path, bytes))
+                .map_err(|error| format!("{label}: {error}"))
+        })
+        .collect()
 }
 
-async fn present(State(state): State<WorkbenchState>, Json(request): Json<UploadedRequest>) -> Result<Json<Value>, ApiError> {
+async fn present(
+    State(state): State<WorkbenchState>,
+    Json(request): Json<UploadedRequest>,
+) -> Result<Json<Value>, ApiError> {
     let files = decoded(request.files)?;
-    Ok(Json(json!({"output":state.registry.present(&request.args, &request.stdin, &files)?})))
+    Ok(Json(
+        json!({"output":state.registry.present(&request.args, &request.stdin, &files)?}),
+    ))
 }
 
 fn option<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
-    args.iter().position(|word| word == name).and_then(|at| args.get(at + 1)).map(String::as_str)
+    args.iter()
+        .position(|word| word == name)
+        .and_then(|at| args.get(at + 1))
+        .map(String::as_str)
 }
 
-async fn screen_check(State(state): State<WorkbenchState>, Json(request): Json<UploadedRequest>) -> Result<Json<Value>, ApiError> {
+async fn screen_check(
+    State(state): State<WorkbenchState>,
+    Json(request): Json<UploadedRequest>,
+) -> Result<Json<Value>, ApiError> {
     let files = decoded(request.files)?;
     let action = request.args.first().map(String::as_str).unwrap_or("help");
     if matches!(action, "help" | "--help" | "-h") {
-        return Ok(Json(json!({"result":{"help":"atelier tool screen-check windows|capture|check|compare"}})));
+        return Ok(Json(
+            json!({"result":{"help":"atelier tool screen-check windows|capture|check|compare"}}),
+        ));
     }
     if action == "--schema" {
-        return Ok(Json(json!({"result":{"schema":{"actions":["windows","capture","check","compare"],"capture_types":["web","window","image"]}}})));
+        return Ok(Json(
+            json!({"result":{"schema":{"actions":["windows","capture","check","compare"],"capture_types":["web","window","image"]}}}),
+        ));
     }
     if action == "windows" {
         let windows = crate::workbench::screen_check::native_windows()?;
-        return Ok(Json(json!({"result":{"windows":windows,"safeguards":["explicit ID required","two matching frames required","no whole-display fallback"]}})));
+        return Ok(Json(
+            json!({"result":{"windows":windows,"safeguards":["explicit ID required","two matching frames required","no whole-display fallback"]}}),
+        ));
     }
 
     let mut captures = Vec::new();
     if action == "compare" {
-        let before = option(&request.args, "--before").ok_or_else(|| "--before is required".to_string())?;
-        let after = option(&request.args, "--after").ok_or_else(|| "--after is required".to_string())?;
-        let before_bytes = files.get(before).ok_or_else(|| format!("no upload for {before}"))?;
-        let after_bytes = files.get(after).ok_or_else(|| format!("no upload for {after}"))?;
-        let before_stored = state.registry.store_capture(before_bytes, "Before", "image")?;
-        let after_stored = state.registry.store_capture(after_bytes, "After", "image")?;
+        let before =
+            option(&request.args, "--before").ok_or_else(|| "--before is required".to_string())?;
+        let after =
+            option(&request.args, "--after").ok_or_else(|| "--after is required".to_string())?;
+        let before_bytes = files
+            .get(before)
+            .ok_or_else(|| format!("no upload for {before}"))?;
+        let after_bytes = files
+            .get(after)
+            .ok_or_else(|| format!("no upload for {after}"))?;
+        let before_stored = state
+            .registry
+            .store_capture(before_bytes, "Before", "image")?;
+        let after_stored = state
+            .registry
+            .store_capture(after_bytes, "After", "image")?;
         let comparison = state.registry.compare_captures(before_bytes, after_bytes)?;
-        captures.push(json!({"asset":before_stored.asset,"label":"Before","evidence":before_stored.evidence}));
-        captures.push(json!({"asset":after_stored.asset,"label":"After","evidence":after_stored.evidence}));
-        return Ok(Json(json!({"result":{"check_id":format!("check_{}_{}", before_stored.asset.chars().take(12).collect::<String>(), after_stored.asset.chars().take(12).collect::<String>()),"captures":captures,"comparison":comparison.objective,"diff_asset":comparison.diff_asset,"verdict":"INDETERMINATE"}})));
+        captures.push(
+            json!({"asset":before_stored.asset,"label":"Before","evidence":before_stored.evidence}),
+        );
+        captures.push(
+            json!({"asset":after_stored.asset,"label":"After","evidence":after_stored.evidence}),
+        );
+        return Ok(Json(
+            json!({"result":{"check_id":format!("check_{}_{}", before_stored.asset.chars().take(12).collect::<String>(), after_stored.asset.chars().take(12).collect::<String>()),"captures":captures,"comparison":comparison.objective,"diff_asset":comparison.diff_asset,"verdict":"INDETERMINATE"}}),
+        ));
     }
 
     let stored = if let Some(recipe) = option(&request.args, "--recipe") {
-        let bytes = files.get(recipe).ok_or_else(|| format!("no upload for {recipe}"))?;
+        let bytes = files
+            .get(recipe)
+            .ok_or_else(|| format!("no upload for {recipe}"))?;
         let recipe = crate::workbench::browser::parse_recipe(bytes)?;
         let capture = state.registry.capture_browser(&recipe, &files).await?;
-        state.registry.store_capture(&capture.bytes, "Browser capture", "browser")?
+        state
+            .registry
+            .store_capture(&capture.bytes, "Browser capture", "browser")?
     } else if let Some(window_id) = option(&request.args, "--window-id") {
-        let stable_ms = option(&request.args, "--stable-ms").and_then(|value| value.parse().ok()).unwrap_or(200);
-        let retries = option(&request.args, "--stable-retries").and_then(|value| value.parse().ok()).unwrap_or(5);
+        let stable_ms = option(&request.args, "--stable-ms")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(200);
+        let retries = option(&request.args, "--stable-retries")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(5);
         let mut source = crate::workbench::screen_check::NativeWindowSource;
-        let (bytes, _, _) = crate::workbench::screen_check::stable_window_capture(&mut source, window_id, Duration::from_millis(stable_ms), retries).await?;
-        state.registry.store_capture(&bytes, "Window capture", "window")?
+        let (bytes, _, _) = crate::workbench::screen_check::stable_window_capture(
+            &mut source,
+            window_id,
+            Duration::from_millis(stable_ms),
+            retries,
+        )
+        .await?;
+        state
+            .registry
+            .store_capture(&bytes, "Window capture", "window")?
     } else {
-        let target = option(&request.args, "--target").ok_or_else(|| "--target, --window-id or --recipe is required".to_string())?;
-        let bytes = files.get(target).ok_or_else(|| format!("no upload for {target}"))?;
-        state.registry.store_capture(bytes, "Image capture", "image")?
+        let target = option(&request.args, "--target")
+            .ok_or_else(|| "--target, --window-id or --recipe is required".to_string())?;
+        let bytes = files
+            .get(target)
+            .ok_or_else(|| format!("no upload for {target}"))?;
+        state
+            .registry
+            .store_capture(bytes, "Image capture", "image")?
     };
     captures.push(json!({"asset":stored.asset,"label":"Capture","evidence":stored.evidence}));
-    Ok(Json(json!({"result":{"check_id":format!("check_{}", stored.asset.chars().take(12).collect::<String>()),"captures":captures,"verdict":if action == "capture" { Value::Null } else { json!("INDETERMINATE") }}})))
+    Ok(Json(
+        json!({"result":{"check_id":format!("check_{}", stored.asset.chars().take(12).collect::<String>()),"captures":captures,"verdict":if action == "capture" { Value::Null } else { json!("INDETERMINATE") }}}),
+    ))
 }
 
 struct ApiError {
@@ -536,5 +1156,20 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn native_workbench_snapshot_handoff_does_not_deliver_buffered_events_twice() {
+        let (sender, receiver) = tokio::sync::broadcast::channel(8);
+        let old: Event = serde_json::from_value(
+            json!({"type":"notice","sessionId":"chat-1","seq":4,"at":"now","text":"in snapshot"}),
+        )
+        .unwrap();
+        let fresh: Event = serde_json::from_value(json!({"type":"notice","sessionId":"chat-1","seq":5,"at":"now","text":"after snapshot"})).unwrap();
+        sender.send(old).unwrap();
+        sender.send(fresh).unwrap();
+        let mut tail = session_tail(receiver, 4);
+        let frame = tail.next().await.unwrap().unwrap();
+        assert!(format!("{frame:?}").contains("after snapshot"));
     }
 }

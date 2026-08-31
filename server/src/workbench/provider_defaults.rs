@@ -12,6 +12,76 @@ pub struct ProviderDefaults {
     pub effort: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct OwnerSettings {
+    pub model: Option<String>,
+    pub permission_mode: Option<String>,
+    pub effort: Option<String>,
+}
+
+fn managed_claude_settings() -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        return PathBuf::from("/Library/Application Support/ClaudeCode/managed-settings.json");
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return std::env::var_os("PROGRAMDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
+            .join("ClaudeCode/managed-settings.json");
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        PathBuf::from("/etc/claude-code/managed-settings.json")
+    }
+}
+
+/// Claude's own settings cascade, lowest precedence first. These files are
+/// read only: steering one chat must never rewrite the owner's global config.
+pub fn read_owner_settings(claude_config: &Path, project: &Path) -> OwnerSettings {
+    let layers = [
+        claude_config.join("settings.json"),
+        project.join(".claude/settings.json"),
+        project.join(".claude/settings.local.json"),
+        managed_claude_settings(),
+    ];
+    let mut answer = OwnerSettings::default();
+    for path in layers {
+        let Some(settings) = fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .and_then(|value| value.as_object().cloned())
+        else {
+            continue;
+        };
+        if let Some(value) = settings
+            .get("model")
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty())
+        {
+            answer.model = Some(value.to_string());
+        }
+        if let Some(value) = settings
+            .get("effortLevel")
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty())
+        {
+            answer.effort = Some(value.to_string());
+        }
+        if let Some(value) = settings
+            .get("permissions")
+            .and_then(Value::as_object)
+            .and_then(|permissions| permissions.get("defaultMode"))
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty())
+        {
+            answer.permission_mode = Some(value.to_string());
+        }
+    }
+    answer
+}
+
 fn json_settings(path: &Path) -> Result<Map<String, Value>, String> {
     if !path.exists() {
         return Ok(Map::new());

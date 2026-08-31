@@ -8,11 +8,17 @@ use crate::workbench::protocol::Event;
 use crate::workbench::store::Session;
 use chrono::Utc;
 use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 pub struct NativeCodexSession {
     database: ChatDb,
     driver: NativeCodexDriver,
     session_id: String,
+    cwd: PathBuf,
+    words: HashMap<String, String>,
+    assistant_messages: HashSet<String>,
+    root_assistant_messages: HashSet<String>,
 }
 
 impl NativeCodexSession {
@@ -44,6 +50,7 @@ impl NativeCodexSession {
         mut session: Session,
         create: bool,
     ) -> Result<Self, String> {
+        let cwd = options.cwd.clone();
         let (driver, opened) = NativeCodexDriver::start(config, options)
             .await
             .map_err(|error| error.to_string())?;
@@ -66,10 +73,19 @@ impl NativeCodexSession {
             database,
             driver,
             session_id: session.id,
+            cwd,
+            words: HashMap::new(),
+            assistant_messages: HashSet::new(),
+            root_assistant_messages: HashSet::new(),
         };
         if let Err(error) = native.persist(opened).await {
             native.close().await;
-            if create { let _ = native.database.delete_session(native.session_id.clone()).await; }
+            if create {
+                let _ = native
+                    .database
+                    .delete_session(native.session_id.clone())
+                    .await;
+            }
             return Err(error);
         }
         Ok(native)
@@ -78,21 +94,83 @@ impl NativeCodexSession {
     async fn persist(&mut self, events: Vec<DriverEvent>) -> Result<Vec<Event>, String> {
         let mut appended = Vec::new();
         for bare in events {
+            let kind = bare["type"].as_str().unwrap_or_default().to_string();
+            let message = bare["messageId"].as_str().map(str::to_string);
+            if kind == "message.started" && bare["role"] == "assistant" {
+                if let Some(id) = message.as_ref() {
+                    self.assistant_messages.insert(id.clone());
+                    if bare["parentToolCallId"].is_null() {
+                        self.root_assistant_messages.insert(id.clone());
+                    }
+                }
+            }
+            if kind == "text.delta" {
+                if let (Some(id), Some(text)) = (message.as_ref(), bare["text"].as_str()) {
+                    self.words.entry(id.clone()).or_default().push_str(text)
+                }
+            }
             let event = envelop(&self.session_id, bare)?;
             if let Some(event) = self.database.append(event).await? {
                 appended.push(event);
+            }
+            if kind == "message.completed" {
+                if let Some(id) = message {
+                    let text = self.words.remove(&id).unwrap_or_default();
+                    let assistant = self.assistant_messages.remove(&id);
+                    let root = self.root_assistant_messages.remove(&id);
+                    if assistant {
+                        if root {
+                            if let Some(mut signal) =
+                                crate::workbench::provider_messages::from_text(&text)
+                            {
+                                signal["sourceMessageId"] = json!(id);
+                                let event = envelop(
+                                    &self.session_id,
+                                    json!({"type":"provider.message","signal":signal}),
+                                )?;
+                                if let Some(event) = self.database.append(event).await? {
+                                    appended.push(event)
+                                }
+                            }
+                        }
+                        for widget in crate::workbench::media::widget_specs(&text) {
+                            let event = envelop(
+                                &self.session_id,
+                                json!({"type":"widget","messageId":id,"widget":widget}),
+                            )?;
+                            if let Some(event) = self.database.append(event).await? {
+                                appended.push(event)
+                            }
+                        }
+                        for comparison in
+                            crate::workbench::media::comparison_specs(&text, &self.cwd)
+                        {
+                            let event = envelop(
+                                &self.session_id,
+                                json!({"type":"image.compare","messageId":id,"comparison":comparison}),
+                            )?;
+                            if let Some(event) = self.database.append(event).await? {
+                                appended.push(event)
+                            }
+                        }
+                    }
+                }
             }
         }
         Ok(appended)
     }
 
-    pub async fn send(&mut self, text: &str) -> Result<Vec<Event>, String> {
+    pub async fn send(&mut self, text: &str, images: &[Value]) -> Result<Vec<Event>, String> {
         let events = self
             .driver
-            .send(text)
+            .send(text, images)
             .await
             .map_err(|error| error.to_string())?;
         self.persist(events).await
+    }
+
+    pub fn validate_prompt(&self, text: &str) -> Result<(), String> {
+        self.driver.validate_prompt(text)
     }
 
     pub async fn next(&mut self) -> Result<Vec<Event>, String> {
@@ -148,8 +226,8 @@ impl NativeCodexSession {
     }
 
     pub async fn set_model(&mut self, model: &str) -> Result<Vec<Event>, String> {
-        let event = self.driver.set_model(model);
-        self.persist(vec![event]).await
+        let events = self.driver.set_model(model).await;
+        self.persist(events).await
     }
 
     pub async fn set_effort(&mut self, effort: &str) -> Result<Vec<Event>, String> {

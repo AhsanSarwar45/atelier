@@ -8,6 +8,20 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
+
+pub fn replay_event_id(value: &Value) -> String {
+    format!("history-{:x}", Sha256::digest(value.to_string().as_bytes()))
+}
+
+/// Stable identity for one complete provider-record normalization recipe.
+pub fn record_event_id(value: &Value) -> String {
+    format!(
+        "r{}:{}",
+        super::store::IMPORT_RECIPE,
+        replay_event_id(value)
+    )
+}
 
 macro_rules! wire_kinds {
     ($name:ident { $($variant:ident => $wire:literal),+ $(,)? }) => {

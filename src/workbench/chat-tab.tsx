@@ -1319,7 +1319,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             are separate facts and the badge never stands in for the first
             (bw-96is). Both clear themselves when that program stops, because
             the stream they are read from does (bw-dmxj.10). */}
-        {state.external && <span
+        {externalId && <span
           data-testid="session-state"
           data-state={held ? 'held' : view.state}
           className={cn('hidden shrink-0 items-center sm:flex', CHIP_GAP)}
@@ -1328,7 +1328,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               live line at the foot of the transcript, and the same state is on
               the chat's row in the list beside it. Only the badge naming
               another program holding this chat stays — nothing else says it. */}
-          <ExternalBadge holder={state.external.holder} />
+          {state.external && <ExternalBadge holder={state.external.holder} />}
         </span>}
         {/* The one thing on this line allowed to give way when the line runs
             short, and the only one that can: the model and the permission mode
@@ -1514,9 +1514,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         >
           {ownership.kind === 'elsewhere' && (
             <p data-testid="held-elsewhere" className="mb-2 text-xs text-info">
-              {heldLine(state)} Sending here will stop that holder and move the chat into Atelier.
+              {heldLine(state)}
             </p>
           )}
+          {ownership.kind !== 'elsewhere' && <>
           {attached.length > 0 && (
             <div data-testid="attachment-tray" className="mb-2 flex flex-wrap gap-2">
               {attached.map((img, i) => (
@@ -1789,7 +1790,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 variant="primary"
                 mode="icon"
                 size="sm"
-                aria-label={ownership.kind === 'elsewhere' ? 'Take over and send' : 'Send'}
+                aria-label="Send"
                 data-testid="send-button"
                 className="rounded-full"
                 onClick={() => void submit()}
@@ -1804,6 +1805,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               </Button>
             )}
           </div>
+          </>}
         </Panel>
         <Dialog open={composerSettingsOpen} onOpenChange={setComposerSettingsOpen}>
           <DialogContent className="max-w-[calc(100vw-2rem)] sm:hidden" data-testid="mobile-composer-settings-dialog">

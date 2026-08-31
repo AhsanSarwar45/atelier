@@ -46,6 +46,117 @@ pub enum HeldDoing {
     Running,
     Summarising,
     Waiting,
+    Retrying,
+    Helping,
+}
+
+fn last_record_row(path: &Path) -> Option<Value> {
+    let mut file = File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    let length = size.min(1_048_576);
+    file.seek(SeekFrom::Start(size.saturating_sub(length)))
+        .ok()?;
+    let mut bytes = Vec::with_capacity(length as usize);
+    file.take(length).read_to_end(&mut bytes).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    text.lines()
+        .rev()
+        .find_map(|line| serde_json::from_str(line).ok())
+}
+
+fn words(message: &Value) -> String {
+    if let Some(text) = message["content"].as_str() {
+        return text.into();
+    }
+    message["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|block| block["type"] == "text")
+        .filter_map(|block| block["text"].as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn record_doing(path: &Path, now_ms: i64) -> Option<(HeldDoing, Option<i64>, Option<String>)> {
+    let row = last_record_row(path)?;
+    let moved = fs::metadata(path)
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis() as i64;
+    if row["type"] == "assistant" {
+        let content = row["message"]["content"].as_array();
+        if row["isApiErrorMessage"] == true {
+            let text = words(&row["message"]);
+            let lower = text.to_lowercase();
+            if lower.contains("limit") && lower.contains("resets") {
+                let detail = lower.find("resets").map(|at| {
+                    text[at..]
+                        .split('·')
+                        .next()
+                        .unwrap_or_default()
+                        .split('(')
+                        .next()
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string()
+                });
+                return Some((HeldDoing::Retrying, Some(moved), detail));
+            }
+        }
+        if let Some(block) = content.into_iter().flatten().rev().find(|block| {
+            block["type"] == "tool_use" && matches!(block["name"].as_str(), Some("Agent" | "Task"))
+        }) {
+            let detail = block["input"]["description"]
+                .as_str()
+                .or_else(|| block["input"]["subagent_type"].as_str())
+                .map(|text| text.chars().take(120).collect());
+            return Some((
+                HeldDoing::Helping,
+                Some(moved),
+                detail.or_else(|| Some("1 helper".into())),
+            ));
+        }
+        let owes = content.is_some_and(|blocks| {
+            let tool = blocks.iter().any(|block| block["type"] == "tool_use");
+            let thought = blocks.iter().any(|block| block["type"] == "thinking");
+            let spoke = blocks.iter().any(|block| block["type"] == "text");
+            tool || thought && !spoke
+        });
+        if owes {
+            return Some((HeldDoing::Working, Some(moved), None));
+        }
+    } else if row["type"] == "user" && row["isCompactSummary"] != true {
+        let text = words(&row["message"]).replace('\n', " ").trim().to_string();
+        let kit = text.starts_with("[Request interrupted by user")
+            || [
+                "<command-name",
+                "<command-message",
+                "<command-args",
+                "<local-command-stdout",
+                "<local-command-stderr",
+            ]
+            .iter()
+            .any(|tag| text.starts_with(tag));
+        let tool_result = row["message"]["content"]
+            .as_array()
+            .is_some_and(|blocks| blocks.iter().any(|block| block["type"] == "tool_result"));
+        if tool_result || (!text.is_empty() && !kit) {
+            return Some((HeldDoing::Working, Some(moved), None));
+        }
+    }
+    Some((
+        if now_ms - moved < 10_000 {
+            HeldDoing::Working
+        } else {
+            HeldDoing::Idle
+        },
+        (now_ms - moved < 10_000).then_some(moved),
+        None,
+    ))
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -134,6 +245,21 @@ fn told(sessions: &Path, id: &str, now_ms: i64) -> Option<(HeldDoing, i64, Optio
     ))
 }
 
+fn marker_doing(status: &str) -> Option<HeldDoing> {
+    Some(match status {
+        "idle" => HeldDoing::Idle,
+        "busy" | "working" => HeldDoing::Working,
+        "thinking" => HeldDoing::Thinking,
+        "answering" => HeldDoing::Answering,
+        "running" | "running_tool" => HeldDoing::Running,
+        "summarising" | "summarizing" => HeldDoing::Summarising,
+        "waiting" | "waiting_permission" => HeldDoing::Waiting,
+        "retrying" => HeldDoing::Retrying,
+        "helping" => HeldDoing::Helping,
+        _ => return None,
+    })
+}
+
 /// Live Claude markers, newest live marker winning when two name one chat.
 pub fn claude_holds(config: &Path, proc_root: &Path, now_ms: i64) -> Vec<ProviderHold> {
     let sessions = config.join("sessions");
@@ -170,15 +296,19 @@ pub fn claude_holds(config: &Path, proc_root: &Path, now_ms: i64) -> Vec<Provide
             let (doing, since, detail, was_told) = if let Some((doing, since, detail)) = said {
                 (doing, Some(since), detail, true)
             } else {
-                let doing = match marker.status.as_deref() {
-                    Some("busy") => HeldDoing::Working,
-                    Some("idle") => HeldDoing::Idle,
-                    _ => HeldDoing::Unknown,
+                let read =
+                    crate::workbench::claude::history::find_record(config, &marker.session_id)
+                        .and_then(|record| record_doing(&record, now_ms));
+                let marked = marker.status.as_deref().and_then(marker_doing);
+                let (doing, since, detail) = match marked {
+                    Some(HeldDoing::Working) => {
+                        read.unwrap_or((HeldDoing::Working, marker.status_at, None))
+                    }
+                    Some(HeldDoing::Idle) => (HeldDoing::Idle, None, None),
+                    Some(doing) => (doing, marker.status_at, None),
+                    None => read.unwrap_or((HeldDoing::Unknown, None, None)),
                 };
-                let since = (doing != HeldDoing::Idle)
-                    .then_some(marker.status_at)
-                    .flatten();
-                (doing, since, None, false)
+                (doing, since, detail, false)
             };
             ProviderHold {
                 id: marker.session_id,
@@ -638,6 +768,26 @@ mod tests {
             ]),
             HeldDoing::Idle
         );
+    }
+
+    #[test]
+    fn native_workbench_services_external_claude_tail_keeps_rich_states() {
+        let root = tempfile::tempdir().unwrap();
+        let record = root.path().join("chat.jsonl");
+        fs::write(&record, serde_json::json!({
+            "type":"assistant","isApiErrorMessage":true,
+            "message":{"content":[{"type":"text","text":"You've hit your session limit · resets 4:40pm (Asia/Karachi)"}]}
+        }).to_string()+"\n").unwrap();
+        let (doing, _, detail) = record_doing(&record, i64::MAX).unwrap();
+        assert_eq!(doing, HeldDoing::Retrying);
+        assert_eq!(detail.as_deref(), Some("resets 4:40pm"));
+
+        fs::write(&record, serde_json::json!({
+            "type":"assistant","message":{"content":[{"type":"tool_use","name":"Agent","input":{"description":"Check the migration"}}]}
+        }).to_string()+"\n").unwrap();
+        let (doing, _, detail) = record_doing(&record, i64::MAX).unwrap();
+        assert_eq!(doing, HeldDoing::Helping);
+        assert_eq!(detail.as_deref(), Some("Check the migration"));
     }
 
     #[test]

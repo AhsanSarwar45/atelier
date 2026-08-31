@@ -3,6 +3,7 @@
 use super::history::{thread_open_request, OpenRequest};
 use super::normalize::{CodexNormalizer, DriverEvent};
 use super::transport::{CodexInbound, CodexTransport, CodexTransportConfig, CodexTransportError};
+use base64::Engine;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -111,12 +112,12 @@ impl CodexLiveState {
                 vec![event(
                     "note",
                     [
-                    ("noteId", json!(format!("protocol:{}", self.diagnostic_seq))),
-                    ("rank", json!("detail")),
-                    ("kind", json!("protocol")),
-                    ("text", json!(line)),
-                    ("body", Value::Null),
-                ],
+                        ("noteId", json!(format!("protocol:{}", self.diagnostic_seq))),
+                        ("rank", json!("detail")),
+                        ("kind", json!("protocol")),
+                        ("text", json!(line)),
+                        ("body", Value::Null),
+                    ],
                 )]
             }
             CodexInbound::Stderr(line) => {
@@ -124,24 +125,36 @@ impl CodexLiveState {
                 vec![event(
                     "note",
                     [
-                    ("noteId", json!(format!("stderr:{}", self.diagnostic_seq))),
-                    ("rank", json!("detail")),
-                    ("kind", json!("stderr")),
-                    ("text", json!(line)),
-                    ("body", Value::Null),
-                ],
+                        ("noteId", json!(format!("stderr:{}", self.diagnostic_seq))),
+                        ("rank", json!("detail")),
+                        ("kind", json!("stderr")),
+                        ("text", json!(line)),
+                        ("body", Value::Null),
+                    ],
                 )]
             }
-            CodexInbound::Exited(detail) => vec![event(
-                "error",
-                [
-                    (
-                        "message",
-                        json!(format!("Codex app-server exited ({detail})")),
-                    ),
-                    ("fatal", json!(true)),
-                ],
-            )],
+            CodexInbound::Exited(detail) => {
+                let mut events = crate::workbench::lifecycle::abandoned_interactions(
+                    self.asks.drain().map(|(id, _)| id),
+                    self.questions.drain().map(|(id, _)| id),
+                    self.plans.drain(),
+                );
+                events.push(event(
+                    "error",
+                    [
+                        (
+                            "message",
+                            json!(format!("Codex app-server exited ({detail})")),
+                        ),
+                        ("fatal", json!(true)),
+                    ],
+                ));
+                events.push(event(
+                    "session.state",
+                    [("state", json!("errored")), ("label", json!("Failed"))],
+                ));
+                events
+            }
         }
     }
 
@@ -170,12 +183,20 @@ impl CodexLiveState {
             "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" => events.push(event("thinking.delta",[("messageId",params["itemId"].clone()),("text",params["delta"].clone())])),
             "turn/plan/updated" => events.push(event("todo",[("items",Value::Array(params["plan"].as_array().into_iter().flatten().enumerate().map(|(index,row)|json!({"id":index.to_string(),"text":row["step"],"status":row["status"]})).collect()))])),
             "item/started" => {
+                if params["item"]["type"] == "agentMessage" {
+                    if let Some(id) = params["item"]["id"].as_str() {
+                        self.messages.insert(id.to_string());
+                    }
+                }
                 if params["item"]["type"]=="subAgentActivity" || params["item"]["type"]=="collabAgentToolCall" {
                     for id in params["item"]["receiverThreadIds"].as_array().into_iter().flatten().filter_map(Value::as_str){self.agents.insert(id.to_string());}
                     if let Some(id)=params["item"]["agentThreadId"].as_str(){self.agents.insert(id.to_string());}
                 }
                 self.normalizer.item_started(&params["item"],&mut events);
-                if events.iter().any(|row|row["type"]=="tool.started"){events.push(event("session.state",[("state",json!("running_tool")),("label",params["item"]["type"].clone())]));}
+                if let Some(tool) = events.iter().find(|row|row["type"]=="tool.started") {
+                    let label = tool["name"].as_str().unwrap_or("Using a tool").to_string();
+                    events.push(event("session.state",[("state",json!("running_tool")),("label",json!(label))]));
+                }
             }
             "item/completed" => {
                 if params["item"]["type"]=="plan" {
@@ -190,10 +211,20 @@ impl CodexLiveState {
             "turn/started" => {self.turn_id=params["turn"]["id"].as_str().map(str::to_string);events.push(event("session.state",[("state",json!("thinking")),("label",json!("Thinking"))]));}
             "turn/completed" => {
                 self.turn_id=None;let status=params["turn"]["status"].as_str();let (state,label)=match status{Some("failed")=>("errored","Failed"),Some("interrupted")=>("stopped","Stopped"),_=>("idle","Ready")};
-                if status==Some("failed"){events.push(event("error",[("message",params["turn"]["error"]["message"].as_str().map_or_else(||json!("Codex turn failed"),|message|json!(message))),("fatal",json!(false))]));}
+                if status==Some("failed"){
+                    let message=params["turn"]["error"]["message"].as_str().unwrap_or("Codex turn failed");
+                    if let Some(signal)=crate::workbench::provider_messages::from_text(message){events.push(event("provider.message",[("signal",signal)]));}
+                    else {events.push(event("error",[("message",json!(message)),("fatal",json!(false))]));}
+                } else {
+                    for kind in ["rate_limit","service_unavailable","network","provider_error"] {events.push(event("provider.message",[("signal",crate::workbench::provider_messages::resolved(kind))]));}
+                }
                 events.push(event("session.state",[("state",json!(state)),("label",json!(label))]));
             }
-            "error" => events.push(event("error",[("message",params["error"]["message"].as_str().or_else(||params["message"].as_str()).map_or_else(||json!("Codex error"),|message|json!(message))),("fatal",json!(false))])),
+            "error" => {
+                let message=params["error"]["message"].as_str().or_else(||params["message"].as_str()).unwrap_or("Codex error");
+                if let Some(signal)=crate::workbench::provider_messages::from_text(message){events.push(event("provider.message",[("signal",signal)]));}
+                else {events.push(event("error",[("message",json!(message)),("fatal",json!(false))]));}
+            },
             "item/fileChange/patchUpdated" => for change in params["changes"].as_array().into_iter().flatten(){events.push(event("diff",[("toolCallId",params["itemId"].clone()),("path",change["path"].clone()),("before",json!("")),("after",change["diff"].clone())]));},
             "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" => {
                 let id=params["itemId"].as_str().unwrap_or_default();let output=self.tool_output.entry(id.to_string()).or_default();output.push_str(params["delta"].as_str().unwrap_or_default());events.push(event("tool.progress",[("toolCallId",json!(id)),("seconds",json!(0)),("summary",json!(output.chars().rev().take(2000).collect::<String>().chars().rev().collect::<String>()))]));
@@ -516,7 +547,20 @@ pub struct NativeCodexDriver {
     inbound: mpsc::UnboundedReceiver<CodexInbound>,
     pub state: CodexLiveState,
     instructions: String,
+    cwd: PathBuf,
     collaboration_presets: HashMap<String, Value>,
+    skill_paths: HashMap<String, String>,
+    image_dirs: Vec<PathBuf>,
+}
+
+fn public_menu(mut menu: Value) -> Value {
+    if let Some(object) = menu.as_object_mut() {
+        object.remove("collaborationPresets");
+        object.remove("skillPaths");
+        object.remove("defaultEffort");
+    }
+    menu["type"] = json!("session.menu");
+    menu
 }
 
 impl NativeCodexDriver {
@@ -554,10 +598,33 @@ impl NativeCodexDriver {
             .or_else(|| opened["effort"].as_str())
             .map(str::to_string)
             .or(state.effort);
+        let menu_future = super::history::menu(&transport, &options.cwd, state.model.as_deref());
+        let terminals_future = transport.call(
+            "thread/backgroundTerminals/list",
+            json!({"threadId":thread_id,"limit":100}),
+            CALL_TIMEOUT,
+        );
+        let (menu, terminals) = tokio::join!(menu_future, terminals_future);
+        let collaboration_presets = menu["collaborationPresets"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|preset| Some((preset["mode"].as_str()?.to_string(), preset.clone())))
+            .collect();
+        let skill_paths = menu["skillPaths"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(name, path)| Some((name.clone(), path.as_str()?.to_string())))
+            .collect();
+        if state.effort.is_none() {
+            state.effort = menu["defaultEffort"].as_str().map(str::to_string);
+        }
+        let menu_event = public_menu(menu);
         let inbound = transport
             .take_inbound()
             .ok_or(CodexTransportError::Stopped)?;
-        let events = vec![
+        let mut events = vec![
             event(
                 "session.started",
                 [
@@ -591,14 +658,39 @@ impl NativeCodexDriver {
                 "session.state",
                 [("state", json!("idle")), ("label", json!("Ready"))],
             ),
+            menu_event,
         ];
+        if let Ok(terminals) = terminals {
+            let rows = terminals["data"].as_array().cloned().unwrap_or_default();
+            for terminal in &rows {
+                events.push(event("tool.started", [
+                    ("toolCallId", terminal["itemId"].clone()),
+                    ("name", json!("Shell")),
+                    ("input", json!({"command":terminal["command"],"cwd":terminal["cwd"],"pid":terminal["osPid"]})),
+                    ("title", terminal["command"].clone()),
+                    ("parentToolCallId", Value::Null),
+                ]));
+            }
+            if !rows.is_empty() {
+                events.push(event(
+                    "session.state",
+                    [
+                        ("state", json!("running_tool")),
+                        ("label", json!("Background command")),
+                    ],
+                ));
+            }
+        }
         Ok((
             Self {
                 transport,
                 inbound,
                 state,
                 instructions: options.instructions,
-                collaboration_presets: HashMap::new(),
+                cwd: options.cwd,
+                collaboration_presets,
+                skill_paths,
+                image_dirs: Vec::new(),
             },
             events,
         ))
@@ -617,15 +709,93 @@ impl NativeCodexDriver {
             .ok_or(CodexTransportError::Stopped)?;
         let events = self.state.handle(inbound);
         self.flush_responses().await?;
+        if events.iter().any(|event| {
+            event["type"] == "session.state"
+                && matches!(
+                    event["state"].as_str(),
+                    Some("idle" | "stopped" | "errored")
+                )
+        }) {
+            self.drop_image_dirs();
+        }
         Ok(events)
     }
-    pub async fn send(&mut self, text: &str) -> Result<Vec<DriverEvent>, CodexTransportError> {
+    pub async fn send(
+        &mut self,
+        text: &str,
+        images: &[Value],
+    ) -> Result<Vec<DriverEvent>, CodexTransportError> {
         let thread = self
             .state
             .thread_id
             .clone()
             .ok_or(CodexTransportError::Stopped)?;
-        let input = json!([{"type":"text","text":text,"text_elements":[]}]);
+        let trimmed = text.trim();
+        let invocation = trimmed.strip_prefix('/').and_then(|text| {
+            let mut parts = text.splitn(2, char::is_whitespace);
+            Some((
+                parts.next()?.to_string(),
+                parts.next().unwrap_or("").trim().to_string(),
+            ))
+        });
+        if let Some((name, argument)) = invocation.as_ref().filter(|(name, _)| {
+            matches!(
+                name.as_str(),
+                "compact" | "review" | "status" | "usage" | "model" | "permissions"
+            )
+        }) {
+            return self.special(name, argument).await;
+        }
+        let mut input = if let Some((name, argument)) = invocation
+            .as_ref()
+            .filter(|(name, _)| self.skill_paths.contains_key(name))
+        {
+            let mut parts = vec![json!({"type":"skill","name":name,"path":self.skill_paths[name]})];
+            if !argument.is_empty() {
+                parts.push(json!({"type":"text","text":argument,"text_elements":[]}));
+            }
+            Value::Array(parts)
+        } else {
+            json!([{"type":"text","text":text,"text_elements":[]}])
+        };
+        if !images.is_empty() {
+            let directory =
+                std::env::temp_dir().join(format!("atelier-codex-images-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&directory)
+                .map_err(|error| CodexTransportError::Request(error.to_string()))?;
+            let values = input
+                .as_array_mut()
+                .expect("Codex turn input is always an array");
+            for (at, image) in images.iter().enumerate() {
+                let Some(data_url) = image["dataUrl"].as_str() else {
+                    continue;
+                };
+                let Some(encoded) = data_url
+                    .strip_prefix("data:")
+                    .and_then(|rest| rest.split_once(";base64,"))
+                    .map(|(_, bytes)| bytes)
+                else {
+                    values.push(json!({"type":"image","url":data_url}));
+                    continue;
+                };
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(encoded)
+                    .map_err(|error| {
+                        CodexTransportError::Request(format!("invalid prompt image: {error}"))
+                    })?;
+                let extension = match image["mime"].as_str().unwrap_or("image/png") {
+                    "image/jpeg" => "jpg",
+                    "image/gif" => "gif",
+                    "image/webp" => "webp",
+                    _ => "png",
+                };
+                let path = directory.join(format!("image-{at}.{extension}"));
+                std::fs::write(&path, bytes)
+                    .map_err(|error| CodexTransportError::Request(error.to_string()))?;
+                values.push(json!({"type":"localImage","path":path}));
+            }
+            self.image_dirs.push(directory);
+        }
         if let Some(turn) = &self.state.turn_id {
             self.transport
                 .call(
@@ -649,6 +819,159 @@ impl NativeCodexDriver {
             "session.state",
             [("state", json!("thinking")), ("label", json!("Thinking"))],
         )])
+    }
+    pub fn validate_prompt(&self, text: &str) -> Result<(), String> {
+        let trimmed = text.trim();
+        if let Some(argument) = trimmed
+            .strip_prefix("/permissions")
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            if !MODES.contains(&argument) {
+                return Err(format!(
+                    "Codex does not support approval policy \"{argument}\""
+                ));
+            }
+        }
+        Ok(())
+    }
+    async fn special(
+        &mut self,
+        name: &str,
+        argument: &str,
+    ) -> Result<Vec<DriverEvent>, CodexTransportError> {
+        match name {
+            "compact" => self.compact().await,
+            "review" => {
+                self.transport.call("review/start",json!({"threadId":self.state.thread_id,"target":if argument.is_empty(){json!({"type":"uncommittedChanges"})}else{json!({"type":"custom","instructions":argument})},"delivery":"inline"}),CALL_TIMEOUT).await?;
+                Ok(vec![event(
+                    "session.state",
+                    [
+                        ("state", json!("thinking")),
+                        ("label", json!("Reviewing changes")),
+                    ],
+                )])
+            }
+            "model" => {
+                let mut events = if argument.is_empty() {
+                    Vec::new()
+                } else {
+                    self.set_model(argument).await
+                };
+                let text = if argument.is_empty() {
+                    "Use the model picker below the composer, or type /model followed by a model name.".into()
+                } else {
+                    format!("Model changed to {argument}.")
+                };
+                events.push(note("model", &text, "note"));
+                Ok(events)
+            }
+            "permissions" => {
+                let mut events = Vec::new();
+                if !argument.is_empty() {
+                    events.push(
+                        self.set_mode(argument)
+                            .map_err(CodexTransportError::Request)?,
+                    )
+                }
+                let text = if argument.is_empty() {
+                    "Use the permission picker below the composer, or type /permissions followed by a mode.".into()
+                } else {
+                    format!("Permission mode changed to {argument}.")
+                };
+                events.push(note("permissions", &text, "note"));
+                Ok(events)
+            }
+            "usage" => {
+                let raw = self
+                    .transport
+                    .call("account/rateLimits/read", json!({}), CALL_TIMEOUT)
+                    .await?;
+                let limits = raw.get("rateLimits").cloned().unwrap_or_else(|| json!({}));
+                let mut snapshots = vec![limits];
+                snapshots.extend(
+                    raw["rateLimitsByLimitId"]
+                        .as_object()
+                        .into_iter()
+                        .flatten()
+                        .map(|(_, value)| value.clone()),
+                );
+                let mut seen = HashSet::new();
+                let mut says = Vec::new();
+                for snapshot in snapshots {
+                    for window in [snapshot.get("primary"), snapshot.get("secondary")]
+                        .into_iter()
+                        .flatten()
+                    {
+                        if window.is_null() {
+                            continue;
+                        }
+                        let span = window["windowDurationMins"]
+                            .as_i64()
+                            .map_or_else(|| "window".into(), |minutes| format!("{minutes}m"));
+                        let used = window["usedPercent"]
+                            .as_f64()
+                            .map_or_else(|| "unknown".into(), |percent| format!("{percent}%"));
+                        let reset =
+                            window["resetsAt"]
+                                .as_i64()
+                                .map_or_else(String::new, |seconds| {
+                                    format!(
+                                        ", resets {}",
+                                        chrono::DateTime::from_timestamp(seconds, 0).map_or_else(
+                                            || seconds.to_string(),
+                                            |at| at.to_rfc3339()
+                                        )
+                                    )
+                                });
+                        let key = format!("{span}:{used}:{reset}");
+                        if seen.insert(key) {
+                            says.push(format!("{span}: {used} used{reset}"));
+                        }
+                    }
+                }
+                let text = if says.is_empty() {
+                    "Codex did not report account limits.".into()
+                } else {
+                    says.join(" · ")
+                };
+                Ok(vec![note("usage", &text, "note")])
+            }
+            "status" => {
+                let thread = self
+                    .transport
+                    .call(
+                        "thread/read",
+                        json!({"threadId":self.state.thread_id,"includeTurns":false}),
+                        CALL_TIMEOUT,
+                    )
+                    .await?;
+                let terminals = self
+                    .transport
+                    .call(
+                        "thread/backgroundTerminals/list",
+                        json!({"threadId":self.state.thread_id,"limit":100}),
+                        CALL_TIMEOUT,
+                    )
+                    .await?;
+                let state = thread["thread"]["status"]["type"]
+                    .as_str()
+                    .unwrap_or("unknown");
+                let running = terminals["data"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|terminal| terminal["command"].as_str())
+                    .collect::<Vec<_>>();
+                let text = if running.is_empty() {
+                    format!("Codex is {state}. No background commands.")
+                } else {
+                    format!("Codex is {state}. Running: {}", running.join("; "))
+                };
+                Ok(vec![note("status", &text, "note")])
+            }
+            _ => unreachable!(),
+        }
     }
     pub async fn compact(&self) -> Result<Vec<DriverEvent>, CodexTransportError> {
         self.transport
@@ -688,12 +1011,15 @@ impl NativeCodexDriver {
             [("permissionMode", json!(mode)), ("model", Value::Null)],
         ))
     }
-    pub fn set_model(&mut self, model: &str) -> DriverEvent {
+    pub async fn set_model(&mut self, model: &str) -> Vec<DriverEvent> {
         self.state.model = (model != "default").then(|| model.to_string());
-        event(
+        let pinned = event(
             "session.pinned",
             [("permissionMode", Value::Null), ("model", json!(model))],
-        )
+        );
+        let menu =
+            super::history::menu(&self.transport, &self.cwd, self.state.model.as_deref()).await;
+        vec![pinned, public_menu(menu)]
     }
     pub fn set_effort(&mut self, effort: &str) -> DriverEvent {
         self.state.effort = Some(effort.into());
@@ -710,6 +1036,11 @@ impl NativeCodexDriver {
         &mut self,
         mode: &str,
     ) -> Result<DriverEvent, CodexTransportError> {
+        if !self.collaboration_presets.contains_key(mode) {
+            return Err(CodexTransportError::Request(format!(
+                "Codex does not support collaboration mode \"{mode}\""
+            )));
+        }
         self.state.collaboration_mode = Some(mode.into());
         self.transport.call("thread/settings/update",json!({"threadId":self.state.thread_id,"collaborationMode":self.collaboration_payload(mode)}),CALL_TIMEOUT).await?;
         Ok(event(
@@ -805,7 +1136,7 @@ impl NativeCodexDriver {
                 )))
             }
         };
-        let mut events = self.send(&text).await?;
+        let mut events = self.send(&text, &[]).await?;
         events.push(event(
             "plan.resolved",
             [
@@ -822,6 +1153,27 @@ impl NativeCodexDriver {
     }
     pub async fn close(&self) {
         self.transport.close().await;
+    }
+
+    fn drop_image_dirs(&mut self) {
+        for directory in self.image_dirs.drain(..) {
+            let _ = std::fs::remove_dir_all(directory);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn staged_images(&self) -> Vec<PathBuf> {
+        self.image_dirs
+            .iter()
+            .flat_map(|directory| std::fs::read_dir(directory).into_iter().flatten().flatten())
+            .map(|entry| entry.path())
+            .collect()
+    }
+}
+
+impl Drop for NativeCodexDriver {
+    fn drop(&mut self) {
+        self.drop_image_dirs();
     }
 }
 
@@ -933,6 +1285,30 @@ mod tests {
             );
         }
         assert_eq!(events.last().unwrap()["state"], "idle");
+        assert!(events.iter().any(|event| event["type"] == "session.state"
+            && event["state"] == "running_tool"
+            && event["label"] == "Bash"));
+    }
+
+    #[test]
+    fn native_codex_live_opens_an_agent_message_once_when_start_precedes_delta() {
+        let mut state = CodexLiveState::new(&options());
+        let started = state.handle(CodexInbound::Notification {
+            method: "item/started".into(),
+            params: json!({"item":{"id":"answer","type":"agentMessage"}}),
+        });
+        let delta = state.handle(CodexInbound::Notification {
+            method: "item/agentMessage/delta".into(),
+            params: json!({"itemId":"answer","delta":"Hello"}),
+        });
+        assert_eq!(
+            started
+                .iter()
+                .chain(&delta)
+                .filter(|event| event["type"] == "message.started")
+                .count(),
+            1
+        );
     }
     #[test]
     fn native_codex_live_answers_approvals_questions_and_clock_once() {

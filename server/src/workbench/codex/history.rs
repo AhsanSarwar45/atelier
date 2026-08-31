@@ -2,13 +2,35 @@
 
 use super::transport::{CodexTransport, CodexTransportError};
 use serde_json::{json, Value};
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::time::Duration;
 
 const MODES: &[&str] = &["untrusted", "on-request", "never"];
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+
+pub fn last_spoke_at(path: &Path) -> Option<String> {
+    let mut file = File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    let start = size.saturating_sub(512 * 1024);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut text = String::new();
+    file.read_to_string(&mut text).ok()?;
+    let lines = text
+        .lines()
+        .skip(if start > 0 { 1 } else { 0 })
+        .collect::<Vec<_>>();
+    for line in lines.into_iter().rev() {
+        let Ok(row) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if row["type"] == "event_msg" && row["payload"]["type"] == "user_message" {
+            return row["timestamp"].as_str().map(str::to_string);
+        }
+    }
+    None
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct OpenRequest {
@@ -305,29 +327,28 @@ pub fn effort_menu(models: &[Value], active_model: Option<&str>) -> EffortMenu {
 pub async fn menu(transport: &CodexTransport, cwd: &Path, active_model: Option<&str>) -> Value {
     // Each list is optional across app-server generations. One old method
     // must not erase the capabilities the other two reported.
-    let models = transport
-        .call(
+    let (model_result, skill_result, collaboration_result) = tokio::join!(
+        transport.call(
             "model/list",
             json!({"includeHidden":false}),
             REQUEST_TIMEOUT,
-        )
-        .await
-        .ok()
-        .and_then(|result| result["data"].as_array().cloned())
-        .unwrap_or_default();
-    let skill_entries = transport
-        .call(
+        ),
+        transport.call(
             "skills/list",
             json!({"cwds":[cwd],"forceReload":false}),
             REQUEST_TIMEOUT,
-        )
-        .await
+        ),
+        transport.call("collaborationMode/list", json!({}), REQUEST_TIMEOUT),
+    );
+    let models = model_result
         .ok()
         .and_then(|result| result["data"].as_array().cloned())
         .unwrap_or_default();
-    let presets = transport
-        .call("collaborationMode/list", json!({}), REQUEST_TIMEOUT)
-        .await
+    let skill_entries = skill_result
+        .ok()
+        .and_then(|result| result["data"].as_array().cloned())
+        .unwrap_or_default();
+    let presets = collaboration_result
         .ok()
         .and_then(|result| result["data"].as_array().cloned())
         .unwrap_or_default()
@@ -341,12 +362,21 @@ pub async fn menu(transport: &CodexTransport, cwd: &Path, active_model: Option<&
         .cloned()
         .collect::<Vec<_>>();
     let efforts = effort_menu(&models, active_model);
-    json!({
-        "commands": skills.iter().map(|skill| json!({
+    let native = [
+        ("compact","Compact this conversation now",Value::Null),
+        ("review","Review uncommitted changes, or follow the supplied instructions",json!("[instructions]")),
+        ("status","Show this Codex thread and its background commands",Value::Null),
+        ("usage","Show Codex account allowance and reset times",Value::Null),
+        ("model","Show or change the model",json!("[model]")),
+        ("permissions","Show or change the permission mode",json!("[mode]")),
+    ].into_iter().map(|(name,description,hint)|json!({"name":name,"description":description,"argumentHint":hint,"kind":"command","execution":"native"}));
+    let commands = native.chain(skills.iter().map(|skill| json!({
             "name":skill["name"],
             "description":skill.get("description").or_else(||skill.get("shortDescription")).cloned().unwrap_or_else(||json!("")),
             "kind":"skill", "execution":"skill"
-        })).collect::<Vec<_>>(),
+        }))).collect::<Vec<_>>();
+    json!({
+        "commands": commands,
         "skills": skills.iter().map(|skill|skill["name"].clone()).collect::<Vec<_>>(),
         "skillPaths": Value::Object(skills.iter().filter_map(|skill|Some((skill["name"].as_str()?.to_string(),skill["path"].clone()))).collect()),
         "models": std::iter::once(json!({"value":"default","displayName":"Default","description":"Use the Codex default model"}))
@@ -356,8 +386,61 @@ pub async fn menu(transport: &CodexTransport, cwd: &Path, active_model: Option<&
         "permissionModes": MODES,
         "collaborationModes": presets.iter().map(|preset|json!({"value":preset["mode"],"displayName":preset.get("name").cloned().unwrap_or_else(||preset["mode"].clone())})).collect::<Vec<_>>(),
         "collaborationPresets": presets,
-        "agentControls": ["stop","say"]
+        "agentControls": ["stop","say"],
+        "agentDefinitions": agent_definitions(cwd)
     })
+}
+
+fn agent_definitions(cwd: &Path) -> Vec<Value> {
+    let personal = std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| directories::UserDirs::new().map(|dirs| dirs.home_dir().join(".codex")))
+        .map(|home| home.join("agents"));
+    let mut found = std::collections::BTreeMap::new();
+    for (directory, source) in personal
+        .into_iter()
+        .map(|path| (path, "user"))
+        .chain(std::iter::once((cwd.join(".codex/agents"), "project")))
+    {
+        let Ok(entries) = fs::read_dir(directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
+                continue;
+            }
+            let Some(name) = path
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            let text = fs::read_to_string(path).unwrap_or_default();
+            let description = text
+                .lines()
+                .find_map(|line| {
+                    let value = line
+                        .trim()
+                        .strip_prefix("description")?
+                        .trim_start()
+                        .strip_prefix('=')?
+                        .trim();
+                    value
+                        .strip_prefix('"')
+                        .and_then(|v| v.strip_suffix('"'))
+                        .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+                        .map(str::to_string)
+                })
+                .unwrap_or_default();
+            found.insert(
+                name.clone(),
+                json!({"name":name,"description":description,"source":source}),
+            );
+        }
+    }
+    found.into_values().collect()
 }
 
 #[cfg(test)]

@@ -379,11 +379,13 @@ async fn serve(open_browser: bool) {
         chat_db,
         workbench::registry::RegistryPaths {
             home,
-            claude_config,
+            claude_config: claude_config.clone(),
             codex_home,
             media: data_dir.join("presentation-media"),
         },
-        Arc::new(workbench::provider::NativeProviderFactory),
+        Arc::new(workbench::provider::NativeProviderFactory::new(
+            claude_config.clone(),
+        )),
     );
     let workbench_state = routes::workbench::WorkbenchState::new(registry);
 
@@ -449,8 +451,14 @@ async fn serve(open_browser: bool) {
     let app = Router::new()
         .route("/api/health", get(routes::health))
         .route("/api/environment", get(routes::environment::read))
-        .route("/api/environment/:tool", axum::routing::put(routes::environment::choose))
-        .route("/api/environment/bd/install", post(routes::environment::install_bd))
+        .route(
+            "/api/environment/:tool",
+            axum::routing::put(routes::environment::choose),
+        )
+        .route(
+            "/api/environment/bd/install",
+            post(routes::environment::install_bd),
+        )
         .nest(
             "/api",
             routes::project_routes().with_state(database.clone()),

@@ -115,6 +115,7 @@ pub struct ClaudeLiveState {
     plans: HashMap<String, Plan>,
     agents: HashMap<String, String>,
     calls_to_agents: HashMap<String, String>,
+    identified_agents: HashSet<String>,
     window: i64,
 }
 
@@ -144,33 +145,77 @@ impl ClaudeLiveState {
             plans: HashMap::new(),
             agents: HashMap::new(),
             calls_to_agents: HashMap::new(),
+            identified_agents: HashSet::new(),
             window: WINDOW,
         }
     }
 
     pub fn menu(&self) -> Value {
-        let commands = self.initialization["commands"]
+        let hidden: HashSet<_> = self.initialization["terminal_slash_commands"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        let mut advertised = self.initialization["commands"]
             .as_array()
             .cloned()
             .unwrap_or_default();
-        let models = self.initialization["models"]
+        if advertised.is_empty() {
+            advertised = self.initialization["slash_commands"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(|name| json!({"name":name,"description":""}))
+                .collect()
+        }
+        let skill_names: HashSet<_> = self.initialization["skills"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        advertised.retain(|row| {
+            row["name"]
+                .as_str()
+                .is_none_or(|name| !hidden.contains(name))
+        });
+        for row in &mut advertised {
+            let skill = row["type"] == "skill"
+                || row["isSkill"] == true
+                || row["name"]
+                    .as_str()
+                    .is_some_and(|name| skill_names.contains(name));
+            row["kind"] = json!(if skill { "skill" } else { "command" });
+            row["execution"] = json!(if skill { "skill" } else { "native" });
+        }
+        for name in skill_names {
+            if !advertised.iter().any(|row| row["name"] == name) {
+                advertised
+                    .push(json!({"name":name,"description":"","kind":"skill","execution":"skill"}))
+            }
+        }
+        let announced = self.initialization["models"]
             .as_array()
             .cloned()
             .unwrap_or_default();
-        let skills = commands
+        let model_rows = super::models::rows(&announced);
+        let models = super::models::menu(&announced);
+        let skills = advertised
             .iter()
-            .filter(|row| row["type"] == "skill" || row["isSkill"] == true)
+            .filter(|row| row["kind"] == "skill")
             .cloned()
             .collect::<Vec<_>>();
-        let commands = commands
+        let commands = advertised
             .into_iter()
-            .filter(|row| row["type"] != "skill" && row["isSkill"] != true)
+            .filter(|row| row["kind"] != "skill")
             .collect::<Vec<_>>();
         let active = self.model.as_deref();
-        let selected = models
+        let selected = model_rows
             .iter()
             .find(|row| row["value"].as_str() == active || row["resolvedModel"].as_str() == active)
-            .or_else(|| models.first());
+            .or_else(|| model_rows.first());
         let efforts = selected
             .and_then(|row| row["supportedEffortLevels"].as_array())
             .cloned()
@@ -196,6 +241,34 @@ impl ClaudeLiveState {
         )
     }
 
+    pub fn validate_prompt(&self, text: &str) -> Result<(), String> {
+        let trimmed = text.trim();
+        if !trimmed.starts_with('/') {
+            return Ok(());
+        }
+        let name = trimmed[1..].split_whitespace().next().unwrap_or_default();
+        if name.is_empty() || name.contains('/') {
+            return Ok(());
+        }
+        let menu = self.menu();
+        let offered = menu["commands"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .chain(menu["skills"].as_array().into_iter().flatten())
+            .any(|row| row["name"] == name);
+        if offered {
+            Ok(())
+        } else {
+            let count = menu["commands"].as_array().map_or(0, Vec::len)
+                + menu["skills"].as_array().map_or(0, Vec::len);
+            Err(format!(
+                "/{name} is not available in this {}.",
+                if count > 0 { "session" } else { "provider" }
+            ))
+        }
+    }
+
     pub fn handle(&mut self, inbound: ClaudeInbound) -> Vec<DriverEvent> {
         match inbound {
             ClaudeInbound::Event(message) => self.draw(&message),
@@ -205,13 +278,22 @@ impl ClaudeLiveState {
             } => self.request(request_id, request),
             ClaudeInbound::ProtocolLine(line) => vec![note("protocol", line, Value::Null)],
             ClaudeInbound::Stderr(line) => vec![note("stderr", line, Value::Null)],
-            ClaudeInbound::Exited(detail) => vec![event(
-                "error",
-                [
-                    ("message", json!(format!("Claude Code exited ({detail})"))),
-                    ("fatal", json!(true)),
-                ],
-            )],
+            ClaudeInbound::Exited(detail) => {
+                let mut events = crate::workbench::lifecycle::abandoned_interactions(
+                    self.permissions.drain().map(|(id, _)| id),
+                    self.questions.drain().map(|(id, _)| id),
+                    self.plans.drain().map(|(id, _)| id),
+                );
+                events.push(event(
+                    "error",
+                    [
+                        ("message", json!(format!("Claude Code exited ({detail})"))),
+                        ("fatal", json!(true)),
+                    ],
+                ));
+                events.push(state("errored", "Failed"));
+                events
+            }
         }
     }
 
@@ -787,17 +869,19 @@ impl ClaudeLiveState {
         }
         if subtype == "task_progress" && message["tool_use_id"].is_string() {
             events.push(event(
-                "tool.progress",
+                "agent.progress",
                 [
-                    ("toolCallId", message["tool_use_id"].clone()),
+                    ("agentId", message["task_id"].clone()),
                     (
                         "seconds",
                         json!(message["usage"]["duration_ms"].as_i64().unwrap_or_default() / 1000),
                     ),
                     (
-                        "summary",
+                        "doing",
                         message.get("summary").cloned().unwrap_or(Value::Null),
                     ),
+                    ("tokens", message["usage"]["total_tokens"].clone()),
+                    ("calls", message["usage"]["tool_uses"].clone()),
                 ],
             ));
             return;
@@ -863,6 +947,16 @@ impl ClaudeLiveState {
                 "system/compact_boundary",
                 "This chat folded its history up.".into(),
                 message.clone(),
+            ));
+            return;
+        }
+        if subtype == "rate_limit_event" {
+            events.push(event(
+                "provider.message",
+                [(
+                    "signal",
+                    crate::workbench::provider_messages::allowance(message),
+                )],
             ));
             return;
         }
@@ -950,6 +1044,21 @@ impl ClaudeLiveState {
 
     fn assistant(&mut self, message: &Value, events: &mut Vec<Value>) {
         let parent = message["parent_tool_use_id"].as_str();
+        if let Some(parent) = parent {
+            if let Some(agent) = self.calls_to_agents.get(parent) {
+                if self.identified_agents.insert(agent.clone()) {
+                    if let Some(model) = message["message"]["model"]
+                        .as_str()
+                        .filter(|m| !m.is_empty())
+                    {
+                        events.push(event(
+                            "agent.identified",
+                            [("agentId", json!(agent)), ("model", json!(model))],
+                        ));
+                    }
+                }
+            }
+        }
         let id = message["message"]["id"]
             .as_str()
             .or_else(|| message["uuid"].as_str())
@@ -1166,6 +1275,10 @@ mod tests {
         assert_eq!(events[0]["type"], "question.requested");
         let events=live.handle(ClaudeInbound::Request{request_id:"plan1".into(),request:json!({"subtype":"can_use_tool","tool_name":"ExitPlanMode","input":{"plan":"Do it"}})});
         assert_eq!(events[0]["type"], "plan.proposed");
+        let events=live.draw(&json!({"type":"system","subtype":"task_progress","task_id":"a1","tool_use_id":"t1","summary":"Reading","usage":{"duration_ms":2000,"total_tokens":9,"tool_uses":2}}));
+        assert_eq!(events[0]["type"], "agent.progress");
+        assert_eq!(events[0]["agentId"], "a1");
+        assert_eq!(events[0]["doing"], "Reading");
     }
     #[test]
     fn native_claude_live_preserves_unknown_messages_and_builds_menu() {
@@ -1176,5 +1289,13 @@ mod tests {
         let menu = live.menu();
         assert_eq!(menu["permissionModes"].as_array().unwrap().len(), 6);
         assert_eq!(menu["efforts"][1]["value"], "high");
+        assert_eq!(menu["models"].as_array().unwrap().len(), 15);
+        assert_eq!(menu["commands"][0]["kind"], "command");
+        assert_eq!(menu["commands"][0]["execution"], "native");
+        assert!(live.validate_prompt("/compact now").is_ok());
+        assert!(live
+            .validate_prompt("/not-offered")
+            .unwrap_err()
+            .contains("not available"));
     }
 }

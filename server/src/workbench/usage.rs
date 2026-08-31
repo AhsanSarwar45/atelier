@@ -356,6 +356,82 @@ pub fn codex_usage(raw: &Value, at: impl Into<String>) -> PlanUsage {
     }
 }
 
+/// Translate Claude's live context report into the browser contract. Keep the
+/// provider's own totals instead of re-adding bands whose measurements are not
+/// defined to sum to the same value.
+pub fn window_now(raw: &Value) -> Option<Value> {
+    let num = |value: &Value| value.as_f64().filter(|n| n.is_finite()).unwrap_or_default();
+    let window = {
+        let raw_max = num(&raw["rawMaxTokens"]);
+        if raw_max > 0.0 {
+            raw_max
+        } else {
+            num(&raw["maxTokens"])
+        }
+    };
+    if window <= 0.0 {
+        return None;
+    }
+    let used = num(&raw["totalTokens"]);
+    let mut pieces = Vec::new();
+    let mut spare = Vec::new();
+    let mut waiting = Vec::new();
+    for band in raw["categories"].as_array().into_iter().flatten() {
+        let tokens = num(&band["tokens"]);
+        if tokens <= 0.0 {
+            continue;
+        }
+        let name = band["name"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("unnamed");
+        let row = json!({"name":name,"tokens":tokens,"share":tokens/window});
+        if band["isDeferred"] == true {
+            waiting.push(row)
+        } else if name.eq_ignore_ascii_case("free space")
+            || name.eq_ignore_ascii_case("autocompact buffer")
+        {
+            spare.push(row)
+        } else {
+            pieces.push(row)
+        }
+    }
+    let sort = |rows: &mut Vec<Value>| {
+        rows.sort_by(|a, b| {
+            b["tokens"]
+                .as_f64()
+                .partial_cmp(&a["tokens"].as_f64())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    };
+    sort(&mut pieces);
+    sort(&mut spare);
+    sort(&mut waiting);
+    let inside=raw.get("messageBreakdown").filter(|v|v.is_object()).and_then(|m|{let written=num(&m["assistantMessageTokens"]);let typed=num(&m["userMessageTokens"]);let calls=num(&m["toolCallTokens"]);let answers=num(&m["toolResultTokens"]);let attachments=num(&m["attachmentTokens"]);let carried=num(&m["redirectedContextTokens"]);let rest=num(&m["unattributedTokens"]);let total=written+typed+calls+answers+attachments+carried+rest;if total==0.0{return None}let mut by_tool=m["toolCallsByType"].as_array().into_iter().flatten().map(|r|json!({"name":r["name"].as_str().filter(|s|!s.is_empty()).unwrap_or("unnamed"),"tokens":num(&r["callTokens"])+num(&r["resultTokens"])})).collect::<Vec<_>>();let mut by_attachment=m["attachmentsByType"].as_array().into_iter().flatten().map(|r|json!({"name":r["name"].as_str().filter(|s|!s.is_empty()).unwrap_or("unnamed"),"tokens":num(&r["tokens"])})).collect::<Vec<_>>();sort(&mut by_tool);sort(&mut by_attachment);Some(json!({"written":written,"typed":typed,"calls":calls,"answers":answers,"attachments":attachments,"carried":carried,"rest":rest,"total":total,"byTool":by_tool,"byAttachment":by_attachment}))});
+    let mut memory=raw["memoryFiles"].as_array().into_iter().flatten().map(|r|json!({"name":r["path"].as_str().filter(|s|!s.is_empty()).unwrap_or("unnamed"),"tokens":num(&r["tokens"])})).collect::<Vec<_>>();
+    sort(&mut memory);
+    let mut servers: std::collections::HashMap<String, (f64, i64, i64)> =
+        std::collections::HashMap::new();
+    for tool in raw["mcpTools"].as_array().into_iter().flatten() {
+        let name = tool["serverName"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("unnamed")
+            .to_string();
+        let row = servers.entry(name).or_default();
+        row.0 += num(&tool["tokens"]);
+        row.1 += 1;
+        if tool["isLoaded"] == true {
+            row.2 += 1
+        }
+    }
+    let mut servers=servers.into_iter().map(|(name,(tokens,tools,loaded))|json!({"name":name,"tokens":tokens,"tools":tools,"loaded":loaded})).collect::<Vec<_>>();
+    sort(&mut servers);
+    Some(
+        json!({"model":raw["model"].as_str(),"used":used,"window":window,"free":0f64.max(window-used),"percent":num(&raw["percentage"]),"forgetsAt":if raw["isAutoCompactEnabled"]==true&&num(&raw["autoCompactThreshold"])>0.0{json!(num(&raw["autoCompactThreshold"]))}else{Value::Null},"pieces":pieces,"spare":spare,"waiting":waiting,"inside":inside,"memory":memory,"servers":servers}),
+    )
+}
+
 /// Read Claude's account allowance over the same native control channel as a
 /// chat; no SDK process is needed.
 pub async fn read_claude(
@@ -406,5 +482,14 @@ mod tests {
         );
         assert_eq!(codex.session.unwrap().severity, "warning");
         assert_eq!(codex.week.unwrap().percent, Some(20.0));
+        let window=window_now(&json!({"rawMaxTokens":200,"totalTokens":80,"percentage":40,"categories":[{"name":"Messages","tokens":50},{"name":"free space","tokens":120},{"name":"Tools","tokens":10,"isDeferred":true}],"messageBreakdown":{"userMessageTokens":7,"assistantMessageTokens":3},"memoryFiles":[{"path":"AGENTS.md","tokens":5}],"mcpTools":[{"serverName":"board","tokens":4,"isLoaded":true},{"serverName":"board","tokens":6,"isLoaded":false}]})).unwrap();
+        assert_eq!(window["used"], 80.0);
+        assert_eq!(window["pieces"][0]["name"], "Messages");
+        assert_eq!(window["spare"][0]["name"], "free space");
+        assert_eq!(window["waiting"][0]["name"], "Tools");
+        assert_eq!(
+            window["servers"][0],
+            json!({"name":"board","tokens":10.0,"tools":2,"loaded":1})
+        );
     }
 }

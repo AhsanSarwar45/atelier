@@ -62,11 +62,20 @@ fn value(event: &Event, field: &str) -> Value {
 }
 
 fn string(event: &Event, field: &str) -> String {
-    event.fields.get(field).and_then(Value::as_str).unwrap_or_default().to_string()
+    event
+        .fields
+        .get(field)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn integer(event: &Event, field: &str) -> i64 {
-    event.fields.get(field).and_then(Value::as_i64).unwrap_or_default()
+    event
+        .fields
+        .get(field)
+        .and_then(Value::as_i64)
+        .unwrap_or_default()
 }
 
 fn truthy_string(event: &Event, field: &str) -> Value {
@@ -137,11 +146,36 @@ fn menu(event: &Event) -> Value {
 /// Fold a complete, sequence-ordered canonical history in one pass.
 pub fn fold_all(events: &[Event]) -> Projection {
     let mut view = empty_view();
-    let mut items = Vec::<Value>::new();
-    let mut agents = Vec::<Value>::new();
-    let mut beads = Vec::<Value>::new();
-    let mut bead_seen = HashSet::<String>::new();
-    let mut agent_at = HashMap::<String, usize>::new();
+    fold_from(&mut view, events)
+}
+
+/// Continue a fold from an already materialised view. This is the native
+/// equivalent of the former helper's incremental canonical projection: a new
+/// event must never force every event since the conversation began through
+/// the reducer again.
+pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection {
+    let mut items = view
+        .remove("items")
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default();
+    let mut agents = view
+        .remove("agents")
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default();
+    let mut beads = view
+        .remove("beads")
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default();
+    let mut bead_seen = beads
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect::<HashSet<_>>();
+    let mut agent_at = agents
+        .iter()
+        .enumerate()
+        .filter_map(|(at, agent)| agent["id"].as_str().map(|id| (id.to_string(), at)))
+        .collect::<HashMap<_, _>>();
 
     for event in events {
         let seq = integer(event, "seq");
@@ -175,6 +209,9 @@ pub fn fold_all(events: &[Event]) -> Projection {
                 }
             }
             EventKind::MessageStarted => {
+                if find(&items, "message", &string(event, "messageId")).is_some() {
+                    continue;
+                }
                 let mut row = item("message", string(event, "messageId"));
                 row.insert("role".into(), value(event, "role"));
                 row.insert("text".into(), json!(""));
@@ -254,7 +291,12 @@ pub fn fold_all(events: &[Event]) -> Projection {
             }
             EventKind::ToolCompleted => {
                 if let Some(at) = find(&items, "tool", &string(event, "toolCallId")) {
-                    items[at]["status"] = if event.fields.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                    items[at]["status"] = if event
+                        .fields
+                        .get("ok")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                    {
                         json!("ok")
                     } else {
                         json!("failed")
@@ -329,7 +371,11 @@ pub fn fold_all(events: &[Event]) -> Projection {
             }
             EventKind::AgentProgress => {
                 if let Some(&at) = agent_at.get(&string(event, "agentId")) {
-                    let final_usage = event.fields.get("finalUsage").and_then(Value::as_bool).unwrap_or(false);
+                    let final_usage = event
+                        .fields
+                        .get("finalUsage")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
                     if is_over(&agents[at]["state"]) {
                         if final_usage {
                             for field in ["seconds", "tokens", "calls"] {
@@ -554,9 +600,8 @@ pub fn fold_all(events: &[Event]) -> Projection {
                 let source = signal["sourceMessageId"].as_str();
                 items.retain(|row| {
                     !(row["kind"] == "provider_message" && row["id"] == id
-                        || source.is_some_and(|source| {
-                            row["kind"] == "message" && row["id"] == source
-                        }))
+                        || source
+                            .is_some_and(|source| row["kind"] == "message" && row["id"] == source))
                 });
                 view.insert("error".into(), Value::Null);
                 if signal["phase"] == "active" {
@@ -587,7 +632,7 @@ pub fn fold_all(events: &[Event]) -> Projection {
     view.insert("agents".into(), Value::Array(agents));
     view.insert("beads".into(), Value::Array(beads));
     Projection {
-        view: Value::Object(view),
+        view: Value::Object(view.clone()),
     }
 }
 
@@ -626,4 +671,17 @@ mod tests {
         assert_eq!(after_reset.view["cost"]["total"], 30);
     }
 
+    #[test]
+    fn projection_treats_repeated_message_start_as_the_same_message() {
+        let events = [1, 2].map(|seq| {
+            serde_json::from_value(json!({
+                "type":"message.started", "sessionId":"chat", "seq":seq,
+                "at":"2026-08-31T00:00:00Z", "messageId":"answer", "role":"assistant"
+            }))
+            .unwrap()
+        });
+        let view = fold_all(&events);
+        assert_eq!(view.items().len(), 1);
+        assert_eq!(view.items()[0]["id"], "answer");
+    }
 }

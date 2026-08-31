@@ -1,5 +1,6 @@
 //! Native content-addressed presentation media and objective PNG evidence.
 
+use base64::Engine;
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -246,6 +247,60 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
         "```atelier-widget\n{}\n```\n",
         serde_json::to_string(&ordered(value)).unwrap()
     ))
+}
+
+fn fenced<'a>(text: &'a str, language: &str) -> Vec<&'a str> {
+    let marker = format!("```{language}");
+    let mut rest = text;
+    let mut found = Vec::new();
+    while let Some(start) = rest.find(&marker) {
+        let after = &rest[start + marker.len()..];
+        let after = after
+            .strip_prefix('\n')
+            .or_else(|| after.trim_start_matches([' ', '\t']).strip_prefix('\n'));
+        let Some(after) = after else { break };
+        let Some(end) = after.find("\n```") else {
+            break;
+        };
+        found.push(&after[..end]);
+        rest = &after[end + 4..];
+    }
+    found
+}
+pub fn widget_specs(text: &str) -> Vec<Value> {
+    fenced(text, "atelier-widget")
+        .into_iter()
+        .filter_map(|source| serde_json::from_str::<Value>(source).ok())
+        .filter(|value| widget_block(value).is_ok())
+        .collect()
+}
+
+fn picture(cwd: &Path, named: &Value, fallback: &str) -> Option<Value> {
+    let root = fs::canonicalize(cwd).ok()?;
+    let path = fs::canonicalize(root.join(named["path"].as_str()?)).ok()?;
+    let allowed = path.starts_with(&root)
+        || path.parent().and_then(Path::parent) == Some(std::env::temp_dir().as_path())
+            && path
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("atelier-codex-images-"));
+    if !allowed {
+        return None;
+    }
+    let bytes = fs::read(path).ok()?;
+    let mime = match image_kind(&bytes)? {
+        ImageKind::Png => "image/png",
+        ImageKind::Jpg => "image/jpeg",
+        ImageKind::Gif => "image/gif",
+        ImageKind::Webp => "image/webp",
+    };
+    Some(
+        serde_json::json!({"mime":mime,"dataUrl":format!("data:{mime};base64,{}",base64::engine::general_purpose::STANDARD.encode(bytes)),"alt":named["caption"].as_str().filter(|s|!s.is_empty()).unwrap_or(fallback)}),
+    )
+}
+pub fn comparison_specs(text: &str, cwd: &Path) -> Vec<Value> {
+    fenced(text,"atelier-image-compare").into_iter().filter_map(|source|serde_json::from_str::<Value>(source).ok()).filter_map(|spec|{let mode=spec["mode"].as_str().unwrap_or("side_by_side");if !matches!(mode,"side_by_side"|"wipe"){return None}Some(serde_json::json!({"mode":mode,"before":picture(cwd,&spec["before"],"Before")?,"after":picture(cwd,&spec["after"],"After")?}))}).collect()
 }
 
 fn option<'a>(args: &'a [String], name: &str) -> Result<Option<&'a str>, String> {
@@ -594,5 +649,15 @@ mod tests {
         .unwrap();
         assert!(rendered.starts_with("```atelier-widget\n"));
         assert!(rendered.contains("A red and black image"));
+        assert_eq!(widget_specs(&rendered).len(), 1);
+        std::fs::write(root.path().join("before.png"), &files["before.png"]).unwrap();
+        std::fs::write(root.path().join("after.png"), &after).unwrap();
+        let comparisons=comparison_specs("```atelier-image-compare\n{\"mode\":\"wipe\",\"before\":{\"path\":\"before.png\"},\"after\":{\"path\":\"after.png\"}}\n```",root.path());
+        assert_eq!(comparisons.len(), 1);
+        assert_eq!(comparisons[0]["mode"], "wipe");
+        assert!(comparisons[0]["before"]["dataUrl"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
     }
 }

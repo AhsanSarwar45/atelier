@@ -385,6 +385,7 @@ mod tests {
                     }
                 }
                 "thread/read" => json!({"thread":{"id":message["params"]["threadId"],"turns":[]}}),
+                "thread/backgroundTerminals/list" => json!({"data":[]}),
                 "thread/start" => {
                     json!({"thread":{"id":"thread-live"},"model":"gpt-5","reasoningEffort":"high","cwd":"/project"})
                 }
@@ -405,6 +406,9 @@ mod tests {
                     {"inputTokens":2,"outputTokens":3,"totalTokens":5},
                     {"inputTokens":7,"outputTokens":11}
                 ]}}),
+                "account/rateLimits/read" => {
+                    json!({"rateLimits":{"primary":{"windowDurationMins":300,"usedPercent":42,"resetsAt":1800000000}}})
+                }
                 "model/list" => {
                     json!({"data":[{"model":"gpt-5","displayName":"GPT-5","description":"Model","isDefault":true,"supportedReasoningEfforts":[{"reasoningEffort":"high"}],"defaultReasoningEffort":"high"}]})
                 }
@@ -578,12 +582,37 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(opened[0]["type"], "session.started");
-        driver.send("Build it").await.unwrap();
-        driver.send("And test it").await.unwrap();
+        let menu = opened
+            .iter()
+            .find(|event| event["type"] == "session.menu")
+            .expect("Codex menu");
+        assert!(menu["models"]
+            .as_array()
+            .is_some_and(|models| models.iter().any(|model| model["value"] == "gpt-5")));
+        assert!(menu["commands"]
+            .as_array()
+            .is_some_and(|commands| commands.iter().any(|command| command["name"] == "compact")));
+        assert!(menu.get("skillPaths").is_none());
+        assert!(menu.get("collaborationPresets").is_none());
+        assert!(menu.get("defaultEffort").is_none());
+        driver.send("Build it", &[]).await.unwrap();
+        driver.send("Look", &[json!({"mime":"image/png","dataUrl":"data:image/png;base64,YWJj","alt":"sample"})]).await.unwrap();
+        let staged = driver.staged_images();
+        assert_eq!(staged.len(), 1);
+        assert_eq!(std::fs::read(&staged[0]).unwrap(), b"abc");
+        driver.send("And test it", &[]).await.unwrap();
         assert_eq!(driver.set_mode("never").unwrap()["permissionMode"], "never");
-        assert_eq!(driver.set_model("default")["model"], "default");
+        assert_eq!(driver.set_model("default").await[0]["model"], "default");
         assert_eq!(driver.set_effort("low")["effort"], "low");
         driver.set_collaboration_mode("plan").await.unwrap();
+        let usage = driver.send("/usage", &[]).await.unwrap();
+        assert!(usage.iter().any(|event| event["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("300m: 42% used"))));
+        let status = driver.send("/status", &[]).await.unwrap();
+        assert!(status.iter().any(|event| event["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("No background commands"))));
         driver.compact().await.unwrap();
         driver.interrupt().await.unwrap();
 
@@ -713,9 +742,9 @@ mod tests {
                 .iter()
                 .map(|event| event.fields["seq"].as_i64().unwrap())
                 .collect::<Vec<_>>(),
-            [1, 2]
+            [1, 2, 3]
         );
-        session.send("Build it").await.unwrap();
+        session.send("Build it", &[]).await.unwrap();
         for _ in 0..8 {
             let events = session.next().await.unwrap();
             if events.iter().any(|event| {

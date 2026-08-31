@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use uuid::Uuid;
@@ -27,6 +28,7 @@ pub struct ClaudeSessionSummary {
     pub name: Option<String>,
     pub cwd: Option<PathBuf>,
     pub git_branch: Option<String>,
+    pub last_spoke_at: Option<String>,
     pub programmatic: bool,
     pub record: PathBuf,
 }
@@ -77,6 +79,46 @@ fn jsonl(path: &Path) -> Vec<Value> {
                 .collect::<Vec<_>>()
         })
         .collect()
+}
+
+fn byte_window(path: &Path, from: i64, limit: usize) -> Vec<Value> {
+    let Ok(mut file) = fs::File::open(path) else {
+        return vec![];
+    };
+    let size = file.metadata().map(|m| m.len()).unwrap_or_default();
+    let start = if from < 0 {
+        size.saturating_sub((-from) as u64)
+    } else {
+        from as u64
+    };
+    if file.seek(SeekFrom::Start(start)).is_err() {
+        return vec![];
+    }
+    let mut bytes = Vec::new();
+    if file.take(limit as u64).read_to_end(&mut bytes).is_err() {
+        return vec![];
+    }
+    if start > 0 {
+        if let Some(newline) = bytes.iter().position(|b| *b == b'\n') {
+            bytes.drain(..=newline);
+        } else {
+            return vec![];
+        }
+    }
+    String::from_utf8_lossy(&bytes)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
+        .collect()
+}
+fn edge_jsonl(path: &Path) -> Vec<Value> {
+    let mut rows = byte_window(path, 0, 128 * 1024);
+    let mut seen: HashSet<String> = rows.iter().map(Value::to_string).collect();
+    for row in byte_window(path, -(256 * 1024), 256 * 1024) {
+        if seen.insert(row.to_string()) {
+            rows.push(row)
+        }
+    }
+    rows
 }
 
 fn record_files(config: &Path) -> Vec<PathBuf> {
@@ -166,13 +208,14 @@ fn modified(path: &Path) -> String {
 
 fn summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
     let session_id = path.file_stem()?.to_str()?.to_string();
-    let rows = jsonl(&path);
+    let rows = edge_jsonl(&path);
     let mut cwd = None;
     let mut branch = None;
     let mut custom_title = None;
     let mut summary = None;
     let mut first_prompt = None;
     let mut programmatic = false;
+    let mut last_spoke_at = None;
     for row in &rows {
         cwd = as_nonempty(&row["cwd"]).map(PathBuf::from).or(cwd);
         branch = as_nonempty(&row["gitBranch"]).or(branch);
@@ -188,13 +231,26 @@ fn summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
                 first_prompt = Some(text);
             }
         }
+        if visible(row) && row["type"] == "user" && human_words(&message_text(&row["message"])) {
+            last_spoke_at = as_nonempty(&row["timestamp"]).or(last_spoke_at);
+        }
     }
     Some(ClaudeSessionSummary {
         session_id,
         last_modified: modified(&path),
-        name: custom_title.or(summary).or(first_prompt),
+        name: custom_title.or_else(|| {
+            summary
+                .as_deref()
+                .and_then(crate::workbench::metadata::conversation_title)
+                .or_else(|| {
+                    first_prompt
+                        .as_deref()
+                        .and_then(crate::workbench::metadata::conversation_title)
+                })
+        }),
         cwd,
         git_branch: branch,
+        last_spoke_at,
         programmatic,
         record: path,
     })
@@ -349,7 +405,11 @@ fn images(message: &Value) -> (String, Vec<Value>) {
 #[derive(Default)]
 struct Usage {
     input: i64,
+    fresh: i64,
+    cache_write: i64,
+    cache_read: i64,
     output: i64,
+    thinking: i64,
     total: i64,
     context: Option<i64>,
     window: i64,
@@ -373,33 +433,140 @@ fn usage(rows: &[Value]) -> Usage {
         if !fields.is_object() {
             continue;
         }
-        let input = fields["input_tokens"].as_i64().unwrap_or_default()
-            + fields["cache_creation_input_tokens"]
-                .as_i64()
-                .unwrap_or_default()
-            + fields["cache_read_input_tokens"]
-                .as_i64()
-                .unwrap_or_default();
+        let fresh = fields["input_tokens"].as_i64().unwrap_or_default();
+        let cache_write = fields["cache_creation_input_tokens"]
+            .as_i64()
+            .unwrap_or_default();
+        let cache_read = fields["cache_read_input_tokens"]
+            .as_i64()
+            .unwrap_or_default();
+        let input = fresh + cache_write + cache_read;
         let output = fields["output_tokens"].as_i64().unwrap_or_default();
+        let thinking = fields["output_tokens_details"]["thinking_tokens"]
+            .as_i64()
+            .unwrap_or_default();
         if input + output > 0 {
             out.context = Some(input + output);
         }
         let key = as_nonempty(&message["id"]).unwrap_or_else(|| format!("line-{index}"));
         if seen.insert(key) {
             out.input += input;
+            out.fresh += fresh;
+            out.cache_write += cache_write;
+            out.cache_read += cache_read;
             out.output += output;
+            out.thinking += thinking;
             out.total += input + output;
         }
     }
     out
 }
 
+fn split_json(usage: &Usage) -> Value {
+    json!({"input":usage.fresh,"cacheWrite":usage.cache_write,"cacheRead":usage.cache_read,"output":usage.output,"thinking":usage.thinking,"total":usage.total})
+}
+fn plus_usage(to: &mut Usage, from: &Usage) {
+    to.fresh += from.fresh;
+    to.cache_write += from.cache_write;
+    to.cache_read += from.cache_read;
+    to.input += from.input;
+    to.output += from.output;
+    to.thinking += from.thinking;
+    to.total += from.total;
+}
+
+/// Exact all-time token arithmetic used by the former sidecar: each assistant
+/// turn is counted once by message id, helpers come from their own records,
+/// and cache/thinking categories remain separate for the token inspector.
+pub fn token_spend(record: &Path) -> Option<Value> {
+    let rows = jsonl(record);
+    if rows.is_empty() {
+        return None;
+    }
+    let own = usage(&rows);
+    if own.total == 0 {
+        return None;
+    }
+    let mut helpers = Usage::default();
+    let mut helper_count = 0i64;
+    let mut models: HashMap<String, (Usage, i64)> = HashMap::new();
+    let mut seen = HashSet::new();
+    let mut turns = 0i64;
+    for (index, row) in rows.iter().enumerate() {
+        let message = &row["message"];
+        if !message["usage"].is_object() {
+            continue;
+        }
+        let key = as_nonempty(&message["id"]).unwrap_or_else(|| format!("line-{index}"));
+        if !seen.insert(key) {
+            continue;
+        }
+        let one = usage(std::slice::from_ref(row));
+        if one.total == 0 {
+            continue;
+        }
+        turns += 1;
+        let model = as_nonempty(&message["model"]).unwrap_or_else(|| "unnamed".into());
+        let entry = models.entry(model).or_default();
+        plus_usage(&mut entry.0, &one);
+        entry.1 += 1;
+    }
+    if let Some(stem) = record.file_stem().and_then(|s| s.to_str()) {
+        if let Ok(entries) = fs::read_dir(record.with_file_name(stem).join("subagents")) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("agent-") && n.ends_with(".jsonl"))
+                {
+                    continue;
+                }
+                let helper_rows = jsonl(&path);
+                let spent = usage(&helper_rows);
+                if spent.total == 0 {
+                    continue;
+                }
+                helper_count += 1;
+                plus_usage(&mut helpers, &spent);
+                let model = helper_rows
+                    .iter()
+                    .find_map(|row| as_nonempty(&row["message"]["model"]))
+                    .unwrap_or_else(|| "unnamed".into());
+                plus_usage(&mut models.entry(model).or_default().0, &spent);
+            }
+        }
+    }
+    let mut total = Usage::default();
+    plus_usage(&mut total, &own);
+    plus_usage(&mut total, &helpers);
+    let tool_calls = rows
+        .iter()
+        .flat_map(|row| row["message"]["content"].as_array().into_iter().flatten())
+        .filter(|block| block["type"] == "tool_use")
+        .count();
+    let forgettings = rows
+        .iter()
+        .filter(|row| row["isCompactSummary"] == true)
+        .count();
+    let mut model_rows:Vec<_>=models.into_iter().filter(|(_, (spend,_))|spend.total>0).map(|(model,(spend,turns))|json!({"model":model,"spend":split_json(&spend),"turns":turns})).collect();
+    model_rows
+        .sort_by_key(|row| std::cmp::Reverse(row["spend"]["total"].as_i64().unwrap_or_default()));
+    Some(
+        json!({"own":split_json(&own),"helpers":split_json(&helpers),"total":split_json(&total),"turns":turns,"toolCalls":tool_calls,"forgettings":forgettings,"helperCount":helper_count,"models":model_rows}),
+    )
+}
+
 fn settings(rows: &[Value]) -> ClaudeSettings {
     let mut found = ClaudeSettings::default();
     for row in rows {
         found.permission_mode = as_nonempty(&row["permissionMode"]).or(found.permission_mode);
-        found.effort = as_nonempty(&row["effort"]).or(found.effort);
-        found.model = as_nonempty(&row["message"]["model"]).or(found.model);
+        if row["type"] == "assistant" && row["isSidechain"] != true {
+            found.effort = as_nonempty(&row["effort"]).or(found.effort);
+            found.model = as_nonempty(&row["message"]["model"])
+                .filter(|model| model != "<synthetic>")
+                .or(found.model);
+        }
     }
     found
 }
@@ -441,6 +608,27 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
                 events.push(json!({"type":"text.delta", "messageId":id, "text":text}));
             }
             events.push(json!({"type":"message.completed", "messageId":id}));
+            if role == "assistant" {
+                if parent.is_none() {
+                    if let Some(mut signal) = crate::workbench::provider_messages::from_text(&text)
+                    {
+                        signal["sourceMessageId"] = json!(id);
+                        events.push(json!({"type":"provider.message","signal":signal}));
+                    }
+                }
+                for widget in crate::workbench::media::widget_specs(&text) {
+                    events.push(json!({"type":"widget","messageId":id,"widget":widget}));
+                }
+                if let Some(cwd) = rows.iter().find_map(|row| as_nonempty(&row["cwd"])) {
+                    for comparison in
+                        crate::workbench::media::comparison_specs(&text, Path::new(&cwd))
+                    {
+                        events.push(
+                            json!({"type":"image.compare","messageId":id,"comparison":comparison}),
+                        );
+                    }
+                }
+            }
         }
         for block in row["message"]["content"].as_array().into_iter().flatten() {
             if block["type"] != "tool_use" {
@@ -488,6 +676,9 @@ fn helper_events(record: &Path) -> Vec<Value> {
         else {
             continue;
         };
+        // Import is an explicit, one-time read. Keep discovery and following
+        // bounded, but do not lose an old helper's command/result pairs merely
+        // because its record exceeds the follower window.
         let rows = jsonl(&path);
         let meta_path = path.with_file_name(format!("agent-{agent_id}.meta.json"));
         let meta: Value = fs::read_to_string(meta_path)
@@ -553,6 +744,10 @@ fn helper_events(record: &Path) -> Vec<Value> {
 }
 
 pub fn read_history(record: &Path) -> ClaudeHistory {
+    // This is the deliberate import boundary, not list discovery and not a
+    // follower tick. Read the provider record once, off the request path, and
+    // then retain only the semantic transcript tail below. Taking the last N
+    // bytes can cut a tool call away from its result.
     let rows = jsonl(record);
     let spent = usage(&rows);
     let mut events = transcript_events(&rows, None);
@@ -583,6 +778,66 @@ pub fn read_history(record: &Path) -> ClaudeHistory {
         context_used: spent.context,
         context_window: spent.window,
     }
+}
+
+/// Normalize a bounded tail window. The external follower owns byte cursors;
+/// this function deliberately knows nothing about, and never opens, the full
+/// record behind those newly appended lines.
+pub fn replay_lines(lines: &[String]) -> Vec<Value> {
+    let rows = lines
+        .iter()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .collect::<Vec<_>>();
+    let mut events = transcript_events(&rows, None);
+    // Settings are conversation facts, not transport state. External Claude
+    // can change them while Atelier only follows the JSONL record, so publish
+    // the same pin event the native driver publishes. The durable actor owns
+    // persistence and provider-event identity drops unchanged observations.
+    let observed = settings(&rows);
+    if observed.model.is_some() || observed.permission_mode.is_some() || observed.effort.is_some() {
+        events.push(json!({
+            "type":"session.pinned",
+            "model":observed.model,
+            "permissionMode":observed.permission_mode,
+            "effort":observed.effort
+        }));
+    }
+    // External Claude sessions report helper lifecycle in system rows beside
+    // the conversation.  A follower must translate these just as the native
+    // driver does or a running helper becomes an anonymous command until the
+    // chat is reopened and its subagent record imported.
+    for row in &rows {
+        if row["type"] != "system" {
+            continue;
+        }
+        match row["subtype"].as_str() {
+            Some("thinking_tokens") => events.push(json!({
+                "type":"thinking.progress","tokens":row["estimated_tokens"]
+            })),
+            Some("task_started") => events.push(json!({
+                "type":"agent.started","agentId":row["task_id"],
+                "toolCallId":row.get("tool_use_id").cloned().unwrap_or(Value::Null),
+                "kind":"helper","what":row.get("description").cloned().unwrap_or(json!("")),
+                "agentType":row.get("agent_type").cloned().unwrap_or(Value::Null),"model":Value::Null
+            })),
+            Some("task_progress") if row["tool_use_id"].is_string() => events.push(json!({
+                "type":"agent.progress","agentId":row["task_id"],
+                "seconds":row["usage"]["duration_ms"].as_i64().unwrap_or_default()/1000,
+                "doing":row.get("summary").cloned().unwrap_or(Value::Null),
+                "tokens":row["usage"]["total_tokens"],"calls":row["usage"]["tool_uses"]
+            })),
+            Some("task_notification") => events.push(json!({
+                "type":"agent.finished","agentId":row["task_id"],
+                "state":if row["status"]=="failed"{"failed"}else{"done"},
+                "seconds":row["usage"]["duration_ms"].as_i64().unwrap_or_default()/1000,
+                "tokens":row["usage"]["total_tokens"],"calls":row["usage"]["tool_uses"],
+                "model":row.get("model").cloned().unwrap_or(Value::Null),
+                "result":row.get("summary").cloned().unwrap_or(Value::Null)
+            })),
+            _ => {}
+        }
+    }
+    events
 }
 
 #[cfg(test)]
@@ -620,10 +875,26 @@ mod tests {
         let sessions = list_sessions(home.path(), Some(Path::new("/work/repo")), false);
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, CHAT);
-        assert_eq!(sessions[0].name.as_deref(), Some("look [Image #1]"));
+        assert_eq!(sessions[0].name.as_deref(), Some("Look Image 1"));
         assert_eq!(sessions[0].git_branch.as_deref(), Some("ours"));
         assert!(find_record(home.path(), CHAT).is_some());
         assert!(find_record(home.path(), "../../etc/passwd").is_none());
+    }
+
+    #[test]
+    fn claude_discovery_preserves_custom_titles_and_normalizes_fallbacks() {
+        let home = tempdir().unwrap();
+        let dir = home.path().join("projects/project");
+        create_dir_all(&dir).unwrap();
+        write(dir.join(format!("{CHAT}.jsonl")), [
+            json!({"type":"summary","summary":"currently we don't have ability to close a session in this chat. fix that."}),
+            json!({"type":"custom-title","customTitle":"Agent Defined Conversation Name"}),
+        ].iter().map(Value::to_string).collect::<Vec<_>>().join("\n")).unwrap();
+        let sessions = list_sessions(home.path(), None, false);
+        assert_eq!(
+            sessions[0].name.as_deref(),
+            Some("Agent Defined Conversation Name")
+        );
     }
 
     #[test]
@@ -641,6 +912,13 @@ mod tests {
             ),
             (12, 3, 15)
         );
+        let picture = token_spend(&record).unwrap();
+        assert_eq!(
+            picture["own"],
+            json!({"input":5,"cacheWrite":0,"cacheRead":7,"output":3,"thinking":0,"total":15})
+        );
+        assert_eq!(picture["turns"], 1);
+        assert_eq!(picture["toolCalls"], 1);
         assert!(history.events.iter().any(|event| event["type"] == "image"));
         assert!(history
             .events
@@ -658,6 +936,33 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn external_claude_growth_reports_conversation_settings() {
+        let lines = vec![
+            json!({"type":"assistant","permissionMode":"plan","effort":"high","message":{"model":"claude-sonnet","content":[]}}).to_string(),
+        ];
+        let events = replay_lines(&lines);
+        let pinned = events
+            .iter()
+            .find(|event| event["type"] == "session.pinned")
+            .expect("external settings are visible to the shared session actor");
+        assert_eq!(pinned["model"], "claude-sonnet");
+        assert_eq!(pinned["permissionMode"], "plan");
+        assert_eq!(pinned["effort"], "high");
+    }
+
+    #[test]
+    fn claude_settings_never_take_a_helpers_or_synthetic_model() {
+        let rows = vec![
+            json!({"type":"assistant","effort":"xhigh","message":{"model":"opus"}}),
+            json!({"type":"assistant","isSidechain":true,"effort":"low","message":{"model":"haiku"}}),
+            json!({"type":"assistant","message":{"model":"<synthetic>"}}),
+        ];
+        let observed = settings(&rows);
+        assert_eq!(observed.model.as_deref(), Some("opus"));
+        assert_eq!(observed.effort.as_deref(), Some("xhigh"));
     }
 
     #[test]

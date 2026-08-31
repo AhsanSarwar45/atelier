@@ -492,11 +492,16 @@ mod tests {
                     json!({"type":"system","subtype":"user_received"})
                 )
                 .unwrap();
-                writeln!(stdout, "{}", json!({
-                    "type":"assistant", "session_id":"claude-thread", "uuid":"claude-message",
-                    "message":{"id":"claude-message","role":"assistant","model":"sonnet",
-                        "content":[{"type":"text","text":"CLAUDE_NATIVE_STREAM"}]}
-                })).unwrap();
+                writeln!(
+                    stdout,
+                    "{}",
+                    json!({
+                        "type":"assistant", "session_id":"claude-thread", "uuid":"claude-message",
+                        "message":{"id":"claude-message","role":"assistant","model":"sonnet",
+                            "content":[{"type":"text","text":"CLAUDE_NATIVE_STREAM"}]}
+                    })
+                )
+                .unwrap();
                 writeln!(stdout, "{}", json!({
                     "type":"control_request", "request_id":"permission-1",
                     "request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"cargo test"}}

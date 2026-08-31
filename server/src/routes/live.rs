@@ -41,15 +41,17 @@ use axum::{
     Extension,
 };
 use futures::{sink::SinkExt, stream::StreamExt};
+use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::{convert::Infallible, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
+use super::environment::BootstrapBus;
 use super::workbench;
 use crate::db::Database;
 use crate::dolt::DoltManager;
-use super::environment::BootstrapBus;
 
 /// One thing a feed said, and which feed said it.
 ///
@@ -130,14 +132,35 @@ fn asked(flag: &Option<String>) -> bool {
 /// Feed the combined browser connection from the in-process database. This is
 /// the native equivalent of relaying the helper's `/watch` SSE stream.
 async fn relay_native_watch(state: workbench::WorkbenchState, tx: mpsc::Sender<Tagged>) {
+    let usage_state = state.clone();
+    let usage_tx = tx.clone();
+    tokio::spawn(async move {
+        let mut beat = tokio::time::interval(Duration::from_secs(30));
+        loop {
+            beat.tick().await;
+            for brand in ["claude", "codex"] {
+                if let Ok(usage) = usage_state.account_usage(brand).await {
+                    let frame = serde_json::json!({"kind":"usage","brand":brand,"usage":usage});
+                    if usage_tx
+                        .send(Tagged::new(Some("workbench"), frame.to_string()))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+    });
     let mut updates = state.database().subscribe_all();
     let sessions = match workbench::session_summaries(state.database(), None).await {
         Ok(sessions) => sessions,
         Err(_) => return,
     };
+    let mut holds = serde_json::to_value(state.provider_holds().await).unwrap_or_default();
     for frame in [
         serde_json::json!({"kind":"snapshot","sessions":sessions}),
-        serde_json::json!({"kind":"running","holds":[]}),
+        serde_json::json!({"kind":"running","holds":holds}),
     ] {
         if tx
             .send(Tagged::new(Some("workbench"), frame.to_string()))
@@ -147,9 +170,61 @@ async fn relay_native_watch(state: workbench::WorkbenchState, tx: mpsc::Sender<T
             return;
         }
     }
+    let mut hold_tick = tokio::time::interval(Duration::from_secs(2));
+    let (external_tx, mut external_rx) = mpsc::unbounded_channel();
+    let mut external_watcher =
+        notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+            if event.is_ok() {
+                let _ = external_tx.send(());
+            }
+        })
+        .ok();
+    if let Some(watcher) = external_watcher.as_mut() {
+        let _ = watcher.watch(
+            &state.claude_config_directory().join("projects"),
+            RecursiveMode::Recursive,
+        );
+        let _ = watcher.watch(
+            &state.codex_home_directory().join("sessions"),
+            RecursiveMode::Recursive,
+        );
+    }
+    let mut external_tick = tokio::time::interval(Duration::from_secs(1));
+    let mut external_dirty = false;
     loop {
-        match updates.recv().await {
+        tokio::select! {
+        _ = hold_tick.tick() => {
+            let current = serde_json::to_value(state.provider_holds().await).unwrap_or_default();
+            if current != holds {
+                holds = current;
+                let frame = serde_json::json!({"kind":"running","holds":holds});
+                if tx.send(Tagged::new(Some("workbench"), frame.to_string())).await.is_err() { return; }
+            }
+        }
+        changed=external_rx.recv(), if external_watcher.is_some()=>{if changed.is_some(){external_dirty=true;}}
+        _ = external_tick.tick() => {
+            if external_dirty {
+                external_dirty=false;
+                let frame = serde_json::json!({"kind":"outside","folders":[]});
+                if tx.send(Tagged::new(Some("workbench"), frame.to_string())).await.is_err() { return; }
+            }
+        }
+        received = updates.recv() => match received {
             Ok(update) => {
+                if update.event.kind == crate::workbench::protocol::EventKind::SessionStarted {
+                    if let Ok(Some(session)) = state.database().get_session(update.session_id.clone()).await {
+                        let beads = state.database().beads_for_session(update.session_id.clone()).await.unwrap_or_default();
+                        let frame = serde_json::json!({"kind":"opened","session":{
+                            "id":session.id,"brand":session.brand,"externalId":session.external_id,
+                            "projectId":session.project_id,"projectPath":session.project_path,"cwd":session.cwd,
+                            "model":session.model,"permissionMode":session.permission_mode,"effort":session.effort,
+                            "collaborationMode":session.collaboration_mode,"title":session.title,"state":session.state,
+                            "origin":session.origin,"createdAt":session.created_at,"lastActiveAt":session.last_active_at,
+                            "lastSpokeAt":session.last_spoke_at,"activity":"","busySince":serde_json::Value::Null,"beads":beads
+                        }});
+                        if tx.send(Tagged::new(Some("workbench"), frame.to_string())).await.is_err() { return; }
+                    }
+                }
                 let frame = serde_json::json!({"kind":"event","event":update.event});
                 if tx
                     .send(Tagged::new(Some("workbench"), frame.to_string()))
@@ -161,7 +236,7 @@ async fn relay_native_watch(state: workbench::WorkbenchState, tx: mpsc::Sender<T
             }
             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
             Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
-        }
+        }}
     }
 }
 
@@ -173,10 +248,66 @@ async fn relay_native_chat(
     tx: mpsc::Sender<Tagged>,
 ) {
     let mut updates = state.database().subscribe_session(&session_id);
+    let followed = state
+        .database()
+        .get_session(session_id.clone())
+        .await
+        .ok()
+        .flatten()
+        .and_then(|session| {
+            let record = session.external_id.as_deref().and_then(|id| {
+                if session.brand == "claude" {
+                    crate::workbench::claude::history::find_record(
+                        state.claude_config_directory(),
+                        id,
+                    )
+                } else if session.brand == "codex" {
+                    state.codex_record(id)
+                } else {
+                    None
+                }
+            })?;
+            Some((session, record))
+        });
+    let followed_to = state
+        .database()
+        .followed_to(session_id.clone())
+        .await
+        .ok()
+        .flatten();
+    let mut claude_tail = followed
+        .as_ref()
+        .filter(|(session, _)| session.brand == "claude")
+        .map(|(_, record)| {
+            let mut tail = crate::workbench::external::LineTail::new(record);
+            if let Some(at) = followed_to {
+                tail.seek(at.max(0) as u64)
+            } else {
+                tail.to_end()
+            }
+            tail
+        });
+    let mut claude_lines: VecDeque<String> = VecDeque::new();
+    let mut codex_tail = followed
+        .as_ref()
+        .filter(|(session, _)| session.brand == "codex")
+        .map(|(_, record)| {
+            let mut tail = crate::workbench::external::LineTail::new(record);
+            if let Some(at) = followed_to {
+                tail.seek(at.max(0) as u64)
+            } else {
+                tail.to_end()
+            }
+            tail
+        });
+    let mut codex_lines: VecDeque<String> = VecDeque::new();
+    let mut record_tick = tokio::time::interval(Duration::from_millis(250));
+    let watermark;
     if since == 0 {
         let Ok(snapshot) = workbench::snapshot(state.database(), &session_id).await else {
             return;
         };
+        watermark = snapshot["lastSeq"].as_i64().unwrap_or_default();
         if tx
             .send(Tagged::scoped(
                 "chat.snapshot",
@@ -193,6 +324,11 @@ async fn relay_native_chat(
         .events_since(session_id.clone(), since)
         .await
     {
+        watermark = events
+            .last()
+            .and_then(|event| event.fields.get("seq"))
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(since);
         for event in events {
             let Ok(data) = serde_json::to_string(&event) else {
                 continue;
@@ -205,10 +341,47 @@ async fn relay_native_chat(
                 return;
             }
         }
+    } else {
+        watermark = since;
     }
     loop {
-        match updates.recv().await {
+        tokio::select! {
+        _ = record_tick.tick(), if followed.is_some() => {
+            let (session, _record) = followed.as_ref().unwrap();
+            // A native driver is the one live source while Atelier owns the
+            // provider. Keep the durable file cursor current without replaying
+            // the same prompt/answer a second time from the provider record.
+            if state.has_driver(&session.id).await {
+                if let Some(tail) = claude_tail.as_mut() { tail.to_end(); }
+                if let Some(tail) = codex_tail.as_mut() { tail.to_end(); }
+                claude_lines.clear();
+                codex_lines.clear();
+                let at=if session.brand=="claude"{claude_tail.as_ref().map(|tail|tail.through_line())}else{codex_tail.as_ref().map(|tail|tail.through_line())};
+                if let Some(at)=at{let _=state.database().remember_followed(session.id.clone(),at as i64).await;}
+                continue;
+            }
+            let fresh = if session.brand=="claude" {
+                let growth=claude_tail.as_mut().and_then(|tail|tail.grown().ok());
+                if growth.as_ref().is_some_and(|growth|growth.rewritten){if !state.database().was_driven_here(session.id.clone()).await.unwrap_or(true){let reset:Result<crate::workbench::protocol::Event,_>=serde_json::from_value(serde_json::json!({"type":"transcript.reset","sessionId":session.id,"seq":0,"at":chrono::Utc::now().to_rfc3339()}));if let Ok(reset)=reset{let _=state.database().append(reset).await;}if let Some(tail)=claude_tail.as_mut(){tail.seek(0)}claude_lines.clear();}else if let Some(tail)=claude_tail.as_mut(){tail.to_end()}Vec::new()}else{if let Some(growth)=growth{for line in growth.lines{claude_lines.push_back(line)}}let fresh=crate::workbench::claude::history::replay_lines(claude_lines.make_contiguous());while claude_lines.len()>256{claude_lines.pop_front();}fresh}
+            } else {
+                let growth=codex_tail.as_mut().and_then(|tail|tail.grown().ok());
+                if growth.as_ref().is_some_and(|growth|growth.rewritten){if !state.database().was_driven_here(session.id.clone()).await.unwrap_or(true){let reset:Result<crate::workbench::protocol::Event,_>=serde_json::from_value(serde_json::json!({"type":"transcript.reset","sessionId":session.id,"seq":0,"at":chrono::Utc::now().to_rfc3339()}));if let Ok(reset)=reset{let _=state.database().append(reset).await;}if let Some(tail)=codex_tail.as_mut(){tail.seek(0)}codex_lines.clear();}else if let Some(tail)=codex_tail.as_mut(){tail.to_end()}Vec::new()}else{if let Some(growth)=growth{for line in growth.lines{codex_lines.push_back(line)}}let fresh=crate::workbench::codex::normalize::replay_rollout(&codex_lines.make_contiguous().join("\n"));while codex_lines.len()>512{codex_lines.pop_front();}fresh}
+            };
+            for mut value in fresh {
+                let event_id=crate::workbench::protocol::record_event_id(&value);
+                let Some(object) = value.as_object_mut() else { continue; };
+                object.insert("providerEvent".into(),serde_json::json!({"provider":session.brand,"threadId":session.external_id,"eventId":event_id,"delivery":"live"}));
+                object.insert("sessionId".into(), serde_json::json!(session.id));
+                object.insert("seq".into(), serde_json::json!(0));
+                object.entry("at").or_insert_with(|| serde_json::json!(chrono::Utc::now().to_rfc3339()));
+                if let Ok(event) = serde_json::from_value(value) { let _ = state.database().append(event).await; }
+            }
+            let at=if session.brand=="claude"{claude_tail.as_ref().map(|tail|tail.through_line())}else{codex_tail.as_ref().map(|tail|tail.through_line())};if let Some(at)=at{let _=state.database().remember_followed(session.id.clone(),at as i64).await;}
+        }
+        received = updates.recv() => match received {
             Ok(event) => {
+                let seq = event.fields.get("seq").and_then(serde_json::Value::as_i64).unwrap_or_default();
+                if seq <= watermark { continue; }
                 let Ok(data) = serde_json::to_string(&event) else {
                     continue;
                 };
@@ -222,7 +395,7 @@ async fn relay_native_chat(
             }
             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
             Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
-        }
+        }}
     }
 }
 
@@ -257,7 +430,15 @@ pub async fn live(
         tokio::spawn(async move {
             loop {
                 match updates.recv().await {
-                    Ok(value) => if bootstrap_tx.send(Tagged::new(Some("bootstrap"), value.to_string())).await.is_err() { return; },
+                    Ok(value) => {
+                        if bootstrap_tx
+                            .send(Tagged::new(Some("bootstrap"), value.to_string()))
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
                 }
@@ -267,7 +448,10 @@ pub async fn live(
 
     if let Some(chat) = params.chat.filter(|c| !c.is_empty()) {
         tokio::spawn(relay_native_chat(
-            native.clone(), chat, params.since.unwrap_or(0) as i64, tx.clone(),
+            native.clone(),
+            chat,
+            params.since.unwrap_or(0) as i64,
+            tx.clone(),
         ));
     }
 

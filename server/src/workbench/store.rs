@@ -4,16 +4,22 @@
 //! helper. Moving the writer into Axum must not make an existing conversation
 //! disappear or require an export/import step.
 
-use crate::workbench::projection::fold_all;
+use crate::workbench::projection::{fold_all, fold_from};
 use crate::workbench::protocol::Event;
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{
     params, params_from_iter, Connection, OptionalExtension, Row, Transaction, TransactionBehavior,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
+
+/// Version of the provider-history normalization recipe persisted on a chat.
+/// Raise only when replaying the same provider record can add or correct
+/// canonical events; this matches the last Node implementation's generation.
+pub const IMPORT_RECIPE: i64 = 10;
 
 const LEGACY_MIGRATIONS: &[&str] = &[
     r#"CREATE TABLE session (
@@ -124,7 +130,8 @@ pub struct SessionPatch {
     pub collaboration_mode: Option<Option<String>>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SearchHit {
     pub session_id: String,
     pub message_id: String,
@@ -145,13 +152,28 @@ pub struct Turn {
     pub total: Option<i64>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Spend {
     pub day: String,
     pub project_id: String,
     pub brand: String,
     pub usd: f64,
     pub tokens: i64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SessionActivity {
+    pub label: String,
+    pub busy_since: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct TokenStats {
+    pub turns: i64,
+    pub tool_calls: i64,
+    pub forgettings: i64,
+    pub helper_count: i64,
+    pub cost: Option<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -394,13 +416,12 @@ impl Store {
     }
 
     pub fn events_since(&self, session_id: &str, since: i64) -> rusqlite::Result<Vec<Event>> {
-        let mut statement = self
-            .connection
-            .prepare("SELECT seq, json FROM event WHERE session_id = ?1 AND seq > ?2 ORDER BY seq")?;
-        let rows =
-            statement.query_map(params![session_id, since], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-            })?;
+        let mut statement = self.connection.prepare(
+            "SELECT seq, json FROM event WHERE session_id = ?1 AND seq > ?2 ORDER BY seq",
+        )?;
+        let rows = statement.query_map(params![session_id, since], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
         rows.map(|row| {
             let (seq, json) = row?;
             let mut event: Event = serde_json::from_str(&json).map_err(|error| {
@@ -413,7 +434,180 @@ impl Store {
             // Legacy helper rows kept the sequence in the indexed SQL column
             // but not always in their JSON. SQL is the durable ordering source
             // for both old and native events, so decode it back onto the wire.
-            event.fields.insert("seq".to_string(), serde_json::json!(seq));
+            event
+                .fields
+                .insert("seq".to_string(), serde_json::json!(seq));
+            super::wire::bound_event(&mut event);
+            Ok(event)
+        })
+        .collect()
+    }
+
+    /// Only canonical helper edges, used once to restore terminal tombstones
+    /// before accepting a new live helper signal after a process restart.
+    pub fn agent_lifecycle_events(&self, session_id: &str) -> rusqlite::Result<Vec<Event>> {
+        let mut statement = self.connection.prepare(
+            "SELECT json FROM event WHERE session_id=?1 AND type IN ('agent.started','agent.progress','agent.finished') ORDER BY seq",
+        )?;
+        let found = statement
+            .query_map([session_id], |row| {
+                let json: String = row.get(0)?;
+                serde_json::from_str(&json).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })
+            })?
+            .collect();
+        found
+    }
+
+    pub fn event_count(&self, session_id: &str) -> rusqlite::Result<i64> {
+        self.connection.query_row(
+            "SELECT COUNT(*) FROM event WHERE session_id = ?1 AND type IN ('message.started','tool.started','notice')",
+            [session_id], |row| row.get(0))
+    }
+
+    pub fn session_activity(&self, session_id: &str) -> rusqlite::Result<SessionActivity> {
+        let mut statement = self.connection.prepare(
+            "SELECT json_extract(json,'$.state'), COALESCE(json_extract(json,'$.label'),''), json_extract(json,'$.at') FROM event WHERE session_id=?1 AND type='session.state' ORDER BY seq DESC")?;
+        let rows = statement.query_map([session_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        let values: Vec<_> = rows.collect::<rusqlite::Result<_>>()?;
+        let Some((state, label, at)) = values.first() else {
+            return Ok(SessionActivity {
+                label: String::new(),
+                busy_since: None,
+            });
+        };
+        let counting = matches!(
+            state.as_str(),
+            "starting" | "thinking" | "streaming" | "running_tool" | "waiting_permission"
+        );
+        let shown = if state == "dormant" { "" } else { label };
+        let busy_since = counting.then(|| {
+            values
+                .iter()
+                .take_while(|(s, l, _)| s == state && l == label)
+                .last()
+                .map(|(_, _, at)| at.clone())
+                .unwrap_or_else(|| at.clone())
+        });
+        Ok(SessionActivity {
+            label: shown.to_string(),
+            busy_since,
+        })
+    }
+    pub fn session_activities(&self) -> rusqlite::Result<HashMap<String, SessionActivity>> {
+        let mut statement=self.connection.prepare("WITH states AS (SELECT session_id,seq,json_extract(json,'$.state') state,COALESCE(json_extract(json,'$.label'),'') label,json_extract(json,'$.at') at FROM event WHERE type='session.state'), latest AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY session_id ORDER BY seq DESC) rank FROM states) SELECT l.session_id,l.state,l.label,CASE WHEN l.state IN ('starting','thinking','streaming','running_tool','waiting_permission') THEN (SELECT s.at FROM states s WHERE s.session_id=l.session_id AND s.seq>COALESCE((SELECT MAX(x.seq) FROM states x WHERE x.session_id=l.session_id AND x.seq<l.seq AND (x.state!=l.state OR x.label!=l.label)),0) ORDER BY s.seq LIMIT 1) ELSE NULL END FROM latest l WHERE l.rank=1")?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                SessionActivity {
+                    label: if row.get::<_, String>(1)? == "dormant" {
+                        String::new()
+                    } else {
+                        row.get(2)?
+                    },
+                    busy_since: row.get(3)?,
+                },
+            ))
+        })?;
+        rows.collect()
+    }
+
+    pub fn token_stats(&self, session_id: &str) -> rusqlite::Result<TokenStats> {
+        let number = |sql: &str| {
+            self.connection
+                .query_row(sql, [session_id], |row| row.get::<_, i64>(0))
+        };
+        let turns = number("SELECT COUNT(*) FROM event c WHERE session_id=?1 AND type='message.completed' AND EXISTS(SELECT 1 FROM event s WHERE s.session_id=c.session_id AND s.type='message.started' AND json_extract(s.json,'$.messageId')=json_extract(c.json,'$.messageId') AND json_extract(s.json,'$.role')='assistant')")?;
+        let tool_calls =
+            number("SELECT COUNT(*) FROM event WHERE session_id=?1 AND type='tool.started'")?;
+        let helper_count =
+            number("SELECT COUNT(*) FROM event WHERE session_id=?1 AND type='agent.started'")?;
+        let forgettings = number("SELECT COUNT(*) FROM event WHERE session_id=?1 AND type='note' AND json_extract(json,'$.kind') IN ('compact','thread/compacted')")?;
+        let cost = self.connection.query_row("SELECT json_extract(json,'$.cost') FROM event WHERE session_id=?1 AND type='cost' AND json_extract(json,'$.cost.kind')='tokens' ORDER BY seq DESC LIMIT 1",[session_id],|row|row.get::<_,String>(0)).optional()?.and_then(|text|serde_json::from_str(&text).ok());
+        Ok(TokenStats {
+            turns,
+            tool_calls,
+            forgettings,
+            helper_count,
+            cost,
+        })
+    }
+    pub fn timeline_count(&self, session_id: &str) -> rusqlite::Result<i64> {
+        self.connection.query_row("SELECT COUNT(*) FROM event WHERE session_id=?1 AND type IN ('message.started','tool.started','note','ask.permission','notice','agent.started')",[session_id],|row|row.get(0))
+    }
+    pub fn followed_to(&self, session_id: &str) -> rusqlite::Result<Option<i64>> {
+        self.connection
+            .query_row(
+                "SELECT followed_to FROM session WHERE id=?1",
+                [session_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(Option::flatten)
+    }
+    pub fn imported_by(&self, session_id: &str) -> rusqlite::Result<Option<i64>> {
+        self.connection.query_row(
+            "SELECT CASE WHEN imported_recipe IS NOT NULL THEN imported_recipe WHEN imported_at IS NOT NULL THEN 0 ELSE NULL END FROM session WHERE id=?1",
+            [session_id],
+            |row| row.get(0),
+        ).optional().map(Option::flatten)
+    }
+    pub fn mark_imported(&self, session_id: &str) -> rusqlite::Result<usize> {
+        self.connection.execute(
+            "UPDATE session SET imported_at=COALESCE(imported_at,?1),imported_recipe=?2 WHERE id=?3",
+            rusqlite::params![chrono::Utc::now().to_rfc3339(), IMPORT_RECIPE, session_id],
+        )
+    }
+    pub fn remember_followed(&self, session_id: &str, at: i64) -> rusqlite::Result<usize> {
+        self.connection.execute("UPDATE session SET followed_to=?1,followed_drawn=0,imported_at=COALESCE(imported_at,?2),imported_recipe=?3 WHERE id=?4",rusqlite::params![at,chrono::Utc::now().to_rfc3339(),IMPORT_RECIPE,session_id])
+    }
+    pub fn was_driven_here(&self, session_id: &str) -> rusqlite::Result<bool> {
+        Ok(self.connection.query_row("SELECT 1 FROM event WHERE session_id=?1 AND type='session.started' AND COALESCE(json_extract(json,'$.readOnly'),0)!=1 LIMIT 1",[session_id],|_|Ok(())).optional()?.is_some())
+    }
+
+    /// Events needed to rebuild only the non-transcript portion of a view.
+    /// Transcript rows and agents already live in indexed projection tables;
+    /// replaying their raw deltas here defeats on-demand history loading.
+    pub fn view_events(&self, session_id: &str) -> rusqlite::Result<Vec<Event>> {
+        let mut statement = self.connection.prepare(
+            r#"SELECT seq, json FROM event
+               WHERE session_id = ?1 AND (
+                 type = 'session.pinned' OR seq IN (
+                   SELECT MAX(seq) FROM event
+                   WHERE session_id = ?1 AND type IN (
+                     'session.started','session.state','session.menu','todo',
+                     'cost','context','error','thinking.progress'
+                   ) GROUP BY type
+                 )
+               ) ORDER BY seq"#,
+        )?;
+        let rows = statement.query_map([session_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.map(|row| {
+            let (seq, json) = row?;
+            let mut event: Event = serde_json::from_str(&json).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    1,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })?;
+            event
+                .fields
+                .insert("seq".to_string(), serde_json::json!(seq));
+            super::wire::bound_event(&mut event);
             Ok(event)
         })
         .collect()
@@ -542,6 +736,41 @@ impl Store {
         found
     }
 
+    pub fn sessions_for_bead(&self, bead_id: &str) -> rusqlite::Result<Vec<Session>> {
+        let mut statement = self.connection.prepare(
+            "SELECT s.* FROM bead_link b JOIN session s ON s.id = b.session_id WHERE b.bead_id = ?1 ORDER BY s.last_active_at DESC",
+        )?;
+        let sessions = statement.query_map([bead_id], session_from_row)?.collect();
+        sessions
+    }
+
+    pub fn tool_details(&self, session_id: &str, tool_id: &str) -> rusqlite::Result<Option<Value>> {
+        let mut statement = self.connection.prepare(
+            r#"SELECT json FROM event WHERE session_id = ?1
+               AND type IN ('tool.started','tool.completed','diff')
+               AND json_extract(json, '$.toolCallId') = ?2 ORDER BY seq"#,
+        )?;
+        let rows =
+            statement.query_map(params![session_id, tool_id], |row| row.get::<_, String>(0))?;
+        let mut found = false;
+        let mut input = json!({});
+        let mut output = Value::Null;
+        let mut diff = Value::Null;
+        for row in rows {
+            let event: Value = serde_json::from_str(&row?).map_err(json_error)?;
+            found = true;
+            match event["type"].as_str() {
+                Some("tool.started") => input = event["input"].clone(),
+                Some("tool.completed") => output = event["output"].clone(),
+                Some("diff") => {
+                    diff = json!({"path":event["path"],"before":event["before"],"after":event["after"],"line":event.get("line").cloned().unwrap_or(Value::Null)})
+                }
+                _ => {}
+            }
+        }
+        Ok(found.then(|| json!({"input":input,"output":output,"diff":diff})))
+    }
+
     pub fn beads_for_sessions(
         &self,
         session_ids: &[String],
@@ -594,8 +823,30 @@ impl Store {
             return Ok(newest_seq);
         }
 
-        let events = self.events_since(session_id, reset_seq)?;
-        let projection = fold_all(&events);
+        let projection = match held {
+            Some((projected_seq, held_reset)) if held_reset == reset_seq => {
+                let items = {
+                    let mut statement = self.connection.prepare(
+                        "SELECT json FROM transcript_item WHERE session_id = ?1 ORDER BY position",
+                    )?;
+                    let items = statement
+                        .query_map([session_id], |row| row.get::<_, String>(0))?
+                        .map(|row| serde_json::from_str(&row?).map_err(json_error))
+                        .collect::<rusqlite::Result<Vec<Value>>>()?;
+                    items
+                };
+                let agents = self.projected_agents_without_ensuring(session_id)?;
+                let events = self.events_since(session_id, projected_seq)?;
+                let mut view = serde_json::Map::new();
+                view.insert("items".into(), Value::Array(items));
+                view.insert("agents".into(), Value::Array(agents));
+                fold_from(&mut view, &events)
+            }
+            _ => {
+                let events = self.events_since(session_id, reset_seq)?;
+                fold_all(&events)
+            }
+        };
         let transaction = self.connection.unchecked_transaction()?;
         transaction.execute(
             "DELETE FROM transcript_item WHERE session_id = ?1",
@@ -699,6 +950,13 @@ impl Store {
 
     pub fn projected_agents(&self, session_id: &str) -> rusqlite::Result<Vec<serde_json::Value>> {
         self.ensure_transcript_projection(session_id)?;
+        self.projected_agents_without_ensuring(session_id)
+    }
+
+    fn projected_agents_without_ensuring(
+        &self,
+        session_id: &str,
+    ) -> rusqlite::Result<Vec<serde_json::Value>> {
         let mut statement = self
             .connection
             .prepare("SELECT json FROM transcript_agent WHERE session_id = ?1 ORDER BY rowid")?;
