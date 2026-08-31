@@ -5,7 +5,14 @@ import { join } from 'node:path';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { makeFixtureProject, PARENT_CARD } from './fixture-board';
-import { HELPER_SAID, longChatSaid, writeChatWithHelper, writeLongChat, type LongChat } from './fixture-record';
+import {
+  HELPER_AGENT,
+  HELPER_SAID,
+  longChatSaid,
+  writeChatWithHelper,
+  writeLongChat,
+  type LongChat,
+} from './fixture-record';
 
 /**
  * How a chat scrolls.
@@ -225,9 +232,9 @@ async function floats(page: Page): Promise<{ below: number; above: number; margi
  * it reaches past its own right edge, and the reader gets a page that slides
  * under him while he reads.
  */
-async function sideways(page: Page): Promise<{ by: number; widest: string }> {
-  return page.evaluate(() => {
-    const pane = document.querySelector('[data-testid="transcript"]') as HTMLElement;
+async function sideways(page: Page, testId = 'transcript'): Promise<{ by: number; widest: string }> {
+  return page.evaluate((paneId) => {
+    const pane = document.querySelector(`[data-testid="${paneId}"]`) as HTMLElement;
     const edge = pane.getBoundingClientRect().left + pane.clientWidth - parseFloat(getComputedStyle(pane).paddingRight);
     let worst = { past: 0, what: 'nothing' };
     const look = (el: Element) => {
@@ -243,10 +250,10 @@ async function sideways(page: Page): Promise<{ by: number; widest: string }> {
       }
       for (const child of el.children) look(child);
     };
-    const rows = pane.querySelector('[data-testid="transcript-rows"]');
-    if (rows) look(rows);
+    const rows = pane.querySelector('[data-testid="transcript-rows"]') ?? pane;
+    look(rows);
     return { by: pane.scrollWidth - pane.clientWidth, widest: `${worst.what} (${worst.past.toFixed(0)}px past)` };
-  });
+  }, testId);
 }
 
 /** How much dead screen sits between the conversation and the box you type in. */
@@ -259,11 +266,23 @@ async function gap(page: Page): Promise<number> {
   });
 }
 
-/** Says `many` more things into the record, and waits for them all to be drawn. */
+/**
+ * Says `many` more things into the record, and waits for the transcript to
+ * contain them all.
+ *
+ * When the reader is in history the newest rows intentionally are not mounted:
+ * the virtualizer only draws the viewport and its overscan.  The complete
+ * loaded window is exposed on the height-bearing transcript instead, so wait
+ * on that count here.  The cases below separately prove that the newest row is
+ * mounted and visible after returning to the end.
+ */
 async function arrives(page: Page, chat: LongChat, many: number): Promise<string> {
+  const before = (await place(page)).rows;
   let last = '';
   for (let n = 0; n < many; n += 1) last = chat.says();
-  await expect(page.getByTestId('transcript-rows')).toContainText(last, { timeout: HELLO_MS });
+  await expect
+    .poll(async () => (await place(page)).rows, { timeout: HELLO_MS })
+    .toBeGreaterThanOrEqual(before + many);
   await settled(page);
   return last;
 }
@@ -565,11 +584,11 @@ test.describe('how a chat scrolls', () => {
   });
 
   /**
-   * A conversation only scrolls one way. A helper's words are indented under
-   * the call that sent them, and a message drawn the full width of the pane as
-   * well as indented reaches past the right edge by exactly that indent — which
-   * gives the whole chat a sideways bar, and the reader a page that slides
-   * under him while he reads (bw-n6yh.14).
+   * A conversation only scrolls one way. A helper's words now live in the
+   * helper's own pane rather than burying the manager's turn. That pane still
+   * has to contain every full-width message inside its right edge; otherwise
+   * the reader gets a page that slides under him while he reads (bw-n6yh.14,
+   * bw-pukk.1).
    */
   test('never scrolls sideways, whoever said the message', async ({ page, request }) => {
     const kept = await makeGround(request, 'wide');
@@ -580,14 +599,17 @@ test.describe('how a chat scrolls', () => {
       await listed.waitFor({ timeout: HELLO_MS });
       await listed.getByTestId('row-name').click();
       await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
-      // A helper's own conversation is folded away until it is asked for, and
-      // its words are the indented ones — the only ones that can stick out.
-      await page.getByTestId('toggle-everything').click();
-      await expect(page.getByTestId('transcript')).toContainText(HELPER_SAID, { timeout: HELLO_MS });
+      // Finished helpers stay behind one explicit control. Open the helper's
+      // row and measure the pane where its complete conversation now belongs.
+      await page.getByTestId('toggle-stopped-agents').click();
+      const helper = page.locator(`[data-testid="sent-away-row"][data-agent="${HELPER_AGENT}"]`);
+      await expect(helper).toBeVisible({ timeout: HELLO_MS });
+      await helper.getByTestId('sent-away-open').click();
+      await expect(page.getByTestId('agent-view-said')).toContainText(HELPER_SAID, { timeout: HELLO_MS });
       await settled(page);
 
-      const off = await sideways(page);
-      expect(off.by, `the conversation scrolls ${off.by}px sideways; widest is ${off.widest}`).toBe(0);
+      const off = await sideways(page, 'agent-view-said');
+      expect(off.by, `the helper conversation scrolls ${off.by}px sideways; widest is ${off.widest}`).toBe(0);
     } finally {
       written.remove();
       await kept.away();

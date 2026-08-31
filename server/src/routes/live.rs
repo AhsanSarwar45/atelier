@@ -317,6 +317,25 @@ async fn relay_native_watch(state: workbench::WorkbenchState, tx: mpsc::Sender<T
     }
 }
 
+async fn send_chat_snapshot(
+    state: &workbench::WorkbenchState,
+    session_id: &str,
+    tx: &mpsc::Sender<Tagged>,
+) -> Option<i64> {
+    let snapshot = workbench::snapshot(state.database(), session_id)
+        .await
+        .ok()?;
+    let watermark = snapshot["lastSeq"].as_i64().unwrap_or_default();
+    tx.send(Tagged::scoped(
+        "chat.snapshot",
+        session_id,
+        snapshot.to_string(),
+    ))
+    .await
+    .ok()?;
+    Some(watermark)
+}
+
 /// Feed one open chat into `/api/live` without a loopback HTTP hop.
 async fn relay_native_chat(
     state: workbench::WorkbenchState,
@@ -379,23 +398,12 @@ async fn relay_native_chat(
         });
     let mut codex_lines: VecDeque<String> = VecDeque::new();
     let mut record_tick = tokio::time::interval(Duration::from_millis(250));
-    let watermark;
+    let mut watermark;
     if since == 0 {
-        let Ok(snapshot) = workbench::snapshot(state.database(), &session_id).await else {
+        let Some(sent) = send_chat_snapshot(&state, &session_id, &tx).await else {
             return;
         };
-        watermark = snapshot["lastSeq"].as_i64().unwrap_or_default();
-        if tx
-            .send(Tagged::scoped(
-                "chat.snapshot",
-                &session_id,
-                snapshot.to_string(),
-            ))
-            .await
-            .is_err()
-        {
-            return;
-        }
+        watermark = sent;
     } else if let Ok(events) = state
         .database()
         .events_since(session_id.clone(), since)
@@ -451,7 +459,16 @@ async fn relay_native_chat(
                 object.insert("sessionId".into(), serde_json::json!(session.id));
                 object.insert("seq".into(), serde_json::json!(0));
                 object.entry("at").or_insert_with(|| serde_json::json!(chrono::Utc::now().to_rfc3339()));
-                if let Ok(event) = serde_json::from_value(value) { let _ = state.database().append(event).await; }
+                if let Ok(event) = serde_json::from_value(value) {
+                    if let Ok(Some(stored)) = state.database().append(event).await {
+                        let seq=stored.fields.get("seq").and_then(serde_json::Value::as_i64).unwrap_or_default();
+                        if seq>watermark {
+                            let Ok(data)=serde_json::to_string(&stored) else { continue; };
+                            if tx.send(Tagged::scoped("chat",&session_id,data)).await.is_err(){return;}
+                            watermark=seq;
+                        }
+                    }
+                }
             }
             let at=if session.brand=="claude"{claude_tail.as_ref().map(|tail|tail.through_line())}else{codex_tail.as_ref().map(|tail|tail.through_line())};if let Some(at)=at{let _=state.database().remember_followed(session.id.clone(),at as i64).await;}
         }
@@ -459,6 +476,15 @@ async fn relay_native_chat(
             Ok(event) => {
                 let seq = event.fields.get("seq").and_then(serde_json::Value::as_i64).unwrap_or_default();
                 if seq <= watermark { continue; }
+                // A replay import is committed and published as one batch. If
+                // this receiver falls behind that burst, replace its bounded
+                // newest page instead of streaming thousands of stale rows or
+                // silently accepting a hole in the durable sequence.
+                if seq > watermark.saturating_add(1) {
+                    let Some(sent) = send_chat_snapshot(&state,&session_id,&tx).await else { return; };
+                    watermark=sent;
+                    continue;
+                }
                 let Ok(data) = serde_json::to_string(&event) else {
                     continue;
                 };
@@ -469,8 +495,12 @@ async fn relay_native_chat(
                 {
                     return;
                 }
+                watermark=seq;
             }
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                let Some(sent) = send_chat_snapshot(&state,&session_id,&tx).await else { return; };
+                watermark=sent;
+            },
             Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
         }}
     }

@@ -186,9 +186,16 @@ export function cacheSessionEvent(event: WbpEvent): void {
   const entry = cachedSessions.get(event.sessionId);
   if (!entry || event.seq <= entry.view.lastSeq) return;
   if (!entry.ready) {
+    // The app-wide feed can beat the selected chat's opening snapshot. Keep
+    // that tail until the snapshot supplies the page it follows.
     if (!entry.pending.some((pending) => pending.seq === event.seq)) entry.pending.push(event);
     return;
   }
+  // Once open, the transcript has its own ordered, resumable chat feed.
+  // Folding the same event from the app-wide sidebar feed races two independent
+  // relays and can advance lastSeq past an earlier chat frame. Keep the global
+  // feed only as catch-up for cached chats that are not currently being read.
+  if (entry.listeners.size > 0) return;
   publishCached(event.sessionId, reduce(entry.view, event));
 }
 
@@ -220,14 +227,19 @@ async function loadHistory(id: string): Promise<HistoryLoad> {
 }
 
 export function useSession(sessionId: string | null): LoadedSessionView {
-  const view = useSyncExternalStore(
-    (listener) => {
-      if (!sessionId) return () => {};
-      const entry = cached(sessionId);
-      entry.listeners.add(listener);
-      return () => entry.listeners.delete(listener);
-    },
+  const subscribe = useCallback((listener: () => void) => {
+    if (!sessionId) return () => {};
+    const entry = cached(sessionId);
+    entry.listeners.add(listener);
+    return () => entry.listeners.delete(listener);
+  }, [sessionId]);
+  const snapshot = useCallback(
     () => sessionId ? cached(sessionId).view : EMPTY,
+    [sessionId],
+  );
+  const view = useSyncExternalStore(
+    subscribe,
+    snapshot,
     () => EMPTY,
   );
 

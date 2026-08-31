@@ -41,6 +41,7 @@ enum Command {
     Spend(Reply<Vec<Spend>>),
     ToolDetails(String, String, Reply<Option<serde_json::Value>>),
     Append(Event, Reply<Option<Event>>),
+    AppendMany(Vec<Event>, Reply<usize>),
     EventsSince(String, i64, Reply<Vec<Event>>),
     EventCount(String, Reply<i64>),
     TimelineCount(String, Reply<i64>),
@@ -218,6 +219,13 @@ impl ChatDb {
         self.request(|reply| Command::Append(event, reply)).await
     }
 
+    /// Persist a provider replay in one actor turn and one SQLite commit.
+    /// Publication happens only after the whole batch is durable.
+    pub async fn append_many(&self, events: Vec<Event>) -> Result<usize, String> {
+        self.request(|reply| Command::AppendMany(events, reply))
+            .await
+    }
+
     pub async fn events_since(&self, session_id: String, since: i64) -> Result<Vec<Event>, String> {
         self.request(|reply| Command::EventsSince(session_id, since, reply))
             .await
@@ -372,6 +380,93 @@ fn apply_session_fact(store: &Store, session_id: &str, event: &Event) -> rusqlit
     store.update_session(session_id, patch, string(event, "at").as_deref())
 }
 
+fn canonical_event(
+    store: &Store,
+    agent_lifecycles: &mut HashMap<String, super::lifecycle::AgentLifecycle>,
+    mut event: Event,
+) -> Result<Option<(String, Event)>, String> {
+    super::wire::bound_event(&mut event);
+    let session_id = event
+        .fields
+        .get("sessionId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    if !matches!(
+        event.kind,
+        EventKind::AgentStarted | EventKind::AgentProgress | EventKind::AgentFinished
+    ) {
+        return Ok(Some((session_id, event)));
+    }
+    if !agent_lifecycles.contains_key(&session_id) {
+        let history = store
+            .agent_lifecycle_events(&session_id)
+            .map_err(|error| error.to_string())?;
+        let mut lifecycle = super::lifecycle::AgentLifecycle::default();
+        let prior = history
+            .into_iter()
+            .filter_map(|event| serde_json::to_value(event).ok())
+            .collect();
+        let _ = lifecycle.accept(prior);
+        agent_lifecycles.insert(session_id.clone(), lifecycle);
+    }
+    let raw = serde_json::to_value(&event).map_err(|error| error.to_string())?;
+    let Some(canonical) = agent_lifecycles
+        .entry(session_id.clone())
+        .or_default()
+        .accept(vec![raw])
+        .into_iter()
+        .next()
+    else {
+        return Ok(None);
+    };
+    let event = serde_json::from_value(canonical).map_err(|error| error.to_string())?;
+    Ok(Some((session_id, event)))
+}
+
+fn persist_event(
+    store: &Store,
+    session_id: &str,
+    mut event: Event,
+    seq: i64,
+) -> rusqlite::Result<Option<(i64, Event)>> {
+    event
+        .fields
+        .insert("seq".to_string(), serde_json::json!(seq));
+    if !store.append_event(&event)? {
+        return Ok(None);
+    }
+    apply_session_fact(store, session_id, &event)?;
+    if event.kind == EventKind::LinkBead {
+        if let Some(bead_id) = string(&event, "beadId") {
+            store.remember_bead_link(
+                session_id,
+                &bead_id,
+                string(&event, "via").as_deref().unwrap_or("tool"),
+                string(&event, "at").as_deref().unwrap_or(""),
+            )?;
+        }
+    }
+    Ok(Some((seq, event)))
+}
+
+fn publish_event(
+    global: &broadcast::Sender<StoreUpdate>,
+    sessions: &Arc<Mutex<HashMap<String, broadcast::Sender<Event>>>>,
+    session_id: String,
+    seq: i64,
+    event: Event,
+) {
+    if let Some(sender) = sessions.lock().unwrap().get(&session_id) {
+        let _ = sender.send(event.clone());
+    }
+    let _ = global.send(StoreUpdate {
+        session_id,
+        seq,
+        event,
+    });
+}
+
 fn run(
     mut store: Store,
     mut commands: mpsc::UnboundedReceiver<Command>,
@@ -410,99 +505,93 @@ fn run(
             Command::ToolDetails(session, tool, reply) => {
                 respond(reply, store.tool_details(&session, &tool))
             }
-            Command::Append(mut event, reply) => {
-                super::wire::bound_event(&mut event);
-                let session_id = event
-                    .fields
-                    .get("sessionId")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
-                if matches!(
-                    event.kind,
-                    EventKind::AgentStarted | EventKind::AgentProgress | EventKind::AgentFinished
-                ) {
-                    if !agent_lifecycles.contains_key(&session_id) {
-                        let history = match store.agent_lifecycle_events(&session_id) {
-                            Ok(history) => history,
-                            Err(error) => {
-                                let _ = reply.send(Err(error.to_string()));
-                                continue;
+            Command::Append(event, reply) => {
+                let lifecycle_before = agent_lifecycles.clone();
+                let result =
+                    canonical_event(&store, &mut agent_lifecycles, event).and_then(|prepared| {
+                        match prepared {
+                            Some((session_id, event)) => {
+                                let seq = store
+                                    .next_seq(&session_id)
+                                    .map_err(|error| error.to_string())?;
+                                persist_event(&store, &session_id, event, seq)
+                                    .map(|stored| {
+                                        stored.map(|(seq, event)| (session_id, seq, event))
+                                    })
+                                    .map_err(|error| error.to_string())
                             }
-                        };
-                        let mut lifecycle = super::lifecycle::AgentLifecycle::default();
-                        let prior = history
-                            .into_iter()
-                            .filter_map(|event| serde_json::to_value(event).ok())
-                            .collect();
-                        let _ = lifecycle.accept(prior);
-                        agent_lifecycles.insert(session_id.clone(), lifecycle);
-                    }
-                    let raw = match serde_json::to_value(&event) {
-                        Ok(raw) => raw,
-                        Err(error) => {
-                            let _ = reply.send(Err(error.to_string()));
-                            continue;
+                            None => Ok(None),
                         }
-                    };
-                    let Some(canonical) = agent_lifecycles
-                        .entry(session_id.clone())
-                        .or_default()
-                        .accept(vec![raw])
-                        .into_iter()
-                        .next()
-                    else {
-                        let _ = reply.send(Ok(None));
-                        continue;
-                    };
-                    event = match serde_json::from_value(canonical) {
-                        Ok(event) => event,
-                        Err(error) => {
-                            let _ = reply.send(Err(error.to_string()));
-                            continue;
-                        }
-                    };
-                }
-                let result = store.next_seq(&session_id).and_then(|seq| {
-                    event
-                        .fields
-                        .insert("seq".to_string(), serde_json::json!(seq));
-                    store.append_event(&event).and_then(|appended| {
-                        if appended {
-                            apply_session_fact(&store, &session_id, &event)?;
-                            if event.kind == EventKind::LinkBead {
-                                if let Some(bead_id) = string(&event, "beadId") {
-                                    store.remember_bead_link(
-                                        &session_id,
-                                        &bead_id,
-                                        string(&event, "via").as_deref().unwrap_or("tool"),
-                                        string(&event, "at").as_deref().unwrap_or(""),
-                                    )?;
-                                }
-                            }
-                        }
-                        Ok(appended.then_some((seq, event)))
-                    })
-                });
+                    });
                 match result {
-                    Ok(Some((seq, event))) => {
-                        // Commit precedes publication. Both channels are sent
-                        // from this one actor, preserving the same seq order.
-                        if let Some(sender) = sessions.lock().unwrap().get(&session_id) {
-                            let _ = sender.send(event.clone());
-                        }
-                        let _ = global.send(StoreUpdate {
-                            session_id,
-                            seq,
-                            event: event.clone(),
-                        });
+                    Ok(Some((session_id, seq, event))) => {
+                        publish_event(&global, &sessions, session_id, seq, event.clone());
                         let _ = reply.send(Ok(Some(event)));
                     }
                     Ok(None) => {
                         let _ = reply.send(Ok(None));
                     }
                     Err(error) => {
-                        let _ = reply.send(Err(error.to_string()));
+                        agent_lifecycles = lifecycle_before;
+                        let _ = reply.send(Err(error));
+                    }
+                }
+            }
+            Command::AppendMany(events, reply) => {
+                let lifecycle_before = agent_lifecycles.clone();
+                let prepared = events
+                    .into_iter()
+                    .map(|event| canonical_event(&store, &mut agent_lifecycles, event))
+                    .collect::<Result<Vec<_>, _>>();
+                let result = prepared.and_then(|prepared| {
+                    store
+                        .begin_event_batch()
+                        .map_err(|error| error.to_string())?;
+                    let mut next = HashMap::<String, i64>::new();
+                    let mut stored = Vec::new();
+                    for (session_id, event) in prepared.into_iter().flatten() {
+                        let seq = match next.get(&session_id).copied() {
+                            Some(seq) => seq,
+                            None => match store.next_seq(&session_id) {
+                                Ok(seq) => seq,
+                                Err(error) => {
+                                    store.rollback_event_batch();
+                                    return Err(error.to_string());
+                                }
+                            },
+                        };
+                        match persist_event(&store, &session_id, event, seq) {
+                            Ok(Some((seq, event))) => {
+                                next.insert(session_id.clone(), seq + 1);
+                                stored.push((session_id, seq, event));
+                            }
+                            Ok(None) => {}
+                            Err(error) => {
+                                store.rollback_event_batch();
+                                return Err(error.to_string());
+                            }
+                        }
+                    }
+                    if let Err(error) = store.commit_event_batch() {
+                        store.rollback_event_batch();
+                        return Err(error.to_string());
+                    }
+                    Ok(stored)
+                });
+                match result {
+                    Ok(stored) => {
+                        let count = stored.len();
+                        for (session_id, seq, event) in stored {
+                            publish_event(&global, &sessions, session_id, seq, event);
+                        }
+                        let _ = reply.send(Ok(count));
+                    }
+                    Err(error) => {
+                        // Canonicalization advances the in-memory agent state.
+                        // A failed SQLite batch did not make those transitions
+                        // durable, so its lifecycle must fail atomically too.
+                        agent_lifecycles = lifecycle_before;
+                        let _ = reply.send(Err(error));
                     }
                 }
             }
@@ -612,6 +701,27 @@ mod tests {
 
         // Live/replay duplication crosses the actor boundary once too.
         assert!(database.append(event(0)).await.unwrap().is_none());
+        assert!(matches!(
+            chat.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn workbench_core_actor_commits_replay_batches_once_and_publishes_in_order() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
+        let mut chat = database.subscribe_session("chat-1");
+
+        let mut replay = (0..500).map(event).collect::<Vec<_>>();
+        replay.push(event(499));
+        assert_eq!(database.append_many(replay).await.unwrap(), 500);
+        assert_eq!(database.event_count("chat-1".into()).await.unwrap(), 500);
+
+        for expected in 1..=500 {
+            let received = chat.recv().await.unwrap();
+            assert_eq!(received.fields["seq"], expected);
+        }
         assert!(matches!(
             chat.try_recv(),
             Err(broadcast::error::TryRecvError::Empty)

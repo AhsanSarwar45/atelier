@@ -43,6 +43,26 @@ describe('the browser session cache', () => {
     expect(reopened.result.current.items.some((item) => item.id === 'm2')).toBe(true);
   });
 
+  it('lets the ordered chat feed own a transcript while its pane is mounted', () => {
+    const { result } = renderHook(() => useSession('cache-open'));
+    act(() => listener!.snapshot(JSON.stringify({ ...EMPTY, lastSeq: 1 })));
+
+    act(() => cacheSessionEvent({
+      type: 'text.delta', sessionId: 'cache-open', seq: 3, at: '', messageId: 'm2', text: 'in order',
+    } as WbpEvent));
+    act(() => {
+      listener!.event(JSON.stringify({
+        type: 'message.started', sessionId: 'cache-open', seq: 2, at: '', messageId: 'm2', role: 'assistant',
+      }));
+      listener!.event(JSON.stringify({
+        type: 'text.delta', sessionId: 'cache-open', seq: 3, at: '', messageId: 'm2', text: 'in order',
+      }));
+    });
+
+    expect(result.current.items).toHaveLength(1);
+    expect(result.current.items[0]?.kind === 'message' && result.current.items[0].text).toBe('in order');
+  });
+
   it('shows no row from the previous chat while the next snapshot is loading', () => {
     const { result, rerender } = renderHook(
       ({ id }: { id: string }) => useSession(id),

@@ -183,6 +183,12 @@ async fn import_claude_history(
     let Some(record) = super::claude::history::find_record(config, external_id) else {
         return Ok(());
     };
+    // The follower resumes from where the record stood before this read. A
+    // writer may append while normalization and storage run; marking the size
+    // afterwards would skip those new lines permanently.
+    let followed_from = std::fs::metadata(&record)
+        .ok()
+        .map(|meta| meta.len() as i64);
     let history = super::claude::history::read_history(&record);
     let choice =
         super::provider_reconciliation::complete_history_choice(database, &session.id).await?;
@@ -211,6 +217,7 @@ async fn import_claude_history(
             None,
         )
         .await?;
+    let mut imported = Vec::with_capacity(history.events.len());
     for mut value in history.events {
         let event_id = super::protocol::record_event_id(&value);
         let Some(object) = value.as_object_mut() else {
@@ -222,11 +229,11 @@ async fn import_claude_history(
         object
             .entry("at")
             .or_insert_with(|| json!(session.last_active_at));
-        let event: Event = serde_json::from_value(value).map_err(|error| error.to_string())?;
-        database.append(event).await?;
+        imported.push(serde_json::from_value(value).map_err(|error| error.to_string())?);
     }
-    if let Ok(size) = std::fs::metadata(&record).map(|meta| meta.len() as i64) {
-        database.remember_followed(session.id.clone(), size).await?;
+    database.append_many(imported).await?;
+    if let Some(at) = followed_from {
+        database.remember_followed(session.id.clone(), at).await?;
     }
     Ok(())
 }
@@ -282,6 +289,7 @@ async fn import_codex_history(database: &ChatDb, session: &Session) -> Result<()
     if !replay.is_empty() && database.timeline_count(session.id.clone()).await? > 0 {
         append_reset(database, &session.id).await?;
     }
+    let mut imported = Vec::with_capacity(replay.len());
     for mut value in replay {
         let event_id = super::protocol::record_event_id(&value);
         let Some(object) = value.as_object_mut() else {
@@ -293,10 +301,9 @@ async fn import_codex_history(database: &ChatDb, session: &Session) -> Result<()
         object
             .entry("at")
             .or_insert_with(|| json!(session.last_active_at));
-        database
-            .append(serde_json::from_value(value).map_err(|error| error.to_string())?)
-            .await?;
+        imported.push(serde_json::from_value(value).map_err(|error| error.to_string())?);
     }
+    database.append_many(imported).await?;
     if let Some(path) = thread["path"].as_str() {
         if let Ok(size) = std::fs::metadata(path).map(|meta| meta.len() as i64) {
             database.remember_followed(session.id.clone(), size).await?;

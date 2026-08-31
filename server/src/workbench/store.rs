@@ -415,6 +415,21 @@ impl Store {
         Ok(changed == 1)
     }
 
+    /// Group a replay import into one SQLite commit. The chat actor remains
+    /// the sole connection owner, so no other command can observe the batch
+    /// until `commit_event_batch` returns.
+    pub fn begin_event_batch(&self) -> rusqlite::Result<()> {
+        self.connection.execute_batch("BEGIN IMMEDIATE")
+    }
+
+    pub fn commit_event_batch(&self) -> rusqlite::Result<()> {
+        self.connection.execute_batch("COMMIT")
+    }
+
+    pub fn rollback_event_batch(&self) {
+        let _ = self.connection.execute_batch("ROLLBACK");
+    }
+
     pub fn events_since(&self, session_id: &str, since: i64) -> rusqlite::Result<Vec<Event>> {
         let mut statement = self.connection.prepare(
             "SELECT seq, json FROM event WHERE session_id = ?1 AND seq > ?2 ORDER BY seq",

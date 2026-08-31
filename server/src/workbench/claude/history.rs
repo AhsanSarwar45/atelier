@@ -14,7 +14,6 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use uuid::Uuid;
 
-const IMPORTED_MESSAGES: usize = 200;
 const KEPT: usize = 4_000;
 const COMMAND_KEPT: usize = 20_000;
 const PICTURE_KEPT: usize = 1_000_000;
@@ -587,7 +586,11 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
     }
     let mut events = Vec::new();
     for (index, row) in rows.iter().enumerate() {
-        if !visible(row) {
+        let nested = parent.is_some()
+            && matches!(row["type"].as_str(), Some("user" | "assistant"))
+            && row["isMeta"] != true
+            && row.get("teamName").is_none_or(Value::is_null);
+        if !visible(row) && !nested {
             continue;
         }
         let role = row["type"].as_str().unwrap();
@@ -739,16 +742,7 @@ fn helper_events(record: &Path) -> Vec<Value> {
             "kind":"helper", "what":as_nonempty(&meta["description"]).and_then(|text| text.lines().next().map(str::to_string)).unwrap_or_default(),
             "agentType":as_nonempty(&meta["agentType"]), "model":model
         })];
-        let nested = transcript_events(&rows, Some(under));
-        events.extend(
-            nested
-                .into_iter()
-                .rev()
-                .take(IMPORTED_MESSAGES)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev(),
-        );
+        events.extend(transcript_events(&rows, Some(under)));
         events.push(json!({
             "type":"agent.finished", "agentId":agent_id, "state":"done",
             "seconds":seconds, "tokens":spent.total, "calls":calls,
@@ -762,20 +756,12 @@ fn helper_events(record: &Path) -> Vec<Value> {
 
 pub fn read_history(record: &Path) -> ClaudeHistory {
     // This is the deliberate import boundary, not list discovery and not a
-    // follower tick. Read the provider record once, off the request path, and
-    // then retain only the semantic transcript tail below. Taking the last N
-    // bytes can cut a tool call away from its result.
+    // follower tick. Read the provider record once, off the request path. The
+    // durable event store pages the normalized transcript; truncating here
+    // would give external chats a different, permanently incomplete history.
     let rows = jsonl(record);
     let spent = usage(&rows);
     let mut events = transcript_events(&rows, None);
-    if events.len() > IMPORTED_MESSAGES {
-        let omitted = events.len() - IMPORTED_MESSAGES;
-        events = events.split_off(omitted);
-        events.insert(0, json!({
-            "type":"notice", "family":"memory", "audience":"you",
-            "text":format!("{omitted} earlier transcript events are in this chat and are not drawn here.")
-        }));
-    }
     events.extend(helper_events(record));
     if let Some(used) = spent.context {
         events.push(json!({"type":"context", "used":used, "window":spent.window}));
@@ -976,7 +962,8 @@ mod tests {
             "type":"assistant","uuid":"a1","message":{"content":[{
                 "type":"tool_use","id":"call-open","name":"Bash","input":{"command":"cargo test"}
             }]}
-        }).to_string()];
+        })
+        .to_string()];
         let events = replay_lines(&lines);
         assert!(events.iter().any(|event| event["type"] == "tool.started"));
         assert!(!events.iter().any(|event| event["type"] == "tool.completed"));
@@ -985,10 +972,14 @@ mod tests {
             "type":"user","uuid":"u2","message":{"content":[{
                 "type":"tool_result","tool_use_id":"call-open","content":"passed"
             }]}
-        }).to_string()];
+        })
+        .to_string()];
         let completed = replay_lines(&result_only);
-        assert!(completed.iter().any(|event| event["type"] == "tool.completed"
-            && event["toolCallId"] == "call-open" && event["ok"] == true));
+        assert!(completed
+            .iter()
+            .any(|event| event["type"] == "tool.completed"
+                && event["toolCallId"] == "call-open"
+                && event["ok"] == true));
     }
 
     #[test]
@@ -1015,8 +1006,8 @@ mod tests {
         )
         .unwrap();
         write(helper_dir.join("agent-h1.jsonl"), [
-            json!({"type":"user","timestamp":"2026-08-30T00:00:00Z","message":{"content":"search"}}),
-            json!({"type":"assistant","timestamp":"2026-08-30T00:00:02Z","message":{"id":"hturn","model":"haiku","usage":{"input_tokens":2,"output_tokens":1},"content":[{"type":"text","text":"found"}]}})
+            json!({"type":"user","isSidechain":true,"timestamp":"2026-08-30T00:00:00Z","message":{"content":"search"}}),
+            json!({"type":"assistant","isSidechain":true,"timestamp":"2026-08-30T00:00:02Z","message":{"id":"hturn","model":"haiku","usage":{"input_tokens":2,"output_tokens":1},"content":[{"type":"text","text":"found"}]}})
         ].iter().map(Value::to_string).collect::<Vec<_>>().join("\n")).unwrap();
         let history = read_history(&record);
         assert!(history
@@ -1026,6 +1017,10 @@ mod tests {
         assert!(history.events.iter().any(
             |event| event["type"] == "message.started" && event["parentToolCallId"] == "call-1"
         ));
+        assert!(history
+            .events
+            .iter()
+            .any(|event| event["type"] == "text.delta" && event["text"] == "found"));
         assert!(history
             .events
             .iter()

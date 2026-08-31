@@ -782,19 +782,46 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     toTheEnd();
   }, [sessionId, toTheEnd]);
 
-  /** How much of the conversation had arrived when he last left the end. */
-  const marked = useRef(0);
+  /** The newest row present when he last left the end. */
+  const marked = useRef<string | null>(null);
+  const wasAtTheEnd = useRef(true);
   /** What has been said since — the number on the way back to now. */
   const [missed, setMissed] = useState(0);
 
   useEffect(() => {
+    const keyOf = (row: (typeof drawn)[number]) => row.row === 'machine'
+      ? `machine:${row.id}`
+      : `${row.item.kind}:${row.item.id}`;
+    const newest = drawn.length === 0 ? null : keyOf(drawn[drawn.length - 1]!);
     if (atTheEnd) {
-      marked.current = drawn.length;
+      marked.current = newest;
+      setMissed(0);
+    } else if (wasAtTheEnd.current) {
+      // The rows present at the exact moment the reader leaves the end are
+      // history, not arrivals. This also covers a bounded opening page whose
+      // final measurements settle during the same frame as the first wheel.
+      marked.current = newest;
       setMissed(0);
     } else {
-      setMissed(Math.max(0, drawn.length - marked.current));
+      // Loading an older page prepends rows and must not call those rows new.
+      // Anchor the count to the newest row that existed when the reader left;
+      // only rows after that exact row arrived while he was away.
+      const anchor = marked.current === null ? -1 : drawn.findIndex((row) => keyOf(row) === marked.current);
+      if (anchor < 0) {
+        marked.current = newest;
+        setMissed(0);
+      } else {
+        setMissed(Math.max(0, drawn.length - anchor - 1));
+      }
     }
-  }, [atTheEnd, drawn.length]);
+    wasAtTheEnd.current = atTheEnd;
+  }, [atTheEnd, drawn]);
+
+  useEffect(() => {
+    marked.current = null;
+    wasAtTheEnd.current = true;
+    setMissed(0);
+  }, [sessionId]);
 
   // One line at rest, growing to what is written. Measured from the content,
   // because a textarea cannot shrink itself back down once it has been sized.

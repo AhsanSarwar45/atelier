@@ -3,7 +3,7 @@
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct AgentRow {
     started: bool,
     finished: bool,
@@ -15,7 +15,7 @@ struct AgentRow {
 
 /// The one canonical child-work state machine used after every provider has
 /// translated its native union and before any event reaches storage or wire.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct AgentLifecycle {
     rows: HashMap<String, AgentRow>,
 }
