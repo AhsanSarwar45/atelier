@@ -257,6 +257,31 @@ impl WorkbenchRegistry {
         Ok(launched.reply)
     }
 
+    /// Opening is only a read operation. If this process already owns the
+    /// conversation, its driver and durable state are the source of truth;
+    /// asking the provider factory to "open" it would incorrectly demote the
+    /// live row to dormant and race a second driver against the first one.
+    async fn already_live_open(&self, command: &Command) -> Result<Option<Value>, String> {
+        let mut session = None;
+        if let Some(id) = command.fields.get("sessionId").and_then(Value::as_str) {
+            session = self.database.get_session(id.to_string()).await?;
+        }
+        if session.is_none() {
+            if let Some(id) = command.fields.get("externalId").and_then(Value::as_str) {
+                session = self.database.session_by_external_id(id.to_string()).await?;
+            }
+        }
+        let Some(session) = session else {
+            return Ok(None);
+        };
+        if !self.has_driver(&session.id).await {
+            return Ok(None);
+        }
+        serde_json::to_value(session)
+            .map(Some)
+            .map_err(|error| error.to_string())
+    }
+
     fn field<'a>(command: &'a Command, name: &str) -> Result<&'a str, String> {
         command
             .fields
@@ -400,10 +425,14 @@ impl WorkbenchRegistry {
                 }).collect::<Vec<_>>();
                 Ok(json!({"providers":providers}))
             }
-            CommandKind::SessionStart | CommandKind::SessionOpen | CommandKind::SessionResume => {
-                if command.kind != CommandKind::SessionOpen {
-                    self.refuse_external_owner(command).await?;
+            CommandKind::SessionOpen => {
+                if let Some(session) = self.already_live_open(command).await? {
+                    return Ok(session);
                 }
+                self.launch(command).await
+            }
+            CommandKind::SessionStart | CommandKind::SessionResume => {
+                self.refuse_external_owner(command).await?;
                 self.launch(command).await
             }
             CommandKind::SessionClose
@@ -613,6 +642,78 @@ mod tests {
             .await
             .is_err());
         assert!(!registry.has_driver("session-1").await);
+    }
+
+    #[tokio::test]
+    async fn opening_a_live_session_keeps_its_driver_and_state() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        database
+            .create_session(crate::workbench::store::Session {
+                id: "session-1".into(),
+                brand: "claude".into(),
+                external_id: Some("external-1".into()),
+                project_id: "project".into(),
+                project_path: "/project".into(),
+                cwd: "/project".into(),
+                model: Some("sonnet".into()),
+                permission_mode: "default".into(),
+                effort: None,
+                collaboration_mode: None,
+                title: Some("Live".into()),
+                state: "streaming".into(),
+                origin: "app".into(),
+                created_at: "2026-08-30T00:00:00Z".into(),
+                last_active_at: "2026-08-30T00:00:01Z".into(),
+                last_spoke_at: None,
+            })
+            .await
+            .unwrap();
+        let registry = WorkbenchRegistry::new(
+            database.clone(),
+            RegistryPaths {
+                home: root.path().into(),
+                claude_config: root.path().join("claude"),
+                codex_home: root.path().join("codex"),
+                media: root.path().join("media"),
+            },
+            Arc::new(FakeFactory {
+                calls: Arc::new(AtomicUsize::new(0)),
+            }),
+        );
+        registry
+            .execute(&command(
+                CommandKind::SessionStart,
+                json!({"brand":"claude"}),
+            ))
+            .await
+            .unwrap();
+
+        let opened = registry
+            .execute(&command(
+                CommandKind::SessionOpen,
+                json!({
+                    "sessionId":"stale-client-id",
+                    "externalId":"external-1",
+                    "brand":"claude"
+                }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(opened["id"], "session-1");
+        assert_eq!(opened["state"], "streaming");
+        assert!(registry.has_driver("session-1").await);
+        assert_eq!(
+            database
+                .get_session("session-1".into())
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            "streaming"
+        );
+        registry.shutdown().await;
     }
 
     #[tokio::test]
