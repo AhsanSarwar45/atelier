@@ -57,7 +57,7 @@
       {
         "hooks": [
           {
-            "command": "atelier hook board-touch.py",
+            "command": "atelier hook board-touch",
             "type": "command"
           }
         ]
