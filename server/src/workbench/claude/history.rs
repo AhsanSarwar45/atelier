@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
 use uuid::Uuid;
 
@@ -109,15 +110,64 @@ fn byte_window(path: &Path, from: i64, limit: usize) -> Vec<Value> {
         .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
         .collect()
 }
-fn edge_jsonl(path: &Path) -> Vec<Value> {
+fn edge_jsonl(path: &Path) -> (Vec<Value>, Vec<Value>) {
     let mut rows = byte_window(path, 0, 128 * 1024);
     let mut seen: HashSet<String> = rows.iter().map(Value::to_string).collect();
-    for row in byte_window(path, -(256 * 1024), 256 * 1024) {
+    let tail = byte_window(path, -(256 * 1024), 256 * 1024);
+    for row in &tail {
         if seen.insert(row.to_string()) {
-            rows.push(row)
+            rows.push(row.clone())
         }
     }
-    rows
+    (rows, tail)
+}
+
+fn human_spoke_at(row: &Value) -> Option<String> {
+    (visible(row) && row["type"] == "user" && human_words(&message_text(&row["message"])))
+        .then(|| as_nonempty(&row["timestamp"]))
+        .flatten()
+}
+
+/// The newest thing the person said, read backwards in complete JSONL rows.
+/// Long command output can put that row megabytes behind the file's end; a
+/// fixed tail window silently turns the agent's last write into the person's
+/// clock. Blocks are joined across their boundary and reading stops at the
+/// first matching row, so the common case remains one bounded tail read.
+fn last_spoke_at(path: &Path, tail: &[Value]) -> Option<String> {
+    const BLOCK: u64 = 256 * 1024;
+    if let Some(at) = tail.iter().rev().find_map(human_spoke_at) {
+        return Some(at);
+    }
+    let mut file = fs::File::open(path).ok()?;
+    let mut end = file.metadata().ok()?.len();
+    let mut suffix = Vec::new();
+    while end > 0 {
+        let start = end.saturating_sub(BLOCK);
+        file.seek(SeekFrom::Start(start)).ok()?;
+        let mut bytes = vec![0; (end - start) as usize];
+        file.read_exact(&mut bytes).ok()?;
+        bytes.extend_from_slice(&suffix);
+        let complete_from = if start == 0 {
+            0
+        } else if let Some(newline) = bytes.iter().position(|byte| *byte == b'\n') {
+            suffix = bytes[..newline].to_vec();
+            newline + 1
+        } else {
+            suffix = bytes;
+            end = start;
+            continue;
+        };
+        let text = String::from_utf8_lossy(&bytes[complete_from..]);
+        if let Some(at) = text.lines().rev().find_map(|line| {
+            serde_json::from_str::<Value>(line.trim())
+                .ok()
+                .and_then(|row| human_spoke_at(&row))
+        }) {
+            return Some(at);
+        }
+        end = start;
+    }
+    None
 }
 
 fn record_files(config: &Path) -> Vec<PathBuf> {
@@ -205,33 +255,70 @@ fn modified(path: &Path) -> String {
     DateTime::<Utc>::from(time).to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
+#[derive(Clone)]
+struct CachedSummary {
+    len: u64,
+    modified: SystemTime,
+    summary: ClaudeSessionSummary,
+}
+
+static SUMMARIES: OnceLock<Mutex<HashMap<PathBuf, CachedSummary>>> = OnceLock::new();
+
+fn cached_summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
+    let metadata = fs::metadata(&path).ok()?;
+    let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+    let cache = SUMMARIES.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(summary) = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&path)
+        .filter(|cached| cached.len == metadata.len() && cached.modified == modified)
+        .map(|cached| cached.summary.clone())
+    {
+        return Some(summary);
+    }
+    let summary = summary(path.clone())?;
+    cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(
+            path,
+            CachedSummary {
+                len: metadata.len(),
+                modified,
+                summary: summary.clone(),
+            },
+        );
+    Some(summary)
+}
+
 fn summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
     let session_id = path.file_stem()?.to_str()?.to_string();
-    let rows = edge_jsonl(&path);
+    let (rows, tail) = edge_jsonl(&path);
     let mut cwd = None;
     let mut branch = None;
     let mut custom_title = None;
     let mut summary = None;
     let mut first_prompt = None;
-    let mut programmatic = false;
-    let mut last_spoke_at = None;
+    let mut has_conversation = false;
+    let mut has_primary_conversation = false;
     for row in &rows {
         cwd = as_nonempty(&row["cwd"]).map(PathBuf::from).or(cwd);
         branch = as_nonempty(&row["gitBranch"]).or(branch);
         custom_title = as_nonempty(&row["customTitle"]).or(custom_title);
         summary = as_nonempty(&row["summary"]).or(summary);
-        programmatic |= row["isApiErrorMessage"] == true
-            || row["source"]
-                .as_str()
-                .is_some_and(|source| source.contains("sdk"));
+        if matches!(row["type"].as_str(), Some("user" | "assistant"))
+            && row["isMeta"] != true
+            && row.get("teamName").is_none_or(Value::is_null)
+        {
+            has_conversation = true;
+            has_primary_conversation |= row["isSidechain"] != true;
+        }
         if first_prompt.is_none() && visible(row) && row["type"] == "user" {
             let text = message_text(&row["message"]);
             if human_words(&text) {
                 first_prompt = Some(text);
             }
-        }
-        if visible(row) && row["type"] == "user" && human_words(&message_text(&row["message"])) {
-            last_spoke_at = as_nonempty(&row["timestamp"]).or(last_spoke_at);
         }
     }
     Some(ClaudeSessionSummary {
@@ -249,8 +336,11 @@ fn summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
         }),
         cwd,
         git_branch: branch,
-        last_spoke_at,
-        programmatic,
+        last_spoke_at: last_spoke_at(&path, &tail),
+        // Agent-SDK child sessions are sidechains throughout. Entrypoint and
+        // API-error fields describe transport/outcome, not authorship: using
+        // either hid ordinary terminal and editor conversations.
+        programmatic: has_conversation && !has_primary_conversation,
         record: path,
     })
 }
@@ -265,7 +355,7 @@ pub fn list_sessions(
 ) -> Vec<ClaudeSessionSummary> {
     let mut sessions: Vec<_> = record_files(config)
         .into_iter()
-        .filter_map(summary)
+        .filter_map(cached_summary)
         .filter(|session| include_programmatic || !session.programmatic)
         .filter(|session| {
             project.is_none_or(|project| {
@@ -1058,6 +1148,79 @@ mod tests {
         assert_eq!(
             sessions[0].name.as_deref(),
             Some("Agent Defined Conversation Name")
+        );
+        let record = dir.join(format!("{CHAT}.jsonl"));
+        let mut file = OpenOptions::new().append(true).open(record).unwrap();
+        writeln!(
+            file,
+            "\n{}",
+            json!({"type":"custom-title","customTitle":"A Newer Name"})
+        )
+        .unwrap();
+        assert_eq!(
+            list_sessions(home.path(), None, false)[0].name.as_deref(),
+            Some("A Newer Name")
+        );
+    }
+
+    #[test]
+    fn claude_discovery_never_hides_a_persons_chat_for_an_api_error_or_sdk_host() {
+        let home = tempdir().unwrap();
+        let dir = home.path().join("projects/project");
+        create_dir_all(&dir).unwrap();
+        write(dir.join(format!("{CHAT}.jsonl")), [
+            json!({"type":"user","isSidechain":false,"source":"sdk-ts","cwd":"/work/repo","timestamp":"2026-08-30T00:00:00Z","message":{"content":"Please continue"}}),
+            json!({"type":"assistant","isSidechain":false,"isApiErrorMessage":true,"message":{"content":[{"type":"text","text":"API Error: 500"}]}}),
+        ].iter().map(Value::to_string).collect::<Vec<_>>().join("\n")).unwrap();
+
+        let sessions = list_sessions(home.path(), None, false);
+        assert_eq!(sessions.len(), 1);
+        assert!(!sessions[0].programmatic);
+    }
+
+    #[test]
+    fn claude_discovery_hides_sidechain_sessions_until_everything_is_requested() {
+        let home = tempdir().unwrap();
+        let dir = home.path().join("projects/project");
+        create_dir_all(&dir).unwrap();
+        write(
+            dir.join(format!("{CHAT}.jsonl")),
+            json!({
+                "type":"user","isSidechain":true,"cwd":"/work/repo",
+                "timestamp":"2026-08-30T00:00:00Z","message":{"content":"Review this change"}
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        assert!(list_sessions(home.path(), None, false).is_empty());
+        let sessions = list_sessions(home.path(), None, true);
+        assert_eq!(sessions.len(), 1);
+        assert!(sessions[0].programmatic);
+    }
+
+    #[test]
+    fn claude_discovery_reads_the_last_human_timestamp_past_a_huge_final_turn() {
+        let home = tempdir().unwrap();
+        let dir = home.path().join("projects/project");
+        create_dir_all(&dir).unwrap();
+        let record = dir.join(format!("{CHAT}.jsonl"));
+        let user = json!({
+            "type":"user","cwd":"/work/repo","timestamp":"2026-08-30T00:00:00Z",
+            "message":{"content":"Run the large report"}
+        });
+        let assistant = json!({
+            "type":"assistant","timestamp":"2026-08-30T00:10:00Z",
+            "message":{"content":[{"type":"tool_use","id":"large","name":"Bash","input":{
+                "command":"report","output":"x".repeat(400_000)
+            }}]}
+        });
+        write(&record, format!("{user}\n{assistant}\n")).unwrap();
+
+        let sessions = list_sessions(home.path(), None, false);
+        assert_eq!(
+            sessions[0].last_spoke_at.as_deref(),
+            Some("2026-08-30T00:00:00Z")
         );
     }
 
