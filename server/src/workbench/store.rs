@@ -5,7 +5,7 @@
 //! disappear or require an export/import step.
 
 use crate::workbench::projection::{fold_all, fold_from};
-use crate::workbench::protocol::Event;
+use crate::workbench::protocol::{Event, EventKind};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{
     params, params_from_iter, Connection, OptionalExtension, Row, Transaction, TransactionBehavior,
@@ -825,22 +825,13 @@ impl Store {
 
         let projection = match held {
             Some((projected_seq, held_reset)) if held_reset == reset_seq => {
-                let items = {
-                    let mut statement = self.connection.prepare(
-                        "SELECT json FROM transcript_item WHERE session_id = ?1 ORDER BY position",
-                    )?;
-                    let items = statement
-                        .query_map([session_id], |row| row.get::<_, String>(0))?
-                        .map(|row| serde_json::from_str(&row?).map_err(json_error))
-                        .collect::<rusqlite::Result<Vec<Value>>>()?;
-                    items
-                };
-                let agents = self.projected_agents_without_ensuring(session_id)?;
-                let events = self.events_since(session_id, projected_seq)?;
-                let mut view = serde_json::Map::new();
-                view.insert("items".into(), Value::Array(items));
-                view.insert("agents".into(), Value::Array(agents));
-                fold_from(&mut view, &events)
+                self.catch_up_transcript_projection(
+                    session_id,
+                    projected_seq,
+                    newest_seq,
+                    reset_seq,
+                )?;
+                return Ok(newest_seq);
             }
             _ => {
                 let events = self.events_since(session_id, reset_seq)?;
@@ -900,6 +891,109 @@ impl Store {
         )?;
         transaction.commit()?;
         Ok(newest_seq)
+    }
+
+    /// Advance an existing projection through only its unseen event tail.
+    ///
+    /// Each event loads and rewrites only the transcript rows it can affect.
+    /// This preserves the former implementation's open-time bound: a live
+    /// tail never causes an old conversation to be loaded and folded again.
+    fn catch_up_transcript_projection(
+        &self,
+        session_id: &str,
+        projected_seq: i64,
+        newest_seq: i64,
+        reset_seq: i64,
+    ) -> rusqlite::Result<()> {
+        let events = self.events_since(session_id, projected_seq)?;
+        if events.is_empty() {
+            return Ok(());
+        }
+        let mut agents = self.projected_agents_without_ensuring(session_id)?;
+        let mut next_position: i64 = self.connection.query_row(
+            "SELECT COALESCE(MAX(position), 0) + 1 FROM transcript_item WHERE session_id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )?;
+        let transaction = self.connection.unchecked_transaction()?;
+
+        for event in events {
+            let selected = projection_items_for_event(&transaction, session_id, &event, &agents)?;
+            let positions: HashMap<String, i64> = selected
+                .iter()
+                .filter_map(|(position, item)| item_key(item).map(|key| (key, *position)))
+                .collect();
+            let before: std::collections::HashSet<String> = positions.keys().cloned().collect();
+            let mut view = crate::workbench::projection::empty_view();
+            view.insert(
+                "items".into(),
+                Value::Array(selected.into_iter().map(|(_, item)| item).collect()),
+            );
+            view.insert("agents".into(), Value::Array(agents.clone()));
+            let projection = fold_from(&mut view, std::slice::from_ref(&event));
+            let after: std::collections::HashSet<String> =
+                projection.items().iter().filter_map(item_key).collect();
+
+            for key in before.difference(&after) {
+                transaction.execute(
+                    "DELETE FROM transcript_item WHERE session_id = ?1 AND item_key = ?2",
+                    params![session_id, key],
+                )?;
+            }
+            for item in projection.items() {
+                let Some(key) = item_key(item) else { continue };
+                let position = positions.get(&key).copied().unwrap_or_else(|| {
+                    let position = next_position;
+                    next_position += 1;
+                    position
+                });
+                transaction.execute(
+                    r#"INSERT INTO transcript_item
+                         (session_id,item_key,position,updated_seq,visible,json)
+                       VALUES (?1,?2,?3,?4,?5,?6)
+                       ON CONFLICT(session_id,item_key) DO UPDATE SET
+                         updated_seq=excluded.updated_seq,
+                         visible=excluded.visible,
+                         json=excluded.json"#,
+                    params![
+                        session_id,
+                        key,
+                        position,
+                        event
+                            .fields
+                            .get("seq")
+                            .and_then(Value::as_i64)
+                            .unwrap_or_default(),
+                        item_visible(item),
+                        serde_json::to_string(item).map_err(json_error)?,
+                    ],
+                )?;
+            }
+            if projection.agents() != agents.as_slice() {
+                agents = projection.agents().to_vec();
+                transaction.execute(
+                    "DELETE FROM transcript_agent WHERE session_id = ?1",
+                    [session_id],
+                )?;
+                for agent in &agents {
+                    transaction.execute(
+                        r#"INSERT INTO transcript_agent
+                             (session_id,agent_id,tool_call_id,json) VALUES (?1,?2,?3,?4)"#,
+                        params![
+                            session_id,
+                            agent["id"].as_str().unwrap_or_default(),
+                            agent["toolCallId"].as_str(),
+                            serde_json::to_string(agent).map_err(json_error)?,
+                        ],
+                    )?;
+                }
+            }
+        }
+        transaction.execute(
+            "UPDATE transcript_projection SET projected_seq=?1,reset_seq=?2 WHERE session_id=?3",
+            params![newest_seq, reset_seq, session_id],
+        )?;
+        transaction.commit()
     }
 
     /// A fixed-size page of complete visible transcript items, in reading order.
@@ -971,6 +1065,100 @@ impl Store {
     fn connection(&self) -> &Connection {
         &self.connection
     }
+}
+
+fn item_key(item: &Value) -> Option<String> {
+    Some(format!(
+        "{}:{}",
+        item["kind"].as_str()?,
+        item["id"].as_str()?
+    ))
+}
+
+fn item_visible(item: &Value) -> bool {
+    !(item["kind"] == "note" && item["rank"] == "detail")
+}
+
+fn projection_items_for_event(
+    transaction: &Transaction<'_>,
+    session_id: &str,
+    event: &Event,
+    agents: &[Value],
+) -> rusqlite::Result<Vec<(i64, Value)>> {
+    let field = |name: &str| {
+        event
+            .fields
+            .get(name)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    };
+    let keys: Vec<String> = match event.kind {
+        EventKind::Image
+        | EventKind::ImageCompare
+        | EventKind::Widget
+        | EventKind::TextDelta
+        | EventKind::MessageRetracted => vec![format!("message:{}", field("messageId"))],
+        EventKind::ThinkingDelta => vec![format!("thinking:{}", field("messageId"))],
+        EventKind::MessageCompleted => vec![
+            format!("message:{}", field("messageId")),
+            format!("thinking:{}", field("messageId")),
+        ],
+        EventKind::ToolStarted
+        | EventKind::ToolCompleted
+        | EventKind::ToolProgress
+        | EventKind::Diff => vec![format!("tool:{}", field("toolCallId"))],
+        EventKind::AgentFinished => agents
+            .iter()
+            .find(|agent| agent["id"].as_str() == Some(field("agentId")))
+            .and_then(|agent| agent["toolCallId"].as_str())
+            .map(|id| vec![format!("tool:{id}")])
+            .unwrap_or_default(),
+        EventKind::AskResolved => vec![format!("ask:{}", field("askId"))],
+        EventKind::QuestionResolved => vec![format!("question:{}", field("requestId"))],
+        EventKind::PlanResolved => vec![format!("plan:{}", field("proposalId"))],
+        EventKind::PlanProposed => {
+            return projection_items_matching(transaction, session_id, "plan:%")
+        }
+        EventKind::TranscriptReset => {
+            return projection_items_matching(transaction, session_id, "%")
+        }
+        _ => Vec::new(),
+    };
+    let mut found = Vec::new();
+    for key in keys {
+        let row = transaction
+            .query_row(
+                "SELECT position,json FROM transcript_item WHERE session_id=?1 AND item_key=?2",
+                params![session_id, key],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        if let Some((position, json)) = row {
+            found.push((position, serde_json::from_str(&json).map_err(json_error)?));
+        }
+    }
+    found.sort_by_key(|(position, _)| *position);
+    Ok(found)
+}
+
+fn projection_items_matching(
+    transaction: &Transaction<'_>,
+    session_id: &str,
+    pattern: &str,
+) -> rusqlite::Result<Vec<(i64, Value)>> {
+    let mut statement = transaction.prepare(
+        "SELECT position,json FROM transcript_item WHERE session_id=?1 AND item_key LIKE ?2 ORDER BY position",
+    )?;
+    let found = statement
+        .query_map(params![session_id, pattern], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?
+        .map(|row| {
+            let (position, json) = row?;
+            Ok((position, serde_json::from_str(&json).map_err(json_error)?))
+        })
+        .collect();
+    found
 }
 
 fn session_from_row(row: &Row<'_>) -> rusqlite::Result<Session> {
@@ -1406,6 +1594,54 @@ mod tests {
             .items
             .is_empty());
         assert!(store.projected_agents("session-1").unwrap().is_empty());
+    }
+
+    #[test]
+    fn workbench_core_projection_catches_up_only_touched_rows() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        for value in [
+            json!({"type":"message.started","sessionId":"chat","seq":1,"at":"now","messageId":"old","role":"user"}),
+            json!({"type":"text.delta","sessionId":"chat","seq":2,"at":"now","messageId":"old","text":"kept"}),
+            json!({"type":"message.completed","sessionId":"chat","seq":3,"at":"now","messageId":"old"}),
+        ] {
+            assert!(store
+                .append_event(&serde_json::from_value(value).unwrap())
+                .unwrap());
+        }
+        assert_eq!(
+            store
+                .transcript_items("chat", None, 40)
+                .unwrap()
+                .items
+                .len(),
+            1
+        );
+        let before: i64 = store
+            .connection()
+            .query_row(
+                "SELECT updated_seq FROM transcript_item WHERE session_id='chat' AND item_key='message:old'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        let notice: Event = serde_json::from_value(json!({
+            "type":"notice","sessionId":"chat","seq":4,"at":"later","text":"new"
+        }))
+        .unwrap();
+        assert!(store.append_event(&notice).unwrap());
+        let page = store.transcript_items("chat", None, 40).unwrap();
+        assert_eq!(page.items.len(), 2);
+        let after: i64 = store
+            .connection()
+            .query_row(
+                "SELECT updated_seq FROM transcript_item WHERE session_id='chat' AND item_key='message:old'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(after, before, "an unrelated tail event rewrote old history");
     }
 
     fn count(connection: &Connection, table: &str) -> i64 {

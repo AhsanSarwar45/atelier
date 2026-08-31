@@ -33,7 +33,7 @@ fn empty_menu() -> Value {
     })
 }
 
-fn empty_view() -> Map<String, Value> {
+pub(crate) fn empty_view() -> Map<String, Value> {
     let mut view = Map::new();
     view.insert("brand".into(), Value::Null);
     view.insert("items".into(), json!([]));
