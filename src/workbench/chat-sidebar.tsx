@@ -822,15 +822,11 @@ export function ChatSidebar({
                         // when the rail is genuinely too narrow for it
                         // (bw-jaoz.14.14).
                         //
-                        // With its detail clause, which the reader wants here
-                        // (the manager, 2026-08-25). It was dropped on the
-                        // grounds that 288px leaves room for a stub and no
-                        // more, and that was true while the only cut available
-                        // was the browser's, at the end. The clause is cut in
-                        // the middle now, so what arrives at this width is both
-                        // ends of it rather than four letters of the front
-                        // (chat-state-chip.tsx, splitDetail; bw-gnzl).
-                        <ChatStateChip state={rowState} testId="row-pill" className="min-w-0 shrink" />
+                        // The rail is the glanceable state word. Its specific
+                        // clause belongs on the open chat's wider header and
+                        // footer; putting it here crowds the external badge and
+                        // leaves neither readable at the list's fixed width.
+                        <ChatStateChip state={{ ...rowState, detail: null }} testId="row-pill" className="min-w-0 shrink" />
                       )}
                       {ownership.kind === 'elsewhere' && state.external && (
                         <ExternalBadge holder={state.external.holder} className="ml-auto shrink-0" />

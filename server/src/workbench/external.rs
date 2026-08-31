@@ -230,12 +230,15 @@ fn marker_alive(marker: &ClaudeMarker, proc_root: &Path) -> bool {
 fn told(sessions: &Path, id: &str, now_ms: i64) -> Option<(HeldDoing, i64, Option<String>)> {
     let path = sessions.join(format!("{id}.doing.json"));
     let row: ToldDoing = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
-    let doing = match row.doing.as_str() {
-        "summarising" if now_ms - row.since <= 900_000 => HeldDoing::Summarising,
-        "waiting" => HeldDoing::Waiting,
-        _ => return None,
-    };
+    // Keep the vocabulary and lifetime identical to the former shared reader:
+    // every concrete status is valid, waiting has no expiry, and every other
+    // claim expires after fifteen minutes. Restricting this to summarising and
+    // waiting flattened thinking/running/retrying/helping back to "Working".
+    let doing = marker_doing(&row.doing)?;
     if row.since > now_ms + 60_000 {
+        return None;
+    }
+    if doing != HeldDoing::Waiting && now_ms - row.since > 900_000 {
         return None;
     }
     Some((
@@ -696,6 +699,25 @@ mod tests {
         assert_eq!(holds[0].doing, HeldDoing::Summarising);
         assert_eq!(holds[0].holder, Holder::Terminal);
         assert!(holds[0].told);
+
+        for (word, expected) in [
+            ("thinking", HeldDoing::Thinking),
+            ("answering", HeldDoing::Answering),
+            ("running", HeldDoing::Running),
+            ("retrying", HeldDoing::Retrying),
+            ("helping", HeldDoing::Helping),
+            ("waiting", HeldDoing::Waiting),
+        ] {
+            fs::write(
+                sessions.join(format!("{CHAT}.doing.json")),
+                serde_json::json!({"doing":word,"since":500,"detail":"specific"}).to_string(),
+            )
+            .unwrap();
+            let hold = claude_holds(&config, &proc_root, 1_000).remove(0);
+            assert_eq!(hold.doing, expected, "{word}");
+            assert_eq!(hold.detail.as_deref(), Some("specific"), "{word}");
+            assert!(hold.told, "{word}");
+        }
 
         fs::write(proc_root.join("42/stat"), stat("reused")).unwrap();
         assert!(claude_holds(&config, &proc_root, 1_000).is_empty());

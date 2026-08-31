@@ -646,12 +646,29 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
                 "input": input.as_object().cloned().unwrap_or_default(),
                 "title":name, "parentToolCallId":parent
             }));
-            let (output, ok) = results.get(call_id).cloned().unwrap_or_default();
-            events.push(json!({
-                "type":"tool.completed", "toolCallId":call_id, "ok":ok,
-                "output":cut(output, KEPT)
-            }));
+            // A record being written can end at `tool_use`. No result means
+            // the command is still running, not that it failed with empty
+            // output. The follower will append the completion when the
+            // matching `tool_result` lands.
+            if let Some((output, ok)) = results.remove(call_id) {
+                events.push(json!({
+                    "type":"tool.completed", "toolCallId":call_id, "ok":ok,
+                    "output":cut(output, KEPT)
+                }));
+            }
         }
+    }
+    // Incremental following often receives the result in a later byte window
+    // than its tool_use. Emit that completion by identity even when this
+    // window does not repeat the start; the durable reducer joins it to the
+    // row already on screen.
+    let mut unmatched = results.into_iter().collect::<Vec<_>>();
+    unmatched.sort_by(|a, b| a.0.cmp(&b.0));
+    for (call_id, (output, ok)) in unmatched {
+        events.push(json!({
+            "type":"tool.completed", "toolCallId":call_id, "ok":ok,
+            "output":cut(output, KEPT)
+        }));
     }
     events
 }
@@ -951,6 +968,27 @@ mod tests {
         assert_eq!(pinned["model"], "claude-sonnet");
         assert_eq!(pinned["permissionMode"], "plan");
         assert_eq!(pinned["effort"], "high");
+    }
+
+    #[test]
+    fn external_claude_keeps_a_tool_running_until_its_result_exists() {
+        let lines = vec![json!({
+            "type":"assistant","uuid":"a1","message":{"content":[{
+                "type":"tool_use","id":"call-open","name":"Bash","input":{"command":"cargo test"}
+            }]}
+        }).to_string()];
+        let events = replay_lines(&lines);
+        assert!(events.iter().any(|event| event["type"] == "tool.started"));
+        assert!(!events.iter().any(|event| event["type"] == "tool.completed"));
+
+        let result_only = vec![json!({
+            "type":"user","uuid":"u2","message":{"content":[{
+                "type":"tool_result","tool_use_id":"call-open","content":"passed"
+            }]}
+        }).to_string()];
+        let completed = replay_lines(&result_only);
+        assert!(completed.iter().any(|event| event["type"] == "tool.completed"
+            && event["toolCallId"] == "call-open" && event["ok"] == true));
     }
 
     #[test]

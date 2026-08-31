@@ -448,7 +448,12 @@ export const ToolRow = memo(function ToolRow({
   // The sentences are written for a finished row, so they are in the past. A
   // row with a spinner on it has not finished, and "Ran the tests" beside a
   // spinner says the opposite of the spinner (bw-7ks.24.6).
-  const says = ran && (item.status === 'running' ? whileItRuns(ran.said) : ran.said);
+  const says = ran && (item.status === 'running'
+    ? whileItRuns(ran.said)
+    // Agent lifecycle/completion events carry the final actor-specific title.
+    // Re-deriving it from the original prompt turns "reviewer finished" back
+    // into "Sent off a helper" after reload.
+    : ranKind === 'agent' && item.title !== item.name ? item.title : ran.said);
 
   return (
     <div

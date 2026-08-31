@@ -51,12 +51,15 @@ export type SessionOwnership =
  * it is ours regardless of where it was originally created.
  */
 export function sessionOwnership(
-  state: SessionState,
+  _state: SessionState,
   externalId: string | null | undefined,
   heldByAnother: boolean,
 ): SessionOwnership {
-  if (!asleepHere(state)) return { kind: 'atelier' };
   if (externalId && heldByAnother) return { kind: 'elsewhere', externalId };
+  // The server's held set excludes provider processes owned by this
+  // Atelier registry. An explicit outside owner therefore outranks a stale
+  // transcript state left mid-turn; state alone cannot prove ownership.
+  if (!asleepHere(_state)) return { kind: 'atelier' };
   return { kind: 'unheld', externalId: externalId ?? null };
 }
 

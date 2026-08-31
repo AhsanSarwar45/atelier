@@ -3,8 +3,9 @@
 # worktree, isolated from any other Atelier running on this machine:
 # its own ports and its own XDG_DATA_HOME, so it shares neither settings.db
 # nor workbench.db with them. Set BEADS_E2E_NO_NODE=1 to launch only the app
-# with a deliberately minimal PATH while Playwright keeps the developer PATH it
-# needs to run the browser.
+# with a deliberately minimal PATH containing neither Node/npm nor
+# Python/python3, while Playwright keeps the developer PATH it needs to run the
+# browser.
 #
 # Usage: scripts/workbench-e2e.sh [<spec> ...] [-g <grep>]
 #
@@ -87,6 +88,16 @@ if [ "${BEADS_E2E_LIVE_PROVIDERS:-0}" = 1 ]; then
   install -m 600 "$codex_auth" "$CODEX_HOME/auth.json"
 fi
 
+if [ -z "${ATELIER_BINARY:-}" ]; then
+  # The Rust executable embeds `out/` at compile time. Rebuilding Cargo alone
+  # after a screen edit therefore produces a new executable containing an old
+  # screen and gives a green browser run against yesterday's implementation.
+  # Build both halves, in their actual packaging order, every time this harness
+  # owns the executable. An explicit ATELIER_BINARY remains an explicit choice
+  # to test exactly that already-packaged artifact.
+  npm run build
+  cargo build --manifest-path "$ROOT/server/Cargo.toml"
+fi
 SERVER_BINARY="${ATELIER_BINARY:-${CARGO_TARGET_DIR:-$ROOT/server/target}/debug/atelier}"
 [ -x "$SERVER_BINARY" ] || { echo "no Atelier binary at $SERVER_BINARY"; exit 1; }
 SERVER_PATH="$PATH"
@@ -98,10 +109,12 @@ if [ "${BEADS_E2E_NO_NODE:-0}" = 1 ]; then
     [ -n "$found" ] && ln -s "$found" "$SERVER_BIN/$tool"
   done
   SERVER_PATH="$SERVER_BIN"
-  if PATH="$SERVER_PATH" command -v node >/dev/null 2>&1 || PATH="$SERVER_PATH" command -v npm >/dev/null 2>&1; then
-    echo "the isolated server PATH unexpectedly contains node or npm"; exit 1
-  fi
-  echo "server PATH contains no node or npm"
+  for retired in node npm python python3; do
+    if PATH="$SERVER_PATH" command -v "$retired" >/dev/null 2>&1; then
+      echo "the isolated server PATH unexpectedly contains $retired"; exit 1
+    fi
+  done
+  echo "server PATH contains no node, npm, Python, or python3"
 fi
 
 env PATH="$SERVER_PATH" "$SERVER_BINARY" >> "$SERVER_LOG" 2>&1 &
@@ -185,12 +198,12 @@ ran=0
 npx playwright test "${specs[@]}" ${rest[@]+"${rest[@]}"} || ran=$?
 
 if [ "${BEADS_E2E_NO_NODE:-0}" = 1 ]; then
-  node_children="$(for pid in $(descendants_of "$SERVER_PID"); do ps -o args= -p "$pid" 2>/dev/null; done | grep -E '(^|/)(node|npm)( |$)' || true)"
-  if [ -n "$node_children" ]; then
-    echo "the isolated app started a Node/npm child: $node_children"
+  retired_children="$(for pid in $(descendants_of "$SERVER_PID"); do ps -o args= -p "$pid" 2>/dev/null; done | grep -E '(^|/)(node|npm|python|python3)( |$)' || true)"
+  if [ -n "$retired_children" ]; then
+    echo "the isolated app started a retired runtime child: $retired_children"
     ran=1
   else
-    echo "isolated app process tree contains no Node/npm child"
+    echo "isolated app process tree contains no Node/npm or Python/python3 child"
   fi
 fi
 

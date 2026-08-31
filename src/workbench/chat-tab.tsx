@@ -64,7 +64,7 @@ import { ChatRightRail, useGitPanel, useRightRail } from '@/workbench/chat-right
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
-import { ExternalBadge } from '@/workbench/chat-state-chip';
+import { ChatStateChip, ExternalBadge } from '@/workbench/chat-state-chip';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { useKnownCards, useKnownCardStatuses } from '@/workbench/known-cards';
 import { drawnRows } from '@/workbench/machine-lines';
@@ -936,7 +936,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const running =
     inFlight?.kind === 'tool'
       ? {
-          title: whileItRuns(whatItRan(inFlight.name, inFlight.input)?.said ?? inFlight.title),
+          title: inFlight.name === 'Bash' && typeof inFlight.input.command === 'string'
+            ? inFlight.input.command
+            : whileItRuns(whatItRan(inFlight.name, inFlight.input)?.said ?? inFlight.title),
           seconds: inFlight.seconds,
         }
       : null;
@@ -1324,10 +1326,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           data-state={held ? 'held' : view.state}
           className={cn('hidden shrink-0 items-center sm:flex', CHIP_GAP)}
         >
-          {/* No activity chip here: what the agent is doing now is already the
-              live line at the foot of the transcript, and the same state is on
-              the chat's row in the list beside it. Only the badge naming
-              another program holding this chat stays — nothing else says it. */}
+          <ChatStateChip state={state} testId="session-state-chip" />
           {state.external && <ExternalBadge holder={state.external.holder} />}
         </span>}
         {/* The one thing on this line allowed to give way when the line runs
@@ -1503,6 +1502,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             comes back by itself when they let go, because the stream this is
             read from does (bw-96is). The line's words are the reading's, so it
             cannot contradict the mark at the top of the pane (bw-96is.9). */}
+        {ownership.kind === 'elsewhere' ? (
+          <p data-testid="held-elsewhere" className="mx-auto w-full max-w-[110ch] px-4 py-3 text-xs text-info">
+            {heldLine(state)}
+          </p>
+        ) : (
         <Panel
           tone="overlay"
           inset="none"
@@ -1512,12 +1516,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             'focus-within:border-primary/60 focus-within:ring-1 focus-within:ring-primary/30',
           )}
         >
-          {ownership.kind === 'elsewhere' && (
-            <p data-testid="held-elsewhere" className="mb-2 text-xs text-info">
-              {heldLine(state)}
-            </p>
-          )}
-          {ownership.kind !== 'elsewhere' && <>
           {attached.length > 0 && (
             <div data-testid="attachment-tray" className="mb-2 flex flex-wrap gap-2">
               {attached.map((img, i) => (
@@ -1805,8 +1803,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               </Button>
             )}
           </div>
-          </>}
         </Panel>
+        )}
         <Dialog open={composerSettingsOpen} onOpenChange={setComposerSettingsOpen}>
           <DialogContent className="max-w-[calc(100vw-2rem)] sm:hidden" data-testid="mobile-composer-settings-dialog">
             <DialogHeader>

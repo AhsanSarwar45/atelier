@@ -177,6 +177,7 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, onOld
       data-testid="virtual-transcript"
       data-total-items={rows.length}
       data-mounted-items={virtual.getVirtualItems().length}
+      data-can-load-older={Boolean(onOlder)}
       className="relative w-full"
       style={{ height: `${virtual.getTotalSize()}px` }}
     >

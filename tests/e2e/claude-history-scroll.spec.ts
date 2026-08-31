@@ -90,23 +90,35 @@ for (const chat of CHATS) {
       await page.goto(`/project?id=${project.id}&tab=chat`);
       const row = page.locator(`[data-testid="restore-row"][data-row-key="${chat.id}"]`);
       await expect(row.getByTestId('row-name')).toHaveText(chat.title, { timeout: 30_000 });
+      const openedAt = Date.now();
       await row.getByTestId('row-name').click();
       await expect(page.getByTestId('chat-loading')).toBeHidden({ timeout: 60_000 });
 
       const pane = page.getByTestId('transcript');
       const transcript = page.getByTestId('virtual-transcript');
       await expect.poll(async () => Number(await transcript.getAttribute('data-total-items'))).toBeGreaterThan(0);
+      expect(Date.now() - openedAt, `${chat.title}: click-to-usable exceeded one second`).toBeLessThan(1_000);
+      await expect(transcript).toHaveAttribute('data-can-load-older', 'true');
       const firstRows = Number(await transcript.getAttribute('data-total-items'));
       // One persisted 40-item page can fan out into more drawn machine rows.
       // It must still remain a small initial render, not the whole transcript.
       expect(firstRows).toBeLessThan(100);
-      await pane.evaluate((element) => { element.scrollTop = 0; });
+      const requestsBeforeGesture = olderRequests;
+      await pane.evaluate((element) => {
+        (window as typeof window & { __olderWheel?: number }).__olderWheel = 0;
+        element.addEventListener('wheel', () => {
+          const observed = window as typeof window & { __olderWheel?: number };
+          observed.__olderWheel = (observed.__olderWheel ?? 0) + 1;
+        }, { once: true });
+        element.scrollTop = 0;
+      });
       mkdirSync(SHOTS, { recursive: true });
       await page.screenshot({ path: join(SHOTS, `${chat.shot}-before.png`) });
-
-      const requestsBeforeGesture = olderRequests;
       await pane.hover();
       await page.mouse.wheel(0, -1200);
+      await expect.poll(() => page.evaluate(() => (window as typeof window & { __olderWheel?: number }).__olderWheel ?? 0), {
+        message: `${chat.title}: the browser did not deliver the upward wheel to the transcript pane`,
+      }).toBe(1);
       await expect.poll(
         () => olderRequests - requestsBeforeGesture,
         { message: `${chat.title}: the upward gesture asked for no older history` },

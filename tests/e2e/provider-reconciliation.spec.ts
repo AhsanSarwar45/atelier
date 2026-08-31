@@ -177,6 +177,7 @@ async function assertCanonical(page: Page, project: Project, brand: Brand, sessi
   await expect(helper).toHaveCount(1);
   await expect(helper).toHaveAttribute('data-state', 'done');
   await expect(helper.getByTestId('sent-away-what')).toHaveText(`Inspect the ${brand} session`);
+  if (!(await helper.isVisible())) await page.getByTestId('toggle-stopped-agents').click();
   await helper.click();
   const child = page.getByTestId('agent-view').getByTestId('assistant-message')
     .filter({ hasText: `${brand.toUpperCase()} CHILD DONE` });

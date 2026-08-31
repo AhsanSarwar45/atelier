@@ -237,17 +237,11 @@ describe('when the writing box is not the reader’s to type in', () => {
     expect(heldElsewhere('dormant', OURS, new Set([OURS]))).toBe(true);
   });
 
-  /**
-   * The trap. Every agent this app drives is a Claude Code process of its own
-   * and writes its own marker, so our own open chat is in the running set
-   * exactly like a terminal's. Locking on that alone would take the box away
-   * during our own work, which is when steering matters most.
-   */
-  it('leaves the box alone for a chat this app is driving, marker and all', () => {
-    expect(heldElsewhere('idle', OURS, new Set([OURS]))).toBe(false);
-    expect(heldElsewhere('streaming', OURS, new Set([OURS]))).toBe(false);
-    expect(heldElsewhere('running_tool', OURS, new Set([OURS]))).toBe(false);
-    expect(heldElsewhere('waiting_permission', OURS, new Set([OURS]))).toBe(false);
+  it('does not let stale transcript state overrule the filtered outside-owner set', () => {
+    expect(heldElsewhere('idle', OURS, new Set([OURS]))).toBe(true);
+    expect(heldElsewhere('streaming', OURS, new Set([OURS]))).toBe(true);
+    expect(heldElsewhere('running_tool', OURS, new Set([OURS]))).toBe(true);
+    expect(heldElsewhere('waiting_permission', OURS, new Set([OURS]))).toBe(true);
   });
 
   it('leaves a sleeping chat nobody is in alone', () => {
@@ -275,9 +269,9 @@ describe('when the writing box is not the reader’s to type in', () => {
     expect(heldElsewhere('dormant', OURS, new Set([OURS]), false)).toBe(true);
   });
 
-  it('still leaves our own driving alone, whatever the chat said at open', () => {
-    expect(heldElsewhere('idle', OURS, null, true)).toBe(false);
-    expect(heldElsewhere('streaming', OURS, null, true)).toBe(false);
+  it('takes the chat’s opening ownership fact before the stream has spoken', () => {
+    expect(heldElsewhere('idle', OURS, null, true)).toBe(true);
+    expect(heldElsewhere('streaming', OURS, null, true)).toBe(true);
   });
 
   it('claims nothing about a chat the brand has no id for', () => {

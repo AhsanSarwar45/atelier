@@ -823,7 +823,7 @@ impl Store {
             return Ok(newest_seq);
         }
 
-        let projection = match held {
+        match held {
             Some((projected_seq, held_reset)) if held_reset == reset_seq => {
                 self.catch_up_transcript_projection(
                     session_id,
@@ -834,63 +834,33 @@ impl Store {
                 return Ok(newest_seq);
             }
             _ => {
-                let events = self.events_since(session_id, reset_seq)?;
-                fold_all(&events)
-            }
-        };
-        let transaction = self.connection.unchecked_transaction()?;
-        transaction.execute(
-            "DELETE FROM transcript_item WHERE session_id = ?1",
-            [session_id],
-        )?;
-        transaction.execute(
-            "DELETE FROM transcript_agent WHERE session_id = ?1",
-            [session_id],
-        )?;
-        {
-            let mut put = transaction.prepare(
-                r#"INSERT INTO transcript_item
-                     (session_id, item_key, position, updated_seq, visible, json)
-                   VALUES (?1,?2,?3,?4,?5,?6)"#,
-            )?;
-            for (index, item) in projection.items().iter().enumerate() {
-                let kind = item["kind"].as_str().unwrap_or_default();
-                let id = item["id"].as_str().unwrap_or_default();
-                let visible = !(kind == "note" && item["rank"] == "detail");
-                put.execute(params![
-                    session_id,
-                    format!("{kind}:{id}"),
-                    index as i64 + 1,
-                    newest_seq,
-                    visible,
-                    serde_json::to_string(item).map_err(json_error)?,
-                ])?;
+                // A cold or incompatible projection starts empty at the last
+                // reset, then uses the same row-local tail algorithm as a live
+                // chat. Folding the entire event log into one growing Vec made
+                // first open quadratic and blocked every other chat behind the
+                // single database actor for tens of seconds.
+                let transaction = self.connection.unchecked_transaction()?;
+                transaction.execute(
+                    "DELETE FROM transcript_item WHERE session_id = ?1",
+                    [session_id],
+                )?;
+                transaction.execute(
+                    "DELETE FROM transcript_agent WHERE session_id = ?1",
+                    [session_id],
+                )?;
+                transaction.execute(
+                    r#"INSERT INTO transcript_projection (session_id,projected_seq,reset_seq)
+                       VALUES (?1,?2,?2)
+                       ON CONFLICT(session_id) DO UPDATE SET
+                         projected_seq=excluded.projected_seq,
+                         reset_seq=excluded.reset_seq"#,
+                    params![session_id, reset_seq],
+                )?;
+                transaction.commit()?;
+                self.catch_up_transcript_projection(session_id, reset_seq, newest_seq, reset_seq)?;
+                return Ok(newest_seq);
             }
         }
-        {
-            let mut put = transaction.prepare(
-                r#"INSERT INTO transcript_agent (session_id, agent_id, tool_call_id, json)
-                   VALUES (?1,?2,?3,?4)"#,
-            )?;
-            for agent in projection.agents() {
-                put.execute(params![
-                    session_id,
-                    agent["id"].as_str().unwrap_or_default(),
-                    agent["toolCallId"].as_str(),
-                    serde_json::to_string(agent).map_err(json_error)?,
-                ])?;
-            }
-        }
-        transaction.execute(
-            r#"INSERT INTO transcript_projection (session_id, projected_seq, reset_seq)
-               VALUES (?1,?2,?3)
-               ON CONFLICT(session_id) DO UPDATE SET
-                 projected_seq = excluded.projected_seq,
-                 reset_seq = excluded.reset_seq"#,
-            params![session_id, newest_seq, reset_seq],
-        )?;
-        transaction.commit()?;
-        Ok(newest_seq)
     }
 
     /// Advance an existing projection through only its unseen event tail.
@@ -1003,6 +973,18 @@ impl Store {
         before: Option<i64>,
         limit: usize,
     ) -> rusqlite::Result<TranscriptItemPage> {
+        let has_projection = self
+            .connection
+            .query_row(
+                "SELECT 1 FROM transcript_projection WHERE session_id=?1",
+                [session_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if before.is_some_and(|cursor| cursor < 0) || !has_projection {
+            return self.event_transcript_items(session_id, before, limit);
+        }
         let newest_seq = self.ensure_transcript_projection(session_id)?;
         let ceiling = before.unwrap_or(i64::MAX);
         let mut statement = self.connection.prepare(
@@ -1043,8 +1025,124 @@ impl Store {
     }
 
     pub fn projected_agents(&self, session_id: &str) -> rusqlite::Result<Vec<serde_json::Value>> {
+        let has_projection = self
+            .connection
+            .query_row(
+                "SELECT 1 FROM transcript_projection WHERE session_id=?1",
+                [session_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !has_projection {
+            return Ok(fold_all(&self.agent_lifecycle_events(session_id)?)
+                .agents()
+                .to_vec());
+        }
         self.ensure_transcript_projection(session_id)?;
         self.projected_agents_without_ensuring(session_id)
+    }
+
+    /// Read a cold conversation newest-first without constructing its complete
+    /// durable projection. Negative cursors are opaque event anchors used only
+    /// by this fallback; the browser already treats cursors as opaque numbers.
+    fn event_transcript_items(
+        &self,
+        session_id: &str,
+        before: Option<i64>,
+        limit: usize,
+    ) -> rusqlite::Result<TranscriptItemPage> {
+        let newest_seq: i64 = self.connection.query_row(
+            "SELECT COALESCE(MAX(seq),0) FROM event WHERE session_id=?1",
+            [session_id],
+            |row| row.get(0),
+        )?;
+        let ceiling = before
+            .filter(|cursor| *cursor < 0)
+            .map(|cursor| cursor.saturating_abs())
+            .unwrap_or_else(|| newest_seq.saturating_add(1));
+        let reset_seq: i64 = self.connection.query_row(
+            "SELECT COALESCE(MAX(seq),0) FROM event WHERE session_id=?1 AND type='transcript.reset' AND seq<?2",
+            params![session_id, ceiling],
+            |row| row.get(0),
+        )?;
+        let mut scan_before = ceiling;
+        let mut descending = Vec::new();
+        let mut anchors = HashMap::<String, i64>::new();
+        let wanted = limit.saturating_add(8);
+
+        loop {
+            let mut statement = self.connection.prepare(
+                "SELECT seq,json FROM event WHERE session_id=?1 AND seq<?2 AND seq>?3 ORDER BY seq DESC LIMIT 512",
+            )?;
+            let chunk: Vec<(i64, String)> = statement
+                .query_map(params![session_id, scan_before, reset_seq], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            if chunk.is_empty() {
+                break;
+            }
+            scan_before = chunk.last().map(|(seq, _)| *seq).unwrap_or(scan_before);
+            for (seq, json) in chunk {
+                let mut event: Event = serde_json::from_str(&json).map_err(json_error)?;
+                event.fields.insert("seq".into(), json!(seq));
+                super::wire::bound_event(&mut event);
+                if let Some(key) = event_item_anchor(&event) {
+                    // We scan newest-to-oldest, so replacing leaves the
+                    // earliest creation event for an item such as thinking.
+                    anchors.insert(key, seq);
+                }
+                descending.push(event);
+            }
+            if anchors.len() >= wanted {
+                let mut ordered = descending.clone();
+                ordered.reverse();
+                if fold_all(&ordered)
+                    .items()
+                    .iter()
+                    .filter(|item| item_visible(item))
+                    .count()
+                    >= limit
+                {
+                    break;
+                }
+            }
+        }
+
+        descending.reverse();
+        let projection = fold_all(&descending);
+        let visible: Vec<Value> = projection
+            .items()
+            .iter()
+            .filter(|item| item_visible(item))
+            .cloned()
+            .collect();
+        let start = visible.len().saturating_sub(limit);
+        let items = visible[start..].to_vec();
+        let oldest_anchor = items
+            .iter()
+            .filter_map(item_key)
+            .filter_map(|key| anchors.get(&key).copied())
+            .min();
+        let has_older = match oldest_anchor {
+            Some(cursor) if cursor > reset_seq => self.connection.query_row(
+                r#"SELECT EXISTS(SELECT 1 FROM event
+                    WHERE session_id=?1 AND seq>?2 AND seq<?3 AND type IN
+                    ('message.started','thinking.delta','tool.started','note',
+                     'ask.permission','question.requested','plan.proposed',
+                     'provider.message','notice'))"#,
+                params![session_id, reset_seq, cursor],
+                |row| row.get::<_, bool>(0),
+            )?,
+            _ => false,
+        };
+        Ok(TranscriptItemPage {
+            items,
+            cursor: oldest_anchor.filter(|_| has_older).map(|seq| -seq),
+            has_older,
+            newest_seq,
+        })
     }
 
     fn projected_agents_without_ensuring(
@@ -1073,6 +1171,26 @@ fn item_key(item: &Value) -> Option<String> {
         item["kind"].as_str()?,
         item["id"].as_str()?
     ))
+}
+
+fn event_item_anchor(event: &Event) -> Option<String> {
+    let field = |name: &str| event.fields.get(name).and_then(Value::as_str);
+    match event.kind {
+        EventKind::MessageStarted => Some(format!("message:{}", field("messageId")?)),
+        EventKind::ThinkingDelta => Some(format!("thinking:{}", field("messageId")?)),
+        EventKind::ToolStarted => Some(format!("tool:{}", field("toolCallId")?)),
+        EventKind::Note => Some(format!("note:{}", field("noteId")?)),
+        EventKind::AskPermission => Some(format!("ask:{}", field("askId")?)),
+        EventKind::QuestionRequested => Some(format!("question:{}", field("requestId")?)),
+        EventKind::PlanProposed => Some(format!("plan:{}", field("proposalId")?)),
+        EventKind::ProviderMessage => Some(format!(
+            "provider_message:{}",
+            event.fields.get("signal")?.get("id")?.as_str()?
+        )),
+        EventKind::Notice => Some(format!("notice-{}", event.fields.get("seq")?.as_i64()?))
+            .map(|id| format!("notice:{id}")),
+        _ => None,
+    }
 }
 
 fn item_visible(item: &Value) -> bool {
@@ -1550,6 +1668,7 @@ mod tests {
             let event: Event = serde_json::from_value(source.clone()).unwrap();
             assert!(store.append_event(&event).unwrap());
         }
+        store.ensure_transcript_projection("session-1").unwrap();
 
         let newest = store.transcript_items("session-1", None, 3).unwrap();
         assert_eq!(newest.newest_seq, 37);
@@ -1609,6 +1728,7 @@ mod tests {
                 .append_event(&serde_json::from_value(value).unwrap())
                 .unwrap());
         }
+        store.ensure_transcript_projection("chat").unwrap();
         assert_eq!(
             store
                 .transcript_items("chat", None, 40)
@@ -1642,6 +1762,41 @@ mod tests {
             )
             .unwrap();
         assert_eq!(after, before, "an unrelated tail event rewrote old history");
+    }
+
+    #[test]
+    fn workbench_core_cold_history_pages_without_materialising_every_item() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        for seq in 1..=50 {
+            let event: Event = serde_json::from_value(json!({
+                "type":"notice","sessionId":"cold","seq":seq,"at":"now","text":format!("row {seq}")
+            }))
+            .unwrap();
+            assert!(store.append_event(&event).unwrap());
+        }
+
+        let newest = store.transcript_items("cold", None, 40).unwrap();
+        assert_eq!(newest.items.len(), 40);
+        assert_eq!(newest.items[0]["text"], "row 11");
+        assert!(newest.cursor.is_some_and(|cursor| cursor < 0));
+        assert!(newest.has_older);
+        assert_eq!(
+            store
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM transcript_item WHERE session_id='cold'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+
+        let older = store.transcript_items("cold", newest.cursor, 40).unwrap();
+        assert_eq!(older.items.len(), 10);
+        assert_eq!(older.items[0]["text"], "row 1");
+        assert!(!older.has_older);
     }
 
     fn count(connection: &Connection, table: &str) -> i64 {

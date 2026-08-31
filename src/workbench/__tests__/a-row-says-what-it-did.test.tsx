@@ -76,6 +76,12 @@ describe('the row says it in English', () => {
     expect(screen.getByTestId('tool-toggle').textContent).toContain('Read app/page.tsx');
     expect(screen.getByTestId('tool-row')).toHaveAttribute('data-ran-kind', 'read');
   });
+
+  it('keeps an agent completion title instead of re-describing its old prompt', () => {
+    render(<ToolRow item={call('Agent', { prompt: 'Inspect the session' }, 'reviewer finished')} nested={false} />);
+    expect(screen.getByTestId('tool-row')).toHaveAttribute('data-ran-kind', 'agent');
+    expect(screen.getByTestId('tool-toggle')).toHaveTextContent('reviewer finished');
+  });
 });
 
 describe('the mark says what kind of thing it was', () => {

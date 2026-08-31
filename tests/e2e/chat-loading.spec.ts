@@ -117,6 +117,7 @@ test('the reported 31,000-plus-event chat opens newest-first and pages only on u
   await page.goto(`/project?id=${project.id}&tab=chat`);
   const row = page.locator(`[data-testid="restore-row"][data-row-key="${CHAT}"]`);
   await expect(row.getByTestId('row-name')).toHaveText(TITLE, { timeout: 30_000 });
+  const openedAt = performance.now();
   await row.getByTestId('row-name').click();
 
   await expect(page.locator(`[data-testid="chat-tab"][data-session-id="${CHAT}"]`)).toBeVisible();
@@ -128,6 +129,8 @@ test('the reported 31,000-plus-event chat opens newest-first and pages only on u
   await expect.poll(async () => Number(await transcript.getAttribute('data-mounted-items'))).toBeGreaterThan(0);
   expect(Number(await transcript.getAttribute('data-mounted-items'))).toBeLessThan(40);
   await expect(page.getByTestId('transcript')).toContainText(/\S/);
+  const openMs = performance.now() - openedAt;
+  expect(openMs, `chat became usable in ${openMs.toFixed(1)}ms`).toBeLessThan(1_000);
   await expect.poll(() => page.getByTestId('transcript').evaluate((pane) =>
     Math.abs(pane.scrollHeight - pane.clientHeight - pane.scrollTop),
   )).toBeLessThanOrEqual(2);

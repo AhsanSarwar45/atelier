@@ -15,10 +15,10 @@ describe.each(['claude', 'codex'])('%s chat ownership', () => {
     expect(canCompose(ownership)).toBe(true);
   });
 
-  it('keeps an attached live chat ours even if a stale outside hold remains', () => {
+  it('trusts the server’s provider-neutral outside-owner set over stale transcript state', () => {
     for (const state of ['starting', 'idle', 'thinking', 'streaming', 'running_tool', 'waiting_permission'] as const) {
       const ownership = sessionOwnership(state, 'provider-session', true);
-      expect(ownership, state).toEqual({ kind: 'atelier' });
+      expect(ownership, state).toEqual({ kind: 'elsewhere', externalId: 'provider-session' });
       expect(canCompose(ownership), state).toBe(true);
     }
   });

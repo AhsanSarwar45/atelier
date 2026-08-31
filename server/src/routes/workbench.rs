@@ -110,6 +110,19 @@ impl WorkbenchState {
             .list_sessions(None)
             .await
             .unwrap_or_default();
+        // Provider marker files are written by Atelier's own drivers too.
+        // Remove those before publishing the provider-neutral "elsewhere"
+        // set; explicit registry ownership is stronger than a process trace
+        // on disk and avoids locking our own composer.
+        let mut attached = std::collections::HashSet::new();
+        for session in &sessions {
+            if self.registry.has_driver(&session.id).await {
+                if let Some(id) = &session.external_id {
+                    attached.insert(id.to_lowercase());
+                }
+            }
+        }
+        holds.retain(|hold| !attached.contains(&hold.id.to_lowercase()));
         let by_external: HashMap<_, _> = sessions
             .iter()
             .filter_map(|s| s.external_id.as_ref().map(|id| (id.to_lowercase(), s)))
