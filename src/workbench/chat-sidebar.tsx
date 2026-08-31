@@ -23,7 +23,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Bot, ChevronDown, Loader2, Plus, Power, Search, X } from 'lucide-react';
+import { Bot, ChevronDown, ExternalLink, Loader2, Plus, Power, Search, X } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
@@ -359,13 +359,33 @@ export function ChatSidebar({
   const [busy, setBusy] = useState<string | null>(null);
   const [ending, setEnding] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  const loadGeneration = useRef(0);
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     const q = new URLSearchParams({ project: projectId, path: projectPath });
     if (everything) q.set('all', '1');
+    const local = new URLSearchParams(q);
+    local.set('local', '1');
+    let reconciled = false;
+    // Rows already in the durable store do not wait behind provider process
+    // startup or a scan of every external record. Provider discovery still
+    // runs on the same load and replaces this local picture when it completes.
+    void request(`/api/workbench/restore?${local}`)
+      .then(async (res) => {
+        if (!res.ok) return;
+        const rows = (await res.json()) as RestoreRow[];
+        if (!reconciled && generation === loadGeneration.current) setFetched(rows);
+      })
+      .catch(() => undefined);
     try {
       const res = await request(`/api/workbench/restore?${q}`);
-      if (res.ok) setFetched((await res.json()) as RestoreRow[]);
+      if (res.ok && generation === loadGeneration.current) {
+        const rows = (await res.json()) as RestoreRow[];
+        if (generation !== loadGeneration.current) return;
+        reconciled = true;
+        setFetched(rows);
+      }
     } catch {
       // The workbench may not be running; the board half is unaffected.
     }
@@ -726,6 +746,16 @@ export function ChatSidebar({
                     >
                       {row.title ?? 'Untitled chat'}
                     </Button>
+                    {row.origin === 'terminal' && (
+                      <span
+                        data-testid="external-origin"
+                        aria-label="External chat"
+                        title="External chat — started outside Atelier"
+                        className="flex size-3.5 shrink-0 items-center text-muted-foreground"
+                      >
+                        <ExternalLink aria-hidden="true" className="size-3.5" />
+                      </span>
+                    )}
                     {/*
                       The control is drawn OVER the clock, not beside it. Beside
                       it, a button nobody could see still held its own width and

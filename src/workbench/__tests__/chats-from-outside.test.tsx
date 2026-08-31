@@ -85,7 +85,8 @@ let list: RestoreRow[] = [];
 /** Every url asked for, so a fetch nobody wanted is visible. */
 let asked: string[] = [];
 
-const restores = () => asked.filter((u) => u.includes('/api/workbench/restore'));
+const restores = () => asked.filter((u) => u.includes('/api/workbench/restore') && !u.includes('local=1'));
+const localRestores = () => asked.filter((u) => u.includes('/api/workbench/restore') && u.includes('local=1'));
 const rows = () => screen.queryAllByTestId('restore-row');
 const rowFor = (key: string) => document.querySelector(`[data-row-key="${key}"]`);
 
@@ -157,6 +158,7 @@ describe('a chat begun in another tool', () => {
 
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(screen.queryByTestId('chat-external')).toBeNull();
+    expect(screen.getByTestId('external-origin')).toHaveAttribute('title', 'External chat — started outside Atelier');
     expect(screen.queryByText('Asleep')).toBeNull();
     expect(screen.queryByTestId('row-pill')).toBeNull();
   });
@@ -198,6 +200,29 @@ describe('a chat begun in another tool', () => {
     // Watching a count that starts somewhere is not the same as being told it
     // moved: opening the tab is one fetch, and the word has not been said.
     expect(restores()).toHaveLength(1);
+    expect(localRestores(), 'the durable fast path was not asked for exactly once').toHaveLength(1);
+  });
+
+  it('draws durable chats without waiting for provider discovery', async () => {
+    let finishProvider!: (rows: RestoreRow[]) => void;
+    const provider = new Promise<RestoreRow[]>((resolve) => { finishProvider = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      asked.push(url);
+      const answer = url.includes('local=1') ? [row({ title: 'Already stored' })] : await provider;
+      return { ok: true, json: async () => answer } as unknown as Response;
+    }));
+
+    const ChatSidebar = await freshSidebar();
+    render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={() => {}} />);
+
+    await screen.findByText('Already stored');
+    expect(restores()).toHaveLength(1);
+    finishProvider([
+      row({ title: 'Already stored' }),
+      row({ sessionId: 'external', externalId: 'external', title: 'Found outside', origin: 'terminal' }),
+    ]);
+    await screen.findByText('Found outside');
   });
 
   it('leaves the reader where he was in a long list', async () => {

@@ -38,6 +38,11 @@ pub struct WorkbenchState {
     registry: Arc<WorkbenchRegistry>,
     hold_memory: Arc<tokio::sync::Mutex<HoldMemory>>,
     usage_cache: Arc<tokio::sync::Mutex<HashMap<String, (std::time::Instant, Value)>>>,
+    codex_readers: Arc<
+        tokio::sync::Mutex<
+            HashMap<std::path::PathBuf, crate::workbench::codex::transport::CodexTransport>,
+        >,
+    >,
 }
 
 #[derive(Default)]
@@ -52,6 +57,7 @@ impl WorkbenchState {
             registry: Arc::new(registry),
             hold_memory: Arc::new(tokio::sync::Mutex::new(HoldMemory::default())),
             usage_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            codex_readers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
     pub fn database(&self) -> &ChatDb {
@@ -95,6 +101,55 @@ impl WorkbenchState {
             id,
             5,
         )
+    }
+
+    /// One read-only app-server per working directory. Initializing Codex is
+    /// expensive; list, metadata and usage reads must share it just as the
+    /// former sidecar's reader cache did.
+    async fn codex_reader(
+        &self,
+        cwd: &std::path::Path,
+    ) -> Result<crate::workbench::codex::transport::CodexTransport, String> {
+        let key = cwd.to_path_buf();
+        let mut readers = self.codex_readers.lock().await;
+        if let Some(reader) = readers.get(&key) {
+            return Ok(reader.clone());
+        }
+        let mut config = crate::workbench::codex::transport::CodexTransportConfig::app_server(cwd);
+        if let Some(executable) = crate::routes::find_tool("codex", &[]) {
+            config.executable = executable;
+        }
+        let reader = crate::workbench::codex::transport::CodexTransport::start(config)
+            .await
+            .map_err(|error| error.to_string())?;
+        // A read-only client does not consume provider notifications. Drain
+        // them so a long-lived cached reader has bounded memory.
+        if let Some(mut inbound) = reader.take_inbound() {
+            tokio::spawn(async move { while inbound.recv().await.is_some() {} });
+        }
+        readers.insert(key, reader.clone());
+        Ok(reader)
+    }
+
+    async fn forget_codex_reader(
+        &self,
+        cwd: &std::path::Path,
+        failed: &crate::workbench::codex::transport::CodexTransport,
+    ) {
+        let removed = {
+            let mut readers = self.codex_readers.lock().await;
+            if readers
+                .get(cwd)
+                .is_some_and(|reader| reader.child_id() == failed.child_id())
+            {
+                readers.remove(cwd)
+            } else {
+                None
+            }
+        };
+        if let Some(reader) = removed {
+            reader.close().await;
+        }
     }
 
     pub(crate) async fn provider_holds(&self) -> Vec<crate::workbench::external::ProviderHold> {
@@ -202,17 +257,12 @@ impl WorkbenchState {
         }
         let at = chrono::Utc::now().to_rfc3339();
         let value = if brand == "codex" {
-            let mut config = crate::workbench::codex::transport::CodexTransportConfig::app_server(
-                std::path::Path::new("."),
-            );
-            if let Some(executable) = crate::routes::find_tool("codex", &[]) {
-                config.executable = executable;
-            }
-            let transport = crate::workbench::codex::transport::CodexTransport::start(config)
-                .await
-                .map_err(|e| e.to_string())?;
+            let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+            let transport = self.codex_reader(&cwd).await?;
             let result = crate::workbench::usage::read_codex(&transport, at).await;
-            transport.close().await;
+            if result.is_err() {
+                self.forget_codex_reader(&cwd, &transport).await;
+            }
             serde_json::to_value(result?).map_err(|e| e.to_string())?
         } else {
             let options = crate::workbench::claude::transport::ClaudeSessionOptions {
@@ -471,10 +521,9 @@ pub(crate) async fn session_summaries(
 #[derive(Deserialize)]
 struct RestoreQuery {
     project: Option<String>,
-    #[allow(dead_code)]
     path: Option<String>,
-    #[allow(dead_code)]
     all: Option<String>,
+    local: Option<String>,
 }
 
 fn folder_of(path: &str) -> Option<String> {
@@ -526,15 +575,11 @@ async fn provider_sessions(
     let project_path = project.map(std::path::Path::new);
     let mut codex_rows = Vec::new();
     let cwd = project_path.unwrap_or_else(|| std::path::Path::new("."));
-    let mut config = crate::workbench::codex::transport::CodexTransportConfig::app_server(cwd);
-    if let Some(executable) = crate::routes::find_tool("codex", &[]) {
-        config.executable = executable;
-    }
-    if let Ok(transport) = crate::workbench::codex::transport::CodexTransport::start(config).await {
-        if let Ok(threads) =
+    if let Ok(transport) = state.codex_reader(cwd).await {
+        let listed =
             crate::workbench::codex::history::list_threads(&transport, project_path, everything)
-                .await
-        {
+                .await;
+        if let Ok(threads) = listed {
             codex_rows.extend(threads.into_iter().filter_map(|thread| {
                 let id = thread["id"].as_str()?;
                 let updated = thread["updatedAt"].as_i64().map(|seconds| chrono::DateTime::from_timestamp(seconds, 0).map(|at| at.to_rfc3339())).flatten();
@@ -543,8 +588,9 @@ async fn provider_sessions(
                     "name":thread.get("name").filter(|v|!v.is_null()).cloned().unwrap_or_else(||json!(crate::workbench::metadata::conversation_title(preview))),
                     "cwd":thread["cwd"],"branch":thread["gitInfo"]["branch"],"lastSpokeAt":thread["path"].as_str().and_then(|path|crate::workbench::codex::history::last_spoke_at(std::path::Path::new(path)))}))
             }));
+        } else {
+            state.forget_codex_reader(cwd, &transport).await;
         }
-        transport.close().await;
     }
     let mut rows = claude.await.unwrap_or_default();
     rows.extend(codex_rows);
@@ -569,7 +615,12 @@ async fn restore(
             restore_row(session, linked, &holds)
         })
         .collect();
-    for known in provider_sessions(&state, query.path.as_deref(), query.all.is_some()).await {
+    let known_sessions = if query.local.is_some() {
+        Vec::new()
+    } else {
+        provider_sessions(&state, query.path.as_deref(), query.all.is_some()).await
+    };
+    for known in known_sessions {
         let key = format!(
             "{}:{}",
             known["brand"].as_str().unwrap_or_default(),

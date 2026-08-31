@@ -172,6 +172,29 @@ async fn append_started(database: &ChatDb, session: &Session) -> Result<(), Stri
     Ok(())
 }
 
+async fn append_import_menu(
+    database: &ChatDb,
+    session: &Session,
+    provider: &str,
+    mut value: Value,
+) -> Result<(), String> {
+    let event_id = super::protocol::record_event_id(&value);
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "provider menu was not an object".to_string())?;
+    object.insert(
+        "providerEvent".into(),
+        json!({"provider":provider,"threadId":session.external_id,"eventId":event_id,"delivery":"replay"}),
+    );
+    object.insert("sessionId".into(), json!(session.id));
+    object.insert("seq".into(), json!(0));
+    object.insert("at".into(), json!(session.last_active_at));
+    database
+        .append(serde_json::from_value(value).map_err(|error| error.to_string())?)
+        .await?;
+    Ok(())
+}
+
 async fn import_claude_history(
     database: &ChatDb,
     config: &Path,
@@ -190,6 +213,18 @@ async fn import_claude_history(
         .ok()
         .map(|meta| meta.len() as i64);
     let history = super::claude::history::read_history(&record);
+    let menu = super::claude::live::ClaudeLiveState::new(
+        json!({}),
+        history.settings.model.clone(),
+        history
+            .settings
+            .permission_mode
+            .clone()
+            .unwrap_or_else(|| "default".into()),
+        history.settings.effort.clone(),
+    )
+    .menu();
+    append_import_menu(database, session, "claude", menu).await?;
     let choice =
         super::provider_reconciliation::complete_history_choice(database, &session.id).await?;
     if choice == super::provider_reconciliation::HistoryChoice::Leave {
@@ -249,11 +284,23 @@ async fn import_codex_history(database: &ChatDb, session: &Session) -> Result<()
     let transport = super::codex::transport::CodexTransport::start(config)
         .await
         .map_err(|error| error.to_string())?;
-    let result = super::codex::history::read_thread(&transport, external_id)
-        .await
-        .map_err(|error| error.to_string());
+    let (result, mut menu) = tokio::join!(
+        super::codex::history::read_thread(&transport, external_id),
+        super::codex::history::menu(
+            &transport,
+            Path::new(&session.cwd),
+            session.model.as_deref()
+        ),
+    );
     transport.close().await;
-    let thread = result?;
+    if let Some(object) = menu.as_object_mut() {
+        object.remove("skillPaths");
+        object.remove("collaborationPresets");
+        object.remove("defaultEffort");
+        object.insert("type".into(), json!("session.menu"));
+    }
+    append_import_menu(database, session, "codex", menu).await?;
+    let thread = result.map_err(|error| error.to_string())?;
     let choice =
         super::provider_reconciliation::complete_history_choice(database, &session.id).await?;
     if choice == super::provider_reconciliation::HistoryChoice::Leave {
@@ -815,5 +862,75 @@ impl ProviderDriver for CodexDriver {
             self.native.close().await;
             Ok(json!({"ok":true}))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn imported_session() -> Session {
+        Session {
+            id: "chat-1".into(),
+            brand: "codex".into(),
+            external_id: Some("thread-1".into()),
+            project_id: "project-1".into(),
+            project_path: "/project".into(),
+            cwd: "/project".into(),
+            model: Some("gpt-5".into()),
+            permission_mode: "on-request".into(),
+            effort: Some("high".into()),
+            collaboration_mode: None,
+            title: Some("Imported chat".into()),
+            state: "idle".into(),
+            origin: "terminal".into(),
+            created_at: "2026-08-31T00:00:00Z".into(),
+            last_active_at: "2026-08-31T00:00:00Z".into(),
+            last_spoke_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn imported_menu_is_durable_deduplicated_and_refreshable() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
+        let session = imported_session();
+        database.create_session(session.clone()).await.unwrap();
+        let menu = json!({
+            "type": "session.menu",
+            "models": [{"id": "gpt-5", "label": "GPT-5"}],
+            "permissionModes": [{"id": "on-request", "label": "Ask"}],
+            "efforts": [{"id": "high", "label": "High"}]
+        });
+
+        append_import_menu(&database, &session, "codex", menu.clone())
+            .await
+            .unwrap();
+        append_import_menu(&database, &session, "codex", menu)
+            .await
+            .unwrap();
+        assert_eq!(
+            database
+                .events_since(session.id.clone(), 0)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+
+        append_import_menu(
+            &database,
+            &session,
+            "codex",
+            json!({
+                "type": "session.menu",
+                "models": [{"id": "gpt-6", "label": "GPT-6"}]
+            }),
+        )
+        .await
+        .unwrap();
+        let events = database.events_since(session.id, 0).await.unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1].fields["models"][0]["id"], "gpt-6");
     }
 }

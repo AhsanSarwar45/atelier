@@ -357,6 +357,26 @@ test.describe('how a chat scrolls', () => {
     });
   });
 
+  test('reloads the durable chat list without waiting for provider discovery', async ({ page, request }) => {
+    const kept = await makeGround(request, 'list-fast');
+    try {
+      const chat = kept.longChat();
+      await openChatList(page, kept.projectId);
+      // Opening once imports the external offer into the shared durable store.
+      // A reload must draw that stored row before the slower provider index is
+      // reconciled, which is the cold-list path the owner waits on.
+      await readChat(page, chat);
+
+      const began = performance.now();
+      await page.reload();
+      await page.locator(`[data-testid="restore-row"][data-external-id="${chat.sessionId}"]`).waitFor();
+      const elapsed = performance.now() - began;
+      expect(elapsed, `the saved chat list took ${elapsed.toFixed(1)}ms to return`).toBeLessThan(1_000);
+    } finally {
+      await kept.away();
+    }
+  });
+
   /**
    * A chat is read from its end, and it is there before the first frame: a pane
    * that starts at the top and is moved afterwards shows the history flying
