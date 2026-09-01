@@ -151,6 +151,27 @@ describe('a chat begun in another tool', () => {
     )).toBe(false);
   });
 
+  it('persists the provider human clock when an unseen chat gets its local id', async () => {
+    list = [row({
+      sessionId: null,
+      externalId: 'outside-1',
+      lastActiveAt: '2026-09-01T09:50:00.000Z',
+      lastSpokeAt: '2026-08-30T22:05:00.000Z',
+      origin: 'terminal',
+    })];
+    const ChatSidebar = await freshSidebar();
+    render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={() => {}} />);
+
+    (await screen.findByTestId('row-name')).click();
+    await waitFor(() => expect((fetch as ReturnType<typeof vi.fn>).mock.calls.some(([, init]) => {
+      if (init?.method !== 'POST') return false;
+      const command = JSON.parse(String(init.body));
+      return command.type === 'session.open'
+        && command.lastActiveAt === '2026-09-01T09:50:00.000Z'
+        && command.lastSpokeAt === '2026-08-30T22:05:00.000Z';
+    })).toBe(true));
+  });
+
   it('is neither external nor asleep once no other process holds it', async () => {
     list = [row({ origin: 'terminal', externalId: 'outside-1', runningElsewhere: false })];
     const ChatSidebar = await freshSidebar();
@@ -158,7 +179,7 @@ describe('a chat begun in another tool', () => {
 
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(screen.queryByTestId('chat-external')).toBeNull();
-    expect(screen.getByTestId('external-origin')).toHaveAttribute('title', 'External chat — started outside Atelier');
+    expect(screen.queryByTestId('external-origin')).toBeNull();
     expect(screen.queryByText('Asleep')).toBeNull();
     expect(screen.queryByTestId('row-pill')).toBeNull();
   });
@@ -173,6 +194,10 @@ describe('a chat begun in another tool', () => {
 
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(screen.getByTestId('chat-external')).toBeInTheDocument();
+    expect(screen.getByTestId('external-origin')).toHaveAttribute(
+      'title',
+      'External chat — currently owned outside Atelier',
+    );
     expect(screen.getByTestId('row-pill')).toHaveTextContent('Idle');
   });
 

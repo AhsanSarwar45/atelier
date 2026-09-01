@@ -589,6 +589,13 @@ fn restore_row(
     })
 }
 
+fn restore_clock(row: &Value) -> &str {
+    row["lastSpokeAt"]
+        .as_str()
+        .or_else(|| row["lastActiveAt"].as_str())
+        .unwrap_or_default()
+}
+
 async fn provider_sessions(
     state: &WorkbenchState,
     project: Option<&str>,
@@ -657,7 +664,7 @@ async fn restore(
                 restore_row(session, linked, &[])
             })
             .collect();
-        rows.sort_by(|a, b| b["lastActiveAt"].as_str().cmp(&a["lastActiveAt"].as_str()));
+        rows.sort_by(|a, b| restore_clock(b).cmp(restore_clock(a)));
         return Ok(Json(rows));
     }
 
@@ -694,6 +701,18 @@ async fn restore(
             }
             if known["lastSpokeAt"].as_str() > row["lastSpokeAt"].as_str() {
                 row["lastSpokeAt"] = known["lastSpokeAt"].clone();
+                if let (Some(session_id), Some(at)) =
+                    (row["sessionId"].as_str(), known["lastSpokeAt"].as_str())
+                {
+                    // Provider discovery is also reconciliation. Persist the
+                    // human clock so the next fast local restore draws the
+                    // same group and order instead of flickering until this
+                    // slower request finishes.
+                    state
+                        .database()
+                        .mark_spoke(session_id.to_string(), at.to_string())
+                        .await?;
+                }
             }
             if !known["cwd"].is_null() {
                 row["cwdHint"] = known["cwd"].clone();
@@ -710,7 +729,7 @@ async fn restore(
             "folder":known["cwd"].as_str().and_then(folder_of),"branch":known["branch"],"beads":[],
             "runningElsewhere":held.is_some(),"held":held}));
     }
-    rows.sort_by(|a, b| b["lastActiveAt"].as_str().cmp(&a["lastActiveAt"].as_str()));
+    rows.sort_by(|a, b| restore_clock(b).cmp(restore_clock(a)));
     Ok(Json(rows))
 }
 
@@ -1359,6 +1378,40 @@ mod tests {
         assert_eq!(rows[0]["sessionId"], "chat-1");
         assert_eq!(rows[0]["title"], "The chat that must remain visible");
         assert_eq!(rows[0]["runningElsewhere"], false);
+    }
+
+    #[tokio::test]
+    async fn native_workbench_local_restore_orders_and_groups_by_human_clock() {
+        let (_directory, state) = fixture();
+        let mut older_human = saved_session();
+        older_human.id = "opened-today".into();
+        older_human.external_id = Some("thread-opened-today".into());
+        older_human.last_active_at = "2026-09-01T09:50:00Z".into();
+        older_human.last_spoke_at = Some("2026-08-30T22:05:00Z".into());
+        let mut newer_human = saved_session();
+        newer_human.id = "spoken-today".into();
+        newer_human.external_id = Some("thread-spoken-today".into());
+        newer_human.last_active_at = "2026-09-01T09:00:00Z".into();
+        newer_human.last_spoke_at = Some("2026-09-01T08:55:00Z".into());
+        state.database().create_session(older_human).await.unwrap();
+        state.database().create_session(newer_human).await.unwrap();
+
+        let response = router(state)
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/restore?project=project-1&local=1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let rows: Value = serde_json::from_slice(&bytes).unwrap();
+
+        assert_eq!(rows[0]["sessionId"], "spoken-today");
+        assert_eq!(rows[1]["sessionId"], "opened-today");
     }
 
     #[tokio::test]

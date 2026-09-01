@@ -11,23 +11,38 @@ const MODES: &[&str] = &["untrusted", "on-request", "never"];
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub fn last_spoke_at(path: &Path) -> Option<String> {
+    const BLOCK: u64 = 256 * 1024;
     let mut file = File::open(path).ok()?;
-    let size = file.metadata().ok()?.len();
-    let start = size.saturating_sub(512 * 1024);
-    file.seek(SeekFrom::Start(start)).ok()?;
-    let mut text = String::new();
-    file.read_to_string(&mut text).ok()?;
-    let lines = text
-        .lines()
-        .skip(if start > 0 { 1 } else { 0 })
-        .collect::<Vec<_>>();
-    for line in lines.into_iter().rev() {
-        let Ok(row) = serde_json::from_str::<Value>(line) else {
+    let mut end = file.metadata().ok()?.len();
+    let mut suffix = Vec::new();
+    while end > 0 {
+        let start = end.saturating_sub(BLOCK);
+        file.seek(SeekFrom::Start(start)).ok()?;
+        let mut bytes = vec![0; (end - start) as usize];
+        file.read_exact(&mut bytes).ok()?;
+        bytes.extend_from_slice(&suffix);
+        let complete_from = if start == 0 {
+            0
+        } else if let Some(newline) = bytes.iter().position(|byte| *byte == b'\n') {
+            suffix = bytes[..newline].to_vec();
+            newline + 1
+        } else {
+            suffix = bytes;
+            end = start;
             continue;
         };
-        if row["type"] == "event_msg" && row["payload"]["type"] == "user_message" {
-            return row["timestamp"].as_str().map(str::to_string);
+        for line in String::from_utf8_lossy(&bytes[complete_from..])
+            .lines()
+            .rev()
+        {
+            let Ok(row) = serde_json::from_str::<Value>(line.trim()) else {
+                continue;
+            };
+            if row["type"] == "event_msg" && row["payload"]["type"] == "user_message" {
+                return row["timestamp"].as_str().map(str::to_string);
+            }
         }
+        end = start;
     }
     None
 }
@@ -447,6 +462,30 @@ fn agent_definitions(cwd: &Path) -> Vec<Value> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn native_codex_history_finds_the_human_clock_before_a_large_final_turn() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            "{}",
+            json!({"type":"event_msg","timestamp":"2026-08-30T22:05:00Z","payload":{"type":"user_message","message":"Resume"}})
+        )
+        .unwrap();
+        for index in 0..700 {
+            writeln!(
+                file,
+                "{}",
+                json!({"type":"response_item","payload":{"type":"function_call_output","output":"x".repeat(2048),"index":index}})
+            )
+            .unwrap();
+        }
+
+        assert_eq!(
+            last_spoke_at(file.path()).as_deref(),
+            Some("2026-08-30T22:05:00Z")
+        );
+    }
 
     #[test]
     fn native_codex_history_reads_latest_settings_and_usage_from_the_rollout_tail() {

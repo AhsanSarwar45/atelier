@@ -458,6 +458,7 @@ export function ChatSidebar({
             title: row.title,
             cwd: row.cwdHint,
             lastActiveAt: row.lastActiveAt,
+            lastSpokeAt: row.lastSpokeAt,
           });
           // The list is asked again, so the row now carries the id it was just
           // given: without that it keeps reporting it has no chat, is never
@@ -730,11 +731,11 @@ export function ChatSidebar({
                     >
                       {row.title ?? 'Untitled chat'}
                     </Button>
-                    {row.origin === 'terminal' && (
+                    {state.external && (
                       <span
                         data-testid="external-origin"
                         aria-label="External chat"
-                        title="External chat — started outside Atelier"
+                        title="External chat — currently owned outside Atelier"
                         className="flex size-3.5 shrink-0 items-center text-muted-foreground"
                       >
                         <ExternalLink aria-hidden="true" className="size-3.5" />

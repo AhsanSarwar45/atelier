@@ -690,6 +690,8 @@ export type WbpCommand =
       title?: string | null;
       cwd?: string | null;
       lastActiveAt?: string;
+      /** The newest human message, distinct from provider/file activity. */
+      lastSpokeAt?: string | null;
     }
   | {
       type: 'session.resume';

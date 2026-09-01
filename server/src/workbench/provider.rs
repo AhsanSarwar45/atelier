@@ -107,7 +107,7 @@ fn new_session(
         .to_string(),
         created_at: at.clone(),
         last_active_at: at,
-        last_spoke_at: None,
+        last_spoke_at: field(command, "lastSpokeAt").map(str::to_string),
     })
 }
 
@@ -930,6 +930,30 @@ impl ProviderDriver for CodexDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn imported_session_keeps_provider_human_clock_separate_from_activity() {
+        let command: Command = serde_json::from_value(json!({
+            "type":"session.open", "brand":"codex", "projectId":"p1",
+            "projectPath":"/project", "externalId":"thread-1",
+            "lastActiveAt":"2026-09-01T09:50:00Z",
+            "lastSpokeAt":"2026-08-30T22:05:00Z"
+        }))
+        .unwrap();
+        let session = new_session(
+            &command,
+            "chat-1".into(),
+            Some("thread-1".into()),
+            Path::new("/unused"),
+        )
+        .unwrap();
+
+        assert_eq!(session.last_active_at, "2026-09-01T09:50:00Z");
+        assert_eq!(
+            session.last_spoke_at.as_deref(),
+            Some("2026-08-30T22:05:00Z")
+        );
+    }
 
     fn imported_session() -> Session {
         Session {
