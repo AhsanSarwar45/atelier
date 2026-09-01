@@ -374,6 +374,14 @@ async fn relay_native_chat(
     tx: mpsc::Sender<Tagged>,
 ) {
     let mut updates = state.database().subscribe_session(&session_id);
+    // A copied URL and a sidebar click are the same cold read. This is
+    // intentionally before the opening snapshot so a stale busy state cannot
+    // survive a process restart, while history parsing itself continues in
+    // background. A resumed wire already reconciled this chat and must not
+    // start another import.
+    if since == 0 {
+        state.looked_at(&session_id).await;
+    }
     let followed = state
         .database()
         .get_session(session_id.clone())

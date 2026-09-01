@@ -366,6 +366,12 @@ async fn serve(open_browser: bool) {
     let data_dir = identity::data_dir().expect("Failed to resolve Atelier data directory");
     let chat_db = workbench::actor::ChatDb::open(&data_dir.join("workbench.db"))
         .expect("Failed to initialize chat database");
+    // Provider processes and registry drivers do not survive this process.
+    // Heal every stale busy/ended row before it is exposed to the sidebar.
+    chat_db
+        .mark_all_dormant()
+        .await
+        .expect("Failed to reset stale chat activity");
     let home = directories::BaseDirs::new()
         .map(|dirs| dirs.home_dir().to_path_buf())
         .expect("Failed to resolve home directory");

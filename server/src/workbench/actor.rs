@@ -34,6 +34,7 @@ enum Command {
     MarkSpoke(String, String, Reply<()>),
     ListSessions(Option<String>, Reply<Vec<Session>>),
     ListRestoreSessions(Option<String>, bool, Reply<Vec<Session>>),
+    MarkAllDormant(Reply<usize>),
     BeadsForSessions(Vec<String>, Reply<HashMap<String, Vec<String>>>),
     BeadsForSession(String, Reply<Vec<String>>),
     RememberBeadLink(String, String, String, String, Reply<()>),
@@ -180,6 +181,10 @@ impl ChatDb {
     ) -> Result<Vec<Session>, String> {
         self.request(|reply| Command::ListRestoreSessions(project_id, everything, reply))
             .await
+    }
+
+    pub async fn mark_all_dormant(&self) -> Result<usize, String> {
+        self.request(Command::MarkAllDormant).await
     }
 
     pub async fn beads_for_sessions(
@@ -511,6 +516,7 @@ fn run(
                 reply,
                 store.list_restore_sessions(project_id.as_deref(), everything),
             ),
+            Command::MarkAllDormant(reply) => respond(reply, store.mark_all_dormant()),
             Command::BeadsForSessions(ids, reply) => respond(reply, store.beads_for_sessions(&ids)),
             Command::BeadsForSession(id, reply) => respond(reply, store.beads_for_session(&id)),
             Command::RememberBeadLink(session, bead, via, at, reply) => respond(

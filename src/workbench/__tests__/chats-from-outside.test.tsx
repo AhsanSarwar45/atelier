@@ -136,7 +136,7 @@ afterEach(() => {
 });
 
 describe('a chat begun in another tool', () => {
-  it('reconciles an existing chat stranded on Starting when its row is opened', async () => {
+  it('lets the chat feed reconcile an existing row without a duplicate open command', async () => {
     list = [row({ sessionId: 'stranded', externalId: 'outside-1', state: 'starting' })];
     const openedChat = vi.fn();
     const ChatSidebar = await freshSidebar();
@@ -146,9 +146,9 @@ describe('a chat begun in another tool', () => {
     screen.getByTestId('row-name').click();
 
     expect(openedChat).toHaveBeenCalledWith('stranded');
-    await waitFor(() => expect((fetch as ReturnType<typeof vi.fn>).mock.calls.some(([, init]) =>
+    expect((fetch as ReturnType<typeof vi.fn>).mock.calls.some(([, init]) =>
       init?.method === 'POST' && JSON.parse(String(init.body)).type === 'session.open',
-    )).toBe(true));
+    )).toBe(false);
   });
 
   it('is neither external nor asleep once no other process holds it', async () => {

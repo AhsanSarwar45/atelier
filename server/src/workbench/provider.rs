@@ -206,6 +206,27 @@ async fn import_claude_history(
     let Some(record) = super::claude::history::find_record(config, external_id) else {
         return Ok(());
     };
+    let choice =
+        super::provider_reconciliation::complete_history_choice(database, &session.id).await?;
+    if choice != super::provider_reconciliation::HistoryChoice::Read {
+        // Controls are useful even when the transcript is already durable.
+        // Build them from the stored pins without reparsing the whole record.
+        let menu = super::claude::live::ClaudeLiveState::new(
+            json!({}),
+            session.model.clone(),
+            session.permission_mode.clone(),
+            session.effort.clone(),
+        )
+        .menu();
+        append_import_menu(database, session, "claude", menu).await?;
+        if choice == super::provider_reconciliation::HistoryChoice::KeepLocal {
+            database.mark_imported(session.id.clone()).await?;
+            if let Ok(size) = std::fs::metadata(&record).map(|meta| meta.len() as i64) {
+                database.remember_followed(session.id.clone(), size).await?;
+            }
+        }
+        return Ok(());
+    }
     // The follower resumes from where the record stood before this read. A
     // writer may append while normalization and storage run; marking the size
     // afterwards would skip those new lines permanently.
@@ -225,18 +246,6 @@ async fn import_claude_history(
     )
     .menu();
     append_import_menu(database, session, "claude", menu).await?;
-    let choice =
-        super::provider_reconciliation::complete_history_choice(database, &session.id).await?;
-    if choice == super::provider_reconciliation::HistoryChoice::Leave {
-        return Ok(());
-    }
-    if choice == super::provider_reconciliation::HistoryChoice::KeepLocal {
-        database.mark_imported(session.id.clone()).await?;
-        if let Ok(size) = std::fs::metadata(&record).map(|meta| meta.len() as i64) {
-            database.remember_followed(session.id.clone(), size).await?;
-        }
-        return Ok(());
-    }
     if !history.events.is_empty() && database.timeline_count(session.id.clone()).await? > 0 {
         append_reset(database, &session.id).await?;
     }
@@ -277,6 +286,8 @@ async fn import_codex_history(database: &ChatDb, session: &Session) -> Result<()
     let Some(external_id) = session.external_id.as_deref() else {
         return Ok(());
     };
+    let choice =
+        super::provider_reconciliation::complete_history_choice(database, &session.id).await?;
     let mut config = CodexTransportConfig::app_server(Path::new(&session.cwd));
     if let Some(executable) = crate::routes::find_tool("codex", &[]) {
         config.executable = executable;
@@ -284,14 +295,27 @@ async fn import_codex_history(database: &ChatDb, session: &Session) -> Result<()
     let transport = super::codex::transport::CodexTransport::start(config)
         .await
         .map_err(|error| error.to_string())?;
-    let (result, mut menu) = tokio::join!(
-        super::codex::history::read_thread(&transport, external_id),
-        super::codex::history::menu(
-            &transport,
-            Path::new(&session.cwd),
-            session.model.as_deref()
-        ),
-    );
+    let (thread, mut menu) = if choice == super::provider_reconciliation::HistoryChoice::Read {
+        let (thread, menu) = tokio::join!(
+            super::codex::history::read_thread(&transport, external_id),
+            super::codex::history::menu(
+                &transport,
+                Path::new(&session.cwd),
+                session.model.as_deref()
+            ),
+        );
+        (Some(thread), menu)
+    } else {
+        (
+            None,
+            super::codex::history::menu(
+                &transport,
+                Path::new(&session.cwd),
+                session.model.as_deref(),
+            )
+            .await,
+        )
+    };
     transport.close().await;
     if let Some(object) = menu.as_object_mut() {
         object.remove("skillPaths");
@@ -300,21 +324,16 @@ async fn import_codex_history(database: &ChatDb, session: &Session) -> Result<()
         object.insert("type".into(), json!("session.menu"));
     }
     append_import_menu(database, session, "codex", menu).await?;
-    let thread = result.map_err(|error| error.to_string())?;
-    let choice =
-        super::provider_reconciliation::complete_history_choice(database, &session.id).await?;
     if choice == super::provider_reconciliation::HistoryChoice::Leave {
         return Ok(());
     }
     if choice == super::provider_reconciliation::HistoryChoice::KeepLocal {
         database.mark_imported(session.id.clone()).await?;
-        if let Some(path) = thread["path"].as_str() {
-            if let Ok(size) = std::fs::metadata(path).map(|meta| meta.len() as i64) {
-                database.remember_followed(session.id.clone(), size).await?;
-            }
-        }
         return Ok(());
     }
+    let thread = thread
+        .expect("read choice has a thread")
+        .map_err(|error| error.to_string())?;
     database
         .update_session(
             session.id.clone(),

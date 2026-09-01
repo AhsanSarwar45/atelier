@@ -233,6 +233,17 @@ impl WorkbenchRegistry {
         self.drivers.read().await.contains_key(session_id)
     }
 
+    /// Reading by URL is the same operation as clicking a stored row. It does
+    /// not attach a provider, but it heals stale state and starts the durable
+    /// history import/follower needed by both entry paths.
+    pub async fn looked_at(&self, session_id: &str) {
+        let command = Command {
+            kind: CommandKind::SessionOpen,
+            fields: serde_json::Map::from_iter([("sessionId".into(), json!(session_id))]),
+        };
+        let _ = self.execute(&command).await;
+    }
+
     async fn launch(&self, command: &Command) -> Result<Value, String> {
         let mut launched = self.factory.launch(self.database.clone(), command).await?;
         let Some(driver) = launched.driver.take() else {
@@ -714,6 +725,58 @@ mod tests {
             "streaming"
         );
         registry.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn reading_by_address_reconciles_a_stale_saved_session() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let mut session = crate::workbench::store::Session {
+            id: "saved".into(),
+            brand: "claude".into(),
+            external_id: None,
+            project_id: "project".into(),
+            project_path: "/project".into(),
+            cwd: "/project".into(),
+            model: None,
+            permission_mode: "default".into(),
+            effort: None,
+            collaboration_mode: None,
+            title: Some("Saved".into()),
+            state: "starting".into(),
+            origin: "app".into(),
+            created_at: "2026-08-30T00:00:00Z".into(),
+            last_active_at: "2026-08-30T00:00:01Z".into(),
+            last_spoke_at: None,
+        };
+        database.create_session(session.clone()).await.unwrap();
+        let registry = WorkbenchRegistry::new(
+            database.clone(),
+            RegistryPaths {
+                home: root.path().into(),
+                claude_config: root.path().join("claude"),
+                codex_home: root.path().join("codex"),
+                media: root.path().join("media"),
+            },
+            Arc::new(crate::workbench::provider::NativeProviderFactory::new(
+                root.path().join("claude"),
+            )),
+        );
+
+        registry.looked_at("saved").await;
+
+        session = database.get_session("saved".into()).await.unwrap().unwrap();
+        assert_eq!(session.state, "dormant");
+        assert!(!registry.has_driver("saved").await);
+        assert!(database
+            .events_since("saved".into(), 0)
+            .await
+            .unwrap()
+            .iter()
+            .any(
+                |event| event.kind == crate::workbench::protocol::EventKind::SessionState
+                    && event.fields["state"] == "dormant"
+            ));
     }
 
     #[tokio::test]

@@ -68,6 +68,9 @@ impl WorkbenchState {
     pub(crate) async fn has_driver(&self, session_id: &str) -> bool {
         self.registry.has_driver(session_id).await
     }
+    pub(crate) async fn looked_at(&self, session_id: &str) {
+        self.registry.looked_at(session_id).await
+    }
     pub(crate) fn claude_config_directory(&self) -> &std::path::Path {
         self.registry.claude_config_directory()
     }
