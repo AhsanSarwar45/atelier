@@ -53,6 +53,8 @@ interface WorkbenchListener {
 interface ChatListener {
   snapshot: (data: string) => void;
   event: (data: string) => void;
+  /** Snapshot construction failed; the server is retrying it in place. */
+  error?: (data: string) => void;
   /**
    * The last event this reader has drawn, asked for at the moment the
    * connection is opened. Asking from zero would send the whole conversation a
@@ -226,6 +228,11 @@ function heard(raw: string): void {
     case 'chat.snapshot': {
       const chat = frame.scope;
       if (chat) chats.get(chat)?.forEach((c) => c.snapshot(said));
+      return;
+    }
+    case 'chat.error': {
+      const chat = frame.scope;
+      if (chat) chats.get(chat)?.forEach((c) => c.error?.(said));
       return;
     }
     default:

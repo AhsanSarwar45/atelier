@@ -24,6 +24,7 @@
 //! | `workbench`      | one frame of the helper's all-sessions stream      |
 //! | `chat`           | one event in the open chat                         |
 //! | `chat.snapshot`  | the open chat's conversation as it stands          |
+//! | `chat.error`     | a readable snapshot failure while retrying          |
 //! | `bootstrap`      | dependency installation progress                   |
 //!
 //! A named upstream event keeps its name after the tag, which is where
@@ -321,10 +322,10 @@ async fn send_chat_snapshot(
     state: &workbench::WorkbenchState,
     session_id: &str,
     tx: &mpsc::Sender<Tagged>,
-) -> Option<i64> {
+) -> Result<i64, String> {
     let snapshot = workbench::snapshot(state.database(), session_id)
         .await
-        .ok()?;
+        .map_err(|error| format!("Could not load this conversation: {error}"))?;
     let watermark = snapshot["lastSeq"].as_i64().unwrap_or_default();
     tx.send(Tagged::scoped(
         "chat.snapshot",
@@ -332,8 +333,37 @@ async fn send_chat_snapshot(
         snapshot.to_string(),
     ))
     .await
-    .ok()?;
-    Some(watermark)
+    .map_err(|_| "conversation reader closed".to_string())?;
+    Ok(watermark)
+}
+
+/// A transient database or projection failure must neither disappear nor
+/// strand the browser on an eternal loading shell. Say what failed, then keep
+/// retrying the bounded snapshot while the window is still listening.
+async fn recover_chat_snapshot(
+    state: &workbench::WorkbenchState,
+    session_id: &str,
+    tx: &mpsc::Sender<Tagged>,
+) -> Option<i64> {
+    loop {
+        match send_chat_snapshot(state, session_id, tx).await {
+            Ok(watermark) => return Some(watermark),
+            Err(error) => {
+                if tx
+                    .send(Tagged::scoped(
+                        "chat.error",
+                        session_id,
+                        serde_json::json!({"error":error}).to_string(),
+                    ))
+                    .await
+                    .is_err()
+                {
+                    return None;
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        }
+    }
 }
 
 /// Feed one open chat into `/api/live` without a loopback HTTP hop.
@@ -404,7 +434,7 @@ async fn relay_native_chat(
     let mut record_tick = tokio::time::interval(Duration::from_millis(250));
     let mut watermark;
     if since == 0 {
-        let Some(sent) = send_chat_snapshot(&state, &session_id, &tx).await else {
+        let Some(sent) = recover_chat_snapshot(&state, &session_id, &tx).await else {
             return;
         };
         watermark = sent;
@@ -511,7 +541,7 @@ async fn relay_native_chat(
                 // newest page instead of streaming thousands of stale rows or
                 // silently accepting a hole in the durable sequence.
                 if seq > watermark.saturating_add(1) {
-                    let Some(sent) = send_chat_snapshot(&state,&session_id,&tx).await else { return; };
+                    let Some(sent) = recover_chat_snapshot(&state,&session_id,&tx).await else { return; };
                     watermark=sent;
                     continue;
                 }
@@ -528,7 +558,7 @@ async fn relay_native_chat(
                 watermark=seq;
             }
             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                let Some(sent) = send_chat_snapshot(&state,&session_id,&tx).await else { return; };
+                let Some(sent) = recover_chat_snapshot(&state,&session_id,&tx).await else { return; };
                 watermark=sent;
             },
             Err(tokio::sync::broadcast::error::RecvError::Closed) => return,

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WbpEvent } from '@/workbench/protocol';
 import { EMPTY } from '@/workbench/fold';
 
-let listener: { snapshot(data: string): void; event(data: string): void } | null = null;
+let listener: { snapshot(data: string): void; event(data: string): void; error?(data: string): void } | null = null;
 vi.mock('@/workbench/live-wire', () => ({
   onChat: (_id: string, next: typeof listener) => { listener = next; return () => {}; },
 }));
@@ -29,6 +29,17 @@ describe('the browser session cache', () => {
 
     const reopened = renderHook(() => useSession('cache-reopen'));
     expect(reopened.result.current.items[0]?.id).toBe('m1');
+  });
+
+  it('shows a snapshot failure while the native relay retries', () => {
+    const opened = renderHook(() => useSession('cache-retrying'));
+    act(() => listener!.error?.(JSON.stringify({ error: 'Could not load this conversation' })));
+    expect(opened.result.current.loading).toBe(true);
+    expect(opened.result.current.error).toBe('Could not load this conversation');
+
+    act(() => listener!.snapshot(JSON.stringify(EMPTY)));
+    expect(opened.result.current.loading).toBe(false);
+    expect(opened.result.current.error).toBeNull();
   });
 
   it('folds app-wide events into a chat while its pane is not mounted', () => {

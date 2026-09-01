@@ -280,6 +280,19 @@ export function useSession(sessionId: string | null): LoadedSessionView {
         }
       },
 
+      error: (data) => {
+        try {
+          const failure = JSON.parse(data) as { error?: unknown };
+          if (typeof failure.error === 'string' && failure.error) {
+            // Keep `ready` false: the native relay retries the snapshot in
+            // place, and its successful bounded page replaces this diagnosis.
+            publishCached(sessionId, { ...entry.view, error: failure.error }, undefined, true);
+          }
+        } catch {
+          // An unreadable diagnosis is no more useful than no diagnosis.
+        }
+      },
+
       event: (data) => {
         let event: WbpEvent;
         try {

@@ -156,12 +156,14 @@ describe('one wire', () => {
     const helperSaw: string[] = [];
     const chatSaw: string[] = [];
     const drawnFromScratch: string[] = [];
+    const chatErrors: string[] = [];
 
     onBoard('/work/atelier', (e) => boardSaw.push(e.path));
     onWorkbench({ frame: (d) => helperSaw.push(d), dropped: () => {} });
     onChat('abc', {
       snapshot: (d) => drawnFromScratch.push(d),
       event: (d) => chatSaw.push(d),
+      error: (d) => chatErrors.push(d),
       since: () => 0,
     });
     await settled();
@@ -171,11 +173,13 @@ describe('one wire', () => {
     wire.says('workbench', '{"kind":"snapshot"}');
     wire.says('chat', '{"type":"text"}', 'abc');
     wire.says('chat.snapshot', '{"lastSeq":3}', 'abc');
+    wire.says('chat.error', '{"error":"database busy"}', 'abc');
 
     expect(boardSaw).toEqual(['/work/atelier/.beads/issues.jsonl']);
     expect(helperSaw).toEqual(['{"kind":"snapshot"}']);
     expect(chatSaw).toEqual(['{"type":"text"}']);
     expect(drawnFromScratch).toEqual(['{"lastSeq":3}']);
+    expect(chatErrors).toEqual(['{"error":"database busy"}']);
   });
 
   it('drops the previous chat’s last frame while the wire switches chats', async () => {
