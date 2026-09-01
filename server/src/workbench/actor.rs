@@ -30,7 +30,6 @@ pub struct StoreUpdate {
 /// before or wholly after the snapshot.
 pub struct SnapshotParts {
     pub history: Vec<Event>,
-    pub steering: serde_json::Value,
     pub page: TranscriptItemPage,
     pub agents: Vec<serde_json::Value>,
 }
@@ -685,7 +684,6 @@ fn run(
                 let result = (|| {
                     Ok(SnapshotParts {
                         history: store.view_events(&session_id)?,
-                        steering: store.steering_menu(&session_id)?,
                         page: store.transcript_items(&session_id, None, 40)?,
                         agents: store.projected_agents(&session_id)?,
                     })

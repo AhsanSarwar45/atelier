@@ -682,17 +682,37 @@ impl Store {
     /// these provider-wide fields keeps its controls useful without leaking
     /// project-specific commands, skills, or agent definitions across chats.
     pub fn steering_menu(&self, session_id: &str) -> rusqlite::Result<Value> {
-        let mut statement = self.connection.prepare(
-            r#"SELECT event.json FROM event
-                 JOIN session ON session.id = event.session_id
-                WHERE event.type = 'session.menu'
-                  AND session.brand = (SELECT brand FROM session WHERE id = ?1)
-                ORDER BY event.rowid DESC LIMIT 50"#,
+        let brand = self.connection.query_row(
+            "SELECT brand FROM session WHERE id=?1",
+            [session_id],
+            |row| row.get::<_, String>(0),
         )?;
-        let rows = statement.query_map([session_id], |row| row.get::<_, String>(0))?;
+        // Search the provider's newest chats, current chat first, through the
+        // existing per-session event index. The former join ordered the entire
+        // multi-provider event table by rowid; a cold 2 GB store could spend
+        // seconds finding a fallback that an ordinary chat did not need.
+        let mut sessions = self.connection.prepare(
+            r#"SELECT id FROM session WHERE brand=?1
+               ORDER BY (id=?2) DESC, COALESCE(last_spoke_at,last_active_at) DESC
+               LIMIT 50"#,
+        )?;
+        let sessions = sessions
+            .query_map(params![brand, session_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut latest = self.connection.prepare(
+            r#"SELECT json FROM event
+               WHERE session_id=?1 AND type='session.menu'
+               ORDER BY seq DESC LIMIT 1"#,
+        )?;
         let mut menu = serde_json::Map::new();
-        for row in rows {
-            let value: Value = serde_json::from_str(&row?).map_err(json_error)?;
+        for session in sessions {
+            let Some(row) = latest
+                .query_row([session], |row| row.get::<_, String>(0))
+                .optional()?
+            else {
+                continue;
+            };
+            let value: Value = serde_json::from_str(&row).map_err(json_error)?;
             for field in ["models", "permissionModes", "efforts", "collaborationModes"] {
                 if menu
                     .get(field)
@@ -703,6 +723,15 @@ impl Store {
                 if value[field].as_array().is_some_and(|rows| !rows.is_empty()) {
                     menu.insert(field.into(), value[field].clone());
                 }
+            }
+            if ["models", "permissionModes", "efforts", "collaborationModes"]
+                .iter()
+                .all(|field| {
+                    menu.get(*field)
+                        .is_some_and(|held| held.as_array().is_some_and(|rows| !rows.is_empty()))
+                })
+            {
+                break;
             }
         }
         Ok(Value::Object(menu))

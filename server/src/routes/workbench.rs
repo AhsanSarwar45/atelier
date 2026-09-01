@@ -995,16 +995,27 @@ async fn events(
 pub(crate) async fn snapshot(database: &ChatDb, session_id: &str) -> Result<Value, String> {
     let snapshot = database.snapshot(session_id.to_string()).await?;
     let mut view = fold_all(&snapshot.history).view;
-    for field in ["models", "permissionModes", "efforts", "collaborationModes"] {
-        let empty = view["menu"][field]
+    let fields = ["models", "permissionModes", "efforts", "collaborationModes"];
+    if fields.iter().any(|field| {
+        view["menu"][field]
             .as_array()
-            .is_none_or(|rows| rows.is_empty());
-        if empty
-            && snapshot.steering[field]
+            .is_none_or(|rows| rows.is_empty())
+    }) {
+        // Most chats carry their own current session.menu. The provider-wide
+        // catalog is only a migration fallback, and on a large event store its
+        // global lookup must not sit in front of every ordinary transcript.
+        let steering = database.steering_menu(session_id.to_string()).await?;
+        for field in fields {
+            let empty = view["menu"][field]
                 .as_array()
-                .is_some_and(|rows| !rows.is_empty())
-        {
-            view["menu"][field] = snapshot.steering[field].clone();
+                .is_none_or(|rows| rows.is_empty());
+            if empty
+                && steering[field]
+                    .as_array()
+                    .is_some_and(|rows| !rows.is_empty())
+            {
+                view["menu"][field] = steering[field].clone();
+            }
         }
     }
     view["items"] = json!(snapshot.page.items);
