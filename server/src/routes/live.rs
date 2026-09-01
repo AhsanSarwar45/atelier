@@ -208,6 +208,25 @@ fn outside_folders(
 
 /// Feed the combined browser connection from the in-process database. This is
 /// the native equivalent of relaying the helper's `/watch` SSE stream.
+async fn send_native_watch_snapshot(
+    state: &workbench::WorkbenchState,
+    tx: &mpsc::Sender<Tagged>,
+) -> Option<serde_json::Value> {
+    let sessions = workbench::session_summaries(state.database(), None)
+        .await
+        .ok()?;
+    let holds = serde_json::to_value(state.provider_holds().await).ok()?;
+    for frame in [
+        serde_json::json!({"kind":"snapshot","sessions":sessions}),
+        serde_json::json!({"kind":"running","holds":holds}),
+    ] {
+        tx.send(Tagged::new(Some("workbench"), frame.to_string()))
+            .await
+            .ok()?;
+    }
+    Some(holds)
+}
+
 async fn relay_native_watch(state: workbench::WorkbenchState, tx: mpsc::Sender<Tagged>) {
     let usage_state = state.clone();
     let usage_tx = tx.clone();
@@ -230,23 +249,9 @@ async fn relay_native_watch(state: workbench::WorkbenchState, tx: mpsc::Sender<T
         }
     });
     let mut updates = state.database().subscribe_all();
-    let sessions = match workbench::session_summaries(state.database(), None).await {
-        Ok(sessions) => sessions,
-        Err(_) => return,
+    let Some(mut holds) = send_native_watch_snapshot(&state, &tx).await else {
+        return;
     };
-    let mut holds = serde_json::to_value(state.provider_holds().await).unwrap_or_default();
-    for frame in [
-        serde_json::json!({"kind":"snapshot","sessions":sessions}),
-        serde_json::json!({"kind":"running","holds":holds}),
-    ] {
-        if tx
-            .send(Tagged::new(Some("workbench"), frame.to_string()))
-            .await
-            .is_err()
-        {
-            return;
-        }
-    }
     let mut hold_tick = tokio::time::interval(Duration::from_secs(2));
     let (external_tx, mut external_rx) = mpsc::unbounded_channel();
     let mut external_watcher =
@@ -312,7 +317,15 @@ async fn relay_native_watch(state: workbench::WorkbenchState, tx: mpsc::Sender<T
                     return;
                 }
             }
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+            // A complete-history import can publish tens of thousands of
+            // events in one actor turn. If the bounded all-chat receiver falls
+            // behind that burst, replace its summaries and live ownership in
+            // one shot; silently continuing can strand a newly discovered
+            // external chat or its final rich state until the page reloads.
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                let Some(current) = send_native_watch_snapshot(&state, &tx).await else { return; };
+                holds = current;
+            },
             Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
         }}
     }

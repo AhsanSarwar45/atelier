@@ -19,7 +19,7 @@ use base64::Engine;
 use futures::{stream, Stream, StreamExt};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};
 use tokio::sync::broadcast;
 
@@ -848,11 +848,37 @@ fn snapshot_frame(view: &Value) -> SseEvent {
         .expect("projection serializes")
 }
 
-fn session_tail(receiver: broadcast::Receiver<Event>, after: i64) -> EventStream {
+fn session_tail(
+    receiver: broadcast::Receiver<Event>,
+    database: ChatDb,
+    session_id: String,
+    after: i64,
+) -> EventStream {
     Box::pin(stream::unfold(
-        (receiver, after),
-        |(mut receiver, after)| async move {
+        (
+            receiver,
+            database,
+            session_id,
+            after,
+            VecDeque::<Event>::new(),
+        ),
+        |(mut receiver, database, session_id, mut after, mut replay)| async move {
             loop {
+                if let Some(event) = replay.pop_front() {
+                    let seq = event
+                        .fields
+                        .get("seq")
+                        .and_then(Value::as_i64)
+                        .unwrap_or_default();
+                    if seq <= after {
+                        continue;
+                    }
+                    after = seq;
+                    return Some((
+                        Ok(event_frame(&event)),
+                        (receiver, database, session_id, after, replay),
+                    ));
+                }
                 match receiver.recv().await {
                     Ok(event) => {
                         let seq = event
@@ -863,9 +889,18 @@ fn session_tail(receiver: broadcast::Receiver<Event>, after: i64) -> EventStream
                         if seq <= after {
                             continue;
                         }
-                        return Some((Ok(event_frame(&event)), (receiver, seq)));
+                        return Some((
+                            Ok(event_frame(&event)),
+                            (receiver, database, session_id, seq, replay),
+                        ));
                     }
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        let Ok(events) = database.events_since(session_id.clone(), after).await
+                        else {
+                            return None;
+                        };
+                        replay.extend(events);
+                    }
                     Err(broadcast::error::RecvError::Closed) => return None,
                 }
             }
@@ -905,8 +940,12 @@ async fn events(
             watermark,
         )
     };
-    let output: EventStream =
-        Box::pin(stream::iter(initial).chain(session_tail(receiver, watermark)));
+    let output: EventStream = Box::pin(stream::iter(initial).chain(session_tail(
+        receiver,
+        state.database().clone(),
+        query.session,
+        watermark,
+    )));
     Ok(Sse::new(output).keep_alive(
         KeepAlive::new()
             .interval(Duration::from_secs(30))
@@ -943,21 +982,28 @@ fn watch_frame(value: Value) -> SseEvent {
         .expect("watch frame serializes")
 }
 
+async fn send_watch_snapshot(
+    state: &WorkbenchState,
+    tx: &tokio::sync::mpsc::Sender<Result<SseEvent, Infallible>>,
+) -> Option<Value> {
+    let sessions = session_summaries(state.database(), None).await.ok()?;
+    let holds = serde_json::to_value(state.provider_holds().await).ok()?;
+    for frame in [
+        json!({"kind":"snapshot","sessions":sessions}),
+        json!({"kind":"running","holds":holds}),
+    ] {
+        tx.send(Ok(watch_frame(frame))).await.ok()?;
+    }
+    Some(holds)
+}
+
 async fn watch(State(state): State<WorkbenchState>) -> Result<Sse<EventStream>, ApiError> {
     let mut receiver = state.database().subscribe_all();
-    let sessions = session_summaries(state.database(), None).await?;
-    let holds = state.provider_holds().await;
     let (tx, rx) = tokio::sync::mpsc::channel(100);
     tokio::spawn(async move {
-        let mut last_holds = serde_json::to_value(&holds).unwrap_or_default();
-        for frame in [
-            json!({"kind":"snapshot","sessions":sessions}),
-            json!({"kind":"running","holds":holds}),
-        ] {
-            if tx.send(Ok(watch_frame(frame))).await.is_err() {
-                return;
-            }
-        }
+        let Some(mut last_holds) = send_watch_snapshot(&state, &tx).await else {
+            return;
+        };
         let mut hold_tick = tokio::time::interval(Duration::from_secs(2));
         let mut usage_tick = tokio::time::interval(Duration::from_secs(30));
         loop {
@@ -967,7 +1013,7 @@ async fn watch(State(state): State<WorkbenchState>) -> Result<Sse<EventStream>, 
                     if current!=last_holds {last_holds=current.clone();if tx.send(Ok(watch_frame(json!({"kind":"running","holds":current})))).await.is_err(){return}}
                 },
                 _=usage_tick.tick()=>{for brand in ["claude","codex"]{if let Ok(usage)=state.account_usage(brand).await{if tx.send(Ok(watch_frame(json!({"kind":"usage","brand":brand,"usage":usage})))).await.is_err(){return}}}},
-                received=receiver.recv()=>match received{Ok(update)=>{if update.event.kind==crate::workbench::protocol::EventKind::SessionStarted{if let Ok(Some(session))=state.database().get_session(update.session_id.clone()).await{let beads=state.database().beads_for_session(update.session_id.clone()).await.unwrap_or_default();if tx.send(Ok(watch_frame(json!({"kind":"opened","session":{"id":session.id,"brand":session.brand,"externalId":session.external_id,"projectId":session.project_id,"projectPath":session.project_path,"cwd":session.cwd,"model":session.model,"permissionMode":session.permission_mode,"effort":session.effort,"collaborationMode":session.collaboration_mode,"title":session.title,"state":session.state,"origin":session.origin,"createdAt":session.created_at,"lastActiveAt":session.last_active_at,"lastSpokeAt":session.last_spoke_at,"activity":"","busySince":Value::Null,"beads":beads}})))).await.is_err(){return}}}if tx.send(Ok(watch_frame(json!({"kind":"event","event":update.event})))).await.is_err(){return}},Err(broadcast::error::RecvError::Lagged(_))=>continue,Err(broadcast::error::RecvError::Closed)=>return}
+                received=receiver.recv()=>match received{Ok(update)=>{if update.event.kind==crate::workbench::protocol::EventKind::SessionStarted{if let Ok(Some(session))=state.database().get_session(update.session_id.clone()).await{let beads=state.database().beads_for_session(update.session_id.clone()).await.unwrap_or_default();if tx.send(Ok(watch_frame(json!({"kind":"opened","session":{"id":session.id,"brand":session.brand,"externalId":session.external_id,"projectId":session.project_id,"projectPath":session.project_path,"cwd":session.cwd,"model":session.model,"permissionMode":session.permission_mode,"effort":session.effort,"collaborationMode":session.collaboration_mode,"title":session.title,"state":session.state,"origin":session.origin,"createdAt":session.created_at,"lastActiveAt":session.last_active_at,"lastSpokeAt":session.last_spoke_at,"activity":"","busySince":Value::Null,"beads":beads}})))).await.is_err(){return}}}if tx.send(Ok(watch_frame(json!({"kind":"event","event":update.event})))).await.is_err(){return}},Err(broadcast::error::RecvError::Lagged(_))=>{let Some(current)=send_watch_snapshot(&state,&tx).await else{return};last_holds=current},Err(broadcast::error::RecvError::Closed)=>return}
             }
         }
     });
@@ -1340,6 +1386,71 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn native_workbench_watch_can_restate_every_summary_after_a_lag() {
+        let (_directory, state) = fixture();
+        state
+            .database()
+            .create_session(saved_session())
+            .await
+            .unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
+        let holds = send_watch_snapshot(&state, &tx)
+            .await
+            .expect("a lag recovery snapshot");
+        assert!(holds.is_array());
+        let snapshot = rx.recv().await.unwrap().unwrap();
+        let running = rx.recv().await.unwrap().unwrap();
+        assert!(format!("{snapshot:?}").contains("chat-1"));
+        assert!(format!("{running:?}").contains("running"));
+    }
+
+    #[tokio::test]
+    async fn native_workbench_watch_recovers_instead_of_skipping_a_burst() {
+        let (_directory, state) = fixture();
+        state
+            .database()
+            .create_session(saved_session())
+            .await
+            .unwrap();
+        let response = router(state.clone())
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/watch")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // The route's outgoing queue holds 100 frames and the database
+        // broadcast holds 1,024. Not reading the body while this burst lands
+        // deterministically forces the all-chat receiver to lag.
+        for index in 0..1_200 {
+            let event: Event = serde_json::from_value(json!({
+                "type":"notice", "sessionId":"chat-1", "seq":0,
+                "at":"2026-08-30T00:01:00.000Z", "text":format!("burst {index}")
+            }))
+            .unwrap();
+            state.database().append(event).await.unwrap();
+        }
+
+        let mut body = response.into_body().into_data_stream();
+        let recovered = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut received = String::new();
+            while let Some(chunk) = body.next().await {
+                received.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
+                if received.matches("\"kind\":\"snapshot\"").count() >= 2 {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .unwrap_or(false);
+        assert!(recovered, "the lagged watch never restated its summaries");
+    }
+
+    #[tokio::test]
     async fn native_workbench_routes_execute_provider_independent_commands() {
         let (_directory, state) = fixture();
         let response = router(state)
@@ -1360,6 +1471,7 @@ mod tests {
 
     #[tokio::test]
     async fn native_workbench_snapshot_handoff_does_not_deliver_buffered_events_twice() {
+        let (_directory, state) = fixture();
         let (sender, receiver) = tokio::sync::broadcast::channel(8);
         let old: Event = serde_json::from_value(
             json!({"type":"notice","sessionId":"chat-1","seq":4,"at":"now","text":"in snapshot"}),
@@ -1368,8 +1480,33 @@ mod tests {
         let fresh: Event = serde_json::from_value(json!({"type":"notice","sessionId":"chat-1","seq":5,"at":"now","text":"after snapshot"})).unwrap();
         sender.send(old).unwrap();
         sender.send(fresh).unwrap();
-        let mut tail = session_tail(receiver, 4);
+        let mut tail = session_tail(receiver, state.database().clone(), "chat-1".into(), 4);
         let frame = tail.next().await.unwrap().unwrap();
         assert!(format!("{frame:?}").contains("after snapshot"));
+    }
+
+    #[tokio::test]
+    async fn native_workbench_session_tail_replays_every_durable_event_after_a_lag() {
+        let (_directory, state) = fixture();
+        state
+            .database()
+            .create_session(saved_session())
+            .await
+            .unwrap();
+        let receiver = state.database().subscribe_session("chat-1");
+        for index in 0..1_100 {
+            let event: Event = serde_json::from_value(json!({
+                "type":"notice", "sessionId":"chat-1", "seq":0,
+                "at":"2026-08-30T00:01:00.000Z", "text":format!("burst {index}")
+            }))
+            .unwrap();
+            state.database().append(event).await.unwrap();
+        }
+        let mut tail = session_tail(receiver, state.database().clone(), "chat-1".into(), 0);
+        let first = tail.next().await.unwrap().unwrap();
+        assert!(
+            format!("{first:?}").contains("burst 0"),
+            "the lag recovery skipped the oldest durable event"
+        );
     }
 }
