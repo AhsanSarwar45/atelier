@@ -409,6 +409,27 @@ impl Store {
 
     /// Append once across live, replay, and snapshot delivery of one provider event.
     pub fn append_event(&self, event: &Event) -> rusqlite::Result<bool> {
+        let owns_transaction = self.connection.is_autocommit();
+        if owns_transaction {
+            self.connection.execute_batch("BEGIN IMMEDIATE")?;
+        }
+        let result = self.append_event_in_transaction(event);
+        if owns_transaction {
+            match result {
+                Ok(changed) => {
+                    self.connection.execute_batch("COMMIT")?;
+                    return Ok(changed);
+                }
+                Err(error) => {
+                    let _ = self.connection.execute_batch("ROLLBACK");
+                    return Err(error);
+                }
+            }
+        }
+        result
+    }
+
+    fn append_event_in_transaction(&self, event: &Event) -> rusqlite::Result<bool> {
         let session_id = event_string(event, "sessionId")?;
         let seq = event
             .fields
@@ -443,7 +464,38 @@ impl Store {
                  WHERE provider_event_id IS NOT NULL DO NOTHING"#,
             params![session_id, seq, at, kind, json, provider, thread_id, event_id],
         )?;
+        if changed == 1 {
+            self.remove_superseded_progress(event, &session_id, seq)?;
+        }
         Ok(changed == 1)
+    }
+
+    /// Progress is a replaceable live snapshot, not permanent transcript
+    /// history. Broadcast delivery still publishes every update; durable
+    /// replay needs only the newest value for each logical operation.
+    fn remove_superseded_progress(
+        &self,
+        event: &Event,
+        session_id: &str,
+        seq: i64,
+    ) -> rusqlite::Result<usize> {
+        let (kind, key) =
+            match event.kind {
+                EventKind::ToolProgress => ("tool.progress", "toolCallId"),
+                EventKind::AgentProgress => ("agent.progress", "agentId"),
+                EventKind::ThinkingProgress => return self.connection.execute(
+                    "DELETE FROM event WHERE session_id=?1 AND type='thinking.progress' AND seq<?2",
+                    params![session_id, seq],
+                ),
+                _ => return Ok(0),
+            };
+        let Some(owner) = event.fields.get(key).and_then(Value::as_str) else {
+            return Ok(0);
+        };
+        self.connection.execute(
+            "DELETE FROM event WHERE session_id=?1 AND type=?2 AND seq<?3 AND json_extract(json,?4)=?5",
+            params![session_id, kind, seq, format!("$.{key}"), owner],
+        )
     }
 
     /// Group a replay import into one SQLite commit. The chat actor remains
@@ -1636,6 +1688,44 @@ mod tests {
             store.followed_to("external").unwrap(),
             None,
             "reading the whole record invalidates the incremental follower byte"
+        );
+    }
+
+    #[test]
+    fn workbench_core_keeps_only_latest_durable_progress_per_operation() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        for value in [
+            json!({"type":"tool.progress","sessionId":"s","seq":1,"at":"now","toolCallId":"a","seconds":1,"summary":"one"}),
+            json!({"type":"tool.progress","sessionId":"s","seq":2,"at":"now","toolCallId":"b","seconds":1,"summary":"other"}),
+            json!({"type":"agent.progress","sessionId":"s","seq":3,"at":"now","agentId":"helper","seconds":1}),
+            json!({"type":"thinking.progress","sessionId":"s","seq":4,"at":"now","tokens":10}),
+            json!({"type":"tool.progress","sessionId":"s","seq":5,"at":"now","toolCallId":"a","seconds":2,"summary":"two"}),
+            json!({"type":"agent.progress","sessionId":"s","seq":6,"at":"now","agentId":"helper","seconds":2}),
+            json!({"type":"thinking.progress","sessionId":"s","seq":7,"at":"now","tokens":20}),
+        ] {
+            assert!(store
+                .append_event(&serde_json::from_value(value).unwrap())
+                .unwrap());
+        }
+        let events = store.events_since("s", 0).unwrap();
+        assert_eq!(events.len(), 4);
+        assert!(events
+            .iter()
+            .any(|event| event.kind == EventKind::ToolProgress
+                && event.fields["toolCallId"] == "a"
+                && event.fields["summary"] == "two"));
+        assert!(events.iter().any(
+            |event| event.kind == EventKind::ToolProgress && event.fields["toolCallId"] == "b"
+        ));
+        assert!(events
+            .iter()
+            .any(|event| event.kind == EventKind::AgentProgress && event.fields["seconds"] == 2));
+        assert!(
+            events
+                .iter()
+                .any(|event| event.kind == EventKind::ThinkingProgress
+                    && event.fields["tokens"] == 20)
         );
     }
 

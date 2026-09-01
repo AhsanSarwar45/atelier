@@ -258,7 +258,11 @@ impl CodexLiveState {
                 let id=params["itemId"].as_str().unwrap_or_default();let output=self.tool_output.entry(id.to_string()).or_default();output.push_str(params["delta"].as_str().unwrap_or_default());events.push(event("tool.progress",[("toolCallId",json!(id)),("seconds",json!(0)),("summary",json!(output.chars().rev().take(2000).collect::<String>().chars().rev().collect::<String>()))]));
             }
             "thread/compacted" => {events.push(note("compact",params["message"].as_str().unwrap_or("Conversation compacted."),"note"));events.push(event("session.state",[("state",json!("idle")),("label",json!("Ready"))]));}
-            "skills/changed" => {}
+            // These app-server notifications are replacement-style diagnostics.
+            // Canonical file-change events and hook-added context carry the
+            // transcript-visible information; persisting every cumulative copy
+            // made the durable cache grow without changing the conversation.
+            "skills/changed" | "turn/diff/updated" | "hook/started" | "hook/completed" => {}
             "warning" | "model/rerouted" => events.push(note(method,params["message"].as_str().unwrap_or(&params.to_string()),"note")),
             _ if !method.ends_with("/delta") && !method.ends_with("/outputDelta") => events.push(note(method,params["message"].as_str().unwrap_or(&params.to_string()),"detail")),
             _ => {}
@@ -1418,6 +1422,29 @@ mod tests {
         assert!(events.iter().any(|event| event["type"] == "tool.completed"
             && event["toolCallId"] == "sh"
             && event["output"] == "/tmp"));
+    }
+
+    #[test]
+    fn native_codex_live_drops_redundant_cumulative_diagnostics() {
+        let mut state = CodexLiveState::new(&options());
+        for method in [
+            "turn/diff/updated",
+            "hook/started",
+            "hook/completed",
+            "skills/changed",
+        ] {
+            let events = state.handle(CodexInbound::Notification {
+                method: method.into(),
+                params: json!({"message":"large replacement snapshot"}),
+            });
+            assert!(events.is_empty(), "{method} became durable transcript data");
+        }
+        let future = state.handle(CodexInbound::Notification {
+            method: "future/notification".into(),
+            params: json!({"payload":"preserve me"}),
+        });
+        assert_eq!(future[0]["type"], "note");
+        assert_eq!(future[0]["kind"], "future/notification");
     }
 
     #[test]
