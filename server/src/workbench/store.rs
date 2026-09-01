@@ -493,7 +493,23 @@ impl Store {
     /// before accepting a new live helper signal after a process restart.
     pub fn agent_lifecycle_events(&self, session_id: &str) -> rusqlite::Result<Vec<Event>> {
         let mut statement = self.connection.prepare(
-            "SELECT json FROM event WHERE session_id=?1 AND type IN ('agent.started','agent.progress','agent.finished') ORDER BY seq",
+            r#"SELECT json FROM (
+                 SELECT seq,json FROM event
+                  WHERE session_id=?1 AND type IN
+                    ('agent.started','agent.finished','agent.identified','agent.relayed')
+                    AND seq > COALESCE((SELECT MAX(seq) FROM event
+                      WHERE session_id=?1 AND type='transcript.reset'),0)
+                 UNION ALL
+                 SELECT seq,json FROM (
+                   SELECT seq,json,
+                          ROW_NUMBER() OVER (
+                            PARTITION BY json_extract(json,'$.agentId') ORDER BY seq DESC
+                          ) AS place
+                     FROM event WHERE session_id=?1 AND type='agent.progress'
+                       AND seq > COALESCE((SELECT MAX(seq) FROM event
+                         WHERE session_id=?1 AND type='transcript.reset'),0)
+                 ) WHERE place=1
+               ) ORDER BY seq"#,
         )?;
         let found = statement
             .query_map([session_id], |row| {
@@ -1061,7 +1077,12 @@ impl Store {
             )
             .optional()?
             .is_some();
-        if before.is_some_and(|cursor| cursor < 0) || !has_projection {
+        // First paint is always an event-anchor page. A projection left by an
+        // older build may be far behind a newly imported provider record; its
+        // catch-up is useful as an optional cache, but must never put the full
+        // event tail back on the chat-open path. Negative cursors keep every
+        // older page on the same provider-agnostic event contract.
+        if before.is_none() || before.is_some_and(|cursor| cursor < 0) || !has_projection {
             return self.event_transcript_items(session_id, before, limit);
         }
         let newest_seq = self.ensure_transcript_projection(session_id)?;
@@ -1104,22 +1125,13 @@ impl Store {
     }
 
     pub fn projected_agents(&self, session_id: &str) -> rusqlite::Result<Vec<serde_json::Value>> {
-        let has_projection = self
-            .connection
-            .query_row(
-                "SELECT 1 FROM transcript_projection WHERE session_id=?1",
-                [session_id],
-                |_| Ok(()),
-            )
-            .optional()?
-            .is_some();
-        if !has_projection {
-            return Ok(fold_all(&self.agent_lifecycle_events(session_id)?)
-                .agents()
-                .to_vec());
-        }
-        self.ensure_transcript_projection(session_id)?;
-        self.projected_agents_without_ensuring(session_id)
+        // The side panel is not transcript history. Rebuild it from durable
+        // lifecycle edges plus only the newest progress report per agent, the
+        // same bounded contract the final Node reader used. In particular, do
+        // not let a stale transcript projection force a full chat catch-up.
+        Ok(fold_all(&self.agent_lifecycle_events(session_id)?)
+            .agents()
+            .to_vec())
     }
 
     /// Read a cold conversation newest-first without constructing its complete
@@ -1985,6 +1997,56 @@ mod tests {
         assert_eq!(older.items.len(), 10);
         assert_eq!(older.items[0]["text"], "row 1");
         assert!(!older.has_older);
+    }
+
+    #[test]
+    fn workbench_core_first_paint_never_catches_up_a_stale_projection() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        for seq in 1..=60 {
+            let event: Event = serde_json::from_value(json!({
+                "type":"notice","sessionId":"stale","seq":seq,"at":"now",
+                "text":format!("row {seq}")
+            }))
+            .unwrap();
+            assert!(store.append_event(&event).unwrap());
+        }
+        store
+            .connection()
+            .execute(
+                "INSERT INTO transcript_projection(session_id,projected_seq,reset_seq) VALUES('stale',1,0)",
+                [],
+            )
+            .unwrap();
+        for value in [
+            json!({"type":"agent.started","sessionId":"stale","seq":61,"at":"2026-08-31T00:00:00Z","agentId":"a","toolCallId":"t","kind":"helper","what":"Inspect","agentType":null,"model":null}),
+            json!({"type":"agent.progress","sessionId":"stale","seq":62,"at":"now","agentId":"a","seconds":1,"tokens":2,"calls":3}),
+            json!({"type":"agent.progress","sessionId":"stale","seq":63,"at":"now","agentId":"a","seconds":4,"tokens":5,"calls":6}),
+        ] {
+            assert!(store
+                .append_event(&serde_json::from_value(value).unwrap())
+                .unwrap());
+        }
+
+        let page = store.transcript_items("stale", None, 40).unwrap();
+        assert_eq!(page.items.len(), 40);
+        assert_eq!(page.items[0]["text"], "row 21");
+        assert!(page.cursor.is_some_and(|cursor| cursor < 0));
+        let agents = store.projected_agents("stale").unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0]["seconds"], 4);
+        assert_eq!(
+            store
+                .connection()
+                .query_row(
+                    "SELECT projected_seq FROM transcript_projection WHERE session_id='stale'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1,
+            "opening a chat caught up its stale full-history cache"
+        );
     }
 
     fn count(connection: &Connection, table: &str) -> i64 {
