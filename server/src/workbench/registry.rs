@@ -355,6 +355,54 @@ impl WorkbenchRegistry {
         Ok(())
     }
 
+    /// Stop only the provider processes already attributed to this exact
+    /// conversation, then wait for their PIDs to disappear before attaching
+    /// Atelier's driver. The browser sends `takeover` only when the ownership
+    /// row it is drawing says another local program currently owns the chat.
+    async fn take_over(&self, command: &Command) -> Result<(), String> {
+        let session_id = Self::field(command, "sessionId")?;
+        let Some(session) = self.database.get_session(session_id.to_string()).await? else {
+            return Err(format!("session {session_id} does not exist"));
+        };
+        let Some(external_id) = session.external_id.as_deref() else {
+            return Ok(());
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        let own_pid = std::process::id();
+        let pids = self
+            .provider_holds(Path::new("/proc"), now)
+            .into_iter()
+            .filter(|hold| hold.id.eq_ignore_ascii_case(external_id))
+            .flat_map(|hold| hold.pids)
+            .filter(|pid| *pid != own_pid)
+            .collect::<std::collections::BTreeSet<_>>();
+        for pid in &pids {
+            if let Err(error) = super::external::terminate_pid(*pid) {
+                // It can release between discovery and the signal. Only a PID
+                // that still exists turns that harmless race into a refusal.
+                if super::external::pid_alive(*pid, Path::new("/proc")) {
+                    return Err(format!(
+                        "Could not stop the program holding this chat: {error}"
+                    ));
+                }
+            }
+        }
+        let until = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+        while tokio::time::Instant::now() < until {
+            if pids
+                .iter()
+                .all(|pid| !super::external::pid_alive(*pid, Path::new("/proc")))
+            {
+                return Ok(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        Err("Chat is still active elsewhere.".into())
+    }
+
     async fn pin_saved_session(&self, command: &Command) -> Result<Value, String> {
         let session_id = Self::field(command, "sessionId")?;
         let mut session = self
@@ -558,7 +606,11 @@ impl WorkbenchRegistry {
             CommandKind::PromptSend
                 if !self.has_driver(Self::field(command, "sessionId")?).await =>
             {
-                self.refuse_external_owner(command).await?;
+                if command.fields["takeover"] == true {
+                    self.take_over(command).await?;
+                } else {
+                    self.refuse_external_owner(command).await?;
+                }
                 self.launch(command).await?;
                 self.driver_command(command).await
             }
@@ -924,6 +976,93 @@ mod tests {
         assert_eq!(view.view["permissionMode"], "plan");
         assert_eq!(view.view["effort"], "xhigh");
         assert!(view.view["model"].is_null());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn prompt_takeover_stops_only_the_exact_external_holder_before_launch() {
+        struct OwnedChild(std::process::Child);
+        impl Drop for OwnedChild {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let claude = root.path().join("claude");
+        std::fs::create_dir_all(claude.join("sessions")).unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        database
+            .create_session(crate::workbench::store::Session {
+                id: "session-1".into(),
+                brand: "claude".into(),
+                external_id: Some("external-thread".into()),
+                project_id: "project".into(),
+                project_path: "/project".into(),
+                cwd: "/project".into(),
+                model: None,
+                permission_mode: "default".into(),
+                effort: None,
+                collaboration_mode: None,
+                title: Some("External".into()),
+                state: "dormant".into(),
+                origin: "terminal".into(),
+                created_at: "2026-08-30T00:00:00Z".into(),
+                last_active_at: "2026-08-30T00:00:00Z".into(),
+                last_spoke_at: None,
+            })
+            .await
+            .unwrap();
+
+        let mut holder = OwnedChild(
+            std::process::Command::new("sleep")
+                .arg("60")
+                .spawn()
+                .unwrap(),
+        );
+        let pid = holder.0.id();
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+        let close = stat.rfind(')').unwrap();
+        let proc_start = stat[close + 1..].split_whitespace().nth(19).unwrap();
+        std::fs::write(
+            claude.join("sessions").join(format!("{pid}.json")),
+            serde_json::to_vec(&json!({
+                "sessionId":"external-thread", "pid":pid, "cwd":"/project",
+                "startedAt":1, "procStart":proc_start, "entrypoint":"cli",
+                "kind":"interactive", "status":"idle"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let registry = WorkbenchRegistry::new(
+            database,
+            RegistryPaths {
+                home: root.path().into(),
+                claude_config: claude,
+                codex_home: root.path().join("codex"),
+                media: root.path().join("media"),
+            },
+            Arc::new(FakeFactory {
+                calls: calls.clone(),
+            }),
+        );
+        registry
+            .execute(&command(
+                CommandKind::PromptSend,
+                json!({
+                    "sessionId":"session-1", "brand":"claude",
+                    "takeover":true, "text":"continue"
+                }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(holder.0.try_wait().unwrap().is_some());
+        registry.shutdown().await;
     }
 
     struct DroppedDriver {

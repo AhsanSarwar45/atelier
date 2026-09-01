@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
 
 const CLAUDE = Object.freeze({
   version: '0.70.0',
@@ -71,6 +71,37 @@ function clonePinned(source, destination) {
 function clonePinnedRust(source, destination) {
   run('git', ['clone', '--filter=blob:none', '--no-checkout', source.repository, destination]);
   run('git', ['checkout', '--detach', source.commit], destination);
+}
+
+function verifyNativeCapabilities(claudeSource, codexSource) {
+  const claude = readFileSync(join(claudeSource, 'src', 'acp-agent.ts'), 'utf8');
+  for (const anchor of [
+    'settingSources: ["user", "project", "local"],',
+    '...(userProvidedOptions?.mcpServers || {}),',
+    '...mcpServers,',
+    'loadSession: true,',
+    'resume: {},',
+  ]) {
+    if (!claude.includes(anchor)) {
+      throw new Error(`Claude ACP native capability changed at ${JSON.stringify(anchor)}; audit MCP/session parity`);
+    }
+  }
+
+  const codexClient = readFileSync(join(codexSource, 'src', 'CodexAcpClient.ts'), 'utf8');
+  for (const anchor of [
+    '...mergeGatewayConfig(this.config, this.gatewayConfig),',
+    'if (mcpServers.length === 0) {\n            return configWithWorkspaceRoots;\n        }',
+  ]) {
+    if (!codexClient.includes(anchor)) {
+      throw new Error(`Codex ACP native MCP inheritance changed at ${JSON.stringify(anchor)}; audit provider config parity`);
+    }
+  }
+  const codexServer = readFileSync(join(codexSource, 'src', 'CodexAcpServer.ts'), 'utf8');
+  for (const anchor of ['loadSession: true,', 'resume: { }']) {
+    if (!codexServer.includes(anchor)) {
+      throw new Error(`Codex ACP session capability changed at ${JSON.stringify(anchor)}; audit resume parity`);
+    }
+  }
 }
 
 function patchCodexAppServerTransport(source) {
@@ -179,6 +210,73 @@ function patchCodexSessionPolicy(source) {
   writeFileSync(sessionFile, code);
 }
 
+function patchCodexSubagentControl(source) {
+  const server = join(source, 'src', 'CodexAcpServer.ts');
+  let code = readFileSync(server, 'utf8');
+  const methodAnchor = '    async extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {';
+  if (code.split(methodAnchor).length - 1 !== 1) {
+    throw new Error('codex-acp extension method shape changed; audit the subagent-control patch');
+  }
+  const method = `    async atelierSubagentControl(params: {sessionId: string; agentId: string; action: "stop"}) {
+        const activeSession = this.sessions.get(params.sessionId);
+        if (!activeSession) {
+            throw RequestError.invalidParams(undefined, \`Unknown session: \${params.sessionId}\`);
+        }
+        const [root, child] = await this.runWithProcessCheck(() => Promise.all([
+            this.codexAcpClient.readSessionThread(params.sessionId),
+            this.codexAcpClient.readSessionThread(params.agentId),
+        ]));
+        if (child.sessionId !== root.sessionId) {
+            throw RequestError.invalidParams(undefined, \`Codex agent \${params.agentId} does not belong to this session\`);
+        }
+        const active = [...child.turns].reverse().find(turn => turn.status === "inProgress");
+        if (!active) {
+            throw RequestError.invalidParams(undefined, \`Codex agent \${params.agentId} has no active turn to stop\`);
+        }
+        await this.runWithProcessCheck(() => this.codexAcpClient.turnInterrupt({
+            threadId: params.agentId,
+            turnId: active.id,
+        }));
+        return {ok: true};
+    }
+
+${methodAnchor}`;
+  code = code.replace(methodAnchor, method);
+
+  const steeringMeta = `                steering: {
+                    supported: true,
+                },`;
+  if (code.split(steeringMeta).length - 1 !== 1) {
+    throw new Error('codex-acp initialize metadata changed; audit the subagent-control patch');
+  }
+  code = code.replace(steeringMeta, `${steeringMeta}
+                atelier: {
+                    subagentControls: ["stop", "say"],
+                },`);
+  writeFileSync(server, code);
+
+  const index = join(source, 'src', 'index.ts');
+  code = readFileSync(index, 'utf8');
+  const parserAnchor = `const sessionSteerParamsParser = z.object({`;
+  if (code.split(parserAnchor).length - 1 !== 1) {
+    throw new Error('codex-acp extension parser shape changed; audit the subagent-control patch');
+  }
+  code = code.replace(parserAnchor, `const atelierSubagentControlParamsParser = z.object({
+    sessionId: z.string().min(1),
+    agentId: z.string().min(1),
+    action: z.literal("stop"),
+});
+
+${parserAnchor}`);
+  const routeAnchor = `        .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params))`;
+  if (code.split(routeAnchor).length - 1 !== 1) {
+    throw new Error('codex-acp extension router shape changed; audit the subagent-control patch');
+  }
+  code = code.replace(routeAnchor, `        .onRequest("_atelier/session/subagent-control", atelierSubagentControlParamsParser, (ctx) => getAgent().atelierSubagentControl(ctx.params))
+${routeAnchor}`);
+  writeFileSync(index, code);
+}
+
 function patchClaudeWindowNow(source) {
   const agent = join(source, 'src', 'acp-agent.ts');
   let code = readFileSync(agent, 'utf8');
@@ -192,6 +290,20 @@ function patchClaudeWindowNow(source) {
       throw RequestError.invalidParams({ sessionId: params.sessionId }, "Unknown session");
     }
     return session.query.getContextUsage();
+  }
+
+  async atelierSubagentControl(params: { sessionId: string; agentId: string; action: "stop" | "park" }) {
+    const session = this.sessions[params.sessionId];
+    if (!session) {
+      throw RequestError.invalidParams({ sessionId: params.sessionId }, "Unknown session");
+    }
+    if (params.action === "stop") {
+      await session.query.stopTask(params.agentId);
+      return { ok: true };
+    }
+    const call = session.liveBackgroundTasks.get(params.agentId)?.parentToolUseId;
+    if (!call) return { ok: true, parked: false };
+    return { ok: true, parked: (await session.query.backgroundTasks(call)) ?? false };
   }
 
 ${methodAnchor}`;
@@ -214,8 +326,34 @@ ${methodAnchor}`;
       },
       (ctx) => agent.atelierWindowNow(ctx.params),
     )
+    .onRequest(
+      "_atelier/session/subagent-control",
+      {
+        parse: (raw: unknown) => {
+          const value = raw as { sessionId?: unknown; agentId?: unknown; action?: unknown } | null;
+          if (typeof value?.sessionId !== "string" || value.sessionId.length === 0 ||
+              typeof value.agentId !== "string" || value.agentId.length === 0 ||
+              (value.action !== "stop" && value.action !== "park")) {
+            throw RequestError.invalidParams(raw, "sessionId, agentId, and a valid action are required");
+          }
+          return { sessionId: value.sessionId, agentId: value.agentId, action: value.action };
+        },
+      },
+      (ctx) => agent.atelierSubagentControl(ctx.params),
+    )
 ${routeAnchor}`;
-  writeFileSync(agent, code.replace(routeAnchor, route));
+  code = code.replace(routeAnchor, route);
+  const steeringMeta = `        steering: {
+          supported: true,
+        },`;
+  if (code.split(steeringMeta).length - 1 !== 1) {
+    throw new Error('claude-agent-acp initialize metadata changed; audit the subagent-control patch');
+  }
+  code = code.replace(steeringMeta, `${steeringMeta}
+        atelier: {
+          subagentControls: ["stop", "park", "say"],
+        },`);
+  writeFileSync(agent, code);
 }
 
 function npmPackage(spec, directory) {
@@ -255,8 +393,10 @@ try {
   if (claudeWire !== '1' || codexWire !== '1') {
     throw new Error(`adapter ACP wire changed (Claude ${claudeWire}, Codex ${codexWire}); audit and upgrade the Rust connector before release`);
   }
+  verifyNativeCapabilities(claudeSource, codexSource);
   patchCodexAppServerTransport(codexSource);
   patchCodexSessionPolicy(codexSource);
+  patchCodexSubagentControl(codexSource);
   patchClaudeWindowNow(claudeSource);
 
   rmSync(output, { recursive: true, force: true });
@@ -300,11 +440,13 @@ try {
     adapters: {
       claude: {
         version: CLAUDE.version, commit: CLAUDE.commit, providerVersion: CLAUDE.providerVersion, wireProtocol: 1,
-        compatibilityPatches: ['atelier-context-window'],
+        compatibilityPatches: ['atelier-context-window', 'atelier-native-subagent-control'],
+        verifiedCapabilities: ['native-mcp-config', 'session-resume'],
       },
       codex: {
         version: CODEX.version, commit: CODEX.commit, providerVersion: CODEX.providerVersion, wireProtocol: 1,
-        compatibilityPatches: ['app-server-stdio', 'bun-child-process-bridge', 'jsonrpc-2-framing', 'atelier-session-policy'],
+        compatibilityPatches: ['app-server-stdio', 'bun-child-process-bridge', 'jsonrpc-2-framing', 'atelier-session-policy', 'atelier-native-subagent-control'],
+        verifiedCapabilities: ['native-mcp-config', 'session-resume'],
       },
       local: { adapter: 'goose', version: GOOSE.version, commit: GOOSE.commit, wireProtocol: 1 },
     },

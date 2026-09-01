@@ -154,4 +154,47 @@ test.describe('native provider child-agent lifecycle', () => {
       }
     });
   }
+
+  test('codex stops one native child without stopping or corrupting its parent chat', async ({ page, request }) => {
+    let project: Project | undefined;
+    let sessionId: string | undefined;
+    try {
+      project = await createProject(request, 'codex');
+      sessionId = await startSession(request, project, 'codex', 'never');
+      await page.goto(`/project?id=${project.id}&tab=chat&chat=${sessionId}`);
+      await page.getByTestId('chat-tab').waitFor({ timeout: 120_000 });
+      const sent = await request.post('/api/workbench/command', {
+        data: {
+          type: 'prompt.send', sessionId,
+          text: 'Call spawn_agent exactly once. Tell that child to call exec_command with sleep 120, wait for it, and then reply CHILD SHOULD NOT FINISH. ' +
+            'Do not wait for the child yourself and do not call any other subagent tool. As soon as spawn_agent returns, reply exactly CODEX CHILD RUNNING.',
+        },
+      });
+      expect(sent.ok(), await sent.text()).toBe(true);
+      await expect(page.getByTestId('assistant-message').last()).toContainText('CODEX CHILD RUNNING', { timeout: SETTLE_MS });
+      const row = page.getByTestId('sent-away-row');
+      await expect(row).toHaveCount(1);
+      await expect(row).toHaveAttribute('data-state', 'running');
+      await expect(row.getByTestId('sent-away-stop')).toBeVisible();
+
+      await row.getByTestId('sent-away-stop').click();
+      await expect(row).toHaveAttribute('data-state', 'stopped', { timeout: SETTLE_MS });
+      await expect(row).toContainText('Stopped');
+      await expect(page.getByTestId('assistant-message').last()).toContainText('CODEX CHILD RUNNING');
+      await expect.poll(() => lifecycleShape(sessionId!), {
+        timeout: SETTLE_MS, message: 'the exact child did not persist a stopped terminal edge',
+      }).toEqual({ count: 2, types: ['agent.started', 'agent.finished'], oneAgent: true, state: 'stopped' });
+
+      await page.reload();
+      await page.getByTestId('chat-tab').waitFor({ timeout: 120_000 });
+      await expect(page.getByTestId('sent-away-row')).toHaveCount(1);
+      await expect(page.getByTestId('sent-away-row')).toHaveAttribute('data-state', 'stopped');
+      await expect(page.getByTestId('assistant-message').last()).toContainText('CODEX CHILD RUNNING');
+    } finally {
+      if (sessionId) {
+        await request.post('/api/workbench/command', { data: { type: 'session.close', sessionId } }).catch(() => undefined);
+      }
+      if (project) await request.delete(`/api/projects/${project.id}`);
+    }
+  });
 });

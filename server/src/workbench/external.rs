@@ -352,7 +352,9 @@ fn marker_alive(marker: &ClaudeMarker, proc_root: &Path) -> bool {
         // Signal zero asks only whether the PID exists. Claude's procStart is a
         // Linux clock-tick value, so this matches the provider's own fallback
         // on macOS without pretending it can detect PID reuse there.
-        unsafe { libc::kill(marker.pid as i32, 0) == 0 }
+        i32::try_from(marker.pid)
+            .ok()
+            .is_some_and(|pid| unsafe { libc::kill(pid, 0) == 0 })
     }
     #[cfg(windows)]
     {
@@ -364,6 +366,89 @@ fn marker_alive(marker: &ClaudeMarker, proc_root: &Path) -> bool {
             .is_some_and(|out| {
                 String::from_utf8_lossy(&out.stdout).contains(&marker.pid.to_string())
             })
+    }
+}
+
+/// Whether an exact provider-holder PID still exists. This is intentionally
+/// separate from discovery: callers may only use PIDs already attributed to
+/// the requested conversation by `provider_holds`.
+pub fn pid_alive(pid: u32, proc_root: &Path) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        // An exited child remains in `/proc` as `Z` until its parent reaps it,
+        // but it no longer owns files, sockets, or a provider conversation.
+        // Treating that bookkeeping row as live makes takeover wait three
+        // seconds and then fail even though SIGTERM worked.
+        fs::read_to_string(proc_root.join(pid.to_string()).join("stat"))
+            .ok()
+            .is_some_and(|stat| {
+                let Some(close) = stat.rfind(')') else {
+                    return false;
+                };
+                stat[close + 1..]
+                    .split_whitespace()
+                    .next()
+                    .is_some_and(|state| state != "Z")
+            })
+    }
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        let _ = proc_root;
+        let Some(pid) = i32::try_from(pid).ok() else {
+            return false;
+        };
+        if unsafe { libc::kill(pid, 0) } != 0 {
+            return false;
+        }
+        // As on Linux, an unreaped child no longer owns the conversation.
+        // `kill(pid, 0)` alone cannot distinguish that bookkeeping process.
+        !std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .ok()
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .is_some_and(|state| state.trim_start().starts_with('Z'))
+    }
+    #[cfg(windows)]
+    {
+        let _ = proc_root;
+        std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output()
+            .ok()
+            .is_some_and(|out| String::from_utf8_lossy(&out.stdout).contains(&pid.to_string()))
+    }
+}
+
+/// Ask one exact provider-holder process to release its conversation.
+pub fn terminate_pid(pid: u32) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let pid = i32::try_from(pid).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "PID is outside Unix range",
+            )
+        })?;
+        let result = unsafe { libc::kill(pid, libc::SIGTERM) };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+    #[cfg(windows)]
+    {
+        let status = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string()])
+            .status()?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(std::io::Error::other(format!(
+                "taskkill refused provider holder {pid}"
+            )))
+        }
     }
 }
 
@@ -901,6 +986,13 @@ mod tests {
         let mut fields = vec!["S"; 19];
         fields.push(start);
         format!("42 (codex (worker)) {}", fields.join(" "))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_pid_signals_fail_closed_outside_the_unix_pid_range() {
+        let error = terminate_pid(u32::MAX).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
     }
 
     #[test]

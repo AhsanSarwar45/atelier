@@ -8,16 +8,64 @@ use super::registry::{LaunchFuture, LaunchedSession, ProviderDriver, SessionFact
 use super::store::{Session, SessionPatch};
 use chrono::Utc;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
 #[derive(Clone)]
 pub struct NativeProviderFactory {
     claude_config: PathBuf,
+    imports: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
 }
 
 impl NativeProviderFactory {
     pub fn new(claude_config: PathBuf) -> Self {
-        Self { claude_config }
+        Self {
+            claude_config,
+            imports: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    async fn schedule_import(&self, database: ChatDb, session: Session) {
+        let mut imports = self.imports.lock().await;
+        if imports
+            .get(&session.id)
+            .is_some_and(|task| !task.is_finished())
+        {
+            return;
+        }
+        imports.remove(&session.id);
+        let session_id = session.id.clone();
+        let claude_config = self.claude_config.clone();
+        imports.insert(
+            session_id,
+            tokio::spawn(async move {
+                if session.brand == "claude" {
+                    let _ = import_claude_history(&database, &claude_config, &session).await;
+                } else if session.brand == "codex" {
+                    let _ = import_codex_history(&database, &session).await;
+                } else if session.brand == super::local::BRAND {
+                    let models = json!(super::local::catalog().await);
+                    if let Ok(menu) = database.steering_menu(session.id.clone()).await {
+                        if let Some(event) = refreshed_local_menu(menu, &session.id, models) {
+                            let _ = database.append(event).await;
+                        }
+                    }
+                }
+            }),
+        );
+    }
+
+    /// A live provider must never race the detached cold-read reconciliation.
+    /// Joining here keeps transcript.reset/import batches strictly before the
+    /// first new prompt and lets the live driver become the sole event source.
+    async fn finish_import(&self, session_id: &str) {
+        let task = self.imports.lock().await.remove(session_id);
+        if let Some(task) = task {
+            let _ = task.await;
+        }
     }
 }
 
@@ -493,26 +541,8 @@ impl SessionFactory for NativeProviderFactory {
                 // Opening is a read-only UI operation. Return immediately and
                 // stream the one-time import into the event log; awaiting file
                 // parsing or a Codex app-server here regresses open latency.
-                let import_db = database.clone();
-                let import_session = session.clone();
-                let claude_config = self.claude_config.clone();
-                tokio::spawn(async move {
-                    if import_session.brand == "claude" {
-                        let _ = import_claude_history(&import_db, &claude_config, &import_session)
-                            .await;
-                    } else if import_session.brand == "codex" {
-                        let _ = import_codex_history(&import_db, &import_session).await;
-                    } else if import_session.brand == super::local::BRAND {
-                        let models = json!(super::local::catalog().await);
-                        if let Ok(menu) = import_db.steering_menu(import_session.id.clone()).await {
-                            if let Some(event) =
-                                refreshed_local_menu(menu, &import_session.id, models)
-                            {
-                                let _ = import_db.append(event).await;
-                            }
-                        }
-                    }
-                });
+                self.schedule_import(database.clone(), session.clone())
+                    .await;
                 return Ok(LaunchedSession {
                     session_id: session.id.clone(),
                     reply: reply(&session)?,
@@ -540,6 +570,9 @@ impl SessionFactory for NativeProviderFactory {
                     )
                 }
             };
+            if !create {
+                self.finish_import(&session.id).await;
+            }
             let brand = session.brand.clone();
             if create && brand == super::local::BRAND && session.model.is_none() {
                 database.create_session(session.clone()).await?;
@@ -659,6 +692,27 @@ pub(super) async fn record_user_for_transport(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn live_attach_waits_for_cold_history_reconciliation() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let factory = NativeProviderFactory::new(PathBuf::from("/unused"));
+        let completed = Arc::new(AtomicBool::new(false));
+        let task_completed = completed.clone();
+        factory.imports.lock().await.insert(
+            "chat-1".into(),
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                task_completed.store(true, Ordering::SeqCst);
+            }),
+        );
+
+        factory.finish_import("chat-1").await;
+
+        assert!(completed.load(Ordering::SeqCst));
+        assert!(!factory.imports.lock().await.contains_key("chat-1"));
+    }
 
     #[test]
     fn a_reopened_local_chat_refreshes_only_a_changed_nonempty_catalog() {

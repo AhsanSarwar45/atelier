@@ -33,6 +33,11 @@ enum Control {
         content: Vec<ContentBlock>,
         reply: Reply,
     },
+    Subagent {
+        action: String,
+        agent_id: String,
+        reply: Reply,
+    },
     Cancel {
         reply: Reply,
     },
@@ -62,13 +67,23 @@ enum ConfigTarget {
 
 #[derive(Default)]
 struct PermissionBroker {
-    pending: Mutex<HashMap<String, oneshot::Sender<String>>>,
+    pending: Mutex<HashMap<String, PendingPermission>>,
     plan_options: Mutex<HashMap<String, (String, String)>>,
+}
+
+struct PendingPermission {
+    answer: oneshot::Sender<String>,
+    reject: String,
 }
 
 #[derive(Default)]
 struct ElicitationBroker {
-    pending: Mutex<HashMap<String, oneshot::Sender<Value>>>,
+    pending: Mutex<HashMap<String, PendingElicitation>>,
+}
+
+struct PendingElicitation {
+    answer: oneshot::Sender<Value>,
+    schema: Option<Value>,
 }
 
 impl PermissionBroker {
@@ -82,6 +97,7 @@ impl PermissionBroker {
             .await
             .remove(id)
             .ok_or_else(|| format!("permission request {id} is no longer pending"))?
+            .answer
             .send(option.to_string())
             .map_err(|_| format!("permission request {id} closed"))
     }
@@ -100,6 +116,14 @@ impl PermissionBroker {
         };
         self.answer(id, &option).await
     }
+
+    async fn cancel_all(&self) {
+        self.plan_options.lock().await.clear();
+        let pending = std::mem::take(&mut *self.pending.lock().await);
+        for (_, permission) in pending {
+            let _ = permission.answer.send(permission.reject);
+        }
+    }
 }
 
 impl ElicitationBroker {
@@ -108,13 +132,38 @@ impl ElicitationBroker {
     }
 
     async fn answer(&self, id: &str, value: Value) -> Result<(), String> {
-        self.pending
-            .lock()
-            .await
+        let mut pending = self.pending.lock().await;
+        let question = pending
+            .get(id)
+            .ok_or_else(|| format!("question {id} is no longer pending"))?;
+        if value["action"] == "accept" {
+            if let Some(schema) = &question.schema {
+                let content = value["content"]
+                    .as_object()
+                    .ok_or_else(|| "question answers are required".to_string())?;
+                for field in schema["required"].as_array().into_iter().flatten() {
+                    let Some(field) = field.as_str() else {
+                        continue;
+                    };
+                    if !content.contains_key(field) {
+                        return Err(format!("no answer was supplied for {field}"));
+                    }
+                }
+            }
+        }
+        pending
             .remove(id)
-            .ok_or_else(|| format!("question {id} is no longer pending"))?
+            .expect("pending elicitation was checked")
+            .answer
             .send(value)
             .map_err(|_| format!("question {id} closed"))
+    }
+
+    async fn cancel_all(&self) {
+        let pending = std::mem::take(&mut *self.pending.lock().await);
+        for (_, question) in pending {
+            let _ = question.answer.send(json!({"action":"decline"}));
+        }
     }
 }
 
@@ -205,7 +254,24 @@ async fn permission(
         .cloned()
         .unwrap_or_default();
     let (answer, receive) = oneshot::channel();
-    broker.pending.lock().await.insert(ask_id.clone(), answer);
+    let reject = raw["options"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|option| {
+            matches!(
+                option["kind"].as_str(),
+                Some("reject_once" | "reject_always" | "deny")
+            )
+        })
+        .and_then(|option| option["optionId"].as_str())
+        .unwrap_or("reject_once")
+        .to_string();
+    broker
+        .pending
+        .lock()
+        .await
+        .insert(ask_id.clone(), PendingPermission { answer, reject });
     let plan = raw
         .pointer("/toolCall/rawInput/plan")
         .and_then(Value::as_str)
@@ -400,11 +466,13 @@ async fn elicitation(
         .map(str::to_string)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let (answer, receive) = oneshot::channel();
-    broker
-        .pending
-        .lock()
-        .await
-        .insert(request_id.clone(), answer);
+    broker.pending.lock().await.insert(
+        request_id.clone(),
+        PendingElicitation {
+            answer,
+            schema: (raw["mode"] == "form").then(|| raw["requestedSchema"].clone()),
+        },
+    );
     let asked = match request.mode {
         ElicitationMode::Form(_) => event(json!({
             "type":"question.requested", "sessionId":local_session_id, "seq":0, "at":now(),
@@ -476,6 +544,45 @@ fn prompt_content(command: &Command) -> Result<Vec<ContentBlock>, String> {
         }
     }
     Ok(content)
+}
+
+fn slash_name(text: &str) -> Option<&str> {
+    let trimmed = text.trim();
+    let command = trimmed.strip_prefix('/')?;
+    let name = command.split_whitespace().next()?;
+    (!name.is_empty() && !name.contains('/')).then_some(name)
+}
+
+fn command_is_offered(name: &str, commands: &[Value]) -> Result<(), String> {
+    if commands.iter().any(|command| command["name"] == name) {
+        return Ok(());
+    }
+    Err(format!(
+        "/{name} is not available in this {}.",
+        if commands.is_empty() {
+            "provider"
+        } else {
+            "session"
+        }
+    ))
+}
+
+async fn validate_offered_command(
+    database: &ChatDb,
+    session_id: &str,
+    text: &str,
+) -> Result<(), String> {
+    let Some(name) = slash_name(text) else {
+        return Ok(());
+    };
+    let menu = database.steering_menu(session_id.to_string()).await?;
+    command_is_offered(
+        name,
+        menu["commands"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or(&[]),
+    )
 }
 
 fn select_values(options: &Value, ids: &[&str]) -> Vec<Value> {
@@ -628,6 +735,7 @@ pub(super) fn menu_fields(
     seed_model: Option<&str>,
     modes: &Value,
     options: &Value,
+    agent_controls: &Value,
 ) -> Value {
     let options = options_for_menu(brand, seed_model, options);
     let permission_modes = modes["availableModes"]
@@ -638,7 +746,7 @@ pub(super) fn menu_fields(
         .map(|mode| mode_from_acp(brand, mode))
         .collect::<Vec<_>>();
     json!({
-        "commands":[], "skills":[], "agentDefinitions":[], "agentControls":["stop","park","say"],
+        "commands":[], "skills":[], "agentDefinitions":[], "agentControls":agent_controls,
         "permissionModes":permission_modes,
         "currentMode":mode_from_acp(brand, modes["currentModeId"].as_str().unwrap_or_default()),
         "models":select_values(&options, &["model"]),
@@ -657,8 +765,9 @@ fn menu_fields_with_local_catalog(
     modes: &Value,
     options: &Value,
     local_models: &Value,
+    agent_controls: &Value,
 ) -> Value {
-    let mut menu = menu_fields(brand, seed_model, modes, options);
+    let mut menu = menu_fields(brand, seed_model, modes, options, agent_controls);
     if brand == super::super::local::BRAND
         && local_models
             .as_array()
@@ -676,8 +785,16 @@ fn menu_event(
     modes: &Value,
     options: &Value,
     local_models: &Value,
+    agent_controls: &Value,
 ) -> Result<Event, String> {
-    let mut menu = menu_fields_with_local_catalog(brand, seed_model, modes, options, local_models);
+    let mut menu = menu_fields_with_local_catalog(
+        brand,
+        seed_model,
+        modes,
+        options,
+        local_models,
+        agent_controls,
+    );
     let object = menu.as_object_mut().expect("ACP menu is an object");
     object.insert("type".into(), json!("session.menu"));
     object.insert("sessionId".into(), json!(session_id));
@@ -697,6 +814,45 @@ pub struct AcpDriver {
 }
 
 impl AcpDriver {
+    async fn record_agent_control(&self, agent_id: &str, state: &str) -> Result<(), String> {
+        let agents = self
+            .database
+            .projected_agents(self.session.id.clone())
+            .await?;
+        let Some(agent) = agents
+            .iter()
+            .find(|agent| agent["id"].as_str() == Some(agent_id))
+        else {
+            return Ok(());
+        };
+        if matches!(agent["state"].as_str(), Some("done" | "failed" | "stopped")) {
+            return Ok(());
+        }
+        let shared = json!({
+            "sessionId":self.session.id, "seq":0, "at":now(), "agentId":agent_id,
+            "seconds":agent["seconds"].as_u64().unwrap_or_default(),
+            "tokens":agent["tokens"].as_u64().unwrap_or_default(),
+            "calls":agent["calls"].as_u64().unwrap_or_default(),
+            "model":agent.get("model").cloned().unwrap_or(Value::Null)
+        });
+        let value = if state == "stopped" {
+            let mut value = shared;
+            value["type"] = json!("agent.finished");
+            value["state"] = json!("stopped");
+            value["result"] = Value::Null;
+            value
+        } else {
+            let mut value = shared;
+            value["type"] = json!("agent.progress");
+            value["state"] = json!(state);
+            value
+        };
+        self.database
+            .append(serde_json::from_value(value).map_err(|error| error.to_string())?)
+            .await?;
+        Ok(())
+    }
+
     pub async fn connect(database: ChatDb, session: Session, create: bool) -> Result<Self, String> {
         let brand: &'static str = match session.brand.as_str() {
             "claude" => "claude",
@@ -850,6 +1006,11 @@ impl AcpDriver {
                             }))?)
                             .block_task()
                             .await?;
+                        let agent_controls = initialized
+                            .pointer("/_meta/atelier/subagentControls")
+                            .filter(|controls| controls.is_array())
+                            .cloned()
+                            .unwrap_or_else(|| json!([]));
                         let (remote_id, mut modes, mut config_options) = if create_remote {
                             let response = connection
                                 .send_request(NewSessionRequest::new(PathBuf::from(
@@ -969,9 +1130,24 @@ impl AcpDriver {
                             )
                             .await
                             .map_err(acp_error)?;
-                        normalizer.lock().await.set_menu(menu_fields_with_local_catalog(brand, local_model.as_deref(), &modes, &config_options, &task_local_models));
+                        normalizer.lock().await.set_menu(menu_fields_with_local_catalog(
+                            brand,
+                            local_model.as_deref(),
+                            &modes,
+                            &config_options,
+                            &task_local_models,
+                            &agent_controls,
+                        ));
                         task_database
-                            .append(menu_event(&task_session.id, brand, local_model.as_deref(), &modes, &config_options, &task_local_models).map_err(acp_error)?)
+                            .append(menu_event(
+                                &task_session.id,
+                                brand,
+                                local_model.as_deref(),
+                                &modes,
+                                &config_options,
+                                &task_local_models,
+                                &agent_controls,
+                            ).map_err(acp_error)?)
                             .await
                             .map_err(acp_error)?;
                         task_database.append(event(json!({
@@ -1038,6 +1214,21 @@ impl AcpDriver {
                                         .map_err(|error| error.to_string());
                                     let _ = reply.send(result);
                                 }
+                                Control::Subagent { action, agent_id, reply } => {
+                                    let result = connection
+                                        .send_request(UntypedMessage::new(
+                                            "_atelier/session/subagent-control",
+                                            json!({
+                                                "sessionId":remote_id,
+                                                "agentId":agent_id,
+                                                "action":action,
+                                            }),
+                                        )?)
+                                        .block_task()
+                                        .await
+                                        .map_err(|error| error.to_string());
+                                    let _ = reply.send(result);
+                                }
                                 Control::Mode { value, reply } => {
                                     let selected = mode_from_acp(brand, &value);
                                     let result = connection
@@ -1092,6 +1283,7 @@ impl AcpDriver {
                                                         &modes,
                                                         &config_options,
                                                         &task_local_models,
+                                                        &agent_controls,
                                                     ));
                                                 }
                                                 Err(error) => {
@@ -1124,9 +1316,24 @@ impl AcpDriver {
                                             if let Some((runtime, model)) = local_selection {
                                                 local_model = Some(super::super::local::encode_model(runtime, model));
                                             }
-                                            let menu = menu_fields_with_local_catalog(brand, local_model.as_deref(), &modes, &config_options, &task_local_models);
+                                            let menu = menu_fields_with_local_catalog(
+                                                brand,
+                                                local_model.as_deref(),
+                                                &modes,
+                                                &config_options,
+                                                &task_local_models,
+                                                &agent_controls,
+                                            );
                                             normalizer.lock().await.set_menu(menu.clone());
-                                            task_database.append(menu_event(&task_session.id, brand, local_model.as_deref(), &modes, &config_options, &task_local_models).map_err(acp_error)?).await.map_err(acp_error)?;
+                                            task_database.append(menu_event(
+                                                &task_session.id,
+                                                brand,
+                                                local_model.as_deref(),
+                                                &modes,
+                                                &config_options,
+                                                &task_local_models,
+                                                &agent_controls,
+                                            ).map_err(acp_error)?).await.map_err(acp_error)?;
                                             let selected_options = menu["configOptions"].as_array().into_iter().flatten().map(|option| json!({
                                                 "id":option["id"], "currentValue":option["currentValue"]
                                             })).collect::<Vec<_>>();
@@ -1220,6 +1427,12 @@ impl AcpDriver {
     async fn run(&mut self, command: &Command) -> Result<Value, String> {
         match command.kind {
             CommandKind::PromptSend => {
+                validate_offered_command(
+                    &self.database,
+                    &self.session.id,
+                    command.fields["text"].as_str().unwrap_or_default(),
+                )
+                .await?;
                 let content = prompt_content(command)?;
                 super::super::provider::record_user_for_transport(
                     &self.database,
@@ -1298,11 +1511,19 @@ impl AcpDriver {
             CommandKind::PlanRespond => {
                 let id = command.fields["proposalId"].as_str().unwrap_or_default();
                 let response = command.fields.get("response").unwrap_or(&Value::Null);
-                let action = response["actionId"].as_str().unwrap_or("request_changes");
+                let action = response["actionId"]
+                    .as_str()
+                    .ok_or_else(|| "plan action is required".to_string())?;
+                if !matches!(action, "approve" | "request_changes") {
+                    return Err(format!("unknown plan action {action}"));
+                }
                 let feedback = response["feedback"]
                     .as_str()
                     .filter(|text| !text.trim().is_empty())
                     .map(str::to_owned);
+                if action == "request_changes" && feedback.is_none() {
+                    return Err("plan feedback is required".into());
+                }
                 // Release the adapter's blocked permission request before sending
                 // any steering notification. Waiting for steering first deadlocks
                 // adapters that serialize requests behind the plan response.
@@ -1322,6 +1543,8 @@ impl AcpDriver {
                 Ok(json!({"ok":true}))
             }
             CommandKind::SessionStop => {
+                self.permissions.cancel_all().await;
+                self.elicitations.cancel_all().await;
                 let result = self.control(|reply| Control::Cancel { reply }).await?;
                 if let Some(message_id) = command
                     .fields
@@ -1392,38 +1615,55 @@ impl AcpDriver {
                 })
                 .await
             }
-            CommandKind::AgentSay | CommandKind::AgentStop | CommandKind::AgentPark => {
+            CommandKind::AgentStop | CommandKind::AgentPark => {
                 let agent_id = command.fields["agentId"].as_str().unwrap_or_default();
-                let (instruction, relayed) = match command.kind {
-                    CommandKind::AgentSay => {
-                        let text = command.fields["text"].as_str().unwrap_or_default();
-                        (
-                            format!("Relay this message to subagent {agent_id}: {text}"),
-                            Some(text),
-                        )
-                    }
-                    CommandKind::AgentStop => (format!("Stop subagent {agent_id} now."), None),
-                    CommandKind::AgentPark => (
-                        format!("Park subagent {agent_id} so it can be resumed later."),
-                        None,
-                    ),
+                if agent_id.is_empty() {
+                    return Err("agentId is required".into());
+                }
+                let (action, state) = match command.kind {
+                    CommandKind::AgentStop => ("stop", "stopped"),
+                    CommandKind::AgentPark => ("park", "parked"),
                     _ => unreachable!(),
                 };
+                let result = self
+                    .control(|reply| Control::Subagent {
+                        action: action.to_string(),
+                        agent_id: agent_id.to_string(),
+                        reply,
+                    })
+                    .await?;
+                self.record_agent_control(agent_id, state).await?;
+                Ok(result)
+            }
+            CommandKind::AgentSay => {
+                let agent_id = command.fields["agentId"].as_str().unwrap_or_default();
+                let text = command.fields["text"].as_str().unwrap_or_default();
+                if agent_id.is_empty() || text.trim().is_empty() {
+                    return Err("agentId and text are required".into());
+                }
+                let instruction = format!(
+                    "A message for the agent you sent off (id {agent_id}), from the person watching this chat. It could not be handed to it directly, so it comes to you:\n\n{text}"
+                );
                 let result = self
                     .control(|reply| Control::Steer {
                         content: vec![ContentBlock::Text(TextContent::new(instruction))],
                         reply,
                     })
                     .await?;
-                if let Some(text) = relayed {
-                    self.database.append(serde_json::from_value(json!({
-                        "type":"agent.relayed", "sessionId":self.session.id, "seq":0, "at":now(),
-                        "agentId":agent_id, "text":text
-                    })).map_err(|error|error.to_string())?).await?;
-                }
+                self.database
+                    .append(
+                        serde_json::from_value(json!({
+                            "type":"agent.relayed", "sessionId":self.session.id,
+                            "seq":0, "at":now(), "agentId":agent_id, "text":text
+                        }))
+                        .map_err(|error| error.to_string())?,
+                    )
+                    .await?;
                 Ok(result)
             }
             CommandKind::SessionClose => {
+                self.permissions.cancel_all().await;
+                self.elicitations.cancel_all().await;
                 self.database
                     .update_session(
                         self.session.id.clone(),
@@ -1473,6 +1713,160 @@ impl ProviderDriver for AcpDriver {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn interrupt_releases_every_pending_provider_question_with_its_native_rejection() {
+        let permissions = PermissionBroker::default();
+        let (permission_answer, permission_result) = oneshot::channel();
+        permissions.pending.lock().await.insert(
+            "permission-1".into(),
+            PendingPermission {
+                answer: permission_answer,
+                reject: "provider-deny".into(),
+            },
+        );
+        permissions.plan_options.lock().await.insert(
+            "permission-1".into(),
+            ("provider-allow".into(), "provider-deny".into()),
+        );
+        permissions.cancel_all().await;
+        assert_eq!(permission_result.await.unwrap(), "provider-deny");
+        assert!(permissions.pending.lock().await.is_empty());
+        assert!(permissions.plan_options.lock().await.is_empty());
+
+        let elicitations = ElicitationBroker::default();
+        let (question_answer, question_result) = oneshot::channel();
+        elicitations.pending.lock().await.insert(
+            "question-1".into(),
+            PendingElicitation {
+                answer: question_answer,
+                schema: None,
+            },
+        );
+        elicitations.cancel_all().await;
+        assert_eq!(question_result.await.unwrap(), json!({"action":"decline"}));
+        assert!(elicitations.pending.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn incomplete_question_answers_stay_pending_instead_of_disappearing() {
+        let broker = ElicitationBroker::default();
+        let (answer, received) = oneshot::channel();
+        broker.pending.lock().await.insert(
+            "question-1".into(),
+            PendingElicitation {
+                answer,
+                schema: Some(json!({
+                    "type":"object", "properties":{"choice":{"type":"string"}},
+                    "required":["choice"]
+                })),
+            },
+        );
+
+        assert_eq!(
+            broker
+                .answer("question-1", json!({"action":"accept","content":{}}))
+                .await
+                .unwrap_err(),
+            "no answer was supplied for choice"
+        );
+        assert!(broker.is_pending("question-1").await);
+        broker
+            .answer(
+                "question-1",
+                json!({"action":"accept","content":{"choice":"yes"}}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            received.await.unwrap(),
+            json!({"action":"accept","content":{"choice":"yes"}})
+        );
+    }
+
+    #[tokio::test]
+    async fn native_agent_controls_persist_canonical_lifecycle_edges() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let session = Session {
+            id: "chat-1".into(),
+            brand: "claude".into(),
+            external_id: Some("thread-1".into()),
+            project_id: "project".into(),
+            project_path: "/project".into(),
+            cwd: "/project".into(),
+            model: None,
+            permission_mode: "default".into(),
+            effort: None,
+            collaboration_mode: None,
+            title: None,
+            state: "idle".into(),
+            origin: "app".into(),
+            created_at: "2026-09-02T00:00:00Z".into(),
+            last_active_at: "2026-09-02T00:00:00Z".into(),
+            last_spoke_at: None,
+        };
+        database.create_session(session.clone()).await.unwrap();
+        for (agent_id, tool_id) in [("stop-me", "tool-1"), ("park-me", "tool-2")] {
+            for value in [
+                json!({"type":"agent.started","sessionId":session.id,"seq":0,"at":"2026-09-02T00:00:00Z","agentId":agent_id,"toolCallId":tool_id,"kind":"task","what":"work"}),
+                json!({"type":"agent.progress","sessionId":session.id,"seq":0,"at":"2026-09-02T00:00:01Z","agentId":agent_id,"seconds":9,"tokens":120,"calls":3,"model":"provider-model","state":"running"}),
+            ] {
+                database
+                    .append(serde_json::from_value(value).unwrap())
+                    .await
+                    .unwrap();
+            }
+        }
+        let (controls, _) = mpsc::unbounded_channel();
+        let (_, ended) = mpsc::unbounded_channel();
+        let driver = AcpDriver {
+            brand: "claude",
+            database: database.clone(),
+            session,
+            controls,
+            ended,
+            permissions: Arc::new(PermissionBroker::default()),
+            elicitations: Arc::new(ElicitationBroker::default()),
+        };
+
+        driver
+            .record_agent_control("stop-me", "stopped")
+            .await
+            .unwrap();
+        driver
+            .record_agent_control("park-me", "parked")
+            .await
+            .unwrap();
+
+        let agents = database.projected_agents("chat-1".into()).await.unwrap();
+        let stopped = agents
+            .iter()
+            .find(|agent| agent["id"] == "stop-me")
+            .unwrap();
+        let parked = agents
+            .iter()
+            .find(|agent| agent["id"] == "park-me")
+            .unwrap();
+        assert_eq!(stopped["state"], "stopped");
+        assert_eq!(parked["state"], "parked");
+        for agent in [stopped, parked] {
+            assert_eq!(agent["seconds"], 9);
+            assert_eq!(agent["tokens"], 120);
+            assert_eq!(agent["calls"], 3);
+            assert_eq!(agent["model"], "provider-model");
+        }
+        let events = database.events_since("chat-1".into(), 0).await.unwrap();
+        assert!(events.iter().any(|event| {
+            event.kind == super::super::super::protocol::EventKind::AgentFinished
+                && event.fields["agentId"] == "stop-me"
+        }));
+        assert!(events.iter().any(|event| {
+            event.kind == super::super::super::protocol::EventKind::AgentProgress
+                && event.fields["agentId"] == "park-me"
+                && event.fields["state"] == "parked"
+        }));
+    }
+
     #[test]
     fn acp_config_options_fill_the_existing_provider_neutral_menu() {
         let menu = menu_event("local", "codex", None, &json!({
@@ -1484,7 +1878,7 @@ mod tests {
             {"id":"reasoning_effort","category":"thought_level","currentValue":"high","options":[{"value":"high","name":"High"}]},
             {"id":"collaboration_mode","category":"collaboration_mode","currentValue":"plan","options":[{"value":"plan","name":"Plan"}]},
             {"id":"fast-mode","name":"Fast mode","description":"Run with lower latency","type":"boolean","currentValue":false}
-        ]), &Value::Null).unwrap();
+        ]), &Value::Null, &json!(["stop","say"])).unwrap();
         let menu = serde_json::to_value(menu).unwrap();
         assert_eq!(
             menu["permissionModes"],
@@ -1495,6 +1889,7 @@ mod tests {
         assert_eq!(menu["collaborationModes"][0]["value"], "plan");
         assert_eq!(menu["configOptions"][0]["id"], "fast-mode");
         assert_eq!(menu["configOptions"][0]["currentValue"], false);
+        assert_eq!(menu["agentControls"], json!(["stop", "say"]));
     }
 
     #[test]
@@ -1523,6 +1918,29 @@ mod tests {
     }
 
     #[test]
+    fn slash_commands_are_validated_before_a_turn_is_persisted() {
+        let commands = json!([
+            {"name":"compact"},
+            {"name":"$review","execution":"skill"}
+        ]);
+        let commands = commands.as_array().unwrap();
+        assert_eq!(slash_name("  /compact  "), Some("compact"));
+        assert_eq!(slash_name("/$review focus on safety"), Some("$review"));
+        assert_eq!(slash_name("ordinary prose"), None);
+        assert_eq!(slash_name("//not-a-command"), None);
+        assert!(command_is_offered("compact", commands).is_ok());
+        assert!(command_is_offered("$review", commands).is_ok());
+        assert_eq!(
+            command_is_offered("invented", commands).unwrap_err(),
+            "/invented is not available in this session."
+        );
+        assert_eq!(
+            command_is_offered("invented", &[]).unwrap_err(),
+            "/invented is not available in this provider."
+        );
+    }
+
+    #[test]
     fn local_menu_keeps_the_discovered_cross_runtime_catalog() {
         let menu = menu_fields_with_local_catalog(
             super::super::super::local::BRAND,
@@ -1536,6 +1954,7 @@ mod tests {
                 {"value":"ollama::qwen3","displayName":"qwen3","runtime":"ollama"},
                 {"value":"openai-compatible::gemma","displayName":"gemma","runtime":"openai-compatible"}
             ]),
+            &json!([]),
         );
         assert_eq!(menu["currentModel"], "ollama::qwen3");
         assert_eq!(menu["models"].as_array().unwrap().len(), 2);
@@ -1545,6 +1964,7 @@ mod tests {
             .unwrap()
             .iter()
             .all(|option| option["id"] != "provider"));
+        assert_eq!(menu["agentControls"], json!([]));
     }
 
     #[test]
