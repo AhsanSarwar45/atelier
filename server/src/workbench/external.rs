@@ -517,6 +517,68 @@ fn logged_codex_threads(home: &Path, pids: &[u32]) -> HashMap<u32, String> {
     found
 }
 
+/// Codex terminal processes from the native process table used on machines
+/// without `/proc`. The first argument must itself be the Codex executable;
+/// matching a later word would mistake shells, editors, and this app for the
+/// conversation owner. App-server is a reader, not an interactive owner.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+fn codex_commands<'a>(rows: impl IntoIterator<Item = &'a str>) -> Vec<(u32, String)> {
+    let mut found = Vec::new();
+    for row in rows {
+        let row = row.trim();
+        let Some(split) = row.find(char::is_whitespace) else {
+            continue;
+        };
+        let Ok(pid) = row[..split].parse::<u32>() else {
+            continue;
+        };
+        let command = row[split..].trim();
+        let mut argv = command.split_whitespace();
+        let executable = argv
+            .next()
+            .map(|arg| arg.trim_matches('"'))
+            .and_then(|arg| arg.rsplit(['/', '\\']).next());
+        if !matches!(executable, Some("codex" | "codex.exe"))
+            || argv.next().is_some_and(|arg| arg == "app-server")
+        {
+            continue;
+        }
+        found.push((pid, command.to_string()));
+    }
+    found
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn native_codex_commands() -> Vec<(u32, String)> {
+    std::process::Command::new("ps")
+        .args(["-axo", "pid=,args="])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+        .map(|output| codex_commands(output.lines()))
+        .unwrap_or_default()
+}
+
+#[cfg(windows)]
+fn native_codex_commands() -> Vec<(u32, String)> {
+    // PowerShell and CIM are part of every Windows version Atelier supports.
+    // Tabs make the PID boundary unambiguous even when CommandLine has spaces.
+    std::process::Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }",
+        ])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+        .map(|output| codex_commands(output.lines()))
+        .unwrap_or_default()
+}
+
 /// Live Codex CLI processes grouped by their current thread. App-server is
 /// excluded: it can list a thread without owning an interactive turn.
 pub fn codex_thread_processes(
@@ -525,7 +587,18 @@ pub fn codex_thread_processes(
 ) -> (BTreeMap<String, BTreeSet<u32>>, HashMap<String, PathBuf>) {
     let mut found: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
     let mut rollout_paths = HashMap::new();
-    if !cfg!(target_os = "linux") && proc_root == Path::new("/proc") {
+    #[cfg(not(target_os = "linux"))]
+    if proc_root == Path::new("/proc") {
+        let commands = native_codex_commands();
+        let pids: Vec<_> = commands.iter().map(|(pid, _)| *pid).collect();
+        for (pid, command) in commands {
+            for id in uuid_in(&command) {
+                found.entry(id).or_default().insert(pid);
+            }
+        }
+        for (pid, id) in logged_codex_threads(codex_home, &pids) {
+            found.entry(id).or_default().insert(pid);
+        }
         return (found, rollout_paths);
     }
     let Ok(entries) = fs::read_dir(proc_root) else {
@@ -918,6 +991,24 @@ mod tests {
         assert_eq!(threads[&CHAT.to_string()], BTreeSet::from([51, 52]));
         assert_eq!(threads[&OTHER.to_string()], BTreeSet::from([52]));
         assert_eq!(paths[OTHER], rollout);
+    }
+
+    #[test]
+    fn native_workbench_services_external_codex_reads_non_linux_process_rows() {
+        let rows = format!(
+            "  41 /opt/homebrew/bin/codex resume {CHAT}\n\
+               42 /opt/homebrew/bin/codex resume\n\
+               43 /opt/homebrew/bin/codex app-server {OTHER}\n\
+               44 /bin/zsh -lc codex resume {OTHER}\n\
+               45 C:\\tools\\codex.exe resume {OTHER}\n"
+        );
+        let commands = codex_commands(rows.lines());
+        assert_eq!(
+            commands.iter().map(|row| row.0).collect::<Vec<_>>(),
+            vec![41, 42, 45]
+        );
+        assert_eq!(uuid_in(&commands[0].1), vec![CHAT.to_string()]);
+        assert_eq!(uuid_in(&commands[2].1), vec![OTHER.to_string()]);
     }
 
     #[test]
