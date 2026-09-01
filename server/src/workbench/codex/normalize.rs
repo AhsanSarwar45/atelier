@@ -96,6 +96,9 @@ fn patch_sides(diff: &str) -> Value {
 #[derive(Clone, Debug)]
 struct Agent {
     agent_type: Option<String>,
+    what: String,
+    tool_call_id: Option<String>,
+    parent_actor_id: Option<String>,
 }
 
 #[derive(Default)]
@@ -103,25 +106,134 @@ pub struct CodexNormalizer {
     messages: HashSet<String>,
     completed_messages: HashSet<String>,
     tools: HashMap<String, String>,
+    completed_tools: HashSet<String>,
     agents: HashMap<String, Agent>,
+    finished_agents: HashSet<String>,
+    message_parents: HashMap<String, String>,
+    message_actors: HashMap<String, String>,
     rollout_apply: Option<String>,
 }
 
 impl CodexNormalizer {
-    fn open_message(&mut self, id: &str, role: &str, events: &mut Vec<DriverEvent>) {
+    fn parent_tool_call(&self, actor_agent_id: Option<&str>) -> Option<String> {
+        actor_agent_id.and_then(|id| self.agents.get(id)?.tool_call_id.clone())
+    }
+
+    pub fn agent_execution(&self, agent_id: &str) -> Option<Value> {
+        let agent = self.agents.get(agent_id)?;
+        let operation_id = agent.tool_call_id.as_deref()?;
+        Some(json!({
+            "conversationId": agent_id,
+            "actorId": agent_id,
+            "actorName": agent.agent_type.as_deref().unwrap_or(&agent.what),
+            "parentActorId": agent.parent_actor_id,
+            "operationId": operation_id,
+            "parentOperationId": self.parent_tool_call(agent.parent_actor_id.as_deref()),
+        }))
+    }
+
+    pub fn finish_agent(
+        &mut self,
+        agent_id: &str,
+        state: &str,
+        result: Value,
+    ) -> Option<DriverEvent> {
+        if !self.agents.contains_key(agent_id) || !self.finished_agents.insert(agent_id.to_string())
+        {
+            return None;
+        }
+        let mut finished = event(
+            "agent.finished",
+            [
+                ("agentId", json!(agent_id)),
+                ("state", json!(state)),
+                ("seconds", json!(0)),
+                ("tokens", json!(0)),
+                ("calls", json!(0)),
+                ("model", Value::Null),
+                ("result", result),
+            ],
+        );
+        if let Some(execution) = self.agent_execution(agent_id) {
+            finished["execution"] = execution;
+        }
+        Some(finished)
+    }
+
+    fn execution(
+        &self,
+        actor_agent_id: Option<&str>,
+        operation_id: &str,
+        parent_operation_id: Option<&str>,
+    ) -> Option<Value> {
+        let actor_id = actor_agent_id?;
+        let actor = self.agents.get(actor_id);
+        Some(json!({
+            "conversationId": actor_id,
+            "actorId": actor_id,
+            "actorName": actor.and_then(|row| row.agent_type.as_deref()).or_else(|| actor.map(|row| row.what.as_str())),
+            "parentActorId": actor.and_then(|row| row.parent_actor_id.as_deref()),
+            "operationId": operation_id,
+            "parentOperationId": parent_operation_id,
+        }))
+    }
+
+    fn contextual_event(
+        &self,
+        kind: &str,
+        fields: impl IntoIterator<Item = (&'static str, Value)>,
+        actor_agent_id: Option<&str>,
+        operation_id: &str,
+        parent_tool_call_id: Option<&str>,
+        include_parent: bool,
+    ) -> DriverEvent {
+        let mut row = event(kind, fields);
+        if include_parent {
+            row["parentToolCallId"] = parent_tool_call_id.map_or(Value::Null, |id| json!(id));
+        }
+        if let Some(execution) = self.execution(actor_agent_id, operation_id, parent_tool_call_id) {
+            row["execution"] = execution;
+        }
+        row
+    }
+
+    fn open_message(
+        &mut self,
+        id: &str,
+        role: &str,
+        actor_agent_id: Option<&str>,
+        events: &mut Vec<DriverEvent>,
+    ) {
         if self.messages.insert(id.to_string()) {
-            events.push(event(
+            let parent = self.parent_tool_call(actor_agent_id);
+            if let Some(parent) = &parent {
+                self.message_parents.insert(id.to_string(), parent.clone());
+            }
+            if let Some(actor) = actor_agent_id {
+                self.message_actors
+                    .insert(id.to_string(), actor.to_string());
+            }
+            events.push(self.contextual_event(
                 "message.started",
                 [("messageId", json!(id)), ("role", json!(role))],
+                actor_agent_id,
+                id,
+                parent.as_deref(),
+                parent.is_some(),
             ));
         }
     }
 
-    fn start_agent(&mut self, item: &Value, events: &mut Vec<DriverEvent>) {
+    fn start_agent(
+        &mut self,
+        item: &Value,
+        actor_agent_id: Option<&str>,
+        events: &mut Vec<DriverEvent>,
+    ) {
         let Some(agent_id) = item["agentThreadId"].as_str() else {
             return;
         };
-        if self.agents.contains_key(agent_id) {
+        if self.agents.contains_key(agent_id) || self.finished_agents.contains(agent_id) {
             return;
         }
         let agent_type = item["agentPath"].as_str().and_then(|path| {
@@ -130,7 +242,22 @@ impl CodexNormalizer {
                 .and_then(|stem| stem.to_str())
                 .map(str::to_string)
         });
-        let what = agent_type.clone().unwrap_or_else(|| "Subagent".into());
+        let what = agent_type.clone().unwrap_or_else(|| {
+            item["prompt"]
+                .as_str()
+                .filter(|prompt| !prompt.is_empty())
+                .unwrap_or("Subagent")
+                .to_string()
+        });
+        let tool_call_id = item["id"].as_str().map(str::to_string);
+        let execution = json!({
+            "conversationId": agent_id,
+            "actorId": agent_id,
+            "actorName": agent_type.as_deref().unwrap_or(&what),
+            "parentActorId": actor_agent_id,
+            "operationId": item.get("id").cloned().unwrap_or(Value::Null),
+            "parentOperationId": self.parent_tool_call(actor_agent_id),
+        });
         events.push(event(
             "agent.started",
             [
@@ -142,27 +269,92 @@ impl CodexNormalizer {
                     "agentType",
                     agent_type.clone().map_or(Value::Null, Value::String),
                 ),
-                ("model", Value::Null),
+                ("model", item.get("model").cloned().unwrap_or(Value::Null)),
+                ("execution", execution),
             ],
         ));
-        self.agents
-            .insert(agent_id.to_string(), Agent { agent_type });
+        self.agents.insert(
+            agent_id.to_string(),
+            Agent {
+                agent_type,
+                what,
+                tool_call_id,
+                parent_actor_id: actor_agent_id.map(str::to_string),
+            },
+        );
     }
 
     pub fn item_started(&mut self, item: &Value, events: &mut Vec<DriverEvent>) {
+        self.item_started_for(item, None, events);
+    }
+
+    pub fn message_delta_for(
+        &mut self,
+        id: &str,
+        text: Value,
+        actor_agent_id: Option<&str>,
+        events: &mut Vec<DriverEvent>,
+    ) -> bool {
+        let opened = !self.messages.contains(id);
+        self.open_message(id, "assistant", actor_agent_id, events);
+        let parent = self
+            .message_parents
+            .get(id)
+            .cloned()
+            .or_else(|| self.parent_tool_call(actor_agent_id));
+        events.push(self.contextual_event(
+            "text.delta",
+            [("messageId", json!(id)), ("text", text)],
+            actor_agent_id,
+            id,
+            parent.as_deref(),
+            false,
+        ));
+        opened && parent.is_none()
+    }
+
+    pub fn thinking_delta_for(
+        &self,
+        id: &str,
+        text: Value,
+        actor_agent_id: Option<&str>,
+        events: &mut Vec<DriverEvent>,
+    ) {
+        let parent = self.parent_tool_call(actor_agent_id);
+        events.push(self.contextual_event(
+            "thinking.delta",
+            [("messageId", json!(id)), ("text", text)],
+            actor_agent_id,
+            id,
+            parent.as_deref(),
+            parent.is_some(),
+        ));
+    }
+
+    pub fn item_started_for(
+        &mut self,
+        item: &Value,
+        actor_agent_id: Option<&str>,
+        events: &mut Vec<DriverEvent>,
+    ) {
         let Some(kind) = item["type"].as_str() else {
             return;
         };
         let id = item["id"].as_str().unwrap_or_default();
         match kind {
-            "agentMessage" => self.open_message(id, "assistant", events),
+            "agentMessage" => self.open_message(id, "assistant", actor_agent_id, events),
             "reasoning" => {
                 let mut text = strings(item, "summary");
                 text.extend(strings(item, "content"));
                 if !text.is_empty() {
-                    events.push(event(
+                    let parent = self.parent_tool_call(actor_agent_id);
+                    events.push(self.contextual_event(
                         "thinking.delta",
                         [("messageId", json!(id)), ("text", json!(text.join("\n")))],
+                        actor_agent_id,
+                        id,
+                        parent.as_deref(),
+                        parent.is_some(),
                     ));
                 }
             }
@@ -177,12 +369,13 @@ impl CodexNormalizer {
                 ],
             )),
             "subAgentActivity" => {
-                self.start_agent(item, events);
+                self.start_agent(item, actor_agent_id, events);
                 if item["kind"] == "started" {
                     self.start_tool(
                         id,
                         "spawn_agent",
                         json!({"task_name": item["agentThreadId"], "prompt": ""}),
+                        actor_agent_id,
                         events,
                     );
                 }
@@ -203,12 +396,13 @@ impl CodexNormalizer {
                 if item["tool"] == "spawnAgent" {
                     for agent_id in &ids {
                         self.start_agent(
-                            &json!({"id":id,"agentThreadId":agent_id,"agentPath":Value::Null}),
+                            &json!({"id":id,"agentThreadId":agent_id,"agentPath":Value::Null,"prompt":item["prompt"],"model":item["model"]}),
+                            actor_agent_id,
                             events,
                         );
                     }
                 }
-                self.start_tool(id, name, json!({"target": ids}), events);
+                self.start_tool(id, name, json!({"target": ids}), actor_agent_id, events);
             }
             "hookPrompt" | "contextCompaction" | "enteredReviewMode" | "exitedReviewMode" => {}
             _ => {
@@ -225,7 +419,7 @@ impl CodexNormalizer {
                         _ => "Bash",
                     },
                     "fileChange" => "Edit",
-                    "mcpToolCall" => return self.start_mcp(item, events),
+                    "mcpToolCall" => return self.start_mcp(item, actor_agent_id, events),
                     "dynamicToolCall" => item["tool"].as_str().unwrap_or("Tool"),
                     "webSearch" => "Web search",
                     "imageView" => "View image",
@@ -238,7 +432,7 @@ impl CodexNormalizer {
                     "pattern": action["query"], "path": action.get("path").unwrap_or(&item["path"]), "file_path": action["path"],
                     "durationMs": item["durationMs"]
                 }));
-                self.start_tool(id, name, input, events);
+                self.start_tool(id, name, input, actor_agent_id, events);
                 if kind == "fileChange" {
                     for change in item["changes"].as_array().into_iter().flatten() {
                         let mut fields =
@@ -256,7 +450,12 @@ impl CodexNormalizer {
         }
     }
 
-    fn start_mcp(&mut self, item: &Value, events: &mut Vec<DriverEvent>) {
+    fn start_mcp(
+        &mut self,
+        item: &Value,
+        actor_agent_id: Option<&str>,
+        events: &mut Vec<DriverEvent>,
+    ) {
         let id = item["id"].as_str().unwrap_or_default();
         let name = format!(
             "{}/{}",
@@ -274,27 +473,48 @@ impl CodexNormalizer {
             .or_else(|| item.get("destructive_hint"))
             .cloned()
             .unwrap_or(Value::Null);
-        self.start_tool(id, &name, input, events);
+        self.start_tool(id, &name, input, actor_agent_id, events);
     }
 
-    fn start_tool(&mut self, id: &str, name: &str, input: Value, events: &mut Vec<DriverEvent>) {
-        if self.tools.contains_key(id) {
+    fn start_tool(
+        &mut self,
+        id: &str,
+        name: &str,
+        input: Value,
+        actor_agent_id: Option<&str>,
+        events: &mut Vec<DriverEvent>,
+    ) {
+        if self.tools.contains_key(id) || self.completed_tools.contains(id) {
             return;
         }
         self.tools.insert(id.to_string(), name.to_string());
-        events.push(event(
+        let parent = self.parent_tool_call(actor_agent_id);
+        events.push(self.contextual_event(
             "tool.started",
             [
                 ("toolCallId", json!(id)),
                 ("name", json!(name)),
                 ("input", input.clone()),
                 ("title", json!(tool_title(name, &input))),
-                ("parentToolCallId", Value::Null),
             ],
+            actor_agent_id,
+            id,
+            parent.as_deref(),
+            true,
         ));
     }
 
     pub fn item_completed(&mut self, item: &Value, events: &mut Vec<DriverEvent>) {
+        self.item_completed_for(item, None, true, events);
+    }
+
+    pub fn item_completed_for(
+        &mut self,
+        item: &Value,
+        actor_agent_id: Option<&str>,
+        replayed: bool,
+        events: &mut Vec<DriverEvent>,
+    ) {
         let Some(kind) = item["type"].as_str() else {
             return;
         };
@@ -308,40 +528,52 @@ impl CodexNormalizer {
                 return;
             }
             let opened = self.messages.contains(id);
-            self.open_message(id, "assistant", events);
+            let remembered_actor = self.message_actors.get(id).cloned();
+            let actor_agent_id = actor_agent_id.or(remembered_actor.as_deref());
+            let remembered_parent = self.message_parents.get(id).cloned();
+            self.open_message(id, "assistant", actor_agent_id, events);
             if !opened && !text.is_empty() {
-                events.push(event(
+                events.push(self.contextual_event(
                     "text.delta",
                     [("messageId", json!(id)), ("text", json!(text))],
+                    actor_agent_id,
+                    id,
+                    remembered_parent.as_deref(),
+                    false,
                 ));
             }
-            events.push(event("message.completed", [("messageId", json!(id))]));
+            events.push(self.contextual_event(
+                "message.completed",
+                [("messageId", json!(id))],
+                actor_agent_id,
+                id,
+                remembered_parent.as_deref(),
+                false,
+            ));
+            return;
+        }
+        if self.completed_tools.contains(id) {
             return;
         }
         if kind == "collabAgentToolCall" {
-            self.item_started(item, events);
+            self.item_started_for(item, actor_agent_id, events);
             for (agent_id, state) in item["agentsStates"].as_object().into_iter().flatten() {
+                if !replayed && item["tool"] == "spawnAgent" {
+                    continue;
+                }
                 let state_name = match state["status"].as_str().unwrap_or_default() {
                     "completed" => "done",
                     "interrupted" | "shutdown" => "stopped",
                     "errored" | "notFound" => "failed",
                     _ => continue,
                 };
-                events.push(event(
-                    "agent.finished",
-                    [
-                        ("agentId", json!(agent_id)),
-                        ("state", json!(state_name)),
-                        ("seconds", json!(0)),
-                        ("tokens", json!(0)),
-                        ("calls", json!(0)),
-                        ("model", Value::Null),
-                        (
-                            "result",
-                            state.get("message").cloned().unwrap_or(Value::Null),
-                        ),
-                    ],
-                ));
+                if let Some(finished) = self.finish_agent(
+                    agent_id,
+                    state_name,
+                    state.get("message").cloned().unwrap_or(Value::Null),
+                ) {
+                    events.push(finished);
+                }
             }
         }
         if !self.tools.contains_key(id) {
@@ -349,13 +581,18 @@ impl CodexNormalizer {
         }
         let ok = !matches!(item["status"].as_str(), Some("failed" | "declined"))
             && item["exitCode"].as_i64().is_none_or(|code| code == 0);
-        events.push(event(
+        let parent = self.parent_tool_call(actor_agent_id);
+        events.push(self.contextual_event(
             "tool.completed",
             [
                 ("toolCallId", json!(id)),
                 ("ok", json!(ok)),
                 ("output", json!(output_of(item))),
             ],
+            actor_agent_id,
+            id,
+            parent.as_deref(),
+            false,
         ));
         if ok && matches!(kind, "imageView" | "imageGeneration") {
             let path = if kind == "imageGeneration" {
@@ -365,7 +602,7 @@ impl CodexNormalizer {
             };
             if let Some(image) = path.and_then(|path| local_image(Path::new(path))) {
                 let message_id = format!("{id}:image");
-                self.open_message(&message_id, "assistant", events);
+                self.open_message(&message_id, "assistant", actor_agent_id, events);
                 events.push(event(
                     "image",
                     [("messageId", json!(message_id)), ("image", image)],
@@ -377,6 +614,7 @@ impl CodexNormalizer {
             }
         }
         self.tools.remove(id);
+        self.completed_tools.insert(id.to_string());
     }
 
     pub fn replay_thread(&mut self, thread: &Value) -> Vec<DriverEvent> {
@@ -386,7 +624,7 @@ impl CodexNormalizer {
                 match item["type"].as_str().unwrap_or_default() {
                     "userMessage" => {
                         let id = item["id"].as_str().unwrap_or_default();
-                        self.open_message(id, "user", &mut events);
+                        self.open_message(id, "user", None, &mut events);
                         let text = item["content"]
                             .as_array()
                             .into_iter()
@@ -471,19 +709,9 @@ impl CodexNormalizer {
                 .map(|(id, _)| id.clone())
                 .collect();
             for agent_id in finished {
-                self.agents.remove(&agent_id);
-                events.push(event(
-                    "agent.finished",
-                    [
-                        ("agentId", json!(agent_id)),
-                        ("state", json!("done")),
-                        ("seconds", json!(0)),
-                        ("tokens", json!(0)),
-                        ("calls", json!(0)),
-                        ("model", Value::Null),
-                        ("result", Value::Null),
-                    ],
-                ));
+                if let Some(finished) = self.finish_agent(&agent_id, "done", Value::Null) {
+                    events.push(finished);
+                }
             }
         } else if row["type"] == "event_msg" && payload["type"] == "user_message" {
             let id = payload["id"]
@@ -498,7 +726,7 @@ impl CodexNormalizer {
                             .unwrap_or_else(|| Uuid::new_v4().to_string())
                     )
                 });
-            self.open_message(&id, "user", &mut events);
+            self.open_message(&id, "user", None, &mut events);
             if payload["message"]
                 .as_str()
                 .is_some_and(|text| !text.is_empty())
@@ -613,7 +841,7 @@ impl CodexNormalizer {
             match item["type"].as_str().unwrap_or_default() {
                 "UserMessage" => {
                     let id = item["id"].as_str().unwrap_or_default();
-                    self.open_message(id, "user", &mut events);
+                    self.open_message(id, "user", None, &mut events);
                     let text = rollout_text(item);
                     if !text.is_empty() {
                         events.push(event(

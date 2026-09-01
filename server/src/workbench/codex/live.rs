@@ -72,9 +72,10 @@ pub struct CodexLiveState {
     asks: HashMap<String, PendingAsk>,
     questions: HashMap<String, PendingQuestions>,
     plans: HashSet<String>,
-    messages: HashSet<String>,
     tool_output: HashMap<String, String>,
     agents: HashSet<String>,
+    active_agents: HashSet<String>,
+    child_results: HashMap<String, String>,
     elicitation: HashMap<String, (Value, usize, serde_json::Map<String, Value>)>,
     responses: Vec<(Value, Result<Value, Value>)>,
     diagnostic_seq: u64,
@@ -101,6 +102,13 @@ impl CodexLiveState {
 
     pub fn take_responses(&mut self) -> Vec<(Value, Result<Value, Value>)> {
         std::mem::take(&mut self.responses)
+    }
+
+    fn actor_of(&self, params: &Value) -> Option<String> {
+        params["threadId"]
+            .as_str()
+            .filter(|id| Some(*id) != self.thread_id.as_deref())
+            .map(str::to_string)
     }
 
     pub fn handle(&mut self, inbound: CodexInbound) -> Vec<DriverEvent> {
@@ -165,9 +173,18 @@ impl CodexLiveState {
                 let status = params.get("status").or_else(|| params["thread"].get("status")).cloned().unwrap_or_else(||json!({}));
                 let changed = params["threadId"].as_str().or_else(||params["thread"]["id"].as_str());
                 if let Some(id) = changed.filter(|id| Some(*id) != self.thread_id.as_deref()) {
-                    if self.agents.contains(id) && matches!(status["type"].as_str(),Some("idle"|"systemError")) {
-                        events.push(event("agent.finished",[("agentId",json!(id)),("state",json!(if status["type"]=="idle"{"done"}else{"failed"})),("seconds",json!(0)),("tokens",json!(0)),("calls",json!(0)),("model",Value::Null),("result",Value::Null)]));
+                    if self.agents.contains(id) && status["type"] == "active" {
+                        self.active_agents.insert(id.to_string());
+                        let mut progress=event("agent.progress",[("agentId",json!(id)),("seconds",json!(0)),("tokens",json!(0)),("calls",json!(0)),("state",json!("running"))]);
+                        if let Some(execution)=self.normalizer.agent_execution(id){progress["execution"]=execution;}
+                        events.push(progress);
+                    } else if self.agents.contains(id)
+                        && (status["type"] == "systemError"
+                            || (status["type"] == "idle" && self.active_agents.remove(id)))
+                    {
+                        if let Some(finished)=self.normalizer.finish_agent(id,if status["type"]=="idle"{"done"}else{"failed"},self.child_results.remove(id).map_or(Value::Null,Value::String)){events.push(finished);}
                         self.agents.remove(id);
+                        self.active_agents.remove(id);
                     }
                 } else {
                     let waiting=status["activeFlags"].as_array().is_some_and(|flags|flags.iter().any(|flag|matches!(flag.as_str(),Some("waitingOnApproval"|"waitingOnUserInput"))));
@@ -177,32 +194,35 @@ impl CodexLiveState {
             }
             "item/agentMessage/delta" => {
                 let id=params["itemId"].as_str().unwrap_or_default();
-                if self.messages.insert(id.to_string()){events.push(event("message.started",[("messageId",json!(id)),("role",json!("assistant"))]));events.push(event("session.state",[("state",json!("streaming")),("label",json!("Answering"))]));}
-                events.push(event("text.delta",[("messageId",json!(id)),("text",params["delta"].clone())]));
+                let actor = self.actor_of(params);
+                if self.normalizer.message_delta_for(id,params["delta"].clone(),actor.as_deref(),&mut events){events.push(event("session.state",[("state",json!("streaming")),("label",json!("Answering"))]));}
             }
-            "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" => events.push(event("thinking.delta",[("messageId",params["itemId"].clone()),("text",params["delta"].clone())])),
+            "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" => {
+                let actor=self.actor_of(params);
+                self.normalizer.thinking_delta_for(params["itemId"].as_str().unwrap_or_default(),params["delta"].clone(),actor.as_deref(),&mut events);
+            }
             "turn/plan/updated" => events.push(event("todo",[("items",Value::Array(params["plan"].as_array().into_iter().flatten().enumerate().map(|(index,row)|json!({"id":index.to_string(),"text":row["step"],"status":row["status"]})).collect()))])),
             "item/started" => {
-                if params["item"]["type"] == "agentMessage" {
-                    if let Some(id) = params["item"]["id"].as_str() {
-                        self.messages.insert(id.to_string());
-                    }
-                }
+                let actor=self.actor_of(params);
                 if params["item"]["type"]=="subAgentActivity" || params["item"]["type"]=="collabAgentToolCall" {
                     for id in params["item"]["receiverThreadIds"].as_array().into_iter().flatten().filter_map(Value::as_str){self.agents.insert(id.to_string());}
                     if let Some(id)=params["item"]["agentThreadId"].as_str(){self.agents.insert(id.to_string());}
                 }
-                self.normalizer.item_started(&params["item"],&mut events);
+                self.normalizer.item_started_for(&params["item"],actor.as_deref(),&mut events);
                 if let Some(tool) = events.iter().find(|row|row["type"]=="tool.started") {
                     let label = tool["name"].as_str().unwrap_or("Using a tool").to_string();
                     events.push(event("session.state",[("state",json!("running_tool")),("label",json!(label))]));
                 }
             }
             "item/completed" => {
+                let actor=self.actor_of(params);
+                if let Some(actor_id)=actor.as_deref().filter(|_|params["item"]["type"]=="agentMessage") {
+                    if let Some(result)=params["item"]["text"].as_str().map(str::trim).filter(|text|!text.is_empty()) {self.child_results.insert(actor_id.to_string(),result.to_string());}
+                }
                 if params["item"]["type"]=="plan" {
                     let markdown=params["item"]["text"].as_str().unwrap_or_default().trim();
                     if !markdown.is_empty(){let id=format!("{}:plan:0",params["item"]["id"].as_str().unwrap_or_default());self.plans.insert(id.clone());events.push(plan_event(&id,markdown));}
-                } else { self.normalizer.item_completed(&params["item"],&mut events); }
+                } else { self.normalizer.item_completed_for(&params["item"],actor.as_deref(),false,&mut events); }
             }
             "thread/tokenUsage/updated" => {
                 if !params["tokenUsage"]["total"].is_null(){let total=&params["tokenUsage"]["total"];events.push(event("cost",[("cost",json!({"kind":"tokens","input":total["inputTokens"],"output":total["outputTokens"],"total":total["totalTokens"]}))]));}
@@ -233,6 +253,15 @@ impl CodexLiveState {
             "warning" | "model/rerouted" => events.push(note(method,params["message"].as_str().unwrap_or(&params.to_string()),"note")),
             _ if !method.ends_with("/delta") && !method.ends_with("/outputDelta") => events.push(note(method,params["message"].as_str().unwrap_or(&params.to_string()),"detail")),
             _ => {}
+        }
+        let finished: Vec<String> = events
+            .iter()
+            .filter(|row| row["type"] == "agent.finished")
+            .filter_map(|row| row["agentId"].as_str().map(str::to_string))
+            .collect();
+        for id in finished {
+            self.agents.remove(&id);
+            self.active_agents.remove(&id);
         }
         events
     }
@@ -1309,6 +1338,83 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn native_codex_live_keeps_nested_work_owned_until_a_real_idle_edge() {
+        let mut state = CodexLiveState::new(&options());
+        state.thread_id = Some("parent".into());
+
+        let spawn = json!({
+            "threadId":"parent",
+            "item":{
+                "id":"spawn-1","type":"collabAgentToolCall","tool":"spawnAgent",
+                "prompt":"Inspect the importer","receiverThreadIds":["child"],
+                "agentsStates":{"child":{"status":"running"}}
+            }
+        });
+        let started = state.handle(CodexInbound::Notification {
+            method: "item/started".into(),
+            params: spawn.clone(),
+        });
+        assert!(started.iter().any(|row| row["type"] == "agent.started"
+            && row["agentId"] == "child"
+            && row["execution"]["conversationId"] == "child"));
+
+        let completed = state.handle(CodexInbound::Notification {
+            method: "item/completed".into(),
+            params: spawn,
+        });
+        assert!(!completed.iter().any(|row| row["type"] == "agent.finished"));
+
+        let premature_idle = state.handle(CodexInbound::Notification {
+            method: "thread/status/changed".into(),
+            params: json!({"threadId":"child","status":{"type":"idle"}}),
+        });
+        assert!(premature_idle.is_empty(), "{premature_idle:#?}");
+
+        let active = state.handle(CodexInbound::Notification {
+            method: "thread/status/changed".into(),
+            params: json!({"threadId":"child","status":{"type":"active"}}),
+        });
+        assert_eq!(active[0]["type"], "agent.progress");
+
+        let tool = state.handle(CodexInbound::Notification {
+            method: "item/started".into(),
+            params: json!({"threadId":"child","item":{"id":"read-1","type":"commandExecution","command":"cat file"}}),
+        });
+        let opened_tool = tool
+            .iter()
+            .find(|row| row["type"] == "tool.started")
+            .unwrap();
+        assert_eq!(opened_tool["parentToolCallId"], "spawn-1");
+        assert_eq!(opened_tool["execution"]["actorId"], "child");
+        assert_eq!(opened_tool["execution"]["operationId"], "read-1");
+        assert_eq!(opened_tool["execution"]["parentOperationId"], "spawn-1");
+
+        let answer = state.handle(CodexInbound::Notification {
+            method: "item/agentMessage/delta".into(),
+            params: json!({"threadId":"child","itemId":"answer-1","delta":"Found it"}),
+        });
+        let opened_message = answer
+            .iter()
+            .find(|row| row["type"] == "message.started")
+            .unwrap();
+        assert_eq!(opened_message["parentToolCallId"], "spawn-1");
+        assert_eq!(opened_message["execution"]["actorId"], "child");
+        assert!(!answer.iter().any(|row| row["type"] == "session.state"));
+
+        state.handle(CodexInbound::Notification {
+            method: "item/completed".into(),
+            params: json!({"threadId":"child","item":{"id":"answer-1","type":"agentMessage","text":"Found it"}}),
+        });
+        let finished = state.handle(CodexInbound::Notification {
+            method: "thread/status/changed".into(),
+            params: json!({"threadId":"child","status":{"type":"idle"}}),
+        });
+        assert!(finished.iter().any(|row| row["type"] == "agent.finished"
+            && row["agentId"] == "child"
+            && row["result"] == "Found it"));
     }
     #[test]
     fn native_codex_live_answers_approvals_questions_and_clock_once() {
