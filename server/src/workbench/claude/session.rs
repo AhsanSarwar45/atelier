@@ -137,8 +137,39 @@ impl NativeClaudeSession {
         let Some(record) = find_record(&config, external_id) else {
             return Ok(());
         };
-        let events=read_history(&record).events.into_iter().map(|mut event|{let event_id=crate::workbench::protocol::replay_event_id(&event);if let Some(object)=event.as_object_mut(){object.insert("providerEvent".into(),json!({"provider":"claude","threadId":external_id,"eventId":event_id,"delivery":"replay"}));}event}).collect();
+        let choice = crate::workbench::provider_reconciliation::complete_history_choice(
+            &self.database,
+            &self.session_id,
+        )
+        .await?;
+        if choice == crate::workbench::provider_reconciliation::HistoryChoice::Leave {
+            return Ok(());
+        }
+        if choice == crate::workbench::provider_reconciliation::HistoryChoice::KeepLocal {
+            self.database.mark_imported(self.session_id.clone()).await?;
+            return Ok(());
+        }
+        let followed_from = std::fs::metadata(&record)
+            .ok()
+            .map(|metadata| metadata.len() as i64);
+        let history = read_history(&record);
+        if !history.events.is_empty()
+            && self
+                .database
+                .timeline_count(self.session_id.clone())
+                .await?
+                > 0
+        {
+            self.persist(vec![json!({"type":"transcript.reset"})])
+                .await?;
+        }
+        let events = super::history::identified_replay(history.events, external_id);
         self.persist(events).await?;
+        if let Some(at) = followed_from {
+            self.database
+                .remember_followed(self.session_id.clone(), at)
+                .await?;
+        }
         Ok(())
     }
 

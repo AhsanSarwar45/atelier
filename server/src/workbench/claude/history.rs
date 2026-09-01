@@ -1039,6 +1039,28 @@ pub fn read_history(record: &Path) -> ClaudeHistory {
     }
 }
 
+/// Give a complete Claude-record replay the same stable identity at every
+/// ingestion boundary. Opening, resuming, and following must not mint three
+/// identities for the same provider event.
+pub fn identified_replay(events: Vec<Value>, external_id: &str) -> Vec<Value> {
+    events
+        .into_iter()
+        .map(|mut event| {
+            let event_id = crate::workbench::protocol::record_event_id(&event);
+            if let Some(object) = event.as_object_mut() {
+                object.insert(
+                    "providerEvent".into(),
+                    json!({
+                        "provider":"claude", "threadId":external_id,
+                        "eventId":event_id, "delivery":"replay"
+                    }),
+                );
+            }
+            event
+        })
+        .collect()
+}
+
 /// Normalize a bounded tail window. The external follower owns byte cursors;
 /// this function deliberately knows nothing about, and never opens, the full
 /// record behind those newly appended lines.
@@ -1127,6 +1149,19 @@ mod tests {
         text.push_str("\n{half-written");
         write(&record, text).unwrap();
         (home, record)
+    }
+
+    #[test]
+    fn every_claude_replay_boundary_uses_the_current_record_identity() {
+        let source = json!({"type":"notice","text":"same provider event"});
+        let identified = identified_replay(vec![source.clone()], CHAT);
+
+        assert_eq!(
+            identified[0]["providerEvent"]["eventId"],
+            crate::workbench::protocol::record_event_id(&source)
+        );
+        assert_eq!(identified[0]["providerEvent"]["threadId"], CHAT);
+        assert_eq!(identified[0]["providerEvent"]["delivery"], "replay");
     }
 
     #[test]

@@ -261,13 +261,12 @@ async fn import_claude_history(
             None,
         )
         .await?;
-    let mut imported = Vec::with_capacity(history.events.len());
-    for mut value in history.events {
-        let event_id = super::protocol::record_event_id(&value);
+    let identified = super::claude::history::identified_replay(history.events, external_id);
+    let mut imported = Vec::with_capacity(identified.len());
+    for mut value in identified {
         let Some(object) = value.as_object_mut() else {
             continue;
         };
-        object.insert("providerEvent".into(),json!({"provider":"claude","threadId":external_id,"eventId":event_id,"delivery":"replay"}));
         object.insert("sessionId".into(), json!(session.id));
         object.insert("seq".into(), json!(0));
         object

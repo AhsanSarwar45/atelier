@@ -880,6 +880,12 @@ async fn events(
     // Subscribe before replay so an append racing the snapshot cannot fall in the gap.
     let receiver = state.database().subscribe_session(&query.session);
     let since = query.since.unwrap_or(0).max(0);
+    // Keep the compatibility SSE endpoint on the same read contract as the
+    // multiplexed browser feed: a direct address heals stale state and starts
+    // provider-record reconciliation, while a resumed stream does neither.
+    if since == 0 {
+        state.looked_at(&query.session).await;
+    }
     let (initial, watermark) = if since == 0 {
         let view = snapshot(state.database(), &query.session).await?;
         let watermark = view["lastSeq"].as_i64().unwrap_or_default();
