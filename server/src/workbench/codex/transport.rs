@@ -395,6 +395,12 @@ mod tests {
                 "turn/start" => {
                     writeln!(stdout, "{}", json!({"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-1"}}})).unwrap();
                     writeln!(stdout, "{}", json!({"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"message-1","delta":"CODEX_NATIVE_STREAM"}})).unwrap();
+                    writeln!(
+                        stdout,
+                        "{}",
+                        json!({"jsonrpc":"2.0","method":"skills/changed","params":{}})
+                    )
+                    .unwrap();
                     writeln!(stdout, "{}", json!({"jsonrpc":"2.0","id":88,"method":"item/commandExecution/requestApproval","params":{"itemId":"shell-1","command":"cargo test"}})).unwrap();
                     json!({"turn":{"id":"turn-1"}})
                 }
@@ -617,8 +623,16 @@ mod tests {
         driver.interrupt().await.unwrap();
 
         let mut saw_approval = false;
-        for _ in 0..8 {
+        let mut saw_refreshed_menu = false;
+        for _ in 0..12 {
             let events = driver.next_events().await.unwrap();
+            if let Some(menu) = events.iter().find(|event| event["type"] == "session.menu") {
+                assert!(menu["skills"]
+                    .as_array()
+                    .is_some_and(|skills| skills.iter().any(|skill| skill == "beads")));
+                assert!(menu.get("skillPaths").is_none());
+                saw_refreshed_menu = true;
+            }
             if let Some(ask) = events
                 .iter()
                 .find(|event| event["type"] == "ask.permission")
@@ -626,10 +640,13 @@ mod tests {
                 assert_eq!(ask["askId"], "shell-1");
                 driver.answer("shell-1", "allow_once", None).await.unwrap();
                 saw_approval = true;
-                break;
+                if saw_refreshed_menu {
+                    break;
+                }
             }
         }
         assert!(saw_approval);
+        assert!(saw_refreshed_menu);
         driver.close().await;
     }
 

@@ -250,6 +250,7 @@ impl CodexLiveState {
                 let id=params["itemId"].as_str().unwrap_or_default();let output=self.tool_output.entry(id.to_string()).or_default();output.push_str(params["delta"].as_str().unwrap_or_default());events.push(event("tool.progress",[("toolCallId",json!(id)),("seconds",json!(0)),("summary",json!(output.chars().rev().take(2000).collect::<String>().chars().rev().collect::<String>()))]));
             }
             "thread/compacted" => {events.push(note("compact",params["message"].as_str().unwrap_or("Conversation compacted."),"note"));events.push(event("session.state",[("state",json!("idle")),("label",json!("Ready"))]));}
+            "skills/changed" => {}
             "warning" | "model/rerouted" => events.push(note(method,params["message"].as_str().unwrap_or(&params.to_string()),"note")),
             _ if !method.ends_with("/delta") && !method.ends_with("/outputDelta") => events.push(note(method,params["message"].as_str().unwrap_or(&params.to_string()),"detail")),
             _ => {}
@@ -593,6 +594,21 @@ fn public_menu(mut menu: Value) -> Value {
 }
 
 impl NativeCodexDriver {
+    fn remember_private_menu(&mut self, menu: &Value) {
+        self.collaboration_presets = menu["collaborationPresets"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|preset| Some((preset["mode"].as_str()?.to_string(), preset.clone())))
+            .collect();
+        self.skill_paths = menu["skillPaths"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(name, path)| Some((name.clone(), path.as_str()?.to_string())))
+            .collect();
+    }
+
     pub async fn start(
         config: CodexTransportConfig,
         options: StartOptions,
@@ -736,8 +752,16 @@ impl NativeCodexDriver {
             .recv()
             .await
             .ok_or(CodexTransportError::Stopped)?;
-        let events = self.state.handle(inbound);
+        let refresh_menu =
+            matches!(&inbound,CodexInbound::Notification{method,..} if method=="skills/changed");
+        let mut events = self.state.handle(inbound);
         self.flush_responses().await?;
+        if refresh_menu {
+            let menu =
+                super::history::menu(&self.transport, &self.cwd, self.state.model.as_deref()).await;
+            self.remember_private_menu(&menu);
+            events.push(public_menu(menu));
+        }
         if events.iter().any(|event| {
             event["type"] == "session.state"
                 && matches!(
