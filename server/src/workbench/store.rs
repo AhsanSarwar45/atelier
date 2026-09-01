@@ -595,8 +595,8 @@ impl Store {
     pub fn followed_to(&self, session_id: &str) -> rusqlite::Result<Option<i64>> {
         self.connection
             .query_row(
-                "SELECT followed_to FROM session WHERE id=?1",
-                [session_id],
+                "SELECT CASE WHEN imported_recipe>=?1 THEN followed_to ELSE NULL END FROM session WHERE id=?2",
+                rusqlite::params![IMPORT_RECIPE, session_id],
                 |row| row.get(0),
             )
             .optional()
@@ -611,7 +611,7 @@ impl Store {
     }
     pub fn mark_imported(&self, session_id: &str) -> rusqlite::Result<usize> {
         self.connection.execute(
-            "UPDATE session SET imported_at=COALESCE(imported_at,?1),imported_recipe=?2 WHERE id=?3",
+            "UPDATE session SET imported_at=?1,imported_recipe=?2,followed_to=NULL,followed_drawn=NULL WHERE id=?3",
             rusqlite::params![chrono::Utc::now().to_rfc3339(), IMPORT_RECIPE, session_id],
         )
     }
@@ -1558,6 +1558,44 @@ mod tests {
             .unwrap()
             .iter()
             .all(|row| row.state == "dormant"));
+    }
+
+    #[test]
+    fn workbench_core_follower_cursor_belongs_to_the_current_import() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        store
+            .create_session(&session(
+                "external",
+                "claude",
+                Some("native-external"),
+                "2026-08-21T00:00:00.000Z",
+            ))
+            .unwrap();
+
+        store.remember_followed("external", 12_345).unwrap();
+        assert_eq!(store.followed_to("external").unwrap(), Some(12_345));
+
+        store
+            .connection()
+            .execute(
+                "UPDATE session SET imported_recipe=?1 WHERE id='external'",
+                [IMPORT_RECIPE - 1],
+            )
+            .unwrap();
+        assert_eq!(
+            store.followed_to("external").unwrap(),
+            None,
+            "a byte from an older normalization recipe cannot skip current history"
+        );
+
+        store.remember_followed("external", 23_456).unwrap();
+        store.mark_imported("external").unwrap();
+        assert_eq!(
+            store.followed_to("external").unwrap(),
+            None,
+            "reading the whole record invalidates the incremental follower byte"
+        );
     }
 
     #[test]
