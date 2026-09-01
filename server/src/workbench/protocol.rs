@@ -16,11 +16,11 @@ pub fn replay_event_id(value: &Value) -> String {
 
 /// Stable identity for one complete provider-record normalization recipe.
 pub fn record_event_id(value: &Value) -> String {
-    format!(
-        "r{}:{}",
-        super::store::IMPORT_RECIPE,
-        replay_event_id(value)
-    )
+    record_event_id_at(value, super::store::IMPORT_RECIPE)
+}
+
+pub fn record_event_id_at(value: &Value, recipe: i64) -> String {
+    format!("r{}:{}", recipe, replay_event_id(value))
 }
 
 macro_rules! wire_kinds {

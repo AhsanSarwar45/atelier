@@ -1,6 +1,6 @@
 //! Provider-neutral ownership decision for complete native history.
 
-use super::{actor::ChatDb, store::IMPORT_RECIPE};
+use super::actor::ChatDb;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HistoryChoice {
@@ -13,12 +13,20 @@ pub async fn complete_history_choice(
     database: &ChatDb,
     session_id: &str,
 ) -> Result<HistoryChoice, String> {
-    if database
-        .imported_by(session_id.to_string())
+    let required = database
+        .get_session(session_id.to_string())
         .await?
-        .is_some_and(|recipe| recipe >= IMPORT_RECIPE)
-    {
-        return Ok(HistoryChoice::Leave);
+        .map(|session| super::store::import_recipe(&session.brand))
+        .unwrap_or(super::store::IMPORT_RECIPE);
+    if let Some(recipe) = database.imported_by(session_id.to_string()).await? {
+        if recipe >= required {
+            return Ok(HistoryChoice::Leave);
+        }
+        // The caller reached this decision only after resolving a complete
+        // provider record. An older normalization generation must be allowed
+        // to replace its cached provider transcript even when the app once
+        // drove that session; otherwise migration fixes can never repair it.
+        return Ok(HistoryChoice::Read);
     }
     if database.timeline_count(session_id.to_string()).await? > 0
         && database.was_driven_here(session_id.to_string()).await?
@@ -72,7 +80,8 @@ mod tests {
     #[tokio::test]
     async fn complete_history_rebuilds_external_only_but_protects_local_turns() {
         let root = tempfile::tempdir().unwrap();
-        let database = ChatDb::open(&root.path().join("db")).unwrap();
+        let path = root.path().join("db");
+        let database = ChatDb::open(&path).unwrap();
         chat(&database, "external").await;
         append(&database,"external",json!({"type":"tool.started","toolCallId":"t","name":"Read","input":{},"title":"Read","parentToolCallId":null})).await;
         assert_eq!(
@@ -88,6 +97,18 @@ mod tests {
         assert_eq!(
             complete_history_choice(&database, "local").await.unwrap(),
             HistoryChoice::KeepLocal
+        );
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "UPDATE session SET imported_at='then',imported_recipe=?1 WHERE id='local'",
+                [super::super::store::IMPORT_RECIPE],
+            )
+            .unwrap();
+        assert_eq!(
+            complete_history_choice(&database, "local").await.unwrap(),
+            HistoryChoice::Read,
+            "a resolved provider record can upgrade its older cached transcript"
         );
         database.mark_imported("local".into()).await.unwrap();
         assert_eq!(

@@ -230,6 +230,268 @@ fn visible(row: &Value) -> bool {
         && row.get("teamName").is_none_or(Value::is_null)
 }
 
+fn recorded_entry(row: &Value) -> bool {
+    matches!(
+        row["type"].as_str(),
+        Some("user" | "assistant" | "progress" | "system" | "attachment")
+    ) && row["uuid"].is_string()
+}
+
+fn conversation_row(row: &Value, include_sidechains: bool) -> bool {
+    matches!(row["type"].as_str(), Some("user" | "assistant"))
+        && row["isMeta"] != true
+        && (include_sidechains || row["isSidechain"] != true)
+        && (include_sidechains || row.get("teamName").is_none_or(Value::is_null))
+}
+
+fn message_api_id(row: &Value) -> Option<&str> {
+    (row["type"] == "assistant")
+        .then(|| row["message"]["id"].as_str())
+        .flatten()
+}
+
+fn tool_result_row(row: &Value) -> bool {
+    row["type"] == "user"
+        && row["parentUuid"].is_string()
+        && row["message"]["content"]
+            .as_array()
+            .is_some_and(|blocks| blocks.iter().any(|block| block["type"] == "tool_result"))
+}
+
+/// Claude's JSONL is an append-only graph, not a conversation in file order.
+/// This is the native equivalent of the final Node reader's pinned Agent SDK
+/// `getSessionMessages`: repair compaction links, choose the newest valid leaf,
+/// walk its ancestry, and place streamed assistant variants/results beside the
+/// canonical assistant row they belong to.
+fn ordered_conversation(rows: &[Value], include_sidechains: bool) -> Vec<Value> {
+    let mut by_id = HashMap::<String, Value>::new();
+    let mut position = HashMap::<String, usize>::new();
+    let mut insertion_order = Vec::new();
+    for (index, row) in rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| recorded_entry(row))
+    {
+        let id = row["uuid"].as_str().unwrap().to_string();
+        if !by_id.contains_key(&id) {
+            insertion_order.push(id.clone());
+        }
+        by_id.insert(id.clone(), row.clone());
+        position.insert(id, index);
+    }
+    // Normal Claude records carry UUIDs and take the graph path below. Keep
+    // synthetic/legacy helper transcripts useful when every row predates that
+    // identity contract; file order is the only ordering information they
+    // contain, and dropping them would erase the helper altogether.
+    if by_id.is_empty() {
+        return rows
+            .iter()
+            .filter(|row| conversation_row(row, include_sidechains))
+            .cloned()
+            .collect();
+    }
+
+    let compact_rows = insertion_order
+        .iter()
+        .filter_map(|id| by_id.get(id))
+        .filter(|row| row["type"] == "system" && row["subtype"] == "compact_boundary")
+        .cloned()
+        .collect::<Vec<_>>();
+    for row in compact_rows {
+        let metadata = row
+            .get("compactMetadata")
+            .or_else(|| row.get("compact_metadata"))
+            .unwrap_or(&Value::Null);
+        if let Some(preserved) = metadata.get("preservedMessages") {
+            let uuids = preserved["uuids"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            let Some(anchor) = preserved["anchorUuid"].as_str() else {
+                continue;
+            };
+            if uuids.is_empty() || uuids.iter().any(|id| !by_id.contains_key(id)) {
+                continue;
+            }
+            let mut parent = anchor.to_string();
+            for id in &uuids {
+                by_id.get_mut(id).unwrap()["parentUuid"] = json!(parent);
+                parent = id.clone();
+            }
+            let first = &uuids[0];
+            let tail = uuids.last().unwrap().clone();
+            for (id, candidate) in &mut by_id {
+                if candidate["parentUuid"] == anchor && id != first {
+                    candidate["parentUuid"] = json!(tail);
+                }
+            }
+        } else if let Some(preserved) = metadata.get("preservedSegment") {
+            let (Some(head), Some(anchor), Some(tail)) = (
+                preserved["headUuid"].as_str(),
+                preserved["anchorUuid"].as_str(),
+                preserved["tailUuid"].as_str(),
+            ) else {
+                continue;
+            };
+            if let Some(entry) = by_id.get_mut(head) {
+                entry["parentUuid"] = json!(anchor);
+            }
+            for (id, candidate) in &mut by_id {
+                if candidate["parentUuid"] == anchor && id != head {
+                    candidate["parentUuid"] = json!(tail);
+                }
+            }
+        }
+    }
+
+    let parents = by_id
+        .values()
+        .filter_map(|row| row["parentUuid"].as_str().map(str::to_string))
+        .collect::<HashSet<_>>();
+    let mut candidates = Vec::<String>::new();
+    for leaf in insertion_order.iter().filter(|id| !parents.contains(*id)) {
+        let mut current = Some(leaf.clone());
+        let mut seen = HashSet::new();
+        while let Some(id) = current {
+            if !seen.insert(id.clone()) {
+                break;
+            }
+            let Some(row) = by_id.get(&id) else {
+                break;
+            };
+            if matches!(row["type"].as_str(), Some("user" | "assistant")) {
+                candidates.push(id);
+                break;
+            }
+            current = row["parentUuid"].as_str().map(str::to_string);
+        }
+    }
+    let preferred = candidates
+        .iter()
+        .filter(|id| {
+            by_id
+                .get(*id)
+                .is_some_and(|row| conversation_row(row, include_sidechains))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let eligible = if preferred.is_empty() {
+        &candidates
+    } else {
+        &preferred
+    };
+    let leaf = eligible
+        .iter()
+        .max_by_key(|id| position.get(*id).copied().unwrap_or_default())
+        .cloned();
+    let Some(leaf) = leaf else {
+        return Vec::new();
+    };
+
+    let mut branch = Vec::new();
+    let mut branch_ids = HashSet::new();
+    let mut current = Some(leaf);
+    while let Some(id) = current {
+        if !branch_ids.insert(id.clone()) {
+            break;
+        }
+        let Some(row) = by_id.get(&id) else {
+            break;
+        };
+        branch.push(row.clone());
+        current = row["parentUuid"].as_str().map(str::to_string);
+    }
+    branch.reverse();
+
+    let mut canonical = HashMap::<String, String>::new();
+    for row in &branch {
+        if let (Some(message), Some(uuid)) = (message_api_id(row), row["uuid"].as_str()) {
+            canonical.insert(message.to_string(), uuid.to_string());
+        }
+    }
+    let mut variants = HashMap::<String, Vec<Value>>::new();
+    let mut results = HashMap::<String, Vec<Value>>::new();
+    for row in by_id.values() {
+        if let Some(message) = message_api_id(row) {
+            variants
+                .entry(message.to_string())
+                .or_default()
+                .push(row.clone());
+        } else if tool_result_row(row) {
+            results
+                .entry(row["parentUuid"].as_str().unwrap().to_string())
+                .or_default()
+                .push(row.clone());
+        }
+    }
+    let mut additions = HashMap::<String, Vec<Value>>::new();
+    let mut handled = HashSet::new();
+    for row in branch.iter().filter(|row| row["type"] == "assistant") {
+        let Some(message) = message_api_id(row) else {
+            continue;
+        };
+        if !handled.insert(message.to_string()) {
+            continue;
+        }
+        let mut extra_variants = variants
+            .get(message)
+            .into_iter()
+            .flatten()
+            .filter(|candidate| {
+                candidate["uuid"]
+                    .as_str()
+                    .is_some_and(|id| !branch_ids.contains(id))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut extra_results = variants
+            .get(message)
+            .into_iter()
+            .flatten()
+            .filter_map(|variant| variant["uuid"].as_str())
+            .flat_map(|id| results.get(id).into_iter().flatten())
+            .filter(|candidate| {
+                candidate["uuid"]
+                    .as_str()
+                    .is_some_and(|id| !branch_ids.contains(id))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        extra_variants.sort_by(|left, right| {
+            left["timestamp"]
+                .as_str()
+                .unwrap_or_default()
+                .cmp(right["timestamp"].as_str().unwrap_or_default())
+        });
+        extra_results.sort_by(|left, right| {
+            left["timestamp"]
+                .as_str()
+                .unwrap_or_default()
+                .cmp(right["timestamp"].as_str().unwrap_or_default())
+        });
+        extra_variants.extend(extra_results);
+        if let Some(canonical_id) = canonical.get(message) {
+            additions.insert(canonical_id.clone(), extra_variants);
+        }
+    }
+
+    let mut ordered = Vec::new();
+    for row in branch {
+        let id = row["uuid"].as_str().unwrap_or_default().to_string();
+        ordered.push(row);
+        if let Some(extra) = additions.remove(&id) {
+            ordered.extend(extra);
+        }
+    }
+    ordered
+        .into_iter()
+        .filter(|row| conversation_row(row, include_sidechains))
+        .collect()
+}
+
 fn human_words(text: &str) -> bool {
     let text = text.trim_start();
     !text.is_empty()
@@ -788,13 +1050,14 @@ fn helper_facts(path: &Path) -> Option<HelperFacts> {
         .strip_suffix(".jsonl")?
         .to_string();
     let rows = jsonl(path);
+    let conversation = ordered_conversation(&rows, true);
     let meta_path = path.with_file_name(format!("agent-{agent_id}.meta.json"));
     let meta: Value = fs::read_to_string(meta_path)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or(Value::Null);
     let tool = as_nonempty(&meta["toolUseId"]);
-    let model = rows
+    let model = conversation
         .iter()
         .find_map(|row| as_nonempty(&row["message"]["model"]));
     let first = rows.iter().find_map(|row| as_nonempty(&row["timestamp"]));
@@ -812,12 +1075,12 @@ fn helper_facts(path: &Path) -> Option<HelperFacts> {
         .map(|(first, last)| (last - first).num_seconds().max(0))
         .unwrap_or_default();
     let spent = usage(&rows);
-    let calls = rows
+    let calls = conversation
         .iter()
         .flat_map(|row| row["message"]["content"].as_array().into_iter().flatten())
         .filter(|block| block["type"] == "tool_use")
         .count();
-    let result = rows
+    let result = conversation
         .iter()
         .rev()
         .filter(|row| row["type"] == "assistant")
@@ -830,7 +1093,7 @@ fn helper_facts(path: &Path) -> Option<HelperFacts> {
         "kind":"helper", "what":as_nonempty(&meta["description"]).and_then(|text| text.lines().next().map(str::to_string)).unwrap_or_default(),
         "agentType":as_nonempty(&meta["agentType"]), "model":model
     })];
-    events.extend(transcript_events(&rows, Some(under)));
+    events.extend(transcript_events(&conversation, Some(under)));
     events.push(json!({
         "type":"agent.progress", "agentId":agent_id, "state":"running",
         "seconds":seconds, "tokens":spent.total, "calls":calls, "model":model
@@ -974,7 +1237,10 @@ impl HelperFollower {
                     if self.ended.contains(&helper.agent_id) && event["type"] == "agent.progress" {
                         continue;
                     }
-                    let id = crate::workbench::protocol::record_event_id(event);
+                    let id = crate::workbench::protocol::record_event_id_at(
+                        event,
+                        crate::workbench::store::CLAUDE_IMPORT_RECIPE,
+                    );
                     if self.seen.insert(id) {
                         updates.push(event.clone());
                     }
@@ -1001,7 +1267,10 @@ impl HelperFollower {
                 continue;
             };
             helper.finish["state"] = json!(if ok { "done" } else { "failed" });
-            let id = crate::workbench::protocol::record_event_id(&helper.finish);
+            let id = crate::workbench::protocol::record_event_id_at(
+                &helper.finish,
+                crate::workbench::store::CLAUDE_IMPORT_RECIPE,
+            );
             if self.seen.insert(id) {
                 finished.push(helper.finish);
             }
@@ -1017,7 +1286,8 @@ pub fn read_history(record: &Path) -> ClaudeHistory {
     // would give external chats a different, permanently incomplete history.
     let rows = jsonl(record);
     let spent = usage(&rows);
-    let mut events = transcript_events(&rows, None);
+    let conversation = ordered_conversation(&rows, false);
+    let mut events = transcript_events(&conversation, None);
     events.extend(helper_events(record, &tool_outcomes(&rows)));
     if let Some(used) = spent.context {
         events.push(json!({"type":"context", "used":used, "window":spent.window}));
@@ -1046,7 +1316,10 @@ pub fn identified_replay(events: Vec<Value>, external_id: &str) -> Vec<Value> {
     events
         .into_iter()
         .map(|mut event| {
-            let event_id = crate::workbench::protocol::record_event_id(&event);
+            let event_id = crate::workbench::protocol::record_event_id_at(
+                &event,
+                crate::workbench::store::CLAUDE_IMPORT_RECIPE,
+            );
             if let Some(object) = event.as_object_mut() {
                 object.insert(
                     "providerEvent".into(),
@@ -1137,9 +1410,9 @@ mod tests {
         let record = dir.join(format!("{CHAT}.jsonl"));
         let lines = [
             json!({"type":"user","uuid":"u1","cwd":"/work/repo/tree","gitBranch":"ours","message":{"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"YWJj"}},{"type":"text","text":"look [Image #1]"}]}}),
-            json!({"type":"assistant","uuid":"a1","permissionMode":"plan","effort":"high","message":{"id":"turn-1","model":"claude-test","usage":{"input_tokens":5,"cache_read_input_tokens":7,"output_tokens":3},"content":[{"type":"text","text":"done"},{"type":"tool_use","id":"call-1","name":"Read","input":{"file_path":"/tmp/a"}}]}}),
-            json!({"type":"assistant","uuid":"a2","message":{"id":"turn-1","usage":{"input_tokens":5,"cache_read_input_tokens":7,"output_tokens":3},"content":[]}}),
-            json!({"type":"user","uuid":"u2","message":{"content":[{"type":"tool_result","tool_use_id":"call-1","content":"contents"}]}}),
+            json!({"type":"assistant","uuid":"a1","parentUuid":"u1","permissionMode":"plan","effort":"high","message":{"id":"turn-1","model":"claude-test","usage":{"input_tokens":5,"cache_read_input_tokens":7,"output_tokens":3},"content":[{"type":"text","text":"done"},{"type":"tool_use","id":"call-1","name":"Read","input":{"file_path":"/tmp/a"}}]}}),
+            json!({"type":"assistant","uuid":"a2","parentUuid":"a1","message":{"id":"turn-1","usage":{"input_tokens":5,"cache_read_input_tokens":7,"output_tokens":3},"content":[]}}),
+            json!({"type":"user","uuid":"u2","parentUuid":"a2","message":{"content":[{"type":"tool_result","tool_use_id":"call-1","content":"contents"}]}}),
         ];
         let mut text = lines
             .iter()
@@ -1158,10 +1431,52 @@ mod tests {
 
         assert_eq!(
             identified[0]["providerEvent"]["eventId"],
-            crate::workbench::protocol::record_event_id(&source)
+            crate::workbench::protocol::record_event_id_at(
+                &source,
+                crate::workbench::store::CLAUDE_IMPORT_RECIPE,
+            )
         );
         assert_eq!(identified[0]["providerEvent"]["threadId"], CHAT);
         assert_eq!(identified[0]["providerEvent"]["delivery"], "replay");
+    }
+
+    #[test]
+    fn claude_history_uses_the_latest_primary_parent_chain_not_file_order() {
+        let rows = vec![
+            json!({"type":"user","uuid":"u1","message":{"content":"first"}}),
+            json!({"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"1","message":{"id":"m1","content":"answer one"}}),
+            json!({"type":"user","uuid":"abandoned","parentUuid":"u1","message":{"content":"discarded retry"}}),
+            json!({"type":"assistant","uuid":"a2","parentUuid":"a1","timestamp":"3","message":{"id":"m2","content":"answer two"}}),
+            json!({"type":"attachment","uuid":"tail","parentUuid":"a2","attachment":{"type":"total_tokens_reminder"}}),
+            json!({"type":"assistant","uuid":"helper","isSidechain":true,"timestamp":"4","message":{"content":"sidechain leaf"}}),
+        ];
+        let ordered = ordered_conversation(&rows, false);
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|row| row["uuid"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["u1", "a1", "a2"]
+        );
+    }
+
+    #[test]
+    fn claude_history_places_streamed_variants_and_results_beside_their_message() {
+        let rows = vec![
+            json!({"type":"user","uuid":"u1","message":{"content":"prompt"}}),
+            json!({"type":"assistant","uuid":"fragment","parentUuid":"u1","timestamp":"2","message":{"id":"turn","content":"words"}}),
+            json!({"type":"user","uuid":"result","parentUuid":"fragment","timestamp":"3","message":{"content":[{"type":"tool_result","tool_use_id":"call","content":"done"}]}}),
+            json!({"type":"assistant","uuid":"canonical","parentUuid":"u1","timestamp":"1","message":{"id":"turn","content":[]}}),
+            json!({"type":"user","uuid":"u2","parentUuid":"canonical","timestamp":"4","message":{"content":"next"}}),
+        ];
+        let ordered = ordered_conversation(&rows, false);
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|row| row["uuid"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["u1", "canonical", "fragment", "result", "u2"]
+        );
     }
 
     #[test]

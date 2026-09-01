@@ -16,10 +16,19 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
-/// Version of the provider-history normalization recipe persisted on a chat.
-/// Raise only when replaying the same provider record can add or correct
-/// canonical events; this matches the last Node implementation's generation.
+/// Provider-history normalization generations. A provider advances only when
+/// replaying its record can add or correct canonical events; changing Claude
+/// must not force every Codex transcript through an unrelated rebuild.
 pub const IMPORT_RECIPE: i64 = 10;
+pub const CLAUDE_IMPORT_RECIPE: i64 = 11;
+
+pub fn import_recipe(brand: &str) -> i64 {
+    if brand == "claude" {
+        CLAUDE_IMPORT_RECIPE
+    } else {
+        IMPORT_RECIPE
+    }
+}
 
 const LEGACY_MIGRATIONS: &[&str] = &[
     r#"CREATE TABLE session (
@@ -663,8 +672,8 @@ impl Store {
     pub fn followed_to(&self, session_id: &str) -> rusqlite::Result<Option<i64>> {
         self.connection
             .query_row(
-                "SELECT CASE WHEN imported_recipe>=?1 THEN followed_to ELSE NULL END FROM session WHERE id=?2",
-                rusqlite::params![IMPORT_RECIPE, session_id],
+                "SELECT CASE WHEN imported_recipe>=CASE brand WHEN 'claude' THEN ?1 ELSE ?2 END THEN followed_to ELSE NULL END FROM session WHERE id=?3",
+                rusqlite::params![CLAUDE_IMPORT_RECIPE, IMPORT_RECIPE, session_id],
                 |row| row.get(0),
             )
             .optional()
@@ -679,12 +688,12 @@ impl Store {
     }
     pub fn mark_imported(&self, session_id: &str) -> rusqlite::Result<usize> {
         self.connection.execute(
-            "UPDATE session SET imported_at=?1,imported_recipe=?2,followed_to=NULL,followed_drawn=NULL WHERE id=?3",
-            rusqlite::params![chrono::Utc::now().to_rfc3339(), IMPORT_RECIPE, session_id],
+            "UPDATE session SET imported_at=?1,imported_recipe=CASE brand WHEN 'claude' THEN ?2 ELSE ?3 END,followed_to=NULL,followed_drawn=NULL WHERE id=?4",
+            rusqlite::params![chrono::Utc::now().to_rfc3339(), CLAUDE_IMPORT_RECIPE, IMPORT_RECIPE, session_id],
         )
     }
     pub fn remember_followed(&self, session_id: &str, at: i64) -> rusqlite::Result<usize> {
-        self.connection.execute("UPDATE session SET followed_to=?1,followed_drawn=0,imported_at=COALESCE(imported_at,?2),imported_recipe=?3 WHERE id=?4",rusqlite::params![at,chrono::Utc::now().to_rfc3339(),IMPORT_RECIPE,session_id])
+        self.connection.execute("UPDATE session SET followed_to=?1,followed_drawn=0,imported_at=COALESCE(imported_at,?2),imported_recipe=CASE brand WHEN 'claude' THEN ?3 ELSE ?4 END WHERE id=?5",rusqlite::params![at,chrono::Utc::now().to_rfc3339(),CLAUDE_IMPORT_RECIPE,IMPORT_RECIPE,session_id])
     }
     pub fn was_driven_here(&self, session_id: &str) -> rusqlite::Result<bool> {
         Ok(self.connection.query_row("SELECT 1 FROM event WHERE session_id=?1 AND type='session.started' AND COALESCE(json_extract(json,'$.readOnly'),0)!=1 LIMIT 1",[session_id],|_|Ok(())).optional()?.is_some())
@@ -1688,6 +1697,27 @@ mod tests {
             store.followed_to("external").unwrap(),
             None,
             "reading the whole record invalidates the incremental follower byte"
+        );
+    }
+
+    #[test]
+    fn import_generations_advance_only_the_provider_whose_normalizer_changed() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        for row in [
+            session("claude-chat", "claude", Some("c"), "now"),
+            session("codex-chat", "codex", Some("x"), "now"),
+        ] {
+            store.create_session(&row).unwrap();
+            store.mark_imported(&row.id).unwrap();
+        }
+        assert_eq!(
+            store.imported_by("claude-chat").unwrap(),
+            Some(CLAUDE_IMPORT_RECIPE)
+        );
+        assert_eq!(
+            store.imported_by("codex-chat").unwrap(),
+            Some(IMPORT_RECIPE)
         );
     }
 

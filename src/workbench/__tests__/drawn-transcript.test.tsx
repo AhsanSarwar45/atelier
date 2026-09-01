@@ -32,16 +32,19 @@ function rows(many: number, prefix = 'm'): DrawnRow[] {
 
 function chat(given: {
   rows?: DrawnRow[];
+  loadedItems?: number;
   sessionId?: string;
   onOlder?: (() => Promise<{ added: number; hasOlder: boolean }>) | null;
 } = {}) {
   const pane = createRef<HTMLDivElement>();
   let currentRows = given.rows ?? rows(400);
+  let currentLoaded = given.loadedItems ?? currentRows.length;
   let currentSession = given.sessionId ?? 's';
   const show = () => (
     <div ref={pane} data-testid="pane">
       <DrawnTranscript
         rows={currentRows}
+        loadedItems={currentLoaded}
         sessionId={currentSession}
         mentions={MENTIONS}
         onLook={LOOK}
@@ -54,8 +57,9 @@ function chat(given: {
   // transcript mounts. Model that ref lifecycle explicitly.
   const drawn = render(<div ref={pane} data-testid="pane" />);
   drawn.rerender(show());
-  const again = (next: { rows?: DrawnRow[]; sessionId?: string }) => {
+  const again = (next: { rows?: DrawnRow[]; loadedItems?: number; sessionId?: string }) => {
     currentRows = next.rows ?? currentRows;
+    currentLoaded = next.loadedItems ?? next.rows?.length ?? currentLoaded;
     currentSession = next.sessionId ?? currentSession;
     drawn.rerender(show());
   };
@@ -127,6 +131,17 @@ describe('the virtual transcript window', () => {
     const { pane, again } = chat({ rows: rows(80), onOlder: older });
     await act(async () => wheel(pane.current!, -120));
     await act(async () => again({ rows: rows(10, 'refolded') }));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 60)));
+    await act(async () => wheel(pane.current!, -120));
+    expect(older).toHaveBeenCalledTimes(2);
+  });
+
+  it('can load again when older parents replace drawn rows one for one', async () => {
+    const older = vi.fn().mockResolvedValue({ added: SCREENFUL, hasOlder: true });
+    const sameRows = rows(80);
+    const { pane, again } = chat({ rows: sameRows, loadedItems: 80, onOlder: older });
+    await act(async () => wheel(pane.current!, -120));
+    await act(async () => again({ rows: sameRows, loadedItems: 120 }));
     await act(async () => new Promise((resolve) => setTimeout(resolve, 60)));
     await act(async () => wheel(pane.current!, -120));
     expect(older).toHaveBeenCalledTimes(2);

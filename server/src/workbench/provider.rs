@@ -152,12 +152,16 @@ async fn append_notice(database: &ChatDb, session_id: &str, text: &str) -> Resul
 }
 
 async fn append_reset(database: &ChatDb, session_id: &str) -> Result<(), String> {
-    let event: Event = serde_json::from_value(json!({
-        "type":"transcript.reset", "sessionId":session_id, "seq":0, "at":now()
-    }))
-    .map_err(|error| error.to_string())?;
+    let event = reset_event(session_id)?;
     database.append(event).await?;
     Ok(())
+}
+
+fn reset_event(session_id: &str) -> Result<Event, String> {
+    serde_json::from_value(json!({
+        "type":"transcript.reset", "sessionId":session_id, "seq":0, "at":now()
+    }))
+    .map_err(|error| error.to_string())
 }
 
 async fn append_started(database: &ChatDb, session: &Session) -> Result<(), String> {
@@ -176,9 +180,17 @@ async fn append_import_menu(
     database: &ChatDb,
     session: &Session,
     provider: &str,
-    mut value: Value,
+    value: Value,
 ) -> Result<(), String> {
-    let event_id = super::protocol::record_event_id(&value);
+    database
+        .append(import_event(session, provider, value)?)
+        .await?;
+    Ok(())
+}
+
+fn import_event(session: &Session, provider: &str, mut value: Value) -> Result<Event, String> {
+    let event_id =
+        super::protocol::record_event_id_at(&value, super::store::import_recipe(provider));
     let object = value
         .as_object_mut()
         .ok_or_else(|| "provider menu was not an object".to_string())?;
@@ -189,10 +201,7 @@ async fn append_import_menu(
     object.insert("sessionId".into(), json!(session.id));
     object.insert("seq".into(), json!(0));
     object.insert("at".into(), json!(session.last_active_at));
-    database
-        .append(serde_json::from_value(value).map_err(|error| error.to_string())?)
-        .await?;
-    Ok(())
+    serde_json::from_value(value).map_err(|error| error.to_string())
 }
 
 async fn append_import_pinned(
@@ -259,10 +268,8 @@ async fn import_claude_history(
         history.settings.effort.clone(),
     )
     .menu();
-    append_import_menu(database, session, "claude", menu).await?;
-    if !history.events.is_empty() && database.timeline_count(session.id.clone()).await? > 0 {
-        append_reset(database, &session.id).await?;
-    }
+    let reset =
+        !history.events.is_empty() && database.timeline_count(session.id.clone()).await? > 0;
     database
         .update_session(
             session.id.clone(),
@@ -275,26 +282,30 @@ async fn import_claude_history(
             None,
         )
         .await?;
-    append_import_pinned(
-        database,
-        session,
-        "claude",
-        [
-            ("model", json!(history.settings.model)),
-            ("effort", json!(history.settings.effort)),
-        ]
-        .into_iter()
-        .chain(
-            history
-                .settings
-                .permission_mode
-                .clone()
-                .map(|mode| ("permissionMode", json!(mode))),
-        ),
-    )
-    .await?;
+    let mut pinned = json!({"type":"session.pinned"});
+    let pinned_fields = [
+        ("model", json!(history.settings.model)),
+        ("effort", json!(history.settings.effort)),
+    ]
+    .into_iter()
+    .chain(
+        history
+            .settings
+            .permission_mode
+            .clone()
+            .map(|mode| ("permissionMode", json!(mode))),
+    );
+    pinned
+        .as_object_mut()
+        .expect("pin is an object")
+        .extend(pinned_fields.map(|(key, value)| (key.into(), value)));
     let identified = super::claude::history::identified_replay(history.events, external_id);
-    let mut imported = Vec::with_capacity(identified.len());
+    let mut imported = Vec::with_capacity(identified.len() + 3);
+    imported.push(import_event(session, "claude", menu)?);
+    if reset {
+        imported.push(reset_event(&session.id)?);
+    }
+    imported.push(import_event(session, "claude", pinned)?);
     for mut value in identified {
         let Some(object) = value.as_object_mut() else {
             continue;

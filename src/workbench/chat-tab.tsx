@@ -1492,6 +1492,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         {!view.loading && (
           <DrawnTranscript
             rows={drawn}
+            loadedItems={view.items.length}
             sessionId={sessionId}
             mentions={mentions}
             onLook={setLooking}

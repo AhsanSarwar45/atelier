@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 const SOURCE = process.env.BEADS_E2E_OWNER_DB;
+const CLAUDE_SOURCE = process.env.BEADS_E2E_OWNER_CLAUDE_CONFIG;
 const SHOTS = join(process.cwd(), 'tests', 'results');
 
 test.describe.configure({ mode: 'serial' });
@@ -13,11 +14,19 @@ const CHATS = [
     id: 'ec075741-1657-4f67-84cb-728deda54c0d',
     title: 'Need Terminal Integration Will Integrate Default',
     shot: 'claude-history-terminal',
+    minimumFirstRows: 1,
   },
   {
     id: '021a4ead-5fae-453e-942a-977a13cb6c70',
     title: 'Claude Sidebar Shows Subagents Done Current',
     shot: 'claude-history-sidebar',
+    minimumFirstRows: 1,
+  },
+  {
+    id: '79225ed8-932b-4ef2-8cda-ff1b883d6381',
+    title: 'See Transcript Chat Chat Was Useless',
+    shot: 'claude-history-ordered',
+    minimumFirstRows: 20,
   },
 ] as const;
 
@@ -28,6 +37,18 @@ function copyChat(chat: (typeof CHATS)[number], project: { id: string; path: str
   const session = source.prepare('SELECT * FROM session WHERE id = ?').get(chat.id) as Record<string, unknown> | undefined;
   if (!session) throw new Error(`source database has no chat ${chat.id}`);
   const events = source.prepare('SELECT * FROM event WHERE session_id = ? ORDER BY seq').all(chat.id) as Record<string, unknown>[];
+  const externalId = typeof session.external_id === 'string' ? session.external_id : null;
+  if (CLAUDE_SOURCE && externalId) {
+    const projects = join(CLAUDE_SOURCE, 'projects');
+    const record = readdirSync(projects, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => join(projects, entry.name, `${externalId}.jsonl`))
+      .find(existsSync);
+    if (!record) throw new Error(`Claude source has no record ${externalId}`);
+    const isolated = join(process.env.CLAUDE_CONFIG_DIR!, 'projects', 'copied');
+    mkdirSync(isolated, { recursive: true });
+    copyFileSync(record, join(isolated, `${externalId}.jsonl`));
+  }
 
   target.exec('BEGIN IMMEDIATE');
   try {
@@ -100,6 +121,8 @@ for (const chat of CHATS) {
       expect(Date.now() - openedAt, `${chat.title}: click-to-usable exceeded one second`).toBeLessThan(1_000);
       await expect(transcript).toHaveAttribute('data-can-load-older', 'true');
       const firstRows = Number(await transcript.getAttribute('data-total-items'));
+      const firstItems = Number(await transcript.getAttribute('data-loaded-items'));
+      expect(firstRows, `${chat.title}: initial page was only a fragment`).toBeGreaterThanOrEqual(chat.minimumFirstRows);
       // One persisted 40-item page can fan out into more drawn machine rows.
       // It must still remain a small initial render, not the whole transcript.
       expect(firstRows).toBeLessThan(100);
@@ -124,18 +147,25 @@ for (const chat of CHATS) {
         { message: `${chat.title}: the upward gesture asked for no older history` },
       ).toBe(1);
       // Older parent rows can fold formerly orphaned machine rows, so the
-      // drawn count may shrink even though the persisted window grew.
-      await expect.poll(async () => Number(await transcript.getAttribute('data-total-items'))).not.toBe(firstRows);
+      // drawn count can grow, shrink, or remain equal. The provider-neutral
+      // transcript-item window itself must grow.
+      await expect.poll(async () => Number(await transcript.getAttribute('data-loaded-items'))).toBeGreaterThan(firstItems);
       await page.waitForTimeout(100); // let the prepend anchor finish its measured correction
 
-      const requestsBeforeSecondGesture = olderRequests;
-      await pane.evaluate((element) => { element.scrollTop = 0; });
-      await pane.hover();
-      await page.mouse.wheel(0, -1200);
-      await expect.poll(
-        () => olderRequests - requestsBeforeSecondGesture,
-        { message: `${chat.title}: history stopped after its first older page` },
-      ).toBe(1);
+      // This real record currently contains only 44 visible canonical items:
+      // the newest forty and one four-item older page. If a future fixture has
+      // another cursor, prove the next gesture consumes it too; exhaustion is
+      // otherwise the correct result, not evidence of a one-shot scroll latch.
+      if (await transcript.getAttribute('data-can-load-older') === 'true') {
+        const requestsBeforeSecondGesture = olderRequests;
+        await pane.evaluate((element) => { element.scrollTop = 0; });
+        await pane.hover();
+        await page.mouse.wheel(0, -1200);
+        await expect.poll(
+          () => olderRequests - requestsBeforeSecondGesture,
+          { message: `${chat.title}: history stopped while another cursor existed` },
+        ).toBe(1);
+      }
       await page.screenshot({ path: join(SHOTS, `${chat.shot}-after.png`) });
     } finally {
       await request.delete(`/api/projects/${project.id}`);

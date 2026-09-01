@@ -23,6 +23,7 @@ export const OVERSCAN = 8;
 
 interface DrawnTranscriptProps {
   rows: DrawnRow[];
+  loadedItems: number;
   sessionId: string;
   mentions: Mentions;
   onLook: (image: LookableImage) => void;
@@ -34,14 +35,14 @@ const rowKey = (row: DrawnRow): string => row.row === 'machine'
   ? `machine:${row.id}`
   : `${row.item.kind}:${row.item.id}`;
 
-export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, onOlder = null }: DrawnTranscriptProps) {
+export function DrawnTranscript({ rows, loadedItems, sessionId, mentions, onLook, pane, onOlder = null }: DrawnTranscriptProps) {
   const loading = useRef(false);
   const historyRequest = useRef(0);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const lastTop = useRef(0);
   const pendingAnchor = useRef<{ height: number; top: number; key: string | null; viewportTop: number } | null>(null);
   const correcting = useRef<number | null>(null);
-  const previous = useRef({ sessionId, many: rows.length });
+  const previous = useRef({ sessionId, many: loadedItems });
 
   const virtual = useVirtualizer({
     count: rows.length,
@@ -61,7 +62,7 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, onOld
   }, []);
 
   if (previous.current.sessionId !== sessionId) {
-    previous.current = { sessionId, many: rows.length };
+    previous.current = { sessionId, many: loadedItems };
     historyRequest.current += 1;
     pendingAnchor.current = null;
     if (correcting.current !== null) cancelAnimationFrame(correcting.current);
@@ -76,8 +77,8 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, onOld
     const anchor = pendingAnchor.current;
     // Adding older parents can collapse formerly orphaned helper rows, so the
     // drawn projection may grow or shrink even though storage was prepended.
-    const changed = rows.length !== previous.current.many;
-    previous.current = { sessionId, many: rows.length };
+    const changed = loadedItems !== previous.current.many;
+    previous.current = { sessionId, many: loadedItems };
     if (!box || !anchor || !changed) return;
     box.scrollTop = anchor.top + (box.scrollHeight - anchor.height);
     lastTop.current = box.scrollTop;
@@ -103,7 +104,7 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, onOld
     };
     if (typeof requestAnimationFrame === 'function') correcting.current = requestAnimationFrame(correct);
     else pendingAnchor.current = null;
-  }, [rows.length, sessionId, pane]);
+  }, [loadedItems, sessionId, pane]);
 
   // Loading is caused only by the reader travelling or wheeling upward.
   // A page already at scrollTop 0 cannot emit upward scroll movement, so its
@@ -176,6 +177,7 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, onOld
     <div
       data-testid="virtual-transcript"
       data-total-items={rows.length}
+      data-loaded-items={loadedItems}
       data-mounted-items={virtual.getVirtualItems().length}
       data-can-load-older={Boolean(onOlder)}
       className="relative w-full"
