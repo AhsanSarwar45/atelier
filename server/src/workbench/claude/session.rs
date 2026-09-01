@@ -88,6 +88,41 @@ impl NativeClaudeSession {
                 return Err(error);
             }
         }
+        // Decide whether a resumed provider transcript should replace the
+        // durable projection before recording this app-owned attachment. The
+        // startup event intentionally marks the chat as locally driven, so
+        // choosing afterwards would protect stale external-only history from
+        // its one required reconciliation.
+        let history_choice = if resume.is_some() {
+            match crate::workbench::provider_reconciliation::complete_history_choice(
+                &database,
+                &session.id,
+            )
+            .await
+            {
+                Ok(choice) => Some(choice),
+                Err(error) => {
+                    transport.close().await;
+                    if create {
+                        let _ = database.delete_session(session.id.clone()).await;
+                    }
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
+        let started = json!({
+            "type":"session.started",
+            "brand":"claude",
+            "externalId":session.external_id,
+            "model":session.model,
+            "cwd":session.cwd,
+            "permissionMode":session.permission_mode,
+            "effort":session.effort,
+            "collaborationMode":session.collaboration_mode,
+            "readOnly":false
+        });
         let mut native = Self {
             database,
             transport,
@@ -101,6 +136,7 @@ impl NativeClaudeSession {
         };
         if let Err(error) = native
             .persist(vec![
+                started,
                 native.live.menu(),
                 json!({"type":"session.state","state":"idle","label":"Ready"}),
             ])
@@ -116,7 +152,13 @@ impl NativeClaudeSession {
             return Err(error);
         }
         if let Some(resume) = resume {
-            if let Err(error) = native.import_history(&resume).await {
+            if let Err(error) = native
+                .import_history(
+                    &resume,
+                    history_choice.expect("resume history choice was computed"),
+                )
+                .await
+            {
                 native.close().await;
                 if create {
                     let _ = native
@@ -130,18 +172,17 @@ impl NativeClaudeSession {
         Ok(native)
     }
 
-    async fn import_history(&mut self, external_id: &str) -> Result<(), String> {
+    async fn import_history(
+        &mut self,
+        external_id: &str,
+        choice: crate::workbench::provider_reconciliation::HistoryChoice,
+    ) -> Result<(), String> {
         let Some(config) = claude_config_dir() else {
             return Ok(());
         };
         let Some(record) = find_record(&config, external_id) else {
             return Ok(());
         };
-        let choice = crate::workbench::provider_reconciliation::complete_history_choice(
-            &self.database,
-            &self.session_id,
-        )
-        .await?;
         if choice == crate::workbench::provider_reconciliation::HistoryChoice::Leave {
             return Ok(());
         }
@@ -509,6 +550,14 @@ mod tests {
             }
         }
         let events = database.events_since("chat-1".into(), 0).await.unwrap();
+        let started = events
+            .iter()
+            .find(|event| event.kind == crate::workbench::protocol::EventKind::SessionStarted)
+            .expect("native Claude must publish its initial settings");
+        assert_eq!(started.fields["model"], "sonnet");
+        assert_eq!(started.fields["permissionMode"], "default");
+        assert_eq!(started.fields["effort"], "high");
+        assert_eq!(started.fields["readOnly"], false);
         assert!(events.iter().any(|event| event.kind
             == crate::workbench::protocol::EventKind::Note
             && event.fields["kind"] == "protocol"));

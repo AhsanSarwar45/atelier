@@ -66,7 +66,10 @@ async function fixtureProject(request: APIRequestContext): Promise<{ id: string;
 
 test.describe('a chat the app starts', () => {
   test.use({ viewport: SCREEN });
-  test.describe.configure({ timeout: 300_000 });
+  // Both cases deliberately share one settings file and one project. Running
+  // them in parallel races project creation and lets one case rewrite the
+  // setting while the other is asserting it.
+  test.describe.configure({ mode: 'serial', timeout: 300_000 });
 
   test.beforeAll(() => {
     mkdirSync(SHOTS, { recursive: true });
@@ -95,6 +98,10 @@ test.describe('a chat the app starts', () => {
     // to name them, and that the app no longer invents one when nobody does.
     await page.goto(`/project?id=${project.id}&tab=chat`);
     await page.getByTestId('new-chat-tool').click();
+    // With the default set to "ask", New Chat first asks which provider owns
+    // this conversation. Confirm the preselected Claude choice instead of
+    // waiting for navigation while the dialog is still open.
+    await page.getByTestId('new-chat-provider-dialog').getByRole('button', { name: 'Start chat' }).click();
     await page.waitForURL((url) => Boolean(url.searchParams.get('chat')), { timeout: HELLO_MS });
     const started = { id: new URL(page.url()).searchParams.get('chat')! };
     await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
@@ -121,10 +128,9 @@ test.describe('a chat the app starts', () => {
       clip: { x: frame.x - 8, y: frame.y - 8, width: frame.width + 16, height: frame.height + 16 },
     });
 
-    // And the other half of it: a picker is not a change to this one chat. Pick
-    // any model that is not the one the settings hold, and the file holds it.
-    // Not the list's top row either — that one is the brand's own default, and
-    // picking it means the key comes OUT rather than being written.
+    // And the other half of it: an ordinary pick changes this chat only. The
+    // separate star control changes provider defaults; steering one live chat
+    // must not silently rewrite what every future terminal or chat starts on.
     await model.click();
     const chosen = page
       .locator(
@@ -137,10 +143,7 @@ test.describe('a chat the app starts', () => {
     await chosen.click();
 
     await expect(model).toHaveAttribute('data-current', picked, { timeout: HELLO_MS });
-    await expect
-      .poll(() => settings().model, { timeout: 15_000, message: 'his settings file never took the pick' })
-      .toBe(picked);
-    // Everything else in the file is left exactly as he wrote it.
+    expect(settings().model).toBe(SET.model);
     expect(settings().permissions?.defaultMode).toBe('plan');
 
     await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId: started.id } });
