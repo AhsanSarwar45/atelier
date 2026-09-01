@@ -25,6 +25,16 @@ pub struct StoreUpdate {
     pub event: Event,
 }
 
+/// One self-consistent cold-chat read. The watermark and every fact it covers
+/// are selected in the same actor turn, so an append can only land wholly
+/// before or wholly after the snapshot.
+pub struct SnapshotParts {
+    pub history: Vec<Event>,
+    pub steering: serde_json::Value,
+    pub page: TranscriptItemPage,
+    pub agents: Vec<serde_json::Value>,
+}
+
 enum Command {
     CreateSession(Session, Reply<()>),
     DeleteSession(String, Reply<()>),
@@ -59,6 +69,7 @@ enum Command {
     SummaryRuns(String, usize, Reply<Vec<i64>>),
     ViewEvents(String, Reply<Vec<Event>>),
     SteeringMenu(String, Reply<serde_json::Value>),
+    Snapshot(String, Reply<SnapshotParts>),
     TranscriptItems(String, Option<i64>, usize, Reply<TranscriptItemPage>),
     ProjectedAgents(String, Reply<Vec<serde_json::Value>>),
     Shutdown,
@@ -308,6 +319,11 @@ impl ChatDb {
 
     pub async fn steering_menu(&self, session_id: String) -> Result<serde_json::Value, String> {
         self.request(|reply| Command::SteeringMenu(session_id, reply))
+            .await
+    }
+
+    pub async fn snapshot(&self, session_id: String) -> Result<SnapshotParts, String> {
+        self.request(|reply| Command::Snapshot(session_id, reply))
             .await
     }
 
@@ -665,6 +681,17 @@ fn run(
             Command::SteeringMenu(session_id, reply) => {
                 respond(reply, store.steering_menu(&session_id))
             }
+            Command::Snapshot(session_id, reply) => {
+                let result = (|| {
+                    Ok(SnapshotParts {
+                        history: store.view_events(&session_id)?,
+                        steering: store.steering_menu(&session_id)?,
+                        page: store.transcript_items(&session_id, None, 40)?,
+                        agents: store.projected_agents(&session_id)?,
+                    })
+                })();
+                respond(reply, result)
+            }
             Command::TranscriptItems(session_id, before, limit, reply) => {
                 respond(reply, store.transcript_items(&session_id, before, limit))
             }
@@ -755,6 +782,48 @@ mod tests {
             chat.try_recv(),
             Err(broadcast::error::TryRecvError::Empty)
         ));
+    }
+
+    #[tokio::test]
+    async fn workbench_core_actor_snapshots_facts_and_watermark_atomically() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
+        database
+            .create_session(Session {
+                id: "chat-1".into(),
+                brand: "codex".into(),
+                external_id: Some("thread-1".into()),
+                project_id: "project-1".into(),
+                project_path: "/project".into(),
+                cwd: "/project".into(),
+                model: Some("gpt-5".into()),
+                permission_mode: "on-request".into(),
+                effort: Some("high".into()),
+                collaboration_mode: None,
+                title: Some("Saved".into()),
+                state: "dormant".into(),
+                origin: "app".into(),
+                created_at: "now".into(),
+                last_active_at: "now".into(),
+                last_spoke_at: None,
+            })
+            .await
+            .unwrap();
+        let menu: Event = serde_json::from_value(json!({
+            "type":"session.menu","sessionId":"chat-1","seq":0,"at":"now",
+            "models":[{"id":"gpt-5","label":"GPT-5"}]
+        }))
+        .unwrap();
+        database.append(menu).await.unwrap();
+
+        let snapshot = database.snapshot("chat-1".into()).await.unwrap();
+
+        assert_eq!(snapshot.page.newest_seq, 1);
+        assert!(snapshot
+            .history
+            .iter()
+            .any(|event| event.kind == EventKind::SessionMenu
+                && event.fields["seq"] == snapshot.page.newest_seq));
     }
 
     #[tokio::test]

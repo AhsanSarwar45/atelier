@@ -909,30 +909,25 @@ async fn events(
 }
 
 pub(crate) async fn snapshot(database: &ChatDb, session_id: &str) -> Result<Value, String> {
-    let history = database.view_events(session_id.to_string()).await?;
-    let steering = database.steering_menu(session_id.to_string()).await?;
-    let page = database
-        .transcript_items(session_id.to_string(), None, 40)
-        .await?;
-    let agents = database.projected_agents(session_id.to_string()).await?;
-    let mut view = fold_all(&history).view;
+    let snapshot = database.snapshot(session_id.to_string()).await?;
+    let mut view = fold_all(&snapshot.history).view;
     for field in ["models", "permissionModes", "efforts", "collaborationModes"] {
         let empty = view["menu"][field]
             .as_array()
             .is_none_or(|rows| rows.is_empty());
         if empty
-            && steering[field]
+            && snapshot.steering[field]
                 .as_array()
                 .is_some_and(|rows| !rows.is_empty())
         {
-            view["menu"][field] = steering[field].clone();
+            view["menu"][field] = snapshot.steering[field].clone();
         }
     }
-    view["items"] = json!(page.items);
-    view["agents"] = json!(agents);
-    view["lastSeq"] = json!(page.newest_seq);
-    view["historyCursor"] = json!(page.cursor);
-    view["hasOlder"] = json!(page.has_older);
+    view["items"] = json!(snapshot.page.items);
+    view["agents"] = json!(snapshot.agents);
+    view["lastSeq"] = json!(snapshot.page.newest_seq);
+    view["historyCursor"] = json!(snapshot.page.cursor);
+    view["hasOlder"] = json!(snapshot.page.has_older);
     Ok(view)
 }
 
