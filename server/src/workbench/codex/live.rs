@@ -216,13 +216,21 @@ impl CodexLiveState {
             }
             "item/completed" => {
                 let actor=self.actor_of(params);
-                if let Some(actor_id)=actor.as_deref().filter(|_|params["item"]["type"]=="agentMessage") {
-                    if let Some(result)=params["item"]["text"].as_str().map(str::trim).filter(|text|!text.is_empty()) {self.child_results.insert(actor_id.to_string(),result.to_string());}
+                let mut item=params["item"].clone();
+                if let Some(id)=item["id"].as_str() {
+                    if let Some(output)=self.tool_output.remove(id).filter(|output|!output.is_empty()) {
+                        let has_output=["aggregatedOutput","result","results"].iter().any(|field|item.get(*field).is_some_and(|value|!value.is_null()&&value.as_str().is_none_or(|text|!text.is_empty())))
+                            || ["error","failure"].iter().any(|field|item[*field]["message"].as_str().is_some_and(|text|!text.is_empty()));
+                        if !has_output {item["aggregatedOutput"]=json!(output);}
+                    }
                 }
-                if params["item"]["type"]=="plan" {
-                    let markdown=params["item"]["text"].as_str().unwrap_or_default().trim();
-                    if !markdown.is_empty(){let id=format!("{}:plan:0",params["item"]["id"].as_str().unwrap_or_default());self.plans.insert(id.clone());events.push(plan_event(&id,markdown));}
-                } else { self.normalizer.item_completed_for(&params["item"],actor.as_deref(),false,&mut events); }
+                if let Some(actor_id)=actor.as_deref().filter(|_|item["type"]=="agentMessage") {
+                    if let Some(result)=item["text"].as_str().map(str::trim).filter(|text|!text.is_empty()) {self.child_results.insert(actor_id.to_string(),result.to_string());}
+                }
+                if item["type"]=="plan" {
+                    let markdown=item["text"].as_str().unwrap_or_default().trim();
+                    if !markdown.is_empty(){let id=format!("{}:plan:0",item["id"].as_str().unwrap_or_default());self.plans.insert(id.clone());events.push(plan_event(&id,markdown));}
+                } else { self.normalizer.item_completed_for(&item,actor.as_deref(),false,&mut events); }
             }
             "thread/tokenUsage/updated" => {
                 if !params["tokenUsage"]["total"].is_null(){let total=&params["tokenUsage"]["total"];events.push(event("cost",[("cost",json!({"kind":"tokens","input":total["inputTokens"],"output":total["outputTokens"],"total":total["totalTokens"]}))]));}
@@ -1327,8 +1335,12 @@ mod tests {
                 json!({"item":{"id":"sh","type":"commandExecution","command":"pwd","status":"inProgress"}}),
             ),
             (
+                "item/commandExecution/outputDelta",
+                json!({"itemId":"sh","delta":"/tmp"}),
+            ),
+            (
                 "item/completed",
-                json!({"item":{"id":"sh","type":"commandExecution","command":"pwd","status":"completed","exitCode":0,"aggregatedOutput":"/tmp"}}),
+                json!({"item":{"id":"sh","type":"commandExecution","command":"pwd","status":"completed","exitCode":0}}),
             ),
             (
                 "thread/tokenUsage/updated",
@@ -1361,6 +1373,9 @@ mod tests {
         assert!(events.iter().any(|event| event["type"] == "session.state"
             && event["state"] == "running_tool"
             && event["label"] == "Bash"));
+        assert!(events.iter().any(|event| event["type"] == "tool.completed"
+            && event["toolCallId"] == "sh"
+            && event["output"] == "/tmp"));
     }
 
     #[test]

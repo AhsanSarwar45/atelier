@@ -27,18 +27,26 @@ fn strings(value: &Value, field: &str) -> Vec<String> {
 }
 
 fn output_of(item: &Value) -> String {
-    for field in ["aggregatedOutput", "result", "results"] {
-        if let Some(value) = item.get(field) {
-            return value
-                .as_str()
-                .map(str::to_string)
-                .unwrap_or_else(|| value.to_string());
-        }
-    }
-    for field in ["error", "failure"] {
-        if let Some(message) = item[field]["message"].as_str() {
-            return message.to_string();
-        }
+    let value = item
+        .get("aggregatedOutput")
+        .filter(|value| !value.is_null())
+        .or_else(|| {
+            item["error"]
+                .get("message")
+                .filter(|value| !value.is_null())
+        })
+        .or_else(|| {
+            item["failure"]
+                .get("message")
+                .filter(|value| !value.is_null())
+        })
+        .or_else(|| item.get("result").filter(|value| !value.is_null()))
+        .or_else(|| item.get("results").filter(|value| !value.is_null()));
+    if let Some(value) = value {
+        return value
+            .as_str()
+            .map(str::to_string)
+            .unwrap_or_else(|| value.to_string());
     }
     String::new()
 }
@@ -450,7 +458,38 @@ impl CodexNormalizer {
                 }
                 self.start_tool(id, name, json!({"target": ids}), actor_agent_id, events);
             }
-            "hookPrompt" | "contextCompaction" | "enteredReviewMode" | "exitedReviewMode" => {}
+            "hookPrompt" => {
+                let text = item["fragments"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|fragment| {
+                        fragment["text"]
+                            .as_str()
+                            .or_else(|| fragment["content"].as_str())
+                    })
+                    .filter(|text| !text.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                events.push(event(
+                    "note",
+                    [
+                        ("noteId", json!(format!("{id}:hook"))),
+                        ("rank", json!("detail")),
+                        ("kind", json!("hook")),
+                        (
+                            "text",
+                            json!(if text.is_empty() {
+                                "A hook added instructions."
+                            } else {
+                                &text
+                            }),
+                        ),
+                        ("body", Value::Null),
+                    ],
+                ));
+            }
+            "contextCompaction" | "enteredReviewMode" | "exitedReviewMode" => {}
             _ => {
                 let action = item["commandActions"]
                     .as_array()
@@ -471,7 +510,19 @@ impl CodexNormalizer {
                     "imageView" => "View image",
                     "sleep" => "Wait",
                     "imageGeneration" => "Generate image",
-                    _ => return,
+                    _ => {
+                        events.push(event(
+                            "note",
+                            [
+                                ("noteId", json!(format!("{id}:item:{kind}"))),
+                                ("rank", json!("detail")),
+                                ("kind", json!(format!("item/{kind}"))),
+                                ("text", json!(item.to_string())),
+                                ("body", Value::Null),
+                            ],
+                        ));
+                        return;
+                    }
                 };
                 let input = item.get("arguments").cloned().unwrap_or_else(|| json!({
                     "command": item["command"], "changes": item["changes"], "query": action.get("query").unwrap_or(&item["query"]),
@@ -688,7 +739,9 @@ impl CodexNormalizer {
                                 [("messageId", json!(id)), ("text", json!(text))],
                             ));
                         }
-                        for part in item["content"].as_array().into_iter().flatten() {
+                        for (part_at, part) in
+                            item["content"].as_array().into_iter().flatten().enumerate()
+                        {
                             let image = if part["type"] == "image" {
                                 part["url"].as_str().map(|url| json!({"dataUrl":url,"mime":data_mime(url),"alt":"Attached image"}))
                             } else if part["type"] == "localImage" {
@@ -702,6 +755,33 @@ impl CodexNormalizer {
                                 events.push(event(
                                     "image",
                                     [("messageId", json!(id)), ("image", image)],
+                                ));
+                            } else if part["type"] != "text" {
+                                let attachment = part["path"]
+                                    .as_str()
+                                    .or_else(|| part["url"].as_str())
+                                    .map(str::to_string)
+                                    .unwrap_or_else(|| {
+                                        format!(
+                                            "A {} attachment was part of this turn.",
+                                            part["type"].as_str().unwrap_or("provider")
+                                        )
+                                    });
+                                events.push(event(
+                                    "note",
+                                    [
+                                        ("noteId", json!(format!("{id}:attachment:{part_at}"))),
+                                        ("rank", json!("detail")),
+                                        (
+                                            "kind",
+                                            json!(format!(
+                                                "attachment/{}",
+                                                part["type"].as_str().unwrap_or("unknown")
+                                            )),
+                                        ),
+                                        ("text", json!(attachment)),
+                                        ("body", Value::Null),
+                                    ],
                                 ));
                             }
                         }
@@ -1060,12 +1140,14 @@ mod tests {
     fn native_codex_history_restores_prompts_answers_reasoning_tools_images_and_agents() {
         let mut normalizer = CodexNormalizer::default();
         let events = normalizer.replay_thread(&json!({"turns":[{"items":[
-            {"id":"u","type":"userMessage","content":[{"type":"text","text":"Check it"},{"type":"image","url":"data:image/png;base64,AA=="}]},
+            {"id":"u","type":"userMessage","content":[{"type":"text","text":"Check it"},{"type":"image","url":"data:image/png;base64,AA=="},{"type":"inputFile","path":"/tmp/spec.pdf"}]},
             {"id":"r","type":"reasoning","summary":["Looking"]},
             {"id":"sh","type":"commandExecution","command":"pwd","status":"completed","exitCode":0,"aggregatedOutput":"/tmp"},
             {"id":"a","type":"agentMessage","text":"Done"},
             {"id":"c","type":"collabAgentToolCall","tool":"spawnAgent","status":"completed","prompt":"Inspect","receiverThreadIds":["helper"],"agentsStates":{"helper":{"status":"completed","message":"OK"}}},
-            {"id":"sa","type":"subAgentActivity","agentThreadId":"typed-helper","agentPath":"/repo/.codex/agents/reviewer.toml","kind":"started"}
+            {"id":"sa","type":"subAgentActivity","agentThreadId":"typed-helper","agentPath":"/repo/.codex/agents/reviewer.toml","kind":"started"},
+            {"id":"hook","type":"hookPrompt","fragments":[{"text":"Follow the repository rules"}]},
+            {"id":"future","type":"newNativeThing","value":42}
         ]}]}));
         let kinds: Vec<&str> = events
             .iter()
@@ -1085,6 +1167,15 @@ mod tests {
         assert!(events.iter().any(|event| event["type"] == "agent.started"
             && event["agentId"] == "typed-helper"
             && event["agentType"] == "reviewer"));
+        assert!(events.iter().any(|event| event["type"] == "note"
+            && event["kind"] == "attachment/inputFile"
+            && event["text"] == "/tmp/spec.pdf"));
+        assert!(events.iter().any(|event| event["type"] == "note"
+            && event["kind"] == "hook"
+            && event["text"] == "Follow the repository rules"));
+        assert!(events
+            .iter()
+            .any(|event| event["type"] == "note" && event["kind"] == "item/newNativeThing"));
     }
 
     #[test]
