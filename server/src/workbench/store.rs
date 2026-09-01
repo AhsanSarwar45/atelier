@@ -628,6 +628,39 @@ impl Store {
         .collect()
     }
 
+    /// Newest durable steering catalog for this session's provider.
+    ///
+    /// Menus are emitted per chat, but model/mode/effort catalogs belong to
+    /// the provider. A migrated chat can predate `session.menu`; borrowing only
+    /// these provider-wide fields keeps its controls useful without leaking
+    /// project-specific commands, skills, or agent definitions across chats.
+    pub fn steering_menu(&self, session_id: &str) -> rusqlite::Result<Value> {
+        let mut statement = self.connection.prepare(
+            r#"SELECT event.json FROM event
+                 JOIN session ON session.id = event.session_id
+                WHERE event.type = 'session.menu'
+                  AND session.brand = (SELECT brand FROM session WHERE id = ?1)
+                ORDER BY event.rowid DESC LIMIT 50"#,
+        )?;
+        let rows = statement.query_map([session_id], |row| row.get::<_, String>(0))?;
+        let mut menu = serde_json::Map::new();
+        for row in rows {
+            let value: Value = serde_json::from_str(&row?).map_err(json_error)?;
+            for field in ["models", "permissionModes", "efforts", "collaborationModes"] {
+                if menu
+                    .get(field)
+                    .is_some_and(|held| held.as_array().is_some_and(|rows| !rows.is_empty()))
+                {
+                    continue;
+                }
+                if value[field].as_array().is_some_and(|rows| !rows.is_empty()) {
+                    menu.insert(field.into(), value[field].clone());
+                }
+            }
+        }
+        Ok(Value::Object(menu))
+    }
+
     pub fn open_message(
         &self,
         session_id: &str,
@@ -1494,6 +1527,42 @@ mod tests {
             .unwrap()
             .iter()
             .all(|row| row.state == "dormant"));
+    }
+
+    #[test]
+    fn steering_menu_reuses_only_provider_wide_controls() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        for row in [
+            session("catalog", "codex", Some("thread-1"), "2026-08-20T00:00:00Z"),
+            session(
+                "migrated",
+                "codex",
+                Some("thread-2"),
+                "2026-08-21T00:00:00Z",
+            ),
+            session("other", "claude", Some("thread-3"), "2026-08-22T00:00:00Z"),
+        ] {
+            store.create_session(&row).unwrap();
+        }
+        let menu: Event = serde_json::from_value(json!({
+            "type":"session.menu", "sessionId":"catalog", "seq":1, "at":"now",
+            "models":[{"value":"gpt-5","displayName":"GPT-5"}],
+            "permissionModes":["on-request"], "efforts":[{"value":"high"}],
+            "collaborationModes":[{"value":"plan"}],
+            "commands":[{"name":"project-only"}], "skills":["private-skill"],
+            "agentDefinitions":[{"name":"private-agent"}]
+        }))
+        .unwrap();
+        assert!(store.append_event(&menu).unwrap());
+
+        let inherited = store.steering_menu("migrated").unwrap();
+        assert_eq!(inherited["models"][0]["value"], "gpt-5");
+        assert_eq!(inherited["permissionModes"][0], "on-request");
+        assert!(inherited.get("commands").is_none());
+        assert!(inherited.get("skills").is_none());
+        assert!(inherited.get("agentDefinitions").is_none());
+        assert_eq!(store.steering_menu("other").unwrap(), json!({}));
     }
 
     #[test]

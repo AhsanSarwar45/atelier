@@ -56,6 +56,7 @@ enum Command {
     NoteSummaryRun(String, String, String, i64, Reply<()>),
     SummaryRuns(String, usize, Reply<Vec<i64>>),
     ViewEvents(String, Reply<Vec<Event>>),
+    SteeringMenu(String, Reply<serde_json::Value>),
     TranscriptItems(String, Option<i64>, usize, Reply<TranscriptItemPage>),
     ProjectedAgents(String, Reply<Vec<serde_json::Value>>),
     Shutdown,
@@ -287,6 +288,11 @@ impl ChatDb {
 
     pub async fn view_events(&self, session_id: String) -> Result<Vec<Event>, String> {
         self.request(|reply| Command::ViewEvents(session_id, reply))
+            .await
+    }
+
+    pub async fn steering_menu(&self, session_id: String) -> Result<serde_json::Value, String> {
+        self.request(|reply| Command::SteeringMenu(session_id, reply))
             .await
     }
 
@@ -635,6 +641,9 @@ fn run(
             }
             Command::ViewEvents(session_id, reply) => {
                 respond(reply, store.view_events(&session_id))
+            }
+            Command::SteeringMenu(session_id, reply) => {
+                respond(reply, store.steering_menu(&session_id))
             }
             Command::TranscriptItems(session_id, before, limit, reply) => {
                 respond(reply, store.transcript_items(&session_id, before, limit))

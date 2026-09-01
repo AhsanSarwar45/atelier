@@ -907,11 +907,24 @@ async fn events(
 
 pub(crate) async fn snapshot(database: &ChatDb, session_id: &str) -> Result<Value, String> {
     let history = database.view_events(session_id.to_string()).await?;
+    let steering = database.steering_menu(session_id.to_string()).await?;
     let page = database
         .transcript_items(session_id.to_string(), None, 40)
         .await?;
     let agents = database.projected_agents(session_id.to_string()).await?;
     let mut view = fold_all(&history).view;
+    for field in ["models", "permissionModes", "efforts", "collaborationModes"] {
+        let empty = view["menu"][field]
+            .as_array()
+            .is_none_or(|rows| rows.is_empty());
+        if empty
+            && steering[field]
+                .as_array()
+                .is_some_and(|rows| !rows.is_empty())
+        {
+            view["menu"][field] = steering[field].clone();
+        }
+    }
     view["items"] = json!(page.items);
     view["agents"] = json!(agents);
     view["lastSeq"] = json!(page.newest_seq);
@@ -1227,6 +1240,17 @@ mod tests {
             .await
             .unwrap();
         state.database().append(notice()).await.unwrap();
+        let mut catalog = saved_session();
+        catalog.id = "catalog-chat".into();
+        catalog.project_id = "another-project".into();
+        state.database().create_session(catalog).await.unwrap();
+        let menu: Event = serde_json::from_value(json!({
+            "type":"session.menu", "sessionId":"catalog-chat", "seq":0, "at":"now",
+            "models":[{"value":"gpt-5","displayName":"GPT-5"}],
+            "permissionModes":["on-request"], "commands":[{"name":"project-only"}]
+        }))
+        .unwrap();
+        state.database().append(menu).await.unwrap();
         let app = router(state);
         let response = app
             .clone()
@@ -1256,6 +1280,8 @@ mod tests {
         let chunk = first_chunk(response).await;
         assert!(chunk.contains("event: snapshot"), "{chunk}");
         assert!(chunk.contains("still here"), "{chunk}");
+        assert!(chunk.contains("GPT-5"), "{chunk}");
+        assert!(!chunk.contains("project-only"), "{chunk}");
     }
 
     #[tokio::test]
