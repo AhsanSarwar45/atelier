@@ -639,9 +639,25 @@ async fn restore(
         .database()
         .list_sessions(query.project.clone())
         .await?;
-    let holds = state.provider_holds().await;
     let ids = sessions.iter().map(|session| session.id.clone()).collect();
     let mut beads = state.database().beads_for_sessions(ids).await?;
+    // This first response exists solely to put durable rows on screen while
+    // provider discovery continues in the concurrent full request. Do not put
+    // process-table and provider-marker discovery back on its critical path;
+    // the app-wide live feed already overlays ownership as soon as it speaks.
+    if query.local.is_some() {
+        let mut rows: Vec<Value> = sessions
+            .into_iter()
+            .map(|session| {
+                let linked = beads.remove(&session.id).unwrap_or_default();
+                restore_row(session, linked, &[])
+            })
+            .collect();
+        rows.sort_by(|a, b| b["lastActiveAt"].as_str().cmp(&a["lastActiveAt"].as_str()));
+        return Ok(Json(rows));
+    }
+
+    let holds = state.provider_holds().await;
     let mut rows: Vec<Value> = sessions
         .into_iter()
         .map(|session| {
@@ -649,11 +665,8 @@ async fn restore(
             restore_row(session, linked, &holds)
         })
         .collect();
-    let known_sessions = if query.local.is_some() {
-        Vec::new()
-    } else {
-        provider_sessions(&state, query.path.as_deref(), query.all.is_some()).await
-    };
+    let known_sessions =
+        provider_sessions(&state, query.path.as_deref(), query.all.is_some()).await;
     for known in known_sessions {
         let key = format!(
             "{}:{}",
@@ -1243,6 +1256,33 @@ mod tests {
         let chunk = first_chunk(response).await;
         assert!(chunk.contains("event: snapshot"), "{chunk}");
         assert!(chunk.contains("still here"), "{chunk}");
+    }
+
+    #[tokio::test]
+    async fn native_workbench_local_restore_returns_durable_rows_without_discovery() {
+        let (_directory, state) = fixture();
+        state
+            .database()
+            .create_session(saved_session())
+            .await
+            .unwrap();
+        let response = router(state)
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/restore?project=project-1&path=%2Fwork%2Fproject&local=1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let rows: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(rows.as_array().map(Vec::len), Some(1));
+        assert_eq!(rows[0]["sessionId"], "chat-1");
+        assert_eq!(rows[0]["title"], "The chat that must remain visible");
+        assert_eq!(rows[0]["runningElsewhere"], false);
     }
 
     #[tokio::test]
