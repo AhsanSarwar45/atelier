@@ -401,6 +401,9 @@ mod tests {
                         json!({"jsonrpc":"2.0","method":"skills/changed","params":{}})
                     )
                     .unwrap();
+                    writeln!(stdout, "{}", json!({"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thread-live","item":{"id":"spawn-helper","type":"subAgentActivity","kind":"started","agentThreadId":"helper-thread","agentPath":"/agents/reviewer.toml"}}})).unwrap();
+                    writeln!(stdout, "{}", json!({"jsonrpc":"2.0","method":"thread/status/changed","params":{"threadId":"helper-thread","status":{"type":"active"}}})).unwrap();
+                    writeln!(stdout, "{}", json!({"jsonrpc":"2.0","method":"thread/status/changed","params":{"threadId":"helper-thread","status":{"type":"idle"}}})).unwrap();
                     writeln!(stdout, "{}", json!({"jsonrpc":"2.0","id":88,"method":"item/commandExecution/requestApproval","params":{"itemId":"shell-1","command":"cargo test"}})).unwrap();
                     json!({"turn":{"id":"turn-1"}})
                 }
@@ -624,7 +627,8 @@ mod tests {
 
         let mut saw_approval = false;
         let mut saw_refreshed_menu = false;
-        for _ in 0..12 {
+        let mut saw_final_usage = false;
+        for _ in 0..20 {
             let events = driver.next_events().await.unwrap();
             if let Some(menu) = events.iter().find(|event| event["type"] == "session.menu") {
                 assert!(menu["skills"]
@@ -633,6 +637,14 @@ mod tests {
                 assert!(menu.get("skillPaths").is_none());
                 saw_refreshed_menu = true;
             }
+            if events.iter().any(|event| {
+                event["type"] == "agent.progress"
+                    && event["agentId"] == "helper-thread"
+                    && event["tokens"] == 23
+                    && event["finalUsage"] == true
+            }) {
+                saw_final_usage = true;
+            }
             if let Some(ask) = events
                 .iter()
                 .find(|event| event["type"] == "ask.permission")
@@ -640,13 +652,17 @@ mod tests {
                 assert_eq!(ask["askId"], "shell-1");
                 driver.answer("shell-1", "allow_once", None).await.unwrap();
                 saw_approval = true;
-                if saw_refreshed_menu {
+                if saw_refreshed_menu && saw_final_usage {
                     break;
                 }
+            }
+            if saw_approval && saw_refreshed_menu && saw_final_usage {
+                break;
             }
         }
         assert!(saw_approval);
         assert!(saw_refreshed_menu);
+        assert!(saw_final_usage);
         driver.close().await;
     }
 

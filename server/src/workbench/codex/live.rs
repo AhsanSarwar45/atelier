@@ -596,6 +596,8 @@ pub struct NativeCodexDriver {
     collaboration_presets: HashMap<String, Value>,
     skill_paths: HashMap<String, String>,
     image_dirs: Vec<PathBuf>,
+    accounting_tx: mpsc::UnboundedSender<DriverEvent>,
+    accounting_rx: mpsc::UnboundedReceiver<DriverEvent>,
 }
 
 fn public_menu(mut menu: Value) -> Value {
@@ -741,6 +743,7 @@ impl NativeCodexDriver {
                 ));
             }
         }
+        let (accounting_tx, accounting_rx) = mpsc::unbounded_channel();
         Ok((
             Self {
                 transport,
@@ -751,6 +754,8 @@ impl NativeCodexDriver {
                 collaboration_presets,
                 skill_paths,
                 image_dirs: Vec::new(),
+                accounting_tx,
+                accounting_rx,
             },
             events,
         ))
@@ -762,11 +767,11 @@ impl NativeCodexDriver {
         Ok(())
     }
     pub async fn next_events(&mut self) -> Result<Vec<DriverEvent>, CodexTransportError> {
-        let inbound = self
-            .inbound
-            .recv()
-            .await
-            .ok_or(CodexTransportError::Stopped)?;
+        let inbound = tokio::select! {
+            biased;
+            Some(accounting) = self.accounting_rx.recv() => return Ok(vec![accounting]),
+            inbound = self.inbound.recv() => inbound.ok_or(CodexTransportError::Stopped)?,
+        };
         let refresh_menu =
             matches!(&inbound,CodexInbound::Notification{method,..} if method=="skills/changed");
         let mut events = self.state.handle(inbound);
@@ -776,6 +781,43 @@ impl NativeCodexDriver {
                 super::history::menu(&self.transport, &self.cwd, self.state.model.as_deref()).await;
             self.remember_private_menu(&menu);
             events.push(public_menu(menu));
+        }
+        for finished in events
+            .iter()
+            .filter(|event| event["type"] == "agent.finished")
+        {
+            let Some(agent_id) = finished["agentId"].as_str().map(str::to_string) else {
+                continue;
+            };
+            let transport = self.transport.clone();
+            let tx = self.accounting_tx.clone();
+            let seconds = finished["seconds"].clone();
+            let calls = finished["calls"].clone();
+            let execution = finished.get("execution").cloned();
+            tokio::spawn(async move {
+                let Ok(Some((_, _, tokens))) =
+                    super::history::thread_usage(&transport, &agent_id).await
+                else {
+                    return;
+                };
+                if tokens <= 0 {
+                    return;
+                }
+                let mut accounted = event(
+                    "agent.progress",
+                    [
+                        ("agentId", json!(agent_id)),
+                        ("seconds", seconds),
+                        ("tokens", json!(tokens)),
+                        ("calls", calls),
+                        ("finalUsage", json!(true)),
+                    ],
+                );
+                if let Some(execution) = execution {
+                    accounted["execution"] = execution;
+                }
+                let _ = tx.send(accounted);
+            });
         }
         if events.iter().any(|event| {
             event["type"] == "session.state"
