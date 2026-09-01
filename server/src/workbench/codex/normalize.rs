@@ -890,6 +890,56 @@ impl CodexNormalizer {
                 }
             }
             events.push(event("message.completed", [("messageId", json!(id))]));
+        } else if row["type"] == "response_item"
+            && payload["type"] == "message"
+            && payload["role"] == "user"
+        {
+            let id = payload["id"]
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| {
+                    format!(
+                        "codex-user:{}",
+                        row["timestamp"]
+                            .as_str()
+                            .map(str::to_string)
+                            .unwrap_or_else(|| Uuid::new_v4().to_string())
+                    )
+                });
+            let content = payload["content"].as_array().cloned().unwrap_or_default();
+            let text = content
+                .iter()
+                .filter_map(|part| part["text"].as_str())
+                .filter(|text| !text.trim().is_empty())
+                .filter(|text| !super::history::machine_context(text))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let images = content
+                .iter()
+                .filter_map(|part| part["image_url"].as_str())
+                .collect::<Vec<_>>();
+            if !text.is_empty() || !images.is_empty() {
+                self.open_message(&id, "user", None, &mut events);
+                if !text.is_empty() {
+                    events.push(event(
+                        "text.delta",
+                        [("messageId", json!(id)), ("text", json!(text))],
+                    ));
+                }
+                for url in images {
+                    events.push(event(
+                        "image",
+                        [
+                            ("messageId", json!(id)),
+                            (
+                                "image",
+                                json!({"dataUrl":url,"mime":data_mime(url),"alt":"Attached image"}),
+                            ),
+                        ],
+                    ));
+                }
+                events.push(event("message.completed", [("messageId", json!(id))]));
+            }
         } else if row["type"] == "event_msg" && payload["type"] == "task_started" {
             events.push(event(
                 "session.state",
@@ -1209,6 +1259,29 @@ mod tests {
         assert!(events
             .iter()
             .any(|event| event["type"] == "context" && event["window"] == 100));
+    }
+
+    #[test]
+    fn modern_rollout_user_messages_keep_human_content_and_images_only() {
+        let text = [
+            json!({"timestamp":"2026-09-01T04:57:32Z","type":"response_item","payload":{"type":"message","id":"user-modern","role":"user","content":[{"type":"input_text","text":"A real prompt"},{"type":"input_image","image_url":"data:image/png;base64,AA=="},{"type":"input_text","text":"<environment_context>machine details</environment_context>"}]}}),
+            json!({"timestamp":"2026-09-01T04:57:33Z","type":"response_item","payload":{"type":"message","id":"internal","role":"user","content":[{"type":"input_text","text":"<codex_internal_context source=\"goal\">Continue automatically</codex_internal_context>"}]}}),
+        ]
+        .into_iter()
+        .map(|row| row.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+        let events = replay_rollout(&text);
+        assert!(events.iter().any(|event| {
+            event["type"] == "text.delta"
+                && event["messageId"] == "user-modern"
+                && event["text"] == "A real prompt"
+        }));
+        assert!(events.iter().any(|event| {
+            event["type"] == "image" && event["messageId"] == "user-modern"
+        }));
+        assert!(!events.iter().any(|event| event["messageId"] == "internal"));
     }
 
     #[test]

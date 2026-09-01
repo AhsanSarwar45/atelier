@@ -693,8 +693,28 @@ async fn restore(
                 row["externalId"].as_str().unwrap_or_default()
             ) == key
         }) {
-            if !known["name"].is_null() {
-                row["title"] = known["name"].clone();
+            if let Some(title) = known["name"].as_str().filter(|title| !title.trim().is_empty()) {
+                if row["title"].as_str() != Some(title) {
+                    row["title"] = json!(title);
+                    if let Some(session_id) = row["sessionId"].as_str() {
+                        // The local response is deliberately drawn before this
+                        // provider reconciliation. Keep its next answer
+                        // identical: otherwise every refresh alternates the
+                        // stored generated title and the provider's canonical
+                        // title while the two requests finish.
+                        state
+                            .database()
+                            .update_session(
+                                session_id.to_string(),
+                                crate::workbench::store::SessionPatch {
+                                    title: Some(Some(title.to_string())),
+                                    ..crate::workbench::store::SessionPatch::default()
+                                },
+                                None,
+                            )
+                            .await?;
+                    }
+                }
             }
             if known["lastActiveAt"].as_str() > row["lastActiveAt"].as_str() {
                 row["lastActiveAt"] = known["lastActiveAt"].clone();
@@ -1412,6 +1432,67 @@ mod tests {
 
         assert_eq!(rows[0]["sessionId"], "spoken-today");
         assert_eq!(rows[1]["sessionId"], "opened-today");
+    }
+
+    #[tokio::test]
+    async fn native_workbench_persists_the_provider_title_for_the_next_fast_restore() {
+        let (directory, state) = fixture();
+        let external_id = "c0704045-2fd3-4e88-bbe2-b7361ebf6a32";
+        let mut session = saved_session();
+        session.brand = "claude".into();
+        session.external_id = Some(external_id.into());
+        session.title = Some("Temporary stored label".into());
+        state.database().create_session(session).await.unwrap();
+        let record = directory
+            .path()
+            .join("claude/projects/-work-project")
+            .join(format!("{external_id}.jsonl"));
+        std::fs::create_dir_all(record.parent().unwrap()).unwrap();
+        std::fs::write(
+            record,
+            concat!(
+                "{\"type\":\"user\",\"timestamp\":\"2026-09-01T06:00:00Z\",",
+                "\"cwd\":\"/work/project\",\"customTitle\":\"Canonical provider title\",",
+                "\"message\":{\"role\":\"user\",\"content\":\"A prompt\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        let app = router(state);
+        let full = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/restore?project=project-1&path=%2Fwork%2Fproject")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let full: Value = serde_json::from_slice(
+            &axum::body::to_bytes(full.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(full[0]["title"], "Canonical provider title");
+
+        let local = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/restore?project=project-1&path=%2Fwork%2Fproject&local=1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let local: Value = serde_json::from_slice(
+            &axum::body::to_bytes(local.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(local[0]["title"], "Canonical provider title");
     }
 
     #[tokio::test]

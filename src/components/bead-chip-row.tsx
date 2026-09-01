@@ -63,9 +63,9 @@ export function BeadChip({
       <Button
         type="button"
         variant="foreground"
-        size="inherit"
+        size="xs"
         className={cn(
-          'relative p-0 before:absolute before:-inset-2.5 before:content-[\'\']',
+          'relative !min-h-0 !min-w-0 p-0 font-inherit before:absolute before:-inset-2.5 before:content-[\'\']',
           size === 'sm' ? 'h-5' : 'h-4',
         )}
         data-testid={testId}

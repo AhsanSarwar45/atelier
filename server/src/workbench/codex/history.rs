@@ -10,6 +10,52 @@ use std::time::Duration;
 const MODES: &[&str] = &["untrusted", "on-request", "never"];
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
+pub(crate) fn machine_context(text: &str) -> bool {
+    let text = text.trim_start();
+    [
+        "<codex_internal_context",
+        "<environment_context>",
+        "<skills_instructions>",
+        "<permissions instructions>",
+        "<apps_instructions>",
+        "<plugins_instructions>",
+        "# AGENTS.md instructions for ",
+    ]
+    .iter()
+    .any(|prefix| text.starts_with(prefix))
+}
+
+fn human_message(row: &Value) -> bool {
+    let payload = &row["payload"];
+    if row["type"] == "event_msg" && payload["type"] == "user_message" {
+        return true;
+    }
+    if row["type"] != "response_item"
+        || payload["type"] != "message"
+        || payload["role"] != "user"
+    {
+        return false;
+    }
+    let mut saw_text = false;
+    for text in payload["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|part| part["text"].as_str())
+        .filter(|text| !text.trim().is_empty())
+    {
+        saw_text = true;
+        if !machine_context(text) {
+            return true;
+        }
+    }
+    // An image-only input is still a human turn.
+    !saw_text
+        && payload["content"]
+            .as_array()
+            .is_some_and(|content| !content.is_empty())
+}
+
 pub fn last_spoke_at(path: &Path) -> Option<String> {
     const BLOCK: u64 = 256 * 1024;
     let mut file = File::open(path).ok()?;
@@ -38,7 +84,7 @@ pub fn last_spoke_at(path: &Path) -> Option<String> {
             let Ok(row) = serde_json::from_str::<Value>(line.trim()) else {
                 continue;
             };
-            if row["type"] == "event_msg" && row["payload"]["type"] == "user_message" {
+            if human_message(&row) {
                 return row["timestamp"].as_str().map(str::to_string);
             }
         }
@@ -469,7 +515,7 @@ mod tests {
         writeln!(
             file,
             "{}",
-            json!({"type":"event_msg","timestamp":"2026-08-30T22:05:00Z","payload":{"type":"user_message","message":"Resume"}})
+            json!({"type":"response_item","timestamp":"2026-08-30T22:05:00Z","payload":{"type":"message","id":"user-1","role":"user","content":[{"type":"input_text","text":"Resume"}]}})
         )
         .unwrap();
         for index in 0..700 {
@@ -480,6 +526,12 @@ mod tests {
             )
             .unwrap();
         }
+        writeln!(
+            file,
+            "{}",
+            json!({"type":"response_item","timestamp":"2026-09-01T00:00:00Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<codex_internal_context source=\"goal\">Continue automatically</codex_internal_context>"}]}})
+        )
+        .unwrap();
 
         assert_eq!(
             last_spoke_at(file.path()).as_deref(),
