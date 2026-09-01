@@ -93,6 +93,52 @@ fn patch_sides(diff: &str) -> Value {
     result
 }
 
+fn proposed_plans(text: &str) -> Vec<String> {
+    let mut plans = Vec::new();
+    let mut rest = text;
+    while let Some(open) = rest.find("<proposed_plan>") {
+        let after = &rest[open + "<proposed_plan>".len()..];
+        let after = after.trim_start_matches([' ', '\t']);
+        let Some(body) = after
+            .strip_prefix("\r\n")
+            .or_else(|| after.strip_prefix('\n'))
+        else {
+            rest = after;
+            continue;
+        };
+        let Some(close) = body
+            .find("\r\n</proposed_plan>")
+            .map(|at| (at, "\r\n</proposed_plan>".len()))
+            .or_else(|| {
+                body.find("\n</proposed_plan>")
+                    .map(|at| (at, "\n</proposed_plan>".len()))
+            })
+        else {
+            break;
+        };
+        let markdown = body[..close.0].trim();
+        if !markdown.is_empty() {
+            plans.push(markdown.to_string());
+        }
+        rest = &body[close.0 + close.1..];
+    }
+    plans
+}
+
+fn plan_proposal(id: &str, markdown: &str) -> DriverEvent {
+    event(
+        "plan.proposed",
+        [
+            ("proposalId", json!(id)),
+            ("markdown", json!(markdown)),
+            (
+                "actions",
+                json!([{"id":"implement","kind":"implement","label":"Implement plan","description":"Leave Plan mode and ask Codex to implement this plan."},{"id":"request_changes","kind":"request_changes","label":"Request changes","acceptsFeedback":true,"description":"Keep planning and tell Codex what should change."}]),
+            ),
+        ],
+    )
+}
+
 #[derive(Clone, Debug)]
 struct Agent {
     agent_type: Option<String>,
@@ -550,6 +596,9 @@ impl CodexNormalizer {
                 remembered_parent.as_deref(),
                 false,
             ));
+            for (index, markdown) in proposed_plans(text).into_iter().enumerate() {
+                events.push(plan_proposal(&format!("{id}:plan:{index}"), &markdown));
+            }
             return;
         }
         if self.completed_tools.contains(id) {

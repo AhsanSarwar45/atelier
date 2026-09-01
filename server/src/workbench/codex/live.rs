@@ -264,6 +264,13 @@ impl CodexLiveState {
             self.agents.remove(&id);
             self.active_agents.remove(&id);
         }
+        for proposal_id in events
+            .iter()
+            .filter(|row| row["type"] == "plan.proposed")
+            .filter_map(|row| row["proposalId"].as_str())
+        {
+            self.plans.insert(proposal_id.to_string());
+        }
         events
     }
 
@@ -1166,7 +1173,7 @@ impl NativeCodexDriver {
         action: &str,
         feedback: Option<&str>,
     ) -> Result<Vec<DriverEvent>, CodexTransportError> {
-        if !self.state.plans.remove(proposal_id) {
+        if !self.state.plans.contains(proposal_id) {
             return Err(CodexTransportError::Request(
                 "This Codex plan is no longer awaiting a response".into(),
             ));
@@ -1176,20 +1183,33 @@ impl NativeCodexDriver {
                 "approved",
                 "Implement the approved proposed plan.".to_string(),
             ),
-            "request_changes" => (
-                "changes_requested",
-                format!(
-                    "Revise the proposed plan with this feedback:\n\n{}",
-                    feedback.unwrap_or_default()
-                ),
-            ),
+            "request_changes" => {
+                let feedback = feedback
+                    .map(str::trim)
+                    .filter(|text| !text.is_empty())
+                    .ok_or_else(|| {
+                        CodexTransportError::Request("Plan feedback is required".into())
+                    })?;
+                (
+                    "changes_requested",
+                    format!("Revise the proposed plan with this feedback:\n\n{feedback}"),
+                )
+            }
             _ => {
                 return Err(CodexTransportError::Request(format!(
                     "Unknown Codex plan action \"{action}\""
                 )))
             }
         };
-        let mut events = self.send(&text, &[]).await?;
+        let mut events = Vec::new();
+        if action == "implement"
+            && self.collaboration_presets.contains_key("default")
+            && self.state.collaboration_mode.as_deref() != Some("default")
+        {
+            events.push(self.set_collaboration_mode("default").await?);
+        }
+        events.extend(self.send(&text, &[]).await?);
+        self.state.plans.remove(proposal_id);
         events.push(event(
             "plan.resolved",
             [
@@ -1489,6 +1509,27 @@ mod tests {
         });
         assert_eq!(events[0]["type"], "plan.proposed");
         assert!(state.plans.contains("p:plan:0"));
+
+        let answer = json!({"threadId":"thread","item":{"id":"answer","type":"agentMessage","text":"Preface\n\n<proposed_plan>\n# Build it\n\n- Safely\n</proposed_plan>"}});
+        let events = state.handle(CodexInbound::Notification {
+            method: "item/completed".into(),
+            params: answer.clone(),
+        });
+        let proposed = events
+            .iter()
+            .find(|event| event["type"] == "plan.proposed")
+            .unwrap();
+        assert_eq!(proposed["proposalId"], "answer:plan:0");
+        assert_eq!(proposed["markdown"], "# Build it\n\n- Safely");
+        assert!(state.plans.contains("answer:plan:0"));
+
+        let repeated = state.handle(CodexInbound::Notification {
+            method: "item/completed".into(),
+            params: answer,
+        });
+        assert!(!repeated
+            .iter()
+            .any(|event| event["type"] == "plan.proposed"));
     }
 
     #[test]
