@@ -16,7 +16,7 @@ describe('model and reasoning defaults', () => {
 
   it('puts a default action beside every model and effort selector row', () => {
     expect(source).toContain('data-testid={`${testid}-default-${o.value}`}');
-    expect(source).toContain('defaultValue={modelDefaults[sessionBrand] ?? null}');
+    expect(source).toContain("defaultValue={sessionBrand === 'local' ? null : modelDefaults[sessionBrand] ?? null}");
     expect(source).toContain('defaultValue={effortDefaults[sessionBrand] ?? null}');
   });
 });

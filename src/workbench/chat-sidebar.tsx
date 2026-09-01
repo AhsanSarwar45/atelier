@@ -57,6 +57,7 @@ import { heldElsewhere, sessionOwnership } from '@/workbench/running';
 import { sendCommand } from '@/workbench/use-session';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
 import { useProviders } from '@/workbench/providers';
+import { ModelIcon } from '@/workbench/model-icon';
 
 /**
  * How many rows are drawn before the reader asks for more. A 288px rail shows
@@ -226,6 +227,7 @@ export function withLive(
       merged[merged.indexOf(known)] = {
         ...known,
         state: session.state,
+        model: session.model,
         // The restore row has already asked the provider for its conversation
         // name. Keep that over our live session's temporary generated label.
         title: known.title ?? session.title,
@@ -249,6 +251,7 @@ export function withLive(
       sessionId: session.id,
       externalId: null,
       brand: session.brand,
+      model: session.model,
       title: session.title,
       lastActiveAt: session.lastActiveAt,
       lastSpokeAt: session.lastSpokeAt,
@@ -600,6 +603,7 @@ export function ChatSidebar({
                           <DropdownMenuRadioItem value="ask">Ask every time</DropdownMenuRadioItem>
                           <DropdownMenuRadioItem value="claude">Use Claude by default</DropdownMenuRadioItem>
                           <DropdownMenuRadioItem value="codex">Use Codex by default</DropdownMenuRadioItem>
+                          <DropdownMenuRadioItem value="local">Use Local models by default</DropdownMenuRadioItem>
                         </DropdownMenuRadioGroup>
                       </>
                     )}
@@ -719,7 +723,9 @@ export function ChatSidebar({
                       beside it — the two boxes are the same height, so centring
                       them is what puts the clock on the name's own line. */}
                   <div className="flex items-center gap-2">
-                    <BrandIcon brand={row.brand} className="text-muted-foreground" />
+                    {row.brand === 'local'
+                      ? <ModelIcon brand={row.brand} model={row.model} className="text-muted-foreground" />
+                      : <BrandIcon brand={row.brand} className="text-muted-foreground" />}
                     <Button
                       type="button"
                       variant="foreground"

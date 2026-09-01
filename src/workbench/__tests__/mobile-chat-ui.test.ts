@@ -29,7 +29,8 @@ describe('the mobile chat composer', () => {
 describe('the mobile chat chrome', () => {
   it('keeps only context and plan usage visible in the status bar', () => {
     const chat = source('../chat-tab.tsx');
-    expect(chat).toContain('<ProviderBadge brand={sessionBrand} className="hidden sm:inline-flex" />');
+    const provider = chat.split('\n').find((line) => line.includes('<ProviderBadge brand={sessionBrand}')) ?? '';
+    expect(provider).toContain('className="hidden sm:inline-flex"');
     expect(chat.slice(chat.indexOf('<WhatItRuns'), chat.indexOf('/>', chat.indexOf('<WhatItRuns')))).toContain('className="hidden sm:flex"');
     expect(chat.slice(chat.indexOf('data-testid="cost-chip"'), chat.indexOf('</Badge>', chat.indexOf('data-testid="cost-chip"')))).toContain('hidden font-mono sm:inline-flex');
     expect(chat.slice(chat.indexOf('<ContextChip'), chat.indexOf('<PlanChip'))).not.toContain('md:hidden');

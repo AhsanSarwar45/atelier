@@ -15,7 +15,6 @@ import {
   ArrowDown,
   ArrowUp,
   Coins,
-  Cpu,
   ChevronDown,
   ChevronRight,
   Folder,
@@ -77,7 +76,7 @@ import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
-import type { Brand, CommandInfo, Cost, ImageComparison, ImagePayload, LookableImage, TodoItem } from '@/workbench/protocol';
+import type { Brand, CommandInfo, Cost, ImageComparison, ImagePayload, LookableImage, SessionConfigOption, TodoItem } from '@/workbench/protocol';
 import { BRAND_DEFAULT_MODEL } from '@/workbench/protocol';
 import { heldElsewhere, sessionOwnership } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
@@ -86,7 +85,7 @@ import { DrawnTranscript } from '@/workbench/drawn-transcript';
 import { WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
-import { CHIP_GAP, ModeMark, modelName, modeWords, WhatItRuns } from '@/workbench/what-it-runs';
+import { CHIP_GAP, ModeMark, modelName, modelWords, modeWords, WhatItRuns } from '@/workbench/what-it-runs';
 import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type TranscriptItem } from '@/workbench/use-session';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import { BrandIcon, ProviderBadge, brandName } from '@/workbench/brand-icon';
@@ -94,6 +93,7 @@ import { workingLine } from '@/workbench/working-line';
 import { PictureViewer } from '@/workbench/picture-viewer';
 import { useEpicChecklist } from '@/workbench/epic-checklist';
 import { useProviders } from '@/workbench/providers';
+import { ModelIcon } from '@/workbench/model-icon';
 
 export { PictureViewer } from '@/workbench/picture-viewer';
 
@@ -253,7 +253,7 @@ export function Picker({
    * changes. `unavailable` says why a row cannot be picked, and is shown in
    * place of the hint, because why-not is the fact a reader needs first.
    */
-  options: { value: string; label: string; hint?: string; group?: string; unavailable?: string }[];
+  options: { value: string; label: string; hint?: string; group?: string; unavailable?: string; icon?: ReactNode }[];
   testid: string;
   /** No agent is attached. Picks are stored and applied when the next message wakes it. */
   asleep: boolean;
@@ -297,7 +297,7 @@ export function Picker({
                 onSelect={() => onPick(o.value)}
                 className="group min-w-0 flex-1 flex-col items-start gap-0.5 px-2 py-1.5"
               >
-                <span className={cn('truncate text-sm', o.value === current && 'font-semibold text-foreground')}>{o.label}</span>
+                <span className={cn('flex max-w-full items-center gap-2 truncate text-sm', o.value === current && 'font-semibold text-foreground')}>{o.icon}{o.label}</span>
                 {(o.unavailable ?? o.hint) && (
                   <span
                     data-testid={`${testid}-option-hint`}
@@ -334,6 +334,64 @@ export function Picker({
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+/**
+ * Provider-defined session switches belong to the same menu contract as model,
+ * effort and mode. Keeping this renderer generic means a newly announced ACP
+ * option appears without adding a provider name or another transport-specific
+ * branch to the composer.
+ */
+export function SessionConfigPickers({
+  options,
+  sessionId,
+  asleep,
+  mobile = false,
+  onError,
+}: {
+  options: SessionConfigOption[];
+  sessionId: string;
+  asleep: boolean;
+  mobile?: boolean;
+  onError: (message: string | null) => void;
+}) {
+  return options.map((option) => {
+    const current = String(option.currentValue);
+    const choices = configOptionChoices(option);
+    const testName = option.id.replace(/[^a-zA-Z0-9_-]+/g, '-');
+    return (
+      <Picker
+        key={option.id}
+        icon={<SlidersHorizontal className={mobile ? 'h-4 w-4' : 'h-3.5 w-3.5'} />}
+        label={option.name || inWords(option.id)}
+        testid={`${mobile ? 'mobile-' : ''}config-${testName}-picker`}
+        current={current}
+        currentLabel={option.type === 'boolean' ? (option.currentValue ? 'Enabled' : 'Disabled') : current}
+        asleep={asleep}
+        options={choices}
+        onPick={(selected) => {
+          onError(null);
+          const value = option.type === 'boolean' ? selected === 'true' : selected;
+          void sendCommand({ type: 'session.config-option', sessionId, configId: option.id, value }).catch((error: unknown) =>
+            onError(error instanceof Error ? error.message : String(error)),
+          );
+        }}
+      />
+    );
+  });
+}
+
+export function configOptionChoices(option: SessionConfigOption): Array<{ value: string; label: string; hint?: string }> {
+  return option.type === 'boolean'
+    ? [
+        { value: 'true', label: 'Enabled' },
+        { value: 'false', label: 'Disabled' },
+      ]
+    : (option.options ?? []).map((choice) => ({
+        value: choice.value,
+        label: choice.name,
+        hint: choice.description,
+      }));
 }
 
 /**
@@ -547,7 +605,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [composerSettingsOpen, setComposerSettingsOpen] = useState(false);
   useEffect(() => {
     const saved = localStorage.getItem(NEW_CHAT_DEFAULT);
-    if (saved === 'claude' || saved === 'codex' || saved === 'ask') setNewChatDefaultState(saved);
+    if (saved === 'claude' || saved === 'codex' || saved === 'local' || saved === 'ask') setNewChatDefaultState(saved);
   }, []);
   const setNewChatDefault = useCallback((choice: Brand | 'ask') => {
     setNewChatDefaultState(choice);
@@ -869,8 +927,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // first frame it draws (live.ts, LiveSession.externalId).
   const live = useLiveSessions().find((s) => s.id === sessionId);
   const sessionBrand = live?.brand ?? facts?.brand ?? 'claude';
+  const selectedModel = view.menu.models.find((model) => model.value === view.model);
   useEffect(() => {
     let current = true;
+    if (sessionBrand === 'local') return () => { current = false; };
     void sendCommand<{ model: string | null; effort: string | null }>({ type: 'provider-defaults.read', brand: sessionBrand })
       .then((defaults) => {
         if (!current) return;
@@ -1006,6 +1066,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   async function submit() {
     const text = draft.trim();
     if (!text || !sessionId) return;
+    if (sessionBrand === 'local' && !view.model) {
+      setSendError('Choose a local model before sending.');
+      return;
+    }
     const images = attached;
     const pending = { text: draft, images, itemsBeforeSend: new Set(view.items.map((item) => item.id)) };
     recallableNow.current = pending;
@@ -1154,10 +1218,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               <Checkbox
               checked={newChatDefault === newBrand}
               data-testid="new-chat-default"
-              aria-label={`Use ${newBrand === 'claude' ? 'Claude' : 'Codex'} by default`}
+              aria-label={`Use ${brandName(newBrand)} by default`}
               onCheckedChange={(checked) => setNewChatDefault(checked ? newBrand : 'ask')}
               />
-              <span>Use {newBrand === 'claude' ? 'Claude' : 'Codex'} by default</span>
+              <span>Use {brandName(newBrand)} by default</span>
             </div>
             <Button variant="primary" disabled={starting} onClick={() => { setShowing(null); setRailOpen(false); void start(newBrand); }}>
               {starting ? 'Starting…' : 'Start chat'}
@@ -1304,13 +1368,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               title={available ? undefined : `Install ${brandName(brand)}: ${installUrl}`}
               data-testid={`agent-${brand}`}
             >
-              {brand === 'claude' ? 'Claude' : 'Codex'}
+              {brandName(brand)}
             </Button>
           ))}
         </div>
         <Button variant="primary" onClick={() => void start()} disabled={starting} data-testid="new-chat">
           {starting ? null : <Plus data-testid="new-chat-empty-plus" aria-hidden="true" />}
-          {starting ? 'Starting…' : `New ${newBrand === 'claude' ? 'Claude' : 'Codex'} chat`}
+          {starting ? 'Starting…' : `New ${brandName(newBrand)} chat`}
         </Button>
         {startError && <p className="max-w-lg text-center text-sm text-red-500">{startError}</p>}
       </div>,
@@ -1340,7 +1404,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           'gap-y-1',
         )}
       >
-        <ProviderBadge brand={sessionBrand} className="hidden sm:inline-flex" />
+        <ProviderBadge brand={sessionBrand} model={view.model} icon={sessionBrand === 'local' ? <ModelIcon brand={sessionBrand} model={view.model} identity={selectedModel?.family ?? selectedModel?.publisher} className="size-3" /> : undefined} className="hidden sm:inline-flex" />
         {/* A chat another program is working in has no agent of OURS attached,
             which is what "Asleep" describes and not what the reader is looking
             at: the messages arrive as that program works. So the line says what
@@ -1712,13 +1776,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               />
             )}
             <Picker
-              icon={<Cpu className="h-3.5 w-3.5" />}
+              icon={<ModelIcon brand={sessionBrand} model={view.model} identity={selectedModel?.family ?? selectedModel?.publisher} className="h-3.5 w-3.5" />}
               label="Model"
               testid="model-picker"
               // A session that has not been given a model is on the brand's own
               // default, and the list has a row for exactly that.
-              current={view.model ?? BRAND_DEFAULT_MODEL}
-              currentLabel={modelName(view.model ?? BRAND_DEFAULT_MODEL)}
+              current={sessionBrand === 'local' ? view.model : view.model ?? BRAND_DEFAULT_MODEL}
+              currentLabel={sessionBrand === 'local' && !view.model ? 'Choose model' : modelWords(view.model ?? BRAND_DEFAULT_MODEL, view.menu.models)}
               asleep={asleep}
               // The list announces ids as often as names — `claude-opus-5[1m]`
               // is what one chat calls the model it is running — and the chip a
@@ -1727,12 +1791,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               options={view.menu.models.map((m) => ({
                 value: m.value,
                 label: modelName(m.value, m.displayName) ?? m.displayName,
+                icon: <ModelIcon brand={sessionBrand} model={m.value} identity={m.family ?? m.publisher} className="h-3.5 w-3.5" />,
                 hint: m.description,
                 group: m.group,
                 unavailable: m.unavailable,
               }))}
-              defaultValue={modelDefaults[sessionBrand] ?? null}
-              onDefault={(model) => makeProviderDefault('model', model)}
+              defaultValue={sessionBrand === 'local' ? null : modelDefaults[sessionBrand] ?? null}
+              onDefault={sessionBrand === 'local' ? undefined : (model) => makeProviderDefault('model', model)}
               onPick={(model) => {
                 setSteerError(null);
                 void sendCommand({ type: 'session.model', sessionId, model }).catch((e: unknown) =>
@@ -1752,7 +1817,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 hint: effort.description,
               }))}
               defaultValue={effortDefaults[sessionBrand] ?? null}
-              onDefault={(effort) => makeProviderDefault('effort', effort)}
+              onDefault={sessionBrand === 'local' ? undefined : (effort) => makeProviderDefault('effort', effort)}
               cannotDefault={(effort) => sessionBrand === 'claude' && effort === 'max'
                 ? 'Claude supports Max for the current session only; it cannot be saved as the system default'
                 : null}
@@ -1762,6 +1827,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                   setSteerError(e instanceof Error ? e.message : String(e)),
                 );
               }}
+            />
+            <SessionConfigPickers
+              options={view.menu.configOptions}
+              sessionId={sessionId}
+              asleep={asleep}
+              onError={setSteerError}
             />
             </div>
             <Button
@@ -1825,7 +1896,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 // could never come out true. What stops a send while someone
                 // else is in there is the composer not being drawn at all,
                 // which is what the browser checks measure (bw-96is.23).
-                disabled={!draft.trim()}
+                disabled={!draft.trim() || (sessionBrand === 'local' && !view.model)}
               >
                 <ArrowUp className="h-4 w-4" />
               </Button>
@@ -1879,21 +1950,22 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 />
               )}
               <Picker
-                icon={<Cpu className="h-4 w-4" />}
+                icon={<ModelIcon brand={sessionBrand} model={view.model} identity={selectedModel?.family ?? selectedModel?.publisher} className="h-4 w-4" />}
                 label="Model"
                 testid="mobile-model-picker"
-                current={view.model ?? BRAND_DEFAULT_MODEL}
-                currentLabel={modelName(view.model ?? BRAND_DEFAULT_MODEL)}
+                current={sessionBrand === 'local' ? view.model : view.model ?? BRAND_DEFAULT_MODEL}
+                currentLabel={sessionBrand === 'local' && !view.model ? 'Choose model' : modelWords(view.model ?? BRAND_DEFAULT_MODEL, view.menu.models)}
                 asleep={asleep}
                 options={view.menu.models.map((model) => ({
                   value: model.value,
                   label: modelName(model.value, model.displayName) ?? model.displayName,
+                  icon: <ModelIcon brand={sessionBrand} model={model.value} identity={model.family ?? model.publisher} className="h-3.5 w-3.5" />,
                   hint: model.description,
                   group: model.group,
                   unavailable: model.unavailable,
                 }))}
-                defaultValue={modelDefaults[sessionBrand] ?? null}
-                onDefault={(model) => makeProviderDefault('model', model)}
+                defaultValue={sessionBrand === 'local' ? null : modelDefaults[sessionBrand] ?? null}
+                onDefault={sessionBrand === 'local' ? undefined : (model) => makeProviderDefault('model', model)}
                 onPick={(model) => {
                   setSteerError(null);
                   void sendCommand({ type: 'session.model', sessionId, model }).catch((error: unknown) =>
@@ -1913,7 +1985,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                   hint: effort.description,
                 }))}
                 defaultValue={effortDefaults[sessionBrand] ?? null}
-                onDefault={(effort) => makeProviderDefault('effort', effort)}
+                onDefault={sessionBrand === 'local' ? undefined : (effort) => makeProviderDefault('effort', effort)}
                 cannotDefault={(effort) => sessionBrand === 'claude' && effort === 'max'
                   ? 'Claude supports Max for the current session only; it cannot be saved as the system default'
                   : null}
@@ -1923,6 +1995,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                     setSteerError(error instanceof Error ? error.message : String(error)),
                   );
                 }}
+              />
+              <SessionConfigPickers
+                options={view.menu.configOptions}
+                sessionId={sessionId}
+                asleep={asleep}
+                mobile
+                onError={setSteerError}
               />
             </div>
           </DialogContent>

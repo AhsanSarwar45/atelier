@@ -35,6 +35,7 @@ function session(over: Partial<LiveSession> = {}): LiveSession {
   return {
     id: 's2',
     brand: 'claude',
+    model: null,
     externalId: null,
     projectId: PROJECT,
     projectPath: '/home/me/project/worktrees/fix-a-thing',

@@ -474,7 +474,7 @@ impl Store {
             params![session_id, seq, at, kind, json, provider, thread_id, event_id],
         )?;
         if changed == 1 {
-            self.remove_superseded_progress(event, &session_id, seq)?;
+            self.remove_superseded_progress(event, session_id, seq)?;
         }
         Ok(changed == 1)
     }
@@ -767,13 +767,17 @@ impl Store {
         )?;
         let mut menu = serde_json::Map::new();
         for session in sessions {
+            let is_current = session == session_id;
             let Some(row) = latest
-                .query_row([session], |row| row.get::<_, String>(0))
+                .query_row([session.as_str()], |row| row.get::<_, String>(0))
                 .optional()?
             else {
                 continue;
             };
             let value: Value = serde_json::from_str(&row).map_err(json_error)?;
+            if is_current && value["configOptions"].is_array() {
+                menu.insert("configOptions".into(), value["configOptions"].clone());
+            }
             for field in ["models", "permissionModes", "efforts", "collaborationModes"] {
                 if menu
                     .get(field)
@@ -793,6 +797,30 @@ impl Store {
                 })
             {
                 break;
+            }
+        }
+        if let Some(options) = menu.get_mut("configOptions").and_then(Value::as_array_mut) {
+            let mut selected = HashMap::<String, Value>::new();
+            let mut statement = self.connection.prepare(
+                r#"SELECT json FROM event
+                   WHERE session_id=?1 AND type='session.pinned'
+                   ORDER BY seq DESC"#,
+            )?;
+            let rows = statement.query_map([session_id], |row| row.get::<_, String>(0))?;
+            for row in rows {
+                let event: Value = serde_json::from_str(&row?).map_err(json_error)?;
+                for patch in event["configOptions"].as_array().into_iter().flatten() {
+                    if let Some(id) = patch["id"].as_str() {
+                        selected
+                            .entry(id.to_string())
+                            .or_insert_with(|| patch["currentValue"].clone());
+                    }
+                }
+            }
+            for option in options {
+                if let Some(current) = option["id"].as_str().and_then(|id| selected.get(id)) {
+                    option["currentValue"] = current.clone();
+                }
             }
         }
         Ok(Value::Object(menu))
@@ -1016,7 +1044,7 @@ impl Store {
                     newest_seq,
                     reset_seq,
                 )?;
-                return Ok(newest_seq);
+                Ok(newest_seq)
             }
             _ => {
                 // A cold or incompatible projection starts empty at the last
@@ -1043,7 +1071,7 @@ impl Store {
                 )?;
                 transaction.commit()?;
                 self.catch_up_transcript_projection(session_id, reset_seq, newest_seq, reset_seq)?;
-                return Ok(newest_seq);
+                Ok(newest_seq)
             }
         }
     }
@@ -1251,10 +1279,21 @@ impl Store {
         let mut descending = Vec::new();
         let mut anchors = HashMap::<String, i64>::new();
         let wanted = limit.saturating_add(8);
+        let mut window_start = None;
 
         loop {
             let mut statement = self.connection.prepare(
-                "SELECT seq,json FROM event WHERE session_id=?1 AND seq<?2 AND seq>?3 ORDER BY seq DESC LIMIT 512",
+                r#"SELECT seq,json FROM event
+                   WHERE session_id=?1 AND seq<?2 AND seq>?3
+                     AND type IN (
+                       'message.started','text.delta','thinking.delta','message.completed','message.retracted',
+                       'tool.started','tool.completed','tool.progress','agent.started','agent.progress',
+                       'agent.finished','agent.relayed','agent.identified','diff','image','image.compare','widget',
+                       'ask.permission','ask.resolved','question.requested','question.resolved',
+                       'plan.proposed','plan.resolved','provider.message','notice','note'
+                     )
+                     AND NOT(type='note' AND json_extract(json,'$.rank')='detail')
+                   ORDER BY seq DESC LIMIT 512"#,
             )?;
             let chunk: Vec<(i64, String)> = statement
                 .query_map(params![session_id, scan_before, reset_seq], |row| {
@@ -1277,20 +1316,49 @@ impl Store {
                 descending.push(event);
             }
             if anchors.len() >= wanted {
-                let mut ordered = descending.clone();
-                ordered.reverse();
-                if fold_all(&ordered)
-                    .items()
-                    .iter()
-                    .filter(|item| item_visible(item))
-                    .count()
-                    >= limit
-                {
-                    break;
+                let mut starts = anchors.values().copied().collect::<Vec<_>>();
+                starts.sort_unstable_by(|left, right| right.cmp(left));
+                let mut candidates = wanted;
+                loop {
+                    let cutoff = starts[candidates - 1];
+                    let ordered = descending
+                        .iter()
+                        .filter(|event| {
+                            event.fields["seq"]
+                                .as_i64()
+                                .is_some_and(|seq| seq >= cutoff)
+                        })
+                        .cloned()
+                        .rev()
+                        .collect::<Vec<_>>();
+                    if fold_all(&ordered)
+                        .items()
+                        .iter()
+                        .filter(|item| item_visible(item))
+                        .count()
+                        >= limit
+                    {
+                        window_start = Some(cutoff);
+                        break;
+                    }
+                    if candidates == starts.len() {
+                        break;
+                    }
+                    candidates = candidates.saturating_add(wanted).min(starts.len());
                 }
+            }
+            if window_start.is_some() {
+                break;
             }
         }
 
+        if let Some(cutoff) = window_start {
+            descending.retain(|event| {
+                event.fields["seq"]
+                    .as_i64()
+                    .is_some_and(|seq| seq >= cutoff)
+            });
+        }
         descending.reverse();
         let projection = fold_all(&descending);
         let visible: Vec<Value> = projection
@@ -1312,7 +1380,8 @@ impl Store {
                     WHERE session_id=?1 AND seq>?2 AND seq<?3 AND type IN
                     ('message.started','thinking.delta','tool.started','note',
                      'ask.permission','question.requested','plan.proposed',
-                     'provider.message','notice'))"#,
+                     'provider.message','notice')
+                    AND NOT(type='note' AND json_extract(json,'$.rank')='detail'))"#,
                 params![session_id, reset_seq, cursor],
                 |row| row.get::<_, bool>(0),
             )?,
@@ -1793,6 +1862,41 @@ mod tests {
         assert!(inherited.get("skills").is_none());
         assert!(inherited.get("agentDefinitions").is_none());
         assert_eq!(store.steering_menu("other").unwrap(), json!({}));
+    }
+
+    #[test]
+    fn steering_menu_keeps_only_this_sessions_provider_owned_option_values() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        for row in [
+            session("one", "codex", Some("thread-1"), "2026-08-20T00:00:00Z"),
+            session("two", "codex", Some("thread-2"), "2026-08-21T00:00:00Z"),
+        ] {
+            store.create_session(&row).unwrap();
+        }
+        for id in ["one", "two"] {
+            let menu: Event = serde_json::from_value(json!({
+                "type":"session.menu", "sessionId":id, "seq":1, "at":"now",
+                "configOptions":[{"id":"fast-mode","name":"Fast mode","type":"boolean","currentValue":false}]
+            })).unwrap();
+            assert!(store.append_event(&menu).unwrap());
+        }
+        let pinned: Event = serde_json::from_value(json!({
+            "type":"session.pinned", "sessionId":"one", "seq":2, "at":"now",
+            "permissionMode":null, "model":null,
+            "configOptions":[{"id":"fast-mode","currentValue":true}]
+        }))
+        .unwrap();
+        assert!(store.append_event(&pinned).unwrap());
+
+        assert_eq!(
+            store.steering_menu("one").unwrap()["configOptions"][0]["currentValue"],
+            true
+        );
+        assert_eq!(
+            store.steering_menu("two").unwrap()["configOptions"][0]["currentValue"],
+            false
+        );
     }
 
     #[test]

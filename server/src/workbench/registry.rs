@@ -44,8 +44,9 @@ pub struct LaunchedSession {
 }
 
 /// Starts or opens a provider transactionally. It must return only after the
-/// provider initialized and its database row exists; failures leave neither a
-/// registry entry nor an orphan chat row.
+/// provider initialized and its database row exists. A failure must leave no
+/// unexplained `starting` row: factories may roll it back or persist a durable,
+/// readable error row, but never strand it between those states.
 pub trait SessionFactory: Send + Sync {
     fn launch<'a>(&'a self, database: ChatDb, command: &'a Command) -> LaunchFuture<'a>;
 }
@@ -367,6 +368,16 @@ impl WorkbenchRegistry {
             }
             CommandKind::SessionModel => {
                 let model = Self::field(command, "model")?;
+                let menu = self.database.steering_menu(session_id.to_string()).await?;
+                if model != "default"
+                    && !menu["models"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|choice| choice["value"] == model)
+                {
+                    return Err("that model is not in the session's advertised catalog".into());
+                }
                 session.model = (model != "default").then(|| model.to_string());
             }
             CommandKind::SessionEffort => {
@@ -375,16 +386,78 @@ impl WorkbenchRegistry {
             CommandKind::SessionCollaborationMode => {
                 session.collaboration_mode = Some(Self::field(command, "mode")?.to_string());
             }
+            CommandKind::SessionConfigOption => {
+                let config_id = Self::field(command, "configId")?;
+                let value = command
+                    .fields
+                    .get("value")
+                    .filter(|value| value.is_boolean() || value.is_string())
+                    .ok_or_else(|| {
+                        "a session config value must be a boolean or string".to_string()
+                    })?;
+                let menu = self.database.steering_menu(session_id.to_string()).await?;
+                let option = menu["configOptions"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|option| option["id"] == config_id)
+                    .ok_or_else(|| format!("session option {config_id} is not available"))?;
+                match option["type"].as_str() {
+                    Some("boolean") if value.is_boolean() => {}
+                    Some("select")
+                        if value.as_str().is_some_and(|selected| {
+                            option["options"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .any(|choice| choice["value"] == selected)
+                        }) => {}
+                    Some("boolean") => {
+                        return Err(format!("session option {config_id} requires a boolean"))
+                    }
+                    Some("select") => {
+                        return Err(format!(
+                            "session option {config_id} does not offer that value"
+                        ))
+                    }
+                    _ => {
+                        return Err(format!(
+                            "session option {config_id} has an unsupported type"
+                        ))
+                    }
+                }
+                let event: crate::workbench::protocol::Event = serde_json::from_value(json!({
+                    "type":"session.pinned", "sessionId":session.id, "seq":0,
+                    "at":chrono::Utc::now().to_rfc3339(), "permissionMode":Value::Null,
+                    "model":Value::Null, "effort":Value::Null, "collaborationMode":Value::Null,
+                    "configOptions":[{"id":config_id,"currentValue":value}]
+                }))
+                .map_err(|error| error.to_string())?;
+                self.database.append(event).await?;
+                return Ok(json!({"ok":true}));
+            }
             _ => return Err("command is not a session setting".into()),
         }
         let event: crate::workbench::protocol::Event = serde_json::from_value(json!({
             "type":"session.pinned", "sessionId":session.id, "seq":0,
             "at":chrono::Utc::now().to_rfc3339(),
             "permissionMode":session.permission_mode, "model":session.model,
+            "clearModel":command.kind == CommandKind::SessionModel && session.model.is_none(),
             "effort":session.effort, "collaborationMode":session.collaboration_mode
         }))
         .map_err(|error| error.to_string())?;
         self.database.append(event).await?;
+        if command.kind == CommandKind::SessionModel
+            && session.brand == super::local::BRAND
+            && session.model.is_some()
+        {
+            let ready: crate::workbench::protocol::Event = serde_json::from_value(json!({
+                "type":"session.state", "sessionId":session.id, "seq":0,
+                "at":chrono::Utc::now().to_rfc3339(), "state":"idle", "label":"Ready"
+            }))
+            .map_err(|error| error.to_string())?;
+            self.database.append(ready).await?;
+        }
         Ok(json!({"ok":true}))
     }
 
@@ -427,13 +500,16 @@ impl WorkbenchRegistry {
                     .map_err(|e| e.to_string())
             }
             CommandKind::ProvidersList => {
-                let providers = [
+                let mut providers = [
                     ("claude", "Claude", "https://docs.anthropic.com/en/docs/claude-code"),
                     ("codex", "Codex", "https://developers.openai.com/codex/cli"),
                 ].into_iter().map(|(brand, name, install_url)| {
                     let path = crate::routes::find_tool(brand, &[]);
-                    json!({"brand":brand,"name":name,"available":path.is_some(),"path":path,"installUrl":install_url})
+                    let adapter = super::acp::adapter::find(brand);
+                    let available = super::acp::adapter::launch_config(brand, None).is_some();
+                    json!({"brand":brand,"name":name,"available":available,"path":path,"adapterPath":adapter,"installUrl":install_url,"models":[]})
                 }).collect::<Vec<_>>();
+                providers.extend(super::local::providers().await);
                 Ok(json!({"providers":providers}))
             }
             CommandKind::SessionOpen => {
@@ -490,6 +566,7 @@ impl WorkbenchRegistry {
             | CommandKind::SessionModel
             | CommandKind::SessionEffort
             | CommandKind::SessionCollaborationMode
+            | CommandKind::SessionConfigOption
                 if !self.has_driver(Self::field(command, "sessionId")?).await =>
             {
                 self.pin_saved_session(command).await

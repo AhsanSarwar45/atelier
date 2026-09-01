@@ -182,11 +182,8 @@ async fn check_github_release() -> VersionCheckResponse {
 
 /// Compares two semver strings. Returns true if `latest` > `current`.
 fn is_newer(latest: &str, current: &str) -> bool {
-    let parse = |s: &str| -> Vec<u32> {
-        s.split('.')
-            .filter_map(|p| p.parse::<u32>().ok())
-            .collect()
-    };
+    let parse =
+        |s: &str| -> Vec<u32> { s.split('.').filter_map(|p| p.parse::<u32>().ok()).collect() };
     let l = parse(latest);
     let c = parse(current);
     l > c
@@ -267,9 +264,7 @@ pub async fn perform_update(
         None => {
             return (
                 StatusCode::NOT_FOUND,
-                Json(
-                    serde_json::json!({"error": "No binary available for this platform"}),
-                ),
+                Json(serde_json::json!({"error": "No binary available for this platform"})),
             )
         }
     };
@@ -298,6 +293,9 @@ pub async fn perform_update(
             )
         }
     };
+    let current_adapters = crate::workbench::acp::adapter::find("claude")
+        .and_then(|path| path.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| current_dir.join("atelier-adapters"));
 
     let archive_name = current_platform_asset();
     let archive_path = current_dir.join("atelier-update-archive");
@@ -365,17 +363,38 @@ pub async fn perform_update(
     };
     let _ = std::fs::remove_file(&archive_path);
     let new_binary = staged.program.clone();
+    let new_adapters = staged.adapters.clone();
 
     // 4. Generate and spawn updater script
-    info!("Downloaded update: {} bytes -> {}", written, new_binary.display());
+    info!(
+        "Downloaded update: {} bytes -> {}",
+        written,
+        new_binary.display()
+    );
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "3008".to_string());
     let pid = std::process::id();
 
     let script_result = if cfg!(windows) {
-        generate_windows_update_script(current_dir, &current_exe, &new_binary, pid, &port)
+        generate_windows_update_script(
+            current_dir,
+            &current_exe,
+            &new_binary,
+            &current_adapters,
+            &new_adapters,
+            pid,
+            &port,
+        )
     } else {
-        generate_unix_update_script(current_dir, &current_exe, &new_binary, pid, &port)
+        generate_unix_update_script(
+            current_dir,
+            &current_exe,
+            &new_binary,
+            &current_adapters,
+            &new_adapters,
+            pid,
+            &port,
+        )
     };
 
     match script_result {
@@ -387,15 +406,14 @@ pub async fn perform_update(
                     .args(["/C", "start", "/B", "", script_path.to_str().unwrap_or("")])
                     .spawn()
             } else {
-                std::process::Command::new("sh")
-                    .arg(&script_path)
-                    .spawn()
+                std::process::Command::new("sh").arg(&script_path).spawn()
             };
 
             if let Err(e) = spawn_result {
                 warn!("Failed to spawn updater: {}", e);
                 // Clean up
                 let _ = std::fs::remove_file(&new_binary);
+                let _ = std::fs::remove_dir_all(&new_adapters);
                 let _ = std::fs::remove_file(&script_path);
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -419,6 +437,7 @@ pub async fn perform_update(
         }
         Err(e) => {
             let _ = std::fs::remove_file(&new_binary);
+            let _ = std::fs::remove_dir_all(&new_adapters);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(
@@ -435,6 +454,8 @@ pub async fn perform_update(
 struct StagedUpdate {
     /// The new program, under a name that is not the running one.
     program: PathBuf,
+    /// Complete provider bundle, staged as one directory for an atomic swap.
+    adapters: PathBuf,
 }
 
 /// Unpack the proved release archive and stage the program next to the running
@@ -460,6 +481,10 @@ fn stage_from_archive(archive: &Path, dir: &Path) -> Result<StagedUpdate, String
     } else {
         "atelier-new"
     });
+    let staged_adapters = dir.join("atelier-adapters-new");
+    let _ = std::fs::remove_dir_all(&staged_adapters);
+    std::fs::create_dir(&staged_adapters)
+        .map_err(|e| format!("{}: {e}", staged_adapters.display()))?;
 
     let bytes = std::fs::read(archive)
         .map_err(|e| format!("could not read the downloaded archive: {e}"))?;
@@ -470,6 +495,28 @@ fn stage_from_archive(archive: &Path, dir: &Path) -> Result<StagedUpdate, String
         .map_err(|e| format!("the update archive could not be read: {e}"))?;
 
     let mut got_program = false;
+    let adapter_names = if cfg!(windows) {
+        [
+            "claude-acp.exe",
+            "codex-acp.exe",
+            "goose-acp.exe",
+            "claude-provider.exe",
+            "codex-provider.exe",
+            "codex-code-mode-host.exe",
+            "manifest.json",
+        ]
+    } else {
+        [
+            "claude-acp",
+            "codex-acp",
+            "goose-acp",
+            "claude-provider",
+            "codex-provider",
+            "codex-code-mode-host",
+            "manifest.json",
+        ]
+    };
+    let mut got_adapters = std::collections::HashSet::new();
     for entry in entries {
         let mut entry =
             entry.map_err(|e| format!("a file in the update archive could not be read: {e}"))?;
@@ -480,31 +527,59 @@ fn stage_from_archive(archive: &Path, dir: &Path) -> Result<StagedUpdate, String
             .path()
             .map_err(|e| format!("a file in the update archive has an unreadable name: {e}"))?
             .into_owned();
-        // Only a flat, single-component name is one of ours; anything nested or
-        // with a directory part is not the program.
         let mut parts = named.components();
-        let leaf = match (parts.next(), parts.next()) {
-            (Some(std::path::Component::Normal(name)), None) => {
-                name.to_str().unwrap_or("").to_string()
+        let first = parts.next();
+        let second = parts.next();
+        let third = parts.next();
+        if let (Some(std::path::Component::Normal(name)), None, None) = (first, second, third) {
+            if name == program_name {
+                entry
+                    .unpack(&staged_program)
+                    .map_err(|e| format!("{}: {e}", staged_program.display()))?;
+                make_runnable(&staged_program)?;
+                got_program = true;
             }
-            _ => continue,
-        };
-        if leaf != program_name {
             continue;
         }
+        let (
+            Some(std::path::Component::Normal(folder)),
+            Some(std::path::Component::Normal(file)),
+            None,
+        ) = (first, second, third)
+        else {
+            continue;
+        };
+        if folder != "atelier-adapters" {
+            continue;
+        }
+        let leaf = file.to_str().unwrap_or_default();
+        if !adapter_names.contains(&leaf) || !got_adapters.insert(leaf.to_string()) {
+            continue;
+        }
+        let destination = staged_adapters.join(leaf);
         entry
-            .unpack(&staged_program)
-            .map_err(|e| format!("{}: {e}", staged_program.display()))?;
-        make_runnable(&staged_program)?;
-        got_program = true;
+            .unpack(&destination)
+            .map_err(|e| format!("{}: {e}", destination.display()))?;
+        if leaf != "manifest.json" {
+            make_runnable(&destination)?;
+        }
     }
 
     if !got_program {
         let _ = std::fs::remove_file(&staged_program);
+        let _ = std::fs::remove_dir_all(&staged_adapters);
         return Err("the update archive carried no atelier program".to_string());
     }
+    if got_adapters.len() != adapter_names.len() {
+        let _ = std::fs::remove_file(&staged_program);
+        let _ = std::fs::remove_dir_all(&staged_adapters);
+        return Err("the update archive carried an incomplete ACP adapter bundle".to_string());
+    }
 
-    Ok(StagedUpdate { program: staged_program })
+    Ok(StagedUpdate {
+        program: staged_program,
+        adapters: staged_adapters,
+    })
 }
 
 /// Give a freshly unpacked program the execute bit it needs to be run.
@@ -530,6 +605,8 @@ fn generate_unix_update_script(
     dir: &Path,
     current_exe: &Path,
     new_binary: &Path,
+    current_adapters: &Path,
+    new_adapters: &Path,
     pid: u32,
     port: &str,
 ) -> Result<PathBuf, String> {
@@ -542,6 +619,8 @@ fn generate_unix_update_script(
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or("Invalid new binary name")?;
+    let adapters = current_adapters.to_string_lossy();
+    let new_adapters = new_adapters.to_string_lossy();
 
     let content = format!(
         r#"#!/bin/sh
@@ -559,6 +638,8 @@ while kill -0 $PID 2>/dev/null; do sleep 0.5; done
 mv "{exe_name}" "{exe_name}.old" 2>/dev/null
 mv "{new_name}" "{exe_name}"
 chmod +x "{exe_name}"
+mv "{adapters}" "{adapters}.old" 2>/dev/null
+mv "{new_adapters}" "{adapters}"
 # Start new server
 PORT=$PORT ./{exe_name} &
 NEW_PID=$!
@@ -577,12 +658,15 @@ done
 if [ $healthy -eq 1 ]; then
     echo "Update successful! New server running (PID $NEW_PID)"
     rm -f "{exe_name}.old"
+    rm -rf "{adapters}.old"
 else
     echo "Health check failed, rolling back..."
     kill $NEW_PID 2>/dev/null
     sleep 1
     mv "{exe_name}" "{new_name}" 2>/dev/null
     mv "{exe_name}.old" "{exe_name}" 2>/dev/null
+    rm -rf "{adapters}"
+    mv "{adapters}.old" "{adapters}" 2>/dev/null
     PORT=$PORT ./{exe_name} &
 fi
 
@@ -608,6 +692,8 @@ fn generate_windows_update_script(
     dir: &Path,
     current_exe: &Path,
     new_binary: &Path,
+    current_adapters: &Path,
+    new_adapters: &Path,
     pid: u32,
     port: &str,
 ) -> Result<PathBuf, String> {
@@ -620,6 +706,8 @@ fn generate_windows_update_script(
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or("Invalid new binary name")?;
+    let adapters = current_adapters.to_string_lossy();
+    let new_adapters = new_adapters.to_string_lossy();
 
     let content = format!(
         r#"@echo off
@@ -640,6 +728,9 @@ echo Replacing binary...
 if exist "{exe_name}.old" del /f "{exe_name}.old"
 rename "{exe_name}" "{exe_name}.old"
 rename "{new_name}" "{exe_name}"
+if exist "{adapters}.old" rmdir /s /q "{adapters}.old"
+if exist "{adapters}" move /y "{adapters}" "{adapters}.old" >nul
+move /y "{new_adapters}" "{adapters}" >nul
 echo Starting new server...
 set PORT=%PORT%
 start /B "" "{exe_name}"
@@ -659,6 +750,8 @@ echo Health check failed, rolling back...
 taskkill /F /IM "{exe_name}" 2>nul
 del /f "{exe_name}" 2>nul
 rename "{exe_name}.old" "{exe_name}"
+if exist "{adapters}" rmdir /s /q "{adapters}"
+if exist "{adapters}.old" move /y "{adapters}.old" "{adapters}" >nul
 set PORT=%PORT%
 start /B "" "{exe_name}"
 goto cleanup
@@ -666,6 +759,7 @@ goto cleanup
 :health_ok
 echo Update successful!
 del /f "{exe_name}.old" 2>nul
+if exist "{adapters}.old" rmdir /s /q "{adapters}.old"
 :cleanup
 rem Self-delete
 (goto) 2>nul & del /f "%~f0"
@@ -681,7 +775,7 @@ mod tests {
     use super::*;
 
     /// Build a release archive the way the build does: a gzipped tar carrying
-    /// the named files as flat entries, no wrapping directory.
+    /// the named program and adapter entries.
     fn make_flat_archive(files: &[(&str, &[u8])]) -> Vec<u8> {
         use std::io::Write;
         let mut tarred = Vec::new();
@@ -773,7 +867,29 @@ mod tests {
         } else {
             "atelier"
         };
-        let archive = make_flat_archive(&[(program_name, program.as_slice())]);
+        let suffix = if cfg!(windows) { ".exe" } else { "" };
+        let archive = make_flat_archive(&[
+            (program_name, program.as_slice()),
+            (
+                &format!("atelier-adapters/claude-acp{suffix}"),
+                b"claude-acp",
+            ),
+            (&format!("atelier-adapters/codex-acp{suffix}"), b"codex-acp"),
+            (&format!("atelier-adapters/goose-acp{suffix}"), b"goose-acp"),
+            (
+                &format!("atelier-adapters/claude-provider{suffix}"),
+                b"claude",
+            ),
+            (
+                &format!("atelier-adapters/codex-provider{suffix}"),
+                b"codex",
+            ),
+            (
+                &format!("atelier-adapters/codex-code-mode-host{suffix}"),
+                b"code-mode",
+            ),
+            ("atelier-adapters/manifest.json", b"{}"),
+        ]);
         let sum = format!("{:x}", Sha256::digest(&archive));
         let checksums = format!("{sum}  {asset}\n");
 
@@ -811,6 +927,23 @@ mod tests {
         assert_ne!(
             landed, archive,
             "the archive must never be installed as the program"
+        );
+        assert_eq!(
+            std::fs::read(staged.adapters.join(format!("codex-acp{suffix}"))).unwrap(),
+            b"codex-acp"
+        );
+        assert_eq!(
+            std::fs::read(staged.adapters.join(format!("goose-acp{suffix}"))).unwrap(),
+            b"goose-acp"
+        );
+        assert_eq!(
+            std::fs::read(
+                staged
+                    .adapters
+                    .join(format!("codex-code-mode-host{suffix}"))
+            )
+            .unwrap(),
+            b"code-mode"
         );
         // The archive itself is consumed by the unpack; only staged files remain.
         assert!(
@@ -952,6 +1085,8 @@ mod tests {
             dir.path(),
             &current_exe,
             &new_binary,
+            &dir.path().join("atelier-adapters"),
+            &dir.path().join("atelier-adapters-new"),
             4242,
             "3008",
         )
@@ -984,9 +1119,16 @@ mod tests {
         let current_exe = dir.path().join("atelier");
         let new_binary = dir.path().join("atelier-new");
 
-        let script_path =
-            generate_unix_update_script(dir.path(), &current_exe, &new_binary, 4242, "3008")
-                .expect("generate unix script");
+        let script_path = generate_unix_update_script(
+            dir.path(),
+            &current_exe,
+            &new_binary,
+            &dir.path().join("atelier-adapters"),
+            &dir.path().join("atelier-adapters-new"),
+            4242,
+            "3008",
+        )
+        .expect("generate unix script");
         let content = std::fs::read_to_string(&script_path).expect("read unix script");
 
         // Poll loop present.
@@ -1010,8 +1152,16 @@ mod tests {
         let current_exe = dir.path().join("atelier");
         let new_binary = dir.path().join("atelier-new");
         let unix = std::fs::read_to_string(
-            generate_unix_update_script(dir.path(), &current_exe, &new_binary, 4242, "3008")
-                .expect("generate unix script"),
+            generate_unix_update_script(
+                dir.path(),
+                &current_exe,
+                &new_binary,
+                &dir.path().join("atelier-adapters"),
+                &dir.path().join("atelier-adapters-new"),
+                4242,
+                "3008",
+            )
+            .expect("generate unix script"),
         )
         .expect("read unix script");
         assert!(
@@ -1024,6 +1174,8 @@ mod tests {
                 dir.path(),
                 &dir.path().join("atelier.exe"),
                 &dir.path().join("atelier-new.exe"),
+                &dir.path().join("atelier-adapters"),
+                &dir.path().join("atelier-adapters-new"),
                 4242,
                 "3008",
             )

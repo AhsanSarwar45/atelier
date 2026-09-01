@@ -28,6 +28,10 @@ mime_guess = "2"
 notify = "6"
 tokio-stream = "0.1"
 futures = "0.3"
+# The official ACP SDK. Stable v1 remains the default wire contract; compile
+# draft-v2 types for the audited future upgrade; today's published adapters
+# negotiate v1 and the release build fails if that changes unexpectedly.
+agent-client-protocol = { version = "=2.0.0", features = ["unstable_protocol_v2", "unstable_end_turn_token_usage", "unstable_elicitation"] }
 # Directly speaks Chromium's DevTools WebSocket protocol without Playwright.
 tokio-tungstenite = "0.24"
 rusqlite = { version = "0.31", features = ["bundled"] }

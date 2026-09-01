@@ -136,6 +136,7 @@ fn menu(event: &Event) -> Value {
         "collaborationModes",
         "agentDefinitions",
         "agentControls",
+        "configOptions",
     ] {
         let sent = event.fields.get(field).filter(|value| value.is_array());
         menu.insert(field.into(), sent.cloned().unwrap_or_else(|| json!([])));
@@ -541,22 +542,28 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                 }
             }
             EventKind::PlanProposed => {
-                for row in &mut items {
-                    if row["kind"] == "plan" && row["status"] == "proposed" {
-                        row["status"] = json!("superseded");
+                let id = string(event, "proposalId");
+                if let Some(at) = find(&items, "plan", &id) {
+                    items[at]["markdown"] = value(event, "markdown");
+                    items[at]["actions"] = value(event, "actions");
+                } else {
+                    for row in &mut items {
+                        if row["kind"] == "plan" && row["status"] == "proposed" {
+                            row["status"] = json!("superseded");
+                        }
                     }
+                    let mut row = item("plan", id);
+                    row.insert("markdown".into(), value(event, "markdown"));
+                    row.insert("actions".into(), value(event, "actions"));
+                    row.insert("status".into(), json!("proposed"));
+                    row.insert("actionId".into(), Value::Null);
+                    row.insert("feedback".into(), Value::Null);
+                    let parent = value(event, "parentToolCallId");
+                    row.insert("parentId".into(), parent.clone());
+                    row.insert("askedBy".into(), brief_of(&agents, &parent));
+                    copy_if_present(&mut row, event, "execution");
+                    items.push(Value::Object(row));
                 }
-                let mut row = item("plan", string(event, "proposalId"));
-                row.insert("markdown".into(), value(event, "markdown"));
-                row.insert("actions".into(), value(event, "actions"));
-                row.insert("status".into(), json!("proposed"));
-                row.insert("actionId".into(), Value::Null);
-                row.insert("feedback".into(), Value::Null);
-                let parent = value(event, "parentToolCallId");
-                row.insert("parentId".into(), parent.clone());
-                row.insert("askedBy".into(), brief_of(&agents, &parent));
-                copy_if_present(&mut row, event, "execution");
-                items.push(Value::Object(row));
             }
             EventKind::PlanResolved => {
                 if let Some(at) = find(&items, "plan", &string(event, "proposalId")) {
@@ -573,8 +580,29 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
             }
             EventKind::SessionPinned => {
                 for field in ["permissionMode", "model", "effort", "collaborationMode"] {
-                    if event.fields.contains_key(field) {
+                    if event.fields.get(field).is_some_and(|sent| !sent.is_null()) {
                         view.insert(field.into(), value(event, field));
+                    }
+                }
+                if event.fields.get("clearModel").and_then(Value::as_bool) == Some(true) {
+                    view.insert("model".into(), Value::Null);
+                }
+                if let Some(selected) = event.fields.get("configOptions").and_then(Value::as_array)
+                {
+                    if let Some(options) = view
+                        .get_mut("menu")
+                        .and_then(Value::as_object_mut)
+                        .and_then(|menu| menu.get_mut("configOptions"))
+                        .and_then(Value::as_array_mut)
+                    {
+                        for patch in selected {
+                            if let Some(option) = options
+                                .iter_mut()
+                                .find(|option| option["id"] == patch["id"])
+                            {
+                                option["currentValue"] = patch["currentValue"].clone();
+                            }
+                        }
                     }
                 }
             }

@@ -4,8 +4,8 @@ class Atelier < Formula
   version "__VERSION__"
   license "MIT"
 
-  # Chat is implemented in the Rust program, so Node is neither a dependency nor
-  # a payload hidden inside this package.
+  # Chat orchestration is implemented in Rust. The provider adapters are pinned,
+  # self-contained executables, so Node/npm/Python remain build-time-only tools.
 
   on_macos do
     on_arm do
@@ -27,6 +27,7 @@ class Atelier < Formula
 
   def install
     bin.install "atelier"
+    libexec.install "atelier-adapters"
   end
 
   def caveats
@@ -40,7 +41,8 @@ class Atelier < Formula
       It answers your whole network, so the board opens on your phone —
       starting it prints the address to type there.
 
-      The Chat tab is part of Atelier itself, so you need neither Node nor npm.
+      The Chat tab and its provider adapters are bundled, so you need neither
+      Node, npm, Python, nor a separately installed ACP adapter.
 
       Project tracking needs git and the Beads CLI (bd):
         https://github.com/gastownhall/beads

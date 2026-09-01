@@ -10,7 +10,9 @@ fn repo_root() -> PathBuf {
 }
 
 fn files_under(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
@@ -35,7 +37,10 @@ fn nothing_looks_for_a_folder_in_someones_home() {
                 .is_ok_and(|text| text.contains(&checkout) || text.contains(&home_var))
         })
         .collect();
-    assert!(guilty.is_empty(), "source files name a home folder or checkout directly: {guilty:#?}");
+    assert!(
+        guilty.is_empty(),
+        "source files name a home folder or checkout directly: {guilty:#?}"
+    );
 }
 
 #[test]
@@ -46,5 +51,8 @@ fn embedded_assets_are_baked_in_for_debug_builds() {
         .lines()
         .find(|line| line.trim_start().starts_with("rust-embed"))
         .expect("rust-embed is a server dependency");
-    assert!(line.contains("debug-embed"), "debug builds must embed assets; dependency reads: {line}");
+    assert!(
+        line.contains("debug-embed"),
+        "debug builds must embed assets; dependency reads: {line}"
+    );
 }

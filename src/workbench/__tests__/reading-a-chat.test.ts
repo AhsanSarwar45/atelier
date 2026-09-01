@@ -151,6 +151,18 @@ describe('building a conversation out of its log', () => {
     ]);
   });
 
+  it('updates a streamed provider plan in place instead of drawing duplicate snapshots', () => {
+    const log = [
+      said({ type: 'plan.proposed', proposalId: 'streamed', markdown: 'First half', actions: [] }),
+      said({ type: 'plan.proposed', proposalId: 'streamed', markdown: 'First half\n\nFinal half', actions: [] }),
+    ];
+    const view = foldAll(log);
+    expect(view).toEqual(log.reduce(reduce, EMPTY));
+    expect(view.items.filter((item) => item.kind === 'plan')).toMatchObject([
+      { id: 'streamed', markdown: 'First half\n\nFinal half', actions: [], status: 'proposed' },
+    ]);
+  });
+
   it('keeps nothing from before the record was read again', () => {
     const view = foldAll(aWholeChat(2));
     // The turn published before the reset is gone, and its card with it.
@@ -473,6 +485,26 @@ describe('a conversation handed over by an older sidecar', () => {
     expect(foldAll([older]).menu.agentControls).toEqual([]);
     // And what it did send is still there.
     expect(foldAll([older]).menu.permissionModes).toEqual(['default']);
+  });
+
+  it('pins a provider-owned option without clearing any unrelated setting', () => {
+    stamped = 0;
+    const menu = said({
+      type: 'session.menu', commands: [], skills: [], models: [], permissionModes: ['on-request'],
+      configOptions: [{ id: 'fast-mode', name: 'Fast mode', type: 'boolean', currentValue: false }],
+    } as never);
+    const pinned = said({
+      type: 'session.pinned', permissionMode: null, model: null,
+      configOptions: [{ id: 'fast-mode', currentValue: true }],
+    } as never);
+    const initial = { ...EMPTY, permissionMode: 'on-request', model: 'gpt-5.6-sol' };
+
+    const incremental = reduce(reduce(initial, menu), pinned);
+    const complete = foldAll([menu, pinned]);
+    expect(incremental.menu.configOptions[0]?.currentValue).toBe(true);
+    expect(incremental.permissionMode).toBe('on-request');
+    expect(incremental.model).toBe('gpt-5.6-sol');
+    expect(complete.menu.configOptions[0]?.currentValue).toBe(true);
   });
 
   it('keeps what the sidecar did send', () => {

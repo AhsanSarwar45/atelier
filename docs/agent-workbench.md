@@ -5,7 +5,8 @@
 > Claude Code and Codex directly from its Rust binary; no Node/npm runtime or
 > helper process is shipped or started. The wire contract and UI behavior below
 > remain authoritative, while sidecar-specific sections are implementation
-> history.
+> history. The current runtime, packaging, transcript paging and performance
+> contract is [ACP transport](architecture/acp-transport.md).
 
 The app becomes the place the owner talks to coding agents. Per project, two
 tabs: **Chat** and **Board**. A chat knows the cards it worked on, a card knows

@@ -397,17 +397,27 @@ fn apply_session_fact(store: &Store, session_id: &str, event: &Event) -> rusqlit
         }
         EventKind::SessionState => patch.state = string(event, "state"),
         EventKind::SessionPinned => {
-            if event.fields.contains_key("model") {
-                patch.model = Some(string(event, "model"));
+            if let Some(title) = string(event, "title") {
+                patch.title = Some(Some(title));
+            }
+            if let Some(model) = string(event, "model") {
+                patch.model = Some(Some(model));
+            } else if event
+                .fields
+                .get("clearModel")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+            {
+                patch.model = Some(None);
             }
             if let Some(mode) = string(event, "permissionMode") {
                 patch.permission_mode = Some(mode);
             }
-            if event.fields.contains_key("effort") {
-                patch.effort = Some(string(event, "effort"));
+            if let Some(effort) = string(event, "effort") {
+                patch.effort = Some(Some(effort));
             }
-            if event.fields.contains_key("collaborationMode") {
-                patch.collaboration_mode = Some(string(event, "collaborationMode"));
+            if let Some(collaboration_mode) = string(event, "collaborationMode") {
+                patch.collaboration_mode = Some(Some(collaboration_mode));
             }
         }
         EventKind::SessionEnded => patch.state = Some("dormant".into()),
@@ -682,10 +692,23 @@ fn run(
             }
             Command::Snapshot(session_id, reply) => {
                 let result = (|| {
+                    let started = std::time::Instant::now();
+                    let history = store.view_events(&session_id)?;
+                    let after_history = started.elapsed();
+                    let page = store.transcript_items(&session_id, None, 40)?;
+                    let after_page = started.elapsed();
+                    let agents = store.projected_agents(&session_id)?;
+                    tracing::info!(
+                        session_id,
+                        history_ms = after_history.as_millis(),
+                        page_ms = (after_page - after_history).as_millis(),
+                        agents_ms = (started.elapsed() - after_page).as_millis(),
+                        "bounded snapshot phases"
+                    );
                     Ok(SnapshotParts {
-                        history: store.view_events(&session_id)?,
-                        page: store.transcript_items(&session_id, None, 40)?,
-                        agents: store.projected_agents(&session_id)?,
+                        history,
+                        page,
+                        agents,
                     })
                 })();
                 respond(reply, result)
@@ -822,6 +845,50 @@ mod tests {
             .iter()
             .any(|event| event.kind == EventKind::SessionMenu
                 && event.fields["seq"] == snapshot.page.newest_seq));
+    }
+
+    #[tokio::test]
+    async fn pinned_nulls_leave_settings_untouched_while_provider_titles_persist() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
+        database
+            .create_session(Session {
+                id: "chat-1".into(),
+                brand: "codex".into(),
+                external_id: Some("thread-1".into()),
+                project_id: "project-1".into(),
+                project_path: "/project".into(),
+                cwd: "/project".into(),
+                model: Some("gpt-5".into()),
+                permission_mode: "on-request".into(),
+                effort: Some("high".into()),
+                collaboration_mode: Some("default".into()),
+                title: Some("Old title".into()),
+                state: "idle".into(),
+                origin: "app".into(),
+                created_at: "now".into(),
+                last_active_at: "now".into(),
+                last_spoke_at: None,
+            })
+            .await
+            .unwrap();
+        let pinned: Event = serde_json::from_value(json!({
+            "type":"session.pinned","sessionId":"chat-1","seq":0,"at":"later",
+            "permissionMode":null,"model":null,"effort":null,"collaborationMode":null,
+            "title":"Provider title"
+        }))
+        .unwrap();
+        database.append(pinned).await.unwrap();
+        let session = database
+            .get_session("chat-1".into())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(session.title.as_deref(), Some("Provider title"));
+        assert_eq!(session.model.as_deref(), Some("gpt-5"));
+        assert_eq!(session.permission_mode, "on-request");
+        assert_eq!(session.effort.as_deref(), Some("high"));
+        assert_eq!(session.collaboration_mode.as_deref(), Some("default"));
     }
 
     #[tokio::test]

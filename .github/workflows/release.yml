@@ -44,6 +44,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Setup Bun build compiler
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.13'
+
       - name: Build frontend
         run: npm run build
 
@@ -56,18 +61,21 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
         working-directory: server
 
+      - name: Build pinned standalone ACP adapters
+        run: node scripts/build-acp-adapters.mjs "${{ matrix.target }}" "server/target/${{ matrix.target }}/release/atelier-adapters"
+
       - name: Bundle archive (Unix)
         if: runner.os != 'Windows'
         run: |
           tar -czf "${{ matrix.artifact }}.tar.gz" \
-            -C "server/target/${{ matrix.target }}/release" atelier
+            -C "server/target/${{ matrix.target }}/release" atelier atelier-adapters
 
       - name: Bundle archive (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          tar -czf "${{ matrix.artifact }}.tar.gz" -C "server/target/${{ matrix.target }}/release" atelier.exe
+          tar -czf "${{ matrix.artifact }}.tar.gz" -C "server/target/${{ matrix.target }}/release" atelier.exe atelier-adapters
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

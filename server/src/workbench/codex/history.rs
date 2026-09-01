@@ -30,10 +30,7 @@ fn human_message(row: &Value) -> bool {
     if row["type"] == "event_msg" && payload["type"] == "user_message" {
         return true;
     }
-    if row["type"] != "response_item"
-        || payload["type"] != "message"
-        || payload["role"] != "user"
-    {
+    if row["type"] != "response_item" || payload["type"] != "message" || payload["role"] != "user" {
         return false;
     }
     let mut saw_text = false;
@@ -91,47 +88,6 @@ pub fn last_spoke_at(path: &Path) -> Option<String> {
         end = start;
     }
     None
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct OpenRequest {
-    pub method: &'static str,
-    pub params: Value,
-}
-
-pub fn thread_open_request(
-    resume: Option<&str>,
-    cwd: &Path,
-    model: Option<&str>,
-    approval_policy: &str,
-    effort: Option<&str>,
-    instructions: &str,
-) -> OpenRequest {
-    let mut common = json!({
-        "cwd": cwd,
-        "model": model,
-        "approvalPolicy": approval_policy,
-        "config": {
-            "sandbox_workspace_write": { "network_access": true },
-            "developer_instructions": instructions
-        },
-        "effort": effort,
-    });
-    if let Some(thread_id) = resume {
-        common["threadId"] = json!(thread_id);
-        common["excludeTurns"] = json!(true);
-        OpenRequest {
-            method: "thread/resume",
-            params: common,
-        }
-    } else {
-        common["sandbox"] = json!("workspace-write");
-        common["ephemeral"] = json!(false);
-        OpenRequest {
-            method: "thread/start",
-            params: common,
-        }
-    }
 }
 
 pub async fn list_threads(
@@ -568,29 +524,7 @@ mod tests {
     }
 
     #[test]
-    fn native_codex_history_builds_start_resume_and_effort_contracts() {
-        let start = thread_open_request(
-            None,
-            Path::new("/project"),
-            Some("gpt-5"),
-            "never",
-            Some("high"),
-            "rules",
-        );
-        assert_eq!(start.method, "thread/start");
-        assert_eq!(start.params["sandbox"], "workspace-write");
-        assert_eq!(start.params["ephemeral"], false);
-        let resume = thread_open_request(
-            Some("thread-1"),
-            Path::new("/project"),
-            None,
-            "on-request",
-            None,
-            "",
-        );
-        assert_eq!(resume.method, "thread/resume");
-        assert_eq!(resume.params["threadId"], "thread-1");
-        assert_eq!(resume.params["excludeTurns"], true);
+    fn native_codex_history_builds_effort_contracts() {
         let menu = effort_menu(
             &[
                 json!({"model":"gpt-5","isDefault":true,"supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"high","description":"More"}],"defaultReasoningEffort":"high"}),

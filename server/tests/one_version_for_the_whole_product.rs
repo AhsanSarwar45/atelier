@@ -21,11 +21,16 @@ use std::fs;
 /// and the frozen list name the product's own version before anything else.
 fn version_in(file: &str) -> String {
     let path = format!("{}/../{file}", env!("CARGO_MANIFEST_DIR"));
-    let text = fs::read_to_string(&path).unwrap_or_else(|_| panic!("{file} sits beside this crate"));
+    let text =
+        fs::read_to_string(&path).unwrap_or_else(|_| panic!("{file} sits beside this crate"));
     for line in text.lines() {
         let line = line.trim();
         if let Some(rest) = line.strip_prefix("\"version\":") {
-            return rest.trim().trim_end_matches(',').trim_matches('"').to_string();
+            return rest
+                .trim()
+                .trim_end_matches(',')
+                .trim_matches('"')
+                .to_string();
         }
     }
     panic!("{file} names no version");
@@ -34,7 +39,8 @@ fn version_in(file: &str) -> String {
 /// Every version named in a Nix-style file: `version = "0.13.0";`.
 fn versions_in_nix(file: &str) -> Vec<String> {
     let path = format!("{}/../{file}", env!("CARGO_MANIFEST_DIR"));
-    let text = fs::read_to_string(&path).unwrap_or_else(|_| panic!("{file} sits beside this crate"));
+    let text =
+        fs::read_to_string(&path).unwrap_or_else(|_| panic!("{file} sits beside this crate"));
     let mut found = Vec::new();
     for line in text.lines() {
         if let Some(rest) = line.trim().strip_prefix("version = \"") {

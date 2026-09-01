@@ -19,7 +19,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { forgetEveryDraft, useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
+import { forgetEveryDraft, rememberUnsentLine, useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
 import type { ImagePayload } from '@/workbench/protocol';
 
 const ONE = 'chat-one';
@@ -44,6 +44,11 @@ afterEach(() => {
 });
 
 describe('a line he typed and did not send', () => {
+  it('can be placed into a newly created chat before its screen mounts', () => {
+    rememberUnsentLine(ONE, 'choose a local model, then send this brief');
+    expect(box(ONE).result.current[0]).toBe('choose a local model, then send this brief');
+  });
+
   it('is still there when the screen has been taken down and built again', () => {
     const typing = box(ONE);
     act(() => typing.result.current[1]('half a thought'));

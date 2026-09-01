@@ -581,7 +581,7 @@ fn restore_row(
         .as_deref()
         .and_then(|id| holds.iter().find(|hold| hold.id.eq_ignore_ascii_case(id)));
     json!({
-        "sessionId": session.id, "externalId": session.external_id, "brand": session.brand,
+        "sessionId": session.id, "externalId": session.external_id, "brand": session.brand, "model":session.model,
         "title": session.title, "lastActiveAt": session.last_active_at,
         "lastSpokeAt": session.last_spoke_at, "state": session.state, "origin": session.origin,
         "projectId": session.project_id, "cwdHint": session.cwd, "folder": folder,
@@ -626,7 +626,7 @@ async fn provider_sessions(
         if let Ok(threads) = listed {
             codex_rows.extend(threads.into_iter().filter_map(|thread| {
                 let id = thread["id"].as_str()?;
-                let updated = thread["updatedAt"].as_i64().map(|seconds| chrono::DateTime::from_timestamp(seconds, 0).map(|at| at.to_rfc3339())).flatten();
+                let updated = thread["updatedAt"].as_i64().and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0).map(|at| at.to_rfc3339()));
                 let preview = thread["preview"].as_str().unwrap_or_default();
                 Some(json!({"brand":"codex","externalId":id,"lastActiveAt":updated,
                     "name":thread.get("name").filter(|v|!v.is_null()).cloned().unwrap_or_else(||json!(crate::workbench::metadata::conversation_title(preview))),
@@ -693,7 +693,10 @@ async fn restore(
                 row["externalId"].as_str().unwrap_or_default()
             ) == key
         }) {
-            if let Some(title) = known["name"].as_str().filter(|title| !title.trim().is_empty()) {
+            if let Some(title) = known["name"]
+                .as_str()
+                .filter(|title| !title.trim().is_empty())
+            {
                 if row["title"].as_str() != Some(title) {
                     row["title"] = json!(title);
                     if let Some(session_id) = row["sessionId"].as_str() {
@@ -954,12 +957,6 @@ async fn events(
     // Subscribe before replay so an append racing the snapshot cannot fall in the gap.
     let receiver = state.database().subscribe_session(&query.session);
     let since = query.since.unwrap_or(0).max(0);
-    // Keep the compatibility SSE endpoint on the same read contract as the
-    // multiplexed browser feed: a direct address heals stale state and starts
-    // provider-record reconciliation, while a resumed stream does neither.
-    if since == 0 {
-        state.looked_at(&query.session).await;
-    }
     let (initial, watermark) = if since == 0 {
         let view = snapshot(state.database(), &query.session).await?;
         let watermark = view["lastSeq"].as_i64().unwrap_or_default();
@@ -979,6 +976,14 @@ async fn events(
             watermark,
         )
     };
+    // The compatibility endpoint follows the multiplexed feed's latency
+    // contract too: publish the bounded stored page first, then reconcile the
+    // provider record without holding the HTTP response open.
+    if since == 0 {
+        let reconcile = state.clone();
+        let session_id = query.session.clone();
+        tokio::spawn(async move { reconcile.looked_at(&session_id).await });
+    }
     let output: EventStream = Box::pin(stream::iter(initial).chain(session_tail(
         receiver,
         state.database().clone(),
@@ -1063,7 +1068,22 @@ async fn watch(State(state): State<WorkbenchState>) -> Result<Sse<EventStream>, 
                     if current!=last_holds {last_holds=current.clone();if tx.send(Ok(watch_frame(json!({"kind":"running","holds":current})))).await.is_err(){return}}
                 },
                 _=usage_tick.tick()=>{for brand in ["claude","codex"]{if let Ok(usage)=state.account_usage(brand).await{if tx.send(Ok(watch_frame(json!({"kind":"usage","brand":brand,"usage":usage})))).await.is_err(){return}}}},
-                received=receiver.recv()=>match received{Ok(update)=>{if update.event.kind==crate::workbench::protocol::EventKind::SessionStarted{if let Ok(Some(session))=state.database().get_session(update.session_id.clone()).await{let beads=state.database().beads_for_session(update.session_id.clone()).await.unwrap_or_default();if tx.send(Ok(watch_frame(json!({"kind":"opened","session":{"id":session.id,"brand":session.brand,"externalId":session.external_id,"projectId":session.project_id,"projectPath":session.project_path,"cwd":session.cwd,"model":session.model,"permissionMode":session.permission_mode,"effort":session.effort,"collaborationMode":session.collaboration_mode,"title":session.title,"state":session.state,"origin":session.origin,"createdAt":session.created_at,"lastActiveAt":session.last_active_at,"lastSpokeAt":session.last_spoke_at,"activity":"","busySince":Value::Null,"beads":beads}})))).await.is_err(){return}}}if tx.send(Ok(watch_frame(json!({"kind":"event","event":update.event})))).await.is_err(){return}},Err(broadcast::error::RecvError::Lagged(_))=>{let Some(current)=send_watch_snapshot(&state,&tx).await else{return};last_holds=current},Err(broadcast::error::RecvError::Closed)=>return}
+                received=receiver.recv()=>match received{
+                    Ok(update)=>{
+                        if update.event.kind==crate::workbench::protocol::EventKind::SessionStarted{
+                            if let Ok(Some(session))=state.database().get_session(update.session_id.clone()).await{
+                                let beads=state.database().beads_for_session(update.session_id.clone()).await.unwrap_or_default();
+                                if tx.send(Ok(watch_frame(json!({"kind":"opened","session":{"id":session.id,"brand":session.brand,"externalId":session.external_id,"projectId":session.project_id,"projectPath":session.project_path,"cwd":session.cwd,"model":session.model,"permissionMode":session.permission_mode,"effort":session.effort,"collaborationMode":session.collaboration_mode,"title":session.title,"state":session.state,"origin":session.origin,"createdAt":session.created_at,"lastActiveAt":session.last_active_at,"lastSpokeAt":session.last_spoke_at,"activity":"","busySince":Value::Null,"beads":beads}})))).await.is_err(){return}
+                            }
+                        }
+                        if tx.send(Ok(watch_frame(json!({"kind":"event","event":update.event})))).await.is_err(){return}
+                    },
+                    Err(broadcast::error::RecvError::Lagged(_))=>{
+                        let Some(current)=send_watch_snapshot(&state,&tx).await else{return};
+                        last_holds=current
+                    },
+                    Err(broadcast::error::RecvError::Closed)=>return
+                }
             }
         }
     });

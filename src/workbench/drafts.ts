@@ -93,6 +93,19 @@ function dropped(kept: Storage, key: string): void {
   kept.setItem(ORDER, JSON.stringify(order(kept).filter((k) => k !== key)));
 }
 
+export function rememberUnsentLine(sessionId: string, line: string): void {
+  const kept = store();
+  if (!kept) return;
+  const key = LINE + sessionId;
+  if (line) {
+    kept.setItem(key, line);
+    newest(kept, key);
+  } else {
+    kept.removeItem(key);
+    dropped(kept, key);
+  }
+}
+
 /**
  * The line he has typed into this chat and not sent, and the way to change it.
  *
@@ -120,18 +133,11 @@ export function useUnsentLine(sessionId: string): [string, Dispatch<SetStateActi
         // opened on, and overwrites what was remembered before the effect that
         // reads it has run. That is the fault that lost the reader's kind
         // filter on every reload (bw-qdim, chat-right-rail.tsx).
-        const kept = store();
-        if (kept && now) {
-          kept.setItem(key, now);
-          newest(kept, key);
-        } else if (kept) {
-          kept.removeItem(key);
-          dropped(kept, key);
-        }
+        rememberUnsentLine(sessionId, now);
         return now;
       });
     },
-    [key],
+    [sessionId],
   );
 
   return [line, write];

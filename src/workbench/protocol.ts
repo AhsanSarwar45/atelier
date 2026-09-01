@@ -19,7 +19,7 @@ import type { PlanUsage } from './plan-usage';
 import type { ChatWidget } from './chat-widgets';
 import type { ProviderMessageSignal } from './provider-messages';
 
-export type Brand = 'claude' | 'codex';
+export type Brand = 'claude' | 'codex' | 'local';
 
 /**
  * What a session is doing. The three `waiting_*` values plus `ended` are
@@ -166,6 +166,11 @@ export interface CommandInfo {
 export interface ModelChoice {
   value: string;
   displayName: string;
+  /** Runtime-supplied identity used for grouping and logos; never inferred billing ownership. */
+  family?: string;
+  publisher?: string;
+  /** Hidden execution backend, relevant only when reconnecting a local model. */
+  runtime?: string;
   description?: string;
   /**
    * Which band of the menu this row belongs to. `alias` is a name pinned to
@@ -186,6 +191,15 @@ export interface EffortChoice {
   value: string;
   displayName: string;
   description?: string;
+}
+
+export interface SessionConfigOption {
+  id: string;
+  name: string;
+  description?: string;
+  type: 'boolean' | 'select';
+  currentValue: boolean | string;
+  options?: Array<{ value: string; name: string; description?: string }>;
 }
 
 /** One provider-defined working style, independent of tool permissions. */
@@ -274,6 +288,7 @@ export type WbpEvent = EventBase &
         collaborationModes?: CollaborationModeChoice[];
         efforts?: EffortChoice[];
         agentDefinitions?: AgentDefinition[];
+        configOptions?: SessionConfigOption[];
         /**
          * Which of the three steering controls this session's brand actually
          * has (docs/agent-workbench.md §8.2.7). A control that is not named
@@ -292,7 +307,7 @@ export type WbpEvent = EventBase &
      * ends plan mode). A field that is `null` is one this message says nothing
      * about, and the reader keeps what it had (bw-1u1.43).
      */
-    | { type: 'session.pinned'; permissionMode: string | null; model: string | null; effort?: string | null; collaborationMode?: string | null }
+    | { type: 'session.pinned'; permissionMode: string | null; model: string | null; effort?: string | null; collaborationMode?: string | null; title?: string | null; configOptions?: Array<{ id: string; currentValue: boolean | string }> }
     | { type: 'session.ended'; reason: string }
     /**
      * `parentToolCallId` is set when a SENT-OFF agent said this, and names the
@@ -674,6 +689,7 @@ export type WbpCommand =
   | { type: 'session.model'; sessionId: string; model: string }
   | { type: 'session.effort'; sessionId: string; effort: string }
   | { type: 'session.collaboration-mode'; sessionId: string; mode: string }
+  | { type: 'session.config-option'; sessionId: string; configId: string; value: boolean | string }
   | {
       /**
        * Open a chat for reading: give a conversation begun elsewhere an id, read
@@ -711,6 +727,7 @@ export interface RestoreRow {
   sessionId: string | null;
   externalId: string | null;
   brand: Brand;
+  model?: string | null;
   /** What the conversation is called, in the brand's own words. */
   title: string | null;
   lastActiveAt: string;
@@ -908,34 +925,6 @@ export interface SessionSummary {
    */
   lastSpokeAt?: string | null;
 }
-
-/**
- * Claude's permission modes, as the SDK spells them.
- *
- * `default` is the mode that asks about every tool — measured, not assumed:
- * a probe run under it saw canUseTool fire for both Read and Edit. Note the
- * CLI's `--permission-mode` flag spells this same mode `manual`; the SDK name
- * is what this code uses.
- */
-export const CLAUDE_PERMISSION_MODES = [
-  'default',
-  'acceptEdits',
-  'plan',
-  'dontAsk',
-  'auto',
-  'bypassPermissions',
-] as const;
-
-/**
- * The mode a chat opens in when NOTHING says otherwise.
- *
- * Last, not first: what a chat opens in is what the owner's own settings say
- * (workbench/src/owner-settings.ts, bw-7ks.23), and this is the answer only
- * where they say nothing at all. It used to be handed to the kit on every
- * start, which is why a machine set to skip every permission check still opened
- * every chat asking about every tool (bw-b1o1).
- */
-export const DEFAULT_PERMISSION_MODE = 'default';
 
 /**
  * The model picker's own top row: not a model, but "whatever the brand would

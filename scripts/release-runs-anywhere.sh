@@ -77,13 +77,19 @@ fi
 
 # CI can hand the script the archives it produced for a byte-level contents
 # check. A whitespace-separated list is deliberate: release asset names contain
-# no spaces. Each archive must contain one flat atelier program and nothing else.
+# no spaces. Each archive must contain the program and its pinned standalone
+# provider adapters, with no runtime interpreter or package-manager payload.
 for archive in ${ATELIER_ARCHIVES:-}; do
   names="$(tar -tzf "$archive" | sed 's#^\./##')"
   expected=atelier
   case "$archive" in *win*) expected=atelier.exe ;; esac
-  if [ "$names" = "$expected" ]; then
-    pass "$(basename "$archive") contains only $expected"
+  adapter_suffix=
+  case "$archive" in *win*) adapter_suffix=.exe ;; esac
+  required="$expected atelier-adapters/claude-acp${adapter_suffix} atelier-adapters/codex-acp${adapter_suffix} atelier-adapters/goose-acp${adapter_suffix} atelier-adapters/claude-provider${adapter_suffix} atelier-adapters/codex-provider${adapter_suffix} atelier-adapters/codex-code-mode-host${adapter_suffix} atelier-adapters/manifest.json"
+  actual="$(printf '%s\n' "$names" | sed '/\/$/d' | sort | tr '\n' ' ' | sed 's/ $//')"
+  wanted="$(printf '%s\n' $required | sort | tr '\n' ' ' | sed 's/ $//')"
+  if [ "$actual" = "$wanted" ]; then
+    pass "$(basename "$archive") contains the program and complete standalone ACP bundle"
   else
     fail "$(basename "$archive") contains unexpected files: $(printf '%s' "$names" | tr '\n' ' ')"
   fi

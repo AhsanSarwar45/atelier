@@ -52,6 +52,7 @@ wire_kinds!(CommandKind {
     SessionModel => "session.model",
     SessionEffort => "session.effort",
     SessionCollaborationMode => "session.collaboration-mode",
+    SessionConfigOption => "session.config-option",
     SessionOpen => "session.open",
     SessionResume => "session.resume",
 });

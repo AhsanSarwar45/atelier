@@ -362,6 +362,7 @@ async fn recover_chat_snapshot(
         match send_chat_snapshot(state, session_id, tx).await {
             Ok(watermark) => return Some(watermark),
             Err(error) => {
+                tracing::warn!(session_id, error, "bounded chat snapshot failed; retrying");
                 if tx
                     .send(Tagged::scoped(
                         "chat.error",
@@ -384,14 +385,27 @@ async fn relay_native_chat(
     state: workbench::WorkbenchState,
     session_id: String,
     since: i64,
+    mut updates: tokio::sync::broadcast::Receiver<crate::workbench::protocol::Event>,
+    prepared_watermark: Option<i64>,
     tx: mpsc::Sender<Tagged>,
 ) {
-    let mut updates = state.database().subscribe_session(&session_id);
+    // The stored bounded page is the click's critical path. Send it before
+    // reconciling provider files or healing stale state; those operations
+    // append onto the subscribed live tail and must never hold first paint.
+    let opening_watermark = if prepared_watermark.is_some() {
+        prepared_watermark
+    } else if since == 0 {
+        let Some(sent) = recover_chat_snapshot(&state, &session_id, &tx).await else {
+            return;
+        };
+        Some(sent)
+    } else {
+        None
+    };
     // A copied URL and a sidebar click are the same cold read. This is
-    // intentionally before the opening snapshot so a stale busy state cannot
-    // survive a process restart, while history parsing itself continues in
-    // background. A resumed wire already reconciled this chat and must not
-    // start another import.
+    // reconciled immediately after its opening page. Any healed state or
+    // imported provider history arrives through `updates`; a resumed wire
+    // already reconciled this chat and must not start another import.
     if since == 0 {
         state.looked_at(&session_id).await;
     }
@@ -454,10 +468,7 @@ async fn relay_native_chat(
     let mut codex_lines: VecDeque<String> = VecDeque::new();
     let mut record_tick = tokio::time::interval(Duration::from_millis(250));
     let mut watermark;
-    if since == 0 {
-        let Some(sent) = recover_chat_snapshot(&state, &session_id, &tx).await else {
-            return;
-        };
+    if let Some(sent) = opening_watermark {
         watermark = sent;
     } else if let Ok(events) = state
         .database()
@@ -521,7 +532,20 @@ async fn relay_native_chat(
                 }
             } else {
                 let growth=codex_tail.as_mut().and_then(|tail|tail.grown().ok());
-                if growth.as_ref().is_some_and(|growth|growth.rewritten){if !state.database().was_driven_here(session.id.clone()).await.unwrap_or(true){let reset:Result<crate::workbench::protocol::Event,_>=serde_json::from_value(serde_json::json!({"type":"transcript.reset","sessionId":session.id,"seq":0,"at":chrono::Utc::now().to_rfc3339()}));if let Ok(reset)=reset{let _=state.database().append(reset).await;}if let Some(tail)=codex_tail.as_mut(){tail.seek(0)}codex_lines.clear();}else if let Some(tail)=codex_tail.as_mut(){tail.to_end()}Vec::new()}else{if let Some(growth)=growth{for line in growth.lines{codex_lines.push_back(line)}}let fresh=crate::workbench::codex::normalize::replay_rollout(&codex_lines.make_contiguous().join("\n"));while codex_lines.len()>512{codex_lines.pop_front();}fresh}
+                if growth.as_ref().is_some_and(|growth|growth.rewritten){
+                    if !state.database().was_driven_here(session.id.clone()).await.unwrap_or(true){
+                        let reset:Result<crate::workbench::protocol::Event,_>=serde_json::from_value(serde_json::json!({"type":"transcript.reset","sessionId":session.id,"seq":0,"at":chrono::Utc::now().to_rfc3339()}));
+                        if let Ok(reset)=reset{let _=state.database().append(reset).await;}
+                        if let Some(tail)=codex_tail.as_mut(){tail.seek(0)}
+                        codex_lines.clear();
+                    }else if let Some(tail)=codex_tail.as_mut(){tail.to_end()}
+                    Vec::new()
+                }else{
+                    if let Some(growth)=growth{for line in growth.lines{codex_lines.push_back(line)}}
+                    let fresh=crate::workbench::codex::normalize::replay_rollout(&codex_lines.make_contiguous().join("\n"));
+                    while codex_lines.len()>512{codex_lines.pop_front();}
+                    fresh
+                }
             };
             if let Some(helpers) = claude_helpers.as_mut() {
                 let (updates, finished) = helpers.poll(&fresh);
@@ -598,6 +622,32 @@ pub async fn live(
 ) -> Response {
     let (tx, rx) = mpsc::channel::<Tagged>(100);
 
+    // Reserve and construct the selected chat before starting lower-priority
+    // board and sidebar snapshots. All of those reads share one SQLite actor;
+    // racing them let a fresh sidebar projection sit in front of the click.
+    let prepared_chat = if let Some(chat) = params.chat.filter(|c| !c.is_empty()) {
+        let since = params.since.unwrap_or(0) as i64;
+        let updates = native.database().subscribe_session(&chat);
+        let watermark = if since == 0 {
+            let started = std::time::Instant::now();
+            match send_chat_snapshot(&native, &chat, &tx).await {
+                Ok(watermark) => {
+                    tracing::info!(session_id = %chat, elapsed_ms = started.elapsed().as_millis(), "priority chat snapshot ready");
+                    Some(watermark)
+                }
+                Err(error) => {
+                    tracing::warn!(session_id = %chat, error, "priority chat snapshot failed; relay will retry");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        Some((chat, since, updates, watermark))
+    } else {
+        None
+    };
+
     for board in boards(&params.board) {
         let tx = tx.clone();
         let dolt_manager = dolt_manager.clone();
@@ -634,11 +684,13 @@ pub async fn live(
         });
     }
 
-    if let Some(chat) = params.chat.filter(|c| !c.is_empty()) {
+    if let Some((chat, since, updates, watermark)) = prepared_chat {
         tokio::spawn(relay_native_chat(
             native.clone(),
             chat,
-            params.since.unwrap_or(0) as i64,
+            since,
+            updates,
+            watermark,
             tx.clone(),
         ));
     }

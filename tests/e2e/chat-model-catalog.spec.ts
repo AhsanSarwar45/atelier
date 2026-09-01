@@ -1,19 +1,13 @@
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 /**
- * The model menu offers every model this Claude install answers to, not the
- * handful of names it advertises (bw-xtic).
- *
- * The fault: the driver rendered `supportedModels()` verbatim, and that returns
- * only the aliases — `opus`, `sonnet`, `haiku`, `fable` — each pinned to
- * whatever shipped last. Every numbered release the install still serves, Opus
- * 4.8 and 4.5 among them, was unreachable from the browser even though typing
- * its id into a settings file worked. Separately, an option's description was
- * drawn as a sibling of the clickable row, so it fell outside both the click
- * target and the highlight.
+ * The model menu is the active provider's advertised catalog. Atelier does not
+ * carry a second release list that can become stale or offer a model this
+ * account, adapter or runtime cannot actually select.
  *
  * The unit cases under src/workbench/__tests__ and workbench/src/__tests__
  * prove the merge and the markup on their own. This one proves the two ends are
@@ -35,6 +29,7 @@ const FIXTURE = join(__dirname, '..', '.workbench-run-model-catalog');
 
 /** The width this is looked at, with both columns open. */
 const SCREEN = { width: 1440, height: 1000 };
+const PROVIDERS = ['claude', 'codex'] as const;
 
 /**
  * A project of this run's own, marked as a test project so it stays off the
@@ -56,7 +51,7 @@ async function fixtureProject(request: APIRequestContext): Promise<{ id: string;
 
 test.describe('the model menu', () => {
   test.use({ viewport: SCREEN });
-  test.describe.configure({ timeout: 300_000 });
+  test.describe.configure({ timeout: 300_000, mode: 'serial' });
 
   test.beforeAll(() => {
     mkdirSync(SHOTS, { recursive: true });
@@ -78,18 +73,17 @@ test.describe('the model menu', () => {
     });
   });
 
-  test('offers the numbered versions under the aliases, and marks what cannot be run', async ({
-    page,
-    request,
+  for (const brand of PROVIDERS) test(`${brand} draws exactly its active provider catalog and can select one of its models`, async ({
+    page, request,
   }) => {
     const project = await fixtureProject(request);
     await page.goto(`/project?id=${project.id}&tab=chat`);
     await page.getByTestId('new-chat-tool').click();
-    // Nobody has said which agent this project uses, so it asks. Claude, since
-    // the models under test are Claude's.
+    // Nobody has said which agent this project uses, so it asks. The catalog
+    // must come from the selected agent rather than a shared release list.
     const asking = page.getByTestId('new-chat-provider-dialog');
     await asking.waitFor({ timeout: HELLO_MS });
-    await page.getByTestId('new-chat-provider-claude').click();
+    await page.getByTestId(`new-chat-provider-${brand}`).click();
     await asking.getByRole('button', { name: 'Start chat' }).click();
     await page.waitForURL((url) => Boolean(url.searchParams.get('chat')), { timeout: HELLO_MS });
     await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
@@ -101,67 +95,27 @@ test.describe('the model menu', () => {
     const options = page.getByTestId('model-picker-option');
     await options.first().waitFor({ timeout: HELLO_MS });
 
-    // The aliases the install advertises are still there, and still first.
     const values = await options.evaluateAll((rows) =>
       rows.map((row) => (row as HTMLElement).dataset.value ?? ''),
     );
-    // An alias is whatever this install calls it — `opus[1m]` on one machine,
-    // `opus` on another — so the one asserted on is the one that never varies.
-    expect(values, 'the aliases the install advertises were dropped').toContain('sonnet');
-    // …and the numbered releases it never named are underneath them.
-    expect(values, 'no numbered version reached the menu').toContain('claude-opus-4-5');
-    expect(values.indexOf('sonnet'), 'a numbered version was listed above the aliases').toBeLessThan(
-      values.indexOf('claude-opus-4-5'),
-    );
+    expect(values.length, 'the provider advertised no selectable model').toBeGreaterThan(0);
+    const sessionId = new URL(page.url()).searchParams.get('chat')!;
+    const database = new DatabaseSync(join(process.env.ATELIER_DATA_DIR!, 'workbench.db'), { readOnly: true });
+    const row = database.prepare(
+      "SELECT json FROM event WHERE session_id = ? AND type = 'session.menu' ORDER BY seq DESC LIMIT 1",
+    ).get(sessionId) as { json: string };
+    database.close();
+    const advertised = (JSON.parse(row.json) as { models: { value: string }[] }).models.map((choice) => choice.value);
+    expect(values).toEqual(advertised);
+    for (const option of await options.all()) await expect(option).not.toHaveText('');
 
-    // One rule, drawn where the aliases give way to the versions.
-    await expect(page.getByTestId('model-picker-menu').getByRole('separator')).toHaveCount(1);
-
-    // A row says what it is inside the row itself rather than beside it, so the
-    // description is part of what a click lands on and part of what lights up.
-    const lit = page.locator('[data-testid="model-picker-option"][data-value="claude-opus-4-5"]');
-    await expect(lit.getByTestId('model-picker-option-hint')).not.toBeEmpty();
-
-    // A model this install cannot run is still shown, with the reason in place
-    // of the description, and it is marked as not for choosing.
-    const shut = page.locator('[data-testid="model-picker-option"][data-unavailable="true"]').first();
-    await expect(shut).toHaveAttribute('aria-disabled', 'true');
-    await expect(shut.getByTestId('model-picker-option-hint')).not.toBeEmpty();
-
-    // The menu is taller than the box it scrolls in, so the proof is taken in
-    // bands: the aliases at the top, the rule and the versions under it, and
-    // the far end where the ones that cannot be run are.
     const menu = page.getByTestId('model-picker-menu');
-    const shot = async (name: string) =>
-      menu.screenshot({ path: `${SHOTS}/model-menu-${name}.png` });
-    /** Scrolls the box itself, since hovering a row would scroll it too. */
-    const scrollTo = async (top: number) => {
-      await menu.evaluate((box, to) => box.scrollTo({ top: to }), top);
-      await expect.poll(() => menu.evaluate((box) => box.scrollTop)).toBe(top);
-    };
-
-    // The last of the aliases, at the top.
-    await scrollTo(0);
-    await shot('aliases');
-
-    // The rule itself, with aliases above it and numbered versions below.
-    const rule = await menu
-      .getByRole('separator')
-      .evaluate((line) => (line as HTMLElement).offsetTop);
-    await scrollTo(Math.max(0, rule - 150));
-    await shot('separator');
-
-    // A row lit up, to show the description highlighting with its own label.
-    await lit.hover();
-    await expect(lit).toHaveAttribute('data-highlighted', '');
-    await shot('highlighted');
-
-    // The far end, where the models this install cannot run are marked.
-    await scrollTo(await menu.evaluate((box) => box.scrollHeight - box.clientHeight));
-    await shot('unavailable');
-
-    // And a version the install never advertised is a version it will take.
-    await lit.click();
-    await expect(model).toHaveAttribute('data-current', 'claude-opus-4-5', { timeout: HELLO_MS });
+    await menu.screenshot({ path: `${SHOTS}/${brand === 'claude' ? 'model-menu-provider-catalog' : 'model-menu-codex-provider-catalog'}.png` });
+    const current = await model.getAttribute('data-current');
+    const selectable = values.find((value) => value !== current);
+    if (selectable) {
+      await options.nth(values.indexOf(selectable)).click();
+      await expect(model).toHaveAttribute('data-current', selectable, { timeout: HELLO_MS });
+    }
   });
 });

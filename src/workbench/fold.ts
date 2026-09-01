@@ -40,6 +40,7 @@ import type {
   PlanStatus,
   QuestionAnswer,
   QuestionField,
+  SessionConfigOption,
   SessionState,
   TodoItem,
   WbpEvent,
@@ -302,11 +303,12 @@ export interface SessionMenu {
   permissionModes: string[];
   collaborationModes: CollaborationModeChoice[];
   agentDefinitions: AgentDefinition[];
+  configOptions: SessionConfigOption[];
   /** Which steering controls this session's brand has for the work it sent away. */
   agentControls: AgentControl[];
 }
 
-const NO_MENU: SessionMenu = { commands: [], skills: [], models: [], efforts: [], permissionModes: [], collaborationModes: [], agentDefinitions: [], agentControls: [] };
+const NO_MENU: SessionMenu = { commands: [], skills: [], models: [], efforts: [], permissionModes: [], collaborationModes: [], agentDefinitions: [], agentControls: [], configOptions: [] };
 
 /** A chat with nothing drawn yet. Exported so the fold can be checked on its own. */
 export const EMPTY: SessionView = {
@@ -358,6 +360,7 @@ function menuOf(sent: Partial<SessionMenu>): SessionMenu {
     collaborationModes: list(sent.collaborationModes, NO_MENU.collaborationModes),
     agentDefinitions: list(sent.agentDefinitions, NO_MENU.agentDefinitions),
     agentControls: list(sent.agentControls, NO_MENU.agentControls),
+    configOptions: list(sent.configOptions, NO_MENU.configOptions),
   };
 }
 
@@ -710,18 +713,24 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       return next;
 
     case 'plan.proposed':
-      next.items = [
-        ...items.map((it) => it.kind === 'plan' && it.status === 'proposed'
-          ? { ...it, status: 'superseded' as const }
-          : it),
-        {
+      if (items.some((it) => it.kind === 'plan' && it.id === e.proposalId)) {
+        next.items = items.map((it) => it.kind === 'plan' && it.id === e.proposalId
+          ? { ...it, markdown: e.markdown, actions: e.actions }
+          : it);
+      } else {
+        next.items = [
+          ...items.map((it) => it.kind === 'plan' && it.status === 'proposed'
+            ? { ...it, status: 'superseded' as const }
+            : it),
+          {
           kind: 'plan', id: e.proposalId, markdown: e.markdown, actions: e.actions,
           status: 'proposed', actionId: null, feedback: null,
           parentId: e.parentToolCallId ?? null,
           askedBy: briefOf(view.agents, e.parentToolCallId ?? null),
           ...(e.execution ? { execution: e.execution } : {}),
-        },
-      ];
+          },
+        ];
+      }
       return next;
 
     case 'plan.resolved':
@@ -746,6 +755,11 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       if (e.model !== null) next.model = e.model;
       if (e.effort != null) next.effort = e.effort;
       if (e.collaborationMode != null) next.collaborationMode = e.collaborationMode;
+      if (e.configOptions?.length) {
+        const selected = new Map(e.configOptions.map((option) => [option.id, option.currentValue]));
+        next.menu = { ...next.menu, configOptions: next.menu.configOptions.map((option) =>
+          selected.has(option.id) ? { ...option, currentValue: selected.get(option.id)! } : option) };
+      }
       return next;
 
     case 'cost':
@@ -1154,16 +1168,25 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
       }
 
       case 'plan.proposed':
-        for (const item of items) {
-          if (item.kind === 'plan' && item.status === 'proposed') item.status = 'superseded';
+        {
+          const at = items.findIndex((item) => item.kind === 'plan' && item.id === e.proposalId);
+          if (at !== -1) {
+            const plan = items[at] as TranscriptPlan;
+            plan.markdown = e.markdown;
+            plan.actions = e.actions;
+          } else {
+            for (const item of items) {
+              if (item.kind === 'plan' && item.status === 'proposed') item.status = 'superseded';
+            }
+            items.push({
+              kind: 'plan', id: e.proposalId, markdown: e.markdown, actions: e.actions,
+              status: 'proposed', actionId: null, feedback: null,
+              parentId: e.parentToolCallId ?? null,
+              askedBy: briefOf(agents, e.parentToolCallId ?? null),
+              ...(e.execution ? { execution: e.execution } : {}),
+            });
+          }
         }
-        items.push({
-          kind: 'plan', id: e.proposalId, markdown: e.markdown, actions: e.actions,
-          status: 'proposed', actionId: null, feedback: null,
-          parentId: e.parentToolCallId ?? null,
-          askedBy: briefOf(agents, e.parentToolCallId ?? null),
-          ...(e.execution ? { execution: e.execution } : {}),
-        });
         break;
 
       case 'plan.resolved': {
@@ -1190,6 +1213,11 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         if (e.model !== null) view.model = e.model;
         if (e.effort != null) view.effort = e.effort;
         if (e.collaborationMode != null) view.collaborationMode = e.collaborationMode;
+        if (e.configOptions?.length) {
+          const selected = new Map(e.configOptions.map((option) => [option.id, option.currentValue]));
+          view.menu = { ...view.menu, configOptions: view.menu.configOptions.map((option) =>
+            selected.has(option.id) ? { ...option, currentValue: selected.get(option.id)! } : option) };
+        }
         break;
 
       case 'cost':

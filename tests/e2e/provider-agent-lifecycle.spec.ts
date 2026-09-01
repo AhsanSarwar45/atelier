@@ -11,6 +11,7 @@ type LifecycleEvent = { type: string; agentId: string; state?: string };
 const ROOT = join(__dirname, '..', '.workbench-run-provider-lifecycle');
 const SHOTS = 'tests/results';
 const TURN_MS = 600_000;
+const SETTLE_MS = 30_000;
 
 const cases: { brand: Brand; permissionMode: string; prompt: string; parentAnswer: string; childAnswer: string }[] = [
   {
@@ -91,16 +92,19 @@ test.describe('native provider child-agent lifecycle', () => {
         const sessionId = await startSession(request, project, provider.brand, provider.permissionMode);
         await page.goto(`/project?id=${project.id}&tab=chat&chat=${sessionId}`);
         await page.getByTestId('chat-tab').waitFor({ timeout: 120_000 });
+        const promptStarted = performance.now();
         const sent = await request.post('/api/workbench/command', {
           data: { type: 'prompt.send', sessionId, text: provider.prompt },
         });
+        const promptAckMs = performance.now() - promptStarted;
         expect(sent.ok(), await sent.text()).toBe(true);
+        expect(promptAckMs, `${provider.brand} prompt acknowledgement took ${promptAckMs.toFixed(1)}ms`).toBeLessThan(500);
 
-        await expect(page.getByTestId('assistant-message').last()).toContainText(provider.parentAnswer, { timeout: TURN_MS });
+        await expect(page.getByTestId('assistant-message').last()).toContainText(provider.parentAnswer, { timeout: SETTLE_MS });
         const rows = page.getByTestId('sent-away-row');
         await expect(rows).toHaveCount(1);
         await expect(rows.first()).toHaveAttribute('data-kind', 'helper');
-        await expect(rows.first()).toHaveAttribute('data-state', 'done', { timeout: TURN_MS });
+        await expect(rows.first()).toHaveAttribute('data-state', 'done', { timeout: SETTLE_MS });
 
         const parentMessages = await page.getByTestId('assistant-message').allInnerTexts();
         expect(parentMessages.some((text) => text.includes(provider.childAnswer)),
@@ -113,7 +117,7 @@ test.describe('native provider child-agent lifecycle', () => {
           const spawned = page.locator('[data-testid="tool-row"][data-tool-name="spawn_agent"]');
           const waited = page.locator('[data-testid="tool-row"][data-tool-name="wait_agent"]');
           await expect(spawned).toHaveCount(1);
-          await expect(spawned).toContainText('Sent off');
+          await expect(spawned).toContainText('Child finished');
           await expect(waited).toHaveCount(1);
           await expect(waited).toContainText(/Waited for (child|helper|CODEX|Inspect)/i);
           await expect(waited.getByTestId('tool-mark')).toBeVisible();
@@ -137,12 +141,12 @@ test.describe('native provider child-agent lifecycle', () => {
         await expect(page.getByTestId('sent-away-row')).toContainText('Done');
         if (provider.brand === 'claude') {
           await expect(page.locator('[data-testid="tool-row"][data-tool-name="Agent"]'))
-            .toContainText('Sent off a general-purpose');
+            .toContainText('general-purpose finished');
         } else {
           await expect(page.locator('[data-testid="tool-row"][data-tool-name="spawn_agent"]'))
-            .toContainText('Sent off a child');
+            .toContainText('Child finished');
           await expect(page.locator('[data-testid="tool-row"][data-tool-name="wait_agent"]'))
-            .toContainText('Waited for child');
+            .toContainText('Waited for Child');
         }
         await page.screenshot({ path: `${SHOTS}/provider-agent-lifecycle-${provider.brand}.png`, fullPage: false });
       } finally {

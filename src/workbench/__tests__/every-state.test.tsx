@@ -546,6 +546,7 @@ describe('the row and the bar say the same thing', () => {
     return {
       id: 's1',
       brand: 'claude',
+      model: null,
       externalId: null,
       projectId: PROJECT,
       projectPath: '/home/me/project',

@@ -10,7 +10,7 @@ const SOURCE = process.env.BEADS_E2E_OWNER_DB;
 const RESULT = join(process.cwd(), 'tests', 'results', 'bw-1rgs-chat-loaded.png');
 
 /** Copies only the reported chat into the disposable E2E database. */
-function seedExactChat(project: { id: string; path: string }): number {
+function seedExactChat(project: { id: string; path: string }): { eventCount: number; latestText: string } {
   if (!SOURCE) throw new Error('BEADS_E2E_OWNER_DB must name the read-only source workbench.db');
   const source = new DatabaseSync(SOURCE, { readOnly: true });
   const target = new DatabaseSync(join(process.env.ATELIER_DATA_DIR!, 'workbench.db'));
@@ -52,7 +52,32 @@ function seedExactChat(project: { id: string; path: string }): number {
     target.close();
     source.close();
   }
-  return events.length;
+  const messages = new Map<string, { text: string; parent: boolean; done: boolean; seq: number }>();
+  for (const row of events) {
+    const event = JSON.parse(String(row.json)) as Record<string, unknown>;
+    const id = typeof event.messageId === 'string' ? event.messageId : '';
+    if (!id) continue;
+    if (row.type === 'message.started') {
+      messages.set(id, { text: '', parent: Boolean(event.parentToolCallId), done: false, seq: Number(row.seq) });
+    } else if (row.type === 'text.delta') {
+      const message = messages.get(id);
+      if (message && typeof event.text === 'string') message.text += event.text;
+    } else if (row.type === 'message.completed') {
+      const message = messages.get(id);
+      if (message) message.done = true;
+    }
+  }
+  const latestText = [...messages.values()]
+    .filter((message) => message.done && !message.parent && message.text.trim())
+    .sort((left, right) => left.seq - right.seq)
+    .at(-1)?.text.trim();
+  if (!latestText) throw new Error(`source chat ${CHAT} has no completed parent message`);
+  return { eventCount: events.length, latestText };
+}
+
+function percentile(samples: number[], percent: number): number {
+  const ordered = [...samples].sort((left, right) => left - right);
+  return ordered[Math.max(0, Math.ceil(ordered.length * percent) - 1)]!;
 }
 
 function seedOrdinaryChat(project: { id: string; path: string }): void {
@@ -97,7 +122,11 @@ test('the reported 31,000-plus-event chat opens newest-first and pages only on u
   const project = (await made.json()) as { id: string; path: string };
   // It is this active conversation, so the six messages exchanged since the
   // original count legitimately extend it while preserving the reproduction.
-  expect(seedExactChat(project)).toBeGreaterThanOrEqual(31_110);
+  const exact = seedExactChat(project);
+  expect(exact.eventCount).toBeGreaterThanOrEqual(31_110);
+  // Markdown punctuation is source syntax, not visible text. The assertion is
+  // against what the browser actually draws while retaining the source words.
+  const latestWords = exact.latestText.replace(/[`*_~]/g, '').replace(/\s+/g, ' ').slice(0, 100);
   seedOrdinaryChat(project);
 
   await page.route(/\/api\/projects(\?[^/]*)?$/, async (route) => {
@@ -108,6 +137,16 @@ test('the reported 31,000-plus-event chat opens newest-first and pages only on u
   });
 
   let historyRequests = 0;
+  let clickedAt = 0;
+  let socketAt = 0;
+  let snapshotAt = 0;
+  page.on('websocket', (socket) => {
+    if (clickedAt > 0) socketAt = performance.now();
+    socket.on('framereceived', ({ payload }) => {
+    const frame = typeof payload === 'string' ? payload : payload.toString();
+    if (clickedAt > 0 && frame.includes('chat.snapshot') && frame.includes(CHAT)) snapshotAt = performance.now();
+    });
+  });
   await page.route('**/api/workbench/history?*', async (route) => {
     historyRequests += 1;
     await new Promise((resolve) => setTimeout(resolve, 200));
@@ -118,6 +157,7 @@ test('the reported 31,000-plus-event chat opens newest-first and pages only on u
   const row = page.locator(`[data-testid="restore-row"][data-row-key="${CHAT}"]`);
   await expect(row.getByTestId('row-name')).toHaveText(TITLE, { timeout: 30_000 });
   const openedAt = performance.now();
+  clickedAt = openedAt;
   await row.getByTestId('row-name').click();
 
   await expect(page.locator(`[data-testid="chat-tab"][data-session-id="${CHAT}"]`)).toBeVisible();
@@ -128,9 +168,10 @@ test('the reported 31,000-plus-event chat opens newest-first and pages only on u
   await expect(transcript).toHaveAttribute('data-total-items', '40');
   await expect.poll(async () => Number(await transcript.getAttribute('data-mounted-items'))).toBeGreaterThan(0);
   expect(Number(await transcript.getAttribute('data-mounted-items'))).toBeLessThan(40);
-  await expect(page.getByTestId('transcript')).toContainText(/\S/);
+  await expect(page.getByTestId('transcript')).toContainText(latestWords);
   const openMs = performance.now() - openedAt;
-  expect(openMs, `chat became usable in ${openMs.toFixed(1)}ms`).toBeLessThan(1_000);
+  console.log(`PERF indexed-cold-chat-open ${openMs.toFixed(1)}ms socket-created ${(socketAt - openedAt).toFixed(1)}ms snapshot-frame ${(snapshotAt - openedAt).toFixed(1)}ms snapshot-to-dom ${(performance.now() - snapshotAt).toFixed(1)}ms`);
+  expect(openMs, `chat became usable in ${openMs.toFixed(1)}ms`).toBeLessThan(500);
   await expect.poll(() => page.getByTestId('transcript').evaluate((pane) =>
     Math.abs(pane.scrollHeight - pane.clientHeight - pane.scrollTop),
   )).toBeLessThanOrEqual(2);
@@ -139,6 +180,7 @@ test('the reported 31,000-plus-event chat opens newest-first and pages only on u
   await page.screenshot({ path: RESULT, fullPage: false });
 
   const pane = page.getByTestId('transcript');
+  const olderStartedAt = performance.now();
   await pane.evaluate((element) => { element.scrollTop = Math.max(1, Math.floor(element.clientHeight / 2)); });
   await expect(page.getByTestId('older-loading')).toBeVisible();
   const anchor = await page.locator('[data-transcript-key]').evaluateAll((rows) => {
@@ -155,6 +197,9 @@ test('the reported 31,000-plus-event chat opens newest-first and pages only on u
   expect(anchor).not.toBeNull();
 
   await expect(transcript).toHaveAttribute('data-total-items', '80');
+  const olderMs = performance.now() - olderStartedAt;
+  console.log(`PERF older-page-with-200ms-injected-latency ${olderMs.toFixed(1)}ms`);
+  expect(olderMs, `older page rendered in ${olderMs.toFixed(1)}ms`).toBeLessThan(400);
   expect(historyRequests).toBe(1);
   await expect.poll(async () => {
     const heldTop = await page.locator(`[data-transcript-key="${anchor!.key}"]`).evaluate((row) => row.getBoundingClientRect().top);
@@ -169,4 +214,20 @@ test('the reported 31,000-plus-event chat opens newest-first and pages only on u
   await expect(page.getByTestId('virtual-transcript')).toHaveAttribute('data-total-items', '40');
   await expect(page.getByTestId('transcript')).toContainText('ordinary message 64');
   await expect(page.getByTestId('transcript')).not.toContainText('CHECKLIST');
+
+  const warm: number[] = [];
+  for (let sample = 0; sample < 8; sample += 1) {
+    const started = performance.now();
+    await row.getByTestId('row-name').click();
+    await expect(page.locator(`[data-testid="chat-tab"][data-session-id="${CHAT}"]`)).toBeVisible();
+    await expect(page.getByTestId('transcript')).toContainText(latestWords);
+    warm.push(performance.now() - started);
+    await page.locator(`[data-testid="restore-row"][data-row-key="${ORDINARY}"]`).getByTestId('row-name').click();
+    await expect(page.getByTestId('transcript')).toContainText('ordinary message 64');
+  }
+  const warmP95 = percentile(warm, 0.95);
+  const warmP99 = percentile(warm, 0.99);
+  console.log(`PERF warm-chat-open p95 ${warmP95.toFixed(1)}ms p99 ${warmP99.toFixed(1)}ms samples ${warm.map((value) => value.toFixed(1)).join(',')}`);
+  expect(warmP95, `warm content-correct p95 was ${warmP95.toFixed(1)}ms`).toBeLessThan(150);
+  expect(warmP99, `warm content-correct p99 was ${warmP99.toFixed(1)}ms`).toBeLessThan(250);
 });

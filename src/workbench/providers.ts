@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import type { Brand } from './protocol';
+import type { Brand, ModelChoice } from './protocol';
 import { sendCommand } from './use-session';
 
 export interface ProviderAvailability {
@@ -10,11 +10,13 @@ export interface ProviderAvailability {
   available: boolean;
   path: string | null;
   installUrl: string;
+  models: ModelChoice[];
 }
 
 const fallback: ProviderAvailability[] = [
-  { brand: 'claude', name: 'Claude', available: false, path: null, installUrl: 'https://docs.anthropic.com/en/docs/claude-code' },
-  { brand: 'codex', name: 'Codex', available: false, path: null, installUrl: 'https://developers.openai.com/codex/cli' },
+  { brand: 'claude', name: 'Claude', available: false, path: null, installUrl: 'https://docs.anthropic.com/en/docs/claude-code', models: [] },
+  { brand: 'codex', name: 'Codex', available: false, path: null, installUrl: 'https://developers.openai.com/codex/cli', models: [] },
+  { brand: 'local', name: 'Local models', available: false, path: null, installUrl: 'https://block.github.io/goose/docs/getting-started/providers', models: [] },
 ];
 
 export function useProviders() {

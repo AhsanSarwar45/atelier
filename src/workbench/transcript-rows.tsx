@@ -940,6 +940,15 @@ export const PlanProposalCard = memo(function PlanProposalCard({
   const [pending, setPending] = useState(false);
   const action = item.actions.find((candidate) => candidate.id === selected) ?? null;
 
+  if (item.status === 'proposed' && item.actions.length === 0) {
+    return (
+      <Panel data-testid="plan-card" data-plan-state="published" className="space-y-3">
+        <div className="text-sm font-medium text-foreground">Plan</div>
+        <MarkdownBody className="text-sm">{item.markdown}</MarkdownBody>
+      </Panel>
+    );
+  }
+
   if (item.status !== 'proposed') {
     const resolved = item.actions.find((candidate) => candidate.id === item.actionId);
     return (

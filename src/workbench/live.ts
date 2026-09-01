@@ -26,6 +26,7 @@ import type { Brand, SessionState, SessionSummary, WatchFrame } from '@/workbenc
 export interface LiveSession {
   id: string;
   brand: Brand;
+  model: string | null;
   /**
    * The tool's own id for the conversation, which is the name the running set
    * is written in — so a view that has this need not wait on the chat's own
@@ -283,6 +284,7 @@ function fromSummary(s: SessionSummary & { activity: string; beads: string[] }):
   return {
     id: s.id,
     brand: s.brand,
+    model: s.model,
     externalId: s.externalId,
     projectId: s.projectId,
     projectPath: s.projectPath,
@@ -474,6 +476,7 @@ function absorb(frame: WatchFrame): void {
       {
         id: e.sessionId,
         brand: e.brand,
+        model: null,
         // The event says a chat exists, not what the tool calls it; the
         // snapshot that follows carries that.
         externalId: null,

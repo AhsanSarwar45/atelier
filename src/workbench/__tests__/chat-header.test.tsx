@@ -161,7 +161,7 @@ describe('what the chat is running, on its own line', () => {
     const opening = picker.slice(0, picker.indexOf('/>'));
 
     expect(opening, 'the list is named by the shared function').toContain('modelName(m.value, m.displayName)');
-    expect(opening, 'and so is a model the list has no row for').toContain('currentLabel={modelName(');
+    expect(opening, 'and so is a model the list has no row for').toContain('currentLabel={sessionBrand === \'local\' && !view.model ? \'Choose model\' : modelWords(');
   });
 
   it('says the brand’s default only where there is a picker to mean it', () => {

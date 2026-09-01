@@ -17,6 +17,8 @@ import type { Bead } from '@/types';
 import { sendCommand } from '@/workbench/use-session';
 import type { Brand } from '@/workbench/protocol';
 import { useProviders } from '@/workbench/providers';
+import { brandName } from '@/workbench/brand-icon';
+import { rememberUnsentLine } from '@/workbench/drafts';
 
 /**
  * What the agent is told. Plain prose rather than a dump of fields: the card's
@@ -54,7 +56,7 @@ export function StartFromCard({ bead, projectId, projectPath }: StartFromCardPro
       <div className="mb-2 flex gap-2" role="group" aria-label="Coding agent">
         {providers.map(({ brand: choice, available, installUrl }) => (
           <Button key={choice} size="sm" variant={brand === choice ? 'primary' : 'secondary'} disabled={!available} title={available ? undefined : `Install ${choice}: ${installUrl}`} onClick={() => setBrand(choice)}>
-            {choice === 'claude' ? 'Claude' : 'Codex'}
+            {brandName(choice)}
           </Button>
         ))}
       </div>
@@ -68,13 +70,15 @@ export function StartFromCard({ bead, projectId, projectPath }: StartFromCardPro
           setStarting(true);
           setFailed(null);
           try {
+            const text = briefFor(bead);
             const s = await sendCommand<{ id: string }>({
               type: 'session.start',
               projectId,
               projectPath,
               brand,
-              brief: { beadId: bead.id, text: briefFor(bead) },
+              brief: { beadId: bead.id, text },
             });
+            if (brand === 'local') rememberUnsentLine(s.id, text);
             router.push(
               `/project?id=${encodeURIComponent(projectId)}&tab=chat&chat=${encodeURIComponent(s.id)}`,
             );
@@ -85,7 +89,7 @@ export function StartFromCard({ bead, projectId, projectPath }: StartFromCardPro
           }
         }}
       >
-        {starting ? 'Starting…' : `Start ${brand === 'claude' ? 'Claude' : 'Codex'} chat`}
+        {starting ? 'Starting…' : `Start ${brandName(brand)} chat`}
       </Button>
       {failed && (
         <p data-testid="start-chat-error" className="mt-2 text-xs text-destructive">

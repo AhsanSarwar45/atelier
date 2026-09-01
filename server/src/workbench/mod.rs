@@ -4,6 +4,7 @@
 //! the Node-to-Rust migration. Keep those contracts here while individual
 //! services move behind them.
 
+pub mod acp;
 pub mod actor;
 pub mod agent_files;
 pub mod beads_links;
@@ -13,6 +14,7 @@ pub mod cli;
 pub mod codex;
 pub mod external;
 pub mod lifecycle;
+pub mod local;
 pub mod media;
 pub mod metadata;
 pub mod projection;

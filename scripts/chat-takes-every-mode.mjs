@@ -16,8 +16,13 @@
  *
  * Needs a signed-in `claude`. Starts a session and sends no turn to it.
  */
-import { CLAUDE_PERMISSION_MODES, DEFAULT_PERMISSION_MODE } from '../src/workbench/protocol.ts';
 import { ClaudeDriver } from '../workbench/src/drivers/claude.ts';
+
+// This legacy driver diagnostic intentionally exercises historical Claude
+// spellings. The live React picker never imports this list; ACP supplies its
+// active mode catalog per session.
+const CLAUDE_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'dontAsk', 'auto', 'bypassPermissions'];
+const DEFAULT_PERMISSION_MODE = 'default';
 
 const driver = new ClaudeDriver();
 const said = [];
