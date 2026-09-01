@@ -7,6 +7,10 @@ import { PRODUCT_NAME } from '@/lib/identity';
 import { Terminals } from '@/workbench/terminal-tabs';
 
 import type { Metadata } from 'next';
+import '@fontsource-variable/inter/wght.css';
+import '@fontsource-variable/plus-jakarta-sans/wght.css';
+import '@fontsource-variable/space-grotesk/wght.css';
+import '@fontsource/space-mono/latin.css';
 import './globals.css';
 
 export const metadata: Metadata = {
