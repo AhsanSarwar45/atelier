@@ -321,6 +321,12 @@ fn summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
             }
         }
     }
+    // Claude's resume index does not offer a record that contains only
+    // initialization metadata. Keep explicitly titled/summarized records, but
+    // do not turn every abandoned process start into an external chat row.
+    if !has_conversation && custom_title.is_none() && summary.is_none() && first_prompt.is_none() {
+        return None;
+    }
     Some(ClaudeSessionSummary {
         session_id,
         last_modified: modified(&path),
@@ -1161,6 +1167,21 @@ mod tests {
             list_sessions(home.path(), None, false)[0].name.as_deref(),
             Some("A Newer Name")
         );
+    }
+
+    #[test]
+    fn claude_discovery_omits_abandoned_metadata_only_starts() {
+        let home = tempdir().unwrap();
+        let dir = home.path().join("projects/project");
+        create_dir_all(&dir).unwrap();
+        write(
+            dir.join(format!("{CHAT}.jsonl")),
+            json!({"type":"system","cwd":"/work/repo","gitBranch":"ours"}).to_string(),
+        )
+        .unwrap();
+
+        assert!(list_sessions(home.path(), None, false).is_empty());
+        assert!(list_sessions(home.path(), None, true).is_empty());
     }
 
     #[test]

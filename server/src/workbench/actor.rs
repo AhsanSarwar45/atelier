@@ -33,6 +33,7 @@ enum Command {
     UpdateSession(String, SessionPatch, Option<String>, Reply<()>),
     MarkSpoke(String, String, Reply<()>),
     ListSessions(Option<String>, Reply<Vec<Session>>),
+    ListRestoreSessions(Option<String>, bool, Reply<Vec<Session>>),
     BeadsForSessions(Vec<String>, Reply<HashMap<String, Vec<String>>>),
     BeadsForSession(String, Reply<Vec<String>>),
     RememberBeadLink(String, String, String, String, Reply<()>),
@@ -169,6 +170,15 @@ impl ChatDb {
 
     pub async fn list_sessions(&self, project_id: Option<String>) -> Result<Vec<Session>, String> {
         self.request(|reply| Command::ListSessions(project_id, reply))
+            .await
+    }
+
+    pub async fn list_restore_sessions(
+        &self,
+        project_id: Option<String>,
+        everything: bool,
+    ) -> Result<Vec<Session>, String> {
+        self.request(|reply| Command::ListRestoreSessions(project_id, everything, reply))
             .await
     }
 
@@ -497,6 +507,10 @@ fn run(
             Command::ListSessions(project_id, reply) => {
                 respond(reply, store.list_sessions(project_id.as_deref()))
             }
+            Command::ListRestoreSessions(project_id, everything, reply) => respond(
+                reply,
+                store.list_restore_sessions(project_id.as_deref(), everything),
+            ),
             Command::BeadsForSessions(ids, reply) => respond(reply, store.beads_for_sessions(&ids)),
             Command::BeadsForSession(id, reply) => respond(reply, store.beads_for_session(&id)),
             Command::RememberBeadLink(session, bead, via, at, reply) => respond(

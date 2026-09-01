@@ -635,9 +635,10 @@ async fn restore(
     State(state): State<WorkbenchState>,
     Query(query): Query<RestoreQuery>,
 ) -> Result<Json<Vec<Value>>, ApiError> {
+    let everything = query.all.is_some();
     let sessions = state
         .database()
-        .list_sessions(query.project.clone())
+        .list_restore_sessions(query.project.clone(), everything)
         .await?;
     let ids = sessions.iter().map(|session| session.id.clone()).collect();
     let mut beads = state.database().beads_for_sessions(ids).await?;
@@ -665,8 +666,7 @@ async fn restore(
             restore_row(session, linked, &holds)
         })
         .collect();
-    let known_sessions =
-        provider_sessions(&state, query.path.as_deref(), query.all.is_some()).await;
+    let known_sessions = provider_sessions(&state, query.path.as_deref(), everything).await;
     for known in known_sessions {
         let key = format!(
             "{}:{}",

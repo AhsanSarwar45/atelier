@@ -361,6 +361,37 @@ impl Store {
         found
     }
 
+    /// Restore-list rows, preserving the former default that an untitled chat
+    /// with no message is not an offer to resume. `everything` deliberately
+    /// exposes those rows for diagnosis.
+    pub fn list_restore_sessions(
+        &self,
+        project_id: Option<&str>,
+        everything: bool,
+    ) -> rusqlite::Result<Vec<Session>> {
+        if everything {
+            return self.list_sessions(project_id);
+        }
+        let visible = r#"(title IS NOT NULL OR EXISTS (
+            SELECT 1 FROM event WHERE event.session_id=session.id
+              AND event.type='message.started' LIMIT 1))"#;
+        let sql = match project_id {
+            Some(_) => format!(
+                "SELECT * FROM session WHERE project_id=?1 AND {visible} ORDER BY COALESCE(last_spoke_at,last_active_at) DESC"
+            ),
+            None => format!(
+                "SELECT * FROM session WHERE {visible} ORDER BY COALESCE(last_spoke_at,last_active_at) DESC"
+            ),
+        };
+        let mut statement = self.connection.prepare(&sql)?;
+        match project_id {
+            Some(project_id) => statement
+                .query_map([project_id], session_from_row)?
+                .collect(),
+            None => statement.query_map([], session_from_row)?.collect(),
+        }
+    }
+
     pub fn mark_all_dormant(&self) -> rusqlite::Result<usize> {
         self.connection.execute(
             "UPDATE session SET state = 'dormant' WHERE state != 'dormant'",
@@ -1563,6 +1594,41 @@ mod tests {
         assert!(inherited.get("skills").is_none());
         assert!(inherited.get("agentDefinitions").is_none());
         assert_eq!(store.steering_menu("other").unwrap(), json!({}));
+    }
+
+    #[test]
+    fn restore_sessions_hide_only_unused_untitled_chats() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        for id in ["empty", "spoken", "titled"] {
+            let mut row = session(id, "claude", None, "2026-08-20T00:00:00Z");
+            row.title = (id == "titled").then(|| "Kept title".into());
+            store.create_session(&row).unwrap();
+        }
+        let message: Event = serde_json::from_value(json!({
+            "type":"message.started", "sessionId":"spoken", "seq":1,
+            "at":"now", "messageId":"m1", "role":"user"
+        }))
+        .unwrap();
+        assert!(store.append_event(&message).unwrap());
+
+        let normal = store
+            .list_restore_sessions(Some("project-1"), false)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(
+            normal,
+            std::collections::HashSet::from(["spoken".into(), "titled".into()])
+        );
+        assert_eq!(
+            store
+                .list_restore_sessions(Some("project-1"), true)
+                .unwrap()
+                .len(),
+            3
+        );
     }
 
     #[test]
