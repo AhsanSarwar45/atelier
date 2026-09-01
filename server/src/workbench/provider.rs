@@ -195,6 +195,20 @@ async fn append_import_menu(
     Ok(())
 }
 
+async fn append_import_pinned(
+    database: &ChatDb,
+    session: &Session,
+    provider: &str,
+    fields: impl IntoIterator<Item = (&'static str, Value)>,
+) -> Result<(), String> {
+    let mut value = json!({"type":"session.pinned"});
+    let object = value.as_object_mut().expect("pin is an object");
+    for (field, setting) in fields {
+        object.insert(field.into(), setting);
+    }
+    append_import_menu(database, session, provider, value).await
+}
+
 async fn import_claude_history(
     database: &ChatDb,
     config: &Path,
@@ -261,6 +275,24 @@ async fn import_claude_history(
             None,
         )
         .await?;
+    append_import_pinned(
+        database,
+        session,
+        "claude",
+        [
+            ("model", json!(history.settings.model)),
+            ("effort", json!(history.settings.effort)),
+        ]
+        .into_iter()
+        .chain(
+            history
+                .settings
+                .permission_mode
+                .clone()
+                .map(|mode| ("permissionMode", json!(mode))),
+        ),
+    )
+    .await?;
     let identified = super::claude::history::identified_replay(history.events, external_id);
     let mut imported = Vec::with_capacity(identified.len());
     for mut value in identified {
@@ -333,22 +365,34 @@ async fn import_codex_history(database: &ChatDb, session: &Session) -> Result<()
     let thread = thread
         .expect("read choice has a thread")
         .map_err(|error| error.to_string())?;
+    // `thread/read` omits the settings that owned the latest turn. The rollout
+    // is their durable source, just as it was in the final Node implementation.
+    // Reading only its bounded tail keeps a large external chat off the open
+    // path while restoring the exact model, approval and collaboration pins.
+    let settings = super::codex::history::thread_settings(thread["path"].as_str().map(Path::new));
     database
         .update_session(
             session.id.clone(),
             SessionPatch {
-                model: Some(thread["model"].as_str().map(str::to_string)),
-                permission_mode: thread["approvalPolicy"].as_str().map(str::to_string),
-                collaboration_mode: Some(
-                    thread["collaborationMode"]["mode"]
-                        .as_str()
-                        .map(str::to_string),
-                ),
+                model: Some(Some(settings.model.clone())),
+                permission_mode: Some(settings.permission_mode.clone()),
+                collaboration_mode: Some(settings.collaboration_mode.clone()),
                 ..SessionPatch::default()
             },
             None,
         )
         .await?;
+    append_import_pinned(
+        database,
+        session,
+        "codex",
+        [
+            ("model", json!(settings.model)),
+            ("permissionMode", json!(settings.permission_mode)),
+            ("collaborationMode", json!(settings.collaboration_mode)),
+        ],
+    )
+    .await?;
     let mut normalizer = super::codex::normalize::CodexNormalizer::default();
     let replay = normalizer.replay_thread(&thread);
     if !replay.is_empty() && database.timeline_count(session.id.clone()).await? > 0 {
@@ -950,5 +994,39 @@ mod tests {
         let events = database.events_since(session.id, 0).await.unwrap();
         assert_eq!(events.len(), 2);
         assert_eq!(events[1].fields["models"][0]["id"], "gpt-6");
+    }
+
+    #[tokio::test]
+    async fn imported_settings_are_durable_visible_and_deduplicated() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
+        let session = imported_session();
+        database.create_session(session.clone()).await.unwrap();
+        let settings = [
+            ("model", json!("gpt-5.4")),
+            ("permissionMode", json!("never")),
+            ("collaborationMode", json!("plan")),
+        ];
+
+        append_import_pinned(&database, &session, "codex", settings.clone())
+            .await
+            .unwrap();
+        append_import_pinned(&database, &session, "codex", settings)
+            .await
+            .unwrap();
+
+        let events = database.events_since(session.id, 0).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].kind,
+            super::super::protocol::EventKind::SessionPinned
+        );
+        assert_eq!(events[0].fields["model"], "gpt-5.4");
+        assert_eq!(events[0].fields["permissionMode"], "never");
+        assert_eq!(events[0].fields["collaborationMode"], "plan");
+        let view = super::super::projection::fold_all(&events).view;
+        assert_eq!(view["model"], "gpt-5.4");
+        assert_eq!(view["permissionMode"], "never");
+        assert_eq!(view["collaborationMode"], "plan");
     }
 }
