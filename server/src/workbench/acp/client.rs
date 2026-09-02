@@ -1,6 +1,7 @@
 //! Supervised ACP client driver backed by the official Rust SDK.
 
 use super::adapter;
+use super::client_io::ClientIo;
 use super::normalize::AcpNormalizer;
 use crate::workbench::actor::ChatDb;
 use crate::workbench::protocol::{Command, CommandKind, Event};
@@ -9,12 +10,13 @@ use crate::workbench::session_policy;
 use crate::workbench::store::{Session, SessionPatch};
 use agent_client_protocol::schema::v1::{
     CancelNotification, CloseSessionRequest, ContentBlock, CreateElicitationRequest,
-    CreateElicitationResponse,
-    ElicitationMode, ImageContent, ListSessionsRequest, LoadSessionRequest, Meta,
-    NewSessionRequest, PromptRequest,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    ResumeSessionRequest, SelectedPermissionOutcome, SessionConfigOptionValue,
-    SetSessionConfigOptionRequest, SetSessionModeRequest, TextContent,
+    CreateElicitationResponse, CreateTerminalRequest, ElicitationMode, ImageContent,
+    KillTerminalRequest, ListSessionsRequest, LoadSessionRequest, Meta, NewSessionRequest,
+    PromptRequest, ReadTextFileRequest, ReleaseTerminalRequest, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, ResumeSessionRequest,
+    SelectedPermissionOutcome, SessionConfigOptionValue, SetSessionConfigOptionRequest,
+    SetSessionModeRequest, TerminalOutputRequest, TextContent, WaitForTerminalExitRequest,
+    WriteTextFileRequest,
 };
 use agent_client_protocol::{AcpAgent, Agent, ConnectionTo, UntypedMessage};
 use serde_json::{json, Value};
@@ -43,70 +45,85 @@ pub struct ListedSession {
 }
 
 fn initialize_request() -> Result<UntypedMessage, agent_client_protocol::Error> {
-    UntypedMessage::new("initialize", json!({
-        "protocolVersion": 1,
-        "clientInfo": {
-            "name":"atelier", "title":"Atelier",
-            "version":env!("CARGO_PKG_VERSION")
-        },
-        "clientCapabilities": {
-            "subagents": {},
-            "plan": {},
-            "elicitation": {"form":{},"url":{}},
-            "session": {"configOptions":{"boolean":{}}},
-            "_meta": {
-                "subagent-transcript": true,
-                "jetbrains": {"air": {"version":1,"capabilities":["nativeSubagentSessions"]}}
+    UntypedMessage::new(
+        "initialize",
+        json!({
+            "protocolVersion": 1,
+            "clientInfo": {
+                "name":"atelier", "title":"Atelier",
+                "version":env!("CARGO_PKG_VERSION")
+            },
+            "clientCapabilities": {
+                "fs": {"readTextFile":true,"writeTextFile":true},
+                "terminal": true,
+                "subagents": {},
+                "plan": {},
+                "elicitation": {"form":{},"url":{}},
+                "session": {"configOptions":{"boolean":{}}},
+                "_meta": {
+                    "subagent-transcript": true,
+                    "jetbrains": {"air": {"version":1,"capabilities":["nativeSubagentSessions"]}}
+                }
             }
-        }
-    }))
+        }),
+    )
 }
 
 /// Enumerate every session an ACP agent knows, following its opaque cursors.
 /// A caller may fall back to legacy discovery only when this returns an error
 /// (adapter unavailable, capability absent, authentication, or bad peer).
-pub async fn list_sessions(
-    brand: &str,
-    cwd: Option<&Path>,
-) -> Result<Vec<ListedSession>, String> {
+pub async fn list_sessions(brand: &str, cwd: Option<&Path>) -> Result<Vec<ListedSession>, String> {
     let config = adapter::launch_config(brand, None)
         .ok_or_else(|| format!("bundled {brand} ACP adapter is incomplete or unavailable"))?;
     let filter = cwd.map(Path::to_path_buf);
     let client = agent_client_protocol::Client.builder();
     client
-        .connect_with(AcpAgent::new(config), async move |connection: ConnectionTo<Agent>| {
-            let initialized = connection.send_request(initialize_request()?).block_task().await?;
-            if initialized.pointer("/agentCapabilities/sessionCapabilities/list").is_none() {
-                return Err(acp_error("agent does not advertise session/list"));
-            }
-
-            let mut listed = Vec::new();
-            let mut cursor: Option<String> = None;
-            let mut seen = HashSet::new();
-            for _ in 0..MAX_SESSION_LIST_PAGES {
-                let response = connection
-                    .send_request(
-                        ListSessionsRequest::new()
-                            .cwd(filter.clone())
-                            .cursor(cursor.clone()),
-                    )
+        .connect_with(
+            AcpAgent::new(config),
+            async move |connection: ConnectionTo<Agent>| {
+                let initialized = connection
+                    .send_request(initialize_request()?)
                     .block_task()
                     .await?;
-                listed.extend(response.sessions.into_iter().map(|session| ListedSession {
-                    session_id: session.session_id.to_string(),
-                    cwd: session.cwd,
-                    title: session.title,
-                    updated_at: session.updated_at,
-                    meta: serde_json::to_value(session.meta).unwrap_or(Value::Null),
-                }));
-                let Some(next) = response.next_cursor else { return Ok(listed) };
-                if !seen.insert(next.clone()) {
-                    return Err(acp_error("agent repeated a session/list cursor"));
+                if initialized
+                    .pointer("/agentCapabilities/sessionCapabilities/list")
+                    .is_none()
+                {
+                    return Err(acp_error("agent does not advertise session/list"));
                 }
-                cursor = Some(next);
-            }
-            Err(acp_error("agent exceeded the session/list page safety bound"))
-        })
+
+                let mut listed = Vec::new();
+                let mut cursor: Option<String> = None;
+                let mut seen = HashSet::new();
+                for _ in 0..MAX_SESSION_LIST_PAGES {
+                    let response = connection
+                        .send_request(
+                            ListSessionsRequest::new()
+                                .cwd(filter.clone())
+                                .cursor(cursor.clone()),
+                        )
+                        .block_task()
+                        .await?;
+                    listed.extend(response.sessions.into_iter().map(|session| ListedSession {
+                        session_id: session.session_id.to_string(),
+                        cwd: session.cwd,
+                        title: session.title,
+                        updated_at: session.updated_at,
+                        meta: serde_json::to_value(session.meta).unwrap_or(Value::Null),
+                    }));
+                    let Some(next) = response.next_cursor else {
+                        return Ok(listed);
+                    };
+                    if !seen.insert(next.clone()) {
+                        return Err(acp_error("agent repeated a session/list cursor"));
+                    }
+                    cursor = Some(next);
+                }
+                Err(acp_error(
+                    "agent exceeded the session/list page safety bound",
+                ))
+            },
+        )
         .await
         .map_err(|error| error.to_string())
 }
@@ -136,12 +153,13 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
         .external_id
         .clone()
         .ok_or_else(|| "saved session has no provider id".to_string())?;
-    let config = adapter::launch_config(&session.brand, session.model.as_deref()).ok_or_else(|| {
-        format!(
-            "bundled {} ACP adapter is incomplete or unavailable",
-            session.brand
-        )
-    })?;
+    let config =
+        adapter::launch_config(&session.brand, session.model.as_deref()).ok_or_else(|| {
+            format!(
+                "bundled {} ACP adapter is incomplete or unavailable",
+                session.brand
+            )
+        })?;
     let policy = session_policy::build(Path::new(&session.cwd))?;
     let meta = session_meta(&session.brand, &policy);
     let local_id = session.id.clone();
@@ -177,34 +195,41 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
     let finish_session = local_id.clone();
     let finish_brand = brand.clone();
     let (modes, config_options, agent_controls) = client
-        .connect_with(AcpAgent::new(config), async move |connection: ConnectionTo<Agent>| {
-            let initialized = connection.send_request(initialize_request()?).block_task().await?;
-            if initialized.pointer("/agentCapabilities/loadSession") != Some(&Value::Bool(true)) {
-                return Err(acp_error("agent does not advertise session/load"));
-            }
-            let agent_controls = initialized
-                .pointer("/_meta/atelier/subagentControls")
-                .filter(|controls| controls.is_array())
-                .cloned()
-                .unwrap_or_else(|| json!([]));
-            let response = connection
-                .send_request(LoadSessionRequest::new(remote_id.clone(), cwd).meta(meta))
-                .block_task()
-                .await?;
-            let end = json!({"sessionId":remote_id,"stopReason":"end_turn"});
-            let closing = finish_normalizer
-                .lock()
-                .await
-                .finish_turn(&finish_session, &finish_brand, &end)
-                .into_iter()
-                .map(replay_delivery);
-            finish_events.lock().await.extend(closing);
-            Ok((
-                serde_json::to_value(response.modes).map_err(acp_error)?,
-                serde_json::to_value(response.config_options).map_err(acp_error)?,
-                agent_controls,
-            ))
-        })
+        .connect_with(
+            AcpAgent::new(config),
+            async move |connection: ConnectionTo<Agent>| {
+                let initialized = connection
+                    .send_request(initialize_request()?)
+                    .block_task()
+                    .await?;
+                if initialized.pointer("/agentCapabilities/loadSession") != Some(&Value::Bool(true))
+                {
+                    return Err(acp_error("agent does not advertise session/load"));
+                }
+                let agent_controls = initialized
+                    .pointer("/_meta/atelier/subagentControls")
+                    .filter(|controls| controls.is_array())
+                    .cloned()
+                    .unwrap_or_else(|| json!([]));
+                let response = connection
+                    .send_request(LoadSessionRequest::new(remote_id.clone(), cwd).meta(meta))
+                    .block_task()
+                    .await?;
+                let end = json!({"sessionId":remote_id,"stopReason":"end_turn"});
+                let closing = finish_normalizer
+                    .lock()
+                    .await
+                    .finish_turn(&finish_session, &finish_brand, &end)
+                    .into_iter()
+                    .map(replay_delivery);
+                finish_events.lock().await.extend(closing);
+                Ok((
+                    serde_json::to_value(response.modes).map_err(acp_error)?,
+                    serde_json::to_value(response.config_options).map_err(acp_error)?,
+                    agent_controls,
+                ))
+            },
+        )
         .await
         .map_err(|error| error.to_string())?;
 
@@ -220,17 +245,22 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
     let pinned_model = menu["currentModel"].as_str().map(str::to_string);
     let pinned_mode = menu["currentMode"].as_str().map(str::to_string);
     let pinned_effort = menu["currentEffort"].as_str().map(str::to_string);
-    let pinned_collaboration = menu["currentCollaborationMode"].as_str().map(str::to_string);
+    let pinned_collaboration = menu["currentCollaborationMode"]
+        .as_str()
+        .map(str::to_string);
     let mut replay = Vec::with_capacity(events.len() + 2);
     replay.push(menu_event(&session.id, menu)?);
     if !events.is_empty() && database.timeline_count(session.id.clone()).await? > 0 {
         replay.push(super::super::provider::reset_event(&session.id)?);
     }
     replay.append(&mut events);
-    replay.push(serde_json::from_value(json!({
-        "type":"session.state", "sessionId":session.id, "seq":0, "at":now(),
-        "state":"dormant", "label":"Asleep"
-    })).map_err(|error| error.to_string())?);
+    replay.push(
+        serde_json::from_value(json!({
+            "type":"session.state", "sessionId":session.id, "seq":0, "at":now(),
+            "state":"dormant", "label":"Asleep"
+        }))
+        .map_err(|error| error.to_string())?,
+    );
     // ACP session/update carries no event timestamp. A historical load must
     // never make an old chat look newly active merely because it was opened.
     // Use the authoritative session/list clock for the entire replay batch.
@@ -1296,6 +1326,7 @@ impl AcpDriver {
         let task_permissions = permissions.clone();
         let task_elicitations = elicitations.clone();
         let task_closing = closing.clone();
+        let task_io = ClientIo::new(PathBuf::from(&task_session.cwd))?;
         let task_saved_menu = saved_menu.clone();
         let task_saved_cost = saved_cost.clone();
         let task_local_models = if brand == super::super::local::BRAND {
@@ -1330,6 +1361,13 @@ impl AcpDriver {
             let stopped_database = task_database.clone();
             let stopped_session = task_session.clone();
             let stopped_closing = task_closing.clone();
+            let read_io = task_io.clone();
+            let write_io = task_io.clone();
+            let create_terminal_io = task_io.clone();
+            let terminal_output_io = task_io.clone();
+            let release_terminal_io = task_io.clone();
+            let wait_terminal_io = task_io.clone();
+            let kill_terminal_io = task_io.clone();
             let client = agent_client_protocol::Client
                 .builder()
                 .on_receive_notification(
@@ -1375,6 +1413,48 @@ impl AcpDriver {
                         responder.respond(response)
                     },
                     agent_client_protocol::on_receive_request!(),
+                )
+                .on_receive_request(
+                    async move |request: ReadTextFileRequest, responder, _connection| {
+                        responder.respond(read_io.read(request).await?)
+                    },
+                    agent_client_protocol::on_receive_request!(),
+                )
+                .on_receive_request(
+                    async move |request: WriteTextFileRequest, responder, _connection| {
+                        responder.respond(write_io.write(request).await?)
+                    },
+                    agent_client_protocol::on_receive_request!(),
+                )
+                .on_receive_request(
+                    async move |request: CreateTerminalRequest, responder, _connection| {
+                        responder.respond(create_terminal_io.create_terminal(request).await?)
+                    },
+                    agent_client_protocol::on_receive_request!(),
+                )
+                .on_receive_request(
+                    async move |request: TerminalOutputRequest, responder, _connection| {
+                        responder.respond(terminal_output_io.terminal_output(request).await?)
+                    },
+                    agent_client_protocol::on_receive_request!(),
+                )
+                .on_receive_request(
+                    async move |request: ReleaseTerminalRequest, responder, _connection| {
+                        responder.respond(release_terminal_io.release_terminal(request).await?)
+                    },
+                    agent_client_protocol::on_receive_request!(),
+                )
+                .on_receive_request(
+                    async move |request: WaitForTerminalExitRequest, responder, _connection| {
+                        responder.respond(wait_terminal_io.wait_terminal(request).await?)
+                    },
+                    agent_client_protocol::on_receive_request!(),
+                )
+                .on_receive_request(
+                    async move |request: KillTerminalRequest, responder, _connection| {
+                        responder.respond(kill_terminal_io.kill_terminal(request).await?)
+                    },
+                    agent_client_protocol::on_receive_request!(),
                 );
             let agent = AcpAgent::new(config);
             let ready = Arc::new(Mutex::new(Some(ready)));
@@ -1391,6 +1471,7 @@ impl AcpDriver {
                     let replaying = replaying.clone();
                     let closing = task_closing.clone();
                     let saved_menu = task_saved_menu.clone();
+                    let io = task_io.clone();
                     async move {
                         let initialized = connection
                             .send_request(initialize_request()?)
@@ -1454,6 +1535,7 @@ impl AcpDriver {
                                 return Err(acp_error("agent supports neither session/resume nor session/load"));
                             }
                         };
+                        io.set_session(remote_id.clone()).await;
                         if brand == super::super::local::BRAND {
                             connection
                                 .send_request(UntypedMessage::new(
@@ -1772,6 +1854,7 @@ impl AcpDriver {
                                 }
                             }
                         }
+                        io.shutdown().await;
                         Ok(())
                     }
                 })
