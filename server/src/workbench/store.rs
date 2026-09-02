@@ -775,8 +775,18 @@ impl Store {
                 continue;
             };
             let value: Value = serde_json::from_str(&row).map_err(json_error)?;
-            if is_current && value["configOptions"].is_array() {
-                menu.insert("configOptions".into(), value["configOptions"].clone());
+            if is_current {
+                for field in [
+                    "commands",
+                    "skills",
+                    "agentDefinitions",
+                    "agentControls",
+                    "configOptions",
+                ] {
+                    if value[field].is_array() {
+                        menu.insert(field.into(), value[field].clone());
+                    }
+                }
             }
             for field in ["models", "permissionModes", "efforts", "collaborationModes"] {
                 if menu
@@ -1850,7 +1860,8 @@ mod tests {
             "permissionModes":["on-request"], "efforts":[{"value":"high"}],
             "collaborationModes":[{"value":"plan"}],
             "commands":[{"name":"project-only"}], "skills":["private-skill"],
-            "agentDefinitions":[{"name":"private-agent"}]
+            "agentDefinitions":[{"name":"private-agent"}],
+            "agentControls":["stop","say"]
         }))
         .unwrap();
         assert!(store.append_event(&menu).unwrap());
@@ -1861,6 +1872,12 @@ mod tests {
         assert!(inherited.get("commands").is_none());
         assert!(inherited.get("skills").is_none());
         assert!(inherited.get("agentDefinitions").is_none());
+        assert!(inherited.get("agentControls").is_none());
+        let exact = store.steering_menu("catalog").unwrap();
+        assert_eq!(exact["commands"][0]["name"], "project-only");
+        assert_eq!(exact["skills"][0], "private-skill");
+        assert_eq!(exact["agentDefinitions"][0]["name"], "private-agent");
+        assert_eq!(exact["agentControls"], json!(["stop", "say"]));
         assert_eq!(store.steering_menu("other").unwrap(), json!({}));
     }
 

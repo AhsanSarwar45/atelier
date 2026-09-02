@@ -31,6 +31,7 @@ enum Control {
     },
     Steer {
         content: Vec<ContentBlock>,
+        suppress_echo: bool,
         reply: Reply,
     },
     Subagent {
@@ -84,6 +85,8 @@ struct ElicitationBroker {
 struct PendingElicitation {
     answer: oneshot::Sender<Value>,
     schema: Option<Value>,
+    custom_fields: HashMap<String, String>,
+    native_questions: bool,
 }
 
 impl PermissionBroker {
@@ -157,6 +160,14 @@ impl ElicitationBroker {
             .answer
             .send(value)
             .map_err(|_| format!("question {id} closed"))
+    }
+
+    async fn question_shape(&self, id: &str) -> Result<(HashMap<String, String>, bool), String> {
+        let pending = self.pending.lock().await;
+        let question = pending
+            .get(id)
+            .ok_or_else(|| format!("question {id} is no longer pending"))?;
+        Ok((question.custom_fields.clone(), question.native_questions))
     }
 
     async fn cancel_all(&self) {
@@ -349,11 +360,52 @@ async fn permission(
     ))
 }
 
-fn elicitation_fields(schema: &Value) -> Vec<Value> {
-    schema["properties"]
+fn custom_question_field(property: &Value) -> Option<&str> {
+    property
+        .pointer("/_meta/_askUserQuestionCustomAnswer/questionId")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            (property
+                .pointer("/_meta/codex/isOtherAnswer")
+                .and_then(Value::as_bool)
+                == Some(true))
+            .then(|| {
+                property
+                    .pointer("/_meta/codex/questionId")
+                    .and_then(Value::as_str)
+            })
+            .flatten()
+        })
+}
+
+fn question_schema_shape(schema: &Value) -> (HashMap<String, String>, bool) {
+    let mut custom_fields = HashMap::new();
+    let mut native_questions = false;
+    for (id, property) in schema["properties"]
         .as_object()
         .into_iter()
         .flat_map(|properties| properties.iter())
+    {
+        if let Some(question_id) = custom_question_field(property) {
+            custom_fields.insert(question_id.to_string(), id.to_string());
+            native_questions = true;
+        }
+        native_questions |= property.pointer("/_meta/codex/isOther").is_some();
+    }
+    (custom_fields, native_questions)
+}
+
+fn elicitation_fields(schema: &Value, message: Option<&str>) -> Vec<Value> {
+    let (custom_fields, _) = question_schema_shape(schema);
+    let properties = schema["properties"].as_object();
+    let visible = properties
+        .into_iter()
+        .flat_map(|properties| properties.iter())
+        .filter(|(_, property)| custom_question_field(property).is_none())
+        .collect::<Vec<_>>();
+    let one_question = visible.len() == 1;
+    visible
+        .into_iter()
         .map(|(id, property)| {
             let variants = property["oneOf"].as_array().or_else(|| property["anyOf"].as_array());
             let options = variants
@@ -363,7 +415,12 @@ fn elicitation_fields(schema: &Value) -> Vec<Value> {
                     let value = option.get("const")?;
                     let id = value.as_str().map(str::to_string)
                         .unwrap_or_else(|| serde_json::to_string(value).unwrap_or_default());
-                    Some(json!({"id":id,"label":option["title"].as_str().unwrap_or(&id),"description":option["description"]}))
+                    Some(json!({
+                        "id":id,
+                        "label":option["title"].as_str().unwrap_or(&id),
+                        "description":option["description"],
+                        "preview":option.pointer("/_meta/_claude~1askUserQuestionOption/preview")
+                    }))
                 })
                 .chain(property["enum"].as_array().into_iter().flatten().map(|value| {
                     let id = value.as_str().map(str::to_string)
@@ -377,14 +434,20 @@ fn elicitation_fields(schema: &Value) -> Vec<Value> {
                 options
             };
             let multiple = property["type"] == "array";
+            let prompt = one_question
+                .then_some(message)
+                .flatten()
+                .or_else(|| property["description"].as_str())
+                .unwrap_or(id);
             json!({
                 "id":id,
                 "header":property["title"].as_str().unwrap_or(id),
-                "prompt":property["description"].as_str().unwrap_or(id),
+                "prompt":prompt,
                 "selection":if multiple {"multiple"} else if options.is_empty() {"text"} else {"single"},
                 "options":options,
-                "allowCustom":options.is_empty(),
+                "allowCustom":options.is_empty() || custom_fields.contains_key(id),
                 "secret":property["format"] == "password"
+                    || property.pointer("/_meta/codex/isSecret").and_then(Value::as_bool) == Some(true)
             })
         })
         .collect()
@@ -466,18 +529,21 @@ async fn elicitation(
         .map(str::to_string)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let (answer, receive) = oneshot::channel();
+    let (custom_fields, native_questions) = question_schema_shape(&raw["requestedSchema"]);
     broker.pending.lock().await.insert(
         request_id.clone(),
         PendingElicitation {
             answer,
             schema: (raw["mode"] == "form").then(|| raw["requestedSchema"].clone()),
+            custom_fields,
+            native_questions,
         },
     );
     let asked = match request.mode {
         ElicitationMode::Form(_) => event(json!({
             "type":"question.requested", "sessionId":local_session_id, "seq":0, "at":now(),
             "requestId":request_id, "blocking":true,
-            "questions":elicitation_fields(&raw["requestedSchema"]), "acp":raw
+            "questions":elicitation_fields(&raw["requestedSchema"], Some(request.message.as_str())), "acp":raw
         }))?,
         ElicitationMode::Url(_) => event(json!({
             "type":"ask.permission", "sessionId":local_session_id, "seq":0, "at":now(),
@@ -546,11 +612,65 @@ fn prompt_content(command: &Command) -> Result<Vec<ContentBlock>, String> {
     Ok(content)
 }
 
+fn question_answer_content(
+    answers: &[Value],
+    custom_fields: &HashMap<String, String>,
+    native_questions: bool,
+) -> serde_json::Map<String, Value> {
+    let mut content = serde_json::Map::new();
+    for answer in answers {
+        let key = answer["questionId"].as_str().unwrap_or_default();
+        let selected = answer["optionIds"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let custom = answer["customText"]
+            .as_str()
+            .filter(|text| !text.trim().is_empty())
+            .map(str::trim);
+        if let Some(custom) = custom {
+            content.insert(
+                custom_fields
+                    .get(key)
+                    .cloned()
+                    .unwrap_or_else(|| key.to_string()),
+                json!(custom),
+            );
+        } else {
+            content.insert(
+                key.to_string(),
+                if selected.len() == 1 {
+                    json!(selected[0])
+                } else {
+                    json!(selected)
+                },
+            );
+        }
+        if native_questions {
+            if let Some(note) = answer["note"]
+                .as_str()
+                .map(str::trim)
+                .filter(|note| !note.is_empty())
+            {
+                content.insert(format!("__atelier_note_{key}"), json!(note));
+            }
+        }
+    }
+    content
+}
+
 fn slash_name(text: &str) -> Option<&str> {
     let trimmed = text.trim();
     let command = trimmed.strip_prefix('/')?;
     let name = command.split_whitespace().next()?;
     (!name.is_empty() && !name.contains('/')).then_some(name)
+}
+
+fn turn_is_active(state: &str) -> bool {
+    matches!(state, "thinking" | "streaming" | "running_tool")
 }
 
 fn command_is_offered(name: &str, commands: &[Value]) -> Result<(), String> {
@@ -575,14 +695,21 @@ async fn validate_offered_command(
     let Some(name) = slash_name(text) else {
         return Ok(());
     };
-    let menu = database.steering_menu(session_id.to_string()).await?;
-    command_is_offered(
-        name,
-        menu["commands"]
+    // Some ACP adapters publish their command catalog immediately after the
+    // session handshake. Give only that empty-catalog startup state a bounded
+    // chance to settle; ordinary prompts and populated menus never wait.
+    for attempt in 0..=25 {
+        let menu = database.steering_menu(session_id.to_string()).await?;
+        let commands = menu["commands"]
             .as_array()
             .map(Vec::as_slice)
-            .unwrap_or(&[]),
-    )
+            .unwrap_or(&[]);
+        if !commands.is_empty() || attempt == 25 {
+            return command_is_offered(name, commands);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    unreachable!("the bounded command-catalog wait always returns")
 }
 
 fn select_values(options: &Value, ids: &[&str]) -> Vec<Value> {
@@ -736,6 +863,7 @@ pub(super) fn menu_fields(
     modes: &Value,
     options: &Value,
     agent_controls: &Value,
+    agent_definitions: &Value,
 ) -> Value {
     let options = options_for_menu(brand, seed_model, options);
     let permission_modes = modes["availableModes"]
@@ -746,7 +874,7 @@ pub(super) fn menu_fields(
         .map(|mode| mode_from_acp(brand, mode))
         .collect::<Vec<_>>();
     json!({
-        "commands":[], "skills":[], "agentDefinitions":[], "agentControls":agent_controls,
+        "commands":[], "skills":[], "agentDefinitions":agent_definitions, "agentControls":agent_controls,
         "permissionModes":permission_modes,
         "currentMode":mode_from_acp(brand, modes["currentModeId"].as_str().unwrap_or_default()),
         "models":select_values(&options, &["model"]),
@@ -766,8 +894,16 @@ fn menu_fields_with_local_catalog(
     options: &Value,
     local_models: &Value,
     agent_controls: &Value,
+    agent_definitions: &Value,
 ) -> Value {
-    let mut menu = menu_fields(brand, seed_model, modes, options, agent_controls);
+    let mut menu = menu_fields(
+        brand,
+        seed_model,
+        modes,
+        options,
+        agent_controls,
+        agent_definitions,
+    );
     if brand == super::super::local::BRAND
         && local_models
             .as_array()
@@ -778,23 +914,7 @@ fn menu_fields_with_local_catalog(
     menu
 }
 
-fn menu_event(
-    session_id: &str,
-    brand: &str,
-    seed_model: Option<&str>,
-    modes: &Value,
-    options: &Value,
-    local_models: &Value,
-    agent_controls: &Value,
-) -> Result<Event, String> {
-    let mut menu = menu_fields_with_local_catalog(
-        brand,
-        seed_model,
-        modes,
-        options,
-        local_models,
-        agent_controls,
-    );
+fn menu_event(session_id: &str, mut menu: Value) -> Result<Event, String> {
     let object = menu.as_object_mut().expect("ACP menu is an object");
     object.insert("type".into(), json!("session.menu"));
     object.insert("sessionId".into(), json!(session_id));
@@ -814,6 +934,46 @@ pub struct AcpDriver {
 }
 
 impl AcpDriver {
+    async fn submit_user_turn(
+        &self,
+        text: &str,
+        images: &[Value],
+        content: Vec<ContentBlock>,
+    ) -> Result<Value, String> {
+        let active = self
+            .database
+            .get_session(self.session.id.clone())
+            .await?
+            .is_some_and(|session| turn_is_active(&session.state));
+        super::super::provider::record_user_for_transport(
+            &self.database,
+            &self.session,
+            text,
+            images,
+        )
+        .await?;
+        self.database
+            .append(
+                serde_json::from_value(json!({
+                    "type":"session.state", "sessionId":self.session.id,
+                    "seq":0, "at":now(), "state":"streaming", "label":"Working"
+                }))
+                .map_err(|error| error.to_string())?,
+            )
+            .await?;
+        if active {
+            self.control(|reply| Control::Steer {
+                content,
+                suppress_echo: true,
+                reply,
+            })
+            .await
+        } else {
+            self.control(|reply| Control::Prompt { content, reply })
+                .await
+        }
+    }
+
     async fn record_agent_control(&self, agent_id: &str, state: &str) -> Result<(), String> {
         let agents = self
             .database
@@ -887,6 +1047,13 @@ impl AcpDriver {
         let elicitations = Arc::new(ElicitationBroker::default());
         let task_database = database.clone();
         let task_session = session.clone();
+        let task_agent_definitions = if brand == "codex" {
+            json!(super::super::codex::history::agent_definitions(Path::new(
+                &session.cwd,
+            )))
+        } else {
+            json!([])
+        };
         let task_session_meta = session_meta(brand, &task_policy);
         let task_permissions = permissions.clone();
         let task_elicitations = elicitations.clone();
@@ -1130,24 +1297,18 @@ impl AcpDriver {
                             )
                             .await
                             .map_err(acp_error)?;
-                        normalizer.lock().await.set_menu(menu_fields_with_local_catalog(
+                        let menu = menu_fields_with_local_catalog(
                             brand,
                             local_model.as_deref(),
                             &modes,
                             &config_options,
                             &task_local_models,
                             &agent_controls,
-                        ));
+                            &task_agent_definitions,
+                        );
+                        normalizer.lock().await.set_menu(menu.clone());
                         task_database
-                            .append(menu_event(
-                                &task_session.id,
-                                brand,
-                                local_model.as_deref(),
-                                &modes,
-                                &config_options,
-                                &task_local_models,
-                                &agent_controls,
-                            ).map_err(acp_error)?)
+                            .append(menu_event(&task_session.id, menu).map_err(acp_error)?)
                             .await
                             .map_err(acp_error)?;
                         task_database.append(event(json!({
@@ -1203,7 +1364,10 @@ impl AcpDriver {
                                         .map_err(|error| error.to_string());
                                     let _ = reply.send(result);
                                 }
-                                Control::Steer { content, reply } => {
+                                Control::Steer { content, suppress_echo, reply } => {
+                                    if suppress_echo {
+                                        normalizer.lock().await.begin_local_prompt();
+                                    }
                                     let result = connection
                                         .send_request(UntypedMessage::new("_session/steering", json!({
                                             "sessionId":remote_id, "prompt":content
@@ -1284,6 +1448,7 @@ impl AcpDriver {
                                                         &config_options,
                                                         &task_local_models,
                                                         &agent_controls,
+                                                        &task_agent_definitions,
                                                     ));
                                                 }
                                                 Err(error) => {
@@ -1323,16 +1488,12 @@ impl AcpDriver {
                                                 &config_options,
                                                 &task_local_models,
                                                 &agent_controls,
+                                                &task_agent_definitions,
                                             );
                                             normalizer.lock().await.set_menu(menu.clone());
                                             task_database.append(menu_event(
                                                 &task_session.id,
-                                                brand,
-                                                local_model.as_deref(),
-                                                &modes,
-                                                &config_options,
-                                                &task_local_models,
-                                                &agent_controls,
+                                                menu.clone(),
                                             ).map_err(acp_error)?).await.map_err(acp_error)?;
                                             let selected_options = menu["configOptions"].as_array().into_iter().flatten().map(|option| json!({
                                                 "id":option["id"], "currentValue":option["currentValue"]
@@ -1434,23 +1595,18 @@ impl AcpDriver {
                 )
                 .await?;
                 let content = prompt_content(command)?;
-                super::super::provider::record_user_for_transport(
-                    &self.database,
-                    &self.session,
+                let images = command
+                    .fields
+                    .get("images")
+                    .and_then(Value::as_array)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]);
+                self.submit_user_turn(
                     command.fields["text"].as_str().unwrap_or_default(),
+                    images,
+                    content,
                 )
-                .await?;
-                self.database
-                    .append(
-                        serde_json::from_value(json!({
-                            "type":"session.state", "sessionId":self.session.id,
-                            "seq":0, "at":now(), "state":"streaming", "label":"Working"
-                        }))
-                        .map_err(|error| error.to_string())?,
-                    )
-                    .await?;
-                self.control(|reply| Control::Prompt { content, reply })
-                    .await
+                .await
             }
             CommandKind::AskAnswer => {
                 let id = command.fields["askId"].as_str().unwrap_or_default();
@@ -1471,35 +1627,15 @@ impl AcpDriver {
             }
             CommandKind::QuestionAnswer => {
                 let id = command.fields["requestId"].as_str().unwrap_or_default();
+                let (custom_fields, native_questions) =
+                    self.elicitations.question_shape(id).await?;
                 let answers = command
                     .fields
                     .get("response")
                     .and_then(|response| response["answers"].as_array())
                     .cloned()
                     .unwrap_or_default();
-                let mut content = serde_json::Map::new();
-                for answer in &answers {
-                    let key = answer["questionId"].as_str().unwrap_or_default();
-                    let selected = answer["optionIds"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(Value::as_str)
-                        .map(str::to_string)
-                        .collect::<Vec<_>>();
-                    let value = answer["customText"]
-                        .as_str()
-                        .filter(|text| !text.trim().is_empty())
-                        .map(|text| json!(text.trim()))
-                        .unwrap_or_else(|| {
-                            if selected.len() == 1 {
-                                json!(selected[0])
-                            } else {
-                                json!(selected)
-                            }
-                        });
-                    content.insert(key.to_string(), value);
-                }
+                let content = question_answer_content(&answers, &custom_fields, native_questions);
                 self.elicitations
                     .answer(
                         id,
@@ -1535,6 +1671,7 @@ impl AcpDriver {
                                 content: vec![ContentBlock::Text(TextContent::new(format!(
                                     "Revise the plan with this feedback: {feedback}"
                                 )))],
+                                suppress_echo: true,
                                 reply,
                             })
                             .await;
@@ -1645,10 +1782,11 @@ impl AcpDriver {
                     "A message for the agent you sent off (id {agent_id}), from the person watching this chat. It could not be handed to it directly, so it comes to you:\n\n{text}"
                 );
                 let result = self
-                    .control(|reply| Control::Steer {
-                        content: vec![ContentBlock::Text(TextContent::new(instruction))],
-                        reply,
-                    })
+                    .submit_user_turn(
+                        &instruction,
+                        &[],
+                        vec![ContentBlock::Text(TextContent::new(instruction.clone()))],
+                    )
                     .await?;
                 self.database
                     .append(
@@ -1665,13 +1803,12 @@ impl AcpDriver {
                 self.permissions.cancel_all().await;
                 self.elicitations.cancel_all().await;
                 self.database
-                    .update_session(
-                        self.session.id.clone(),
-                        SessionPatch {
-                            state: Some("dormant".into()),
-                            ..SessionPatch::default()
-                        },
-                        None,
+                    .append(
+                        serde_json::from_value(json!({
+                            "type":"session.state", "sessionId":self.session.id,
+                            "seq":0, "at":now(), "state":"dormant", "label":"Asleep"
+                        }))
+                        .map_err(|error| error.to_string())?,
                     )
                     .await?;
                 Ok(json!({"ok":true}))
@@ -1713,6 +1850,99 @@ impl ProviderDriver for AcpDriver {
 mod tests {
     use super::*;
 
+    fn test_session(state: &str) -> Session {
+        Session {
+            id: "chat-1".into(),
+            brand: "codex".into(),
+            external_id: Some("thread-1".into()),
+            project_id: "project".into(),
+            project_path: "/project".into(),
+            cwd: "/project".into(),
+            model: None,
+            permission_mode: "on-request".into(),
+            effort: None,
+            collaboration_mode: None,
+            title: Some("Steering".into()),
+            state: state.into(),
+            origin: "app".into(),
+            created_at: "2026-09-02T00:00:00Z".into(),
+            last_active_at: "2026-09-02T00:00:00Z".into(),
+            last_spoke_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_second_user_turn_steers_the_active_turn_and_stays_durable() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let session = test_session("thinking");
+        database.create_session(session.clone()).await.unwrap();
+        let (controls, mut requests) = mpsc::unbounded_channel();
+        let (_, ended) = mpsc::unbounded_channel();
+        let driver = AcpDriver {
+            brand: "codex",
+            database: database.clone(),
+            session,
+            controls,
+            ended,
+            permissions: Arc::new(PermissionBroker::default()),
+            elicitations: Arc::new(ElicitationBroker::default()),
+        };
+        let sent = tokio::spawn(async move {
+            driver
+                .submit_user_turn(
+                    "Use the safer route",
+                    &[],
+                    vec![ContentBlock::Text(TextContent::new("Use the safer route"))],
+                )
+                .await
+        });
+        let control = requests.recv().await.unwrap();
+        match control {
+            Control::Steer {
+                suppress_echo,
+                reply,
+                ..
+            } => {
+                assert!(suppress_echo);
+                reply.send(Ok(json!({"ok":true}))).unwrap();
+            }
+            _ => panic!("an active turn must be steered, not queued as another prompt"),
+        }
+        assert_eq!(sent.await.unwrap().unwrap(), json!({"ok":true}));
+        let events = database.events_since("chat-1".into(), 0).await.unwrap();
+        assert!(events.iter().any(|event| {
+            event.kind == crate::workbench::protocol::EventKind::TextDelta
+                && event.fields["text"] == "Use the safer route"
+        }));
+    }
+
+    #[tokio::test]
+    async fn an_immediate_slash_waits_for_the_adapters_initial_catalog() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        database.create_session(test_session("idle")).await.unwrap();
+        let publication = database.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+            publication
+                .append(
+                    serde_json::from_value(json!({
+                        "type":"session.menu", "sessionId":"chat-1", "seq":0,
+                        "at":"2026-09-02T00:00:00Z",
+                        "commands":[{"name":"review","description":"Review the changes"}]
+                    }))
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
+        });
+
+        validate_offered_command(&database, "chat-1", "/review please")
+            .await
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn interrupt_releases_every_pending_provider_question_with_its_native_rejection() {
         let permissions = PermissionBroker::default();
@@ -1740,6 +1970,8 @@ mod tests {
             PendingElicitation {
                 answer: question_answer,
                 schema: None,
+                custom_fields: HashMap::new(),
+                native_questions: false,
             },
         );
         elicitations.cancel_all().await;
@@ -1759,6 +1991,8 @@ mod tests {
                     "type":"object", "properties":{"choice":{"type":"string"}},
                     "required":["choice"]
                 })),
+                custom_fields: HashMap::new(),
+                native_questions: false,
             },
         );
 
@@ -1867,18 +2101,87 @@ mod tests {
         }));
     }
 
+    #[tokio::test]
+    async fn live_close_persists_the_same_dormant_event_as_an_already_sleeping_chat() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let session = Session {
+            id: "chat-1".into(),
+            brand: "claude".into(),
+            external_id: Some("thread-1".into()),
+            project_id: "project".into(),
+            project_path: "/project".into(),
+            cwd: "/project".into(),
+            model: None,
+            permission_mode: "default".into(),
+            effort: None,
+            collaboration_mode: None,
+            title: None,
+            state: "idle".into(),
+            origin: "app".into(),
+            created_at: "2026-09-02T00:00:00Z".into(),
+            last_active_at: "2026-09-02T00:00:00Z".into(),
+            last_spoke_at: None,
+        };
+        database.create_session(session.clone()).await.unwrap();
+        let (controls, _) = mpsc::unbounded_channel();
+        let (_, ended) = mpsc::unbounded_channel();
+        let mut driver = AcpDriver {
+            brand: "claude",
+            database: database.clone(),
+            session,
+            controls,
+            ended,
+            permissions: Arc::new(PermissionBroker::default()),
+            elicitations: Arc::new(ElicitationBroker::default()),
+        };
+
+        driver
+            .run(&Command {
+                kind: CommandKind::SessionClose,
+                fields: serde_json::Map::from_iter([("sessionId".into(), json!("chat-1"))]),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            database
+                .get_session("chat-1".into())
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            "dormant"
+        );
+        let events = database.events_since("chat-1".into(), 0).await.unwrap();
+        assert!(events.iter().any(|event| {
+            event.kind == super::super::super::protocol::EventKind::SessionState
+                && event.fields["state"] == "dormant"
+                && event.fields["label"] == "Asleep"
+        }));
+    }
+
     #[test]
     fn acp_config_options_fill_the_existing_provider_neutral_menu() {
-        let menu = menu_event("local", "codex", None, &json!({
-            "currentModeId":"agent", "availableModes":[
-                {"id":"read-only"},{"id":"agent"},{"id":"agent-full-access"}
-            ]
-        }), &json!([
-            {"id":"model","category":"model","currentValue":"gpt-5.6-sol","options":[{"value":"gpt-5.6-sol","name":"GPT-5.6-Sol"}]},
-            {"id":"reasoning_effort","category":"thought_level","currentValue":"high","options":[{"value":"high","name":"High"}]},
-            {"id":"collaboration_mode","category":"collaboration_mode","currentValue":"plan","options":[{"value":"plan","name":"Plan"}]},
-            {"id":"fast-mode","name":"Fast mode","description":"Run with lower latency","type":"boolean","currentValue":false}
-        ]), &Value::Null, &json!(["stop","say"])).unwrap();
+        let menu = menu_fields_with_local_catalog(
+            "codex",
+            None,
+            &json!({
+                "currentModeId":"agent", "availableModes":[
+                    {"id":"read-only"},{"id":"agent"},{"id":"agent-full-access"}
+                ]
+            }),
+            &json!([
+                {"id":"model","category":"model","currentValue":"gpt-5.6-sol","options":[{"value":"gpt-5.6-sol","name":"GPT-5.6-Sol"}]},
+                {"id":"reasoning_effort","category":"thought_level","currentValue":"high","options":[{"value":"high","name":"High"}]},
+                {"id":"collaboration_mode","category":"collaboration_mode","currentValue":"plan","options":[{"value":"plan","name":"Plan"}]},
+                {"id":"fast-mode","name":"Fast mode","description":"Run with lower latency","type":"boolean","currentValue":false}
+            ]),
+            &Value::Null,
+            &json!(["stop", "say"]),
+            &json!([{"name":"reviewer"}]),
+        );
+        let menu = menu_event("local", menu).unwrap();
         let menu = serde_json::to_value(menu).unwrap();
         assert_eq!(
             menu["permissionModes"],
@@ -1890,6 +2193,7 @@ mod tests {
         assert_eq!(menu["configOptions"][0]["id"], "fast-mode");
         assert_eq!(menu["configOptions"][0]["currentValue"], false);
         assert_eq!(menu["agentControls"], json!(["stop", "say"]));
+        assert_eq!(menu["agentDefinitions"], json!([{"name":"reviewer"}]));
     }
 
     #[test]
@@ -1955,6 +2259,7 @@ mod tests {
                 {"value":"openai-compatible::gemma","displayName":"gemma","runtime":"openai-compatible"}
             ]),
             &json!([]),
+            &json!([]),
         );
         assert_eq!(menu["currentModel"], "ollama::qwen3");
         assert_eq!(menu["models"].as_array().unwrap().len(), 2);
@@ -1969,16 +2274,58 @@ mod tests {
 
     #[test]
     fn form_elicitation_schema_becomes_the_shared_question_contract() {
-        let fields = elicitation_fields(&json!({"properties":{
-            "choice":{"title":"Choice","description":"Pick one","oneOf":[
-                {"const":"a","title":"A"},{"const":"b","title":"B"}
-            ]},
-            "details":{"title":"Details","type":"string"}
-        }}));
+        let fields = elicitation_fields(
+            &json!({"properties":{
+                "choice":{"title":"Choice","description":"Pick one","oneOf":[
+                    {"const":"a","title":"A"},{"const":"b","title":"B"}
+                ]},
+                "details":{"title":"Details","type":"string"}
+            }}),
+            None,
+        );
         assert_eq!(fields[0]["selection"], "single");
         assert_eq!(fields[0]["options"][1]["id"], "b");
         assert_eq!(fields[1]["selection"], "text");
         assert_eq!(fields[1]["allowCustom"], true);
+    }
+
+    #[test]
+    fn native_question_companions_fold_into_one_rich_shared_field() {
+        let schema = json!({"properties":{
+            "question_0":{
+                "title":"Approach", "type":"string", "oneOf":[{
+                    "const":"safe", "title":"Safe", "description":"Prefer safety",
+                    "_meta":{"_claude/askUserQuestionOption":{"preview":"**Preview**"}}
+                }]
+            },
+            "question_0_custom":{
+                "type":"string", "title":"Other",
+                "_meta":{"_askUserQuestionCustomAnswer":{
+                    "questionId":"question_0", "isCustomAnswer":true
+                }}
+            }
+        }});
+        let fields = elicitation_fields(&schema, Some("Which approach?"));
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0]["id"], "question_0");
+        assert_eq!(fields[0]["prompt"], "Which approach?");
+        assert_eq!(fields[0]["allowCustom"], true);
+        assert_eq!(fields[0]["options"][0]["preview"], "**Preview**");
+
+        let (custom, native) = question_schema_shape(&schema);
+        assert!(native);
+        assert_eq!(custom["question_0"], "question_0_custom");
+        let content = question_answer_content(
+            &[json!({
+                "questionId":"question_0", "optionIds":["safe"],
+                "customText":"A custom route", "note":"Keep the fallback"
+            })],
+            &custom,
+            native,
+        );
+        assert_eq!(content["question_0_custom"], "A custom route");
+        assert_eq!(content["__atelier_note_question_0"], "Keep the fallback");
+        assert!(!content.contains_key("question_0"));
     }
 
     #[test]
@@ -1990,7 +2337,7 @@ mod tests {
             "levels":{"title":"Levels","type":"array","items":{"type":"integer"},"enum":[1,2]},
             "choice":{"title":"Choice","oneOf":[{"const":7,"title":"Seven"},{"const":"auto","title":"Automatic"}]}
         }});
-        let fields = elicitation_fields(&schema);
+        let fields = elicitation_fields(&schema, None);
         let field = |id: &str| fields.iter().find(|field| field["id"] == id).unwrap();
         assert_eq!(
             field("enabled")["options"],

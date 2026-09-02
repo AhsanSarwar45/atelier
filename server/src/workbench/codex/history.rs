@@ -408,7 +408,7 @@ pub async fn menu(transport: &CodexTransport, cwd: &Path, active_model: Option<&
     })
 }
 
-fn agent_definitions(cwd: &Path) -> Vec<Value> {
+pub(crate) fn agent_definitions(cwd: &Path) -> Vec<Value> {
     let personal = std::env::var_os("CODEX_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| directories::UserDirs::new().map(|dirs| dirs.home_dir().join(".codex")))

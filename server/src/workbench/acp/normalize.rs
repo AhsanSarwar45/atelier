@@ -881,6 +881,7 @@ impl AcpNormalizer {
                     &json!({}),
                     &update["configOptions"],
                     &self.menu["agentControls"],
+                    &self.menu["agentDefinitions"],
                 );
                 let model = translated["currentModel"].clone();
                 let effort = translated["currentEffort"].clone();

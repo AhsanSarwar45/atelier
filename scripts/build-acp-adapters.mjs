@@ -356,6 +356,53 @@ ${routeAnchor}`;
   writeFileSync(agent, code);
 }
 
+function patchNativeQuestionNotes(claudeSource, codexSource) {
+  const claude = join(claudeSource, 'src', 'elicitation.ts');
+  let code = readFileSync(claude, 'utf8');
+  const claudeAnswers = `  const answers: AskUserQuestionOutput["answers"] = {};
+  questions.forEach((question, index) => {`;
+  if (code.split(claudeAnswers).length - 1 !== 1) {
+    throw new Error('claude-acp question response shape changed; audit native note parity');
+  }
+  code = code.replace(claudeAnswers, `  const answers: AskUserQuestionOutput["answers"] = {};
+  const annotations: Record<string, { notes: string }> = {};
+  questions.forEach((question, index) => {
+    const note = content[\`__atelier_note_\${questionFieldKey(index)}\`];
+    if (typeof note === "string" && note.trim() !== "") {
+      annotations[question.question] = { notes: note.trim() };
+    }`);
+  const claudeResult = `  return { action: "answered", updatedInput: { ...toolInput, answers } };`;
+  if (code.split(claudeResult).length - 1 !== 1) {
+    throw new Error('claude-acp AskUserQuestion result changed; audit native note parity');
+  }
+  code = code.replace(claudeResult, `  return {
+    action: "answered",
+    updatedInput: {
+      ...toolInput,
+      answers,
+      ...(Object.keys(annotations).length > 0 ? { annotations } : {}),
+    },
+  };`);
+  writeFileSync(claude, code);
+
+  const codex = join(codexSource, 'src', 'CodexElicitationHandler.ts');
+  code = readFileSync(codex, 'utf8');
+  const codexAnswer = `            answers[question.id] = {
+                answers: Array.isArray(value)
+                    ? value.map(String)
+                    : [String(value)],
+            };`;
+  if (code.split(codexAnswer).length - 1 !== 1) {
+    throw new Error('codex-acp request_user_input response changed; audit native note parity');
+  }
+  code = code.replace(codexAnswer, `${codexAnswer}
+            const note = content[\`__atelier_note_\${question.id}\`];
+            if (typeof note === "string" && note.trim() !== "") {
+                answers[question.id].answers.push(\`Additional note: \${note.trim()}\`);
+            }`);
+  writeFileSync(codex, code);
+}
+
 function npmPackage(spec, directory) {
   mkdirSync(directory, { recursive: true });
   run('npm', ['pack', spec, '--pack-destination', directory], directory);
@@ -398,6 +445,7 @@ try {
   patchCodexSessionPolicy(codexSource);
   patchCodexSubagentControl(codexSource);
   patchClaudeWindowNow(claudeSource);
+  patchNativeQuestionNotes(claudeSource, codexSource);
 
   rmSync(output, { recursive: true, force: true });
   mkdirSync(output, { recursive: true });
@@ -440,12 +488,12 @@ try {
     adapters: {
       claude: {
         version: CLAUDE.version, commit: CLAUDE.commit, providerVersion: CLAUDE.providerVersion, wireProtocol: 1,
-        compatibilityPatches: ['atelier-context-window', 'atelier-native-subagent-control'],
+        compatibilityPatches: ['atelier-context-window', 'atelier-native-subagent-control', 'atelier-native-question-notes'],
         verifiedCapabilities: ['native-mcp-config', 'session-resume'],
       },
       codex: {
         version: CODEX.version, commit: CODEX.commit, providerVersion: CODEX.providerVersion, wireProtocol: 1,
-        compatibilityPatches: ['app-server-stdio', 'bun-child-process-bridge', 'jsonrpc-2-framing', 'atelier-session-policy', 'atelier-native-subagent-control'],
+        compatibilityPatches: ['app-server-stdio', 'bun-child-process-bridge', 'jsonrpc-2-framing', 'atelier-session-policy', 'atelier-native-subagent-control', 'atelier-native-question-notes'],
         verifiedCapabilities: ['native-mcp-config', 'session-resume'],
       },
       local: { adapter: 'goose', version: GOOSE.version, commit: GOOSE.commit, wireProtocol: 1 },

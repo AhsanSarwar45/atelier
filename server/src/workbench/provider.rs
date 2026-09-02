@@ -662,14 +662,24 @@ pub(super) async fn record_user_for_transport(
     database: &ChatDb,
     session: &Session,
     text: &str,
+    images: &[Value],
 ) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let at = now();
-    for value in [
+    let mut values = vec![
         json!({"type":"message.started","sessionId":session.id,"seq":0,"at":at,"messageId":id,"role":"user"}),
+    ];
+    values.extend(images.iter().map(|image| {
+        json!({
+            "type":"image", "sessionId":session.id, "seq":0, "at":at,
+            "messageId":id, "image":image
+        })
+    }));
+    values.extend([
         json!({"type":"text.delta","sessionId":session.id,"seq":0,"at":at,"messageId":id,"text":text}),
         json!({"type":"message.completed","sessionId":session.id,"seq":0,"at":at,"messageId":id}),
-    ] {
+    ]);
+    for value in values {
         let event = serde_json::from_value(value).map_err(|error| error.to_string())?;
         database.append(event).await?;
     }
@@ -692,6 +702,55 @@ pub(super) async fn record_user_for_transport(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn locally_sent_images_are_durable_parts_of_the_user_turn() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let session = Session {
+            id: "chat-1".into(),
+            brand: "codex".into(),
+            external_id: Some("thread-1".into()),
+            project_id: "project".into(),
+            project_path: "/project".into(),
+            cwd: "/project".into(),
+            model: None,
+            permission_mode: "on-request".into(),
+            effort: None,
+            collaboration_mode: None,
+            title: Some("Images".into()),
+            state: "idle".into(),
+            origin: "app".into(),
+            created_at: "2026-09-02T00:00:00Z".into(),
+            last_active_at: "2026-09-02T00:00:00Z".into(),
+            last_spoke_at: None,
+        };
+        database.create_session(session.clone()).await.unwrap();
+        record_user_for_transport(
+            &database,
+            &session,
+            "What is shown?",
+            &[json!({"mimeType":"image/png","data":"aGVsbG8="})],
+        )
+        .await
+        .unwrap();
+
+        let events = database.events_since("chat-1".into(), 0).await.unwrap();
+        let image = events
+            .iter()
+            .find(|event| event.kind == crate::workbench::protocol::EventKind::Image)
+            .expect("the attachment is part of the durable transcript");
+        assert_eq!(image.fields["image"]["mimeType"], "image/png");
+        assert_eq!(image.fields["image"]["data"], "aGVsbG8=");
+        assert_eq!(
+            image.fields["messageId"],
+            events
+                .iter()
+                .find(|event| event.kind == crate::workbench::protocol::EventKind::MessageStarted)
+                .unwrap()
+                .fields["messageId"]
+        );
+    }
 
     #[tokio::test]
     async fn live_attach_waits_for_cold_history_reconciliation() {

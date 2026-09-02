@@ -80,6 +80,8 @@ enum DriverRequest {
 type Driver = mpsc::UnboundedSender<DriverRequest>;
 
 async fn supervise_driver(
+    database: ChatDb,
+    session_id: String,
     mut driver: Box<dyn ProviderDriver>,
     mut requests: mpsc::UnboundedReceiver<DriverRequest>,
 ) {
@@ -95,8 +97,20 @@ async fn supervise_driver(
             }
             Ok(DriverRequest::Close(command, reply)) => {
                 let result = driver.command(&command).await;
-                let closed = driver.close().await;
-                let _ = reply.send(result.and(closed.map(|_| json!({"ok":true}))));
+                if let Err(error) = driver.close().await {
+                    // Closing means Atelier has already detached this driver.
+                    // A provider teardown failure is important conversation
+                    // evidence, but cannot turn that completed detach into a
+                    // refusal or leave the browser believing it is still live.
+                    if let Ok(event) = serde_json::from_value(json!({
+                        "type":"error", "sessionId":session_id, "seq":0,
+                        "at":chrono::Utc::now().to_rfc3339(), "fatal":false,
+                        "message":format!("the agent did not shut down cleanly: {error}")
+                    })) {
+                        let _ = database.append(event).await;
+                    }
+                }
+                let _ = reply.send(result);
                 return;
             }
             Err(mpsc::error::TryRecvError::Disconnected) => {
@@ -262,8 +276,9 @@ impl WorkbenchRegistry {
         drivers.insert(session_id.clone(), requests);
         drop(drivers);
         let live = self.drivers.clone();
+        let database = self.database.clone();
         tokio::spawn(async move {
-            supervise_driver(driver, receiver).await;
+            supervise_driver(database, session_id.clone(), driver, receiver).await;
             live.write().await.remove(&session_id);
         });
         Ok(launched.reply)
@@ -1070,6 +1085,20 @@ mod tests {
         phase: usize,
     }
 
+    struct RefusesTeardown;
+
+    impl ProviderDriver for RefusesTeardown {
+        fn brand(&self) -> &'static str {
+            "claude"
+        }
+        fn command<'a>(&'a mut self, _: &'a Command) -> DriverFuture<'a> {
+            Box::pin(async { Ok(json!({"ok":true})) })
+        }
+        fn close<'a>(&'a mut self) -> DriverFuture<'a> {
+            Box::pin(async { Err("provider process stayed behind".into()) })
+        }
+    }
+
     fn provider_event(identity: &str, text: &str) -> Event {
         serde_json::from_value(json!({
             "type":"notice", "sessionId":"session-1", "seq":0,
@@ -1113,6 +1142,8 @@ mod tests {
         let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
         let (send, receive) = mpsc::unbounded_channel();
         let task = tokio::spawn(supervise_driver(
+            database.clone(),
+            "session-1".into(),
             Box::new(DroppedDriver {
                 database: database.clone(),
                 phase: 0,
@@ -1133,5 +1164,35 @@ mod tests {
         );
         assert_eq!(events[0].fields["text"], "before drop");
         drop(send);
+    }
+
+    #[tokio::test]
+    async fn closing_detaches_even_when_provider_teardown_fails() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let (send, receive) = mpsc::unbounded_channel();
+        let task = tokio::spawn(supervise_driver(
+            database.clone(),
+            "session-1".into(),
+            Box::new(RefusesTeardown),
+            receive,
+        ));
+        let (reply, answer) = oneshot::channel();
+        send.send(DriverRequest::Close(
+            command(CommandKind::SessionClose, json!({"sessionId":"session-1"})),
+            reply,
+        ))
+        .unwrap();
+
+        assert_eq!(answer.await.unwrap().unwrap(), json!({"ok":true}));
+        task.await.unwrap();
+        let events = database.events_since("session-1".into(), 0).await.unwrap();
+        assert!(events.iter().any(|event| {
+            event.kind == crate::workbench::protocol::EventKind::Error
+                && event.fields["fatal"] == false
+                && event.fields["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("provider process stayed behind"))
+        }));
     }
 }
