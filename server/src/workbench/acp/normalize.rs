@@ -177,7 +177,12 @@ impl AcpNormalizer {
             .then(|| (TokenTally::prompt(&raw["usage"]), "acp-prompt"))
     }
 
-    fn add_agent_usage(&mut self, agent_id: &str, tokens: i64) -> bool {
+    fn add_agent_usage(
+        &mut self,
+        agent_id: &str,
+        tokens: i64,
+        included_in_prompt_usage: bool,
+    ) -> bool {
         let tokens = tokens.max(0);
         let previous = self
             .agent_usage_tokens
@@ -188,9 +193,11 @@ impl AcpNormalizer {
         }
         let delta = tokens - *previous;
         *previous = tokens;
-        self.cumulative_usage.total = self.cumulative_usage.total.saturating_add(delta);
+        if !included_in_prompt_usage {
+            self.cumulative_usage.total = self.cumulative_usage.total.saturating_add(delta);
+        }
         self.cumulative_usage.delegated = self.cumulative_usage.delegated.saturating_add(delta);
-        true
+        !included_in_prompt_usage
     }
 
     pub fn set_menu(&mut self, menu: Value) {
@@ -277,13 +284,14 @@ impl AcpNormalizer {
         }
     }
 
-    fn agent_usage(update: &Value) -> (i64, i64, i64, Value) {
+    fn agent_usage(update: &Value) -> (i64, i64, i64, Value, bool) {
         let usage = &update["_meta"]["atelier.dev/usage"];
         (
             usage["seconds"].as_i64().unwrap_or_default().max(0),
             usage["tokens"].as_i64().unwrap_or_default().max(0),
             usage["calls"].as_i64().unwrap_or_default().max(0),
             usage.get("model").cloned().unwrap_or(Value::Null),
+            usage["includedInPromptUsage"].as_bool().unwrap_or(false),
         )
     }
 
@@ -930,8 +938,8 @@ impl AcpNormalizer {
                             self.goose_tasks.insert(task_id.to_string(), id.clone());
                         }
                     } else if self.subagent_tools.remove(&id) {
-                        let (seconds, tokens, calls, model) = Self::agent_usage(update);
-                        if self.add_agent_usage(&id, tokens) {
+                        let (seconds, tokens, calls, model, included) = Self::agent_usage(update);
+                        if self.add_agent_usage(&id, tokens, included) {
                             events.push(self.envelope(
                                 session_id,
                                 provider,
@@ -1054,6 +1062,88 @@ impl AcpNormalizer {
                 vec![self.menu_event(session_id, provider, raw)]
             }
             Some("session_info_update") => self.session_info(session_id, provider, raw),
+            Some("async_task_spawned") => {
+                let id = update["asyncTaskId"].as_str().unwrap_or_default();
+                let task_type = update["taskType"].as_str().unwrap_or("task");
+                let kind = match task_type {
+                    "shell" => "command",
+                    "monitor" => "watch",
+                    "workflow" => "run",
+                    _ => "run",
+                };
+                let what = update["description"]
+                    .as_str()
+                    .filter(|value| !value.is_empty())
+                    .or_else(|| update["name"].as_str())
+                    .unwrap_or("Background task");
+                vec![self.envelope(
+                    session_id,
+                    provider,
+                    raw,
+                    json!({
+                        "type":"agent.started", "agentId":id,
+                        "toolCallId":update.get("toolCallId").cloned().unwrap_or(Value::Null),
+                        "kind":kind, "what":what, "agentType":task_type,
+                        "model":Value::Null, "acp":update
+                    }),
+                )]
+            }
+            Some("async_task_progress") => {
+                let usage = &update["usage"];
+                let milliseconds = usage["durationMs"].as_i64().unwrap_or_default().max(0);
+                let doing = update["summary"]
+                    .as_str()
+                    .filter(|value| !value.is_empty())
+                    .or_else(|| update["description"].as_str().filter(|value| !value.is_empty()))
+                    .or_else(|| update["lastToolName"].as_str().filter(|value| !value.is_empty()));
+                vec![self.envelope(
+                    session_id,
+                    provider,
+                    raw,
+                    json!({
+                        "type":"agent.progress", "agentId":update["asyncTaskId"],
+                        "seconds":milliseconds.saturating_add(500) / 1000,
+                        "tokens":usage["totalTokens"].as_i64().unwrap_or_default().max(0),
+                        "calls":usage["toolUses"].as_i64().unwrap_or_default().max(0),
+                        "doing":doing, "state":"running", "acp":update
+                    }),
+                )]
+            }
+            Some("async_task_state_update") => {
+                let native_state = update["state"].as_str().unwrap_or("running");
+                if matches!(native_state, "running" | "paused") {
+                    return vec![self.envelope(
+                        session_id,
+                        provider,
+                        raw,
+                        json!({
+                            "type":"agent.progress", "agentId":update["asyncTaskId"],
+                            "seconds":0, "tokens":0, "calls":0,
+                            "doing":update.get("summary").cloned().unwrap_or(Value::Null),
+                            "state":if native_state == "paused" { "parked" } else { "running" },
+                            "acp":update
+                        }),
+                    )];
+                }
+                let state = if native_state == "completed" {
+                    "done"
+                } else if native_state == "stopped" {
+                    "stopped"
+                } else {
+                    "failed"
+                };
+                vec![self.envelope(
+                    session_id,
+                    provider,
+                    raw,
+                    json!({
+                        "type":"agent.finished", "agentId":update["asyncTaskId"],
+                        "state":state, "result":update.get("summary").cloned().unwrap_or(Value::Null),
+                        "seconds":0, "tokens":0, "calls":0, "model":Value::Null,
+                        "acp":update
+                    }),
+                )]
+            }
             Some("subagent_spawned") => {
                 let child = update["subagentSessionId"].as_str().unwrap_or_default().to_string();
                 self.agent_tools.insert(child.clone(), child.clone());
@@ -1074,7 +1164,7 @@ impl AcpNormalizer {
             }
             Some("subagent_state_update") => {
                 let child = update["subagentSessionId"].as_str().unwrap_or_default();
-                let (seconds, tokens, calls, model) = Self::agent_usage(update);
+                let (seconds, tokens, calls, model, included) = Self::agent_usage(update);
                 let state = match update["state"].as_str() {
                     Some("completed") => "done",
                     Some("cancelled") => "stopped",
@@ -1083,7 +1173,7 @@ impl AcpNormalizer {
                 };
                 if state == "running" {
                     let mut events = Vec::new();
-                    if self.add_agent_usage(child, tokens) {
+                    if self.add_agent_usage(child, tokens, included) {
                         events.push(self.envelope(
                             session_id, provider, raw,
                             json!({"type":"cost","cost":self.cumulative_usage.value(),"source":"acp-subagent"}),
@@ -1097,7 +1187,7 @@ impl AcpNormalizer {
                 } else {
                     self.subagent_tools.remove(child);
                     let mut events = Vec::new();
-                    if self.add_agent_usage(child, tokens) {
+                    if self.add_agent_usage(child, tokens, included) {
                         events.push(self.envelope(
                             session_id, provider, raw,
                             json!({"type":"cost","cost":self.cumulative_usage.value(),"source":"acp-subagent"}),
@@ -1116,8 +1206,9 @@ impl AcpNormalizer {
                 let child = update["subagentSessionId"].as_str().unwrap_or_default();
                 let usage = &update["usage"];
                 let tokens = usage["tokens"].as_i64().unwrap_or_default().max(0);
+                let included = usage["includedInPromptUsage"].as_bool().unwrap_or(false);
                 let mut events = Vec::new();
-                if self.add_agent_usage(child, tokens) {
+                if self.add_agent_usage(child, tokens, included) {
                     events.push(self.envelope(
                         session_id, provider, raw,
                         json!({"type":"cost","cost":self.cumulative_usage.value(),"source":"acp-subagent"}),
@@ -1784,9 +1875,11 @@ mod tests {
                 "sessionId":"remote","update":{"sessionUpdate":"tool_call_update",
                 "toolCallId":"agent-1","status":"completed","rawOutput":"Complete",
                 "_meta":{"claudeCode":{"toolName":"Agent"},
-                "atelier.dev/usage":{"seconds":21,"tokens":11735,"calls":2}}}
+                "atelier.dev/usage":{"seconds":21,"tokens":11735,"calls":2,
+                "includedInPromptUsage":true}}}
             }),
         );
+        assert_eq!(kinds(&events), vec!["tool.completed", "agent.finished"]);
         let finished = events
             .iter()
             .map(|event| serde_json::to_value(event).unwrap())
@@ -1795,6 +1888,74 @@ mod tests {
         assert_eq!(finished["seconds"], 21);
         assert_eq!(finished["tokens"], 11735);
         assert_eq!(finished["calls"], 2);
+
+        let settled = normalizer.finish_turn(
+            "local",
+            "claude",
+            &json!({
+                "stopReason":"end_turn",
+                "usage":{"inputTokens":10,"outputTokens":5,"totalTokens":15},
+                "_meta":{"quota":{"model_usage":[{
+                    "model":"claude-opus","token_count":{
+                        "inputTokens":10000,"outputTokens":1735,"totalTokens":11735
+                    }
+                }]}}
+            }),
+        );
+        let cost = settled
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "cost")
+            .unwrap();
+        assert_eq!(cost["cost"]["total"], 11735);
+        assert_eq!(cost["cost"]["delegated"], 11735);
+    }
+
+    #[test]
+    fn native_async_tasks_use_the_same_provider_neutral_agent_rows() {
+        let mut normalizer = AcpNormalizer::default();
+        let started = normalizer.update(
+            "local",
+            "claude",
+            &json!({
+                "sessionId":"remote","update":{"sessionUpdate":"async_task_spawned",
+                "asyncTaskId":"task-1","name":"Build release","taskType":"shell",
+                "description":"cargo build --release","showInTranscript":true,"canStop":true}
+            }),
+        );
+        assert_eq!(kinds(&started), vec!["agent.started"]);
+        let started = serde_json::to_value(&started[0]).unwrap();
+        assert_eq!(started["kind"], "command");
+        assert_eq!(started["toolCallId"], Value::Null);
+
+        let progress = normalizer.update(
+            "local",
+            "claude",
+            &json!({
+                "sessionId":"remote","update":{"sessionUpdate":"async_task_progress",
+                "asyncTaskId":"task-1","summary":"Linking","lastToolName":"Bash",
+                "usage":{"totalTokens":500,"toolUses":3,"durationMs":2499}}
+            }),
+        );
+        let progress = serde_json::to_value(&progress[0]).unwrap();
+        assert_eq!(progress["type"], "agent.progress");
+        assert_eq!(progress["seconds"], 2);
+        assert_eq!(progress["tokens"], 500);
+        assert_eq!(progress["calls"], 3);
+        assert_eq!(progress["doing"], "Linking");
+
+        let finished = normalizer.update(
+            "local",
+            "claude",
+            &json!({
+                "sessionId":"remote","update":{"sessionUpdate":"async_task_state_update",
+                "asyncTaskId":"task-1","state":"completed","summary":"Built"}
+            }),
+        );
+        let finished = serde_json::to_value(&finished[0]).unwrap();
+        assert_eq!(finished["type"], "agent.finished");
+        assert_eq!(finished["state"], "done");
+        assert_eq!(finished["result"], "Built");
     }
 
     #[test]

@@ -7,16 +7,16 @@ import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 
 const CLAUDE = Object.freeze({
-  version: '0.70.0',
-  commit: 'd0aafb1ca26427285ffaeac8d8a4452fff28e9c3',
+  version: '0.73.0',
+  commit: 'ea7076c0bc324603e65d8c124b7573f158749969',
   repository: 'https://github.com/agentclientprotocol/claude-agent-acp.git',
-  providerVersion: '0.3.232',
+  providerVersion: '0.3.257',
 });
 const CODEX = Object.freeze({
-  version: '1.7.0',
-  commit: '2b48e9822330fc09f3a94a81563e5c4bb779601a',
+  version: '1.8.0',
+  commit: '87997e2627e8fa246a49de533c612f6196c4004e',
   repository: 'https://github.com/agentclientprotocol/codex-acp.git',
-  providerVersion: '0.148.0',
+  providerVersion: '0.152.0',
 });
 const GOOSE = Object.freeze({
   version: '1.41.0',
@@ -190,7 +190,7 @@ function patchCodexSessionPolicy(source) {
   const roots = 'const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);';
   const policy = `${roots}\n        const atelierSessionPolicy = (request._meta as { atelier?: { sessionPolicy?: unknown } } | undefined)?.atelier?.sessionPolicy;`;
   const rootCount = code.split(roots).length - 1;
-  if (rootCount !== 3) {
+  if (rootCount !== 4) {
     throw new Error(`codex-acp session root shape changed (${rootCount}); audit the pinned policy patch`);
   }
   code = code.split(roots).join(policy);
@@ -210,6 +210,14 @@ function patchCodexSessionPolicy(source) {
   if (configurationCount !== 3) {
     throw new Error(`codex-acp session config shape changed (${configurationCount}); audit the pinned policy patch`);
   }
+
+  const forkConfiguration = `createSessionConfig: (cwd, directories, mcpServers) =>
+                this.createSessionConfig(cwd, directories, mcpServers),`;
+  if (code.split(forkConfiguration).length - 1 !== 1) {
+    throw new Error('codex-acp fork config shape changed; audit the pinned policy patch');
+  }
+  code = code.replace(forkConfiguration, `createSessionConfig: async (cwd, directories, mcpServers) =>
+                ({ ...await this.createSessionConfig(cwd, directories, mcpServers), ...(typeof atelierSessionPolicy === 'string' ? { developer_instructions: atelierSessionPolicy } : {}) }),`);
   writeFileSync(sessionFile, code);
 }
 
@@ -383,6 +391,13 @@ function patchClaudeWindowNow(source) {
       throw RequestError.invalidParams({ sessionId: params.sessionId }, "Unknown session");
     }
     if (params.action === "stop") {
+      if (session.asyncTaskRuntime?.canStop(params.agentId)) {
+        const stopped = await this.stopAsyncTask({
+          sessionId: params.sessionId,
+          asyncTaskId: params.agentId,
+        });
+        return { ok: stopped.stopped };
+      }
       await session.query.stopTask(params.agentId);
       return { ok: true };
     }
@@ -446,15 +461,88 @@ ${routeAnchor}`;
 }
 
 function patchClaudeAccounting(source) {
+  const types = join(source, 'src', 'acp-subagents.ts');
+  let code = readFileSync(types, 'utf8');
+  const stateType = `export type SubagentStateUpdate = {
+  sessionUpdate: "subagent_state_update";
+  subagentSessionId: string;
+  state: SubagentState;
+  _meta?: Record<string, unknown> | null;
+};`;
+  if (code.split(stateType).length - 1 !== 1) {
+    throw new Error('claude-acp subagent update union changed; audit child accounting parity');
+  }
+  code = code.replace(stateType, `${stateType}
+
+export type SubagentUsageUpdate = {
+  sessionUpdate: "subagent_usage_update";
+  subagentSessionId: string;
+  usage: {
+    seconds: number;
+    tokens: number;
+    calls: number;
+    includedInPromptUsage: true;
+  };
+  _meta?: Record<string, unknown> | null;
+};`);
+  const union = `  | SubagentStateUpdate
+  | AsyncTaskSpawnedUpdate`;
+  if (code.split(union).length - 1 !== 1) {
+    throw new Error('claude-acp session update members changed; audit child accounting parity');
+  }
+  code = code.replace(union, `  | SubagentStateUpdate
+  | SubagentUsageUpdate
+  | AsyncTaskSpawnedUpdate`);
+  writeFileSync(types, code);
+
+  const native = join(source, 'src', 'native-subagents.ts');
+  code = readFileSync(native, 'utf8');
+  const finishAnchor = `  async finishTask(`;
+  if (code.split(finishAnchor).length - 1 !== 1) {
+    throw new Error('claude-acp native child runtime changed; audit child accounting parity');
+  }
+  code = code.replace(finishAnchor, `  async toolUsage(
+    toolUseId: string,
+    usage: { seconds: number; tokens: number; calls: number },
+  ): Promise<void> {
+    if (!this.enabled) return;
+    const child = this.childByParentToolUse.get(toolUseId);
+    if (!child) return;
+    await announceNativeSubagent(child, this.publish);
+    await this.publish({
+      sessionId: child.parentSessionId,
+      update: {
+        sessionUpdate: "subagent_usage_update",
+        subagentSessionId: child.sessionId,
+        usage: { ...usage, includedInPromptUsage: true },
+      },
+    });
+  }
+
+${finishAnchor}`);
+  const childAnchor = `      const child = this.childByParentToolUse.get(toolCallId);
+      if (child && !child.announced) {`;
+  if (code.split(childAnchor).length - 1 !== 1) {
+    throw new Error('claude-acp native child routing changed; audit child accounting parity');
+  }
+  code = code.replace(childAnchor, `      const child = this.childByParentToolUse.get(toolCallId);
+      const atelierUsage = update._meta?.["atelier.dev/usage"] as
+        { seconds: number; tokens: number; calls: number } | undefined;
+      if (child && atelierUsage) await this.toolUsage(toolCallId, atelierUsage);
+      if (child && !child.announced) {`);
+  writeFileSync(native, code);
+
   const agent = join(source, 'src', 'acp-agent.ts');
-  let code = readFileSync(agent, 'utf8');
+  code = readFileSync(agent, 'utf8');
   const metaType = `export type ToolUpdateMeta = {
   claudeCode?: {`;
   if (code.split(metaType).length - 1 !== 1) {
     throw new Error('claude-acp tool metadata shape changed; audit child accounting parity');
   }
   code = code.replace(metaType, `export type ToolUpdateMeta = {
-  "atelier.dev/usage"?: { seconds: number; tokens: number; calls: number };
+  "atelier.dev/usage"?: {
+    seconds: number; tokens: number; calls: number; includedInPromptUsage: true;
+  };
   claudeCode?: {`);
 
   const resultAnchor = `          const { _meta: toolMeta, ...toolUpdate } = toolUpdateFromToolResult(
@@ -495,6 +583,7 @@ function patchClaudeAccounting(source) {
                   seconds: Math.round(Number(atelierAgentUsage.totalDurationMs ?? 0) / 1000),
                   tokens: Number(atelierAgentUsage.totalTokens ?? 0),
                   calls: Number(atelierAgentUsage.totalToolUseCount ?? 0),
+                  includedInPromptUsage: true,
                 },
               } : {}),
               ...(toolMeta?.terminal_exit ? { terminal_exit: toolMeta.terminal_exit } : {}),`);

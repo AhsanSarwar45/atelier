@@ -3,8 +3,8 @@
 use agent_client_protocol::AcpAgentConfig;
 use std::path::{Path, PathBuf};
 
-pub const CLAUDE_ADAPTER_VERSION: &str = "0.70.0";
-pub const CODEX_ADAPTER_VERSION: &str = "1.7.0";
+pub const CLAUDE_ADAPTER_VERSION: &str = "0.73.0";
+pub const CODEX_ADAPTER_VERSION: &str = "1.8.0";
 pub const GOOSE_ADAPTER_VERSION: &str = "1.41.0";
 
 fn executable_name(brand: &str) -> String {
@@ -145,8 +145,8 @@ mod tests {
 
     #[test]
     fn versions_are_release_pinned() {
-        assert_eq!(CLAUDE_ADAPTER_VERSION, "0.70.0");
-        assert_eq!(CODEX_ADAPTER_VERSION, "1.7.0");
+        assert_eq!(CLAUDE_ADAPTER_VERSION, "0.73.0");
+        assert_eq!(CODEX_ADAPTER_VERSION, "1.8.0");
         assert_eq!(GOOSE_ADAPTER_VERSION, "1.41.0");
     }
 

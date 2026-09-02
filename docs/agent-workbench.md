@@ -284,7 +284,7 @@ no collaboration control for an empty list.
 
 ### 3.1 Claude
 
-Launched through `@anthropic-ai/claude-agent-sdk` (npm, currently 0.3.232),
+Launched through `@anthropic-ai/claude-agent-sdk` (release-pinned at 0.3.257),
 which wraps `claude --input-format stream-json --output-format stream-json
 --verbose` and adds the typed message stream, `canUseTool`, `set_permission_mode`
 and hooks.

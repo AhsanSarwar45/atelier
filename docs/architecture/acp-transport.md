@@ -27,22 +27,29 @@ Release inputs are exact, audited pins:
 | component | pin |
 | --- | --- |
 | Rust `agent-client-protocol` SDK | 2.0.0 with stable v1, draft-v2 types, end-turn usage and elicitation |
-| Claude ACP adapter | 0.70.0, commit `d0aafb1ca26427285ffaeac8d8a4452fff28e9c3` |
-| Claude native provider | 0.3.232 |
-| Codex ACP adapter | 1.7.0, commit `2b48e9822330fc09f3a94a81563e5c4bb779601a` |
-| Codex native provider | 0.148.0 |
+| Claude ACP adapter | 0.73.0, commit `ea7076c0bc324603e65d8c124b7573f158749969` |
+| Claude native provider | 0.3.257 |
+| Codex ACP adapter | 1.8.0, commit `87997e2627e8fa246a49de533c612f6196c4004e` |
+| Codex native provider | 0.152.0 |
 | Goose local ACP harness | 1.41.0, commit `39c27c387d726ce4605108d2f974d4feec158ed5` |
 | build-time Bun compiler | 1.3.13 |
 
-The pinned Codex adapter predates three requirements of Atelier's pinned Codex
-integration: it omits `--stdio`, removes the JSON-RPC 2.0 marker, and has no
-standard field for Atelier's shared session policy. The build applies three
-exact, fail-closed source patches. The policy patch reads only
+The stable Claude adapter supplies accounting-grade per-model quota, native
+subagents, async tasks, session forks, MCP OAuth2 and dynamically announced
+permission/model/effort controls. Atelier adds only narrow compatibility
+extensions for an immediate context-window reading, its existing agent control
+bar, exact child accounting on the shared agent row and rich question notes.
+
+The pinned Codex adapter predates several requirements of Atelier's integration:
+stdio app-server launch, JSON-RPC 2.0 framing, the shared session policy, exact
+agent controls/accounting and rich question notes. Each compatibility patch is
+an exact, fail-closed source transform. The policy patch reads only
 `_meta.atelier.sessionPolicy` and merges it into Codex's
-`developer_instructions` configuration for new, resumed and loaded sessions.
-If any upstream source shape
-changes, the release fails and requires a new audit. The manifest records these
-patches and the SHA-256 of every executable.
+`developer_instructions` configuration for new, resumed, loaded and forked sessions.
+Both patched adapters must pass their own TypeScript compiler before Bun may
+package them. If any upstream source shape changes, the release fails and
+requires a new audit. The manifest records every patch and the SHA-256 of every
+executable.
 
 Both published adapters currently negotiate ACP wire protocol 1. Their shared
 TypeScript SDK reports `PROTOCOL_VERSION = 1`; Codex's separately named
@@ -72,8 +79,10 @@ The mapping covers:
 - slash commands and later command-catalog updates;
 - provider, project and client-supplied MCP servers, with ACP additions merged
   into rather than replacing each agent's own configured servers;
-- context occupancy, canonical USD charges when supplied, and cumulative end-of-turn token usage;
-- native subagent lifecycle, child transcript attribution and controls;
+- context occupancy, canonical USD charges when supplied, cumulative end-of-turn token usage,
+  and accounting-grade internal/subagent usage without double counting;
+- native subagent and async shell/workflow/monitor lifecycle, child transcript attribution,
+  exact usage and controls through the same provider-neutral agent rows;
 - lossless preservation of unknown extension messages as machine-detail notes.
 
 The current released Codex adapter's full announced surface stays enabled:
