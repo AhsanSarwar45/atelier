@@ -20,6 +20,7 @@ use futures::{stream, Stream, StreamExt};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};
 use tokio::sync::broadcast;
 
@@ -48,6 +49,10 @@ pub struct WorkbenchState {
     >,
     codex_records: Arc<std::sync::Mutex<HashMap<String, std::path::PathBuf>>>,
     claim_sweeps: Arc<tokio::sync::Mutex<HashMap<std::path::PathBuf, std::time::Instant>>>,
+    watch_polls: broadcast::Sender<Value>,
+    watch_pollers: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    watch_poll_subscribers: Arc<AtomicUsize>,
+    watch_poll_wake: Arc<tokio::sync::Notify>,
 }
 
 #[derive(Default)]
@@ -56,8 +61,21 @@ struct HoldMemory {
     summaries: crate::workbench::summary::SummaryTracker,
 }
 
+struct WatchPollLease {
+    subscribers: Arc<AtomicUsize>,
+    wake: Arc<tokio::sync::Notify>,
+}
+
+impl Drop for WatchPollLease {
+    fn drop(&mut self) {
+        self.subscribers.fetch_sub(1, Ordering::AcqRel);
+        self.wake.notify_one();
+    }
+}
+
 impl WorkbenchState {
     pub fn new(registry: WorkbenchRegistry) -> Self {
+        let (watch_polls, _) = broadcast::channel(16);
         Self {
             registry: Arc::new(registry),
             hold_memory: Arc::new(tokio::sync::Mutex::new(HoldMemory::default())),
@@ -67,6 +85,10 @@ impl WorkbenchState {
             codex_readers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             codex_records: Arc::new(std::sync::Mutex::new(HashMap::new())),
             claim_sweeps: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            watch_polls,
+            watch_pollers: Arc::new(tokio::sync::Mutex::new(None)),
+            watch_poll_subscribers: Arc::new(AtomicUsize::new(0)),
+            watch_poll_wake: Arc::new(tokio::sync::Notify::new()),
         }
     }
 
@@ -260,6 +282,64 @@ impl WorkbenchState {
         };
         if let Some(transport) = removed {
             transport.close().await;
+        }
+    }
+
+    async fn watch_poll_subscription(&self) -> (broadcast::Receiver<Value>, WatchPollLease) {
+        let receiver = self.watch_polls.subscribe();
+        self.watch_poll_subscribers.fetch_add(1, Ordering::AcqRel);
+        let lease = WatchPollLease {
+            subscribers: self.watch_poll_subscribers.clone(),
+            wake: self.watch_poll_wake.clone(),
+        };
+        let mut poller = self.watch_pollers.lock().await;
+        let running = poller.as_ref().is_some_and(|task| !task.is_finished());
+        if !running {
+            let state = self.clone();
+            *poller = Some(tokio::spawn(async move { state.run_watch_poller().await }));
+        }
+        (receiver, lease)
+    }
+
+    async fn run_watch_poller(self) {
+        let mut last_holds = serde_json::to_value(self.provider_holds().await).unwrap_or_default();
+        let mut hold_tick = tokio::time::interval_at(
+            tokio::time::Instant::now() + Duration::from_secs(2),
+            Duration::from_secs(2),
+        );
+        let mut usage_tick = tokio::time::interval(Duration::from_secs(30));
+        loop {
+            if self.watch_poll_subscribers.load(Ordering::Acquire) == 0 {
+                return;
+            }
+            tokio::select! {
+                _ = self.watch_poll_wake.notified() => {},
+                _ = hold_tick.tick() => {
+                    let current = serde_json::to_value(self.provider_holds().await).unwrap_or_default();
+                    if current != last_holds {
+                        last_holds = current.clone();
+                        let _ = self.watch_polls.send(json!({"kind":"running","holds":current}));
+                    }
+                },
+                _ = usage_tick.tick() => {
+                    let readings = async {
+                        tokio::join!(
+                            self.account_usage("claude"),
+                            self.account_usage("codex"),
+                        )
+                    };
+                    tokio::select! {
+                        _ = self.watch_poll_wake.notified() => {},
+                        (claude, codex) = readings => {
+                            for (brand, result) in [("claude", claude), ("codex", codex)] {
+                                if let Ok(usage) = result {
+                                    let _ = self.watch_polls.send(json!({"kind":"usage","brand":brand,"usage":usage}));
+                                }
+                            }
+                        }
+                    }
+                },
+            }
         }
     }
 
@@ -1157,27 +1237,18 @@ async fn watch(State(state): State<WorkbenchState>) -> Result<Sse<EventStream>, 
     let mut receiver = state.database().subscribe_all();
     let (tx, rx) = tokio::sync::mpsc::channel(100);
     tokio::spawn(async move {
-        let Some(mut last_holds) = send_watch_snapshot(&state, &tx).await else {
+        let Some(_) = send_watch_snapshot(&state, &tx).await else {
             return;
         };
-        let mut hold_tick = tokio::time::interval(Duration::from_secs(2));
-        let mut usage_tick = tokio::time::interval(Duration::from_secs(30));
+        let (mut polls, _poll_lease) = state.watch_poll_subscription().await;
         loop {
             tokio::select! {
-                _=hold_tick.tick()=>{
-                    let current=serde_json::to_value(state.provider_holds().await).unwrap_or_default();
-                    if current!=last_holds {last_holds=current.clone();if tx.send(Ok(watch_frame(json!({"kind":"running","holds":current})))).await.is_err(){return}}
-                },
-                _=usage_tick.tick()=>{
-                    let (claude, codex) = tokio::join!(
-                        state.account_usage("claude"),
-                        state.account_usage("codex"),
-                    );
-                    for (brand, result) in [("claude", claude), ("codex", codex)] {
-                        if let Ok(usage) = result {
-                            if tx.send(Ok(watch_frame(json!({"kind":"usage","brand":brand,"usage":usage})))).await.is_err(){return}
-                        }
+                polled=polls.recv()=>match polled {
+                    Ok(frame) => {
+                        if tx.send(Ok(watch_frame(frame))).await.is_err(){return}
                     }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return,
                 },
                 received=receiver.recv()=>match received{
                     Ok(update)=>{
@@ -1190,8 +1261,7 @@ async fn watch(State(state): State<WorkbenchState>) -> Result<Sse<EventStream>, 
                         if tx.send(Ok(watch_frame(json!({"kind":"event","event":update.event})))).await.is_err(){return}
                     },
                     Err(broadcast::error::RecvError::Lagged(_))=>{
-                        let Some(current)=send_watch_snapshot(&state,&tx).await else{return};
-                        last_holds=current
+                        if send_watch_snapshot(&state,&tx).await.is_none(){return}
                     },
                     Err(broadcast::error::RecvError::Closed)=>return
                 }
@@ -1452,6 +1522,47 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn every_browser_shares_one_poller_and_the_last_one_stops_it() {
+        let (_directory, state) = fixture();
+        {
+            let mut cache = state.usage_cache.lock().await;
+            for brand in ["claude", "codex"] {
+                cache.insert(
+                    brand.into(),
+                    (std::time::Instant::now(), json!({"at":"now"})),
+                );
+            }
+        }
+
+        let (_first_rx, first) = state.watch_poll_subscription().await;
+        let first_task = state.watch_pollers.lock().await.as_ref().unwrap().id();
+        let (_second_rx, second) = state.watch_poll_subscription().await;
+        let second_task = state.watch_pollers.lock().await.as_ref().unwrap().id();
+        assert_eq!(first_task, second_task);
+        assert_eq!(state.watch_poll_subscribers.load(Ordering::Acquire), 2);
+
+        drop(first);
+        assert_eq!(state.watch_poll_subscribers.load(Ordering::Acquire), 1);
+        drop(second);
+        tokio::time::timeout(Duration::from_millis(250), async {
+            loop {
+                if state
+                    .watch_pollers
+                    .lock()
+                    .await
+                    .as_ref()
+                    .is_some_and(|task| task.is_finished())
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the shared poller outlived its last browser");
     }
 
     fn notice() -> Event {
