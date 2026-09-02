@@ -28,3 +28,12 @@ export function useProviders() {
   }, []);
   return providers;
 }
+
+/** Availability is a server fact; no caller may infer it from a CLI or model name. */
+export function providerIsAvailable(providers: ProviderAvailability[], brand: Brand): boolean {
+  return providers.some((provider) => provider.brand === brand && provider.available);
+}
+
+export function firstAvailableProvider(providers: ProviderAvailability[]): Brand | null {
+  return providers.find((provider) => provider.available)?.brand ?? null;
+}

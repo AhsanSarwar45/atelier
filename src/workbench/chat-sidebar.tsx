@@ -343,6 +343,7 @@ export function ChatSidebar({
   onClose,
 }: ChatSidebarProps) {
   const providers = useProviders();
+  const anyProviderAvailable = providers.some((provider) => provider.available);
   const [fetched, setFetched] = useState<RestoreRow[]>([]);
   const live = useLiveSessions();
   const running = useRunningElsewhere();
@@ -568,7 +569,7 @@ export function ChatSidebar({
                   className="rounded-r-none border-r border-primary-foreground/20"
                   data-testid="new-chat-tool"
                   aria-label="New Chat"
-                  disabled={startingNewChat}
+                  disabled={startingNewChat || !anyProviderAvailable}
                   onClick={() => onNewChat()}
                 >
                   {startingNewChat ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Plus data-testid="new-chat-plus" aria-hidden="true" />}
@@ -583,7 +584,7 @@ export function ChatSidebar({
                       className="rounded-l-none px-2"
                       aria-label="New chat options"
                       data-testid="new-chat-menu"
-                      disabled={startingNewChat}
+                      disabled={startingNewChat || !anyProviderAvailable}
                     >
                       <ChevronDown aria-hidden="true" />
                     </Button>
@@ -601,9 +602,11 @@ export function ChatSidebar({
                         <DropdownMenuLabel>Main button</DropdownMenuLabel>
                         <DropdownMenuRadioGroup value={newChatDefault} onValueChange={(value) => onNewChatDefault(value as Brand | 'ask')}>
                           <DropdownMenuRadioItem value="ask">Ask every time</DropdownMenuRadioItem>
-                          <DropdownMenuRadioItem value="claude">Use Claude by default</DropdownMenuRadioItem>
-                          <DropdownMenuRadioItem value="codex">Use Codex by default</DropdownMenuRadioItem>
-                          <DropdownMenuRadioItem value="local">Use Local models by default</DropdownMenuRadioItem>
+                          {providers.map(({ brand, available }) => (
+                            <DropdownMenuRadioItem key={brand} value={brand} disabled={!available}>
+                              Use {brandName(brand)} by default
+                            </DropdownMenuRadioItem>
+                          ))}
                         </DropdownMenuRadioGroup>
                       </>
                     )}

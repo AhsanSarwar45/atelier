@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Build this checkout, put that exact build where `atelier` currently lives,
-# and make the computer's Atelier service run it.
+# Build this checkout, put that exact build and its pinned ACP runtimes where
+# `atelier` currently lives, and make the computer's Atelier service run it.
 #
 #   scripts/install-local.sh
 #   scripts/install-local.sh --dry-run
@@ -82,31 +82,70 @@ else
   TARGET=${HOME:?HOME is not set}/.local/bin/atelier
 fi
 
+# Preserve an installer-managed link such as Homebrew's `bin/atelier`. Writing
+# through it with `install` unlinks the link and divorces the local build from
+# the package prefix that owns it.
+if [ -L "$TARGET" ]; then
+  LINK=$(readlink "$TARGET")
+  case "$LINK" in
+    /*) TARGET=$LINK ;;
+    *) TARGET=$(dirname "$TARGET")/$LINK ;;
+  esac
+  TARGET=$(cd "$(dirname "$TARGET")" && pwd -P)/$(basename "$TARGET")
+fi
+
 TARGET_DIR=$(dirname "$TARGET")
 BUILT=server/target/release/atelier
 if [ "${OS:-}" = Windows_NT ]; then
   BUILT=server/target/release/atelier.exe
 fi
+ADAPTERS=server/target/release/atelier-adapters
+case "$(uname -s):$(uname -m)" in
+  Darwin:arm64) ACP_TARGET=aarch64-apple-darwin ;;
+  Darwin:x86_64) ACP_TARGET=x86_64-apple-darwin ;;
+  Linux:x86_64) ACP_TARGET=x86_64-unknown-linux-gnu ;;
+  MINGW*:x86_64|MSYS*:x86_64) ACP_TARGET=x86_64-pc-windows-msvc ;;
+  *) die "there is no bundled ACP build target for $(uname -s) $(uname -m)" ;;
+esac
 
-step "1/3  Build this checkout"
+step "1/4  Build this checkout"
 run npm ci
 run npm run build
 run cargo build --release --locked --manifest-path server/Cargo.toml
 [ "$DRY_RUN" = 1 ] || [ -x "$BUILT" ] || die "the build did not produce $BUILT"
 ok "release binary is ready"
 
-step "2/3  Replace the installed command"
+step "2/4  Build the pinned provider runtimes"
+run node scripts/build-acp-adapters.mjs "$ACP_TARGET" "$ADAPTERS"
+if [ "$DRY_RUN" != 1 ]; then
+  for file in claude-acp codex-acp goose-acp claude-provider codex-provider codex-code-mode-host manifest.json; do
+    [ -f "$ADAPTERS/$file" ] || die "the adapter build did not produce $ADAPTERS/$file"
+  done
+fi
+ok "complete ACP runtime bundle is ready"
+
+step "3/4  Replace the installed runtime"
 run mkdir -p "$TARGET_DIR"
 if [ -w "$TARGET_DIR" ]; then
-  run install -m 755 "$BUILT" "$TARGET"
+  ADMIN=()
 elif command -v sudo >/dev/null 2>&1; then
-  run sudo install -m 755 "$BUILT" "$TARGET"
+  ADMIN=(sudo)
 else
   die "$TARGET_DIR is not writable and sudo is unavailable"
 fi
-ok "installed $TARGET"
 
-step "3/3  Register and start the new build"
+ADAPTER_TARGET=$TARGET_DIR/atelier-adapters
+run "${ADMIN[@]}" mkdir -p "$ADAPTER_TARGET"
+for file in claude-acp codex-acp goose-acp claude-provider codex-provider codex-code-mode-host; do
+  run "${ADMIN[@]}" install -m 755 "$ADAPTERS/$file" "$ADAPTER_TARGET/$file"
+done
+run "${ADMIN[@]}" install -m 644 "$ADAPTERS/manifest.json" "$ADAPTER_TARGET/manifest.json"
+# Last on purpose: handover watches this file. It only restarts after every
+# executable the new program needs is complete and in its final place.
+run "${ADMIN[@]}" install -m 755 "$BUILT" "$TARGET"
+ok "installed $TARGET and $ADAPTER_TARGET"
+
+step "4/4  Register and start the new build"
 run "$TARGET" service install
 ok "the Atelier service now uses $TARGET"
 

@@ -14,7 +14,7 @@ trap 'rm -rf -- "$TEST_ROOT"' EXIT
 FAKE_BIN=$TEST_ROOT/bin
 mkdir -p "$FAKE_BIN"
 
-for name in npm cargo install atelier; do
+for name in npm node bun git cargo install atelier; do
   printf '#!/usr/bin/env bash\nprintf "ran %s\\n" "$0" >> "%s"\n' "$TEST_ROOT/ran" > "$FAKE_BIN/$name"
   chmod +x "$FAKE_BIN/$name"
 done
@@ -23,6 +23,10 @@ OUTPUT=$(PATH="$FAKE_BIN:$PATH" HOME="$TEST_ROOT/home" scripts/install-local.sh 
 has "$OUTPUT" "npm ci"
 has "$OUTPUT" "npm run build"
 has "$OUTPUT" "cargo build --release --locked --manifest-path server/Cargo.toml"
+has "$OUTPUT" "node scripts/build-acp-adapters.mjs x86_64-unknown-linux-gnu server/target/release/atelier-adapters"
+has "$OUTPUT" "mkdir -p $FAKE_BIN/atelier-adapters"
+has "$OUTPUT" "install -m 755 server/target/release/atelier-adapters/claude-acp $FAKE_BIN/atelier-adapters/claude-acp"
+has "$OUTPUT" "install -m 644 server/target/release/atelier-adapters/manifest.json $FAKE_BIN/atelier-adapters/manifest.json"
 has "$OUTPUT" "install -m 755 server/target/release/atelier $FAKE_BIN/atelier"
 has "$OUTPUT" "$FAKE_BIN/atelier service install"
 [ ! -e "$TEST_ROOT/ran" ] || fail "dry-run executed a mocked command"
@@ -30,6 +34,8 @@ has "$OUTPUT" "$FAKE_BIN/atelier service install"
 EXPLICIT=$TEST_ROOT/chosen/atelier
 OUTPUT=$(PATH="$FAKE_BIN:$PATH" HOME="$TEST_ROOT/home" ATELIER_INSTALL_PATH="$EXPLICIT" scripts/install-local.sh --dry-run)
 has "$OUTPUT" "mkdir -p $TEST_ROOT/chosen"
+has "$OUTPUT" "mkdir -p $TEST_ROOT/chosen/atelier-adapters"
+has "$OUTPUT" "install -m 755 server/target/release/atelier-adapters/codex-acp $TEST_ROOT/chosen/atelier-adapters/codex-acp"
 has "$OUTPUT" "install -m 755 server/target/release/atelier $EXPLICIT"
 has "$OUTPUT" "$EXPLICIT service install"
 [ ! -e "$TEST_ROOT/ran" ] || fail "explicit-path dry-run executed a mocked command"

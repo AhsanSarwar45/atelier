@@ -92,7 +92,7 @@ import { BrandIcon, ProviderBadge, brandName } from '@/workbench/brand-icon';
 import { workingLine } from '@/workbench/working-line';
 import { PictureViewer } from '@/workbench/picture-viewer';
 import { useEpicChecklist } from '@/workbench/epic-checklist';
-import { useProviders } from '@/workbench/providers';
+import { firstAvailableProvider, providerIsAvailable, useProviders } from '@/workbench/providers';
 import { ModelIcon } from '@/workbench/model-icon';
 
 export { PictureViewer } from '@/workbench/picture-viewer';
@@ -603,6 +603,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [modelDefaults, setModelDefaults] = useState<Partial<Record<Brand, string>>>({});
   const [effortDefaults, setEffortDefaults] = useState<Partial<Record<Brand, string>>>({});
   const [composerSettingsOpen, setComposerSettingsOpen] = useState(false);
+  const availableBrand = firstAvailableProvider(providers);
+  const newBrandAvailable = providerIsAvailable(providers, newBrand);
+  useEffect(() => {
+    if (!newBrandAvailable && availableBrand) setNewBrand(availableBrand);
+  }, [availableBrand, newBrandAvailable]);
   useEffect(() => {
     const saved = localStorage.getItem(NEW_CHAT_DEFAULT);
     if (saved === 'claude' || saved === 'codex' || saved === 'local' || saved === 'ask') setNewChatDefaultState(saved);
@@ -617,6 +622,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [sendError, setSendError] = useState<string | null>(null);
   const start = useCallback(async (brand: Brand = newBrand) => {
     if (!projectId || !projectPath) return;
+    if (!providerIsAvailable(providers, brand)) {
+      setStartError(`The ${brandName(brand)} provider is not available in this installation.`);
+      return;
+    }
     setStarting(true);
     setStartError(null);
     try {
@@ -632,7 +641,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     } finally {
       setStarting(false);
     }
-  }, [projectId, projectPath, open, newBrand]);
+  }, [projectId, projectPath, open, newBrand, providers]);
   const view = useSession(sessionId);
   const facts = useSessionFacts(sessionId);
   const checklist = useEpicChecklist(view.todos, projectPath);
@@ -743,15 +752,23 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [showing, setShowing] = useState<'search' | 'usage' | 'tokens' | 'new-chat' | null>(null);
   const newChat = useCallback((brand?: Brand) => {
     if (brand) {
+      if (!providerIsAvailable(providers, brand)) {
+        setNewBrand(availableBrand ?? brand);
+        setShowing('new-chat');
+        return;
+      }
       setRailOpen(false);
       void start(brand);
     } else if (newChatDefault === 'ask') {
       setShowing('new-chat');
-    } else {
+    } else if (providerIsAvailable(providers, newChatDefault)) {
       setRailOpen(false);
       void start(newChatDefault);
+    } else {
+      setNewBrand(availableBrand ?? newChatDefault);
+      setShowing('new-chat');
     }
-  }, [newChatDefault, start]);
+  }, [availableBrand, newChatDefault, providers, start]);
   /**
    * Whether the list also holds the chats an agent started for another chat.
    * Off unless he says otherwise, and remembered, because it is a way of
@@ -1217,13 +1234,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             <div className="flex min-h-9 items-center gap-2 rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground">
               <Checkbox
               checked={newChatDefault === newBrand}
+              disabled={!newBrandAvailable}
               data-testid="new-chat-default"
               aria-label={`Use ${brandName(newBrand)} by default`}
               onCheckedChange={(checked) => setNewChatDefault(checked ? newBrand : 'ask')}
               />
               <span>Use {brandName(newBrand)} by default</span>
             </div>
-            <Button variant="primary" disabled={starting} onClick={() => { setShowing(null); setRailOpen(false); void start(newBrand); }}>
+            <Button variant="primary" disabled={starting || !newBrandAvailable} onClick={() => { setShowing(null); setRailOpen(false); void start(newBrand); }}>
               {starting ? 'Starting…' : 'Start chat'}
             </Button>
           </DialogFooter>
@@ -1372,7 +1390,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             </Button>
           ))}
         </div>
-        <Button variant="primary" onClick={() => void start()} disabled={starting} data-testid="new-chat">
+        <Button variant="primary" onClick={() => void start()} disabled={starting || !newBrandAvailable} data-testid="new-chat">
           {starting ? null : <Plus data-testid="new-chat-empty-plus" aria-hidden="true" />}
           {starting ? 'Starting…' : `New ${brandName(newBrand)} chat`}
         </Button>

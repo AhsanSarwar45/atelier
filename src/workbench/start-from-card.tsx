@@ -8,7 +8,7 @@
  */
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { useRouter } from 'next/navigation';
 
@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import type { Bead } from '@/types';
 import { sendCommand } from '@/workbench/use-session';
 import type { Brand } from '@/workbench/protocol';
-import { useProviders } from '@/workbench/providers';
+import { firstAvailableProvider, providerIsAvailable, useProviders } from '@/workbench/providers';
 import { brandName } from '@/workbench/brand-icon';
 import { rememberUnsentLine } from '@/workbench/drafts';
 
@@ -48,6 +48,11 @@ export function StartFromCard({ bead, projectId, projectPath }: StartFromCardPro
   const [failed, setFailed] = useState<string | null>(null);
   const [brand, setBrand] = useState<Brand>('claude');
   const router = useRouter();
+  const availableBrand = firstAvailableProvider(providers);
+  const brandAvailable = providerIsAvailable(providers, brand);
+  useEffect(() => {
+    if (!brandAvailable && availableBrand) setBrand(availableBrand);
+  }, [availableBrand, brandAvailable]);
 
   if (!projectId || !projectPath) return null;
 
@@ -65,7 +70,7 @@ export function StartFromCard({ bead, projectId, projectPath }: StartFromCardPro
         variant="primary"
         data-testid="start-chat-from-card"
         data-bead-id={bead.id}
-        disabled={starting}
+        disabled={starting || !brandAvailable}
         onClick={async () => {
           setStarting(true);
           setFailed(null);
