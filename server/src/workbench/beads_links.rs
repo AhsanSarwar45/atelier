@@ -1,7 +1,7 @@
 //! Provider-neutral Beads provenance linking from tool actions.
 
 use serde_json::{json, Value};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::process::Command;
@@ -171,6 +171,78 @@ pub async fn issues_for_session(runner: &BdRunner, cwd: &Path, session: &str) ->
         .collect()
 }
 
+/// Every claimed card, read in one board-wide request. This is deliberately
+/// separate from `issues_for_session`: opening one chat asks provenance only
+/// about that chat, while the more expensive legacy-claim recovery runs later
+/// for every external chat in the project at once.
+pub async fn claimed_cards(runner: &BdRunner, cwd: &Path) -> Vec<(String, String)> {
+    let out = runner
+        .run(
+            cwd,
+            &[
+                "list",
+                "--all",
+                "--limit",
+                "0",
+                "--json",
+                "--brief",
+                "--skip-labels",
+                "--flat",
+            ],
+        )
+        .await;
+    claimed_cards_from(&out.stdout)
+}
+
+fn claimed_cards_from(raw: &str) -> Vec<(String, String)> {
+    let Ok(value) = serde_json::from_str::<Value>(raw) else {
+        return Vec::new();
+    };
+    let rows = value
+        .as_array()
+        .cloned()
+        .or_else(|| value["issues"].as_array().cloned())
+        .unwrap_or_default();
+    rows.into_iter()
+        .filter_map(|row| {
+            Some((
+                row["id"].as_str()?.to_string(),
+                row["assignee"].as_str()?.to_string(),
+            ))
+        })
+        .collect()
+}
+
+/// Match the claim stamp used by terminal/editor agents to the provider's
+/// durable conversation id. The claim owner is either the first eight
+/// characters itself or a provider/worktree prefix ending in those characters.
+pub fn claimed_links<'a>(
+    sessions: impl IntoIterator<Item = (&'a str, &'a str)>,
+    cards: &[(String, String)],
+) -> BTreeMap<String, Vec<String>> {
+    let mut links: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for (session_id, external_id) in sessions {
+        let Some(short) = external_id.get(..8) else {
+            continue;
+        };
+        for (card, claimant) in cards {
+            let stamped = claimant
+                .strip_suffix(short)
+                .is_some_and(|prefix| prefix.is_empty() || prefix.ends_with('-'));
+            if stamped {
+                links
+                    .entry(session_id.to_string())
+                    .or_default()
+                    .insert(card.clone());
+            }
+        }
+    }
+    links
+        .into_iter()
+        .map(|(session, cards)| (session, cards.into_iter().collect()))
+        .collect()
+}
+
 pub async fn sessions_for_issue(runner: &BdRunner, cwd: &Path, issue: &str) -> Vec<String> {
     let out = runner
         .run(cwd, &["provenance", "log", issue, "--json"])
@@ -244,5 +316,35 @@ mod tests {
         );
         assert!(candidates("Read", &json!({"file_path":"/tmp/bw-oesd.11.md"})).is_empty());
         assert!(candidates("Write", &json!({"file_path":"/tmp/notes-bw-oesd.11.md"})).is_empty());
+    }
+
+    #[test]
+    fn one_board_read_can_restore_claims_for_every_external_chat() {
+        let cards = claimed_cards_from(
+            r#"{"issues":[
+                {"id":"bw-3","assignee":"bw-job-aaaaaaaa"},
+                {"id":"bw-40","assignee":"aaaaaaaa"},
+                {"id":"bw-800","assignee":"copy-bbbbbbbb"},
+                {"id":"bw-other","assignee":"someone-else"},
+                {"id":"bw-unclaimed","assignee":null}
+            ],"meta":{"count":5},"schema_version":1}"#,
+        );
+        let links = claimed_links(
+            [
+                ("session-a", "aaaaaaaa-1111-2222-3333-444444444444"),
+                ("session-b", "bbbbbbbb-1111-2222-3333-444444444444"),
+                ("too-short", "tiny"),
+            ],
+            &cards,
+        );
+
+        assert_eq!(links["session-a"], ["bw-3", "bw-40"]);
+        assert_eq!(links["session-b"], ["bw-800"]);
+        assert!(!links.contains_key("too-short"));
+
+        assert_eq!(
+            claimed_cards_from(r#"[{"id":"bw-legacy","assignee":"cccccccc"}]"#),
+            [("bw-legacy".into(), "cccccccc".into())]
+        );
     }
 }

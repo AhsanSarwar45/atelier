@@ -44,6 +44,7 @@ pub struct WorkbenchState {
         >,
     >,
     codex_records: Arc<std::sync::Mutex<HashMap<String, std::path::PathBuf>>>,
+    claim_sweeps: Arc<tokio::sync::Mutex<HashMap<std::path::PathBuf, std::time::Instant>>>,
 }
 
 #[derive(Default)]
@@ -60,7 +61,22 @@ impl WorkbenchState {
             usage_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             codex_readers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             codex_records: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            claim_sweeps: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
+    }
+
+    async fn begin_claim_sweep(&self, cwd: &std::path::Path) -> bool {
+        const EVERY: Duration = Duration::from_secs(60);
+        let now = std::time::Instant::now();
+        let mut swept = self.claim_sweeps.lock().await;
+        if swept
+            .get(cwd)
+            .is_some_and(|previous| now.duration_since(*previous) < EVERY)
+        {
+            return false;
+        }
+        swept.insert(cwd.to_path_buf(), now);
+        true
     }
     pub fn database(&self) -> &ChatDb {
         self.registry.database()
@@ -808,30 +824,34 @@ async fn session(
             )
             .await;
     }
-    let sweep = state.database().clone();
-    tokio::spawn(async move {
-        let Ok(sessions) = sweep.list_sessions(None).await else {
-            return;
-        };
-        for session in sessions {
-            for bead in crate::workbench::beads_links::issues_for_session(
-                &Default::default(),
-                std::path::Path::new(&session.cwd),
-                &session.id,
-            )
-            .await
-            {
-                let _ = sweep
-                    .remember_bead_link(
-                        session.id.clone(),
-                        bead,
-                        "claim".into(),
-                        chrono::Utc::now().to_rfc3339(),
-                    )
-                    .await;
+    if state.begin_claim_sweep(std::path::Path::new(&cwd)).await {
+        let sweep = state.database().clone();
+        let sweep_cwd = std::path::PathBuf::from(&cwd);
+        tokio::spawn(async move {
+            let Ok(sessions) = sweep.list_sessions(None).await else {
+                return;
+            };
+            let here = sessions
+                .iter()
+                .filter(|session| std::path::Path::new(&session.cwd) == sweep_cwd)
+                .filter_map(|session| Some((session.id.as_str(), session.external_id.as_deref()?)))
+                .collect::<Vec<_>>();
+            if here.is_empty() {
+                return;
             }
-        }
-    });
+            let runner = crate::workbench::beads_links::BdRunner::default();
+            let cards = crate::workbench::beads_links::claimed_cards(&runner, &sweep_cwd).await;
+            let links = crate::workbench::beads_links::claimed_links(here, &cards);
+            let at = chrono::Utc::now().to_rfc3339();
+            for (session, beads) in links {
+                for bead in beads {
+                    let _ = sweep
+                        .remember_bead_link(session.clone(), bead, "claim".into(), at.clone())
+                        .await;
+                }
+            }
+        });
+    }
     let holds = state.provider_holds().await;
     let held = found
         .external_id
@@ -1319,6 +1339,17 @@ mod tests {
             last_active_at: "2026-08-30T00:01:00.000Z".into(),
             last_spoke_at: Some("2026-08-30T00:00:30.000Z".into()),
         }
+    }
+
+    #[tokio::test]
+    async fn external_claim_sweep_is_once_per_project_window() {
+        let (_directory, state) = fixture();
+        let first = std::path::Path::new("/work/project");
+        let second = std::path::Path::new("/work/another");
+
+        assert!(state.begin_claim_sweep(first).await);
+        assert!(!state.begin_claim_sweep(first).await);
+        assert!(state.begin_claim_sweep(second).await);
     }
 
     fn notice() -> Event {
