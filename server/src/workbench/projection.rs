@@ -389,7 +389,8 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                         }
                     } else {
                         for field in ["seconds", "tokens", "calls"] {
-                            agents[at][field] = value(event, field);
+                            let old = agents[at][field].as_i64().unwrap_or_default();
+                            agents[at][field] = json!(old.max(integer(event, field)));
                         }
                         for field in ["doing", "model", "state"] {
                             if event
@@ -707,5 +708,26 @@ mod tests {
         let view = fold_all(&events);
         assert_eq!(view.items().len(), 1);
         assert_eq!(view.items()[0]["id"], "answer");
+    }
+
+    #[test]
+    fn agent_accounting_is_monotone_and_late_final_usage_only_enriches() {
+        let values = vec![
+            json!({"type":"agent.started","sessionId":"chat","seq":1,"at":"2026-09-02T00:00:00Z","agentId":"child","toolCallId":"spawn","kind":"helper","what":"Audit","agentType":"reviewer","model":null}),
+            json!({"type":"agent.progress","sessionId":"chat","seq":2,"at":"2026-09-02T00:00:12Z","agentId":"child","seconds":12,"tokens":900,"calls":4}),
+            json!({"type":"agent.progress","sessionId":"chat","seq":3,"at":"2026-09-02T00:00:13Z","agentId":"child","seconds":2,"tokens":100,"calls":1}),
+            json!({"type":"agent.finished","sessionId":"chat","seq":4,"at":"2026-09-02T00:00:14Z","agentId":"child","state":"done","seconds":0,"tokens":0,"calls":0,"model":null,"result":"Done"}),
+            json!({"type":"agent.progress","sessionId":"chat","seq":5,"at":"2026-09-02T00:00:15Z","agentId":"child","seconds":10,"tokens":1000,"calls":3,"finalUsage":true}),
+        ];
+        let events = values
+            .into_iter()
+            .map(|value| serde_json::from_value(value).unwrap())
+            .collect::<Vec<Event>>();
+        let view = fold_all(&events);
+        assert_eq!(view.agents()[0]["state"], "done");
+        assert_eq!(view.agents()[0]["seconds"], 12);
+        assert_eq!(view.agents()[0]["tokens"], 1000);
+        assert_eq!(view.agents()[0]["calls"], 4);
+        assert_eq!(view.agents()[0]["result"], "Done");
     }
 }

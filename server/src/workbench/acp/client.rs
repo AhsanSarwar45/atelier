@@ -1031,6 +1031,11 @@ impl AcpDriver {
             .steering_menu(session.id.clone())
             .await
             .unwrap_or_else(|_| json!({}));
+        let saved_cost = database
+            .token_stats(session.id.clone())
+            .await
+            .ok()
+            .and_then(|stats| stats.cost);
         let config = match adapter::launch_config(brand, session.model.as_deref()) {
             Some(config) => config,
             None => {
@@ -1059,6 +1064,7 @@ impl AcpDriver {
         let task_elicitations = elicitations.clone();
         let task_closing = closing.clone();
         let task_saved_menu = saved_menu.clone();
+        let task_saved_cost = saved_cost.clone();
         let task_local_models = if brand == super::super::local::BRAND {
             if saved_menu["models"]
                 .as_array()
@@ -1073,9 +1079,9 @@ impl AcpDriver {
             Value::Null
         };
         tokio::spawn(async move {
-            let normalizer = Arc::new(Mutex::new(AcpNormalizer::new(PathBuf::from(
-                &task_session.cwd,
-            ))));
+            let mut task_normalizer = AcpNormalizer::new(PathBuf::from(&task_session.cwd));
+            task_normalizer.seed_usage(task_saved_cost.as_ref());
+            let normalizer = Arc::new(Mutex::new(task_normalizer));
             let replaying = Arc::new(AtomicBool::new(false));
             let updates_db = task_database.clone();
             let updates_session = task_session.id.clone();

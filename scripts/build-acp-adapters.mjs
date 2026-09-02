@@ -65,7 +65,7 @@ function clonePinned(source, destination) {
   // host tools affect a supposedly pinned release (esbuild's installer will,
   // for example, accept an executable from PATH and then reject its version).
   // Bun compilation below is the authoritative dependency check.
-  run('npm', ['ci', '--ignore-scripts', '--omit=optional'], destination);
+  run('npm', ['ci', '--ignore-scripts'], destination);
 }
 
 function clonePinnedRust(source, destination) {
@@ -126,7 +126,10 @@ function patchCodexAppServerTransport(source) {
   code = code.replace(importAnchor, `${importAnchor}
 import {EventEmitter} from "node:events";
 import {Readable, Writable} from "node:stream";`);
-  code = code.replace(launchAnchor, `        const subprocess = Bun.spawn([codexPath, 'app-server', '--stdio'], {
+  code = code.replace(launchAnchor, `        // This source is compiled into Bun, while its upstream typecheck stays
+        // intentionally Node-only and must not gain a shipped @types/bun dependency.
+        // @ts-expect-error Bun is the executable runtime supplied by the build target.
+        const subprocess = Bun.spawn([codexPath, 'app-server', '--stdio'], {
             env: spawnEnv, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe',
         });
         const events = new EventEmitter();
@@ -148,7 +151,7 @@ import {Readable, Writable} from "node:stream";`);
                 return true;
             },
         });
-        void subprocess.exited.then(code => events.emit('exit', code, null));
+        void subprocess.exited.then((code: number) => events.emit('exit', code, null));
         codex = child as unknown as ChildProcessWithoutNullStreams;`);
   code = code.replace(loggedInput, '');
   writeFileSync(connection, code);
@@ -277,6 +280,88 @@ ${routeAnchor}`);
   writeFileSync(index, code);
 }
 
+function patchCodexAccounting(source) {
+  const types = join(source, 'src', 'subagents', 'AcpSubagents.ts');
+  let code = readFileSync(types, 'utf8');
+  const stateType = `export type SubagentStateUpdate = {
+    sessionUpdate: "subagent_state_update";
+    subagentSessionId: string;
+    state: SubagentState;
+    _meta?: Record<string, unknown> | null;
+};`;
+  if (code.split(stateType).length - 1 !== 1) {
+    throw new Error('codex-acp subagent update union changed; audit child accounting parity');
+  }
+  code = code.replace(stateType, `${stateType}
+
+export type SubagentUsageUpdate = {
+    sessionUpdate: "subagent_usage_update";
+    subagentSessionId: string;
+    usage: { seconds: number; tokens: number; calls: number };
+    _meta?: Record<string, unknown> | null;
+};`);
+  const union = `    | SubagentSpawnedUpdate
+    | SubagentStateUpdate;`;
+  if (code.split(union).length - 1 !== 1) {
+    throw new Error('codex-acp subagent union members changed; audit child accounting parity');
+  }
+  code = code.replace(union, `    | SubagentSpawnedUpdate
+    | SubagentStateUpdate
+    | SubagentUsageUpdate;`);
+  writeFileSync(types, code);
+
+  const router = join(source, 'src', 'subagents', 'CodexSubagentEventRouter.ts');
+  code = readFileSync(router, 'utf8');
+  const importAnchor = `import type {SubagentState} from "./AcpSubagents";`;
+  if (code.split(importAnchor).length - 1 !== 1) {
+    throw new Error('codex-acp subagent router imports changed; audit child accounting parity');
+  }
+  code = code.replace(importAnchor, `import type {SubagentState} from "./AcpSubagents";
+import {toTokenCount, type TokenCount} from "../TokenCount";`);
+  const childType = `    terminalState?: SubagentState;
+};`;
+  if (code.split(childType).length - 1 !== 1) {
+    throw new Error('codex-acp native child state changed; audit child accounting parity');
+  }
+  code = code.replace(childType, `    terminalState?: SubagentState;
+    usage?: TokenCount;
+};`);
+  const itemGate = `        if (notification.method !== "item/started" && notification.method !== "item/completed") {
+            return false;
+        }`;
+  if (code.split(itemGate).length - 1 !== 1) {
+    throw new Error('codex-acp child notification gate changed; audit child accounting parity');
+  }
+  code = code.replace(itemGate, `        if (notification.method === "thread/tokenUsage/updated" && this.isKnownChild(notification.params.threadId)) {
+            const child = this.children.get(notification.params.threadId);
+            if (child) {
+                // "last" is this child generation's current turn. "total"
+                // spans earlier resumed generations and would bill them again.
+                child.usage = toTokenCount(notification.params.tokenUsage.last);
+                await this.session.update({
+                    sessionUpdate: "subagent_usage_update",
+                    subagentSessionId: child.sessionId,
+                    usage: {seconds: 0, tokens: child.usage.totalTokens, calls: 0},
+                }, child.parentSessionId);
+            }
+            return true;
+        }
+${itemGate}`);
+  const terminalUpdate = `                subagentSessionId: child.sessionId,
+                state,
+            }, child.parentSessionId);`;
+  if (code.split(terminalUpdate).length - 1 !== 1) {
+    throw new Error('codex-acp terminal child update changed; audit child accounting parity');
+  }
+  code = code.replace(terminalUpdate, `                subagentSessionId: child.sessionId,
+                state,
+                ...(child.usage ? { _meta: { "atelier.dev/usage": {
+                    seconds: 0, tokens: child.usage.totalTokens, calls: 0,
+                } } } : {}),
+            }, child.parentSessionId);`);
+  writeFileSync(router, code);
+}
+
 function patchClaudeWindowNow(source) {
   const agent = join(source, 'src', 'acp-agent.ts');
   let code = readFileSync(agent, 'utf8');
@@ -336,7 +421,11 @@ ${methodAnchor}`;
               (value.action !== "stop" && value.action !== "park")) {
             throw RequestError.invalidParams(raw, "sessionId, agentId, and a valid action are required");
           }
-          return { sessionId: value.sessionId, agentId: value.agentId, action: value.action };
+          return {
+            sessionId: value.sessionId,
+            agentId: value.agentId,
+            action: value.action as "stop" | "park",
+          };
         },
       },
       (ctx) => agent.atelierSubagentControl(ctx.params),
@@ -353,6 +442,62 @@ ${routeAnchor}`;
         atelier: {
           subagentControls: ["stop", "park", "say"],
         },`);
+  writeFileSync(agent, code);
+}
+
+function patchClaudeAccounting(source) {
+  const agent = join(source, 'src', 'acp-agent.ts');
+  let code = readFileSync(agent, 'utf8');
+  const metaType = `export type ToolUpdateMeta = {
+  claudeCode?: {`;
+  if (code.split(metaType).length - 1 !== 1) {
+    throw new Error('claude-acp tool metadata shape changed; audit child accounting parity');
+  }
+  code = code.replace(metaType, `export type ToolUpdateMeta = {
+  "atelier.dev/usage"?: { seconds: number; tokens: number; calls: number };
+  claudeCode?: {`);
+
+  const resultAnchor = `          const { _meta: toolMeta, ...toolUpdate } = toolUpdateFromToolResult(
+            chunk,
+            toolUseCache[chunk.tool_use_id],
+            supportsTerminalOutput,
+            toolUseResult,
+          );`;
+  if (code.split(resultAnchor).length - 1 !== 1) {
+    throw new Error('claude-acp tool result shape changed; audit child accounting parity');
+  }
+  code = code.replace(resultAnchor, `${resultAnchor}
+          const atelierAgentUsage =
+            (toolUse.name === "Agent" || toolUse.name === "Task") &&
+            toolUseResult !== null && typeof toolUseResult === "object"
+              ? toolUseResult as { totalDurationMs?: unknown; totalTokens?: unknown; totalToolUseCount?: unknown }
+              : null;
+          const atelierAgentSpent = atelierAgentUsage
+            ? Number(atelierAgentUsage.totalDurationMs ?? 0) +
+              Number(atelierAgentUsage.totalTokens ?? 0) +
+              Number(atelierAgentUsage.totalToolUseCount ?? 0)
+            : 0;`);
+
+  const metaResult = `              claudeCode: {
+                toolName: toolUse.name,
+                ...(nonExecution ?? {}),
+              },
+              ...(toolMeta?.terminal_exit ? { terminal_exit: toolMeta.terminal_exit } : {}),`;
+  if (code.split(metaResult).length - 1 !== 1) {
+    throw new Error('claude-acp completed tool metadata changed; audit child accounting parity');
+  }
+  code = code.replace(metaResult, `              claudeCode: {
+                toolName: toolUse.name,
+                ...(nonExecution ?? {}),
+              },
+              ...(atelierAgentUsage && atelierAgentSpent > 0 ? {
+                "atelier.dev/usage": {
+                  seconds: Math.round(Number(atelierAgentUsage.totalDurationMs ?? 0) / 1000),
+                  tokens: Number(atelierAgentUsage.totalTokens ?? 0),
+                  calls: Number(atelierAgentUsage.totalToolUseCount ?? 0),
+                },
+              } : {}),
+              ...(toolMeta?.terminal_exit ? { terminal_exit: toolMeta.terminal_exit } : {}),`);
   writeFileSync(agent, code);
 }
 
@@ -395,11 +540,14 @@ function patchNativeQuestionNotes(claudeSource, codexSource) {
   if (code.split(codexAnswer).length - 1 !== 1) {
     throw new Error('codex-acp request_user_input response changed; audit native note parity');
   }
-  code = code.replace(codexAnswer, `${codexAnswer}
+  code = code.replace(codexAnswer, `            const selectedAnswers = Array.isArray(value)
+                ? value.map(String)
+                : [String(value)];
             const note = content[\`__atelier_note_\${question.id}\`];
             if (typeof note === "string" && note.trim() !== "") {
-                answers[question.id].answers.push(\`Additional note: \${note.trim()}\`);
-            }`);
+                selectedAnswers.push(\`Additional note: \${note.trim()}\`);
+            }
+            answers[question.id] = { answers: selectedAnswers };`);
   writeFileSync(codex, code);
 }
 
@@ -444,8 +592,16 @@ try {
   patchCodexAppServerTransport(codexSource);
   patchCodexSessionPolicy(codexSource);
   patchCodexSubagentControl(codexSource);
+  patchCodexAccounting(codexSource);
   patchClaudeWindowNow(claudeSource);
+  patchClaudeAccounting(claudeSource);
   patchNativeQuestionNotes(claudeSource, codexSource);
+
+  // Bun deliberately transpiles without type-checking. These adapters are
+  // patched at pinned source revisions, so make their own compiler contracts
+  // part of the release build before producing any executable artifacts.
+  run('npm', ['run', 'build'], claudeSource);
+  run('npm', ['run', 'typecheck'], codexSource);
 
   rmSync(output, { recursive: true, force: true });
   mkdirSync(output, { recursive: true });
@@ -488,12 +644,12 @@ try {
     adapters: {
       claude: {
         version: CLAUDE.version, commit: CLAUDE.commit, providerVersion: CLAUDE.providerVersion, wireProtocol: 1,
-        compatibilityPatches: ['atelier-context-window', 'atelier-native-subagent-control', 'atelier-native-question-notes'],
+        compatibilityPatches: ['atelier-context-window', 'atelier-native-subagent-control', 'atelier-child-accounting', 'atelier-native-question-notes'],
         verifiedCapabilities: ['native-mcp-config', 'session-resume'],
       },
       codex: {
         version: CODEX.version, commit: CODEX.commit, providerVersion: CODEX.providerVersion, wireProtocol: 1,
-        compatibilityPatches: ['app-server-stdio', 'bun-child-process-bridge', 'jsonrpc-2-framing', 'atelier-session-policy', 'atelier-native-subagent-control', 'atelier-native-question-notes'],
+        compatibilityPatches: ['app-server-stdio', 'bun-child-process-bridge', 'jsonrpc-2-framing', 'atelier-session-policy', 'atelier-native-subagent-control', 'atelier-child-accounting', 'atelier-native-question-notes'],
         verifiedCapabilities: ['native-mcp-config', 'session-resume'],
       },
       local: { adapter: 'goose', version: GOOSE.version, commit: GOOSE.commit, wireProtocol: 1 },

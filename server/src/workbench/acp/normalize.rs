@@ -7,6 +7,88 @@ use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+#[derive(Clone, Debug, Default, PartialEq)]
+struct TokenTally {
+    input: i64,
+    output: i64,
+    total: i64,
+    thinking: i64,
+    cache_read: i64,
+    cache_write: i64,
+    delegated: i64,
+}
+
+impl TokenTally {
+    fn number(value: &Value, field: &str) -> i64 {
+        value[field].as_i64().unwrap_or_default().max(0)
+    }
+
+    fn quota(value: &Value) -> Self {
+        let input = Self::number(value, "inputTokens");
+        let output = Self::number(value, "outputTokens");
+        let thinking = Self::number(value, "reasoningOutputTokens");
+        let cache_read = Self::number(value, "cachedInputTokens");
+        let cache_write = Self::number(value, "cachedWriteTokens");
+        let total = value
+            .get("totalTokens")
+            .and_then(Value::as_i64)
+            .unwrap_or(input + output + cache_read + cache_write)
+            .max(0);
+        Self {
+            input,
+            output,
+            total,
+            thinking,
+            cache_read,
+            cache_write,
+            delegated: 0,
+        }
+    }
+
+    fn prompt(value: &Value) -> Self {
+        Self {
+            input: Self::number(value, "inputTokens"),
+            output: Self::number(value, "outputTokens"),
+            total: Self::number(value, "totalTokens"),
+            thinking: Self::number(value, "thoughtTokens"),
+            cache_read: Self::number(value, "cachedReadTokens"),
+            cache_write: Self::number(value, "cachedWriteTokens"),
+            delegated: 0,
+        }
+    }
+
+    fn cost(value: &Value) -> Self {
+        Self {
+            input: Self::number(value, "input"),
+            output: Self::number(value, "output"),
+            total: Self::number(value, "total"),
+            thinking: Self::number(value, "thinking"),
+            cache_read: Self::number(value, "cacheRead"),
+            cache_write: Self::number(value, "cacheWrite"),
+            delegated: Self::number(value, "delegated"),
+        }
+    }
+
+    fn add(&mut self, next: &Self) {
+        self.input = self.input.saturating_add(next.input);
+        self.output = self.output.saturating_add(next.output);
+        self.total = self.total.saturating_add(next.total);
+        self.thinking = self.thinking.saturating_add(next.thinking);
+        self.cache_read = self.cache_read.saturating_add(next.cache_read);
+        self.cache_write = self.cache_write.saturating_add(next.cache_write);
+        self.delegated = self.delegated.saturating_add(next.delegated);
+    }
+
+    fn value(&self) -> Value {
+        json!({
+            "kind":"tokens", "input":self.input, "output":self.output,
+            "total":self.total, "thinking":self.thinking,
+            "cacheRead":self.cache_read, "cacheWrite":self.cache_write,
+            "delegated":self.delegated
+        })
+    }
+}
+
 pub struct AcpNormalizer {
     serial: u64,
     event_serial: Cell<u64>,
@@ -27,6 +109,8 @@ pub struct AcpNormalizer {
     suppress_local_user: bool,
     menu: Value,
     cwd: PathBuf,
+    cumulative_usage: TokenTally,
+    agent_usage_tokens: HashMap<String, i64>,
 }
 
 impl Default for AcpNormalizer {
@@ -51,6 +135,8 @@ impl Default for AcpNormalizer {
             suppress_local_user: false,
             menu: json!({"commands":[],"skills":[],"models":[],"efforts":[],"permissionModes":[],"collaborationModes":[],"agentDefinitions":[],"agentControls":[],"configOptions":[]}),
             cwd: PathBuf::from("."),
+            cumulative_usage: TokenTally::default(),
+            agent_usage_tokens: HashMap::new(),
         }
     }
 }
@@ -61,6 +147,50 @@ impl AcpNormalizer {
             cwd,
             ..Self::default()
         }
+    }
+
+    pub fn seed_usage(&mut self, cost: Option<&Value>) {
+        if let Some(cost) = cost.filter(|cost| cost["kind"] == "tokens") {
+            self.cumulative_usage = TokenTally::cost(cost);
+        }
+    }
+
+    fn turn_usage(raw: &Value) -> Option<(TokenTally, &'static str)> {
+        let model_usage = raw
+            .pointer("/_meta/quota/model_usage")
+            .and_then(Value::as_array);
+        if let Some(rows) = model_usage.filter(|rows| !rows.is_empty()) {
+            let mut total = TokenTally::default();
+            for row in rows {
+                total.add(&TokenTally::quota(&row["token_count"]));
+            }
+            return Some((total, "acp-accounting-quota"));
+        }
+        if let Some(tokens) = raw
+            .pointer("/_meta/quota/token_count")
+            .filter(|value| value.is_object())
+        {
+            return Some((TokenTally::quota(tokens), "acp-quota"));
+        }
+        raw["usage"]
+            .is_object()
+            .then(|| (TokenTally::prompt(&raw["usage"]), "acp-prompt"))
+    }
+
+    fn add_agent_usage(&mut self, agent_id: &str, tokens: i64) -> bool {
+        let tokens = tokens.max(0);
+        let previous = self
+            .agent_usage_tokens
+            .entry(agent_id.to_string())
+            .or_default();
+        if tokens <= *previous {
+            return false;
+        }
+        let delta = tokens - *previous;
+        *previous = tokens;
+        self.cumulative_usage.total = self.cumulative_usage.total.saturating_add(delta);
+        self.cumulative_usage.delegated = self.cumulative_usage.delegated.saturating_add(delta);
+        true
     }
 
     pub fn set_menu(&mut self, menu: Value) {
@@ -145,6 +275,16 @@ impl AcpNormalizer {
                 .unwrap_or_else(|| serde_json::to_string(value).unwrap_or_default()),
             _ => value.to_string(),
         }
+    }
+
+    fn agent_usage(update: &Value) -> (i64, i64, i64, Value) {
+        let usage = &update["_meta"]["atelier.dev/usage"];
+        (
+            usage["seconds"].as_i64().unwrap_or_default().max(0),
+            usage["tokens"].as_i64().unwrap_or_default().max(0),
+            usage["calls"].as_i64().unwrap_or_default().max(0),
+            usage.get("model").cloned().unwrap_or(Value::Null),
+        )
     }
 
     fn complete_message(
@@ -790,11 +930,20 @@ impl AcpNormalizer {
                             self.goose_tasks.insert(task_id.to_string(), id.clone());
                         }
                     } else if self.subagent_tools.remove(&id) {
+                        let (seconds, tokens, calls, model) = Self::agent_usage(update);
+                        if self.add_agent_usage(&id, tokens) {
+                            events.push(self.envelope(
+                                session_id,
+                                provider,
+                                raw,
+                                json!({"type":"cost","cost":self.cumulative_usage.value(),"source":"acp-subagent"}),
+                            ));
+                        }
                         events.push(self.envelope(
                             session_id,
                             provider,
                             raw,
-                            json!({"type":"agent.finished","agentId":id,"state":if status=="completed"{"done"}else{"failed"},"result":summary,"seconds":0,"tokens":0,"calls":0,"model":Value::Null}),
+                            json!({"type":"agent.finished","agentId":id,"state":if status=="completed"{"done"}else{"failed"},"result":summary,"seconds":seconds,"tokens":tokens,"calls":calls,"model":model}),
                         ));
                     }
                     if started_name == "load" {
@@ -925,6 +1074,7 @@ impl AcpNormalizer {
             }
             Some("subagent_state_update") => {
                 let child = update["subagentSessionId"].as_str().unwrap_or_default();
+                let (seconds, tokens, calls, model) = Self::agent_usage(update);
                 let state = match update["state"].as_str() {
                     Some("completed") => "done",
                     Some("cancelled") => "stopped",
@@ -932,19 +1082,60 @@ impl AcpNormalizer {
                     _ => "running",
                 };
                 if state == "running" {
-                    vec![self.envelope(session_id, provider, raw, json!({
-                        "type":"agent.progress","agentId":child,"seconds":0,"tokens":0,"calls":0,
+                    let mut events = Vec::new();
+                    if self.add_agent_usage(child, tokens) {
+                        events.push(self.envelope(
+                            session_id, provider, raw,
+                            json!({"type":"cost","cost":self.cumulative_usage.value(),"source":"acp-subagent"}),
+                        ));
+                    }
+                    events.push(self.envelope(session_id, provider, raw, json!({
+                        "type":"agent.progress","agentId":child,"seconds":seconds,"tokens":tokens,"calls":calls,
                         "doing":update["detail"].as_str().unwrap_or("Working"),"state":"running","acp":update
-                    }))]
+                    })));
+                    events
                 } else {
                     self.subagent_tools.remove(child);
-                    vec![self.envelope(
+                    let mut events = Vec::new();
+                    if self.add_agent_usage(child, tokens) {
+                        events.push(self.envelope(
+                            session_id, provider, raw,
+                            json!({"type":"cost","cost":self.cumulative_usage.value(),"source":"acp-subagent"}),
+                        ));
+                    }
+                    events.push(self.envelope(
                         session_id,
                         provider,
                         raw,
-                        json!({"type":"agent.finished","agentId":child,"state":state,"result":Value::Null,"seconds":0,"tokens":0,"calls":0,"model":Value::Null,"acp":update}),
-                    )]
+                        json!({"type":"agent.finished","agentId":child,"state":state,"result":Value::Null,"seconds":seconds,"tokens":tokens,"calls":calls,"model":model,"acp":update}),
+                    ));
+                    events
                 }
+            }
+            Some("subagent_usage_update") => {
+                let child = update["subagentSessionId"].as_str().unwrap_or_default();
+                let usage = &update["usage"];
+                let tokens = usage["tokens"].as_i64().unwrap_or_default().max(0);
+                let mut events = Vec::new();
+                if self.add_agent_usage(child, tokens) {
+                    events.push(self.envelope(
+                        session_id, provider, raw,
+                        json!({"type":"cost","cost":self.cumulative_usage.value(),"source":"acp-subagent"}),
+                    ));
+                }
+                events.push(self.envelope(
+                    session_id,
+                    provider,
+                    raw,
+                    json!({
+                        "type":"agent.progress", "agentId":child,
+                        "seconds":usage["seconds"].as_i64().unwrap_or_default().max(0),
+                        "tokens":tokens,
+                        "calls":usage["calls"].as_i64().unwrap_or_default().max(0),
+                        "finalUsage":true, "acp":update
+                    }),
+                ));
+                events
             }
             _ => {
                 let kind = update["sessionUpdate"].as_str().unwrap_or("unknown");
@@ -994,12 +1185,13 @@ impl AcpNormalizer {
             ));
         }
         self.started_messages.clear();
-        if raw["usage"].is_object() {
+        if let Some((turn, source)) = Self::turn_usage(raw) {
+            self.cumulative_usage.add(&turn);
             events.push(self.envelope(
                 session_id,
                 provider,
                 raw,
-                json!({"type":"cost","cost":{"kind":"tokens","input":raw["usage"]["inputTokens"],"output":raw["usage"]["outputTokens"],"total":raw["usage"]["totalTokens"],"thinking":raw["usage"]["thoughtTokens"],"cacheRead":raw["usage"]["cachedReadTokens"],"cacheWrite":raw["usage"]["cachedWriteTokens"]},"source":"acp-prompt"}),
+                json!({"type":"cost","cost":self.cumulative_usage.value(),"source":source}),
             ));
         }
         let failed = failure.as_ref().is_some_and(|signal| {
@@ -1339,15 +1531,38 @@ mod tests {
         );
         let message = serde_json::to_value(&child[0]).unwrap();
         assert_eq!(message["parentToolCallId"], "child-1");
+        let usage = normalizer.update(
+            "local",
+            "codex",
+            &json!({
+                "sessionId":"root", "update":{"sessionUpdate":"subagent_usage_update",
+                "subagentSessionId":"child-1","usage":{"seconds":0,"tokens":850,"calls":0}}
+            }),
+        );
+        assert_eq!(kinds(&usage), vec!["cost", "agent.progress"]);
+        let cost = serde_json::to_value(&usage[0]).unwrap();
+        assert_eq!(cost["cost"]["total"], 850);
+        assert_eq!(cost["cost"]["delegated"], 850);
+        let usage = serde_json::to_value(&usage[1]).unwrap();
+        assert_eq!(usage["tokens"], 850);
+        assert_eq!(usage["finalUsage"], true);
         let finished = normalizer.update(
             "local",
             "codex",
             &json!({
                 "sessionId":"root", "update":{"sessionUpdate":"subagent_state_update",
-                "subagentSessionId":"child-1","state":"completed"}
+                "subagentSessionId":"child-1","state":"completed",
+                "_meta":{"atelier.dev/usage":{"seconds":12,"tokens":900,"calls":4,"model":"gpt-5.6-sol"}}}
             }),
         );
-        assert_eq!(kinds(&finished), vec!["agent.finished"]);
+        assert_eq!(kinds(&finished), vec!["cost", "agent.finished"]);
+        let cost = serde_json::to_value(&finished[0]).unwrap();
+        assert_eq!(cost["cost"]["total"], 900);
+        let finished = serde_json::to_value(&finished[1]).unwrap();
+        assert_eq!(finished["seconds"], 12);
+        assert_eq!(finished["tokens"], 900);
+        assert_eq!(finished["calls"], 4);
+        assert_eq!(finished["model"], "gpt-5.6-sol");
     }
 
     #[test]
@@ -1410,6 +1625,40 @@ mod tests {
             .unwrap();
         assert_eq!(cost["cost"]["total"], 60);
         assert_eq!(cost["cost"]["cacheRead"], 10);
+    }
+
+    #[test]
+    fn accounting_quota_extends_saved_usage_without_counting_the_root_twice() {
+        let mut normalizer = AcpNormalizer::default();
+        normalizer.seed_usage(Some(&json!({
+            "kind":"tokens", "input":70, "output":30, "total":100,
+            "thinking":5, "cacheRead":20, "cacheWrite":0
+        })));
+        let events = normalizer.finish_turn(
+            "local",
+            "claude",
+            &json!({
+                "stopReason":"end_turn",
+                "usage":{"inputTokens":40,"outputTokens":20,"totalTokens":60},
+                "_meta":{"quota":{
+                    "token_count":{"inputTokens":40,"outputTokens":20,"totalTokens":60},
+                    "model_usage":[
+                        {"model":"claude-opus","token_count":{"inputTokens":50,"outputTokens":20,"cachedInputTokens":10,"totalTokens":80}},
+                        {"model":"claude-haiku","token_count":{"inputTokens":15,"outputTokens":5,"totalTokens":20}}
+                    ]
+                }}
+            }),
+        );
+        let cost = events
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "cost")
+            .unwrap();
+        assert_eq!(cost["source"], "acp-accounting-quota");
+        assert_eq!(cost["cost"]["total"], 200);
+        assert_eq!(cost["cost"]["input"], 135);
+        assert_eq!(cost["cost"]["output"], 55);
+        assert_eq!(cost["cost"]["cacheRead"], 30);
     }
 
     #[test]
@@ -1514,6 +1763,38 @@ mod tests {
         let agent = serde_json::to_value(finished.last().unwrap()).unwrap();
         assert_eq!(agent["state"], "done");
         assert_eq!(agent["result"], "Looks good");
+    }
+
+    #[test]
+    fn claude_structured_child_accounting_reaches_the_shared_terminal_row() {
+        let mut normalizer = AcpNormalizer::default();
+        normalizer.update(
+            "local",
+            "claude",
+            &json!({
+                "sessionId":"remote","update":{"sessionUpdate":"tool_call",
+                "toolCallId":"agent-1","title":"Audit","rawInput":{"prompt":"Review it"},
+                "_meta":{"claudeCode":{"toolName":"Agent","subagent":true}}}
+            }),
+        );
+        let events = normalizer.update(
+            "local",
+            "claude",
+            &json!({
+                "sessionId":"remote","update":{"sessionUpdate":"tool_call_update",
+                "toolCallId":"agent-1","status":"completed","rawOutput":"Complete",
+                "_meta":{"claudeCode":{"toolName":"Agent"},
+                "atelier.dev/usage":{"seconds":21,"tokens":11735,"calls":2}}}
+            }),
+        );
+        let finished = events
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "agent.finished")
+            .unwrap();
+        assert_eq!(finished["seconds"], 21);
+        assert_eq!(finished["tokens"], 11735);
+        assert_eq!(finished["calls"], 2);
     }
 
     #[test]
