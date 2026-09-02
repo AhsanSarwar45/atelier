@@ -9,10 +9,73 @@
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+
+fn record_cwd(path: &Path) -> Option<String> {
+    let mut file = File::open(path).ok()?;
+    let mut front = Vec::with_capacity(64_000);
+    file.by_ref().take(64_000).read_to_end(&mut front).ok()?;
+    String::from_utf8_lossy(&front).lines().find_map(|line| {
+        let row: Value = serde_json::from_str(line).ok()?;
+        row["cwd"]
+            .as_str()
+            .or_else(|| row["payload"]["cwd"].as_str())
+            .filter(|cwd| !cwd.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn claude_folder_cwd(folder: &Path) -> Option<String> {
+    fs::read_dir(folder).ok()?.flatten().find_map(|entry| {
+        let path = entry.path();
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension == "jsonl")
+            .then(|| record_cwd(&path))
+            .flatten()
+    })
+}
+
+/// Scope a settled burst of provider record writes to affected projects.
+/// `None` means at least one path could not be placed, so consumers must
+/// conservatively refresh every visible project rather than miss a chat.
+pub(crate) fn changed_record_folders(
+    paths: &HashSet<PathBuf>,
+    claude_projects: &Path,
+    codex_sessions: &Path,
+    known: &mut HashMap<PathBuf, String>,
+) -> Option<Vec<String>> {
+    if paths.is_empty() {
+        return None;
+    }
+    let mut moved = Vec::new();
+    for path in paths {
+        let key = if let Ok(relative) = path.strip_prefix(claude_projects) {
+            let project = relative.components().next()?.as_os_str();
+            claude_projects.join(project)
+        } else if path.starts_with(codex_sessions) {
+            path.clone()
+        } else {
+            continue;
+        };
+        let cwd = known.get(&key).cloned().or_else(|| {
+            let found = if key.starts_with(claude_projects) {
+                claude_folder_cwd(&key)
+            } else {
+                record_cwd(&key)
+            }?;
+            known.insert(key.clone(), found.clone());
+            Some(found)
+        })?;
+        moved.push(cwd);
+    }
+    moved.sort();
+    moved.dedup();
+    (!moved.is_empty()).then_some(moved)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

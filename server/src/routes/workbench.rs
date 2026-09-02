@@ -17,9 +17,10 @@ use axum::{
 };
 use base64::Engine;
 use futures::{stream, Stream, StreamExt};
+use notify::{RecursiveMode, Watcher};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};
 use tokio::sync::broadcast;
@@ -61,7 +62,7 @@ struct HoldMemory {
     summaries: crate::workbench::summary::SummaryTracker,
 }
 
-struct WatchPollLease {
+pub(crate) struct WatchPollLease {
     subscribers: Arc<AtomicUsize>,
     wake: Arc<tokio::sync::Notify>,
 }
@@ -285,7 +286,9 @@ impl WorkbenchState {
         }
     }
 
-    async fn watch_poll_subscription(&self) -> (broadcast::Receiver<Value>, WatchPollLease) {
+    pub(crate) async fn watch_poll_subscription(
+        &self,
+    ) -> (broadcast::Receiver<Value>, WatchPollLease) {
         let receiver = self.watch_polls.subscribe();
         self.watch_poll_subscribers.fetch_add(1, Ordering::AcqRel);
         let lease = WatchPollLease {
@@ -308,12 +311,50 @@ impl WorkbenchState {
             Duration::from_secs(2),
         );
         let mut usage_tick = tokio::time::interval(Duration::from_secs(30));
+        let (external_tx, mut external_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut external_watcher =
+            notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+                if let Ok(event) = event {
+                    let _ = external_tx.send(event.paths);
+                }
+            })
+            .ok();
+        let claude_projects = self.claude_config_directory().join("projects");
+        let codex_sessions = self.codex_home_directory().join("sessions");
+        if let Some(watcher) = external_watcher.as_mut() {
+            let _ = watcher.watch(&claude_projects, RecursiveMode::Recursive);
+            let _ = watcher.watch(&codex_sessions, RecursiveMode::Recursive);
+        }
+        let mut external_tick = tokio::time::interval_at(
+            tokio::time::Instant::now() + Duration::from_secs(1),
+            Duration::from_secs(1),
+        );
+        let mut external_dirty = HashSet::new();
+        let mut external_cwds = HashMap::new();
         loop {
             if self.watch_poll_subscribers.load(Ordering::Acquire) == 0 {
                 return;
             }
             tokio::select! {
                 _ = self.watch_poll_wake.notified() => {},
+                changed = external_rx.recv(), if external_watcher.is_some() => {
+                    if let Some(paths) = changed {
+                        external_dirty.extend(paths);
+                    }
+                },
+                _ = external_tick.tick() => {
+                    if !external_dirty.is_empty() {
+                        let paths = std::mem::take(&mut external_dirty);
+                        let folders = crate::workbench::external::changed_record_folders(
+                            &paths,
+                            &claude_projects,
+                            &codex_sessions,
+                            &mut external_cwds,
+                        )
+                        .unwrap_or_default();
+                        let _ = self.watch_polls.send(json!({"kind":"outside","folders":folders}));
+                    }
+                },
                 _ = hold_tick.tick() => {
                     let current = serde_json::to_value(self.provider_holds().await).unwrap_or_default();
                     if current != last_holds {
@@ -1237,10 +1278,10 @@ async fn watch(State(state): State<WorkbenchState>) -> Result<Sse<EventStream>, 
     let mut receiver = state.database().subscribe_all();
     let (tx, rx) = tokio::sync::mpsc::channel(100);
     tokio::spawn(async move {
+        let (mut polls, _poll_lease) = state.watch_poll_subscription().await;
         let Some(_) = send_watch_snapshot(&state, &tx).await else {
             return;
         };
-        let (mut polls, _poll_lease) = state.watch_poll_subscription().await;
         loop {
             tokio::select! {
                 polled=polls.recv()=>match polled {
@@ -1563,6 +1604,52 @@ mod tests {
         })
         .await
         .expect("the shared poller outlived its last browser");
+    }
+
+    #[tokio::test]
+    async fn shared_poller_broadcasts_one_external_record_change_to_every_browser() {
+        let (directory, state) = fixture();
+        let project = directory.path().join("claude/projects/-work-project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(directory.path().join("codex/sessions")).unwrap();
+        {
+            let mut cache = state.usage_cache.lock().await;
+            for brand in ["claude", "codex"] {
+                cache.insert(
+                    brand.into(),
+                    (std::time::Instant::now(), json!({"brand":brand})),
+                );
+            }
+        }
+
+        let (mut first_rx, first) = state.watch_poll_subscription().await;
+        let (mut second_rx, second) = state.watch_poll_subscription().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        std::fs::write(
+            project.join("session.jsonl"),
+            "{\"type\":\"meta\",\"cwd\":\"/work/project\"}\n",
+        )
+        .unwrap();
+
+        async fn outside(receiver: &mut broadcast::Receiver<Value>) -> Value {
+            loop {
+                let frame = receiver.recv().await.unwrap();
+                if frame["kind"] == "outside" {
+                    return frame;
+                }
+            }
+        }
+        let (first_frame, second_frame) = tokio::time::timeout(
+            Duration::from_secs(3),
+            async { tokio::join!(outside(&mut first_rx), outside(&mut second_rx)) },
+        )
+        .await
+        .expect("the shared filesystem watcher announces within its settle window");
+        assert_eq!(first_frame["folders"], json!(["/work/project"]));
+        assert_eq!(second_frame, first_frame);
+
+        drop(first);
+        drop(second);
     }
 
     fn notice() -> Event {

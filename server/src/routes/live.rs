@@ -42,14 +42,11 @@ use axum::{
     Extension,
 };
 use futures::{sink::SinkExt, stream::StreamExt};
-use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::fs::File;
-use std::io::Read;
+use std::collections::VecDeque;
 use std::{
     convert::Infallible,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::Arc,
     time::Duration,
 };
@@ -137,75 +134,6 @@ fn asked(flag: &Option<String>) -> bool {
     )
 }
 
-/// The working directory named at the head of a provider record. Both Claude
-/// and Codex put it in their opening metadata; reading only the head keeps an
-/// outside-session notification independent of transcript size.
-fn record_cwd(path: &Path) -> Option<String> {
-    let mut file = File::open(path).ok()?;
-    let mut front = Vec::with_capacity(64_000);
-    file.by_ref().take(64_000).read_to_end(&mut front).ok()?;
-    String::from_utf8_lossy(&front).lines().find_map(|line| {
-        let row: serde_json::Value = serde_json::from_str(line).ok()?;
-        row["cwd"]
-            .as_str()
-            .or_else(|| row["payload"]["cwd"].as_str())
-            .filter(|cwd| !cwd.is_empty())
-            .map(str::to_string)
-    })
-}
-
-/// A Claude project folder's flattened name cannot be reversed safely. Read
-/// one record in it, exactly as the retired implementation did, and remember
-/// only successful answers so a half-written first record is retried.
-fn claude_folder_cwd(folder: &Path) -> Option<String> {
-    std::fs::read_dir(folder).ok()?.flatten().find_map(|entry| {
-        let path = entry.path();
-        path.extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| extension == "jsonl")
-            .then(|| record_cwd(&path))
-            .flatten()
-    })
-}
-
-/// Scope a burst of provider-record writes to the projects they can affect.
-/// `None` deliberately means "unplaceable": the browser then performs the
-/// conservative all-project refresh used by the established wire contract.
-fn outside_folders(
-    paths: &HashSet<PathBuf>,
-    claude_projects: &Path,
-    codex_sessions: &Path,
-    known: &mut HashMap<PathBuf, String>,
-) -> Option<Vec<String>> {
-    if paths.is_empty() {
-        return None;
-    }
-    let mut moved = Vec::new();
-    for path in paths {
-        let key = if let Ok(relative) = path.strip_prefix(claude_projects) {
-            let project = relative.components().next()?.as_os_str();
-            claude_projects.join(project)
-        } else if path.starts_with(codex_sessions) {
-            path.clone()
-        } else {
-            continue;
-        };
-        let cwd = known.get(&key).cloned().or_else(|| {
-            let found = if key.starts_with(claude_projects) {
-                claude_folder_cwd(&key)
-            } else {
-                record_cwd(&key)
-            }?;
-            known.insert(key.clone(), found.clone());
-            Some(found)
-        })?;
-        moved.push(cwd);
-    }
-    moved.sort();
-    moved.dedup();
-    (!moved.is_empty()).then_some(moved)
-}
-
 /// Feed the combined browser connection from the in-process database. This is
 /// the native equivalent of relaying the helper's `/watch` SSE stream.
 async fn send_native_watch_snapshot(
@@ -228,70 +156,20 @@ async fn send_native_watch_snapshot(
 }
 
 async fn relay_native_watch(state: workbench::WorkbenchState, tx: mpsc::Sender<Tagged>) {
-    let usage_state = state.clone();
-    let usage_tx = tx.clone();
-    tokio::spawn(async move {
-        let mut beat = tokio::time::interval(Duration::from_secs(30));
-        loop {
-            beat.tick().await;
-            for brand in ["claude", "codex"] {
-                if let Ok(usage) = usage_state.account_usage(brand).await {
-                    let frame = serde_json::json!({"kind":"usage","brand":brand,"usage":usage});
-                    if usage_tx
-                        .send(Tagged::new(Some("workbench"), frame.to_string()))
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-            }
-        }
-    });
     let mut updates = state.database().subscribe_all();
-    let Some(mut holds) = send_native_watch_snapshot(&state, &tx).await else {
+    let (mut polls, _poll_lease) = state.watch_poll_subscription().await;
+    let Some(_) = send_native_watch_snapshot(&state, &tx).await else {
         return;
     };
-    let mut hold_tick = tokio::time::interval(Duration::from_secs(2));
-    let (external_tx, mut external_rx) = mpsc::unbounded_channel();
-    let mut external_watcher =
-        notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-            if let Ok(event) = event {
-                let _ = external_tx.send(event.paths);
-            }
-        })
-        .ok();
-    let claude_projects = state.claude_config_directory().join("projects");
-    let codex_sessions = state.codex_home_directory().join("sessions");
-    if let Some(watcher) = external_watcher.as_mut() {
-        let _ = watcher.watch(&claude_projects, RecursiveMode::Recursive);
-        let _ = watcher.watch(&codex_sessions, RecursiveMode::Recursive);
-    }
-    let mut external_tick = tokio::time::interval(Duration::from_secs(1));
-    let mut external_dirty = HashSet::new();
-    let mut external_cwds = HashMap::new();
     loop {
         tokio::select! {
-        _ = hold_tick.tick() => {
-            let current = serde_json::to_value(state.provider_holds().await).unwrap_or_default();
-            if current != holds {
-                holds = current;
-                let frame = serde_json::json!({"kind":"running","holds":holds});
-                if tx.send(Tagged::new(Some("workbench"), frame.to_string())).await.is_err() { return; }
-            }
-        }
-        changed=external_rx.recv(), if external_watcher.is_some()=>{
-            if let Some(paths)=changed { external_dirty.extend(paths); }
-        }
-        _ = external_tick.tick() => {
-            if !external_dirty.is_empty() {
-                let paths=std::mem::take(&mut external_dirty);
-                let folders=outside_folders(&paths,&claude_projects,&codex_sessions,&mut external_cwds)
-                    .unwrap_or_default();
-                let frame = serde_json::json!({"kind":"outside","folders":folders});
-                if tx.send(Tagged::new(Some("workbench"), frame.to_string())).await.is_err() { return; }
-            }
-        }
+        polled = polls.recv() => match polled {
+            Ok(frame) => if tx.send(Tagged::new(Some("workbench"), frame.to_string())).await.is_err() { return; },
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                if send_native_watch_snapshot(&state, &tx).await.is_none() { return; }
+            },
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+        },
         received = updates.recv() => match received {
             Ok(update) => {
                 if update.event.kind == crate::workbench::protocol::EventKind::SessionStarted {
@@ -323,8 +201,7 @@ async fn relay_native_watch(state: workbench::WorkbenchState, tx: mpsc::Sender<T
             // one shot; silently continuing can strand a newly discovered
             // external chat or its final rich state until the page reloads.
             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                let Some(current) = send_native_watch_snapshot(&state, &tx).await else { return; };
-                holds = current;
+                if send_native_watch_snapshot(&state, &tx).await.is_none() { return; }
             },
             Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
         }}
@@ -782,6 +659,7 @@ fn boards(asked: &Option<String>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::{HashMap, HashSet};
     use std::fs;
 
     #[test]
@@ -813,7 +691,7 @@ mod tests {
 
         let paths = HashSet::from([record]);
         assert_eq!(
-            outside_folders(
+            crate::workbench::external::changed_record_folders(
                 &paths,
                 &home.path().join("claude/projects"),
                 &codex,
@@ -838,7 +716,7 @@ mod tests {
 
         let paths = HashSet::from([record]);
         assert_eq!(
-            outside_folders(&paths, &claude, &codex, &mut HashMap::new()),
+            crate::workbench::external::changed_record_folders(&paths, &claude, &codex, &mut HashMap::new()),
             Some(vec!["/work/codex".to_string()])
         );
     }
@@ -853,7 +731,7 @@ mod tests {
         fs::write(&record, "{\"type\":\"session_meta\"}\n").expect("an unfinished record");
 
         assert_eq!(
-            outside_folders(
+            crate::workbench::external::changed_record_folders(
                 &HashSet::from([record]),
                 &claude,
                 &codex,
