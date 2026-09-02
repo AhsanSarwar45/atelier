@@ -122,7 +122,7 @@ if [ "$DRY_RUN" != 1 ]; then
     [ -f "$ADAPTERS/$file" ] || die "the adapter build did not produce $ADAPTERS/$file"
   done
 fi
-ok "complete ACP runtime bundle is ready"
+ok "complete ACP runtime bundle is ready (unchanged bundles are reused; Goose Cargo cache: ${ATELIER_ACP_BUILD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/atelier/acp-build})"
 
 step "3/4  Replace the installed runtime"
 run mkdir -p "$TARGET_DIR"

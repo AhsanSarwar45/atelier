@@ -3,8 +3,9 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const CLAUDE = Object.freeze({
   version: '0.73.0',
@@ -43,8 +44,8 @@ const TARGETS = Object.freeze({
   },
 });
 
-function run(command, args, cwd) {
-  const result = spawnSync(command, args, { cwd, stdio: 'inherit', shell: false });
+function run(command, args, cwd, env = process.env) {
+  const result = spawnSync(command, args, { cwd, env, stdio: 'inherit', shell: false });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed with ${result.status}`);
 }
@@ -653,11 +654,66 @@ function sha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
+const BUNDLE_FILES = Object.freeze([
+  'claude-acp',
+  'codex-acp',
+  'goose-acp',
+  'claude-provider',
+  'codex-provider',
+  'codex-code-mode-host',
+]);
+
+/**
+ * The builder contains every pin and compatibility patch, so its own digest is
+ * the complete local bundle input. A hit is accepted only when every promised
+ * executable still has the digest recorded when it was built.
+ */
+function bundleIsCurrent(output, target, fingerprint, platform) {
+  try {
+    const manifest = JSON.parse(readFileSync(join(output, 'manifest.json'), 'utf8'));
+    if (manifest.schema !== 2 || manifest.target !== target || manifest.builderFingerprint !== fingerprint) {
+      return false;
+    }
+    return BUNDLE_FILES.every(name => {
+      const file = `${name}${platform.exe}`;
+      return typeof manifest.files?.[file]?.sha256 === 'string'
+        && existsSync(join(output, file))
+        && sha256(join(output, file)) === manifest.files[file].sha256;
+    });
+  } catch {
+    return false;
+  }
+}
+
+function cacheRoot() {
+  if (process.env.ATELIER_ACP_BUILD_CACHE) return resolve(process.env.ATELIER_ACP_BUILD_CACHE);
+  const base = process.env.XDG_CACHE_HOME
+    ? resolve(process.env.XDG_CACHE_HOME)
+    : join(homedir(), '.cache');
+  return join(base, 'atelier', 'acp-build');
+}
+
 const target = process.argv[2];
 const output = resolve(process.argv[3] ?? 'dist/atelier-adapters');
+const cacheOnly = process.argv[4] === '--cache-only';
+const cacheInfo = process.argv[4] === '--cache-info';
 const platform = TARGETS[target];
 if (!platform) {
   throw new Error(`usage: build-acp-adapters.mjs <${Object.keys(TARGETS).join('|')}> [output]`);
+}
+const builderFingerprint = sha256(fileURLToPath(import.meta.url));
+const gooseTarget = join(cacheRoot(), 'goose', target, GOOSE.commit);
+if (cacheInfo) {
+  console.log(JSON.stringify({ builderFingerprint, gooseTarget, target }));
+  process.exit(0);
+}
+if (bundleIsCurrent(output, target, builderFingerprint, platform)) {
+  console.log(`ACP adapter bundle is current: ${output}`);
+  process.exit(0);
+}
+if (cacheOnly) {
+  console.error(`ACP adapter bundle cache miss: ${output}`);
+  process.exit(3);
 }
 
 const scratch = mkdtempSync(join(tmpdir(), 'atelier-acp-build-'));
@@ -699,8 +755,18 @@ try {
   const gooseAdapter = join(output, `goose-acp${platform.exe}`);
   run('bun', ['build', 'src/index.ts', '--minify', '--compile', `--target=${platform.bun}`, `--outfile=${claudeAdapter}`], claudeSource);
   run('bun', ['build', 'src/index.ts', '--minify', '--compile', `--target=${platform.bun}`, `--outfile=${codexAdapter}`], codexSource);
-  run('cargo', ['build', '--release', '--locked', '--target', target, '-p', 'goose-cli', '--bin', 'goose'], gooseSource);
-  cpSync(join(gooseSource, 'target', target, 'release', `goose${platform.exe}`), gooseAdapter);
+  // The source clone is disposable; compiled Rust dependencies are not. Cargo
+  // owns invalidation inside a cache separated by target and pinned Goose
+  // revision, so a changed pin cannot borrow incompatible workspace artifacts
+  // and an unchanged local install never recompiles the dependency graph.
+  mkdirSync(gooseTarget, { recursive: true });
+  run(
+    'cargo',
+    ['build', '--release', '--locked', '--target', target, '-p', 'goose-cli', '--bin', 'goose'],
+    gooseSource,
+    { ...process.env, CARGO_TARGET_DIR: gooseTarget },
+  );
+  cpSync(join(gooseTarget, target, 'release', `goose${platform.exe}`), gooseAdapter);
 
   const claudePackage = npmPackage(
     `@anthropic-ai/claude-agent-sdk-${platform.claude}@${CLAUDE.providerVersion}`,
@@ -728,8 +794,9 @@ try {
 
   const files = [claudeAdapter, codexAdapter, gooseAdapter, claudeProvider, codexProvider, codexCodeModeHost];
   writeFileSync(join(output, 'manifest.json'), `${JSON.stringify({
-    schema: 1,
+    schema: 2,
     target,
+    builderFingerprint,
     adapters: {
       claude: {
         version: CLAUDE.version, commit: CLAUDE.commit, providerVersion: CLAUDE.providerVersion, wireProtocol: 1,
