@@ -128,6 +128,97 @@ pub async fn list_sessions(brand: &str, cwd: Option<&Path>) -> Result<Vec<Listed
         .map_err(|error| error.to_string())
 }
 
+async fn one_shot_request(
+    brand: &str,
+    model: Option<&str>,
+    capability: Option<&str>,
+    method: &str,
+    params: Value,
+) -> Result<Value, String> {
+    let config = adapter::launch_config(brand, model)
+        .ok_or_else(|| format!("bundled {brand} ACP adapter is incomplete or unavailable"))?;
+    let capability = capability.map(str::to_string);
+    let method = method.to_string();
+    agent_client_protocol::Client
+        .builder()
+        .connect_with(AcpAgent::new(config), async move |connection: ConnectionTo<Agent>| {
+            let initialized = connection.send_request(initialize_request()?).block_task().await?;
+            if capability
+                .as_deref()
+                .is_some_and(|path| initialized.pointer(path).is_none())
+            {
+                return Err(acp_error(format!("agent does not advertise {method}")));
+            }
+            if method == "authenticate" {
+                let requested = params["methodId"].as_str().unwrap_or_default();
+                let offered = initialized["authMethods"]
+                    .as_array()
+                    .is_some_and(|methods| methods.iter().any(|entry| entry["id"] == requested));
+                if !offered {
+                    return Err(acp_error("agent did not advertise that authentication method"));
+                }
+            }
+            connection
+                .send_request(UntypedMessage::new(&method, params)?)
+                .block_task()
+                .await
+        })
+        .await
+        .map_err(|error| error.to_string())
+}
+
+pub async fn authenticate(brand: &str, method_id: &str) -> Result<Value, String> {
+    one_shot_request(
+        brand,
+        None,
+        None,
+        "authenticate",
+        json!({"methodId":method_id}),
+    )
+    .await
+}
+
+pub async fn logout(brand: &str) -> Result<Value, String> {
+    one_shot_request(
+        brand,
+        None,
+        Some("/agentCapabilities/auth/logout"),
+        "logout",
+        json!({}),
+    )
+    .await
+}
+
+pub async fn delete_session(session: &Session) -> Result<Value, String> {
+    let external_id = session
+        .external_id
+        .as_deref()
+        .ok_or_else(|| "saved session has no provider id".to_string())?;
+    one_shot_request(
+        &session.brand,
+        session.model.as_deref(),
+        Some("/agentCapabilities/sessionCapabilities/delete"),
+        "session/delete",
+        json!({"sessionId":external_id}),
+    )
+    .await
+}
+
+pub async fn fork_session(session: &Session) -> Result<Value, String> {
+    let external_id = session
+        .external_id
+        .as_deref()
+        .ok_or_else(|| "saved session has no provider id".to_string())?;
+    one_shot_request(
+        &session.brand,
+        session.model.as_deref(),
+        Some("/agentCapabilities/sessionCapabilities/fork"),
+        "session/fork",
+        json!({"sessionId":external_id,"cwd":session.cwd,"mcpServers":[]}),
+    )
+    .await
+}
+
 fn replay_delivery(event: Event) -> Event {
     let mut value = serde_json::to_value(event).expect("canonical ACP event serializes");
     if let Some(provider) = value["providerEvent"].as_object_mut() {

@@ -650,6 +650,8 @@ export type WbpCommand =
   | { type: 'provider-defaults.read'; brand: Brand }
   | { type: 'provider-defaults.write'; brand: Brand; kind: 'model' | 'effort'; value: string }
   | { type: 'providers.list' }
+  | { type: 'provider.authenticate'; brand: Brand; methodId: string }
+  | { type: 'provider.logout'; brand: Brand }
   | {
       type: 'session.start';
       projectId: string;
@@ -674,6 +676,8 @@ export type WbpCommand =
    * flight and leaves the agent standing.
    */
   | { type: 'session.close'; sessionId: string }
+  | { type: 'session.delete'; sessionId: string }
+  | { type: 'session.fork'; sessionId: string }
   /**
    * Steering ONE piece of sent-off work, never the chat it belongs to
    * (docs/agent-workbench.md §8.2.7). `agentId` is the row's own id.

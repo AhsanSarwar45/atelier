@@ -572,6 +572,15 @@ impl WorkbenchRegistry {
                 serde_json::to_value(self.defaults.write(brand, kind, value)?)
                     .map_err(|e| e.to_string())
             }
+            CommandKind::ProviderAuthenticate => {
+                let brand = Self::field(command, "brand")?;
+                let method = Self::field(command, "methodId")?;
+                super::acp::client::authenticate(brand, method).await
+            }
+            CommandKind::ProviderLogout => {
+                let brand = Self::field(command, "brand")?;
+                super::acp::client::logout(brand).await
+            }
             CommandKind::ProvidersList => {
                 let mut providers = [
                     ("claude", "Claude", "https://docs.anthropic.com/en/docs/claude-code"),
@@ -584,6 +593,40 @@ impl WorkbenchRegistry {
                 }).collect::<Vec<_>>();
                 providers.extend(super::local::providers().await);
                 Ok(json!({"providers":providers}))
+            }
+            CommandKind::SessionDelete => {
+                let session_id = Self::field(command, "sessionId")?;
+                if self.has_driver(session_id).await {
+                    return Err("close the live session before deleting it".into());
+                }
+                self.refuse_external_owner(command).await?;
+                let session = self.database.get_session(session_id.to_string()).await?
+                    .ok_or_else(|| format!("no session {session_id}"))?;
+                super::acp::client::delete_session(&session).await?;
+                self.database.delete_session(session_id.to_string()).await?;
+                Ok(json!({"ok":true}))
+            }
+            CommandKind::SessionFork => {
+                let session_id = Self::field(command, "sessionId")?;
+                let source = self.database.get_session(session_id.to_string()).await?
+                    .ok_or_else(|| format!("no session {session_id}"))?;
+                let response = super::acp::client::fork_session(&source).await?;
+                let external_id = response["sessionId"].as_str()
+                    .filter(|id| !id.is_empty())
+                    .ok_or_else(|| "ACP session/fork returned no session id".to_string())?;
+                let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                let mut fork = source.clone();
+                fork.id = uuid::Uuid::new_v4().to_string();
+                fork.external_id = Some(external_id.to_string());
+                fork.title = source.title.as_ref().map(|title| format!("{title} (fork)"));
+                fork.state = "dormant".into();
+                fork.origin = "atelier".into();
+                fork.created_at = at.clone();
+                fork.last_active_at = at;
+                fork.last_spoke_at = None;
+                self.database.create_session(fork.clone()).await?;
+                super::provider::append_started(&self.database, &fork, false).await?;
+                serde_json::to_value(fork).map_err(|error| error.to_string())
             }
             CommandKind::SessionOpen => {
                 if let Some(session) = self.already_live_open(command).await? {
