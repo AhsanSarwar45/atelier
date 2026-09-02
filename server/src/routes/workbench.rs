@@ -1245,6 +1245,64 @@ pub(crate) async fn snapshot(database: &ChatDb, session_id: &str) -> Result<Valu
             }
         }
     }
+    // A picker with no options is intentionally absent in the browser. Older
+    // sessions can predate session.menu while still carrying exact saved pins
+    // in session.started/session.pinned. Keep those controls visible without
+    // inventing a provider catalog: the one known current value is a safe
+    // fallback until an ACP/provider menu replaces it.
+    let model = view["model"].as_str().map(str::to_string).or_else(|| {
+        matches!(view["brand"].as_str(), Some("claude" | "codex"))
+            .then(|| "default".to_string())
+    });
+    let permission_mode = view["permissionMode"].as_str().map(str::to_string);
+    let effort = view["effort"].as_str().map(str::to_string);
+    let collaboration_mode = view["collaborationMode"].as_str().map(str::to_string);
+    if view["menu"]["models"]
+        .as_array()
+        .is_none_or(|rows| rows.is_empty())
+    {
+        if let Some(value) = model {
+            let display_name = if value == "default" {
+                "Default".to_string()
+            } else {
+                value.clone()
+            };
+            view["menu"]["models"] = json!([{
+                "value":value,
+                "displayName":display_name,
+                "description":"Saved session selection; the full provider catalog loads when available.",
+                "group":"session"
+            }]);
+        }
+    }
+    if view["menu"]["permissionModes"]
+        .as_array()
+        .is_none_or(|rows| rows.is_empty())
+    {
+        if let Some(value) = permission_mode {
+            view["menu"]["permissionModes"] = json!([value]);
+        }
+    }
+    if view["menu"]["efforts"]
+        .as_array()
+        .is_none_or(|rows| rows.is_empty())
+    {
+        if let Some(value) = effort {
+            let display_name = value.clone();
+            view["menu"]["efforts"] =
+                json!([{"value":value,"displayName":display_name}]);
+        }
+    }
+    if view["menu"]["collaborationModes"]
+        .as_array()
+        .is_none_or(|rows| rows.is_empty())
+    {
+        if let Some(value) = collaboration_mode {
+            let display_name = value.clone();
+            view["menu"]["collaborationModes"] =
+                json!([{"value":value,"displayName":display_name}]);
+        }
+    }
     view["items"] = json!(snapshot.page.items);
     view["agents"] = json!(snapshot.agents);
     view["lastSeq"] = json!(snapshot.page.newest_seq);
@@ -1744,6 +1802,30 @@ mod tests {
         assert!(chunk.contains("still here"), "{chunk}");
         assert!(chunk.contains("GPT-5"), "{chunk}");
         assert!(!chunk.contains("project-only"), "{chunk}");
+    }
+
+    #[tokio::test]
+    async fn saved_pins_keep_every_known_picker_visible_without_a_historical_menu() {
+        let (_directory, state) = fixture();
+        let mut session = saved_session();
+        session.permission_mode = "on-request".into();
+        session.effort = Some("high".into());
+        session.collaboration_mode = Some("plan".into());
+        state.database().create_session(session.clone()).await.unwrap();
+        let started: Event = serde_json::from_value(json!({
+            "type":"session.started","sessionId":session.id,"seq":0,"at":session.created_at,
+            "brand":session.brand,"externalId":session.external_id,"model":session.model,
+            "cwd":session.cwd,"permissionMode":session.permission_mode,"effort":session.effort,
+            "collaborationMode":session.collaboration_mode
+        }))
+        .unwrap();
+        state.database().append(started).await.unwrap();
+
+        let view = snapshot(state.database(), &session.id).await.unwrap();
+        assert_eq!(view["menu"]["models"][0]["value"], "gpt-5");
+        assert_eq!(view["menu"]["permissionModes"], json!(["on-request"]));
+        assert_eq!(view["menu"]["efforts"][0]["value"], "high");
+        assert_eq!(view["menu"]["collaborationModes"][0]["value"], "plan");
     }
 
     #[tokio::test]
