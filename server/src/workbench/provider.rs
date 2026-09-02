@@ -384,7 +384,7 @@ async fn import_claude_history(
             .or_insert_with(|| json!(session.last_active_at));
         imported.push(serde_json::from_value(value).map_err(|error| error.to_string())?);
     }
-    database.append_many(imported).await?;
+    database.append_replay(imported).await?;
     if let Some(at) = followed_from {
         database.remember_followed(session.id.clone(), at).await?;
     }
@@ -478,7 +478,7 @@ async fn import_codex_history(database: &ChatDb, session: &Session) -> Result<()
     }
     let mut imported = Vec::with_capacity(replay.len());
     for mut value in replay {
-        let event_id = super::protocol::record_event_id(&value);
+        let event_id = super::protocol::provider_record_event_id("codex", &value);
         let Some(object) = value.as_object_mut() else {
             continue;
         };
@@ -490,7 +490,7 @@ async fn import_codex_history(database: &ChatDb, session: &Session) -> Result<()
             .or_insert_with(|| json!(session.last_active_at));
         imported.push(serde_json::from_value(value).map_err(|error| error.to_string())?);
     }
-    database.append_many(imported).await?;
+    database.append_replay(imported).await?;
     if let Some(path) = thread["path"].as_str() {
         if let Ok(size) = std::fs::metadata(path).map(|meta| meta.len() as i64) {
             database.remember_followed(session.id.clone(), size).await?;

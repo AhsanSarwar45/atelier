@@ -19,6 +19,13 @@ pub fn record_event_id(value: &Value) -> String {
     record_event_id_at(value, super::store::IMPORT_RECIPE)
 }
 
+/// Stable identity for a normalized provider record at both replay and live
+/// ingestion boundaries. A provider-specific decoder may advance its recipe,
+/// but delivery mode must never mint a second identity for the same event.
+pub fn provider_record_event_id(provider: &str, value: &Value) -> String {
+    record_event_id_at(value, super::store::import_recipe(provider))
+}
+
 pub fn record_event_id_at(value: &Value, recipe: i64) -> String {
     format!("r{}:{}", recipe, replay_event_id(value))
 }

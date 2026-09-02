@@ -18,14 +18,16 @@ const CHATS = [
     expectedFirstItems: 40,
     minimumFirstRows: 6,
     hasOlder: true,
+    visibleText: ['The teardown is confirmed', 'Closed bw-8jzg.27'],
   },
   {
     id: '021a4ead-5fae-453e-942a-977a13cb6c70',
     title: 'Claude Sidebar Shows Subagents Done Current',
     shot: 'claude-history-sidebar',
-    expectedFirstItems: 29,
+    expectedFirstItems: 23,
     minimumFirstRows: 6,
     hasOlder: false,
+    visibleText: ['Scout came back with a correction', 'Landed on ours and closed'],
   },
   {
     id: '79225ed8-932b-4ef2-8cda-ff1b883d6381',
@@ -34,6 +36,7 @@ const CHATS = [
     expectedFirstItems: 40,
     minimumFirstRows: 20,
     hasOlder: true,
+    visibleText: [] as string[],
   },
 ] as const;
 
@@ -74,20 +77,13 @@ function copyChat(chat: (typeof CHATS)[number], project: { id: string; path: str
     ).run(
       session.id, session.brand, session.external_id, project.id, project.path, project.path,
       session.model, session.permission_mode, session.effort, session.title, 'dormant', session.origin,
-      session.created_at, session.last_active_at, session.ended_at, session.imported_at,
-      session.imported_recipe, session.last_spoke_at, session.followed_to, session.followed_drawn,
+      session.created_at, session.last_active_at, session.ended_at, null,
+      0, session.last_spoke_at, null, null,
     );
-    const put = target.prepare(
-      `INSERT INTO event
-        (session_id, seq, at, type, json, provider, provider_thread_id, provider_event_id)
-       VALUES (?,?,?,?,?,?,?,?)`,
-    );
-    for (const event of events) {
-      put.run(
-        event.session_id, event.seq, event.at, event.type, event.json,
-        event.provider, event.provider_thread_id, event.provider_event_id,
-      );
-    }
+    // Seed no normalized events. Restore must exercise this build's Rust
+    // reader against the copied provider record; reusing the owner's already
+    // normalized event rows would only prove the pager and could hide a
+    // provider-parser regression that reduces a long chat to one message.
     target.exec('COMMIT');
   } catch (error) {
     target.exec('ROLLBACK');
@@ -145,12 +141,18 @@ for (const chat of CHATS) {
         chat.expectedFirstItems,
       );
       expect(firstRows, `${chat.title}: initial page was only a fragment`).toBeGreaterThanOrEqual(chat.minimumFirstRows);
+      for (const words of chat.visibleText) {
+        await expect(transcript, `${chat.title}: canonical transcript omitted “${words}”`).toContainText(words);
+      }
       // One persisted 40-item page can fan out into more drawn machine rows.
       // It must still remain a small initial render, not the whole transcript.
       expect(firstRows).toBeLessThan(100);
       if (!chat.hasOlder) {
-        // This saved chat has exactly 29 main-thread canonical items. Helper
-        // messages have their own independently paged transcript and must not
+        // This saved chat has exactly 23 main-thread canonical items. Helper
+        // turns and six superseded assistant stream/retry rows are not main
+        // transcript items. The visible text assertions above prove that the
+        // canonical beginning and ending survived normalization.
+        // Helper messages have their own independently paged transcript and must not
         // be mixed into this count.
         // page must exhaust its cursor without issuing a pointless older-page
         // request.
@@ -163,6 +165,18 @@ for (const chat of CHATS) {
         await helperRow.getByTestId('sent-away-open').click();
         const helperPane = page.getByTestId('agent-view-said');
         await expect.poll(() => helperRequests).toBe(1);
+        // The complete helper now has later tool calls beyond the old partial
+        // import. Its two images are older than the bounded newest page, so
+        // reach them through the same independent upward cursor a person uses.
+        for (let pageNumber = 0; pageNumber < 10 && await helperPane.locator('img').count() < 2; pageNumber += 1) {
+          await expect(helperPane).toHaveAttribute('data-can-load-older', 'true');
+          const requestsBefore = helperOlderRequests;
+          await helperPane.evaluate((element) => {
+            element.scrollTop = 0;
+            element.dispatchEvent(new Event('scroll', { bubbles: true }));
+          });
+          await expect.poll(() => helperOlderRequests - requestsBefore).toBe(1);
+        }
         await expect(helperPane.locator('img')).toHaveCount(2);
         mkdirSync(SHOTS, { recursive: true });
         await page.screenshot({ path: join(SHOTS, `${chat.shot}-after.png`) });
@@ -175,7 +189,10 @@ for (const chat of CHATS) {
           const observed = window as typeof window & { __olderWheel?: number };
           observed.__olderWheel = (observed.__olderWheel ?? 0) + 1;
         }, { once: true });
-        element.scrollTop = 0;
+        // Park just outside the load threshold. Jumping straight to zero is
+        // itself an upward-scroll request; following it with a wheel would be
+        // two intents while the assertion below deliberately proves one.
+        element.scrollTop = element.clientHeight + 8;
       });
       mkdirSync(SHOTS, { recursive: true });
       await page.screenshot({ path: join(SHOTS, `${chat.shot}-before.png`) });

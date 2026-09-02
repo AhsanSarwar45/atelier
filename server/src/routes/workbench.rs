@@ -1192,7 +1192,7 @@ fn snapshot_frame(view: &Value) -> SseEvent {
 }
 
 fn session_tail(
-    receiver: broadcast::Receiver<Event>,
+    receiver: broadcast::Receiver<crate::workbench::actor::SessionUpdate>,
     database: ChatDb,
     session_id: String,
     after: i64,
@@ -1223,7 +1223,16 @@ fn session_tail(
                     ));
                 }
                 match receiver.recv().await {
-                    Ok(event) => {
+                    Ok(crate::workbench::actor::SessionUpdate::ReplayCommitted { from, .. }) => {
+                        let Ok(events) = database
+                            .events_since(session_id.clone(), after.min(from.saturating_sub(1)))
+                            .await
+                        else {
+                            return None;
+                        };
+                        replay.extend(events);
+                    }
+                    Ok(crate::workbench::actor::SessionUpdate::Event(event)) => {
                         let seq = event
                             .fields
                             .get("seq")
@@ -1430,6 +1439,10 @@ async fn watch(State(state): State<WorkbenchState>) -> Result<Sse<EventStream>, 
                 },
                 received=receiver.recv()=>match received{
                     Ok(update)=>{
+                        if update.batch_from.is_some(){
+                            if send_watch_snapshot(&state,&tx).await.is_none(){return}
+                            continue
+                        }
                         if update.event.kind==crate::workbench::protocol::EventKind::SessionStarted{
                             if let Ok(Some(session))=state.database().get_session(update.session_id.clone()).await{
                                 let beads=state.database().beads_for_session(update.session_id.clone()).await.unwrap_or_default();
@@ -2165,8 +2178,8 @@ mod tests {
         )
         .unwrap();
         let fresh: Event = serde_json::from_value(json!({"type":"notice","sessionId":"chat-1","seq":5,"at":"now","text":"after snapshot"})).unwrap();
-        sender.send(old).unwrap();
-        sender.send(fresh).unwrap();
+        sender.send(crate::workbench::actor::SessionUpdate::Event(old)).unwrap();
+        sender.send(crate::workbench::actor::SessionUpdate::Event(fresh)).unwrap();
         let mut tail = session_tail(receiver, state.database().clone(), "chat-1".into(), 4);
         let frame = tail.next().await.unwrap().unwrap();
         assert!(format!("{frame:?}").contains("after snapshot"));

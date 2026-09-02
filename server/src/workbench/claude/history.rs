@@ -258,12 +258,12 @@ fn tool_result_row(row: &Value) -> bool {
             .is_some_and(|blocks| blocks.iter().any(|block| block["type"] == "tool_result"))
 }
 
-/// Claude's JSONL is an append-only graph, not a conversation in file order.
+/// Choose the canonical branch inside one uninterrupted context segment.
 /// This is the native equivalent of the final Node reader's pinned Agent SDK
-/// `getSessionMessages`: repair compaction links, choose the newest valid leaf,
-/// walk its ancestry, and place streamed assistant variants/results beside the
+/// `getSessionMessages`: repair links, choose the newest valid leaf, walk its
+/// ancestry, and place streamed assistant variants/results beside the
 /// canonical assistant row they belong to.
-fn ordered_conversation(rows: &[Value], include_sidechains: bool) -> Vec<Value> {
+fn latest_conversation(rows: &[Value], include_sidechains: bool) -> Vec<Value> {
     let mut by_id = HashMap::<String, Value>::new();
     let mut position = HashMap::<String, usize>::new();
     let mut insertion_order = Vec::new();
@@ -490,6 +490,46 @@ fn ordered_conversation(rows: &[Value], include_sidechains: bool) -> Vec<Value> 
         .into_iter()
         .filter(|row| conversation_row(row, include_sidechains))
         .collect()
+}
+
+/// Claude's JSONL is an append-only graph split into context-sized segments.
+/// A `compact_boundary` deliberately makes the following summary a new graph
+/// root. The SDK reader returns only the newest root because that is exactly
+/// what a model resume needs; using it once over the whole file in a history UI
+/// permanently hides everything before the latest compaction.
+///
+/// Canonicalize each segment independently, then concatenate them in durable
+/// file order. This retains the SDK's retry/variant selection within a context
+/// while recovering the complete user-visible conversation in one linear pass.
+fn ordered_conversation(rows: &[Value], include_sidechains: bool) -> Vec<Value> {
+    let mut ordered = Vec::new();
+    let mut seen = HashSet::new();
+    let mut start = 0;
+    for (index, row) in rows.iter().enumerate() {
+        if row["type"] != "system" || row["subtype"] != "compact_boundary" {
+            continue;
+        }
+        ordered.extend(
+            latest_conversation(&rows[start..index], include_sidechains)
+                .into_iter()
+                .filter(|row| {
+                    row["uuid"]
+                        .as_str()
+                        .is_none_or(|id| seen.insert(id.to_string()))
+                }),
+        );
+        start = index;
+    }
+    ordered.extend(
+        latest_conversation(&rows[start..], include_sidechains)
+            .into_iter()
+            .filter(|row| {
+                row["uuid"]
+                    .as_str()
+                    .is_none_or(|id| seen.insert(id.to_string()))
+            }),
+    );
+    ordered
 }
 
 fn human_words(text: &str) -> bool {
@@ -1231,11 +1271,64 @@ impl HelperFollower {
     pub fn after_import(record: &Path) -> Self {
         let rows = jsonl(record);
         let outcomes = tool_outcomes(&rows);
-        Self {
+        let mut follower = Self {
             record: record.to_path_buf(),
             sizes: HashMap::new(),
             calls: HashMap::new(),
             outcomes,
+            ended: HashSet::new(),
+            seen: HashSet::new(),
+        };
+        // `read_history` has already normalized every current helper file.
+        // Seed the incremental cursor and identities from that exact view so
+        // the first follower tick cannot replay the imported prefix.
+        for path in follower.paths() {
+            let Ok(size) = fs::metadata(&path).map(|meta| meta.len()) else {
+                continue;
+            };
+            let Some(mut helper) = helper_facts(&path) else {
+                continue;
+            };
+            follower.sizes.insert(helper.agent_id.clone(), size);
+            if let Some(call) = &helper.tool_call_id {
+                follower.calls.insert(call.clone(), helper.agent_id.clone());
+            }
+            for event in &helper.events {
+                follower.seen.insert(
+                    crate::workbench::protocol::record_event_id_at(
+                        event,
+                        crate::workbench::store::CLAUDE_IMPORT_RECIPE,
+                    ),
+                );
+            }
+            if let Some(ok) = helper
+                .tool_call_id
+                .as_ref()
+                .and_then(|call| follower.outcomes.get(call))
+            {
+                helper.finish["state"] = json!(if *ok { "done" } else { "failed" });
+                follower.seen.insert(
+                    crate::workbench::protocol::record_event_id_at(
+                        &helper.finish,
+                        crate::workbench::store::CLAUDE_IMPORT_RECIPE,
+                    ),
+                );
+                follower.ended.insert(helper.agent_id);
+            }
+        }
+        follower
+    }
+
+    /// A provider rewrite follows a transcript reset, so all current helper
+    /// rows must be emitted into the new generation rather than treated as an
+    /// already-imported prefix.
+    pub fn after_reset(record: &Path) -> Self {
+        let rows = jsonl(record);
+        Self {
+            record: record.to_path_buf(),
+            sizes: HashMap::new(),
+            calls: HashMap::new(),
+            outcomes: tool_outcomes(&rows),
             ended: HashSet::new(),
             seen: HashSet::new(),
         }
@@ -1374,10 +1467,7 @@ pub fn identified_replay(events: Vec<Value>, external_id: &str) -> Vec<Value> {
     events
         .into_iter()
         .map(|mut event| {
-            let event_id = crate::workbench::protocol::record_event_id_at(
-                &event,
-                crate::workbench::store::CLAUDE_IMPORT_RECIPE,
-            );
+            let event_id = crate::workbench::protocol::provider_record_event_id("claude", &event);
             if let Some(object) = event.as_object_mut() {
                 object.insert(
                     "providerEvent".into(),
@@ -1534,6 +1624,27 @@ mod tests {
                 .map(|row| row["uuid"].as_str().unwrap())
                 .collect::<Vec<_>>(),
             vec!["u1", "canonical", "fragment", "result", "u2"]
+        );
+    }
+
+    #[test]
+    fn claude_history_keeps_every_canonical_compaction_segment() {
+        let rows = vec![
+            json!({"type":"user","uuid":"u1","message":{"content":"first"}}),
+            json!({"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"id":"m1","content":"answer one"}}),
+            json!({"type":"system","subtype":"compact_boundary","uuid":"boundary"}),
+            json!({"type":"user","uuid":"summary","parentUuid":"boundary","isCompactSummary":true,"message":{"content":"summary"}}),
+            json!({"type":"assistant","uuid":"a1","parentUuid":"summary","message":{"id":"m1","content":"answer one"}}),
+            json!({"type":"user","uuid":"u2","parentUuid":"a1","message":{"content":"second"}}),
+            json!({"type":"assistant","uuid":"a2","parentUuid":"u2","message":{"id":"m2","content":"answer two"}}),
+        ];
+        let ordered = ordered_conversation(&rows, false);
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|row| row["uuid"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["u1", "a1", "summary", "u2", "a2"]
         );
     }
 
@@ -1936,12 +2047,8 @@ mod tests {
         let mut follower = HelperFollower::after_import(&record);
 
         let (first, done) = follower.poll(&[]);
+        assert!(first.is_empty());
         assert!(done.is_empty());
-        assert!(first.iter().any(|event| event["type"] == "agent.started"));
-        assert!(first
-            .iter()
-            .any(|event| event["type"] == "text.delta" && event["text"] == "Start"));
-        assert!(follower.poll(&[]).0.is_empty());
 
         let next = json!({
             "type":"assistant","uuid":"helper-answer","timestamp":"2026-08-30T00:00:03Z",

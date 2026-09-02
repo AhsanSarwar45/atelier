@@ -172,6 +172,10 @@ async fn relay_native_watch(state: workbench::WorkbenchState, tx: mpsc::Sender<T
         },
         received = updates.recv() => match received {
             Ok(update) => {
+                if update.batch_from.is_some() {
+                    if send_native_watch_snapshot(&state, &tx).await.is_none() { return; }
+                    continue;
+                }
                 if update.event.kind == crate::workbench::protocol::EventKind::SessionStarted {
                     if let Ok(Some(session)) = state.database().get_session(update.session_id.clone()).await {
                         let beads = state.database().beads_for_session(update.session_id.clone()).await.unwrap_or_default();
@@ -342,7 +346,7 @@ async fn follow_native_record(
                         if let Ok(reset)=reset{let _=state.database().append(reset).await;}
                         if let Some(tail)=claude_tail.as_mut(){tail.seek(0)}
                         claude_lines.clear();
-                        claude_helpers=Some(crate::workbench::claude::history::HelperFollower::after_import(&record));
+                        claude_helpers=Some(crate::workbench::claude::history::HelperFollower::after_reset(&record));
                     } else if let Some(tail)=claude_tail.as_mut(){tail.to_end()}
                     Vec::new()
                 } else {
@@ -379,7 +383,7 @@ async fn follow_native_record(
                 }
             }
             for mut value in fresh {
-                let event_id=crate::workbench::protocol::record_event_id(&value);
+                let event_id=crate::workbench::protocol::provider_record_event_id(&session.brand,&value);
                 let Some(object) = value.as_object_mut() else { continue; };
                 object.insert("providerEvent".into(),serde_json::json!({"provider":session.brand,"threadId":session.external_id,"eventId":event_id,"delivery":"live"}));
                 object.insert("sessionId".into(), serde_json::json!(session.id));
@@ -400,7 +404,7 @@ async fn relay_native_chat(
     state: workbench::WorkbenchState,
     session_id: String,
     since: i64,
-    mut updates: tokio::sync::broadcast::Receiver<crate::workbench::protocol::Event>,
+    mut updates: tokio::sync::broadcast::Receiver<crate::workbench::actor::SessionUpdate>,
     prepared_watermark: Option<i64>,
     tx: mpsc::Sender<Tagged>,
 ) {
@@ -463,7 +467,12 @@ async fn relay_native_chat(
     loop {
         tokio::select! {
         received = updates.recv() => match received {
-            Ok(event) => {
+            Ok(crate::workbench::actor::SessionUpdate::ReplayCommitted { through, .. }) => {
+                if through <= watermark { continue; }
+                let Some(sent) = recover_chat_snapshot(&state,&session_id,&tx).await else { return; };
+                watermark=sent;
+            }
+            Ok(crate::workbench::actor::SessionUpdate::Event(event)) => {
                 let seq = event.fields.get("seq").and_then(serde_json::Value::as_i64).unwrap_or_default();
                 if seq <= watermark { continue; }
                 // A replay import is committed and published as one batch. If
@@ -833,7 +842,7 @@ mod tests {
 
         let appeared = tokio::time::timeout(Duration::from_secs(2), async {
             loop {
-                let event = updates.recv().await.unwrap();
+                let crate::workbench::actor::SessionUpdate::Event(event) = updates.recv().await.unwrap() else { continue; };
                 if event.fields.get("text").and_then(serde_json::Value::as_str)
                     == Some("one shared answer")
                 {

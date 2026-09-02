@@ -151,17 +151,27 @@ impl WorkbenchRegistry {
             let mut updates = database.subscribe_all();
             handle.spawn(async move {
                 while let Ok(update) = updates.recv().await {
-                    if update.event.kind != super::protocol::EventKind::ToolStarted { continue; }
-                    let name=update.event.fields.get("name").and_then(Value::as_str).unwrap_or("");
-                    let input=update.event.fields.get("input").unwrap_or(&Value::Null);
-                    let candidates=super::beads_links::candidates(name,input);
-                    if candidates.is_empty(){continue} let Some(session)=db.get_session(update.session_id.clone()).await.ok().flatten() else{continue};
-                    let runner=super::beads_links::BdRunner::default();
-                    for id in candidates {
-                        if super::beads_links::issue_exists(&runner,Path::new(&session.cwd),&id).await.is_none(){continue}
-                        if !super::beads_links::record_link(&runner,Path::new(&session.cwd),&id,&session.id,"workbench-tool").await{continue}
-                        let event:super::protocol::Event=match serde_json::from_value(json!({"type":"link.bead","sessionId":session.id,"seq":0,"at":chrono::Utc::now().to_rfc3339(),"beadId":id,"via":"tool"})){Ok(event)=>event,Err(_)=>continue};
-                        let _=db.append(event).await;
+                    let session_id = update.session_id;
+                    let events = if let Some(from) = update.batch_from {
+                        db.events_since(session_id.clone(), from.saturating_sub(1))
+                            .await
+                            .unwrap_or_default()
+                    } else {
+                        vec![update.event]
+                    };
+                    for provider_event in events {
+                        if provider_event.kind != super::protocol::EventKind::ToolStarted { continue; }
+                        let name=provider_event.fields.get("name").and_then(Value::as_str).unwrap_or("");
+                        let input=provider_event.fields.get("input").unwrap_or(&Value::Null);
+                        let candidates=super::beads_links::candidates(name,input);
+                        if candidates.is_empty(){continue} let Some(session)=db.get_session(session_id.clone()).await.ok().flatten() else{continue};
+                        let runner=super::beads_links::BdRunner::default();
+                        for id in candidates {
+                            if super::beads_links::issue_exists(&runner,Path::new(&session.cwd),&id).await.is_none(){continue}
+                            if !super::beads_links::record_link(&runner,Path::new(&session.cwd),&id,&session.id,"workbench-tool").await{continue}
+                            let event:super::protocol::Event=match serde_json::from_value(json!({"type":"link.bead","sessionId":session.id,"seq":0,"at":chrono::Utc::now().to_rfc3339(),"beadId":id,"via":"tool"})){Ok(event)=>event,Err(_)=>continue};
+                            let _=db.append(event).await;
+                        }
                     }
                 }
             });

@@ -23,6 +23,16 @@ pub struct StoreUpdate {
     pub session_id: String,
     pub seq: i64,
     pub event: Event,
+    /// First durable sequence in a historical replay committed atomically.
+    /// Consumers should refresh or read that range instead of assuming the
+    /// representative `event` is the only newly stored row.
+    pub batch_from: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SessionUpdate {
+    Event(Event),
+    ReplayCommitted { from: i64, through: i64 },
 }
 
 /// One self-consistent cold-chat read. The watermark and every fact it covers
@@ -52,7 +62,7 @@ enum Command {
     Spend(Reply<Vec<Spend>>),
     ToolDetails(String, String, Reply<Option<serde_json::Value>>),
     Append(Event, Reply<Option<Event>>),
-    AppendMany(Vec<Event>, Reply<usize>),
+    AppendMany(Vec<Event>, bool, Reply<usize>),
     EventsSince(String, i64, Reply<Vec<Event>>),
     EventCount(String, Reply<i64>),
     TimelineCount(String, Reply<i64>),
@@ -101,7 +111,7 @@ impl Drop for Owner {
 pub struct ChatDb {
     owner: Arc<Owner>,
     global: broadcast::Sender<StoreUpdate>,
-    sessions: Arc<Mutex<HashMap<String, broadcast::Sender<Event>>>>,
+    sessions: Arc<Mutex<HashMap<String, broadcast::Sender<SessionUpdate>>>>,
 }
 
 impl ChatDb {
@@ -255,7 +265,16 @@ impl ChatDb {
     /// Persist a provider replay in one actor turn and one SQLite commit.
     /// Publication happens only after the whole batch is durable.
     pub async fn append_many(&self, events: Vec<Event>) -> Result<usize, String> {
-        self.request(|reply| Command::AppendMany(events, reply))
+        self.request(|reply| Command::AppendMany(events, false, reply))
+            .await
+    }
+
+    /// Persist a historical provider replay atomically and notify each live
+    /// consumer once. The durable range is authoritative; sending thousands
+    /// of replay rows through a bounded live channel only creates lag and
+    /// repeated snapshots while adding no information.
+    pub async fn append_replay(&self, events: Vec<Event>) -> Result<usize, String> {
+        self.request(|reply| Command::AppendMany(events, true, reply))
             .await
     }
 
@@ -368,7 +387,7 @@ impl ChatDb {
         self.global.subscribe()
     }
 
-    pub fn subscribe_session(&self, session_id: &str) -> broadcast::Receiver<Event> {
+    pub fn subscribe_session(&self, session_id: &str) -> broadcast::Receiver<SessionUpdate> {
         let mut sessions = self.sessions.lock().unwrap();
         let sender = sessions.entry(session_id.to_string()).or_insert_with(|| {
             let (sender, _) = broadcast::channel(1024);
@@ -533,18 +552,19 @@ fn persist_event(
 
 fn publish_event(
     global: &broadcast::Sender<StoreUpdate>,
-    sessions: &Arc<Mutex<HashMap<String, broadcast::Sender<Event>>>>,
+    sessions: &Arc<Mutex<HashMap<String, broadcast::Sender<SessionUpdate>>>>,
     session_id: String,
     seq: i64,
     event: Event,
 ) {
     if let Some(sender) = sessions.lock().unwrap().get(&session_id) {
-        let _ = sender.send(event.clone());
+        let _ = sender.send(SessionUpdate::Event(event.clone()));
     }
     let _ = global.send(StoreUpdate {
         session_id,
         seq,
         event,
+        batch_from: None,
     });
 }
 
@@ -552,7 +572,7 @@ fn run(
     mut store: Store,
     mut commands: mpsc::UnboundedReceiver<Command>,
     global: broadcast::Sender<StoreUpdate>,
-    sessions: Arc<Mutex<HashMap<String, broadcast::Sender<Event>>>>,
+    sessions: Arc<Mutex<HashMap<String, broadcast::Sender<SessionUpdate>>>>,
 ) {
     let mut agent_lifecycles: HashMap<String, super::lifecycle::AgentLifecycle> = HashMap::new();
     while let Some(command) = commands.blocking_recv() {
@@ -623,7 +643,7 @@ fn run(
                     }
                 }
             }
-            Command::AppendMany(events, reply) => {
+            Command::AppendMany(events, replay, reply) => {
                 let lifecycle_before = agent_lifecycles.clone();
                 let prepared = events
                     .into_iter()
@@ -667,8 +687,35 @@ fn run(
                 match result {
                     Ok(stored) => {
                         let count = stored.len();
-                        for (session_id, seq, event) in stored {
-                            publish_event(&global, &sessions, session_id, seq, event);
+                        if replay {
+                            let mut ranges = HashMap::<String, (i64, i64, Event)>::new();
+                            for (session_id, seq, event) in stored {
+                                ranges
+                                    .entry(session_id)
+                                    .and_modify(|range| {
+                                        range.1 = seq;
+                                        range.2 = event.clone();
+                                    })
+                                    .or_insert((seq, seq, event));
+                            }
+                            for (session_id, (from, through, event)) in ranges {
+                                if let Some(sender) = sessions.lock().unwrap().get(&session_id) {
+                                    let _ = sender.send(SessionUpdate::ReplayCommitted {
+                                        from,
+                                        through,
+                                    });
+                                }
+                                let _ = global.send(StoreUpdate {
+                                    session_id,
+                                    seq: through,
+                                    event,
+                                    batch_from: Some(from),
+                                });
+                            }
+                        } else {
+                            for (session_id, seq, event) in stored {
+                                publish_event(&global, &sessions, session_id, seq, event);
+                            }
                         }
                         let _ = reply.send(Ok(count));
                     }
@@ -781,6 +828,13 @@ mod tests {
         .unwrap()
     }
 
+    fn live_event(update: SessionUpdate) -> Event {
+        match update {
+            SessionUpdate::Event(event) => event,
+            SessionUpdate::ReplayCommitted { .. } => panic!("expected a live event"),
+        }
+    }
+
     #[tokio::test]
     async fn workbench_core_actor_serializes_and_publishes_monotone_updates() {
         let directory = tempfile::tempdir().unwrap();
@@ -801,7 +855,11 @@ mod tests {
         let mut chat_seq = Vec::new();
         let mut all_seq = Vec::new();
         for _ in 0..20 {
-            chat_seq.push(chat.recv().await.unwrap().fields["seq"].as_i64().unwrap());
+            chat_seq.push(
+                live_event(chat.recv().await.unwrap()).fields["seq"]
+                    .as_i64()
+                    .unwrap(),
+            );
             all_seq.push(all.recv().await.unwrap().seq);
         }
         assert_eq!(chat_seq, (1..=20).collect::<Vec<_>>());
@@ -835,11 +893,45 @@ mod tests {
         assert_eq!(database.event_count("chat-1".into()).await.unwrap(), 500);
 
         for expected in 1..=500 {
-            let received = chat.recv().await.unwrap();
+            let received = live_event(chat.recv().await.unwrap());
             assert_eq!(received.fields["seq"], expected);
         }
         assert!(matches!(
             chat.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn historical_replay_publishes_one_authoritative_range() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
+        let mut chat = database.subscribe_session("chat-1");
+        let mut all = database.subscribe_all();
+
+        assert_eq!(
+            database
+                .append_replay((0..500).map(event).collect())
+                .await
+                .unwrap(),
+            500
+        );
+        assert_eq!(
+            chat.recv().await.unwrap(),
+            SessionUpdate::ReplayCommitted {
+                from: 1,
+                through: 500
+            }
+        );
+        assert!(matches!(
+            chat.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+        let update = all.recv().await.unwrap();
+        assert_eq!(update.batch_from, Some(1));
+        assert_eq!(update.seq, 500);
+        assert!(matches!(
+            all.try_recv(),
             Err(broadcast::error::TryRecvError::Empty)
         ));
     }

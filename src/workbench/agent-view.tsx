@@ -219,8 +219,20 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
       const restore = (): void => {
         if (pane) pane.scrollTop = previousTop + pane.scrollHeight - previousHeight;
       };
-      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(restore);
-      else restore();
+      // Keep the in-flight latch through the measured prepend correction.
+      // Releasing it before this frame lets the browser's correction scroll
+      // synchronously enter `onScroll` at zero and request the next page from
+      // the same human gesture.
+      if (typeof requestAnimationFrame === 'function') {
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            restore();
+            resolve();
+          });
+        });
+      } else {
+        restore();
+      }
     } catch (error) {
       if (requestGeneration.current === generation) {
         setHistoryError(error instanceof Error ? error.message : String(error));
