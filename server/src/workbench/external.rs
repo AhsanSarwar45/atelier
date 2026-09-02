@@ -113,6 +113,26 @@ pub enum HeldDoing {
     Helping,
 }
 
+/** One provider-neutral reading of activity observed in a native record. */
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderActivity {
+    pub doing: HeldDoing,
+    pub detail: Option<String>,
+    pub since: Option<i64>,
+    pub turn_since: Option<i64>,
+}
+
+impl ProviderActivity {
+    fn idle() -> Self {
+        Self {
+            doing: HeldDoing::Idle,
+            detail: None,
+            since: None,
+            turn_since: None,
+        }
+    }
+}
+
 fn last_record_row(path: &Path) -> Option<Value> {
     let mut file = File::open(path).ok()?;
     let size = file.metadata().ok()?.len();
@@ -807,12 +827,75 @@ pub fn codex_thread_processes(
     (found, rollout_paths)
 }
 
-pub fn codex_doing_from_lines<'a>(lines: impl IntoIterator<Item = &'a str>) -> HeldDoing {
+fn event_millis(row: &Value) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(row["timestamp"].as_str()?)
+        .ok()
+        .map(|time| time.timestamp_millis())
+}
+
+fn short_detail(text: &str) -> Option<String> {
+    const ROOM: usize = 96;
+    let line = text.lines().next()?.trim();
+    if line.is_empty() {
+        return None;
+    }
+    if line.chars().count() <= ROOM {
+        return Some(line.to_string());
+    }
+    let mut short = line.chars().take(ROOM).collect::<String>();
+    if let Some(end) = short.rfind(char::is_whitespace) {
+        short.truncate(end);
+    }
+    Some(format!("{}…", short.trim_end()))
+}
+
+fn codex_item_detail(item: &Value) -> Option<String> {
+    let action = item["commandActions"]
+        .as_array()
+        .and_then(|rows| rows.first());
+    if let Some(action) = action {
+        let subject = action["query"]
+            .as_str()
+            .or_else(|| action["path"].as_str())
+            .unwrap_or_default();
+        let prefix = match action["type"].as_str() {
+            Some("search") => "Searching",
+            Some("read") => "Reading",
+            Some("listFiles") => "Listing",
+            _ => "Running",
+        };
+        if let Some(subject) = short_detail(subject) {
+            return Some(format!("{prefix} {subject}"));
+        }
+    }
+    let command = match &item["command"] {
+        Value::Array(parts) => {
+            let parts: Vec<_> = parts.iter().filter_map(Value::as_str).collect();
+            if parts.len() >= 3
+                && Path::new(parts[0])
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| matches!(name, "bash" | "sh" | "zsh"))
+                && matches!(parts[1], "-c" | "-lc")
+            {
+                parts[2].to_string()
+            } else {
+                parts.join(" ")
+            }
+        }
+        Value::String(command) => command.clone(),
+        _ => String::new(),
+    };
+    short_detail(&command)
+}
+
+pub fn codex_activity_from_lines<'a>(lines: impl IntoIterator<Item = &'a str>) -> ProviderActivity {
     let rows: Vec<Value> = lines
         .into_iter()
         .filter_map(|line| serde_json::from_str(line).ok())
         .collect();
     let mut started = None;
+    let mut turn_since = None;
     let mut ended = None;
     for (at, row) in rows.iter().enumerate() {
         let kind = row
@@ -821,13 +904,14 @@ pub fn codex_doing_from_lines<'a>(lines: impl IntoIterator<Item = &'a str>) -> H
             .and_then(Value::as_str);
         if kind == Some("task_started") {
             started = Some(at);
+            turn_since = event_millis(row);
         }
         if matches!(kind, Some("task_complete" | "turn_aborted")) {
             ended = Some(at);
         }
     }
     if ended.is_some_and(|ended| started.is_none_or(|started| ended > started)) {
-        return HeldDoing::Idle;
+        return ProviderActivity::idle();
     }
     // Long tool-heavy turns routinely exceed the bounded tail above. Their
     // task_started anchor is then outside the window while current reasoning
@@ -843,7 +927,7 @@ pub fn codex_doing_from_lines<'a>(lines: impl IntoIterator<Item = &'a str>) -> H
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_lowercase();
-        let item = payload
+        let item_kind = payload
             .pointer("/item/type")
             .and_then(Value::as_str)
             .unwrap_or("")
@@ -851,37 +935,84 @@ pub fn codex_doing_from_lines<'a>(lines: impl IntoIterator<Item = &'a str>) -> H
         if kind.contains("approval")
             || kind.contains("permission")
             || kind.contains("request_user_input")
-            || item.contains("approval")
-            || item.contains("permission")
+            || item_kind.contains("approval")
+            || item_kind.contains("permission")
         {
-            return HeldDoing::Waiting;
+            return ProviderActivity {
+                doing: HeldDoing::Waiting,
+                detail: payload["item"]
+                    .get("tool")
+                    .or_else(|| payload.get("name"))
+                    .and_then(Value::as_str)
+                    .and_then(short_detail),
+                since: event_millis(row),
+                turn_since,
+            };
         }
         if kind.contains("compact")
             || kind.contains("summary")
-            || item.contains("compact")
-            || item.contains("summary")
+            || item_kind.contains("compact")
+            || item_kind.contains("summary")
         {
-            return HeldDoing::Summarising;
+            return ProviderActivity {
+                doing: HeldDoing::Summarising,
+                detail: None,
+                since: event_millis(row),
+                turn_since,
+            };
         }
         if (kind.contains("custom_tool_call") || kind.contains("function_call"))
             && !kind.ends_with("_output")
-            || item.contains("commandexecution")
-            || item.contains("filechange")
+            || item_kind.contains("commandexecution")
+            || item_kind.contains("filechange")
         {
-            return HeldDoing::Running;
+            let detail = if item_kind.contains("commandexecution") {
+                codex_item_detail(&payload["item"])
+            } else {
+                payload["name"]
+                    .as_str()
+                    .or_else(|| payload["item"]["tool"].as_str())
+                    .and_then(short_detail)
+            };
+            return ProviderActivity {
+                doing: HeldDoing::Running,
+                detail,
+                since: event_millis(row),
+                turn_since,
+            };
         }
-        if item.contains("agentmessage") || kind == "message" {
-            return HeldDoing::Answering;
+        if item_kind.contains("agentmessage") || kind == "message" {
+            return ProviderActivity {
+                doing: HeldDoing::Answering,
+                detail: None,
+                since: event_millis(row),
+                turn_since,
+            };
         }
-        if kind.contains("reason") || item.contains("reason") {
-            return HeldDoing::Thinking;
+        if kind.contains("reason") || item_kind.contains("reason") {
+            return ProviderActivity {
+                doing: HeldDoing::Thinking,
+                detail: None,
+                since: event_millis(row),
+                turn_since,
+            };
         }
     }
-    if rows.is_empty() {
+    let doing = if rows.is_empty() {
         HeldDoing::Idle
     } else {
         HeldDoing::Working
+    };
+    ProviderActivity {
+        doing,
+        detail: None,
+        since: rows.last().and_then(event_millis),
+        turn_since,
     }
+}
+
+pub fn codex_doing_from_lines<'a>(lines: impl IntoIterator<Item = &'a str>) -> HeldDoing {
+    codex_activity_from_lines(lines).doing
 }
 
 fn tail_lines(path: &Path, limit: u64) -> Vec<String> {
@@ -913,9 +1044,13 @@ fn tail_lines(path: &Path, limit: u64) -> Vec<String> {
 /// process-FD discovery alone cannot supply this path. The caller also keeps
 /// paths learned from the provider index and uses this same bounded reader,
 /// matching the former runtime without loading the transcript.
-pub fn codex_doing_from_path(path: &Path) -> HeldDoing {
+pub fn codex_activity_from_path(path: &Path) -> ProviderActivity {
     let lines = tail_lines(path, 256 * 1024);
-    codex_doing_from_lines(lines.iter().map(String::as_str))
+    codex_activity_from_lines(lines.iter().map(String::as_str))
+}
+
+pub fn codex_doing_from_path(path: &Path) -> HeldDoing {
+    codex_activity_from_path(path).doing
 }
 
 /// One provider-neutral ownership snapshot. A UUID is case-insensitive and
@@ -932,21 +1067,26 @@ pub fn provider_holds(
         .collect();
     let (codex, rollouts) = codex_thread_processes(proc_root, codex_home);
     for (id, pids) in codex {
-        let doing = rollouts
+        let activity = rollouts
             .get(&id)
-            .map(|path| codex_doing_from_path(path))
-            .unwrap_or(HeldDoing::Unknown);
+            .map(|path| codex_activity_from_path(path))
+            .unwrap_or(ProviderActivity {
+                doing: HeldDoing::Unknown,
+                detail: None,
+                since: None,
+                turn_since: None,
+            });
         holds
             .entry(id.clone())
             .and_modify(|hold| hold.pids.extend(&pids))
             .or_insert(ProviderHold {
                 id,
                 holder: Holder::Terminal,
-                doing,
-                detail: None,
+                doing: activity.doing,
+                detail: activity.detail,
                 told: false,
-                since: None,
-                turn_since: None,
+                since: activity.since,
+                turn_since: activity.turn_since,
                 typical_ms: None,
                 pids,
             });
@@ -1148,6 +1288,52 @@ mod tests {
         assert_eq!(paths[OTHER], rollout);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn native_workbench_services_external_codex_wires_rich_activity_into_provider_hold() {
+        let root = tempfile::tempdir().unwrap();
+        let proc_root = root.path().join("proc");
+        let claude_config = root.path().join("claude");
+        let codex_home = root.path().join("codex");
+        let fd_root = proc_root.join("61/fd");
+        fs::create_dir_all(&fd_root).unwrap();
+        fs::create_dir_all(&claude_config).unwrap();
+        fs::write(
+            proc_root.join("61/cmdline"),
+            format!("/usr/bin/codex\0resume\0{CHAT}\0"),
+        )
+        .unwrap();
+        let rollout = codex_home.join(format!("sessions/rollout-{CHAT}.jsonl"));
+        fs::create_dir_all(rollout.parent().unwrap()).unwrap();
+        fs::write(
+            &rollout,
+            concat!(
+                r#"{"timestamp":"2026-09-02T10:00:00Z","payload":{"type":"task_started"}}"#,
+                "\n",
+                r#"{"timestamp":"2026-09-02T10:00:03Z","payload":{"type":"item_started","item":{"type":"CommandExecution","commandActions":[{"type":"read","path":"server/src/routes/workbench.rs"}]}}}"#,
+                "\n"
+            ),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&rollout, fd_root.join("7")).unwrap();
+
+        let hold = provider_holds(&claude_config, &proc_root, &codex_home, 0)
+            .into_iter()
+            .find(|hold| hold.id == CHAT)
+            .unwrap();
+        assert_eq!(hold.doing, HeldDoing::Running);
+        assert_eq!(
+            hold.detail.as_deref(),
+            Some("Reading server/src/routes/workbench.rs")
+        );
+        assert_eq!(
+            hold.since
+                .zip(hold.turn_since)
+                .map(|(step, turn)| step - turn),
+            Some(3_000)
+        );
+    }
+
     #[test]
     fn native_workbench_services_external_codex_reads_non_linux_process_rows() {
         let rows = format!(
@@ -1178,6 +1364,29 @@ mod tests {
                 r#"{"payload":{"type":"reasoning"}}"#,
             ]),
             HeldDoing::Thinking
+        );
+
+        let command = codex_activity_from_lines([
+            r#"{"timestamp":"2026-09-02T10:00:00Z","payload":{"type":"task_started"}}"#,
+            r#"{"timestamp":"2026-09-02T10:00:03Z","payload":{"type":"item_started","item":{"type":"CommandExecution","command":["/bin/bash","-c","rg -n status server/src"],"commandActions":[{"type":"search","query":"status","path":"server/src"}]}}}"#,
+        ]);
+        assert_eq!(command.doing, HeldDoing::Running);
+        assert_eq!(command.detail.as_deref(), Some("Searching status"));
+        assert_eq!(
+            command
+                .since
+                .zip(command.turn_since)
+                .map(|(step, turn)| step - turn),
+            Some(3_000)
+        );
+
+        let shell = codex_activity_from_lines([
+            r#"{"timestamp":"2026-09-02T10:00:00Z","payload":{"type":"task_started"}}"#,
+            r#"{"timestamp":"2026-09-02T10:00:04Z","payload":{"type":"item_started","item":{"type":"CommandExecution","command":["/bin/bash","-c","cargo test --manifest-path server/Cargo.toml external"]}}}"#,
+        ]);
+        assert_eq!(
+            shell.detail.as_deref(),
+            Some("cargo test --manifest-path server/Cargo.toml external")
         );
         assert_eq!(
             codex_doing_from_lines([

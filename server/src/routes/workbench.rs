@@ -198,7 +198,11 @@ impl WorkbenchState {
             return;
         }
         if let Some(path) = self.codex_record(&hold.id) {
-            hold.doing = crate::workbench::external::codex_doing_from_path(&path);
+            let activity = crate::workbench::external::codex_activity_from_path(&path);
+            hold.doing = activity.doing;
+            hold.detail = activity.detail;
+            hold.since = activity.since;
+            hold.turn_since = activity.turn_since;
         }
     }
 
