@@ -10,6 +10,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { languagesOf } from '@/workbench/colouring';
 import { asView, EMPTY, foldAll, reduce, type SessionView } from '@/workbench/fold';
 import { movesTheClock } from '@/workbench/live';
 import type { SessionState, WbpEvent } from '@/workbench/protocol';
@@ -472,6 +473,30 @@ describe('a conversation handed over by an older sidecar', () => {
       expect(Array.isArray(view.menu.agentControls)).toBe(true);
       expect(view.state).toBe(EMPTY.state);
     }
+  });
+
+  it('draws a call the sidecar sent with no arguments at all', () => {
+    // ACP announces a call before it knows what the call was given, and the
+    // record on this machine already holds hundreds of started calls whose
+    // `input` is null. Every reader of a row — the language of it, the cards it
+    // puts forward, the sentence it is titled with — takes a key off that
+    // without asking, so one such row took the whole transcript down as the
+    // page opened (bw-t26l.20).
+    const row = {
+      kind: 'tool', id: 'call', name: 'Read', title: "Read file '/w/a.rs'",
+      status: 'ok', seconds: 0, summary: null, parentId: null, diff: null,
+      output: null,
+    };
+    for (const input of [null, undefined, 'file_path']) {
+      const view = asView({ items: [{ ...row, input }] } as never);
+      const drawn = view.items[0] as Extract<(typeof view.items)[number], { kind: 'tool' }>;
+      expect(drawn.input).toEqual({});
+      expect(languagesOf(drawn.name, drawn.input)).toEqual({ asked: null, printed: null });
+    }
+    // And a call that does carry arguments keeps them, and its identity.
+    const carried = { ...row, input: { file_path: '/w/a.rs' } };
+    const view = asView({ items: [carried] } as never);
+    expect(view.items[0]).toBe(carried);
   });
 
   it('takes a menu from a sidecar that has never heard of steering controls', () => {

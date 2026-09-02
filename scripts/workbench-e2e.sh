@@ -100,6 +100,35 @@ if [ -z "${ATELIER_BINARY:-}" ]; then
 fi
 SERVER_BINARY="${ATELIER_BINARY:-${CARGO_TARGET_DIR:-$ROOT/server/target}/debug/atelier}"
 [ -x "$SERVER_BINARY" ] || { echo "no Atelier binary at $SERVER_BINARY"; exit 1; }
+
+# The pinned ACP adapters are a release artifact: scripts/build-acp-adapters.mjs
+# compiles them and the packaging puts them in `atelier-adapters` beside the
+# executable. A worktree build has none, so what a provider says about itself
+# there is only ever "the bundle is missing" — and a case about which agents a
+# new chat offers would be proving the absence rather than the feature. Link an
+# installed bundle into the release position, so the server finds it exactly the
+# way a release does. The executables are read, never written, and nothing on
+# this path starts one. Name one with BEADS_E2E_ACP_ADAPTERS, or `none` to run
+# deliberately without; unset, the bundle beside an installed `atelier` is used
+# if there is one.
+ADAPTERS="${BEADS_E2E_ACP_ADAPTERS:-}"
+if [ -z "$ADAPTERS" ]; then
+  installed="$(command -v atelier || true)"
+  if [ -n "$installed" ]; then
+    ADAPTERS="$(dirname "$(readlink -f "$installed")")/atelier-adapters"
+  fi
+fi
+# Removed first, so a run that has no bundle to offer cannot be answered by the
+# one the last run linked.
+BUNDLE_LINK="$(dirname "$SERVER_BINARY")/atelier-adapters"
+if [ -L "$BUNDLE_LINK" ]; then rm -f "$BUNDLE_LINK"; fi
+export BEADS_E2E_ACP_BUNDLE=0
+if [ -n "$ADAPTERS" ] && [ "$ADAPTERS" != none ] && [ -d "$ADAPTERS" ]; then
+  ln -sfn "$ADAPTERS" "$BUNDLE_LINK"
+  export BEADS_E2E_ACP_BUNDLE=1
+elif [ -n "${BEADS_E2E_ACP_ADAPTERS:-}" ] && [ "$BEADS_E2E_ACP_ADAPTERS" != none ]; then
+  echo "no ACP adapter bundle at $BEADS_E2E_ACP_ADAPTERS"; exit 1
+fi
 SERVER_PATH="$PATH"
 if [ "${BEADS_E2E_NO_NODE:-0}" = 1 ]; then
   SERVER_BIN="$RUN/runtime-bin"

@@ -7,6 +7,13 @@ pub const CLAUDE_ADAPTER_VERSION: &str = "0.73.0";
 pub const CODEX_ADAPTER_VERSION: &str = "1.8.0";
 pub const GOOSE_ADAPTER_VERSION: &str = "1.41.0";
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Availability {
+    pub available: bool,
+    pub adapter: Option<PathBuf>,
+    pub reason: Option<String>,
+}
+
 fn executable_name(brand: &str) -> String {
     let brand = if brand == super::super::local::BRAND {
         "goose"
@@ -37,6 +44,14 @@ pub fn bundled_beside(program: &Path, brand: &str) -> Option<PathBuf> {
         directory
             .parent()
             .map(|prefix| prefix.join("libexec").join("atelier-adapters").join(&name))
+            .unwrap_or_default(),
+        directory
+            .parent()
+            .map(|prefix| prefix.join("bin").join("atelier-adapters").join(&name))
+            .unwrap_or_default(),
+        directory
+            .parent()
+            .map(|prefix| prefix.join("lib").join("atelier").join("atelier-adapters").join(&name))
             .unwrap_or_default(),
         directory.join("adapters").join(&name),
         directory.join(&name),
@@ -122,6 +137,41 @@ pub fn launch_config(brand: &str, model: Option<&str>) -> Option<AcpAgentConfig>
     launch_config_at(find(brand)?, brand, model)
 }
 
+/// Whether this installation contains the complete pinned ACP runtime.
+///
+/// Provider support is an ACP bundle fact. It must not depend on whether a
+/// separately installed legacy CLI happens to be on PATH, and a missing
+/// companion executable must not be reported to the client as the same thing
+/// as an unsupported provider.
+pub fn availability(brand: &str) -> Availability {
+    let Some(adapter) = find(brand) else {
+        return Availability {
+            available: false,
+            adapter: None,
+            reason: Some(format!("the bundled {brand} ACP adapter was not found")),
+        };
+    };
+    if brand == super::super::local::BRAND {
+        return Availability {
+            available: true,
+            adapter: Some(adapter),
+            reason: None,
+        };
+    }
+    if launch_config_at(adapter.clone(), brand, None).is_none() {
+        return Availability {
+            available: false,
+            adapter: Some(adapter),
+            reason: Some(format!("the bundled {brand} ACP runtime is incomplete")),
+        };
+    }
+    Availability {
+        available: true,
+        adapter: Some(adapter),
+        reason: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,6 +187,20 @@ mod tests {
         std::fs::write(&program, b"app").unwrap();
         let adapters = root.path().join("atelier-adapters");
         std::fs::create_dir(&adapters).unwrap();
+        let adapter = adapters.join(executable_name("claude"));
+        std::fs::write(&adapter, b"adapter").unwrap();
+
+        assert_eq!(bundled_beside(&program, "claude"), Some(adapter));
+    }
+
+    #[test]
+    fn release_adapter_is_found_from_a_libexec_server() {
+        let root = tempfile::tempdir().unwrap();
+        let program = root.path().join("libexec").join("atelier-server");
+        std::fs::create_dir(program.parent().unwrap()).unwrap();
+        std::fs::write(&program, b"app").unwrap();
+        let adapters = root.path().join("bin").join("atelier-adapters");
+        std::fs::create_dir_all(&adapters).unwrap();
         let adapter = adapters.join(executable_name("claude"));
         std::fs::write(&adapter, b"adapter").unwrap();
 

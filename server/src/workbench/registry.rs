@@ -586,10 +586,18 @@ impl WorkbenchRegistry {
                     ("claude", "Claude", "https://docs.anthropic.com/en/docs/claude-code"),
                     ("codex", "Codex", "https://developers.openai.com/codex/cli"),
                 ].into_iter().map(|(brand, name, install_url)| {
-                    let path = crate::routes::find_tool(brand, &[]);
-                    let adapter = super::acp::adapter::find(brand);
-                    let available = super::acp::adapter::launch_config(brand, None).is_some();
-                    json!({"brand":brand,"name":name,"available":available,"path":path,"adapterPath":adapter,"installUrl":install_url,"models":[]})
+                    let runtime = super::acp::adapter::availability(brand);
+                    let path = runtime.adapter.clone();
+                    json!({
+                        "brand":brand,
+                        "name":name,
+                        "available":runtime.available,
+                        "path":path,
+                        "adapterPath":runtime.adapter,
+                        "availabilityReason":runtime.reason,
+                        "installUrl":install_url,
+                        "models":[]
+                    })
                 }).collect::<Vec<_>>();
                 providers.extend(super::local::providers().await);
                 Ok(json!({"providers":providers}))

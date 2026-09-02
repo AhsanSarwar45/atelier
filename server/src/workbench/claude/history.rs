@@ -521,6 +521,14 @@ fn latest_conversation(rows: &[Value], include_sidechains: bool) -> Vec<Value> {
     // UUID beside UUID-bearing Claude Code rows. The graph has no edge by
     // which to discover them, but file position is still exact. Dropping them
     // was why mixed external transcripts opened with only the last few rows.
+    //
+    // Each is placed after the last row already ordered that precedes it in
+    // the file, never by sorting the whole conversation into file order: the
+    // work above exists precisely because file order is wrong for rows the
+    // graph does know. A streamed variant and its result are written where the
+    // stream happened to end and belong beside the message they are a variant
+    // of, so re-sorting by position undid every placement it had just made
+    // and put the retry ahead of the answer that replaced it (bw-t26l.20).
     for (at, row) in rows.iter().enumerate() {
         if row["uuid"].is_string() || !conversation_row(row, include_sidechains) {
             continue;
@@ -528,9 +536,12 @@ fn latest_conversation(rows: &[Value], include_sidechains: bool) -> Vec<Value> {
         if identityless_message_key(row).is_some_and(|key| !semantic.insert(key)) {
             continue;
         }
-        selected.push((at, row.clone()));
+        let after = selected
+            .iter()
+            .rposition(|(placed, _)| *placed < at)
+            .map_or(0, |index| index + 1);
+        selected.insert(after, (at, row.clone()));
     }
-    selected.sort_by_key(|(at, _)| *at);
     selected.into_iter().map(|(_, row)| row).collect()
 }
 

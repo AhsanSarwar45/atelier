@@ -61,6 +61,21 @@ fn value(event: &Event, field: &str) -> Value {
     event.fields.get(field).cloned().unwrap_or(Value::Null)
 }
 
+/// A call's arguments, always an object.
+///
+/// The projection replays a durable record, and the record on a machine that
+/// has run ACP already holds started calls whose `input` is null: ACP
+/// announces a `tool_call` before it knows what the call was given. The wire
+/// contract says this field is an object and every reader takes a key off it
+/// without asking, so one such row took the whole transcript down as the page
+/// opened (bw-t26l.20).
+fn arguments(event: &Event, field: &str) -> Value {
+    match event.fields.get(field) {
+        Some(Value::Object(fields)) => Value::Object(fields.clone()),
+        _ => json!({}),
+    }
+}
+
 fn string(event: &Event, field: &str) -> String {
     event
         .fields
@@ -282,7 +297,7 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                 row.insert("parentId".into(), value(event, "parentToolCallId"));
                 copy_if_present(&mut row, event, "execution");
                 row.insert("diff".into(), Value::Null);
-                row.insert("input".into(), value(event, "input"));
+                row.insert("input".into(), arguments(event, "input"));
                 row.insert("output".into(), Value::Null);
                 let row = Value::Object(row);
                 match find(&items, "tool", &id) {
@@ -729,5 +744,27 @@ mod tests {
         assert_eq!(view.agents()[0]["tokens"], 1000);
         assert_eq!(view.agents()[0]["calls"], 4);
         assert_eq!(view.agents()[0]["result"], "Done");
+    }
+
+    /// ACP announces a call before it knows what the call was given, so the
+    /// durable record holds started calls whose `input` is null. The window
+    /// the browser opens on must still say the field is an object: every
+    /// reader of a row takes a key off it without asking (bw-t26l.20).
+    #[test]
+    fn a_call_announced_without_arguments_is_projected_with_none_rather_than_null() {
+        let events = [
+            json!({"type":"tool.started","sessionId":"chat","seq":1,"at":"2026-09-03T00:00:00Z",
+                   "toolCallId":"call","name":"Read","title":"Read a file","parentToolCallId":null,
+                   "input":Value::Null}),
+            json!({"type":"tool.started","sessionId":"chat","seq":2,"at":"2026-09-03T00:00:01Z",
+                   "toolCallId":"kept","name":"Read","title":"Read a file","parentToolCallId":null,
+                   "input":{"file_path":"/w/a.rs"}}),
+        ]
+        .map(|value| serde_json::from_value::<Event>(value).unwrap());
+
+        let view = fold_all(&events);
+
+        assert_eq!(view.items()[0]["input"], json!({}));
+        assert_eq!(view.items()[1]["input"], json!({"file_path":"/w/a.rs"}));
     }
 }

@@ -603,8 +603,22 @@ impl AcpNormalizer {
         update["title"].as_str().unwrap_or("Tool").to_string()
     }
 
+    /// The arguments a call was made with, always as an object.
+    ///
+    /// ACP announces a `tool_call` before it knows what the call was given:
+    /// `rawInput` is absent on the opening notification for most agents and
+    /// arrives later on a `tool_call_update`. The wire contract says a started
+    /// call carries `input` as an object, and every reader downstream — the
+    /// title rules, the language of a row, the cards a call puts forward —
+    /// reads a key off it without asking whether it is there. Handing the
+    /// absence straight through wrote `"input": null` into the record and took
+    /// the whole transcript down on the first row that had no arguments yet
+    /// (bw-t26l.20).
     fn tool_input(&self, update: &Value) -> Value {
-        let mut input = update["rawInput"].clone();
+        let mut input = match update["rawInput"].clone() {
+            Value::Object(fields) => Value::Object(fields),
+            _ => json!({}),
+        };
         if Self::tool_name(update) == "wait_agent" {
             let missing_target = input
                 .get("target")
@@ -1654,6 +1668,38 @@ mod tests {
         assert_eq!(finished["tokens"], 900);
         assert_eq!(finished["calls"], 4);
         assert_eq!(finished["model"], "gpt-5.6-sol");
+    }
+
+    /// A `tool_call` notification routinely carries no `rawInput`: ACP
+    /// announces the call and sends what it was given on a later
+    /// `tool_call_update`. The wire contract says a started call's `input` is
+    /// an object, and handing the absence straight through wrote a null into
+    /// the durable record that every later reader of the row broke on
+    /// (bw-t26l.20).
+    #[test]
+    fn a_call_announced_before_its_arguments_starts_with_none_rather_than_null() {
+        let mut normalizer = AcpNormalizer::default();
+        let announced = normalizer.update(
+            "local",
+            "claude",
+            &json!({
+                "sessionId":"root", "update":{"sessionUpdate":"tool_call",
+                "toolCallId":"call-1","title":"Read file '/w/a.rs'","kind":"read"}
+            }),
+        );
+        let started = serde_json::to_value(&announced[0]).unwrap();
+        assert_eq!(started["input"], json!({}));
+
+        let refined = normalizer.update(
+            "local",
+            "claude",
+            &json!({
+                "sessionId":"root", "update":{"sessionUpdate":"tool_call_update",
+                "toolCallId":"call-1","rawInput":{"file_path":"/w/a.rs"}}
+            }),
+        );
+        let started = serde_json::to_value(&refined[0]).unwrap();
+        assert_eq!(started["input"]["file_path"], "/w/a.rs");
     }
 
     #[test]

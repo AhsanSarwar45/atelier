@@ -339,6 +339,25 @@ function list<T>(sent: T[] | undefined, blank: T[]): T[] {
 }
 
 /**
+ * The arguments a call was made with, as an object whatever the wire said.
+ *
+ * Same guard as the menu below, for the same reason: a chat is read back out
+ * of a record written by whatever was running at the time. ACP announces a
+ * call before it knows what the call was given, and the record on this machine
+ * already holds hundreds of started calls whose `input` is null. Every reader
+ * of a row — the language of it, the cards it puts forward, the sentence it is
+ * titled with — takes a key off this without asking, so one such row took the
+ * whole transcript down on the way in (bw-t26l.20).
+ */
+function isArguments(sent: unknown): sent is Record<string, unknown> {
+  return typeof sent === 'object' && sent !== null && !Array.isArray(sent);
+}
+
+function argumentsOf(sent: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  return isArguments(sent) ? sent : {};
+}
+
+/**
  * A menu off the wire, every list of it guarded — including the one that
  * arrives from a running sidecar as nothing at all.
  *
@@ -383,7 +402,9 @@ export function asView(sent: Partial<SessionView> | null | undefined): SessionVi
   return {
     ...EMPTY,
     ...raw,
-    items: list(raw.items, EMPTY.items),
+    items: list(raw.items, EMPTY.items).map((item) =>
+      item.kind === 'tool' && !isArguments(item.input) ? { ...item, input: argumentsOf(item.input) } : item,
+    ),
     todos: list(raw.todos, EMPTY.todos),
     agents: list(raw.agents, EMPTY.agents),
     beads: list(raw.beads, EMPTY.beads),
@@ -500,7 +521,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
         parentId: e.parentToolCallId,
         ...(e.execution ? { execution: e.execution } : {}),
         diff: null,
-        input: e.input,
+        input: argumentsOf(e.input),
         output: null,
       };
       // One call is one row, wherever the word about it came from. A chat
@@ -970,7 +991,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           parentId: e.parentToolCallId,
           ...(e.execution ? { execution: e.execution } : {}),
           diff: null,
-          input: e.input,
+          input: argumentsOf(e.input),
           output: null,
         };
         // The same call twice is the same row: see the note on the other fold.

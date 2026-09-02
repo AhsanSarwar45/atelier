@@ -983,7 +983,14 @@ impl Store {
             let event: Value = serde_json::from_str(&row?).map_err(json_error)?;
             found = true;
             match event["type"].as_str() {
-                Some("tool.started") => input = event["input"].clone(),
+                // A call whose arguments are not an object has none: the
+                // reader is handed the same empty object it starts with
+                // rather than a null it would read a key off (bw-t26l.20).
+                Some("tool.started") => {
+                    if event["input"].is_object() {
+                        input = event["input"].clone()
+                    }
+                }
                 Some("tool.completed") => output = event["output"].clone(),
                 Some("diff") => {
                     diff = json!({"path":event["path"],"before":event["before"],"after":event["after"],"line":event.get("line").cloned().unwrap_or(Value::Null)})
