@@ -257,35 +257,14 @@ async fn recover_chat_snapshot(
     }
 }
 
-/// Feed one open chat into `/api/live` without a loopback HTTP hop.
-async fn relay_native_chat(
+/// Follow one provider record into the durable event stream. Browser windows
+/// never receive from this task directly: they all consume the same committed
+/// per-session broadcast, so one normalization cannot be delivered twice.
+async fn follow_native_record(
     state: workbench::WorkbenchState,
     session_id: String,
-    since: i64,
-    mut updates: tokio::sync::broadcast::Receiver<crate::workbench::protocol::Event>,
-    prepared_watermark: Option<i64>,
-    tx: mpsc::Sender<Tagged>,
+    control: Arc<workbench::ChatFollowControl>,
 ) {
-    // The stored bounded page is the click's critical path. Send it before
-    // reconciling provider files or healing stale state; those operations
-    // append onto the subscribed live tail and must never hold first paint.
-    let opening_watermark = if prepared_watermark.is_some() {
-        prepared_watermark
-    } else if since == 0 {
-        let Some(sent) = recover_chat_snapshot(&state, &session_id, &tx).await else {
-            return;
-        };
-        Some(sent)
-    } else {
-        None
-    };
-    // A copied URL and a sidebar click are the same cold read. This is
-    // reconciled immediately after its opening page. Any healed state or
-    // imported provider history arrives through `updates`; a resumed wire
-    // already reconciled this chat and must not start another import.
-    if since == 0 {
-        state.looked_at(&session_id).await;
-    }
     let followed = state
         .database()
         .get_session(session_id.clone())
@@ -307,86 +286,53 @@ async fn relay_native_chat(
             })?;
             Some((session, record))
         });
+    let Some((session, record)) = followed else {
+        state.finish_chat_follow(&session_id, &control).await;
+        return;
+    };
     let followed_to = state
         .database()
         .followed_to(session_id.clone())
         .await
         .ok()
         .flatten();
-    let mut claude_tail = followed
-        .as_ref()
-        .filter(|(session, _)| session.brand == "claude")
-        .map(|(_, record)| {
-            let mut tail = crate::workbench::external::LineTail::new(record);
-            if let Some(at) = followed_to {
-                tail.seek(at.max(0) as u64)
-            } else {
-                tail.to_end()
-            }
-            tail
-        });
+    let mut claude_tail = (session.brand == "claude").then(|| {
+        let mut tail = crate::workbench::external::LineTail::new(&record);
+        if let Some(at) = followed_to {
+            tail.seek(at.max(0) as u64)
+        } else {
+            tail.to_end()
+        }
+        tail
+    });
     let mut claude_lines: VecDeque<String> = VecDeque::new();
-    let mut claude_helpers = followed
-        .as_ref()
-        .filter(|(session, _)| session.brand == "claude")
-        .map(|(_, record)| crate::workbench::claude::history::HelperFollower::after_import(record));
-    let mut codex_tail = followed
-        .as_ref()
-        .filter(|(session, _)| session.brand == "codex")
-        .map(|(_, record)| {
-            let mut tail = crate::workbench::external::LineTail::new(record);
-            if let Some(at) = followed_to {
-                tail.seek(at.max(0) as u64)
-            } else {
-                tail.to_end()
-            }
-            tail
-        });
+    let mut claude_helpers = (session.brand == "claude")
+        .then(|| crate::workbench::claude::history::HelperFollower::after_import(&record));
+    let mut codex_tail = (session.brand == "codex").then(|| {
+        let mut tail = crate::workbench::external::LineTail::new(&record);
+        if let Some(at) = followed_to {
+            tail.seek(at.max(0) as u64)
+        } else {
+            tail.to_end()
+        }
+        tail
+    });
     let mut codex_lines: VecDeque<String> = VecDeque::new();
     let mut record_tick = tokio::time::interval(Duration::from_millis(250));
-    let mut watermark;
-    if let Some(sent) = opening_watermark {
-        watermark = sent;
-    } else if let Ok(events) = state
-        .database()
-        .events_since(session_id.clone(), since)
-        .await
-    {
-        watermark = events
-            .last()
-            .and_then(|event| event.fields.get("seq"))
-            .and_then(serde_json::Value::as_i64)
-            .unwrap_or(since);
-        for event in events {
-            let Ok(data) = serde_json::to_string(&event) else {
-                continue;
-            };
-            if tx
-                .send(Tagged::scoped("chat", &session_id, data))
-                .await
-                .is_err()
-            {
-                return;
-            }
-        }
-    } else {
-        watermark = since;
-    }
+
     loop {
         tokio::select! {
-        _ = record_tick.tick(), if followed.is_some() => {
-            let (session, record) = followed.as_ref().unwrap();
-            // A native driver is the one live source while Atelier owns the
-            // provider. Keep the durable file cursor current without replaying
-            // the same prompt/answer a second time from the provider record.
+        _ = control.stopped() => break,
+        _ = record_tick.tick() => {
+            // A native driver is the sole live source while Atelier owns the
+            // provider. Advance the durable byte cursor once and retire this
+            // outside follower instead of polling beside the driver.
             if state.has_driver(&session.id).await {
                 if let Some(tail) = claude_tail.as_mut() { tail.to_end(); }
                 if let Some(tail) = codex_tail.as_mut() { tail.to_end(); }
-                claude_lines.clear();
-                codex_lines.clear();
                 let at=if session.brand=="claude"{claude_tail.as_ref().map(|tail|tail.through_line())}else{codex_tail.as_ref().map(|tail|tail.through_line())};
                 if let Some(at)=at{let _=state.database().remember_followed(session.id.clone(),at as i64).await;}
-                continue;
+                break;
             }
             let mut fresh = if session.brand=="claude" {
                 let growth=claude_tail.as_mut().and_then(|tail|tail.grown().ok());
@@ -396,9 +342,7 @@ async fn relay_native_chat(
                         if let Ok(reset)=reset{let _=state.database().append(reset).await;}
                         if let Some(tail)=claude_tail.as_mut(){tail.seek(0)}
                         claude_lines.clear();
-                        // A reset removes child rows with the parent transcript.
-                        // Re-observe every current helper on this same beat.
-                        claude_helpers=Some(crate::workbench::claude::history::HelperFollower::after_import(record));
+                        claude_helpers=Some(crate::workbench::claude::history::HelperFollower::after_import(&record));
                     } else if let Some(tail)=claude_tail.as_mut(){tail.to_end()}
                     Vec::new()
                 } else {
@@ -442,18 +386,82 @@ async fn relay_native_chat(
                 object.insert("seq".into(), serde_json::json!(0));
                 object.entry("at").or_insert_with(|| serde_json::json!(chrono::Utc::now().to_rfc3339()));
                 if let Ok(event) = serde_json::from_value(value) {
-                    if let Ok(Some(stored)) = state.database().append(event).await {
-                        let seq=stored.fields.get("seq").and_then(serde_json::Value::as_i64).unwrap_or_default();
-                        if seq>watermark {
-                            let Ok(data)=serde_json::to_string(&stored) else { continue; };
-                            if tx.send(Tagged::scoped("chat",&session_id,data)).await.is_err(){return;}
-                            watermark=seq;
-                        }
-                    }
+                    let _ = state.database().append(event).await;
                 }
             }
             let at=if session.brand=="claude"{claude_tail.as_ref().map(|tail|tail.through_line())}else{codex_tail.as_ref().map(|tail|tail.through_line())};if let Some(at)=at{let _=state.database().remember_followed(session.id.clone(),at as i64).await;}
+        }}
+    }
+    state.finish_chat_follow(&session_id, &control).await;
+}
+
+/// Feed one open chat into `/api/live` without a loopback HTTP hop.
+async fn relay_native_chat(
+    state: workbench::WorkbenchState,
+    session_id: String,
+    since: i64,
+    mut updates: tokio::sync::broadcast::Receiver<crate::workbench::protocol::Event>,
+    prepared_watermark: Option<i64>,
+    tx: mpsc::Sender<Tagged>,
+) {
+    // The stored bounded page is the click's critical path. Send it before
+    // reconciling provider files or healing stale state; those operations
+    // append onto the subscribed live tail and must never hold first paint.
+    let opening_watermark = if prepared_watermark.is_some() {
+        prepared_watermark
+    } else if since == 0 {
+        let Some(sent) = recover_chat_snapshot(&state, &session_id, &tx).await else {
+            return;
+        };
+        Some(sent)
+    } else {
+        None
+    };
+    // A copied URL and a sidebar click are the same cold read. This is
+    // reconciled immediately after its opening page. Any healed state or
+    // imported provider history arrives through `updates`; a resumed wire
+    // already reconciled this chat and must not start another import.
+    if since == 0 {
+        state.looked_at(&session_id).await;
+    }
+    let (_follow_lease, start_follower) = state.chat_follow_subscription(&session_id).await;
+    if let Some(control) = start_follower {
+        let follow_state = state.clone();
+        let followed_session = session_id.clone();
+        tokio::spawn(async move {
+            follow_native_record(follow_state, followed_session, control).await;
+        });
+    }
+    let mut watermark;
+    if let Some(sent) = opening_watermark {
+        watermark = sent;
+    } else if let Ok(events) = state
+        .database()
+        .events_since(session_id.clone(), since)
+        .await
+    {
+        watermark = events
+            .last()
+            .and_then(|event| event.fields.get("seq"))
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(since);
+        for event in events {
+            let Ok(data) = serde_json::to_string(&event) else {
+                continue;
+            };
+            if tx
+                .send(Tagged::scoped("chat", &session_id, data))
+                .await
+                .is_err()
+            {
+                return;
+            }
         }
+    } else {
+        watermark = since;
+    }
+    loop {
+        tokio::select! {
         received = updates.recv() => match received {
             Ok(event) => {
                 let seq = event.fields.get("seq").and_then(serde_json::Value::as_i64).unwrap_or_default();
@@ -659,8 +667,27 @@ fn boards(asked: &Option<String>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::{
+        actor::ChatDb,
+        registry::{RegistryPaths, UnavailableFactory, WorkbenchRegistry},
+        store::Session,
+    };
     use std::collections::{HashMap, HashSet};
     use std::fs;
+    use std::io::Write;
+
+    fn workbench_fixture() -> (tempfile::TempDir, workbench::WorkbenchState) {
+        let directory = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
+        let paths = RegistryPaths {
+            home: directory.path().to_path_buf(),
+            claude_config: directory.path().join("claude"),
+            codex_home: directory.path().join("codex"),
+            media: directory.path().join("media"),
+        };
+        let registry = WorkbenchRegistry::new(database, paths, Arc::new(UnavailableFactory));
+        (directory, workbench::WorkbenchState::new(registry))
+    }
 
     #[test]
     fn native_live_splits_each_requested_board_without_empty_entries() {
@@ -739,5 +766,112 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn two_viewers_share_one_content_correct_external_follower() {
+        let (directory, state) = workbench_fixture();
+        let external = "11111111-1111-4111-8111-111111111111";
+        let project = directory.path().join("claude/projects/project");
+        fs::create_dir_all(&project).unwrap();
+        let record = project.join(format!("{external}.jsonl"));
+        fs::write(&record, "{\"type\":\"meta\",\"cwd\":\"/work/project\"}\n").unwrap();
+        let at = "2026-09-02T00:00:00Z";
+        state
+            .database()
+            .create_session(Session {
+                id: "chat-1".into(),
+                brand: "claude".into(),
+                external_id: Some(external.into()),
+                project_id: "project-1".into(),
+                project_path: "/work/project".into(),
+                cwd: "/work/project".into(),
+                model: Some("sonnet".into()),
+                permission_mode: "default".into(),
+                effort: None,
+                collaboration_mode: None,
+                title: Some("External".into()),
+                state: "dormant".into(),
+                origin: "terminal".into(),
+                created_at: at.into(),
+                last_active_at: at.into(),
+                last_spoke_at: None,
+            })
+            .await
+            .unwrap();
+        let mut updates = state.database().subscribe_session("chat-1");
+        let (first, start) = state.chat_follow_subscription("chat-1").await;
+        let (second, duplicate) = state.chat_follow_subscription("chat-1").await;
+        assert!(duplicate.is_none());
+        let control = start.unwrap();
+        let follow_state = state.clone();
+        tokio::spawn(async move {
+            follow_native_record(follow_state, "chat-1".into(), control).await;
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let mut file = fs::OpenOptions::new().append(true).open(&record).unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type":"user","uuid":"question-1","timestamp":at,
+                "message":{"role":"user","content":"question"}
+            })
+        )
+        .unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type":"assistant","uuid":"answer-1","parentUuid":"question-1","timestamp":at,
+                "message":{"id":"turn-1","role":"assistant","content":"one shared answer"}
+            })
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let appeared = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let event = updates.recv().await.unwrap();
+                if event.fields.get("text").and_then(serde_json::Value::as_str)
+                    == Some("one shared answer")
+                {
+                    break;
+                }
+            }
+        })
+        .await;
+        if appeared.is_err() {
+            let events = state.database().events_since("chat-1".into(), 0).await.unwrap();
+            panic!("the shared follower did not publish the exact appended words: {events:?}");
+        }
+        tokio::time::sleep(Duration::from_millis(350)).await;
+        let events = state.database().events_since("chat-1".into(), 0).await.unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| {
+                    event.fields.get("text").and_then(serde_json::Value::as_str)
+                        == Some("one shared answer")
+                })
+                .count(),
+            1,
+            "two viewers must not normalize the same provider line twice"
+        );
+
+        drop(first);
+        assert!(state.has_chat_follower("chat-1").await);
+        drop(second);
+        tokio::time::timeout(Duration::from_millis(500), async {
+            loop {
+                if !state.has_chat_follower("chat-1").await {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the last viewer stops and removes the follower");
     }
 }

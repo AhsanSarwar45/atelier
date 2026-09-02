@@ -54,6 +54,7 @@ pub struct WorkbenchState {
     watch_pollers: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
     watch_poll_subscribers: Arc<AtomicUsize>,
     watch_poll_wake: Arc<tokio::sync::Notify>,
+    chat_followers: Arc<tokio::sync::Mutex<HashMap<String, Arc<ChatFollowControl>>>>,
 }
 
 #[derive(Default)]
@@ -65,6 +66,30 @@ struct HoldMemory {
 pub(crate) struct WatchPollLease {
     subscribers: Arc<AtomicUsize>,
     wake: Arc<tokio::sync::Notify>,
+}
+
+pub(crate) struct ChatFollowControl {
+    viewers: AtomicUsize,
+    wake: tokio::sync::Notify,
+}
+
+pub(crate) struct ChatFollowLease {
+    control: Arc<ChatFollowControl>,
+}
+
+impl Drop for ChatFollowLease {
+    fn drop(&mut self) {
+        self.control.viewers.fetch_sub(1, Ordering::AcqRel);
+        self.control.wake.notify_one();
+    }
+}
+
+impl ChatFollowControl {
+    pub(crate) async fn stopped(&self) {
+        while self.viewers.load(Ordering::Acquire) > 0 {
+            self.wake.notified().await;
+        }
+    }
 }
 
 impl Drop for WatchPollLease {
@@ -90,6 +115,7 @@ impl WorkbenchState {
             watch_pollers: Arc::new(tokio::sync::Mutex::new(None)),
             watch_poll_subscribers: Arc::new(AtomicUsize::new(0)),
             watch_poll_wake: Arc::new(tokio::sync::Notify::new()),
+            chat_followers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -302,6 +328,55 @@ impl WorkbenchState {
             *poller = Some(tokio::spawn(async move { state.run_watch_poller().await }));
         }
         (receiver, lease)
+    }
+
+    /// One external-record follower per chat, however many browser windows
+    /// currently read it. The first subscriber starts the task; the last lease
+    /// wakes it to stop.
+    pub(crate) async fn chat_follow_subscription(
+        &self,
+        session_id: &str,
+    ) -> (ChatFollowLease, Option<Arc<ChatFollowControl>>) {
+        let mut followers = self.chat_followers.lock().await;
+        if let Some(control) = followers.get(session_id) {
+            control.viewers.fetch_add(1, Ordering::AcqRel);
+            return (
+                ChatFollowLease {
+                    control: control.clone(),
+                },
+                None,
+            );
+        }
+        let control = Arc::new(ChatFollowControl {
+            viewers: AtomicUsize::new(1),
+            wake: tokio::sync::Notify::new(),
+        });
+        followers.insert(session_id.to_string(), control.clone());
+        (
+            ChatFollowLease {
+                control: control.clone(),
+            },
+            Some(control),
+        )
+    }
+
+    pub(crate) async fn finish_chat_follow(
+        &self,
+        session_id: &str,
+        control: &Arc<ChatFollowControl>,
+    ) {
+        let mut followers = self.chat_followers.lock().await;
+        if followers
+            .get(session_id)
+            .is_some_and(|current| Arc::ptr_eq(current, control))
+        {
+            followers.remove(session_id);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn has_chat_follower(&self, session_id: &str) -> bool {
+        self.chat_followers.lock().await.contains_key(session_id)
     }
 
     async fn run_watch_poller(self) {
@@ -1662,6 +1737,25 @@ mod tests {
         })
         .await
         .expect("the shared poller outlived its last browser");
+    }
+
+    #[tokio::test]
+    async fn every_viewer_shares_one_chat_follower_until_the_last_leaves() {
+        let (_directory, state) = fixture();
+        let (first, started) = state.chat_follow_subscription("chat-1").await;
+        let control = started.expect("the first viewer starts the follower");
+        let (second, started_again) = state.chat_follow_subscription("chat-1").await;
+        assert!(started_again.is_none());
+        assert_eq!(control.viewers.load(Ordering::Acquire), 2);
+
+        drop(first);
+        assert_eq!(control.viewers.load(Ordering::Acquire), 1);
+        drop(second);
+        tokio::time::timeout(Duration::from_millis(50), control.stopped())
+            .await
+            .expect("the last viewer wakes the one shared follower");
+        state.finish_chat_follow("chat-1", &control).await;
+        assert!(!state.chat_followers.lock().await.contains_key("chat-1"));
     }
 
     #[tokio::test]
