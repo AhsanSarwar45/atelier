@@ -887,43 +887,69 @@ async fn provider_sessions(
     project: Option<&str>,
     everything: bool,
 ) -> Vec<Value> {
-    let project_owned = project.map(std::path::PathBuf::from);
-    let claude_config = state.registry.claude_config_directory().to_path_buf();
-    let claude = tokio::task::spawn_blocking(move || {
-        crate::workbench::claude::history::list_sessions(
-            &claude_config,
-            project_owned.as_deref(),
-            everything,
-        )
-        .into_iter()
-        .map(|session| json!({
-            "brand":"claude", "externalId":session.session_id, "lastActiveAt":session.last_modified,
-            "name":session.name, "cwd":session.cwd, "branch":session.git_branch,"lastSpokeAt":session.last_spoke_at,
-        }))
-        .collect::<Vec<_>>()
-    });
     let project_path = project.map(std::path::Path::new);
-    let mut codex_rows = Vec::new();
-    let cwd = project_path.unwrap_or_else(|| std::path::Path::new("."));
-    if let Ok(transport) = state.codex_reader(cwd).await {
-        let listed =
-            crate::workbench::codex::history::list_threads(&transport, project_path, everything)
-                .await;
-        if let Ok(threads) = listed {
-            codex_rows.extend(threads.into_iter().filter_map(|thread| {
-                let id = thread["id"].as_str()?;
-                let updated = thread["updatedAt"].as_i64().and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0).map(|at| at.to_rfc3339()));
-                let preview = thread["preview"].as_str().unwrap_or_default();
-                Some(json!({"brand":"codex","externalId":id,"lastActiveAt":updated,
-                    "name":thread.get("name").filter(|v|!v.is_null()).cloned().unwrap_or_else(||json!(crate::workbench::metadata::conversation_title(preview))),
-                    "cwd":thread["cwd"],"branch":thread["gitInfo"]["branch"],"lastSpokeAt":thread["path"].as_str().and_then(|path|crate::workbench::codex::history::last_spoke_at(std::path::Path::new(path)))}))
-            }));
-        } else {
-            state.forget_codex_reader(cwd, &transport).await;
+    let filter = (!everything).then_some(project_path).flatten();
+    let (claude_acp, codex_acp) = tokio::join!(
+        crate::workbench::acp::client::list_sessions("claude", filter),
+        crate::workbench::acp::client::list_sessions("codex", filter),
+    );
+    let mut rows = Vec::new();
+    for (brand, result) in [("claude", claude_acp), ("codex", codex_acp)] {
+        match result {
+            Ok(sessions) => rows.extend(sessions.into_iter().map(|session| json!({
+                "brand":brand,
+                "externalId":session.session_id,
+                "lastActiveAt":session.updated_at,
+                "lastSpokeAt":Value::Null,
+                "name":session.title,
+                "cwd":session.cwd,
+                "branch":Value::Null,
+                "acpMeta":session.meta,
+            }))),
+            Err(error) => {
+                tracing::warn!(provider = brand, %error, "ACP session/list unavailable; using compatibility discovery");
+                if brand == "claude" {
+                    let project_owned = project.map(std::path::PathBuf::from);
+                    let claude_config = state.registry.claude_config_directory().to_path_buf();
+                    rows.extend(tokio::task::spawn_blocking(move || {
+                        crate::workbench::claude::history::list_sessions(
+                            &claude_config,
+                            project_owned.as_deref(),
+                            everything,
+                        )
+                        .into_iter()
+                        .map(|session| json!({
+                            "brand":"claude", "externalId":session.session_id, "lastActiveAt":session.last_modified,
+                            "name":session.name, "cwd":session.cwd, "branch":session.git_branch,
+                            "lastSpokeAt":session.last_spoke_at,
+                        }))
+                        .collect::<Vec<_>>()
+                    }).await.unwrap_or_default());
+                } else {
+                    let cwd = project_path.unwrap_or_else(|| std::path::Path::new("."));
+                    if let Ok(transport) = state.codex_reader(cwd).await {
+                        let listed = crate::workbench::codex::history::list_threads(
+                            &transport,
+                            project_path,
+                            everything,
+                        ).await;
+                        if let Ok(threads) = listed {
+                            rows.extend(threads.into_iter().filter_map(|thread| {
+                                let id = thread["id"].as_str()?;
+                                let updated = thread["updatedAt"].as_i64().and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0).map(|at| at.to_rfc3339()));
+                                let preview = thread["preview"].as_str().unwrap_or_default();
+                                Some(json!({"brand":"codex","externalId":id,"lastActiveAt":updated,
+                                    "name":thread.get("name").filter(|v|!v.is_null()).cloned().unwrap_or_else(||json!(crate::workbench::metadata::conversation_title(preview))),
+                                    "cwd":thread["cwd"],"branch":thread["gitInfo"]["branch"],"lastSpokeAt":thread["path"].as_str().and_then(|path|crate::workbench::codex::history::last_spoke_at(std::path::Path::new(path)))}))
+                            }));
+                        } else {
+                            state.forget_codex_reader(cwd, &transport).await;
+                        }
+                    }
+                }
+            }
         }
     }
-    let mut rows = claude.await.unwrap_or_default();
-    rows.extend(codex_rows);
     rows
 }
 
@@ -1006,7 +1032,22 @@ async fn restore(
                 }
             }
             if known["lastActiveAt"].as_str() > row["lastActiveAt"].as_str() {
+                let latest = known["lastActiveAt"].as_str().map(str::to_string);
                 row["lastActiveAt"] = known["lastActiveAt"].clone();
+                if let (Some(session_id), Some(latest)) = (row["sessionId"].as_str(), latest) {
+                    // The fast durable response is painted before provider
+                    // discovery. Persist its clock just like its title and
+                    // human clock, or every refresh briefly moves the row to
+                    // its old day and then back to the provider's current day.
+                    state
+                        .database()
+                        .update_session(
+                            session_id.to_string(),
+                            crate::workbench::store::SessionPatch::default(),
+                            Some(latest),
+                        )
+                        .await?;
+                }
             }
             if known["lastSpokeAt"].as_str() > row["lastSpokeAt"].as_str() {
                 row["lastSpokeAt"] = known["lastSpokeAt"].clone();
@@ -1032,7 +1073,52 @@ async fn restore(
             row["held"] = json!(held);
             continue;
         }
-        rows.push(json!({"sessionId":Value::Null,"externalId":known["externalId"],"brand":known["brand"],
+        let durable_id = if let (Some(project_id), Some(external_id), Some(brand), Some(cwd)) = (
+            query.project.as_deref(),
+            known["externalId"].as_str(),
+            known["brand"].as_str(),
+            known["cwd"].as_str(),
+        ) {
+            let at = known["lastActiveAt"]
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+            let session = Session {
+                id: uuid::Uuid::new_v4().to_string(),
+                brand: brand.to_string(),
+                external_id: Some(external_id.to_string()),
+                project_id: project_id.to_string(),
+                project_path: query.path.clone().unwrap_or_else(|| cwd.to_string()),
+                cwd: cwd.to_string(),
+                model: None,
+                permission_mode: if brand == "claude" { "default" } else { "on-request" }.into(),
+                effort: None,
+                collaboration_mode: None,
+                title: known["name"].as_str().map(str::to_string),
+                state: "dormant".into(),
+                origin: "terminal".into(),
+                created_at: at.clone(),
+                last_active_at: at,
+                last_spoke_at: known["lastSpokeAt"].as_str().map(str::to_string),
+            };
+            match state.database().create_session(session.clone()).await {
+                Ok(()) => Some(session.id),
+                Err(error) => {
+                    let raced = state
+                        .database()
+                        .session_by_external_id(external_id.to_string())
+                        .await?
+                        .map(|session| session.id);
+                    if raced.is_none() {
+                        tracing::warn!(%error, %external_id, "could not cache ACP-discovered session");
+                    }
+                    raced
+                }
+            }
+        } else {
+            None
+        };
+        rows.push(json!({"sessionId":durable_id,"externalId":known["externalId"],"brand":known["brand"],
             "title":known["name"],"lastActiveAt":known["lastActiveAt"],"lastSpokeAt":known["lastSpokeAt"],
             "state":"dormant","origin":"terminal","projectId":query.project,"cwdHint":known["cwd"],
             "folder":known["cwd"].as_str().and_then(folder_of),"branch":known["branch"],"beads":[],
@@ -1223,7 +1309,9 @@ fn session_tail(
                     ));
                 }
                 match receiver.recv().await {
-                    Ok(crate::workbench::actor::SessionUpdate::ReplayCommitted { from, .. }) => {
+                    Ok(crate::workbench::actor::SessionUpdate::ReplayCommitted {
+                        from, ..
+                    }) => {
                         let Ok(events) = database
                             .events_since(session_id.clone(), after.min(from.saturating_sub(1)))
                             .await
@@ -1339,8 +1427,7 @@ pub(crate) async fn snapshot(database: &ChatDb, session_id: &str) -> Result<Valu
     // inventing a provider catalog: the one known current value is a safe
     // fallback until an ACP/provider menu replaces it.
     let model = view["model"].as_str().map(str::to_string).or_else(|| {
-        matches!(view["brand"].as_str(), Some("claude" | "codex"))
-            .then(|| "default".to_string())
+        matches!(view["brand"].as_str(), Some("claude" | "codex")).then(|| "default".to_string())
     });
     let permission_mode = view["permissionMode"].as_str().map(str::to_string);
     let effort = view["effort"].as_str().map(str::to_string);
@@ -1377,8 +1464,7 @@ pub(crate) async fn snapshot(database: &ChatDb, session_id: &str) -> Result<Valu
     {
         if let Some(value) = effort {
             let display_name = value.clone();
-            view["menu"]["efforts"] =
-                json!([{"value":value,"displayName":display_name}]);
+            view["menu"]["efforts"] = json!([{"value":value,"displayName":display_name}]);
         }
     }
     if view["menu"]["collaborationModes"]
@@ -1808,10 +1894,9 @@ mod tests {
                 }
             }
         }
-        let (first_frame, second_frame) = tokio::time::timeout(
-            Duration::from_secs(3),
-            async { tokio::join!(outside(&mut first_rx), outside(&mut second_rx)) },
-        )
+        let (first_frame, second_frame) = tokio::time::timeout(Duration::from_secs(3), async {
+            tokio::join!(outside(&mut first_rx), outside(&mut second_rx))
+        })
         .await
         .expect("the shared filesystem watcher announces within its settle window");
         assert_eq!(first_frame["folders"], json!(["/work/project"]));
@@ -1922,7 +2007,11 @@ mod tests {
         session.permission_mode = "on-request".into();
         session.effort = Some("high".into());
         session.collaboration_mode = Some("plan".into());
-        state.database().create_session(session.clone()).await.unwrap();
+        state
+            .database()
+            .create_session(session.clone())
+            .await
+            .unwrap();
         let started: Event = serde_json::from_value(json!({
             "type":"session.started","sessionId":session.id,"seq":0,"at":session.created_at,
             "brand":session.brand,"externalId":session.external_id,"model":session.model,
@@ -2042,6 +2131,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(full[0]["title"], "Canonical provider title");
+        let provider_clock = full[0]["lastActiveAt"].clone();
 
         let local = app
             .oneshot(
@@ -2059,6 +2149,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(local[0]["title"], "Canonical provider title");
+        assert_eq!(local[0]["lastActiveAt"], provider_clock);
     }
 
     #[tokio::test]
@@ -2178,8 +2269,12 @@ mod tests {
         )
         .unwrap();
         let fresh: Event = serde_json::from_value(json!({"type":"notice","sessionId":"chat-1","seq":5,"at":"now","text":"after snapshot"})).unwrap();
-        sender.send(crate::workbench::actor::SessionUpdate::Event(old)).unwrap();
-        sender.send(crate::workbench::actor::SessionUpdate::Event(fresh)).unwrap();
+        sender
+            .send(crate::workbench::actor::SessionUpdate::Event(old))
+            .unwrap();
+        sender
+            .send(crate::workbench::actor::SessionUpdate::Event(fresh))
+            .unwrap();
         let mut tail = session_tail(receiver, state.database().clone(), "chat-1".into(), 4);
         let frame = tail.next().await.unwrap().unwrap();
         assert!(format!("{frame:?}").contains("after snapshot"));

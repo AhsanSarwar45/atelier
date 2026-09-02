@@ -103,6 +103,20 @@ describe('whether the reader is watching the end', () => {
     expect(result.current.held).toBe(false);
   });
 
+  it('lets go on upward intent even when the loaded page cannot move yet', () => {
+    tall = seen;
+    const { result, rerender } = watching();
+    expect(at).toBe(0);
+    expect(result.current.held).toBe(true);
+
+    act(() => box.dispatchEvent(new WheelEvent('wheel', { deltaY: -120 })));
+    expect(result.current.held).toBe(false);
+
+    tall += 400;
+    act(() => rerender());
+    expect(at).toBe(0);
+  });
+
   it('keeps hold while he is only a little way off the end', () => {
     const { result } = watching();
     scrolls(END - 40);

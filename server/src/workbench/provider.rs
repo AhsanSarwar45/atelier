@@ -42,10 +42,15 @@ impl NativeProviderFactory {
         imports.insert(
             session_id,
             tokio::spawn(async move {
-                if session.brand == "claude" {
-                    let _ = import_claude_history(&database, &claude_config, &session).await;
-                } else if session.brand == "codex" {
-                    let _ = import_codex_history(&database, &session).await;
+                if matches!(session.brand.as_str(), "claude" | "codex") {
+                    if let Err(error) = super::acp::client::load_history(&database, &session).await {
+                        tracing::warn!(provider = %session.brand, %error, "ACP session/load unavailable; using compatibility history reader");
+                        if session.brand == "claude" {
+                            let _ = import_claude_history(&database, &claude_config, &session).await;
+                        } else {
+                            let _ = import_codex_history(&database, &session).await;
+                        }
+                    }
                 } else if session.brand == super::local::BRAND {
                     let models = json!(super::local::catalog().await);
                     if let Ok(menu) = database.steering_menu(session.id.clone()).await {
@@ -211,7 +216,7 @@ async fn append_reset(database: &ChatDb, session_id: &str) -> Result<(), String>
     Ok(())
 }
 
-fn reset_event(session_id: &str) -> Result<Event, String> {
+pub(super) fn reset_event(session_id: &str) -> Result<Event, String> {
     serde_json::from_value(json!({
         "type":"transcript.reset", "sessionId":session_id, "seq":0, "at":now()
     }))

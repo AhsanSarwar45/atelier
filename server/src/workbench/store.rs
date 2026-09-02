@@ -19,8 +19,8 @@ use std::time::Duration;
 /// Provider-history normalization generations. A provider advances only when
 /// replaying its record can add or correct canonical events; changing Claude
 /// must not force every Codex transcript through an unrelated rebuild.
-pub const IMPORT_RECIPE: i64 = 10;
-pub const CLAUDE_IMPORT_RECIPE: i64 = 11;
+pub const IMPORT_RECIPE: i64 = 11;
+pub const CLAUDE_IMPORT_RECIPE: i64 = 12;
 
 pub fn import_recipe(brand: &str) -> i64 {
     if brand == "claude" {

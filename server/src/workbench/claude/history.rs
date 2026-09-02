@@ -250,6 +250,25 @@ fn message_api_id(row: &Value) -> Option<&str> {
         .flatten()
 }
 
+/// Identity used only to coalesce a UUID-less provider echo with the same
+/// logical row. Different turns with the same words remain distinct because
+/// their provider timestamps differ; a row with neither identity nor time is
+/// retained because guessing would be data loss.
+fn identityless_message_key(row: &Value) -> Option<String> {
+    let role = row["type"].as_str()?;
+    let message = as_nonempty(&row["message"]["id"]);
+    let at = as_nonempty(&row["timestamp"]);
+    if message.is_none() && at.is_none() {
+        return None;
+    }
+    Some(format!(
+        "{role}\u{1f}{}\u{1f}{}\u{1f}{}",
+        message.unwrap_or_default(),
+        at.unwrap_or_default(),
+        message_text(&row["message"]),
+    ))
+}
+
 fn tool_result_row(row: &Value) -> bool {
     row["type"] == "user"
         && row["parentUuid"].is_string()
@@ -486,10 +505,33 @@ fn latest_conversation(rows: &[Value], include_sidechains: bool) -> Vec<Value> {
             ordered.extend(extra);
         }
     }
-    ordered
+    let mut selected = ordered
         .into_iter()
         .filter(|row| conversation_row(row, include_sidechains))
-        .collect()
+        .filter_map(|row| {
+            let at = position.get(row["uuid"].as_str()?).copied()?;
+            Some((at, row))
+        })
+        .collect::<Vec<_>>();
+    let mut semantic = selected
+        .iter()
+        .filter_map(|(_, row)| identityless_message_key(row))
+        .collect::<HashSet<_>>();
+    // SDK and legacy hosts can append ordinary conversation rows without a
+    // UUID beside UUID-bearing Claude Code rows. The graph has no edge by
+    // which to discover them, but file position is still exact. Dropping them
+    // was why mixed external transcripts opened with only the last few rows.
+    for (at, row) in rows.iter().enumerate() {
+        if row["uuid"].is_string() || !conversation_row(row, include_sidechains) {
+            continue;
+        }
+        if identityless_message_key(row).is_some_and(|key| !semantic.insert(key)) {
+            continue;
+        }
+        selected.push((at, row.clone()));
+    }
+    selected.sort_by_key(|(at, _)| *at);
+    selected.into_iter().map(|(_, row)| row).collect()
 }
 
 /// Claude's JSONL is an append-only graph split into context-sized segments.
@@ -1294,12 +1336,12 @@ impl HelperFollower {
                 follower.calls.insert(call.clone(), helper.agent_id.clone());
             }
             for event in &helper.events {
-                follower.seen.insert(
-                    crate::workbench::protocol::record_event_id_at(
+                follower
+                    .seen
+                    .insert(crate::workbench::protocol::record_event_id_at(
                         event,
                         crate::workbench::store::CLAUDE_IMPORT_RECIPE,
-                    ),
-                );
+                    ));
             }
             if let Some(ok) = helper
                 .tool_call_id
@@ -1307,12 +1349,12 @@ impl HelperFollower {
                 .and_then(|call| follower.outcomes.get(call))
             {
                 helper.finish["state"] = json!(if *ok { "done" } else { "failed" });
-                follower.seen.insert(
-                    crate::workbench::protocol::record_event_id_at(
+                follower
+                    .seen
+                    .insert(crate::workbench::protocol::record_event_id_at(
                         &helper.finish,
                         crate::workbench::store::CLAUDE_IMPORT_RECIPE,
-                    ),
-                );
+                    ));
                 follower.ended.insert(helper.agent_id);
             }
         }
@@ -1605,6 +1647,33 @@ mod tests {
                 .map(|row| row["uuid"].as_str().unwrap())
                 .collect::<Vec<_>>(),
             vec!["u1", "a1", "a2"]
+        );
+    }
+
+    #[test]
+    fn claude_history_keeps_identityless_rows_beside_uuid_backed_rows() {
+        let rows = vec![
+            json!({"type":"user","uuid":"u1","timestamp":"1","message":{"content":"First prompt"}}),
+            json!({"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2","message":{"id":"a","content":"First answer"}}),
+            json!({"type":"user","source":"sdk-ts","timestamp":"3","message":{"content":"SDK prompt"}}),
+            json!({"type":"user","source":"sdk-ts","timestamp":"3","message":{"content":"SDK prompt"}}),
+            json!({"type":"assistant","source":"sdk-ts","timestamp":"4","message":{"id":"sdk-answer","content":"SDK answer"}}),
+            json!({"type":"user","source":"sdk-ts","timestamp":"5","message":{"content":"SDK prompt"}}),
+        ];
+
+        let ordered = ordered_conversation(&rows, false);
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|row| (row["type"].as_str().unwrap(), message_text(&row["message"])))
+                .collect::<Vec<_>>(),
+            [
+                ("user", "First prompt".into()),
+                ("assistant", "First answer".into()),
+                ("user", "SDK prompt".into()),
+                ("assistant", "SDK answer".into()),
+                ("user", "SDK prompt".into()),
+            ]
         );
     }
 

@@ -159,6 +159,10 @@ struct Agent {
 pub struct CodexNormalizer {
     messages: HashSet<String>,
     completed_messages: HashSet<String>,
+    /// One Codex turn can record the person's prompt as `user_message`,
+    /// `response_item`, and `item_completed`. Those are delivery shapes for
+    /// one logical message, not three transcript rows.
+    turn_user_payloads: HashSet<String>,
     tools: HashMap<String, String>,
     completed_tools: HashSet<String>,
     agents: HashMap<String, Agent>,
@@ -169,6 +173,36 @@ pub struct CodexNormalizer {
 }
 
 impl CodexNormalizer {
+    fn emit_user_message(
+        &mut self,
+        id: &str,
+        text: String,
+        images: Vec<Value>,
+        events: &mut Vec<DriverEvent>,
+    ) {
+        let signature = if text.trim().is_empty() {
+            format!("images:{}", Value::Array(images.clone()))
+        } else {
+            format!("text:{}", text.trim())
+        };
+        if !self.turn_user_payloads.insert(signature) {
+            return;
+        }
+        self.open_message(id, "user", None, events);
+        if !text.is_empty() {
+            events.push(event(
+                "text.delta",
+                [("messageId", json!(id)), ("text", json!(text))],
+            ));
+        }
+        events.extend(
+            images
+                .into_iter()
+                .map(|image| event("image", [("messageId", json!(id)), ("image", image)])),
+        );
+        events.push(event("message.completed", [("messageId", json!(id))]));
+    }
+
     fn parent_tool_call(&self, actor_agent_id: Option<&str>) -> Option<String> {
         actor_agent_id.and_then(|id| self.agents.get(id)?.tool_call_id.clone())
     }
@@ -720,11 +754,11 @@ impl CodexNormalizer {
     pub fn replay_thread(&mut self, thread: &Value) -> Vec<DriverEvent> {
         let mut events = Vec::new();
         for turn in thread["turns"].as_array().into_iter().flatten() {
+            self.turn_user_payloads.clear();
             for item in turn["items"].as_array().into_iter().flatten() {
                 match item["type"].as_str().unwrap_or_default() {
                     "userMessage" => {
                         let id = item["id"].as_str().unwrap_or_default();
-                        self.open_message(id, "user", None, &mut events);
                         let text = item["content"]
                             .as_array()
                             .into_iter()
@@ -733,12 +767,8 @@ impl CodexNormalizer {
                             .filter_map(|part| part["text"].as_str())
                             .collect::<Vec<_>>()
                             .join("\n");
-                        if !text.is_empty() {
-                            events.push(event(
-                                "text.delta",
-                                [("messageId", json!(id)), ("text", json!(text))],
-                            ));
-                        }
+                        let mut images = Vec::new();
+                        let mut attachments = Vec::new();
                         for (part_at, part) in
                             item["content"].as_array().into_iter().flatten().enumerate()
                         {
@@ -752,10 +782,7 @@ impl CodexNormalizer {
                                 None
                             };
                             if let Some(image) = image {
-                                events.push(event(
-                                    "image",
-                                    [("messageId", json!(id)), ("image", image)],
-                                ));
+                                images.push(image);
                             } else if part["type"] != "text" {
                                 let attachment = part["path"]
                                     .as_str()
@@ -767,7 +794,7 @@ impl CodexNormalizer {
                                             part["type"].as_str().unwrap_or("provider")
                                         )
                                     });
-                                events.push(event(
+                                attachments.push(event(
                                     "note",
                                     [
                                         ("noteId", json!(format!("{id}:attachment:{part_at}"))),
@@ -785,7 +812,8 @@ impl CodexNormalizer {
                                 ));
                             }
                         }
-                        events.push(event("message.completed", [("messageId", json!(id))]));
+                        self.emit_user_message(id, text, images, &mut events);
+                        events.extend(attachments);
                     }
                     "reasoning" | "plan" => self.item_started(item, &mut events),
                     "agentMessage" => self.item_completed(item, &mut events),
@@ -855,41 +883,22 @@ impl CodexNormalizer {
                             .unwrap_or_else(|| Uuid::new_v4().to_string())
                     )
                 });
-            self.open_message(&id, "user", None, &mut events);
-            if payload["message"]
-                .as_str()
-                .is_some_and(|text| !text.is_empty())
-            {
-                events.push(event(
-                    "text.delta",
-                    [
-                        ("messageId", json!(id)),
-                        ("text", payload["message"].clone()),
-                    ],
-                ));
-            }
+            let text = payload["message"].as_str().unwrap_or_default().to_string();
+            let mut images = Vec::new();
             for source in payload["images"].as_array().into_iter().flatten() {
                 let url = source.as_str().or_else(|| source["url"].as_str());
                 if let Some(url) = url {
-                    events.push(event(
-                        "image",
-                        [
-                            ("messageId", json!(id)),
-                            (
-                                "image",
-                                json!({"dataUrl":url,"mime":data_mime(url),"alt":"Attached image"}),
-                            ),
-                        ],
-                    ));
+                    images
+                        .push(json!({"dataUrl":url,"mime":data_mime(url),"alt":"Attached image"}));
                 }
             }
             for source in payload["local_images"].as_array().into_iter().flatten() {
                 let path = source.as_str().or_else(|| source["path"].as_str());
                 if let Some(image) = path.and_then(|path| local_image(Path::new(path))) {
-                    events.push(event("image", [("messageId", json!(id)), ("image", image)]));
+                    images.push(image);
                 }
             }
-            events.push(event("message.completed", [("messageId", json!(id))]));
+            self.emit_user_message(&id, text, images, &mut events);
         } else if row["type"] == "response_item"
             && payload["type"] == "message"
             && payload["role"] == "user"
@@ -919,28 +928,14 @@ impl CodexNormalizer {
                 .filter_map(|part| part["image_url"].as_str())
                 .collect::<Vec<_>>();
             if !text.is_empty() || !images.is_empty() {
-                self.open_message(&id, "user", None, &mut events);
-                if !text.is_empty() {
-                    events.push(event(
-                        "text.delta",
-                        [("messageId", json!(id)), ("text", json!(text))],
-                    ));
-                }
-                for url in images {
-                    events.push(event(
-                        "image",
-                        [
-                            ("messageId", json!(id)),
-                            (
-                                "image",
-                                json!({"dataUrl":url,"mime":data_mime(url),"alt":"Attached image"}),
-                            ),
-                        ],
-                    ));
-                }
-                events.push(event("message.completed", [("messageId", json!(id))]));
+                let images = images
+                    .into_iter()
+                    .map(|url| json!({"dataUrl":url,"mime":data_mime(url),"alt":"Attached image"}))
+                    .collect();
+                self.emit_user_message(&id, text, images, &mut events);
             }
         } else if row["type"] == "event_msg" && payload["type"] == "task_started" {
+            self.turn_user_payloads.clear();
             events.push(event(
                 "session.state",
                 [("state", json!("thinking")), ("label", json!("Thinking"))],
@@ -1020,15 +1015,8 @@ impl CodexNormalizer {
             match item["type"].as_str().unwrap_or_default() {
                 "UserMessage" => {
                     let id = item["id"].as_str().unwrap_or_default();
-                    self.open_message(id, "user", None, &mut events);
                     let text = rollout_text(item);
-                    if !text.is_empty() {
-                        events.push(event(
-                            "text.delta",
-                            [("messageId", json!(id)), ("text", json!(text))],
-                        ));
-                    }
-                    events.push(event("message.completed", [("messageId", json!(id))]));
+                    self.emit_user_message(id, text, Vec::new(), &mut events);
                 }
                 "AgentMessage" => self.item_completed(
                     &json!({"id":item["id"],"type":"agentMessage","text":rollout_text(item)}),
@@ -1278,10 +1266,44 @@ mod tests {
                 && event["messageId"] == "user-modern"
                 && event["text"] == "A real prompt"
         }));
-        assert!(events.iter().any(|event| {
-            event["type"] == "image" && event["messageId"] == "user-modern"
-        }));
+        assert!(events
+            .iter()
+            .any(|event| { event["type"] == "image" && event["messageId"] == "user-modern" }));
         assert!(!events.iter().any(|event| event["messageId"] == "internal"));
+    }
+
+    #[test]
+    fn one_codex_turn_coalesces_every_record_shape_of_the_users_message() {
+        let same = "Do this once";
+        let rows = [
+            json!({"type":"event_msg","payload":{"type":"task_started"}}),
+            json!({"timestamp":"2026-09-02T05:00:01Z","type":"event_msg","payload":{"type":"user_message","id":"event-user","message":same}}),
+            json!({"timestamp":"2026-09-02T05:00:01Z","type":"response_item","payload":{"type":"message","id":"response-user","role":"user","content":[{"type":"input_text","text":same}]}}),
+            json!({"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"completed-user","content":[{"type":"text","text":same}]}}}),
+            json!({"type":"event_msg","payload":{"type":"task_complete"}}),
+            json!({"type":"event_msg","payload":{"type":"task_started"}}),
+            json!({"timestamp":"2026-09-02T05:01:01Z","type":"event_msg","payload":{"type":"user_message","id":"next-turn-user","message":same}}),
+        ];
+        let events = replay_rollout(
+            &rows
+                .into_iter()
+                .map(|row| row.to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+
+        let starts = events
+            .iter()
+            .filter(|event| event["type"] == "message.started" && event["role"] == "user")
+            .collect::<Vec<_>>();
+        let words = events
+            .iter()
+            .filter(|event| event["type"] == "text.delta" && event["text"] == same)
+            .collect::<Vec<_>>();
+        assert_eq!(starts.len(), 2);
+        assert_eq!(words.len(), 2);
+        assert_eq!(starts[0]["messageId"], "event-user");
+        assert_eq!(starts[1]["messageId"], "next-turn-user");
     }
 
     #[test]

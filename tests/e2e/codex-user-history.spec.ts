@@ -50,6 +50,22 @@ function installRollout(): void {
       payload: { type: 'user_message', id: 'person-1', message: PROMPT, images: [], local_images: [] },
     },
     {
+      timestamp: '2026-09-02T05:00:01.100Z',
+      type: 'response_item',
+      payload: {
+        type: 'message', id: 'person-response-copy', role: 'user',
+        content: [{ type: 'input_text', text: PROMPT }],
+      },
+    },
+    {
+      timestamp: '2026-09-02T05:00:01.100Z',
+      type: 'event_msg',
+      payload: {
+        type: 'item_completed',
+        item: { type: 'UserMessage', id: 'person-completed-copy', content: [{ type: 'text', text: PROMPT }] },
+      },
+    },
+    {
       timestamp: '2026-09-02T05:00:02.000Z',
       type: 'event_msg',
       payload: { type: 'agent_message', message: ANSWER, phase: 'final_answer' },

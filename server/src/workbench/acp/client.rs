@@ -8,21 +8,254 @@ use crate::workbench::registry::{DriverFuture, ProviderDriver};
 use crate::workbench::session_policy;
 use crate::workbench::store::{Session, SessionPatch};
 use agent_client_protocol::schema::v1::{
-    CancelNotification, ContentBlock, CreateElicitationRequest, CreateElicitationResponse,
-    ElicitationMode, ImageContent, LoadSessionRequest, Meta, NewSessionRequest, PromptRequest,
+    CancelNotification, CloseSessionRequest, ContentBlock, CreateElicitationRequest,
+    CreateElicitationResponse,
+    ElicitationMode, ImageContent, ListSessionsRequest, LoadSessionRequest, Meta,
+    NewSessionRequest, PromptRequest,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     ResumeSessionRequest, SelectedPermissionOutcome, SessionConfigOptionValue,
     SetSessionConfigOptionRequest, SetSessionModeRequest, TextContent,
 };
 use agent_client_protocol::{AcpAgent, Agent, ConnectionTo, UntypedMessage};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 type Reply = oneshot::Sender<Result<Value, String>>;
+
+const MAX_SESSION_LIST_PAGES: usize = 100;
+
+/// Provider-neutral metadata returned by ACP `session/list`.
+///
+/// This is deliberately the only discovery shape the workbench consumes. An
+/// adapter's `_meta` remains intact for future standardized or extension
+/// fields; no Claude/Codex knowledge belongs in the discovery layer.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ListedSession {
+    pub session_id: String,
+    pub cwd: PathBuf,
+    pub title: Option<String>,
+    pub updated_at: Option<String>,
+    pub meta: Value,
+}
+
+fn initialize_request() -> Result<UntypedMessage, agent_client_protocol::Error> {
+    UntypedMessage::new("initialize", json!({
+        "protocolVersion": 1,
+        "clientInfo": {
+            "name":"atelier", "title":"Atelier",
+            "version":env!("CARGO_PKG_VERSION")
+        },
+        "clientCapabilities": {
+            "subagents": {},
+            "plan": {},
+            "elicitation": {"form":{},"url":{}},
+            "session": {"configOptions":{"boolean":{}}},
+            "_meta": {
+                "subagent-transcript": true,
+                "jetbrains": {"air": {"version":1,"capabilities":["nativeSubagentSessions"]}}
+            }
+        }
+    }))
+}
+
+/// Enumerate every session an ACP agent knows, following its opaque cursors.
+/// A caller may fall back to legacy discovery only when this returns an error
+/// (adapter unavailable, capability absent, authentication, or bad peer).
+pub async fn list_sessions(
+    brand: &str,
+    cwd: Option<&Path>,
+) -> Result<Vec<ListedSession>, String> {
+    let config = adapter::launch_config(brand, None)
+        .ok_or_else(|| format!("bundled {brand} ACP adapter is incomplete or unavailable"))?;
+    let filter = cwd.map(Path::to_path_buf);
+    let client = agent_client_protocol::Client.builder();
+    client
+        .connect_with(AcpAgent::new(config), async move |connection: ConnectionTo<Agent>| {
+            let initialized = connection.send_request(initialize_request()?).block_task().await?;
+            if initialized.pointer("/agentCapabilities/sessionCapabilities/list").is_none() {
+                return Err(acp_error("agent does not advertise session/list"));
+            }
+
+            let mut listed = Vec::new();
+            let mut cursor: Option<String> = None;
+            let mut seen = HashSet::new();
+            for _ in 0..MAX_SESSION_LIST_PAGES {
+                let response = connection
+                    .send_request(
+                        ListSessionsRequest::new()
+                            .cwd(filter.clone())
+                            .cursor(cursor.clone()),
+                    )
+                    .block_task()
+                    .await?;
+                listed.extend(response.sessions.into_iter().map(|session| ListedSession {
+                    session_id: session.session_id.to_string(),
+                    cwd: session.cwd,
+                    title: session.title,
+                    updated_at: session.updated_at,
+                    meta: serde_json::to_value(session.meta).unwrap_or(Value::Null),
+                }));
+                let Some(next) = response.next_cursor else { return Ok(listed) };
+                if !seen.insert(next.clone()) {
+                    return Err(acp_error("agent repeated a session/list cursor"));
+                }
+                cursor = Some(next);
+            }
+            Err(acp_error("agent exceeded the session/list page safety bound"))
+        })
+        .await
+        .map_err(|error| error.to_string())
+}
+
+fn replay_delivery(event: Event) -> Event {
+    let mut value = serde_json::to_value(event).expect("canonical ACP event serializes");
+    if let Some(provider) = value["providerEvent"].as_object_mut() {
+        provider.insert("delivery".into(), json!("replay"));
+    }
+    serde_json::from_value(value).expect("delivery does not change the event shape")
+}
+
+/// Load a saved provider session through ACP and materialize the replay through
+/// the same normalizer used for live `session/update` notifications.
+pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), String> {
+    match super::super::provider_reconciliation::complete_history_choice(database, &session.id)
+        .await?
+    {
+        super::super::provider_reconciliation::HistoryChoice::Leave => return Ok(()),
+        super::super::provider_reconciliation::HistoryChoice::KeepLocal => {
+            database.mark_imported(session.id.clone()).await?;
+            return Ok(());
+        }
+        super::super::provider_reconciliation::HistoryChoice::Read => {}
+    }
+    let remote_id = session
+        .external_id
+        .clone()
+        .ok_or_else(|| "saved session has no provider id".to_string())?;
+    let config = adapter::launch_config(&session.brand, session.model.as_deref()).ok_or_else(|| {
+        format!(
+            "bundled {} ACP adapter is incomplete or unavailable",
+            session.brand
+        )
+    })?;
+    let policy = session_policy::build(Path::new(&session.cwd))?;
+    let meta = session_meta(&session.brand, &policy);
+    let local_id = session.id.clone();
+    let brand = session.brand.clone();
+    let cwd = PathBuf::from(&session.cwd);
+    let normalizer = Arc::new(Mutex::new(AcpNormalizer::new(cwd.clone())));
+    let collected = Arc::new(Mutex::new(Vec::<Event>::new()));
+    let update_normalizer = normalizer.clone();
+    let update_events = collected.clone();
+    let update_session = local_id.clone();
+    let update_brand = brand.clone();
+    let client = agent_client_protocol::Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: UntypedMessage, _connection| {
+                if notification.method() != "session/update" {
+                    return Ok(());
+                }
+                let raw = notification.params().clone();
+                let events = update_normalizer
+                    .lock()
+                    .await
+                    .update(&update_session, &update_brand, &raw)
+                    .into_iter()
+                    .map(replay_delivery);
+                update_events.lock().await.extend(events);
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
+        );
+    let finish_normalizer = normalizer.clone();
+    let finish_events = collected.clone();
+    let finish_session = local_id.clone();
+    let finish_brand = brand.clone();
+    let (modes, config_options, agent_controls) = client
+        .connect_with(AcpAgent::new(config), async move |connection: ConnectionTo<Agent>| {
+            let initialized = connection.send_request(initialize_request()?).block_task().await?;
+            if initialized.pointer("/agentCapabilities/loadSession") != Some(&Value::Bool(true)) {
+                return Err(acp_error("agent does not advertise session/load"));
+            }
+            let agent_controls = initialized
+                .pointer("/_meta/atelier/subagentControls")
+                .filter(|controls| controls.is_array())
+                .cloned()
+                .unwrap_or_else(|| json!([]));
+            let response = connection
+                .send_request(LoadSessionRequest::new(remote_id.clone(), cwd).meta(meta))
+                .block_task()
+                .await?;
+            let end = json!({"sessionId":remote_id,"stopReason":"end_turn"});
+            let closing = finish_normalizer
+                .lock()
+                .await
+                .finish_turn(&finish_session, &finish_brand, &end)
+                .into_iter()
+                .map(replay_delivery);
+            finish_events.lock().await.extend(closing);
+            Ok((
+                serde_json::to_value(response.modes).map_err(acp_error)?,
+                serde_json::to_value(response.config_options).map_err(acp_error)?,
+                agent_controls,
+            ))
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+
+    let mut events = std::mem::take(&mut *collected.lock().await);
+    let menu = menu_fields(
+        &session.brand,
+        session.model.as_deref(),
+        &modes,
+        &config_options,
+        &agent_controls,
+        &json!([]),
+    );
+    let pinned_model = menu["currentModel"].as_str().map(str::to_string);
+    let pinned_mode = menu["currentMode"].as_str().map(str::to_string);
+    let pinned_effort = menu["currentEffort"].as_str().map(str::to_string);
+    let pinned_collaboration = menu["currentCollaborationMode"].as_str().map(str::to_string);
+    let mut replay = Vec::with_capacity(events.len() + 2);
+    replay.push(menu_event(&session.id, menu)?);
+    if !events.is_empty() && database.timeline_count(session.id.clone()).await? > 0 {
+        replay.push(super::super::provider::reset_event(&session.id)?);
+    }
+    replay.append(&mut events);
+    replay.push(serde_json::from_value(json!({
+        "type":"session.state", "sessionId":session.id, "seq":0, "at":now(),
+        "state":"dormant", "label":"Asleep"
+    })).map_err(|error| error.to_string())?);
+    // ACP session/update carries no event timestamp. A historical load must
+    // never make an old chat look newly active merely because it was opened.
+    // Use the authoritative session/list clock for the entire replay batch.
+    for event in &mut replay {
+        event
+            .fields
+            .insert("at".into(), json!(session.last_active_at));
+    }
+    database.append_replay(replay).await?;
+    database
+        .update_session(
+            session.id.clone(),
+            SessionPatch {
+                model: Some(pinned_model),
+                permission_mode: pinned_mode,
+                effort: Some(pinned_effort),
+                collaboration_mode: Some(pinned_collaboration),
+                state: Some("dormant".into()),
+                ..SessionPatch::default()
+            },
+            None,
+        )
+        .await?;
+    database.mark_imported(session.id.clone()).await
+}
 
 enum Control {
     Prompt {
@@ -1160,23 +1393,7 @@ impl AcpDriver {
                     let saved_menu = task_saved_menu.clone();
                     async move {
                         let initialized = connection
-                            .send_request(UntypedMessage::new("initialize", json!({
-                                "protocolVersion": 1,
-                                "clientInfo": {
-                                    "name":"atelier", "title":"Atelier",
-                                    "version":env!("CARGO_PKG_VERSION")
-                                },
-                                "clientCapabilities": {
-                                    "subagents": {},
-                                    "plan": {},
-                                    "elicitation": {"form":{},"url":{}},
-                                    "session": {"configOptions":{"boolean":{}}},
-                                    "_meta": {
-                                        "subagent-transcript": true,
-                                        "jetbrains": {"air": {"version":1,"capabilities":["nativeSubagentSessions"]}}
-                                    }
-                                }
-                            }))?)
+                            .send_request(initialize_request()?)
                             .block_task()
                             .await?;
                         let agent_controls = initialized
@@ -1184,6 +1401,9 @@ impl AcpDriver {
                             .filter(|controls| controls.is_array())
                             .cloned()
                             .unwrap_or_else(|| json!([]));
+                        let supports_close = initialized
+                            .pointer("/agentCapabilities/sessionCapabilities/close")
+                            .is_some();
                         let (remote_id, mut modes, mut config_options) = if create_remote {
                             let response = connection
                                 .send_request(NewSessionRequest::new(PathBuf::from(
@@ -1534,8 +1754,20 @@ impl AcpDriver {
                                 }
                                 Control::Close { reply } => {
                                     closing.store(true, Ordering::Release);
-                                    let _ = connection.send_notification(CancelNotification::new(remote_id.clone()));
-                                    let _ = reply.send(Ok(json!({"ok":true})));
+                                    let result = if supports_close {
+                                        connection
+                                            .send_request(CloseSessionRequest::new(remote_id.clone()))
+                                            .block_task()
+                                            .await
+                                            .map(|_| json!({"ok":true,"closed":true}))
+                                            .map_err(|error| error.to_string())
+                                    } else {
+                                        connection
+                                            .send_notification(CancelNotification::new(remote_id.clone()))
+                                            .map(|_| json!({"ok":true,"closed":false}))
+                                            .map_err(|error| error.to_string())
+                                    };
+                                    let _ = reply.send(result);
                                     break;
                                 }
                             }

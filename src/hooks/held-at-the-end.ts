@@ -164,17 +164,30 @@ export function useHeldAtTheEnd(pane: React.MutableRefObject<HTMLElement | null>
       aimed.current = null;
       gliding.current = false;
     };
+    // At scrollTop 0 an upward wheel may have nowhere to move until the older
+    // page arrives. The absence of a scroll event does not mean the reader is
+    // still following the newest row: the gesture itself is the decision to
+    // read history. Releasing here prevents that prepend being pulled straight
+    // back to the bottom by the layout effect above.
+    const wheeled = (event: WheelEvent) => {
+      his();
+      if (event.deltaY < 0) hold(false);
+    };
+    const keyed = (event: KeyboardEvent) => {
+      his();
+      if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) hold(false);
+    };
     box.addEventListener('scroll', read, { passive: true });
-    box.addEventListener('wheel', his, { passive: true });
+    box.addEventListener('wheel', wheeled, { passive: true });
     box.addEventListener('touchstart', his, { passive: true });
-    box.addEventListener('keydown', his);
+    box.addEventListener('keydown', keyed);
     return () => {
       box.removeEventListener('scroll', read);
-      box.removeEventListener('wheel', his);
+      box.removeEventListener('wheel', wheeled);
       box.removeEventListener('touchstart', his);
-      box.removeEventListener('keydown', his);
+      box.removeEventListener('keydown', keyed);
     };
-  }, [box, read]);
+  }, [box, hold, read]);
 
   // Anything that changes how tall the conversation is, or how much of it can be
   // seen at once, without the chat drawing a frame of its own: a picture that

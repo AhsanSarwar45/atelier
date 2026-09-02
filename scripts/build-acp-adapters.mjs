@@ -82,6 +82,7 @@ function verifyNativeCapabilities(claudeSource, codexSource) {
     '...mcpServers,',
     'loadSession: true,',
     'resume: {},',
+    'list: {},',
   ]) {
     if (!claude.includes(anchor)) {
       throw new Error(`Claude ACP native capability changed at ${JSON.stringify(anchor)}; audit MCP/session parity`);
@@ -98,7 +99,7 @@ function verifyNativeCapabilities(claudeSource, codexSource) {
     }
   }
   const codexServer = readFileSync(join(codexSource, 'src', 'CodexAcpServer.ts'), 'utf8');
-  for (const anchor of ['loadSession: true,', 'resume: { }']) {
+  for (const anchor of ['loadSession: true,', 'resume: { }', 'list: { }']) {
     if (!codexServer.includes(anchor)) {
       throw new Error(`Codex ACP session capability changed at ${JSON.stringify(anchor)}; audit resume parity`);
     }

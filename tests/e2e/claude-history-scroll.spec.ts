@@ -1,4 +1,4 @@
-import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -261,3 +261,111 @@ for (const chat of CHATS) {
     }
   });
 }
+
+test('an isolated external Claude chat pages upward without moving the visible message', async ({ page, request }) => {
+  test.setTimeout(60_000);
+  const externalId = '77777777-7777-4777-8777-777777777777';
+  const fixture = join(process.cwd(), 'tests', '.workbench-run-claude-generated-scroll');
+  // Match the official Agent SDK's sanitized project-directory layout.
+  const projectKey = Array.from(fixture, (character) => {
+    const code = character.charCodeAt(0);
+    const alphaNumeric = (code >= 48 && code <= 57)
+      || (code >= 65 && code <= 90)
+      || (code >= 97 && code <= 122);
+    return alphaNumeric ? character : '-';
+  }).join('');
+  const recordDir = join(process.env.CLAUDE_CONFIG_DIR!, 'projects', projectKey);
+  const record = join(recordDir, `${externalId}.jsonl`);
+  rmSync(fixture, { recursive: true, force: true });
+  mkdirSync(fixture, { recursive: true });
+  mkdirSync(recordDir, { recursive: true });
+  let parent: string | null = null;
+  const rows: Record<string, unknown>[] = [];
+  for (let turn = 0; turn < 45; turn += 1) {
+    const user = `user-${turn}`;
+    const assistant = `assistant-${turn}`;
+    rows.push({
+      type: 'user', sessionId: externalId, uuid: user, parentUuid: parent, cwd: fixture,
+      timestamp: `2026-09-02T05:${String(turn).padStart(2, '0')}:00.000Z`,
+      ...(turn === 0 ? { customTitle: 'Generated Claude Scroll Contract' } : {}),
+      message: { role: 'user', content: `Prompt ${turn}` },
+    });
+    rows.push({
+      type: 'assistant', sessionId: externalId, uuid: assistant, parentUuid: user, cwd: fixture,
+      timestamp: `2026-09-02T05:${String(turn).padStart(2, '0')}:30.000Z`,
+      message: { id: `answer-${turn}`, role: 'assistant', content: [{ type: 'text', text: `Answer ${turn}` }] },
+    });
+    parent = assistant;
+  }
+  writeFileSync(record, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`);
+
+  const made = await request.post('/api/projects', {
+    data: { name: 'Generated Claude scroll contract', path: fixture },
+  });
+  expect(made.status(), await made.text()).toBe(201);
+  const project = (await made.json()) as { id: string };
+  let olderRequests = 0;
+  await page.route('**/api/workbench/history?*', async (route) => {
+    if (new URL(route.request().url()).searchParams.has('before')) {
+      olderRequests += 1;
+      // Leave a deterministic window in which to capture the exact visible
+      // row before the older page is committed and the virtualizer reflows.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    await route.continue();
+  });
+
+  try {
+    await page.goto(`/project?id=${project.id}&tab=chat`);
+    const row = page.locator(`[data-testid="restore-row"][data-external-id="${externalId}"]`);
+    await expect(row).toBeVisible();
+    const cached = await request.get(`/api/workbench/restore?${new URLSearchParams({
+      project: project.id,
+      path: fixture,
+      local: '1',
+    })}`);
+    expect(cached.status(), await cached.text()).toBe(200);
+    expect((await cached.json() as Array<{ externalId?: string }>).some(
+      (session) => session.externalId === externalId,
+    )).toBe(true);
+    await row.getByTestId('row-name').click();
+    await expect(page.getByTestId('chat-loading')).toBeHidden();
+    const pane = page.getByTestId('transcript');
+    const transcript = page.getByTestId('virtual-transcript');
+    await expect(transcript).toHaveAttribute('data-loaded-items', '40');
+    await expect(transcript).toHaveAttribute('data-can-load-older', 'true');
+    await expect(page.getByTestId('user-message').filter({ hasText: 'Prompt 44' })).toHaveCount(1);
+    await expect(page.getByTestId('assistant-message').filter({ hasText: 'Answer 44' })).toHaveCount(1);
+
+    await pane.hover();
+    await page.mouse.wheel(0, -10_000);
+    await expect(page.getByTestId('older-loading')).toBeVisible();
+    const anchor = await page.locator('[data-transcript-key]').evaluateAll((rows) => {
+      const pane = document.querySelector('[data-testid="transcript"]')!.getBoundingClientRect();
+      const visible = rows.find((candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return rect.bottom > pane.top && rect.top < pane.bottom;
+      });
+      return visible ? {
+        key: visible.getAttribute('data-transcript-key')!,
+        top: visible.getBoundingClientRect().top,
+      } : null;
+    });
+    expect(anchor).not.toBeNull();
+    await expect.poll(() => olderRequests).toBe(1);
+    await expect.poll(async () => Number(await transcript.getAttribute('data-loaded-items'))).toBeGreaterThan(40);
+    await expect.poll(async () => {
+      const after = await pane.locator(`[data-transcript-key="${anchor!.key}"]`).evaluate(
+        (element) => element.getBoundingClientRect().top,
+      );
+      return Math.abs(after - anchor!.top);
+    }).toBeLessThanOrEqual(2);
+    await page.getByRole('button', { name: 'Back to the newest message' }).click();
+    await expect(page.getByTestId('user-message').filter({ hasText: 'Prompt 44' })).toHaveCount(1);
+    await expect(page.getByTestId('assistant-message').filter({ hasText: 'Answer 44' })).toHaveCount(1);
+  } finally {
+    await request.delete(`/api/projects/${project.id}`).catch(() => undefined);
+    rmSync(fixture, { recursive: true, force: true });
+    rmSync(record, { force: true });
+  }
+});
