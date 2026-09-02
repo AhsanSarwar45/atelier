@@ -1215,11 +1215,16 @@ impl Store {
         }
         let newest_seq = self.ensure_transcript_projection(session_id)?;
         let ceiling = before.unwrap_or(i64::MAX);
-        let mut statement = self.connection.prepare(
+        let page_predicate = r#"(
+            json_extract(json,'$.kind') NOT IN ('tool','message','thinking')
+            OR json_extract(json,'$.parentId') IS NULL
+            OR (json_extract(json,'$.kind')='tool' AND json_extract(json,'$.status')='failed')
+        )"#;
+        let mut statement = self.connection.prepare(&format!(
             r#"SELECT position, json FROM transcript_item
-                 WHERE session_id = ?1 AND visible = 1 AND position < ?2
+                 WHERE session_id = ?1 AND visible = 1 AND position < ?2 AND {page_predicate}
                  ORDER BY position DESC LIMIT ?3"#,
-        )?;
+        ))?;
         let mut rows: Vec<(i64, serde_json::Value)> = statement
             .query_map(params![session_id, ceiling, limit as i64], |row| {
                 let position = row.get(0)?;
@@ -1236,9 +1241,34 @@ impl Store {
             .collect::<rusqlite::Result<_>>()?;
         rows.reverse();
         let oldest = rows.first().map(|row| row.0);
+        let lower = oldest.unwrap_or(ceiling);
+        let mut nested_statement = self.connection.prepare(
+            r#"SELECT position,json FROM transcript_item
+               WHERE session_id=?1 AND visible=1 AND position>=?2 AND position<?3
+                 AND json_extract(json,'$.kind') IN ('tool','message','thinking')
+                 AND json_extract(json,'$.parentId') IS NOT NULL
+                 AND NOT(json_extract(json,'$.kind')='tool' AND json_extract(json,'$.status')='failed')
+               ORDER BY position DESC LIMIT ?4"#,
+        )?;
+        let nested = nested_statement
+            .query_map(params![session_id, lower, ceiling, limit as i64], |row| {
+                let position = row.get(0)?;
+                let json: String = row.get(1)?;
+                let item = serde_json::from_str(&json).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        1,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?;
+                Ok((position, item))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.extend(nested);
+        rows.sort_by_key(|row| row.0);
         let has_older = match oldest {
             Some(cursor) => self.connection.query_row(
-                "SELECT EXISTS(SELECT 1 FROM transcript_item WHERE session_id = ?1 AND visible = 1 AND position < ?2)",
+                &format!("SELECT EXISTS(SELECT 1 FROM transcript_item WHERE session_id=?1 AND visible=1 AND position<?2 AND {page_predicate})"),
                 params![session_id, cursor],
                 |row| row.get::<_, bool>(0),
             )?,
@@ -1285,112 +1315,149 @@ impl Store {
             params![session_id, ceiling],
             |row| row.get(0),
         )?;
-        let mut scan_before = ceiling;
-        let mut descending = Vec::new();
-        let mut anchors = HashMap::<String, i64>::new();
         let wanted = limit.saturating_add(8);
-        let mut window_start = None;
+        let mut candidate_count = wanted;
+        let (items, anchors) = loop {
+            let cutoff = self
+            .connection
+            .query_row(
+                r#"WITH anchors AS (
+                     SELECT CASE type
+                       WHEN 'message.started' THEN 'message:' || json_extract(json,'$.messageId')
+                       WHEN 'thinking.delta' THEN 'thinking:' || json_extract(json,'$.messageId')
+                       WHEN 'tool.started' THEN 'tool:' || json_extract(json,'$.toolCallId')
+                       WHEN 'note' THEN 'note:' || json_extract(json,'$.noteId')
+                       WHEN 'ask.permission' THEN 'ask:' || json_extract(json,'$.askId')
+                       WHEN 'question.requested' THEN 'question:' || json_extract(json,'$.requestId')
+                       WHEN 'plan.proposed' THEN 'plan:' || json_extract(json,'$.proposalId')
+                       WHEN 'provider.message' THEN 'provider_message:' || json_extract(json,'$.signal.id')
+                       WHEN 'notice' THEN 'notice:' || seq END AS item_key,
+                       MIN(seq) AS started
+                     FROM event
+                     WHERE session_id=?1 AND seq<?2 AND seq>?3
+                       AND (
+                         type IN ('note','ask.permission','question.requested','plan.proposed',
+                                  'provider.message','notice')
+                         OR (type IN ('message.started','thinking.delta','tool.started')
+                             AND json_extract(json,'$.parentToolCallId') IS NULL)
+                       )
+                       AND NOT(type='note' AND json_extract(json,'$.rank')='detail')
+                     GROUP BY item_key
+                   )
+                   SELECT started FROM anchors ORDER BY started DESC LIMIT 1 OFFSET ?4"#,
+                params![
+                    session_id,
+                    ceiling,
+                    reset_seq,
+                    candidate_count.saturating_sub(1) as i64
+                ],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .unwrap_or_else(|| reset_seq.saturating_add(1));
 
-        loop {
+            // Select only the events that can affect the chosen parent rows and a
+            // separately bounded helper tail. SQLite performs the identity joins;
+            // Rust never parses or repeatedly folds a huge intervening child run.
             let mut statement = self.connection.prepare(
-                r#"SELECT seq,json FROM event
-                   WHERE session_id=?1 AND seq<?2 AND seq>?3
-                     AND type IN (
-                       'message.started','text.delta','thinking.delta','message.completed','message.retracted',
-                       'tool.started','tool.completed','tool.progress','agent.started','agent.progress',
-                       'agent.finished','agent.relayed','agent.identified','diff','image','image.compare','widget',
-                       'ask.permission','ask.resolved','question.requested','question.resolved',
-                       'plan.proposed','plan.resolved','provider.message','notice','note'
-                     )
-                     AND NOT(type='note' AND json_extract(json,'$.rank')='detail')
-                   ORDER BY seq DESC LIMIT 512"#,
-            )?;
-            let chunk: Vec<(i64, String)> = statement
-                .query_map(params![session_id, scan_before, reset_seq], |row| {
-                    Ok((row.get(0)?, row.get(1)?))
+            r#"WITH
+               root_messages(id) AS (
+                 SELECT DISTINCT json_extract(json,'$.messageId') FROM event
+                 WHERE session_id=?1 AND seq>=?2 AND seq<?3
+                   AND type IN ('message.started','thinking.delta')
+                   AND json_extract(json,'$.parentToolCallId') IS NULL
+               ),
+               child_messages(id) AS (
+                 SELECT json_extract(json,'$.messageId') FROM event
+                 WHERE session_id=?1 AND seq>=?2 AND seq<?3
+                   AND type IN ('message.started','thinking.delta')
+                   AND json_extract(json,'$.parentToolCallId') IS NOT NULL
+                 GROUP BY json_extract(json,'$.messageId')
+                 ORDER BY MIN(seq) DESC LIMIT ?4
+               ),
+               selected_messages(id) AS (
+                 SELECT id FROM root_messages UNION SELECT id FROM child_messages
+               ),
+               root_tools(id) AS (
+                 SELECT DISTINCT json_extract(json,'$.toolCallId') FROM event
+                 WHERE session_id=?1 AND seq>=?2 AND seq<?3 AND type='tool.started'
+                   AND json_extract(json,'$.parentToolCallId') IS NULL
+               ),
+               child_tools(id) AS (
+                 SELECT json_extract(json,'$.toolCallId') FROM event
+                 WHERE session_id=?1 AND seq>=?2 AND seq<?3 AND type='tool.started'
+                   AND json_extract(json,'$.parentToolCallId') IS NOT NULL
+                 GROUP BY json_extract(json,'$.toolCallId')
+                 ORDER BY MIN(seq) DESC LIMIT ?4
+               ),
+               selected_tools(id) AS (
+                 SELECT id FROM root_tools UNION SELECT id FROM child_tools
+               ),
+               selected_agents(id) AS (
+                 SELECT DISTINCT json_extract(json,'$.agentId') FROM event
+                 WHERE session_id=?1 AND seq>=?2 AND seq<?3 AND type='agent.started'
+                   AND json_extract(json,'$.toolCallId') IN (SELECT id FROM selected_tools)
+               )
+               SELECT seq,json FROM event
+               WHERE session_id=?1 AND seq>=?2 AND seq<?3 AND (
+                 (type IN ('message.started','text.delta','thinking.delta','message.completed',
+                           'message.retracted','image','image.compare','widget')
+                    AND json_extract(json,'$.messageId') IN (SELECT id FROM selected_messages))
+                 OR (type IN ('tool.started','tool.completed','tool.progress','diff')
+                    AND json_extract(json,'$.toolCallId') IN (SELECT id FROM selected_tools))
+                 OR (type IN ('agent.started','agent.progress','agent.finished','agent.relayed','agent.identified')
+                    AND json_extract(json,'$.agentId') IN (SELECT id FROM selected_agents))
+                 OR type IN ('ask.permission','ask.resolved','question.requested','question.resolved',
+                             'plan.proposed','plan.resolved','provider.message','notice','note')
+               )
+               AND NOT(type='note' AND json_extract(json,'$.rank')='detail')
+               ORDER BY seq"#,
+        )?;
+            let rows = statement
+                .query_map(params![session_id, cutoff, ceiling, limit as i64], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
                 })?
-                .collect::<rusqlite::Result<_>>()?;
-            if chunk.is_empty() {
-                break;
-            }
-            scan_before = chunk.last().map(|(seq, _)| *seq).unwrap_or(scan_before);
-            for (seq, json) in chunk {
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let mut anchors = HashMap::<String, i64>::new();
+            let mut events = Vec::with_capacity(rows.len());
+            for (seq, json) in rows {
                 let mut event: Event = serde_json::from_str(&json).map_err(json_error)?;
                 event.fields.insert("seq".into(), json!(seq));
                 super::wire::bound_event(&mut event);
                 if let Some(key) = event_item_anchor(&event) {
-                    // We scan newest-to-oldest, so replacing leaves the
-                    // earliest creation event for an item such as thinking.
                     anchors.insert(key, seq);
                 }
-                descending.push(event);
+                events.push(event);
             }
-            if anchors.len() >= wanted {
-                let mut starts = anchors.values().copied().collect::<Vec<_>>();
-                starts.sort_unstable_by(|left, right| right.cmp(left));
-                let mut candidates = wanted;
-                loop {
-                    let cutoff = starts[candidates - 1];
-                    let ordered = descending
-                        .iter()
-                        .filter(|event| {
-                            event.fields["seq"]
-                                .as_i64()
-                                .is_some_and(|seq| seq >= cutoff)
-                        })
-                        .cloned()
-                        .rev()
-                        .collect::<Vec<_>>();
-                    if fold_all(&ordered)
-                        .items()
-                        .iter()
-                        .filter(|item| item_visible(item))
-                        .count()
-                        >= limit
-                    {
-                        window_start = Some(cutoff);
-                        break;
-                    }
-                    if candidates == starts.len() {
-                        break;
-                    }
-                    candidates = candidates.saturating_add(wanted).min(starts.len());
-                }
+            let projection = fold_all(&events);
+            let items = bounded_page_items(projection.items(), limit);
+            let primary_count = items
+                .iter()
+                .filter(|item| item_counts_toward_page(item))
+                .count();
+            if primary_count >= limit || cutoff <= reset_seq.saturating_add(1) {
+                break (items, anchors);
             }
-            if window_start.is_some() {
-                break;
-            }
-        }
-
-        if let Some(cutoff) = window_start {
-            descending.retain(|event| {
-                event.fields["seq"]
-                    .as_i64()
-                    .is_some_and(|seq| seq >= cutoff)
-            });
-        }
-        descending.reverse();
-        let projection = fold_all(&descending);
-        let visible: Vec<Value> = projection
-            .items()
-            .iter()
-            .filter(|item| item_visible(item))
-            .cloned()
-            .collect();
-        let start = visible.len().saturating_sub(limit);
-        let items = visible[start..].to_vec();
+            // Retractions and identity refinements can make creation anchors
+            // disappear during folding. Expanding the indexed anchor window
+            // is cheap and guarantees a full page without scanning child runs.
+            candidate_count = candidate_count.saturating_add(wanted);
+        };
         let oldest_anchor = items
             .iter()
+            .filter(|item| item_counts_toward_page(item))
             .filter_map(item_key)
             .filter_map(|key| anchors.get(&key).copied())
             .min();
         let has_older = match oldest_anchor {
             Some(cursor) if cursor > reset_seq => self.connection.query_row(
                 r#"SELECT EXISTS(SELECT 1 FROM event
-                    WHERE session_id=?1 AND seq>?2 AND seq<?3 AND type IN
-                    ('message.started','thinking.delta','tool.started','note',
-                     'ask.permission','question.requested','plan.proposed',
-                     'provider.message','notice')
+                    WHERE session_id=?1 AND seq>?2 AND seq<?3 AND (
+                      type IN ('note','ask.permission','question.requested','plan.proposed',
+                               'provider.message','notice')
+                      OR (type IN ('message.started','thinking.delta','tool.started')
+                          AND json_extract(json,'$.parentToolCallId') IS NULL)
+                    )
                     AND NOT(type='note' AND json_extract(json,'$.rank')='detail'))"#,
                 params![session_id, reset_seq, cursor],
                 |row| row.get::<_, bool>(0),
@@ -1455,6 +1522,48 @@ fn event_item_anchor(event: &Event) -> Option<String> {
 
 fn item_visible(item: &Value) -> bool {
     !(item["kind"] == "note" && item["rank"] == "detail")
+}
+
+/// The main conversation's page budget counts only rows the main transcript
+/// can draw. Helper-owned words and commands remain available to the helper
+/// panel, but a long child run cannot displace the parent conversation.
+fn item_counts_toward_page(item: &Value) -> bool {
+    if !item_visible(item) {
+        return false;
+    }
+    let nested = matches!(item["kind"].as_str(), Some("tool" | "message" | "thinking"))
+        && item["parentId"].as_str().is_some();
+    !nested || (item["kind"] == "tool" && item["status"] == "failed")
+}
+
+/// Keep one fixed main-conversation page plus one fixed helper tail. The
+/// latter preserves the existing subagent panel without allowing its private
+/// transcript to make the main conversation blank or unbounded.
+fn bounded_page_items(items: &[Value], limit: usize) -> Vec<Value> {
+    let primary = items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item_counts_toward_page(item))
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let nested = items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item_visible(item) && !item_counts_toward_page(item))
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let mut selected = primary
+        .into_iter()
+        .rev()
+        .take(limit)
+        .chain(nested.into_iter().rev().take(limit))
+        .collect::<Vec<_>>();
+    selected.sort_unstable();
+    selected.dedup();
+    selected
+        .into_iter()
+        .map(|index| items[index].clone())
+        .collect()
 }
 
 fn projection_items_for_event(
@@ -2142,12 +2251,16 @@ mod tests {
 
         let newest = store.transcript_items("session-1", None, 3).unwrap();
         assert_eq!(newest.newest_seq, 37);
-        assert_eq!(newest.items.len(), 3);
+        assert!(
+            newest.items.len() <= 6,
+            "one primary page plus one helper tail"
+        );
         assert!(newest.has_older);
         assert_eq!(
             newest
                 .items
                 .iter()
+                .filter(|item| item_counts_toward_page(item))
                 .map(|item| item["kind"].as_str().unwrap())
                 .collect::<Vec<_>>(),
             ["plan", "provider_message", "notice"]
@@ -2267,6 +2380,115 @@ mod tests {
         assert_eq!(older.items.len(), 10);
         assert_eq!(older.items[0]["text"], "row 1");
         assert!(!older.has_older);
+    }
+
+    #[test]
+    fn helper_history_cannot_consume_the_parent_transcript_page() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let mut seq = 0;
+        let mut append = |body: Value| {
+            seq += 1;
+            let mut object = body.as_object().unwrap().clone();
+            object.insert("sessionId".into(), json!("nested"));
+            object.insert("seq".into(), json!(seq));
+            object.insert("at".into(), json!("now"));
+            assert!(store
+                .append_event(&serde_json::from_value(Value::Object(object)).unwrap())
+                .unwrap());
+        };
+        for index in 0..45 {
+            append(
+                json!({"type":"message.started","messageId":format!("root-{index}"),"role":"assistant"}),
+            );
+            append(
+                json!({"type":"text.delta","messageId":format!("root-{index}"),"text":format!("root {index}")}),
+            );
+            append(json!({"type":"message.completed","messageId":format!("root-{index}")}));
+        }
+        for index in 0..80 {
+            append(
+                json!({"type":"message.started","messageId":format!("child-{index}"),"role":"assistant","parentToolCallId":"spawn"}),
+            );
+            append(
+                json!({"type":"text.delta","messageId":format!("child-{index}"),"text":format!("child {index}")}),
+            );
+            append(json!({"type":"message.completed","messageId":format!("child-{index}")}));
+        }
+
+        let newest = store.transcript_items("nested", None, 40).unwrap();
+        let primary = newest
+            .items
+            .iter()
+            .filter(|item| item_counts_toward_page(item))
+            .collect::<Vec<_>>();
+        let child = newest
+            .items
+            .iter()
+            .filter(|item| !item_counts_toward_page(item))
+            .collect::<Vec<_>>();
+        assert_eq!(primary.len(), 40);
+        assert_eq!(primary.first().unwrap()["text"], "root 5");
+        assert_eq!(primary.last().unwrap()["text"], "root 44");
+        assert_eq!(child.len(), 40, "the helper panel tail stays bounded too");
+        assert_eq!(child.last().unwrap()["text"], "child 79");
+        assert_eq!(newest.items.len(), 80);
+        assert!(newest.has_older);
+
+        let older = store.transcript_items("nested", newest.cursor, 40).unwrap();
+        assert_eq!(
+            older
+                .items
+                .iter()
+                .filter(|item| item_counts_toward_page(item))
+                .count(),
+            5
+        );
+        assert!(!older.has_older);
+    }
+
+    #[test]
+    fn cold_history_expands_past_retracted_anchor_rows() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let mut seq = 0;
+        let mut append = |body: Value| {
+            seq += 1;
+            let mut object = body.as_object().unwrap().clone();
+            object.insert("sessionId".into(), json!("retracted"));
+            object.insert("seq".into(), json!(seq));
+            object.insert("at".into(), json!("now"));
+            assert!(store
+                .append_event(&serde_json::from_value(Value::Object(object)).unwrap())
+                .unwrap());
+        };
+        for index in 0..60 {
+            append(json!({
+                "type":"message.started",
+                "messageId":format!("root-{index}"),
+                "role":"assistant"
+            }));
+            append(json!({
+                "type":"text.delta",
+                "messageId":format!("root-{index}"),
+                "text":format!("root {index}")
+            }));
+            append(json!({"type":"message.completed","messageId":format!("root-{index}")}));
+        }
+        for index in 40..60 {
+            append(json!({"type":"message.retracted","messageId":format!("root-{index}")}));
+        }
+
+        let newest = store.transcript_items("retracted", None, 40).unwrap();
+        let primary = newest
+            .items
+            .iter()
+            .filter(|item| item_counts_toward_page(item))
+            .collect::<Vec<_>>();
+        assert_eq!(primary.len(), 40);
+        assert_eq!(primary.first().unwrap()["text"], "root 0");
+        assert_eq!(primary.last().unwrap()["text"], "root 39");
+        assert!(!newest.has_older);
     }
 
     #[test]
