@@ -61,6 +61,9 @@ beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (_url: string, init?: { body?: string }) => {
+      if (!init?.body) {
+        return { ok: true, json: async () => ({ items: [], cursor: null, hasOlder: false }) } as Response;
+      }
       posted.push(JSON.parse(init?.body ?? '{}') as Record<string, unknown>);
       return { ok: true, json: async () => ({ ok: true }) } as Response;
     }),
@@ -76,6 +79,9 @@ function refusing(why: string): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (_url: string, init?: { body?: string }) => {
+      if (!init?.body) {
+        return { ok: true, json: async () => ({ items: [], cursor: null, hasOlder: false }) } as Response;
+      }
       posted.push(JSON.parse(init?.body ?? '{}') as Record<string, unknown>);
       return { ok: false, status: 500, text: async () => JSON.stringify({ error: why }) } as Response;
     }),

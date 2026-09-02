@@ -1,24 +1,22 @@
 /**
  * One sent-off agent's own conversation, opened from its row (bw-7ks.22.4).
  *
- * The claim is that nothing is remembered and nothing is fetched: an agent's
- * conversation is the chat's own conversation read by who said it. So the same
- * events are folded both ways — the live tail and a replay of the whole log —
- * and the pane is built from each, because "the same after a restart" is
- * exactly the difference between those two paths (§4).
+ * An agent's conversation is the chat's canonical rows read by who said them.
+ * The live tail and independently paged durable history are both exercised,
+ * because "the same after a restart" is exactly the difference between them.
  *
  * The main agent's own words are in the fixture on purpose. A pane that showed
  * everything would look right on a chat with one helper and be useless on a
  * chat with four.
  */
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Mentions } from '@/components/markdown-body';
 import { AgentView, saidBy } from '@/workbench/agent-view';
-import { EMPTY, foldAll, reduce, type SessionView } from '@/workbench/fold';
-import { SentAwayPanel } from '@/workbench/sent-away';
+import { EMPTY, foldAll, reduce, type SessionView, type TranscriptItem } from '@/workbench/fold';
 import type { WbpEvent } from '@/workbench/protocol';
+import { SentAwayPanel } from '@/workbench/sent-away';
 
 /** When all of this happened. */
 const OFF = '2026-08-20T09:00:00.000Z';
@@ -32,6 +30,16 @@ function said(e: Said<WbpEvent>): WbpEvent {
 
 /** Words, drawn as they are: the pane is not what makes a card a link. */
 const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null };
+
+beforeEach(() => {
+  // Most cases exercise the already-streamed tail. Leave the independent
+  // history read pending so it cannot alter an assertion about that tail.
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 /**
  * A chat that says something itself, sends two helpers away, and hears from
@@ -170,6 +178,43 @@ describe.each(bothWays)('a chat %s', (_name, fold) => {
 
 describe('the pane itself', () => {
   const view = live(aChatWithTwoHelpers());
+
+  it('loads its own newest page and automatically prepends older words at the top', async () => {
+    const calls: string[] = [];
+    const message = (id: string, text: string): TranscriptItem => ({
+      kind: 'message', id, role: 'assistant', text, images: [], done: true, parentId: 'call-1',
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      calls.push(url);
+      const older = new URL(url, 'http://atelier.test').searchParams.has('before');
+      return {
+        ok: true,
+        json: async () => older
+          ? { items: [message('older', 'old helper words')], cursor: null, hasOlder: false }
+          : { items: [message('newer', 'new helper words')], cursor: -41, hasOlder: true },
+      } as Response;
+    }));
+    const row = view.agents.find((agent) => agent.id === 'task-1')!;
+    const baseline = message('baseline', 'old snapshot fragment');
+    const { rerender } = render(<AgentView row={row} items={[baseline]} sessionId="chat-1" controls={[]} mentions={PLAINLY} onClose={() => {}} />);
+
+    expect(await screen.findByText('new helper words')).toBeInTheDocument();
+    expect(screen.queryByText('old snapshot fragment')).not.toBeInTheDocument();
+    rerender(<AgentView row={row} items={[baseline, message('live', 'arrived while open')]} sessionId="chat-1" controls={[]} mentions={PLAINLY} onClose={() => {}} />);
+    expect(screen.getByText('arrived while open')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-view-said')).toHaveAttribute('data-can-load-older', 'true');
+    await act(async () => {
+      fireEvent.scroll(screen.getByTestId('agent-view-said'), { target: { scrollTop: 0 } });
+    });
+
+    expect(await screen.findByText('old helper words')).toBeInTheDocument();
+    expect(screen.getByText('new helper words')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-view-said')).toHaveAttribute('data-can-load-older', 'false');
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain('parent=call-1');
+    expect(calls[1]).toContain('before=-41');
+  });
 
   it('says so plainly when the agent has not said anything yet', () => {
     const row = { ...view.agents.find((a) => a.id === 'task-2')!, state: 'running' as const };

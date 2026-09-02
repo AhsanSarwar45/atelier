@@ -70,6 +70,13 @@ enum Command {
     SteeringMenu(String, Reply<serde_json::Value>),
     Snapshot(String, Reply<SnapshotParts>),
     TranscriptItems(String, Option<i64>, usize, Reply<TranscriptItemPage>),
+    AgentTranscriptItems(
+        String,
+        String,
+        Option<i64>,
+        usize,
+        Reply<TranscriptItemPage>,
+    ),
     ProjectedAgents(String, Reply<Vec<serde_json::Value>>),
     Shutdown,
 }
@@ -334,6 +341,19 @@ impl ChatDb {
     ) -> Result<TranscriptItemPage, String> {
         self.request(|reply| Command::TranscriptItems(session_id, before, limit, reply))
             .await
+    }
+
+    pub async fn agent_transcript_items(
+        &self,
+        session_id: String,
+        parent_id: String,
+        before: Option<i64>,
+        limit: usize,
+    ) -> Result<TranscriptItemPage, String> {
+        self.request(|reply| {
+            Command::AgentTranscriptItems(session_id, parent_id, before, limit, reply)
+        })
+        .await
     }
 
     pub async fn projected_agents(
@@ -716,6 +736,10 @@ fn run(
             Command::TranscriptItems(session_id, before, limit, reply) => {
                 respond(reply, store.transcript_items(&session_id, before, limit))
             }
+            Command::AgentTranscriptItems(session_id, parent_id, before, limit, reply) => respond(
+                reply,
+                store.agent_transcript_items(&session_id, &parent_id, before, limit),
+            ),
             Command::ProjectedAgents(session_id, reply) => {
                 respond(reply, store.projected_agents(&session_id))
             }

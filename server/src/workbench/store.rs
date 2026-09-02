@@ -1369,7 +1369,7 @@ impl Store {
                ),
                child_messages(id) AS (
                  SELECT json_extract(json,'$.messageId') FROM event
-                 WHERE session_id=?1 AND seq>=?2 AND seq<?3
+                 WHERE session_id=?1 AND seq>?5 AND seq<?3
                    AND type IN ('message.started','thinking.delta')
                    AND json_extract(json,'$.parentToolCallId') IS NOT NULL
                  GROUP BY json_extract(json,'$.messageId')
@@ -1385,7 +1385,7 @@ impl Store {
                ),
                child_tools(id) AS (
                  SELECT json_extract(json,'$.toolCallId') FROM event
-                 WHERE session_id=?1 AND seq>=?2 AND seq<?3 AND type='tool.started'
+                 WHERE session_id=?1 AND seq>?5 AND seq<?3 AND type='tool.started'
                    AND json_extract(json,'$.parentToolCallId') IS NOT NULL
                  GROUP BY json_extract(json,'$.toolCallId')
                  ORDER BY MIN(seq) DESC LIMIT ?4
@@ -1395,11 +1395,11 @@ impl Store {
                ),
                selected_agents(id) AS (
                  SELECT DISTINCT json_extract(json,'$.agentId') FROM event
-                 WHERE session_id=?1 AND seq>=?2 AND seq<?3 AND type='agent.started'
+                 WHERE session_id=?1 AND seq>?5 AND seq<?3 AND type='agent.started'
                    AND json_extract(json,'$.toolCallId') IN (SELECT id FROM selected_tools)
                )
                SELECT seq,json FROM event
-               WHERE session_id=?1 AND seq>=?2 AND seq<?3 AND (
+               WHERE session_id=?1 AND seq>?5 AND seq<?3 AND (
                  (type IN ('message.started','text.delta','thinking.delta','message.completed',
                            'message.retracted','image','image.compare','widget')
                     AND json_extract(json,'$.messageId') IN (SELECT id FROM selected_messages))
@@ -1407,16 +1407,18 @@ impl Store {
                     AND json_extract(json,'$.toolCallId') IN (SELECT id FROM selected_tools))
                  OR (type IN ('agent.started','agent.progress','agent.finished','agent.relayed','agent.identified')
                     AND json_extract(json,'$.agentId') IN (SELECT id FROM selected_agents))
-                 OR type IN ('ask.permission','ask.resolved','question.requested','question.resolved',
-                             'plan.proposed','plan.resolved','provider.message','notice','note')
+                 OR (seq>=?2 AND type IN
+                    ('ask.permission','ask.resolved','question.requested','question.resolved',
+                     'plan.proposed','plan.resolved','provider.message','notice','note'))
                )
                AND NOT(type='note' AND json_extract(json,'$.rank')='detail')
                ORDER BY seq"#,
         )?;
             let rows = statement
-                .query_map(params![session_id, cutoff, ceiling, limit as i64], |row| {
-                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                })?
+                .query_map(
+                    params![session_id, cutoff, ceiling, limit as i64, reset_seq],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             let mut anchors = HashMap::<String, i64>::new();
             let mut events = Vec::with_capacity(rows.len());
@@ -1463,6 +1465,151 @@ impl Store {
                 |row| row.get::<_, bool>(0),
             )?,
             _ => false,
+        };
+        Ok(TranscriptItemPage {
+            items,
+            cursor: oldest_anchor.filter(|_| has_older).map(|seq| -seq),
+            has_older,
+            newest_seq,
+        })
+    }
+
+    /// Page one helper's private transcript by the canonical call that owns
+    /// its rows. This is deliberately independent from the parent chat cursor:
+    /// a large helper cannot starve the main transcript, and exhausting the
+    /// main transcript cannot make older helper words unreachable.
+    pub fn agent_transcript_items(
+        &self,
+        session_id: &str,
+        parent_id: &str,
+        before: Option<i64>,
+        limit: usize,
+    ) -> rusqlite::Result<TranscriptItemPage> {
+        let newest_seq: i64 = self.connection.query_row(
+            "SELECT COALESCE(MAX(seq),0) FROM event WHERE session_id=?1",
+            [session_id],
+            |row| row.get(0),
+        )?;
+        let ceiling = before
+            .filter(|cursor| *cursor < 0)
+            .map(|cursor| cursor.saturating_abs())
+            .unwrap_or_else(|| newest_seq.saturating_add(1));
+        let reset_seq: i64 = self.connection.query_row(
+            "SELECT COALESCE(MAX(seq),0) FROM event WHERE session_id=?1 AND type='transcript.reset' AND seq<?2",
+            params![session_id, ceiling],
+            |row| row.get(0),
+        )?;
+        let batch = limit.saturating_add(8);
+        let mut candidate_count = batch;
+        let (items, anchors) = loop {
+            let mut statement = self.connection.prepare(
+                r#"WITH candidate_events(item_kind,item_id,started) AS (
+                     SELECT CASE type
+                       WHEN 'message.started' THEN 'message'
+                       WHEN 'thinking.delta' THEN 'thinking'
+                       WHEN 'tool.started' THEN 'tool'
+                       WHEN 'ask.permission' THEN 'ask'
+                       WHEN 'question.requested' THEN 'question'
+                       WHEN 'plan.proposed' THEN 'plan' END,
+                       CASE type
+                       WHEN 'message.started' THEN json_extract(json,'$.messageId')
+                       WHEN 'thinking.delta' THEN json_extract(json,'$.messageId')
+                       WHEN 'tool.started' THEN json_extract(json,'$.toolCallId')
+                       WHEN 'ask.permission' THEN json_extract(json,'$.askId')
+                       WHEN 'question.requested' THEN json_extract(json,'$.requestId')
+                       WHEN 'plan.proposed' THEN json_extract(json,'$.proposalId') END,
+                       seq
+                     FROM event
+                     WHERE session_id=?1 AND seq>?2 AND seq<?3
+                       AND json_extract(json,'$.parentToolCallId')=?4
+                       AND type IN ('message.started','thinking.delta','tool.started',
+                                    'ask.permission','question.requested','plan.proposed')
+                   ), anchors(item_kind,item_id,started) AS (
+                     SELECT item_kind,item_id,MIN(started) FROM candidate_events
+                     GROUP BY item_kind,item_id ORDER BY MIN(started) DESC LIMIT ?5
+                   ), selected_agents(id) AS (
+                     SELECT DISTINCT json_extract(event.json,'$.agentId') FROM event
+                     WHERE event.session_id=?1 AND event.seq>?2 AND event.seq<?3
+                       AND event.type='agent.started'
+                       AND json_extract(event.json,'$.toolCallId') IN
+                           (SELECT item_id FROM anchors WHERE item_kind='tool')
+                   )
+                   SELECT event.seq,event.json FROM event
+                   WHERE event.session_id=?1 AND event.seq>?2 AND event.seq<?3 AND (
+                     (event.type IN ('message.started','text.delta','thinking.delta','message.completed',
+                                     'message.retracted','image','image.compare','widget')
+                       AND json_extract(event.json,'$.messageId') IN
+                           (SELECT item_id FROM anchors WHERE item_kind IN ('message','thinking')))
+                     OR (event.type IN ('tool.started','tool.completed','tool.progress','diff')
+                       AND json_extract(event.json,'$.toolCallId') IN
+                           (SELECT item_id FROM anchors WHERE item_kind='tool'))
+                     OR (event.type IN ('ask.permission','ask.resolved')
+                       AND json_extract(event.json,'$.askId') IN
+                           (SELECT item_id FROM anchors WHERE item_kind='ask'))
+                     OR (event.type IN ('question.requested','question.resolved')
+                       AND json_extract(event.json,'$.requestId') IN
+                           (SELECT item_id FROM anchors WHERE item_kind='question'))
+                     OR (event.type IN ('plan.proposed','plan.resolved')
+                       AND json_extract(event.json,'$.proposalId') IN
+                           (SELECT item_id FROM anchors WHERE item_kind='plan'))
+                     OR (event.type IN ('agent.started','agent.progress','agent.finished',
+                                        'agent.relayed','agent.identified')
+                       AND json_extract(event.json,'$.agentId') IN (SELECT id FROM selected_agents))
+                   ) ORDER BY event.seq"#,
+            )?;
+            let rows = statement
+                .query_map(
+                    params![
+                        session_id,
+                        reset_seq,
+                        ceiling,
+                        parent_id,
+                        candidate_count as i64
+                    ],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let mut anchors = HashMap::<String, i64>::new();
+            let mut events = Vec::with_capacity(rows.len());
+            for (seq, json) in rows {
+                let mut event: Event = serde_json::from_str(&json).map_err(json_error)?;
+                event.fields.insert("seq".into(), json!(seq));
+                super::wire::bound_event(&mut event);
+                if let Some(key) = event_item_anchor(&event) {
+                    anchors.insert(key, seq);
+                }
+                events.push(event);
+            }
+            let projection = fold_all(&events);
+            let visible = projection
+                .items()
+                .iter()
+                .filter(|item| item_visible(item) && item["parentId"].as_str() == Some(parent_id))
+                .cloned()
+                .collect::<Vec<_>>();
+            let start = visible.len().saturating_sub(limit);
+            let items = visible[start..].to_vec();
+            if items.len() >= limit || candidate_count > anchors.len() {
+                break (items, anchors);
+            }
+            candidate_count = candidate_count.saturating_add(batch);
+        };
+        let oldest_anchor = items
+            .iter()
+            .filter_map(item_key)
+            .filter_map(|key| anchors.get(&key).copied())
+            .min();
+        let has_older = match oldest_anchor {
+            Some(cursor) => self.connection.query_row(
+                r#"SELECT EXISTS(SELECT 1 FROM event
+                    WHERE session_id=?1 AND seq>?2 AND seq<?3
+                      AND json_extract(json,'$.parentToolCallId')=?4
+                      AND type IN ('message.started','thinking.delta','tool.started',
+                                   'ask.permission','question.requested','plan.proposed'))"#,
+                params![session_id, reset_seq, cursor, parent_id],
+                |row| row.get::<_, bool>(0),
+            )?,
+            None => false,
         };
         Ok(TranscriptItemPage {
             items,
@@ -2489,6 +2636,109 @@ mod tests {
         assert_eq!(primary.first().unwrap()["text"], "root 0");
         assert_eq!(primary.last().unwrap()["text"], "root 39");
         assert!(!newest.has_older);
+    }
+
+    #[test]
+    fn helper_history_pages_on_its_own_cursor() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let mut seq = 0;
+        let mut append = |body: Value| {
+            seq += 1;
+            let mut object = body.as_object().unwrap().clone();
+            object.insert("sessionId".into(), json!("helper-pages"));
+            object.insert("seq".into(), json!(seq));
+            object.insert("at".into(), json!("now"));
+            assert!(store
+                .append_event(&serde_json::from_value(Value::Object(object)).unwrap())
+                .unwrap());
+        };
+        for index in 0..45 {
+            append(
+                json!({"type":"message.started","messageId":format!("root-{index}"),"role":"assistant"}),
+            );
+            append(
+                json!({"type":"text.delta","messageId":format!("root-{index}"),"text":format!("root {index}")}),
+            );
+            append(json!({"type":"message.completed","messageId":format!("root-{index}")}));
+        }
+        for index in 0..85 {
+            append(
+                json!({"type":"message.started","messageId":format!("child-{index}"),"role":"assistant","parentToolCallId":"spawn"}),
+            );
+            append(
+                json!({"type":"text.delta","messageId":format!("child-{index}"),"text":format!("child {index}")}),
+            );
+            append(json!({"type":"message.completed","messageId":format!("child-{index}")}));
+        }
+
+        let newest = store
+            .agent_transcript_items("helper-pages", "spawn", None, 40)
+            .unwrap();
+        assert_eq!(newest.items.len(), 40);
+        assert_eq!(newest.items.first().unwrap()["text"], "child 45");
+        assert_eq!(newest.items.last().unwrap()["text"], "child 84");
+        assert!(newest.has_older);
+
+        let middle = store
+            .agent_transcript_items("helper-pages", "spawn", newest.cursor, 40)
+            .unwrap();
+        assert_eq!(middle.items.len(), 40);
+        assert_eq!(middle.items.first().unwrap()["text"], "child 5");
+        assert_eq!(middle.items.last().unwrap()["text"], "child 44");
+        assert!(middle.has_older);
+
+        let oldest = store
+            .agent_transcript_items("helper-pages", "spawn", middle.cursor, 40)
+            .unwrap();
+        assert_eq!(oldest.items.len(), 5);
+        assert_eq!(oldest.items.first().unwrap()["text"], "child 0");
+        assert_eq!(oldest.items.last().unwrap()["text"], "child 4");
+        assert!(!oldest.has_older);
+    }
+
+    #[test]
+    fn cold_helper_tail_keeps_an_items_complete_early_events() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let mut seq = 0;
+        let mut append = |body: Value| {
+            seq += 1;
+            let mut object = body.as_object().unwrap().clone();
+            object.insert("sessionId".into(), json!("complete-helper"));
+            object.insert("seq".into(), json!(seq));
+            object.insert("at".into(), json!("now"));
+            assert!(store
+                .append_event(&serde_json::from_value(Value::Object(object)).unwrap())
+                .unwrap());
+        };
+        append(json!({
+            "type":"thinking.delta","messageId":"long-thought","text":"early ",
+            "parentToolCallId":"spawn"
+        }));
+        for index in 0..45 {
+            append(
+                json!({"type":"message.started","messageId":format!("root-{index}"),"role":"assistant"}),
+            );
+            append(
+                json!({"type":"text.delta","messageId":format!("root-{index}"),"text":format!("root {index}")}),
+            );
+            append(json!({"type":"message.completed","messageId":format!("root-{index}")}));
+        }
+        append(json!({
+            "type":"thinking.delta","messageId":"long-thought","text":"late",
+            "parentToolCallId":"spawn"
+        }));
+        append(json!({"type":"message.completed","messageId":"long-thought"}));
+
+        let newest = store.transcript_items("complete-helper", None, 40).unwrap();
+        let thought = newest
+            .items
+            .iter()
+            .find(|item| item["kind"] == "thinking" && item["id"] == "long-thought")
+            .unwrap();
+        assert_eq!(thought["text"], "early late");
+        assert_eq!(thought["done"], true);
     }
 
     #[test]

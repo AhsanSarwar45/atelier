@@ -1,7 +1,8 @@
-import { expect, test } from '@playwright/test';
-import { DatabaseSync } from 'node:sqlite';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+
+import { expect, test } from '@playwright/test';
 
 const SOURCE = process.env.BEADS_E2E_OWNER_DB;
 const CLAUDE_SOURCE = process.env.BEADS_E2E_OWNER_CLAUDE_CONFIG;
@@ -102,8 +103,14 @@ for (const chat of CHATS) {
     expect(copyChat(chat, project)).toBeGreaterThan(100);
 
     let olderRequests = 0;
+    let helperRequests = 0;
+    let helperOlderRequests = 0;
     await page.route('**/api/workbench/history?*', async (route) => {
-      if (new URL(route.request().url()).searchParams.has('before')) olderRequests += 1;
+      const params = new URL(route.request().url()).searchParams;
+      if (params.has('parent')) {
+        helperRequests += 1;
+        if (params.has('before')) helperOlderRequests += 1;
+      } else if (params.has('before')) olderRequests += 1;
       await route.continue();
     });
 
@@ -165,6 +172,35 @@ for (const chat of CHATS) {
           () => olderRequests - requestsBeforeSecondGesture,
           { message: `${chat.title}: history stopped while another cursor existed` },
         ).toBe(1);
+      }
+
+      if (chat.id === '79225ed8-932b-4ef2-8cda-ff1b883d6381') {
+        // This saved helper owns 934 canonical events. Its transcript has an
+        // independent cursor: main-chat exhaustion must not make those words
+        // unreachable, and the provider that produced them is irrelevant.
+        const finished = page.getByTestId('toggle-stopped-agents');
+        if (await finished.isVisible()) await finished.click();
+        const helperRow = page.locator('[data-testid="sent-away-row"][data-agent="a0e4a338553d6007d"]');
+        await expect(helperRow).toBeVisible();
+        const helperOpenedAt = performance.now();
+        await helperRow.getByTestId('sent-away-open').click();
+        const helperPane = page.getByTestId('agent-view-said');
+        await expect.poll(() => helperRequests).toBe(1);
+        await expect(helperPane).toHaveAttribute('data-can-load-older', 'true');
+        expect(performance.now() - helperOpenedAt, 'helper newest page was not subsecond').toBeLessThan(500);
+        const firstHelperItems = Number(await page.getByTestId('agent-view').getAttribute('data-said'));
+        expect(firstHelperItems).toBe(40);
+        const newestHelperText = (await helperPane.innerText()).trim();
+        expect(newestHelperText.length).toBeGreaterThan(0);
+        const helperOlderAt = performance.now();
+        await helperPane.evaluate((element) => {
+          element.scrollTop = 0;
+          element.dispatchEvent(new Event('scroll', { bubbles: true }));
+        });
+        await expect.poll(() => helperOlderRequests).toBe(1);
+        await expect.poll(async () => Number(await page.getByTestId('agent-view').getAttribute('data-said'))).toBeGreaterThan(firstHelperItems);
+        expect(performance.now() - helperOlderAt, 'helper older page was not subsecond').toBeLessThan(500);
+        expect((await helperPane.innerText()).trim()).toContain(newestHelperText);
       }
       await page.screenshot({ path: join(SHOTS, `${chat.shot}-after.png`) });
     } finally {

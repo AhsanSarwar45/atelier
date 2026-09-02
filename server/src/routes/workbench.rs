@@ -848,17 +848,28 @@ async fn session(
 #[derive(Deserialize)]
 struct HistoryQuery {
     session: String,
-    before: i64,
+    before: Option<i64>,
+    parent: Option<String>,
 }
 
 async fn history(
     State(state): State<WorkbenchState>,
     Query(query): Query<HistoryQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let page = state
-        .database()
-        .transcript_items(query.session, Some(query.before), 40)
-        .await?;
+    let page = if let Some(parent) = query.parent {
+        state
+            .database()
+            .agent_transcript_items(query.session, parent, query.before, 40)
+            .await?
+    } else {
+        let before = query
+            .before
+            .ok_or_else(|| ApiError::from("before is required".to_string()))?;
+        state
+            .database()
+            .transcript_items(query.session, Some(before), 40)
+            .await?
+    };
     Ok(Json(
         json!({"items":page.items,"cursor":page.cursor,"hasOlder":page.has_older}),
     ))

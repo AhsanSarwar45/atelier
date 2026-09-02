@@ -2,13 +2,11 @@
  * One sent-off agent's own conversation, opened from its row
  * (docs/agent-workbench.md §8.2.7).
  *
- * Nothing here is fetched and nothing is remembered. Every event a sent-off
- * agent produced already arrives carrying the call that sent it, and both ways
- * of building a conversation keep that on the row — so an agent's conversation
- * is the chat's own conversation, read by who said it. That is also why it is
- * still there tomorrow: the sidecar replays its own log and the parentage is
- * rebuilt with everything else, rather than depending on this browser having
- * been watching at the time.
+ * Every event a sent-off agent produced carries the call that sent it. The
+ * newest bounded page is read by that canonical parent, older pages are fetched
+ * only at the top, and live rows still arrive through the parent chat stream.
+ * No provider has a private transcript implementation and nothing depends on
+ * this browser having watched the helper at the time.
  *
  * It opens over the conversation rather than inside the column it was clicked
  * in. The column is 288px because it holds chips; a conversation read at that
@@ -21,24 +19,25 @@
  */
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Clock, Coins, Send, X } from 'lucide-react';
 
 import type { Mentions } from '@/components/markdown-body';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Overlay, overlayPanel } from '@/components/ui/overlay';
 import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
+import { request } from '@/lib/api';
+import { cn } from '@/lib/utils';
 import type { SentAway, TranscriptItem } from '@/workbench/fold';
 import type { AgentControl } from '@/workbench/protocol';
 import { AgentSteering, forHowLong, isOver, KINDS, liveSeconds, modelNamed, spend, STATES, useNow } from '@/workbench/sent-away';
 import { TranscriptRow } from '@/workbench/transcript-rows';
 import { sendCommand } from '@/workbench/use-session';
 
-import { cn } from '@/lib/utils';
 
-import { Overlay, overlayPanel } from '@/components/ui/overlay';
 
 
 /**
@@ -138,7 +137,99 @@ export interface AgentViewProps {
 }
 
 export function AgentView({ row, items, sessionId, controls, mentions, onClose }: AgentViewProps) {
-  const said = useMemo(() => saidBy(items, row), [items, row]);
+  const sentBy = row.toolCallId ?? row.id;
+  const live = useMemo(() => saidBy(items, row), [items, row]);
+  const [history, setHistory] = useState<TranscriptItem[]>(live);
+  const [historyReady, setHistoryReady] = useState(false);
+  const [cursor, setCursor] = useState<number | null>(null);
+  const [hasOlder, setHasOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const historyRef = useRef<HTMLDivElement>(null);
+  const requestGeneration = useRef(0);
+  const loadingOlderRef = useRef(false);
+  const liveRef = useRef(live);
+  const openingKeys = useRef(new Set(live.map((item) => `${item.kind}:${item.id}`)));
+  liveRef.current = live;
+  const said = useMemo(() => {
+    const newest = new Map(live.map((item) => [`${item.kind}:${item.id}`, item]));
+    const merged = history.map((item) => newest.get(`${item.kind}:${item.id}`) ?? item);
+    const known = new Set(merged.map((item) => `${item.kind}:${item.id}`));
+    for (const item of live) {
+      const key = `${item.kind}:${item.id}`;
+      if (!known.has(key) && (!historyReady || !openingKeys.current.has(key))) merged.push(item);
+    }
+    return merged;
+  }, [history, historyReady, live]);
+
+  useEffect(() => {
+    const generation = requestGeneration.current + 1;
+    requestGeneration.current = generation;
+    openingKeys.current = new Set(liveRef.current.map((item) => `${item.kind}:${item.id}`));
+    loadingOlderRef.current = false;
+    setHistory(liveRef.current);
+    setHistoryReady(false);
+    setCursor(null);
+    setHasOlder(false);
+    setHistoryError(null);
+    void (async () => {
+      try {
+        const res = await request(`/api/workbench/history?session=${encodeURIComponent(sessionId)}&parent=${encodeURIComponent(sentBy)}`);
+        if (!res.ok) throw new Error(`history failed: ${res.status}`);
+        const page = (await res.json()) as Partial<{ items: TranscriptItem[]; cursor: number | null; hasOlder: boolean }>;
+        if (!Array.isArray(page.items)) throw new Error('history returned no transcript items');
+        if (requestGeneration.current !== generation) return;
+        setHistory(page.items);
+        setHistoryReady(true);
+        setCursor(page.cursor ?? null);
+        setHasOlder(page.hasOlder === true && page.cursor != null);
+      } catch (error) {
+        if (requestGeneration.current === generation) {
+          setHistoryError(error instanceof Error ? error.message : String(error));
+        }
+      }
+    })();
+    return () => {
+      if (requestGeneration.current === generation) requestGeneration.current += 1;
+    };
+  }, [sentBy, sessionId]);
+
+  const loadOlder = useCallback(async (): Promise<void> => {
+    if (loadingOlderRef.current || !hasOlder || cursor === null) return;
+    loadingOlderRef.current = true;
+    const generation = requestGeneration.current;
+    setLoadingOlder(true);
+    setHistoryError(null);
+    const pane = historyRef.current;
+    const previousHeight = pane?.scrollHeight ?? 0;
+    const previousTop = pane?.scrollTop ?? 0;
+    try {
+      const res = await request(`/api/workbench/history?session=${encodeURIComponent(sessionId)}&parent=${encodeURIComponent(sentBy)}&before=${cursor}`);
+      if (!res.ok) throw new Error(`history failed: ${res.status}`);
+      const page = (await res.json()) as Partial<{ items: TranscriptItem[]; cursor: number | null; hasOlder: boolean }>;
+      if (!Array.isArray(page.items)) throw new Error('history returned no transcript items');
+      if (requestGeneration.current !== generation) return;
+      const olderItems = page.items;
+      setHistory((current) => {
+        const known = new Set(current.map((item) => `${item.kind}:${item.id}`));
+        return [...olderItems.filter((item) => !known.has(`${item.kind}:${item.id}`)), ...current];
+      });
+      setCursor(page.cursor ?? null);
+      setHasOlder(page.hasOlder === true && page.cursor != null && page.cursor !== cursor);
+      const restore = (): void => {
+        if (pane) pane.scrollTop = previousTop + pane.scrollHeight - previousHeight;
+      };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(restore);
+      else restore();
+    } catch (error) {
+      if (requestGeneration.current === generation) {
+        setHistoryError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      loadingOlderRef.current = false;
+      if (requestGeneration.current === generation) setLoadingOlder(false);
+    }
+  }, [cursor, hasOlder, sentBy, sessionId]);
   const { label: kind, Icon } = KINDS[row.kind];
   const state = STATES[row.state];
   const model = modelNamed(row.model);
@@ -197,7 +288,17 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
           </Button>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4" data-testid="agent-view-said">
+        <div
+          ref={historyRef}
+          className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4 [overflow-anchor:none]"
+          data-testid="agent-view-said"
+          data-can-load-older={hasOlder}
+          onScroll={(event) => {
+            if (event.currentTarget.scrollTop <= 32) void loadOlder();
+          }}
+        >
+          {loadingOlder && <div className="text-center text-[11px] text-muted-foreground" data-testid="agent-view-older-loading">Loading older messages…</div>}
+          {historyError && <div className="text-center text-[11px] text-red-500" data-testid="agent-view-history-error">{historyError}</div>}
           {said.map((item) => (
             <TranscriptRow key={item.id} item={item} sessionId={sessionId} mentions={mentions} onLook={() => {}} />
           ))}
