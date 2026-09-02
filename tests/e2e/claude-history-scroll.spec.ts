@@ -1,5 +1,5 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { expect, test } from '@playwright/test';
@@ -15,19 +15,25 @@ const CHATS = [
     id: 'ec075741-1657-4f67-84cb-728deda54c0d',
     title: 'Need Terminal Integration Will Integrate Default',
     shot: 'claude-history-terminal',
-    minimumFirstRows: 1,
+    expectedFirstItems: 40,
+    minimumFirstRows: 6,
+    hasOlder: true,
   },
   {
     id: '021a4ead-5fae-453e-942a-977a13cb6c70',
     title: 'Claude Sidebar Shows Subagents Done Current',
     shot: 'claude-history-sidebar',
-    minimumFirstRows: 1,
+    expectedFirstItems: 29,
+    minimumFirstRows: 6,
+    hasOlder: false,
   },
   {
     id: '79225ed8-932b-4ef2-8cda-ff1b883d6381',
     title: 'See Transcript Chat Chat Was Useless',
     shot: 'claude-history-ordered',
+    expectedFirstItems: 40,
     minimumFirstRows: 20,
+    hasOlder: true,
   },
 ] as const;
 
@@ -35,6 +41,7 @@ function copyChat(chat: (typeof CHATS)[number], project: { id: string; path: str
   if (!SOURCE) throw new Error('BEADS_E2E_OWNER_DB must name the read-only source workbench.db');
   const source = new DatabaseSync(SOURCE, { readOnly: true });
   const target = new DatabaseSync(join(process.env.ATELIER_DATA_DIR!, 'workbench.db'));
+  target.exec('PRAGMA busy_timeout = 5000');
   const session = source.prepare('SELECT * FROM session WHERE id = ?').get(chat.id) as Record<string, unknown> | undefined;
   if (!session) throw new Error(`source database has no chat ${chat.id}`);
   const events = source.prepare('SELECT * FROM event WHERE session_id = ? ORDER BY seq').all(chat.id) as Record<string, unknown>[];
@@ -49,6 +56,10 @@ function copyChat(chat: (typeof CHATS)[number], project: { id: string; path: str
     const isolated = join(process.env.CLAUDE_CONFIG_DIR!, 'projects', 'copied');
     mkdirSync(isolated, { recursive: true });
     copyFileSync(record, join(isolated, `${externalId}.jsonl`));
+    const sourceSession = join(dirname(record), externalId);
+    if (existsSync(sourceSession)) {
+      cpSync(sourceSession, join(isolated, externalId), { recursive: true });
+    }
   }
 
   target.exec('BEGIN IMMEDIATE');
@@ -126,13 +137,37 @@ for (const chat of CHATS) {
       const transcript = page.getByTestId('virtual-transcript');
       await expect.poll(async () => Number(await transcript.getAttribute('data-total-items'))).toBeGreaterThan(0);
       expect(Date.now() - openedAt, `${chat.title}: click-to-usable exceeded one second`).toBeLessThan(1_000);
-      await expect(transcript).toHaveAttribute('data-can-load-older', 'true');
+      await expect(transcript).toHaveAttribute('data-can-load-older', String(chat.hasOlder));
       const firstRows = Number(await transcript.getAttribute('data-total-items'));
       const firstItems = Number(await transcript.getAttribute('data-loaded-items'));
+      const firstPrimaryItems = Number(await transcript.getAttribute('data-primary-items'));
+      expect(firstPrimaryItems, `${chat.title}: newest main-thread page was incomplete`).toBeGreaterThanOrEqual(
+        chat.expectedFirstItems,
+      );
       expect(firstRows, `${chat.title}: initial page was only a fragment`).toBeGreaterThanOrEqual(chat.minimumFirstRows);
       // One persisted 40-item page can fan out into more drawn machine rows.
       // It must still remain a small initial render, not the whole transcript.
       expect(firstRows).toBeLessThan(100);
+      if (!chat.hasOlder) {
+        // This saved chat has exactly 29 main-thread canonical items. Helper
+        // messages have their own independently paged transcript and must not
+        // be mixed into this count.
+        // page must exhaust its cursor without issuing a pointless older-page
+        // request.
+        expect(firstPrimaryItems).toBe(chat.expectedFirstItems);
+        expect(olderRequests).toBe(0);
+        const finished = page.getByTestId('toggle-stopped-agents');
+        if (await finished.isVisible()) await finished.click();
+        const helperRow = page.locator('[data-testid="sent-away-row"][data-agent="a1a9005b01e0f6a31"]');
+        await expect(helperRow).toBeVisible();
+        await helperRow.getByTestId('sent-away-open').click();
+        const helperPane = page.getByTestId('agent-view-said');
+        await expect.poll(() => helperRequests).toBe(1);
+        await expect(helperPane.locator('img')).toHaveCount(2);
+        mkdirSync(SHOTS, { recursive: true });
+        await page.screenshot({ path: join(SHOTS, `${chat.shot}-after.png`) });
+        return;
+      }
       const requestsBeforeGesture = olderRequests;
       await pane.evaluate((element) => {
         (window as typeof window & { __olderWheel?: number }).__olderWheel = 0;

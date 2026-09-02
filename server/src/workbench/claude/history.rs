@@ -704,6 +704,58 @@ fn result_text(content: &Value) -> String {
     }
 }
 
+fn result_images(content: &Value) -> Vec<Value> {
+    content
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|block| {
+            if block["type"] != "image" {
+                return None;
+            }
+            let source = block.get("source")?;
+            let mime = source["media_type"].as_str().unwrap_or("image/*");
+            let data_url = match source["type"].as_str()? {
+                "base64" => format!("data:{mime};base64,{}", source["data"].as_str()?),
+                "url" => source["url"].as_str()?.to_string(),
+                _ => return None,
+            };
+            Some(json!({
+                "mime": mime,
+                "dataUrl": data_url,
+                "alt": "Agent-produced image"
+            }))
+        })
+        .collect()
+}
+
+fn result_image_events(call_id: &str, pictures: Vec<Value>, parent: Option<&str>) -> Vec<Value> {
+    if pictures.is_empty() {
+        return Vec::new();
+    }
+    let message_id = format!("{call_id}:images");
+    let mut started = json!({
+        "type":"message.started", "messageId":message_id, "role":"assistant"
+    });
+    if let Some(parent) = parent {
+        started["parentToolCallId"] = json!(parent);
+    }
+    let mut events = vec![started];
+    events.extend(pictures.into_iter().map(|image| {
+        let mut event = json!({"type":"image", "messageId":message_id, "image":image});
+        if let Some(parent) = parent {
+            event["parentToolCallId"] = json!(parent);
+        }
+        event
+    }));
+    let mut completed = json!({"type":"message.completed", "messageId":message_id});
+    if let Some(parent) = parent {
+        completed["parentToolCallId"] = json!(parent);
+    }
+    events.push(completed);
+    events
+}
+
 fn message_id(row: &Value, index: usize) -> String {
     as_nonempty(&row["uuid"])
         .or_else(|| as_nonempty(&row["message"]["id"]))
@@ -936,7 +988,11 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
                 if let Some(id) = block["tool_use_id"].as_str() {
                     results.insert(
                         id.to_string(),
-                        (result_text(&block["content"]), block["is_error"] != true),
+                        (
+                            result_text(&block["content"]),
+                            block["is_error"] != true,
+                            result_images(&block["content"]),
+                        ),
                     );
                 }
             }
@@ -1011,11 +1067,12 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
             // the command is still running, not that it failed with empty
             // output. The follower will append the completion when the
             // matching `tool_result` lands.
-            if let Some((output, ok)) = results.remove(call_id) {
+            if let Some((output, ok, pictures)) = results.remove(call_id) {
                 events.push(json!({
                     "type":"tool.completed", "toolCallId":call_id, "ok":ok,
                     "output":cut(output, KEPT)
                 }));
+                events.extend(result_image_events(call_id, pictures, parent));
             }
         }
     }
@@ -1025,11 +1082,12 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
     // row already on screen.
     let mut unmatched = results.into_iter().collect::<Vec<_>>();
     unmatched.sort_by(|a, b| a.0.cmp(&b.0));
-    for (call_id, (output, ok)) in unmatched {
+    for (call_id, (output, ok, pictures)) in unmatched {
         events.push(json!({
             "type":"tool.completed", "toolCallId":call_id, "ok":ok,
             "output":cut(output, KEPT)
         }));
+        events.extend(result_image_events(&call_id, pictures, parent));
     }
     events
 }
@@ -1675,6 +1733,64 @@ mod tests {
             .any(|event| event["type"] == "tool.completed"
                 && event["toolCallId"] == "call-open"
                 && event["ok"] == true));
+    }
+
+    #[test]
+    fn claude_tool_result_images_survive_full_replay_and_follower_windows() {
+        let result = json!({
+            "type":"user","uuid":"result","message":{"content":[{
+                "type":"tool_result","tool_use_id":"call-image","content":[
+                    {"type":"text","text":"two pictures"},
+                    {"type":"image","source":{
+                        "type":"base64","media_type":"image/png","data":"YWJj"
+                    }},
+                    {"type":"image","source":{
+                        "type":"url","media_type":"image/jpeg","url":"https://example.test/picture.jpg"
+                    }}
+                ]
+            }]}
+        });
+        let rows = vec![
+            json!({
+                "type":"assistant","uuid":"tool","message":{"content":[{
+                    "type":"tool_use","id":"call-image","name":"Read","input":{}
+                }]}
+            }),
+            result.clone(),
+        ];
+
+        for events in [
+            transcript_events(&rows, None),
+            transcript_events(&[result], None),
+        ] {
+            let image_events = events
+                .iter()
+                .filter(|event| {
+                    event["type"] == "image" && event["messageId"] == "call-image:images"
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(image_events.len(), 2);
+            assert_eq!(
+                image_events[0]["image"],
+                json!({
+                    "mime":"image/png",
+                    "dataUrl":"data:image/png;base64,YWJj",
+                    "alt":"Agent-produced image"
+                })
+            );
+            assert_eq!(
+                image_events[1]["image"]["dataUrl"],
+                "https://example.test/picture.jpg"
+            );
+            assert!(events.iter().any(|event| {
+                event["type"] == "message.started"
+                    && event["messageId"] == "call-image:images"
+                    && event["role"] == "assistant"
+            }));
+            assert!(events.iter().any(|event| {
+                event["type"] == "message.completed" && event["messageId"] == "call-image:images"
+            }));
+        }
     }
 
     #[test]

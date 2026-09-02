@@ -75,7 +75,7 @@ import { askableIn, pathsIn, type Rooted } from '@/workbench/paths';
 import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere } from '@/workbench/live';
-import { EVERYTHING, hisDoing, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
+import { EVERYTHING, hisDoing, remember, remembered, sentAway, showing as stillShowing, type KindId } from '@/workbench/message-filter';
 import type { Brand, CommandInfo, Cost, ImageComparison, ImagePayload, LookableImage, SessionConfigOption, TodoItem } from '@/workbench/protocol';
 import { BRAND_DEFAULT_MODEL } from '@/workbench/protocol';
 import { heldElsewhere, sessionOwnership } from '@/workbench/running';
@@ -1557,6 +1557,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           <DrawnTranscript
             rows={drawn}
             loadedItems={view.items.length}
+            primaryItems={view.items.filter((item) => !sentAway(item)).length}
             sessionId={sessionId}
             mentions={mentions}
             onLook={setLooking}

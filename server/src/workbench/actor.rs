@@ -458,6 +458,21 @@ fn canonical_event(
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default()
         .to_string();
+    if event.kind == EventKind::TranscriptReset {
+        // A provider recipe replay is a new canonical transcript generation.
+        // Keeping terminal rows from the previous generation makes the shared
+        // lifecycle reject every replayed helper start as a duplicate, while
+        // paging correctly ignores the old child events after this reset.
+        // Keep an explicit empty generation. AppendMany canonicalizes the
+        // complete batch before persisting its reset, so removing the entry
+        // would make the next helper start reload pre-reset tombstones from
+        // SQLite and reject itself again.
+        agent_lifecycles.insert(
+            session_id.clone(),
+            super::lifecycle::AgentLifecycle::default(),
+        );
+        return Ok(Some((session_id, event)));
+    }
     if !matches!(
         event.kind,
         EventKind::AgentStarted | EventKind::AgentProgress | EventKind::AgentFinished
@@ -827,6 +842,66 @@ mod tests {
             chat.try_recv(),
             Err(broadcast::error::TryRecvError::Empty)
         ));
+    }
+
+    #[tokio::test]
+    async fn transcript_reset_rebuilds_helper_lifecycle_and_private_history() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
+        let at = "2026-09-02T00:00:00.000Z";
+        let decode = |value| serde_json::from_value::<Event>(value).unwrap();
+
+        database
+            .append_many(vec![
+                decode(json!({
+                    "type":"agent.started","sessionId":"chat-1","seq":0,"at":at,
+                    "agentId":"helper","toolCallId":"old-call","kind":"helper",
+                    "what":"Inspect","agentType":null,"model":null
+                })),
+                decode(json!({
+                    "type":"agent.finished","sessionId":"chat-1","seq":0,"at":at,
+                    "agentId":"helper","state":"done","seconds":1,"tokens":1,
+                    "calls":0,"model":null,"result":"old"
+                })),
+            ])
+            .await
+            .unwrap();
+
+        database
+            .append_many(vec![
+                decode(json!({
+                    "type":"transcript.reset","sessionId":"chat-1","seq":0,"at":at
+                })),
+                decode(json!({
+                    "type":"agent.started","sessionId":"chat-1","seq":0,"at":at,
+                    "agentId":"helper","toolCallId":"new-call","kind":"helper",
+                    "what":"Inspect again","agentType":null,"model":null
+                })),
+                decode(json!({
+                    "type":"message.started","sessionId":"chat-1","seq":0,"at":at,
+                    "messageId":"answer","role":"assistant","parentToolCallId":"new-call"
+                })),
+                decode(json!({
+                    "type":"text.delta","sessionId":"chat-1","seq":0,"at":at,
+                    "messageId":"answer","text":"restored"
+                })),
+                decode(json!({
+                    "type":"message.completed","sessionId":"chat-1","seq":0,"at":at,
+                    "messageId":"answer"
+                })),
+            ])
+            .await
+            .unwrap();
+
+        let agents = database.projected_agents("chat-1".into()).await.unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0]["toolCallId"], "new-call");
+        let page = database
+            .agent_transcript_items("chat-1".into(), "new-call".into(), None, 40)
+            .await
+            .unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0]["text"], "restored");
     }
 
     #[tokio::test]

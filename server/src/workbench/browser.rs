@@ -289,14 +289,30 @@ struct BrowserChild {
 impl Drop for BrowserChild {
     fn drop(&mut self) {
         let _ = self.child.start_kill();
-        let _ = std::fs::remove_dir_all(&self.profile);
+        // Chromium keeps profile files open briefly after it receives the kill
+        // signal. Removing the directory immediately races that shutdown and
+        // used to leave every capture profile behind in RAM-backed /tmp.
+        for _ in 0..50 {
+            match self.child.try_wait() {
+                Ok(Some(_)) | Err(_) => break,
+                Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            }
+        }
+        for attempt in 0..20 {
+            match std::fs::remove_dir_all(&self.profile) {
+                Ok(()) => break,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+                Err(_) if attempt < 19 => std::thread::sleep(Duration::from_millis(10)),
+                Err(_) => break,
+            }
+        }
     }
 }
 
 async fn launch(executable: &Path, viewport: &Viewport) -> Result<(BrowserChild, String), String> {
     let profile = std::env::temp_dir().join(format!("atelier-browser-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&profile).map_err(|e| e.to_string())?;
-    let mut child = Command::new(executable)
+    let spawned = Command::new(executable)
         .args([
             "--headless=new",
             "--disable-gpu",
@@ -314,9 +330,20 @@ async fn launch(executable: &Path, viewport: &Viewport) -> Result<(BrowserChild,
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| format!("WEB_CAPTURE_UNAVAILABLE: {e}"))?;
+        .spawn();
+    let child = match spawned {
+        Ok(child) => child,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&profile);
+            return Err(format!("WEB_CAPTURE_UNAVAILABLE: {error}"));
+        }
+    };
+    // Own the profile from the moment the process exists. Endpoint discovery
+    // can still time out or fail; every early return below must run the same
+    // process-reaping cleanup as a completed capture.
+    let mut child = BrowserChild { child, profile };
     let stderr = child
+        .child
         .stderr
         .take()
         .ok_or("browser had no diagnostic stream")?;
@@ -332,7 +359,7 @@ async fn launch(executable: &Path, viewport: &Viewport) -> Result<(BrowserChild,
     .await
     .map_err(|_| "WEB_CAPTURE_TIMEOUT: Chromium did not expose DevTools")?
     .ok_or("WEB_CAPTURE_UNAVAILABLE: Chromium ended before DevTools was ready")?;
-    Ok((BrowserChild { child, profile }, endpoint))
+    Ok((child, endpoint))
 }
 
 type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
@@ -965,6 +992,27 @@ pub async fn capture_recipe(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn browser_child_reaps_its_exact_process_before_removing_the_profile() {
+        let root = tempfile::tempdir().unwrap();
+        let profile = root.path().join("profile");
+        std::fs::create_dir(&profile).unwrap();
+        std::fs::write(profile.join("held"), b"temporary browser state").unwrap();
+        let child = Command::new("sh")
+            .args(["-c", "sleep 30"])
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+
+        drop(BrowserChild {
+            child,
+            profile: profile.clone(),
+        });
+
+        assert!(!profile.exists(), "the owned browser profile leaked");
+    }
+
     #[test]
     fn native_workbench_services_media_strictly_validates_browser_recipes_and_discovers_explicit_browser(
     ) {

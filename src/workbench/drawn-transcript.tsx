@@ -24,6 +24,7 @@ export const OVERSCAN = 8;
 interface DrawnTranscriptProps {
   rows: DrawnRow[];
   loadedItems: number;
+  primaryItems?: number;
   sessionId: string;
   mentions: Mentions;
   onLook: (image: LookableImage) => void;
@@ -35,7 +36,16 @@ const rowKey = (row: DrawnRow): string => row.row === 'machine'
   ? `machine:${row.id}`
   : `${row.item.kind}:${row.item.id}`;
 
-export function DrawnTranscript({ rows, loadedItems, sessionId, mentions, onLook, pane, onOlder = null }: DrawnTranscriptProps) {
+export function DrawnTranscript({
+  rows,
+  loadedItems,
+  primaryItems = loadedItems,
+  sessionId,
+  mentions,
+  onLook,
+  pane,
+  onOlder = null,
+}: DrawnTranscriptProps) {
   const loading = useRef(false);
   const historyRequest = useRef(0);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -178,6 +188,7 @@ export function DrawnTranscript({ rows, loadedItems, sessionId, mentions, onLook
       data-testid="virtual-transcript"
       data-total-items={rows.length}
       data-loaded-items={loadedItems}
+      data-primary-items={primaryItems}
       data-mounted-items={virtual.getVirtualItems().length}
       data-can-load-older={Boolean(onOlder)}
       className="relative w-full"
