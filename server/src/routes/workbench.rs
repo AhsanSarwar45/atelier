@@ -38,6 +38,9 @@ pub struct WorkbenchState {
     registry: Arc<WorkbenchRegistry>,
     hold_memory: Arc<tokio::sync::Mutex<HoldMemory>>,
     usage_cache: Arc<tokio::sync::Mutex<HashMap<String, (std::time::Instant, Value)>>>,
+    usage_refreshes: Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+    claude_usage_reader:
+        Arc<tokio::sync::Mutex<Option<crate::workbench::claude::transport::ClaudeTransport>>>,
     codex_readers: Arc<
         tokio::sync::Mutex<
             HashMap<std::path::PathBuf, crate::workbench::codex::transport::CodexTransport>,
@@ -59,6 +62,8 @@ impl WorkbenchState {
             registry: Arc::new(registry),
             hold_memory: Arc::new(tokio::sync::Mutex::new(HoldMemory::default())),
             usage_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            usage_refreshes: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            claude_usage_reader: Arc::new(tokio::sync::Mutex::new(None)),
             codex_readers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             codex_records: Arc::new(std::sync::Mutex::new(HashMap::new())),
             claim_sweeps: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -197,6 +202,67 @@ impl WorkbenchState {
         }
     }
 
+    async fn usage_refresh(&self, brand: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut refreshes = self.usage_refreshes.lock().await;
+        refreshes
+            .entry(brand.to_string())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    }
+
+    async fn claude_usage_reader(
+        &self,
+    ) -> Result<crate::workbench::claude::transport::ClaudeTransport, String> {
+        let mut reader = self.claude_usage_reader.lock().await;
+        if let Some(transport) = reader.as_ref() {
+            return Ok(transport.clone());
+        }
+        let options = crate::workbench::claude::transport::ClaudeSessionOptions {
+            cwd: std::env::current_dir().map_err(|error| error.to_string())?,
+            resume: None,
+            model: None,
+            permission_mode: Some("default".into()),
+            effort: None,
+            instructions: String::new(),
+        };
+        let mut config =
+            crate::workbench::claude::transport::ClaudeTransportConfig::session(&options);
+        if let Some(executable) = crate::routes::find_tool("claude", &[]) {
+            config.executable = executable;
+        }
+        let transport = crate::workbench::claude::transport::ClaudeTransport::start(config)
+            .await
+            .map_err(|error| error.to_string())?;
+        // A usage-only connection does not consume provider notifications.
+        // Drain them so the one reused reader cannot accumulate an unbounded
+        // inbound queue between its thirty-second requests.
+        if let Some(mut inbound) = transport.take_inbound() {
+            tokio::spawn(async move { while inbound.recv().await.is_some() {} });
+        }
+        *reader = Some(transport.clone());
+        Ok(transport)
+    }
+
+    async fn forget_claude_usage_reader(
+        &self,
+        failed: &crate::workbench::claude::transport::ClaudeTransport,
+    ) {
+        let removed = {
+            let mut reader = self.claude_usage_reader.lock().await;
+            if reader
+                .as_ref()
+                .is_some_and(|current| current.child_id() == failed.child_id())
+            {
+                reader.take()
+            } else {
+                None
+            }
+        };
+        if let Some(transport) = removed {
+            transport.close().await;
+        }
+    }
+
     pub(crate) async fn provider_holds(&self) -> Vec<crate::workbench::external::ProviderHold> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -299,14 +365,16 @@ impl WorkbenchState {
     }
 
     pub(crate) async fn account_usage(&self, brand: &str) -> Result<Value, String> {
-        // Hold the lock through a refresh: simultaneous browser connections
-        // share one provider query, exactly as the former sidecar's inFlight
-        // promise did. A cached answer stands for one usage beat.
-        let mut cache = self.usage_cache.lock().await;
-        if let Some((at, value)) = cache.get(brand) {
-            if at.elapsed() < Duration::from_secs(30) {
-                return Ok(value.clone());
-            }
+        if let Some(value) = fresh_usage(&self.usage_cache, brand).await {
+            return Ok(value);
+        }
+        // Only callers for this provider share an in-flight refresh. Claude
+        // and Codex must never wait behind each other's fifteen-second native
+        // allowance request.
+        let refresh = self.usage_refresh(brand).await;
+        let _refresh = refresh.lock().await;
+        if let Some(value) = fresh_usage(&self.usage_cache, brand).await {
+            return Ok(value);
         }
         let at = chrono::Utc::now().to_rfc3339();
         let value = if brand == "codex" {
@@ -317,27 +385,17 @@ impl WorkbenchState {
                 self.forget_codex_reader(&cwd, &transport).await;
             }
             serde_json::to_value(result?).map_err(|e| e.to_string())?
-        } else {
-            let options = crate::workbench::claude::transport::ClaudeSessionOptions {
-                cwd: std::env::current_dir().map_err(|e| e.to_string())?,
-                resume: None,
-                model: None,
-                permission_mode: Some("default".into()),
-                effort: None,
-                instructions: String::new(),
-            };
-            let mut config =
-                crate::workbench::claude::transport::ClaudeTransportConfig::session(&options);
-            if let Some(executable) = crate::routes::find_tool("claude", &[]) {
-                config.executable = executable;
-            }
-            let transport = crate::workbench::claude::transport::ClaudeTransport::start(config)
-                .await
-                .map_err(|e| e.to_string())?;
+        } else if brand == "claude" {
+            let transport = self.claude_usage_reader().await?;
             let result = crate::workbench::usage::read_claude(&transport, at).await;
-            transport.close().await;
+            if result.is_err() {
+                self.forget_claude_usage_reader(&transport).await;
+            }
             serde_json::to_value(result?).map_err(|e| e.to_string())?
+        } else {
+            return Err(format!("unknown usage provider {brand}"));
         };
+        let mut cache = self.usage_cache.lock().await;
         cache.insert(
             brand.to_string(),
             (std::time::Instant::now(), value.clone()),
@@ -347,6 +405,18 @@ impl WorkbenchState {
     async fn window_now(&self, session: &str) -> Option<Result<Value, String>> {
         self.registry.window_now(session).await
     }
+}
+
+async fn fresh_usage(
+    cache: &tokio::sync::Mutex<HashMap<String, (std::time::Instant, Value)>>,
+    brand: &str,
+) -> Option<Value> {
+    cache
+        .lock()
+        .await
+        .get(brand)
+        .filter(|(at, _)| at.elapsed() < Duration::from_secs(30))
+        .map(|(_, value)| value.clone())
 }
 
 pub fn router(state: WorkbenchState) -> Router {
@@ -1098,7 +1168,17 @@ async fn watch(State(state): State<WorkbenchState>) -> Result<Sse<EventStream>, 
                     let current=serde_json::to_value(state.provider_holds().await).unwrap_or_default();
                     if current!=last_holds {last_holds=current.clone();if tx.send(Ok(watch_frame(json!({"kind":"running","holds":current})))).await.is_err(){return}}
                 },
-                _=usage_tick.tick()=>{for brand in ["claude","codex"]{if let Ok(usage)=state.account_usage(brand).await{if tx.send(Ok(watch_frame(json!({"kind":"usage","brand":brand,"usage":usage})))).await.is_err(){return}}}},
+                _=usage_tick.tick()=>{
+                    let (claude, codex) = tokio::join!(
+                        state.account_usage("claude"),
+                        state.account_usage("codex"),
+                    );
+                    for (brand, result) in [("claude", claude), ("codex", codex)] {
+                        if let Ok(usage) = result {
+                            if tx.send(Ok(watch_frame(json!({"kind":"usage","brand":brand,"usage":usage})))).await.is_err(){return}
+                        }
+                    }
+                },
                 received=receiver.recv()=>match received{
                     Ok(update)=>{
                         if update.event.kind==crate::workbench::protocol::EventKind::SessionStarted{
@@ -1350,6 +1430,28 @@ mod tests {
         assert!(state.begin_claim_sweep(first).await);
         assert!(!state.begin_claim_sweep(first).await);
         assert!(state.begin_claim_sweep(second).await);
+    }
+
+    #[tokio::test]
+    async fn usage_single_flights_are_shared_per_provider_not_across_providers() {
+        let (_directory, state) = fixture();
+        let claude = state.usage_refresh("claude").await;
+        let same_claude = state.usage_refresh("claude").await;
+        let codex = state.usage_refresh("codex").await;
+
+        assert!(Arc::ptr_eq(&claude, &same_claude));
+        assert!(!Arc::ptr_eq(&claude, &codex));
+        let _claude_guard = claude.lock().await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), codex.lock())
+                .await
+                .is_ok()
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), same_claude.lock())
+                .await
+                .is_err()
+        );
     }
 
     fn notice() -> Event {
