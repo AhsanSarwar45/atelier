@@ -129,12 +129,10 @@ test.describe('a chat another program is in', () => {
       await row.getByTestId('row-name').click();
       await expect(page.getByTestId('transcript').getByText(opening)).toBeVisible({ timeout: 30_000 });
 
-      // And the same two things at the top of the chat, in the same words.
-      const chip = page.getByTestId('session-state-chip');
-      await expect(chip).toHaveAttribute('data-working', 'yes');
-      await expect(chip).toHaveAttribute('data-word', 'Working');
-      await expect(page.getByTestId('session-state').getByTestId('chat-external')).toBeVisible();
-      await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'held');
+      // Status belongs to the row and the live line at the end of the
+      // transcript, never in the transcript header.
+      const chip = row.getByTestId('row-pill');
+      await expect(page.getByTestId('session-state')).toHaveCount(0);
 
       // With its seconds, counted from when that terminal said it was busy and
       // growing while the reader watches — the difference between a mark that
@@ -152,13 +150,13 @@ test.describe('a chat another program is in', () => {
       await expect(chip).toHaveAttribute('data-working', 'no', { timeout: 30_000 });
       await expect(chip).toHaveAttribute('data-word', 'Idle');
       expect(await secondsOn(chip), 'a chat doing nothing was still counting').toBeNull();
-      await expect(page.getByTestId('session-state').getByTestId('chat-external')).toBeVisible();
+      await expect(row.getByTestId('chat-external')).toBeVisible();
     } finally {
       release();
     }
 
     // And when they let go of it altogether, the badge goes with them.
-    await expect(page.getByTestId('session-state').getByTestId('chat-external')).toHaveCount(0, { timeout: 30_000 });
+    await expect(rowFor(page, chat.id).getByTestId('chat-external')).toHaveCount(0, { timeout: 30_000 });
     chat.forget();
   });
 
@@ -259,49 +257,7 @@ test.describe('a chat another program is in', () => {
         `the badge has neither a fill nor an edge of its own on the open row: fill ${against!.fill}, edge ${against!.edge}, row ${against!.behind}`,
       ).toBe(true);
 
-      // And it is not the mark: a reader who does not stop to read the words
-      // still has the colour and the corners to go on.
-      //
-      // Waited for rather than read straight off: the pane's own line is drawn
-      // from the app-wide stream, which arrives a beat after the transcript, so
-      // reading the pixels the moment the transcript appears failed under a
-      // loaded machine and passed on a quiet one — a check that is a coin toss
-      // proves nothing either way (bw-96is.17).
-      const line = page.getByTestId('session-state');
-      await expect(line.getByTestId('chat-external')).toBeVisible({ timeout: 30_000 });
-      await expect(line.getByTestId('session-state-chip')).toBeVisible({ timeout: 30_000 });
-      const apart = await page.evaluate(() => {
-        const seen = document.querySelector('[data-testid="session-state"]');
-        const one = seen?.querySelector('[data-testid="chat-external"]');
-        const two = seen?.querySelector('[data-testid="session-state-chip"]');
-        if (!one || !two) return null;
-        const a = getComputedStyle(one);
-        const b = getComputedStyle(two);
-        return {
-          colour: a.backgroundColor !== b.backgroundColor,
-          corners: a.borderTopLeftRadius !== b.borderTopLeftRadius,
-          // Its own two: nothing behind it, and a border that is really there.
-          fill: a.backgroundColor,
-          edge: a.borderTopColor,
-          edgeWidth: parseFloat(a.borderTopWidth),
-        };
-      });
-      expect(apart, 'the open chat drew no badge beside its mark').not.toBeNull();
-      expect(apart!.colour, 'the badge is the same colour as the mark beside it').toBe(true);
-      expect(apart!.corners, 'the badge is the same shape as the mark beside it').toBe(true);
-
-      // And quieter than it: an outline where the mark has a fill, so the eye
-      // lands on what the chat is doing before who is holding it. A filled
-      // badge in its own colour beat the mark it is a footnote to, and a
-      // transparent BORDER is how it vanished into the selected row in the
-      // first place — so both halves are held here (bw-96is.10).
-      expect(apart!.fill, 'the badge is filled, so it shouts over the mark beside it').toMatch(
-        /rgba\(0, 0, 0, 0\)|transparent/,
-      );
-      expect(apart!.edgeWidth, 'the badge drew no border to hold its shape').toBeGreaterThan(0);
-      expect(apart!.edge, 'the badge border is invisible, which is how it vanished before').not.toMatch(
-        /rgba\(0, 0, 0, 0\)|transparent/,
-      );
+      await expect(page.getByTestId('session-state'), 'status regressed into the transcript header').toHaveCount(0);
     } finally {
       release();
     }
@@ -443,17 +399,7 @@ test.describe('a chat another program is in', () => {
     chat.forget();
   });
 
-  /**
-   * The marks on a row and the marks on the open chat's own line are one size.
-   *
-   * The manager photographed them side by side: the same chip, drawn a step
-   * smaller on the list than in the chat beside it, so its word sat one point
-   * off each edge instead of four and the row read as crammed and high
-   * (bw-jaoz.1). Measured off the drawn boxes rather than off a class name,
-   * because a class name is what the two screens disagreed about while both
-   * believed they were drawing the same chip.
-   */
-  test('draws its marks at one size, on the row and on the open chat’s own line', async ({ page, request }) => {
+  test('centres the rich status and external badge on its sidebar row', async ({ page, request }) => {
     test.setTimeout(180_000);
     const project = await aFixtureProject(request);
     const opening = 'Measure the chips';
@@ -466,7 +412,7 @@ test.describe('a chat another program is in', () => {
       await expect(row.getByTestId('row-pill')).toHaveAttribute('data-working', 'yes', { timeout: 30_000 });
       await row.getByTestId('row-name').click();
       await expect(page.getByTestId('transcript').getByText(opening)).toBeVisible({ timeout: 30_000 });
-      await expect(page.getByTestId('session-state-chip')).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId('session-state')).toHaveCount(0);
 
       /** The chip's own box, and the box its word is drawn in. */
       const measure = async (chip: ReturnType<Page['getByTestId']>) => {
@@ -483,25 +429,12 @@ test.describe('a chat another program is in', () => {
       };
 
       const onRow = await measure(row.getByTestId('row-pill'));
-      const onLine = await measure(page.getByTestId('session-state-chip'));
 
-      expect(
-        onRow.box.height,
-        `the row's chip is ${onRow.box.height}px tall and the chat's own line draws the same chip at ${onLine.box.height}px`,
-      ).toBeCloseTo(onLine.box.height, 0);
-
-      // Clear of both edges, and by the same amount top and bottom: a word
-      // pressed against the top of its chip is what "sitting high" was.
-      for (const [where, chip] of [['row', onRow], ['line', onLine]] as const) {
-        const above = chip.word.top - chip.box.y;
-        const below = chip.box.y + chip.box.height - chip.word.bottom;
-        expect(above, `the word on the ${where}'s chip touches its top edge`).toBeGreaterThan(0);
-        expect(below, `the word on the ${where}'s chip touches its bottom edge`).toBeGreaterThan(0);
-        expect(
-          Math.abs(above - below),
-          `the word on the ${where}'s chip sits ${above}px from the top and ${below}px from the bottom`,
-        ).toBeLessThanOrEqual(1);
-      }
+      const above = onRow.word.top - onRow.box.y;
+      const below = onRow.box.y + onRow.box.height - onRow.word.bottom;
+      expect(above, 'the word on the row chip touches its top edge').toBeGreaterThan(0);
+      expect(below, 'the word on the row chip touches its bottom edge').toBeGreaterThan(0);
+      expect(Math.abs(above - below), `the row word sits ${above}px from the top and ${below}px from the bottom`).toBeLessThanOrEqual(1);
 
       // The badge beside it is the other half of what he compared, and it is
       // drawn from the same size.
@@ -691,11 +624,7 @@ test.describe('a chat another program is in', () => {
       const summarising = made[0]!;
       await rowFor(page, summarising.chat.id).getByTestId('row-name').click();
       await expect(page.getByTestId('working-line')).toContainText('Summarising', { timeout: 30_000 });
-      // And the open chat repeats the same clause from the same state reader.
-      await expect(
-        page.getByTestId('session-state-chip').getByTestId('chat-state-detail'),
-        'the chat that dropped the clause from the rail does not say it anywhere',
-      ).toContainText(summarising.detail!, { timeout: 30_000 });
+      await expect(page.getByTestId('working-line')).toContainText(summarising.detail!, { timeout: 30_000 });
       await expect(page.getByTestId('summarising-bar')).toBeVisible({ timeout: 30_000 });
       await page.screenshot({ path: 'tests/results/chat-state-summarising.png', fullPage: false });
 
@@ -756,15 +685,8 @@ test.describe('a chat nothing is running', () => {
     await page.goto(`/project?id=${project.id}&tab=chat&chat=${opened}`);
     await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
 
-    const chip = page.getByTestId('session-state-chip');
-    await expect(chip, 'a chat nothing is running still said it was coming back').toHaveAttribute(
-      'data-word',
-      'Asleep',
-      { timeout: 60_000 },
-    );
-    await expect(chip).toHaveAttribute('data-working', 'no');
-    await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'dormant');
-    await expect(page.getByTestId('session-state').getByTestId('chat-external')).toHaveCount(0);
+    await expect(page.getByTestId('session-state')).toHaveCount(0);
+    await expect(page.getByTestId('composer')).toBeEnabled({ timeout: 60_000 });
 
     // And the list is still saying the same thing about it.
     await expect(rowFor(page, chat.id)).toHaveAttribute('data-state', 'dormant', { timeout: 60_000 });

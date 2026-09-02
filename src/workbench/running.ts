@@ -47,19 +47,20 @@ export type SessionOwnership =
  *
  * A terminal-created chat is not permanently external. While no driver is
  * attached it is unheld and may be resumed by the first send; while another
- * live process holds it, it is external and read-only; once Atelier attaches,
- * it is ours regardless of where it was originally created.
+ * live process holds it, it is external and read-only. An Atelier provider
+ * driver makes it ours; a read-only Atelier follower does not take ownership.
  */
 export function sessionOwnership(
-  _state: SessionState,
+  state: SessionState,
   externalId: string | null | undefined,
   heldByAnother: boolean,
 ): SessionOwnership {
+  // The server removes provider processes driven by this Atelier registry
+  // before publishing the hold set. A remaining hold is therefore explicit
+  // outside ownership and outranks a stale state or a read-only follower
+  // session that happens to be awake while it tails the external transcript.
   if (externalId && heldByAnother) return { kind: 'elsewhere', externalId };
-  // The server's held set excludes provider processes owned by this
-  // Atelier registry. An explicit outside owner therefore outranks a stale
-  // transcript state left mid-turn; state alone cannot prove ownership.
-  if (!asleepHere(_state)) return { kind: 'atelier' };
+  if (!asleepHere(state)) return { kind: 'atelier' };
   return { kind: 'unheld', externalId: externalId ?? null };
 }
 

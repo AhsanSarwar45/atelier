@@ -126,7 +126,7 @@ describe('the working mark keeps up', () => {
     expect(marked[0]!.runningElsewhere).toBe(true);
   });
 
-  it('does not put a stale outside command back on a closed Atelier session', () => {
+  it('marks a dormant Atelier-created chat when a current outside owner resumes it', () => {
     const marked = withLive(
       [row({ sessionId: 's1', state: 'dormant', externalId: 'x1' })],
       [],
@@ -135,8 +135,8 @@ describe('the working mark keeps up', () => {
       new Map([['x1', { id: 'x1', holder: 'program' as const, doing: 'running' as const, detail: 'Bash', since: 1_000 }]]),
     );
 
-    expect(marked[0]!.runningElsewhere).toBe(false);
-    expect(marked[0]!.held).toBeNull();
+    expect(marked[0]!.runningElsewhere).toBe(true);
+    expect(marked[0]!.held?.detail).toBe('Bash');
   });
 
   it('keeps following an imported terminal session after it has a local id', () => {
@@ -178,11 +178,10 @@ describe('the working mark keeps up', () => {
     expect(merged[0]!.runningElsewhere).toBe(true);
   });
 
-  it('a chat this app is driving is not somebody else’s, whatever is holding its record', () => {
-    // Anything answering a chat leaves the same trace on disk, this app's own
-    // helpers included, and the list believed the trace without asking who was
-    // making it: the rail said external for a chat whose own top bar, which
-    // does ask, said ready (bw-jaoz.2).
+  it('an outside owner outranks stale local state and a read-only follower', () => {
+    // The server has already removed this app's own provider drivers from the
+    // hold set. What remains is somebody else, even if a stale state or the
+    // follower opened to tail that transcript still reads as awake.
     const merged = withLive(
       [row({ externalId: 'x1', runningElsewhere: true })],
       [session({ id: 's1', externalId: 'x1', state: 'thinking' })],
@@ -190,8 +189,8 @@ describe('the working mark keeps up', () => {
       new Set(['x1']),
       new Map([['x1', { id: 'x1', holder: 'terminal' as const, doing: 'working' as const, since: null }]]),
     );
-    expect(merged[0]!.runningElsewhere, 'the rail called a chat we are driving somebody else’s').toBe(false);
-    expect(merged[0]!.held, 'and hung a holder on it').toBeNull();
+    expect(merged[0]!.runningElsewhere).toBe(true);
+    expect(merged[0]!.held?.holder).toBe('terminal');
   });
 
   it('and still says so for a chat nothing of ours is on', () => {

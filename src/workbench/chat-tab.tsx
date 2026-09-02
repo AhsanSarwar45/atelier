@@ -63,7 +63,6 @@ import { ChatRightRail, useGitPanel, useRightRail } from '@/workbench/chat-right
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
-import { ChatStateChip, ExternalBadge } from '@/workbench/chat-state-chip';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { useKnownCards, useKnownCardStatuses } from '@/workbench/known-cards';
 import { drawnRows } from '@/workbench/machine-lines';
@@ -1008,8 +1007,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     setTurnSince(busy ? Date.now() : null);
   }, [busy]);
   /**
-   * The one reading every screen draws (chat-state.ts). A held chat is read
-   * from what the holder says about itself; ours from our own driver's word.
+   * The shared activity reading used by the transcript footer and composer.
+   * A held chat is read from what the holder says about itself; ours from our
+   * own driver's word.
    */
   const state = chatState({
     state: view.state,
@@ -1423,21 +1423,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         )}
       >
         <ProviderBadge brand={sessionBrand} model={view.model} icon={sessionBrand === 'local' ? <ModelIcon brand={sessionBrand} model={view.model} identity={selectedModel?.family ?? selectedModel?.publisher} className="size-3" /> : undefined} className="hidden sm:inline-flex" />
-        {/* A chat another program is working in has no agent of OURS attached,
-            which is what "Asleep" describes and not what the reader is looking
-            at: the messages arrive as that program works. So the line says what
-            the holder says it is doing, and wears the badge beside it — the two
-            are separate facts and the badge never stands in for the first
-            (bw-96is). Both clear themselves when that program stops, because
-            the stream they are read from does (bw-dmxj.10). */}
-        {externalId && <span
-          data-testid="session-state"
-          data-state={held ? 'held' : view.state}
-          className={cn('hidden shrink-0 items-center sm:flex', CHIP_GAP)}
-        >
-          <ChatStateChip state={state} testId="session-state-chip" />
-          {state.external && <ExternalBadge holder={state.external.holder} />}
-        </span>}
         {/* The one thing on this line allowed to give way when the line runs
             short, and the only one that can: the model and the permission mode
             are both named again on the writing box below, while every chip

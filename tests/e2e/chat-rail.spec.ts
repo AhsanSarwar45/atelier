@@ -130,7 +130,7 @@ test.describe('the right rail', () => {
     await page.screenshot({ path: `${SHOTS}/chat-right-rail-cards.png` });
 
     // And the line naming the agent carries none of them, at one line high.
-    const line = page.getByTestId('session-state').locator('xpath=..');
+    const line = page.getByTestId('chat-status-line');
     await expect(line.getByTestId('bead-chip'), 'cards are still on the chat’s own line').toHaveCount(0);
     const high = await line.evaluate((el) => el.getBoundingClientRect().height);
     expect(high, `the chat's line drew ${high}px high`).toBeLessThanOrEqual(ONE_LINE_PX);

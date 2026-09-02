@@ -115,17 +115,12 @@ test.describe('the list of chats', () => {
 
     // None of them, now: the cards are in the rail, which is a column, and the
     // line keeps only what names the agent (docs/agent-workbench.md §8.2.1).
-    const onTheLine = await page
-      .getByTestId('session-state')
-      .locator('xpath=..')
-      .getByTestId('bead-chip')
-      .count();
+    const onTheLine = await page.getByTestId('chat-status-line').getByTestId('bead-chip').count();
     expect(onTheLine, `${onTheLine} cards were drawn on the line`).toBe(0);
 
     const line = await page.evaluate(() => {
-      const state = document.querySelector('[data-testid="session-state"]');
       const meta = document.querySelector('[data-testid="session-meta"]') as HTMLElement | null;
-      const head = state?.parentElement as HTMLElement | null;
+      const head = document.querySelector('[data-testid="chat-status-line"]') as HTMLElement | null;
       return {
         height: Math.round(head?.getBoundingClientRect().height ?? 0),
         overflow: head ? Math.round(head.scrollWidth - head.clientWidth) : 0,

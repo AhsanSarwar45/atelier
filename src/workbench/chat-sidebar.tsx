@@ -276,15 +276,12 @@ export function withLive(
   const marked = running
     ? merged.map((r) => {
         if (!r.externalId) return r;
-        // A provider marker names the conversation, not the Atelier session.
-        // Our own driver writes one too, and after an unclean exit that marker
-        // can outlive the driver. An Atelier-owned row already has its truthful
-        // state from the session stream; a restored terminal row can also have
-        // a session id, but still needs the outside-process overlay
-        // (restore-status.ts, bw-zpyl.9).
-        if (r.sessionId !== null && r.origin === 'app') {
-          return { ...r, runningElsewhere: false, held: null };
-        }
+        // Origin is history, not ownership. A chat created here can later be
+        // resumed in a terminal after our driver has gone dormant, while an
+        // app-owned live session can leave the same provider trace as an
+        // outside process. `heldElsewhere` combines the current session state
+        // with the current provider hold, so it is the one ownership question
+        // every row asks regardless of where the chat began.
         const theirs = heldElsewhere(r.state, r.externalId, running);
         return {
           ...r,

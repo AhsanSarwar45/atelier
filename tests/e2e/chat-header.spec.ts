@@ -94,7 +94,6 @@ const HAIR = 0.5;
 
 /** Everything the line draws, in the order it draws it. */
 const PIECES = [
-  'session-state',
   'session-meta',
   'chat-folder-chip',
   'context-chip',

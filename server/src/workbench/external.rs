@@ -755,16 +755,28 @@ pub fn codex_thread_processes(
 ) -> (BTreeMap<String, BTreeSet<u32>>, HashMap<String, PathBuf>) {
     let mut found: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
     let mut rollout_paths = HashMap::new();
+    // A thread named on argv is the provider's explicit current selection.
+    // Processes started as bare `codex resume` need the latest process-log
+    // thread instead; their open descriptors can include old rollouts retained
+    // for history and are evidence of access, not current ownership.
+    let mut explicit = HashSet::new();
     #[cfg(not(target_os = "linux"))]
     if proc_root == Path::new("/proc") {
         let commands = native_codex_commands();
         let pids: Vec<_> = commands.iter().map(|(pid, _)| *pid).collect();
         for (pid, command) in commands {
-            for id in uuid_in(&command) {
+            let ids = uuid_in(&command);
+            if ids.len() == 1 {
+                explicit.insert(pid);
+            }
+            for id in ids {
                 found.entry(id).or_default().insert(pid);
             }
         }
         for (pid, id) in logged_codex_threads(codex_home, &pids) {
+            if explicit.contains(&pid) {
+                continue;
+            }
             found.entry(id).or_default().insert(pid);
         }
         return (found, rollout_paths);
@@ -800,6 +812,9 @@ pub fn codex_thread_processes(
         for arg in &argv {
             ids.extend(uuid_in(&String::from_utf8_lossy(arg)));
         }
+        if ids.len() == 1 {
+            explicit.insert(pid);
+        }
         if let Ok(fds) = fs::read_dir(entry.path().join("fd")) {
             for fd in fds.flatten() {
                 let Ok(target) = fs::read_link(fd.path()) else {
@@ -822,6 +837,13 @@ pub fn codex_thread_processes(
         }
     }
     for (pid, id) in logged_codex_threads(codex_home, &terminal_pids) {
+        if explicit.contains(&pid) {
+            continue;
+        }
+        for pids in found.values_mut() {
+            pids.remove(&pid);
+        }
+        found.retain(|_, pids| !pids.is_empty());
         found.entry(id).or_default().insert(pid);
     }
     (found, rollout_paths)
@@ -887,6 +909,22 @@ fn codex_item_detail(item: &Value) -> Option<String> {
         _ => String::new(),
     };
     short_detail(&command)
+}
+
+fn codex_tool_detail(payload: &Value) -> Option<String> {
+    let name = payload["name"]
+        .as_str()
+        .or_else(|| payload["item"]["tool"].as_str())?;
+    match name.to_ascii_lowercase().as_str() {
+        // These are transport method names, not useful activity words. The
+        // following CommandExecution row carries the exact command; until it
+        // arrives, "Running" is the complete truthful status.
+        "exec" | "exec_command" | "write_stdin" | "wait" => None,
+        "apply_patch" => Some("Editing files".into()),
+        "view_image" => Some("Viewing an image".into()),
+        name if name.starts_with("web") => Some("Browsing the web".into()),
+        _ => short_detail(name),
+    }
 }
 
 pub fn codex_activity_from_lines<'a>(lines: impl IntoIterator<Item = &'a str>) -> ProviderActivity {
@@ -969,10 +1007,7 @@ pub fn codex_activity_from_lines<'a>(lines: impl IntoIterator<Item = &'a str>) -
             let detail = if item_kind.contains("commandexecution") {
                 codex_item_detail(&payload["item"])
             } else {
-                payload["name"]
-                    .as_str()
-                    .or_else(|| payload["item"]["tool"].as_str())
-                    .and_then(short_detail)
+                codex_tool_detail(payload)
             };
             return ProviderActivity {
                 doing: HeldDoing::Running,
@@ -1284,7 +1319,7 @@ mod tests {
 
         let (threads, paths) = codex_thread_processes(&proc_root, &home);
         assert_eq!(threads[&CHAT.to_string()], BTreeSet::from([51, 52]));
-        assert_eq!(threads[&OTHER.to_string()], BTreeSet::from([52]));
+        assert!(!threads.contains_key(OTHER));
         assert_eq!(paths[OTHER], rollout);
     }
 
@@ -1388,6 +1423,12 @@ mod tests {
             shell.detail.as_deref(),
             Some("cargo test --manifest-path server/Cargo.toml external")
         );
+        let transport = codex_activity_from_lines([
+            r#"{"timestamp":"2026-09-02T10:00:00Z","payload":{"type":"task_started"}}"#,
+            r#"{"timestamp":"2026-09-02T10:00:04Z","payload":{"type":"custom_tool_call","name":"exec"}}"#,
+        ]);
+        assert_eq!(transport.doing, HeldDoing::Running);
+        assert_eq!(transport.detail, None);
         assert_eq!(
             codex_doing_from_lines([
                 r#"{"payload":{"type":"task_started"}}"#,

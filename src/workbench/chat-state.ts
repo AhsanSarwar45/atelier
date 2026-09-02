@@ -429,8 +429,9 @@ function standing(input: ChatStateInput): SessionState {
  * last state: our state for such a chat is `dormant` — no agent of ours is
  * attached — and drawing "Asleep" over a terminal in the middle of a turn is
  * the exact lie this replaces. The reverse holds too: a chat of ours that is
- * answering is never held, because {@link heldElsewhere} only calls a chat held
- * while our own side of it is asleep.
+ * answering is never held, because the server removes provider processes owned
+ * by our driver before publishing the outside-owner set. A read-only follower
+ * may itself be awake while it tails a held external transcript.
  */
 export function chatState(input: ChatStateInput): ChatState {
   const held = input.held ?? null;

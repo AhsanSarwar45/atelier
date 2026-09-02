@@ -148,7 +148,7 @@ test('the Rust Codex importer restores one ordered copy of the person and agent 
 
     await expect(page.getByTestId('model-picker')).toBeVisible();
     await expect(page.getByTestId('model-picker')).toBeEnabled();
-    await expect(page.getByTestId('chat-status-line').getByTestId('chat-external')).toHaveCount(0);
+    await expect(page.getByTestId('session-state')).toHaveCount(0);
     await expect(page.getByTestId('restore-error')).toHaveCount(0);
 
     const reloadedAt = performance.now();

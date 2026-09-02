@@ -374,6 +374,9 @@ test.describe('a chat another program is running', () => {
     const opening = 'Look at the routing on the chat tab';
     const chat = aChatSomebodyElseIsIn(project.path, opening);
     const release = claimConversation(chat.id);
+    // The local session id is learned when the row opens, so its React key
+    // legitimately changes. The provider conversation id does not.
+    const row = page.locator(`[data-testid="restore-row"][data-external-id="${chat.id}"]`);
 
     try {
       // The box has to refuse from the first frame it draws, so it may not wait
@@ -385,7 +388,6 @@ test.describe('a chat another program is running', () => {
       await openChatTab(page, project);
 
       // It is being worked in, so it is marked and at the top of the rail.
-      const row = page.locator(`[data-testid="restore-row"][data-row-key="ext:${chat.id}"]`);
       await expect(row, 'the chat being worked in was not offered').toBeVisible({ timeout: 30_000 });
       // The name is the way in; the row around it is not a button.
       await row.getByTestId('row-name').click();
@@ -401,11 +403,8 @@ test.describe('a chat another program is running', () => {
       await expect(page.getByTestId('composer')).toHaveCount(0);
       await expect(page.getByTestId('send-button')).toHaveCount(0);
 
-      // And the top of the chat says what its row in the list says. "Asleep" is
-      // true of our own agent and false of what is on the screen, which is a
-      // conversation being worked in as the reader watches (bw-dmxj.10).
-      await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'held');
-      await expect(page.getByTestId('session-state').getByTestId('chat-external')).toBeVisible();
+      await expect(row.getByTestId('chat-external')).toBeVisible();
+      await expect(page.getByTestId('session-state'), 'status regressed into the transcript header').toHaveCount(0);
 
       // The whole of it: something said over there turns up here, with nobody
       // reloading anything.
@@ -425,8 +424,7 @@ test.describe('a chat another program is running', () => {
     // box is back by itself because the stream it went away on says so.
     await expect(page.getByTestId('composer')).toBeEnabled({ timeout: 30_000 });
     await expect(page.getByTestId('held-elsewhere')).toHaveCount(0);
-    await expect(page.getByTestId('session-state').getByTestId('chat-external')).toHaveCount(0);
-    await expect(page.getByTestId('session-state')).not.toHaveAttribute('data-state', 'held');
+    await expect(row.getByTestId('chat-external')).toHaveCount(0);
   });
 
   /**
