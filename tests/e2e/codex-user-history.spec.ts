@@ -87,6 +87,24 @@ test('the Rust Codex importer restores one ordered copy of the person and agent 
     url.searchParams.set('include_test', 'true');
     await route.continue({ url: url.toString() });
   });
+  await page.addInitScript((thread) => {
+    Object.defineProperty(window, '__codexTitles', { value: [], configurable: true });
+    const seen = (window as Window & { __codexTitles: string[] }).__codexTitles;
+    const read = (): void => {
+      const title = document.querySelector(
+        `[data-testid="restore-row"][data-external-id="${thread}"] [data-testid="row-name"]`,
+      )?.textContent?.trim();
+      if (title && seen.at(-1) !== title) seen.push(title);
+    };
+    const watch = (): void => {
+      read();
+      new MutationObserver(read).observe(document.documentElement, {
+        childList: true, subtree: true, characterData: true,
+      });
+    };
+    if (document.documentElement) watch();
+    else document.addEventListener('DOMContentLoaded', watch, { once: true });
+  }, THREAD);
 
   let project: { id: string } | null = null;
   try {
@@ -100,6 +118,16 @@ test('the Rust Codex importer restores one ordered copy of the person and agent 
     const row = page.locator(`[data-testid="restore-row"][data-external-id="${THREAD}"]`);
     await expect(row).toBeVisible({ timeout: 30_000 });
     await expect(row.getByTestId('row-name')).toHaveText(TITLE);
+    await expect(row.locator('span.font-mono').first()).toHaveText('10:00 AM');
+    await expect(row.getByTestId('external-origin')).toHaveCount(0);
+    await expect(row.getByTestId('chat-external')).toHaveCount(0);
+
+    const name = await row.getByTestId('row-name').boundingBox();
+    const clock = await row.locator('span.font-mono').first().boundingBox();
+    expect(name, 'the real provider row drew no title').not.toBeNull();
+    expect(clock, 'the real provider row drew no last-message clock').not.toBeNull();
+    const middle = (box: { y: number; height: number }): number => box.y + box.height / 2;
+    expect(Math.abs(middle(name!) - middle(clock!)), 'the row clock is off the title baseline').toBeLessThan(1);
 
     const openedAt = performance.now();
     await row.getByTestId('row-name').click();
@@ -120,7 +148,19 @@ test('the Rust Codex importer restores one ordered copy of the person and agent 
 
     await expect(page.getByTestId('model-picker')).toBeVisible();
     await expect(page.getByTestId('model-picker')).toBeEnabled();
+    await expect(page.getByTestId('chat-status-line').getByTestId('chat-external')).toHaveCount(0);
     await expect(page.getByTestId('restore-error')).toHaveCount(0);
+
+    const reloadedAt = performance.now();
+    await page.reload();
+    await expect(row).toBeVisible();
+    expect(performance.now() - reloadedAt, 'sidebar row after a warm reload').toBeLessThan(500);
+    await expect(row.getByTestId('row-name')).toHaveText(TITLE);
+    await expect(row.locator('span.font-mono').first()).toHaveText('10:00 AM');
+    const titles = await page.evaluate(() =>
+      (window as Window & { __codexTitles: string[] }).__codexTitles,
+    );
+    expect(titles, 'the provider row flashed alternate titles while reconciling').toEqual([TITLE]);
   } finally {
     if (project) await request.delete(`/api/projects/${project.id}`);
     rmSync(FIXTURE, { recursive: true, force: true });
