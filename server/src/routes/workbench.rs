@@ -1354,7 +1354,9 @@ async fn session(
         .get_session(id.clone())
         .await?
         .ok_or_else(|| ApiError::not_found(format!("no session {id}")))?;
-    let known = provider_sessions(&state, Some(&found.project_path), false)
+    // Asked on every open, and it used to start an adapter per provider each
+    // time: the shared answer is the one the sidebar just drew from.
+    let known = provider_sessions_shared(&state, Some(&found.project_path), false)
         .await
         .into_iter()
         .find(|known| {
