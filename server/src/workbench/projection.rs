@@ -330,7 +330,13 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
             }
             EventKind::ToolProgress => {
                 if let Some(at) = find(&items, "tool", &string(event, "toolCallId")) {
-                    items[at]["seconds"] = value(event, "seconds");
+                    // A clock only ever goes forward. A ping that carries none
+                    // — the line about what a helper is doing carries no count
+                    // of its own — must not wind the row's back to nothing.
+                    let counted = integer(event, "seconds");
+                    if counted > items[at]["seconds"].as_i64().unwrap_or_default() {
+                        items[at]["seconds"] = json!(counted);
+                    }
                     if event
                         .fields
                         .get("summary")

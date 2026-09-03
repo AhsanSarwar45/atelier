@@ -109,6 +109,7 @@ pub struct AcpNormalizer {
     unbound_agents: Vec<String>,
     agent_words: HashMap<String, String>,
     agent_word_message: HashMap<String, String>,
+    agent_doing: HashMap<String, String>,
     agent_reports: HashMap<String, (String, String)>,
     active_signals: HashMap<String, String>,
     suppress_local_user: bool,
@@ -140,6 +141,7 @@ impl Default for AcpNormalizer {
             unbound_agents: Vec::new(),
             agent_words: HashMap::new(),
             agent_word_message: HashMap::new(),
+            agent_doing: HashMap::new(),
             agent_reports: HashMap::new(),
             active_signals: HashMap::new(),
             suppress_local_user: false,
@@ -818,6 +820,75 @@ impl AcpNormalizer {
         agent
     }
 
+    /**
+     * The line on a sent-away row saying what its helper is doing NOW.
+     *
+     * Nothing in the stream states it. A `tool_call_update` for a `Task` that
+     * is still running carries an empty content list, so the summary built
+     * from that content is the empty string and the line is never drawn —
+     * measured against the pinned claude adapter on 2026-09-03, where every
+     * one of a turn's seven in-flight updates summarised to nothing and a
+     * helper that ran for four minutes said not a word about itself
+     * (bw-t26l.20).
+     *
+     * What the kit does send is the helper's own work, each piece stamped with
+     * the call that sent it: the command it just started, the sentence it just
+     * wrote. Those are what this line is built from, so it says only things
+     * the helper actually did.
+     *
+     * One fact, two rows. The same words go to the call in the transcript and
+     * to the row in the panel beside it, because two accounts of one helper
+     * that disagree are worse than one.
+     */
+    fn doing_now(
+        &mut self,
+        session_id: &str,
+        provider: &str,
+        raw: &Value,
+        under: &str,
+        said: &str,
+    ) -> Vec<Event> {
+        // Only while the call is still going: once it is over, what the helper
+        // did is in its answer, and a present tense beside a finished row is a
+        // stale guess (bw-7ks.22.2).
+        if !self.subagent_tools.contains(under) || !self.open_tools.contains(under) {
+            return Vec::new();
+        }
+        // Its last line, not its first: a message arrives a piece at a time and
+        // the piece before this one is already behind the reader.
+        let Some(line) = said
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .next_back()
+        else {
+            return Vec::new();
+        };
+        // Said again is not news. A helper's message is re-read on every delta,
+        // and a row that re-announces the same sentence eight times costs the
+        // reader a redraw each time to say nothing.
+        if self.agent_doing.get(under).is_some_and(|last| last == line) {
+            return Vec::new();
+        }
+        self.agent_doing.insert(under.to_string(), line.to_string());
+        // No clock and no totals: this ping knows none, and a reader that took
+        // its zeros for a count would wind the row's own clock back to nothing.
+        vec![
+            self.envelope(
+                session_id,
+                provider,
+                raw,
+                json!({"type":"tool.progress","toolCallId":under,"seconds":0,"summary":line,"status":"in_progress"}),
+            ),
+            self.envelope(
+                session_id,
+                provider,
+                raw,
+                json!({"type":"agent.progress","agentId":under,"seconds":0,"tokens":0,"calls":0,"doing":line}),
+            ),
+        ]
+    }
+
     fn message_chunk(
         &mut self,
         session_id: &str,
@@ -938,6 +1009,12 @@ impl AcpNormalizer {
                 raw,
                 json!({"type":"text.delta","messageId":id,"text":text}),
             ));
+            if role == "assistant" {
+                if let Some(under) = parent.clone() {
+                    let said = self.message_text.get(&id).cloned().unwrap_or_default();
+                    events.extend(self.doing_now(session_id, provider, raw, &under, &said));
+                }
+            }
         } else if let Some((mime, data_url)) = Self::content_picture(content) {
             events.push(self.envelope(
                 session_id,
@@ -1008,9 +1085,13 @@ impl AcpNormalizer {
                 let input = self.tool_input(update);
                 let title = Self::tool_title(update, &name);
                 let parent = self.parent_tool_call(raw);
-                let started = json!({"type":"tool.started","toolCallId":id,"name":name.clone(),"title":title,"parentToolCallId":parent,"input":input.clone(),"acp":update});
+                let started = json!({"type":"tool.started","toolCallId":id,"name":name.clone(),"title":title.clone(),"parentToolCallId":parent.clone(),"input":input.clone(),"acp":update});
                 self.tool_starts.insert(id.clone(), started.clone());
                 let mut events = vec![self.envelope(session_id, provider, raw, started)];
+                if let Some(under) = parent {
+                    let says = title.as_str().unwrap_or_default().to_string();
+                    events.extend(self.doing_now(session_id, provider, raw, &under, &says));
+                }
                 let subagent = update
                     .pointer("/_meta/claudeCode/subagent")
                     .and_then(Value::as_bool)
@@ -1064,7 +1145,16 @@ impl AcpNormalizer {
                         started["name"] = json!(name);
                         started["acp"] = update.clone();
                         self.tool_starts.insert(id.clone(), started.clone());
+                        // A helper's command arrives twice: once as a bare
+                        // `Terminal` and again with the command in it. The row
+                        // that sent the helper wants the second one.
+                        let under = started["parentToolCallId"].as_str().map(str::to_string);
+                        let says = started["title"].as_str().unwrap_or_default().to_string();
                         refinements.push(self.envelope(session_id, provider, raw, started));
+                        if let Some(under) = under {
+                            let doing = self.doing_now(session_id, provider, raw, &under, &says);
+                            refinements.extend(doing);
+                        }
                     }
                 }
                 if self.subagent_tools.contains(&id) {
@@ -1341,6 +1431,14 @@ impl AcpNormalizer {
                 let child = update["subagentSessionId"].as_str().unwrap_or_default().to_string();
                 self.agent_tools.insert(child.clone(), child.clone());
                 self.subagent_tools.insert(child.clone());
+                // The row drawn just below is a call like any other, and it is
+                // open until the helper ends. Left off this list it was never
+                // closed: on a real turn the sending row was still spinning
+                // long after the helper had answered and the panel beside it
+                // had filed the helper under "completed" (measured 2026-09-03,
+                // agent `a80d66a3…` — `agent.finished` arrived, no
+                // `tool.completed` ever did).
+                self.open_tools.insert(child.clone());
                 if !self.unbound_agents.contains(&child) {
                     self.unbound_agents.push(child.clone());
                 }
@@ -1410,6 +1508,19 @@ impl AcpNormalizer {
                         raw,
                         json!({"type":"agent.finished","agentId":child,"state":state,"result":said,"seconds":seconds,"tokens":tokens,"calls":calls,"model":model,"acp":update}),
                     ));
+                    // The call that stood for it in the conversation ends here
+                    // too, carrying what it answered. Only when this stream
+                    // opened one: a helper launched as an asynchronous call had
+                    // its row closed the moment the kit acknowledged the launch.
+                    if self.open_tools.remove(child) {
+                        events.push(self.envelope(
+                            session_id,
+                            provider,
+                            raw,
+                            json!({"type":"tool.completed","toolCallId":child,"ok":state == "done",
+                                   "output":said.clone().unwrap_or_default(),"summary":said,"acp":update}),
+                        ));
+                    }
                     events
                 }
             }
@@ -2017,9 +2128,13 @@ mod tests {
                 "_meta":{"atelier.dev/usage":{"seconds":12,"tokens":900,"calls":4,"model":"gpt-5.6-sol"}}}
             }),
         );
-        assert_eq!(kinds(&finished), vec!["cost", "agent.finished"]);
+        // And the call that stood for it in the conversation ends with it.
+        assert_eq!(kinds(&finished), vec!["cost", "agent.finished", "tool.completed"]);
         let cost = serde_json::to_value(&finished[0]).unwrap();
         assert_eq!(cost["cost"]["total"], 900);
+        let ended = serde_json::to_value(&finished[2]).unwrap();
+        assert_eq!(ended["toolCallId"], "child-1");
+        assert_eq!(ended["ok"], true);
         let finished = serde_json::to_value(&finished[1]).unwrap();
         assert_eq!(finished["seconds"], 12);
         assert_eq!(finished["tokens"], 900);
@@ -2517,10 +2632,20 @@ mod tests {
             "sessionId":"root", "update":{"sessionUpdate":"subagent_state_update",
             "subagentSessionId":"agent-1","state":"completed"}
         }));
-        let finished = serde_json::to_value(finished.last().unwrap()).unwrap();
-        assert_eq!(finished["type"], "agent.finished");
+        let ended = finished.iter().map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "tool.completed");
+        let finished = finished.iter().map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "agent.finished").expect("nothing ended the helper");
         assert_eq!(finished["agentId"], "agent-1");
         assert_eq!(finished["result"], "They are round.");
+        // And the row that stood for it in the conversation stops spinning.
+        // Measured on a real turn: the helper answered, the panel beside it
+        // filed the helper under "completed", and the row that sent it was
+        // still running — nothing had ever closed it (2026-09-03, `a80d66a3…`).
+        let ended = ended.expect("the row that sent the helper was left running");
+        assert_eq!(ended["toolCallId"], "agent-1");
+        assert_eq!(ended["ok"], true);
+        assert_eq!(ended["output"], "They are round.");
 
         // And the root's own words are the root's, still.
         let root = normalizer.update("local", "claude", &json!({
@@ -2529,6 +2654,79 @@ mod tests {
         }));
         assert_eq!(kinds(&root), vec!["message.started", "text.delta"]);
         assert_eq!(serde_json::to_value(&root[0]).unwrap()["parentToolCallId"], Value::Null);
+    }
+
+    /**
+     * The line saying what a sent-away helper is doing NOW, built from the only
+     * thing the kit actually sends about it.
+     *
+     * The `Task` call's own updates carry an empty content list for as long as
+     * the helper runs, so the row's line was never drawn once — a four-minute
+     * helper and not a word about it (measured against the pinned claude
+     * adapter, 2026-09-03). The helper's work does arrive, stamped with the
+     * call that sent it, and that is what the line is made of.
+     */
+    #[test]
+    fn the_row_that_sent_a_helper_says_what_the_helper_is_doing() {
+        let mut normalizer = AcpNormalizer::default();
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"subagent_spawned",
+            "subagentSessionId":"agent-1","name":"Wait twice","task":"Sleep, speak, sleep","capabilities":{}}
+        }));
+
+        // The command it just started.
+        let ran = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"tool_call",
+            "toolCallId":"call-sleep","title":"python3 -c 'time.sleep(5)'","kind":"execute",
+            "_meta":{"claudeCode":{"toolName":"Bash","parentToolUseId":"task-call"}}}
+        }));
+        let doing = serde_json::to_value(
+            ran.iter().map(|event| serde_json::to_value(event).unwrap())
+                .find(|event| event["type"] == "tool.progress")
+                .expect("the sending row was never told what its helper started"),
+        ).unwrap();
+        assert_eq!(doing["toolCallId"], "agent-1");
+        assert_eq!(doing["summary"], "python3 -c 'time.sleep(5)'");
+        // No clock of its own, and the reader must not read the zero as one.
+        assert_eq!(doing["seconds"], 0);
+        let pane = ran.iter().map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "agent.progress")
+            .expect("the panel beside it was told nothing");
+        assert_eq!(pane["doing"], "python3 -c 'time.sleep(5)'");
+        assert_eq!(pane["agentId"], "agent-1");
+        // A ping with nothing to report about state must not reopen a row.
+        assert_eq!(pane["state"], Value::Null);
+
+        // Then the sentence it just wrote, which replaces it.
+        let said = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-1","content":{"type":"text","text":"That wait is done.\nStarting the longer one."},
+            "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
+        }));
+        let doing = said.iter().map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "tool.progress")
+            .expect("the sending row never heard the helper speak");
+        assert_eq!(doing["summary"], "Starting the longer one.", "its last line, not its first");
+
+        // Said again is not news: a message is re-read on every delta, and the
+        // row must not be redrawn to say what it already says.
+        let again = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-1","content":{"type":"text","text":""},
+            "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
+        }));
+        assert!(
+            !kinds(&again).iter().any(|kind| kind == "tool.progress"),
+            "the row was told the same thing twice: {:?}", kinds(&again),
+        );
+
+        // And a call of the chat's own says nothing about any helper.
+        let mine = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"tool_call",
+            "toolCallId":"call-mine","title":"Read notes.md","kind":"read",
+            "_meta":{"claudeCode":{"toolName":"Read"}}}
+        }));
+        assert_eq!(kinds(&mine), vec!["tool.started"]);
     }
 
     /**
@@ -2553,7 +2751,8 @@ mod tests {
             "sessionId":"root", "update":{"sessionUpdate":"subagent_state_update",
             "subagentSessionId":"agent-1","state":"completed"}
         }));
-        let early = serde_json::to_value(early.last().unwrap()).unwrap();
+        let early = early.iter().map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "agent.finished").expect("nothing ended the helper");
         assert_eq!(early["result"], "I'll read both files.");
 
         // The chat's own answer, in between: measured on a real chat, the

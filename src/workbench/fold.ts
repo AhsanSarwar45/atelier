@@ -559,7 +559,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       // the line says what the helper is doing, and it is still doing it.
       next.items = items.map((it) =>
         it.kind === 'tool' && it.id === e.toolCallId
-          ? { ...it, seconds: e.seconds, summary: e.summary || it.summary }
+          ? { ...it, seconds: Math.max(it.seconds, e.seconds), summary: e.summary || it.summary }
           : it,
       );
       return next;
@@ -615,9 +615,9 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
               }
             : {
                 ...a,
-                seconds: e.seconds,
-                tokens: e.tokens,
-                calls: e.calls,
+                seconds: Math.max(a.seconds, e.seconds),
+                tokens: Math.max(a.tokens, e.tokens),
+                calls: Math.max(a.calls, e.calls),
                 // Absent means "still whatever it last said", the same bargain
                 // tool.progress makes: a blank line would erase it.
                 doing: e.doing || a.doing,
@@ -1020,7 +1020,9 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         const at = toolAt.get(e.toolCallId);
         if (at !== undefined) {
           const it = items[at] as TranscriptTool;
-          it.seconds = e.seconds;
+          // Forward only: the line about what a helper is doing carries no
+          // clock, and its zero must not erase the one already on the row.
+          it.seconds = Math.max(it.seconds, e.seconds);
           if (e.summary) it.summary = e.summary;
         }
         break;
@@ -1071,9 +1073,9 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
             row.model = row.model || e.model || null;
             break;
           }
-          row.seconds = e.seconds;
-          row.tokens = e.tokens;
-          row.calls = e.calls;
+          row.seconds = Math.max(row.seconds, e.seconds);
+          row.tokens = Math.max(row.tokens, e.tokens);
+          row.calls = Math.max(row.calls, e.calls);
           if (e.doing) row.doing = e.doing;
           if (e.model) row.model = e.model;
           if (e.state) row.state = e.state;
