@@ -1174,6 +1174,32 @@ impl AcpNormalizer {
                         }),
                     ));
                 }
+                // A tool call may arrive already finished. ACP puts `status`,
+                // `content` and `locations` on the creating notification as
+                // well as on its updates (schema `v1/tool_call.rs`, ToolCall),
+                // and an agent that does the work before it tells anybody
+                // sends exactly one notification for the whole call. This read
+                // only the id, the title and the input off it, so such a row
+                // span "running" forever, with no output and no diff, and
+                // nothing ever closed it (bw-t26l.20). Run the same
+                // notification through the update path, which is where all
+                // three of those fields are already understood.
+                //
+                // `rawInput` is taken off the copy on purpose: it is the one
+                // field the first pass has already read, and leaving it would
+                // have the update path re-announce a row it has just drawn.
+                let finished = update["status"]
+                    .as_str()
+                    .is_some_and(|status| matches!(status, "completed" | "failed"));
+                let carries_content = update["content"]
+                    .as_array()
+                    .is_some_and(|rows| !rows.is_empty());
+                if finished || carries_content {
+                    let mut again = raw.clone();
+                    again["update"]["sessionUpdate"] = json!("tool_call_update");
+                    again["update"]["rawInput"] = Value::Null;
+                    events.extend(self.update(session_id, provider, &again));
+                }
                 events
             }
             Some("tool_call_update") => {
@@ -1861,6 +1887,46 @@ mod tests {
             let events = normalizer.finish_turn("local", "claude", &json!({"stopReason":reason}));
             assert_eq!(kinds(&events), vec!["session.state"], "{reason} said something");
         }
+    }
+
+    /// A tool call that is finished the moment it is announced still closes.
+    ///
+    /// ACP puts `status` and `content` on the creating `tool_call` as well as
+    /// on its updates, so an agent that does the work before it says anything
+    /// sends one notification for the whole call. This read only the id, the
+    /// title and the input off it: the row span "running" forever with no
+    /// output, no diff, and nothing that would ever close it (bw-t26l.20).
+    #[test]
+    fn a_tool_call_that_arrives_already_finished_closes_and_shows_what_it_did() {
+        let mut normalizer = AcpNormalizer::default();
+        let events = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call",
+            "toolCallId":"call-1",
+            "title":"Edit notes.txt",
+            "kind":"edit",
+            "status":"completed",
+            "rawInput":{"file_path":"/work/notes.txt"},
+            "content":[
+                {"type":"diff","path":"/work/notes.txt","oldText":"a line\n","newText":"a line\nHELLO\n"},
+                {"type":"content","content":{"type":"text","text":"Applied one edit."}}
+            ]
+        }}));
+        let seen = kinds(&events);
+        assert!(seen.contains(&json!("tool.started")), "{seen:?}");
+        assert!(seen.contains(&json!("diff")), "{seen:?}");
+        assert!(seen.contains(&json!("tool.completed")), "{seen:?}");
+        // Announced once, not twice: the second pass is told to leave the row
+        // it has already drawn alone.
+        assert_eq!(seen.iter().filter(|kind| **kind == json!("tool.started")).count(), 1);
+
+        let completed = events
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "tool.completed")
+            .expect("the call was closed");
+        assert_eq!(completed["toolCallId"], "call-1");
+        assert_eq!(completed["ok"], true);
+        assert_eq!(completed["summary"], "Applied one edit.");
     }
 
     /// ACP carries five kinds of content block and this read two of them.
