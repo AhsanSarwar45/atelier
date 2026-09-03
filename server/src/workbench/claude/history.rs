@@ -1100,8 +1100,103 @@ fn settings(rows: &[Value]) -> ClaudeSettings {
     found
 }
 
+/**
+ * A tool's answer, read for the work it handed off rather than for its words.
+ *
+ * The kit says where backgrounded work went in the tool's own answer, in the
+ * same shape on both roads it reaches us by: over ACP as
+ * `_meta.claudeCode.toolResponse`, and in the record as `toolUseResult`. A
+ * shell command left running names a `backgroundTaskId`; everything else the
+ * kit launches asynchronously reports `status: "async_launched"` beside its
+ * `taskId` and `taskType`. Measured 2026-09-03 against the pinned adapter and
+ * the record it wrote, on a turn that left one command running and launched one
+ * workflow (bw-t26l.20).
+ *
+ * A helper is launched by this same road and already has a row from the call
+ * that sent it, so it is not one of these: two rows for one piece of work is
+ * the panel counting it twice.
+ */
+/**
+ * The kit's own note that backgrounded work has ended, read off the prompt it
+ * writes to itself.
+ *
+ * ACP carries no word of it: the notification is injected into the kit's queue,
+ * answered by the model in ordinary prose, and nothing structured about it ever
+ * reaches a client. The record keeps the block whole, which is the only place a
+ * reader can be told the command it left running is done (bw-t26l.20).
+ */
+fn task_notification(text: &str) -> Option<Value> {
+    let text = text.trim();
+    if !text.starts_with("<task-notification>") {
+        return None;
+    }
+    let field = |name: &str| -> Option<String> {
+        let open = format!("<{name}>");
+        let close = format!("</{name}>");
+        let from = text.find(&open)? + open.len();
+        let to = text[from..].find(&close)? + from;
+        Some(text[from..to].trim().to_string())
+    };
+    let task = field("task-id").filter(|task| !task.is_empty())?;
+    let status = field("status").unwrap_or_default();
+    // Anything but a clean finish is a failure the reader wants to see said as
+    // one. The kit writes `completed` for the good case and names the fault in
+    // the summary for the rest.
+    let state = if status == "completed" { "done" } else { "failed" };
+    Some(json!({
+        "type":"agent.finished", "agentId":task, "state":state,
+        "result":field("summary").unwrap_or_default(),
+        "seconds":0, "tokens":0, "calls":0, "model":Value::Null
+    }))
+}
+
+pub fn handed_off(answer: &Value, tool_call_id: &str, title: &str) -> Option<Value> {
+    let shell = as_nonempty(&answer["backgroundTaskId"]);
+    let launched = answer["status"]
+        .as_str()
+        .filter(|status| *status == "async_launched")
+        .and_then(|_| as_nonempty(&answer["taskId"]));
+    let task = shell.clone().or(launched)?;
+    let task_type = answer["taskType"]
+        .as_str()
+        .unwrap_or(if shell.is_some() { "shell" } else { "task" })
+        .to_string();
+    if task_type.contains("agent") {
+        return None;
+    }
+    let kind = if task_type.contains("workflow") {
+        "run"
+    } else if task_type.contains("monitor") || task_type.contains("watch") {
+        "watch"
+    } else if shell.is_some() || task_type.contains("shell") || task_type.contains("bash") {
+        "command"
+    } else {
+        "run"
+    };
+    // Its own words for it first — a workflow's summary says what the run is
+    // for, which the script carrying it does not. For a shell command the
+    // call's title IS the command, which is what a reader looks for it by.
+    let what = ["summary", "workflowName", "description", "name"]
+        .into_iter()
+        .find_map(|field| as_nonempty(&answer[field]))
+        .unwrap_or_else(|| title.to_string());
+    let what = what.lines().next().unwrap_or_default().trim().to_string();
+    let what = if what.is_empty() {
+        "Background task".to_string()
+    } else {
+        what
+    };
+    Some(json!({
+        "type":"agent.started", "agentId":task, "toolCallId":tool_call_id, "kind":kind,
+        "what":what, "agentType":task_type, "model":Value::Null
+    }))
+}
+
 fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
     let mut results = HashMap::new();
+    // The tool's answer in full, beside the words of it: what the words say
+    // about work handed to the background is prose, and this is the fact.
+    let mut answers: HashMap<String, Value> = HashMap::new();
     for row in rows {
         for block in row["message"]["content"].as_array().into_iter().flatten() {
             if block["type"] == "tool_result" {
@@ -1114,6 +1209,9 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
                             result_images(&block["content"]),
                         ),
                     );
+                    if row["toolUseResult"].is_object() {
+                        answers.insert(id.to_string(), row["toolUseResult"].clone());
+                    }
                 }
             }
         }
@@ -1193,6 +1291,20 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
                     "output":cut(output, KEPT)
                 }));
                 events.extend(result_image_events(call_id, pictures, parent));
+            }
+            // Work the call handed off rather than did. Only the chat's own
+            // calls: the panel this feeds is the chat's, and a helper's
+            // background work belongs inside the helper's own conversation.
+            if parent.is_none() {
+                let said = as_nonempty(&block["input"]["command"])
+                    .or_else(|| as_nonempty(&block["input"]["description"]))
+                    .unwrap_or_else(|| name.to_string());
+                if let Some(row) = answers
+                    .get(call_id)
+                    .and_then(|answer| handed_off(answer, call_id, &said))
+                {
+                    events.push(row);
+                }
             }
         }
     }
@@ -1625,6 +1737,24 @@ pub fn replay_lines(lines: &[String]) -> Vec<Value> {
     // the conversation.  A follower must translate these just as the native
     // driver does or a running helper becomes an anonymous command until the
     // chat is reopened and its subagent record imported.
+    // And the other end of backgrounded work: nothing on the wire ever says a
+    // command left running has ended, because the kit tells ITSELF — it drops a
+    // `<task-notification>` into its own prompt queue, and that queue is
+    // written down here. Read on the enqueue alone: the same block is written
+    // again when the prompt is delivered and again when it is removed, and a
+    // row cannot finish three times (measured 2026-09-03, bw-t26l.20).
+    for row in &rows {
+        if row["type"] != "queue-operation" || row["operation"] != "enqueue" {
+            continue;
+        }
+        let Some(text) = row["content"].as_str() else {
+            continue;
+        };
+        let Some(finished) = task_notification(text) else {
+            continue;
+        };
+        events.push(finished);
+    }
     for row in &rows {
         if row["type"] != "system" {
             continue;
@@ -1990,6 +2120,79 @@ mod tests {
         assert_eq!(pinned["model"], "claude-sonnet");
         assert_eq!(pinned["permissionMode"], "plan");
         assert_eq!(pinned["effort"], "high");
+    }
+
+    /// Work the chat left running is on the record twice: the tool's own
+    /// answer says where it went, and the kit's prompt queue says when it came
+    /// back. Read as a plain call, a chat that left a build running and a chat
+    /// that ran one to the end look identical (bw-t26l.20).
+    #[test]
+    fn a_command_left_running_opens_a_row_and_the_kits_own_note_closes_it() {
+        let lines = vec![
+            json!({"type":"assistant","uuid":"a1","message":{"content":[{
+                "type":"tool_use","id":"call-bg","name":"Bash",
+                "input":{"command":"python3 -c 'import time; time.sleep(240)'"}
+            }]}}).to_string(),
+            json!({"type":"user","uuid":"u1","toolUseResult":{
+                "stdout":"","stderr":"","interrupted":false,"backgroundTaskId":"bvah8rxvt"
+            },"message":{"content":[{
+                "type":"tool_result","tool_use_id":"call-bg",
+                "content":"Command running in background with ID: bvah8rxvt."
+            }]}}).to_string(),
+        ];
+        let events = replay_lines(&lines);
+        let opened = events
+            .iter()
+            .find(|event| event["type"] == "agent.started")
+            .expect("a command left running is nowhere on the panel");
+        assert_eq!(opened["agentId"], "bvah8rxvt");
+        assert_eq!(opened["kind"], "command");
+        assert_eq!(opened["toolCallId"], "call-bg");
+        assert_eq!(opened["what"], "python3 -c 'import time; time.sleep(240)'");
+        assert!(
+            !events.iter().any(|event| event["type"] == "agent.finished"),
+            "the command was declared over the moment it was handed off"
+        );
+
+        let note = vec![json!({"type":"queue-operation","operation":"enqueue","content":
+            "<task-notification>\n<task-id>bvah8rxvt</task-id>\n<tool-use-id>call-bg</tool-use-id>\n<status>completed</status>\n<summary>Background command \"Sleep 240 seconds\" completed (exit code 0)</summary>\n</task-notification>"
+        }).to_string()];
+        let closed = replay_lines(&note);
+        let finished = closed
+            .iter()
+            .find(|event| event["type"] == "agent.finished")
+            .expect("nothing ever said the command came back");
+        assert_eq!(finished["agentId"], "bvah8rxvt");
+        assert_eq!(finished["state"], "done");
+        assert!(finished["result"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("exit code 0"));
+    }
+
+    /// A workflow says what it is for in its own answer. The script that
+    /// carries it is not a name a reader can act on.
+    #[test]
+    fn a_workflow_launched_in_the_background_is_named_by_what_it_is_for() {
+        let lines = vec![
+            json!({"type":"assistant","uuid":"a1","message":{"content":[{
+                "type":"tool_use","id":"call-wf","name":"Workflow","input":{"script":"export const meta = {}"}
+            }]}}).to_string(),
+            json!({"type":"user","uuid":"u1","toolUseResult":{
+                "status":"async_launched","taskId":"wepek3i68","taskType":"local_workflow",
+                "workflowName":"two-ones","summary":"Two agents each reply with the single word ONE"
+            },"message":{"content":[{
+                "type":"tool_result","tool_use_id":"call-wf","content":"Workflow launched in background."
+            }]}}).to_string(),
+        ];
+        let events = replay_lines(&lines);
+        let opened = events
+            .iter()
+            .find(|event| event["type"] == "agent.started")
+            .expect("a workflow left running is nowhere on the panel");
+        assert_eq!(opened["kind"], "run");
+        assert_eq!(opened["agentId"], "wepek3i68");
+        assert_eq!(opened["what"], "Two agents each reply with the single word ONE");
     }
 
     #[test]

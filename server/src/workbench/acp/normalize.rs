@@ -110,6 +110,7 @@ pub struct AcpNormalizer {
     agent_words: HashMap<String, String>,
     agent_word_message: HashMap<String, String>,
     agent_doing: HashMap<String, String>,
+    left_running: HashSet<String>,
     agent_reports: HashMap<String, (String, String)>,
     active_signals: HashMap<String, String>,
     suppress_local_user: bool,
@@ -142,6 +143,7 @@ impl Default for AcpNormalizer {
             agent_words: HashMap::new(),
             agent_word_message: HashMap::new(),
             agent_doing: HashMap::new(),
+            left_running: HashSet::new(),
             agent_reports: HashMap::new(),
             active_signals: HashMap::new(),
             suppress_local_user: false,
@@ -889,6 +891,50 @@ impl AcpNormalizer {
         ]
     }
 
+    /**
+     * Work the chat handed to the background, which nothing else on the wire
+     * ever mentions again.
+     *
+     * A backgrounded shell command and a launched workflow reach the reader as
+     * ordinary tool calls that simply COMPLETE: the call is over the moment the
+     * work is handed off, and every later word about it — the kit's own
+     * `<task-notification>` — is injected into its prompt queue, where ACP
+     * never carries it. Read as a plain call, a chat that left a build running
+     * and a chat that ran one to the end look identical the second the call
+     * closes, and the panel that exists to say what a chat has out there had
+     * nothing on it (bw-t26l.20).
+     *
+     * The launch itself is stated, though, in the tool's own answer rather than
+     * in its prose: a shell command left running carries
+     * `toolResponse.backgroundTaskId`, and everything else the kit launches
+     * asynchronously carries `status: "async_launched"` beside its `taskId` and
+     * `taskType`. Both measured against the pinned claude adapter on
+     * 2026-09-03, on a turn that left one command running and launched one
+     * workflow.
+     *
+     * A row this opens stays open. Nothing on this wire ever says the work
+     * ended — saying it did, on a timer or on a guess, would be the one claim a
+     * reader cannot check. What closes it is the record, read back, where the
+     * notification is written down.
+     *
+     * Not for a helper: a `Task` launched asynchronously is async_launched too,
+     * and it already has a row of its own from the call that sent it. A second
+     * row for the same work would be the panel double-counting.
+     */
+    fn work_left_running(&mut self, id: &str, update: &Value, title: &str) -> Option<Value> {
+        if self.subagent_tools.contains(id) || self.task_agents.contains_key(id) {
+            return None;
+        }
+        let answer = update.pointer("/_meta/claudeCode/toolResponse")?;
+        let row = crate::workbench::claude::history::handed_off(answer, id, title)?;
+        // The same answer is repeated on every ping about the call, and on the
+        // close as well. One handover, one row.
+        if !self.left_running.insert(row["agentId"].as_str()?.to_string()) {
+            return None;
+        }
+        Some(row)
+    }
+
     fn message_chunk(
         &mut self,
         session_id: &str,
@@ -1177,12 +1223,22 @@ impl AcpNormalizer {
                 let started_input = self.tool_starts.get(&id)
                     .map(|started| started["input"].clone())
                     .unwrap_or(Value::Null);
+                let started_title = self.tool_starts.get(&id)
+                    .and_then(|started| started["title"].as_str())
+                    .unwrap_or_default()
+                    .to_string();
                 let diffs = update["content"].as_array().into_iter().flatten()
                     .filter(|row| row["type"] == "diff")
                     .map(|row| self.envelope(
                         session_id, provider, raw,
                         json!({"type":"diff","toolCallId":id,"path":row["path"].as_str().unwrap_or_default(),"before":row["oldText"].as_str().unwrap_or_default(),"after":row["newText"].as_str().unwrap_or_default()})
                     )).collect::<Vec<_>>();
+                // Work that outlived its own call gets a row on the panel. Read
+                // on every update rather than on the close: the adapter states
+                // the handover on the ping that carries the tool's answer, and
+                // by the time the call is marked completed the answer is gone
+                // from `_meta` again (measured 2026-09-03).
+                let left_running = self.work_left_running(&id, update, &started_title);
                 if matches!(status, "completed" | "failed") {
                     self.open_tools.remove(&id);
                     self.tool_starts.remove(&id);
@@ -1196,6 +1252,9 @@ impl AcpNormalizer {
                         raw,
                         json!({"type":"tool.completed","toolCallId":id,"ok":status=="completed","output":output,"summary":summary,"acp":update}),
                     ));
+                    if let Some(left) = left_running {
+                        events.push(self.envelope(session_id, provider, raw, left));
+                    }
                     let asynchronous = update.pointer("/_meta/claudeCode/toolResponse/isAsync")
                         .and_then(Value::as_bool).unwrap_or(false)
                         || update.pointer("/rawInput/async").and_then(Value::as_bool).unwrap_or(false)
@@ -1260,6 +1319,9 @@ impl AcpNormalizer {
                         raw,
                         json!({"type":"tool.progress","toolCallId":id,"seconds":0,"summary":summary,"status":status,"acp":update}),
                     ));
+                    if let Some(left) = left_running {
+                        events.push(self.envelope(session_id, provider, raw, left));
+                    }
                     events
                 }
             }
@@ -2474,6 +2536,84 @@ mod tests {
         assert_eq!(finished["type"], "agent.finished");
         assert_eq!(finished["state"], "done");
         assert_eq!(finished["result"], "Built");
+    }
+
+    /// The claude adapter never sends `async_task_spawned`. A command left
+    /// running and a workflow launched come back as ordinary calls that
+    /// complete, and the only word about where the work went is in the tool's
+    /// own answer — `backgroundTaskId` for a shell, `async_launched` with a
+    /// `taskId` for the rest. Both measured on 2026-09-03 against the pinned
+    /// adapter, on a turn that left one command running and launched one
+    /// workflow: the panel beside that chat had neither on it (bw-t26l.20).
+    #[test]
+    fn work_the_chat_left_running_gets_a_row_the_call_alone_would_not() {
+        let mut normalizer = AcpNormalizer::default();
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"remote","update":{"sessionUpdate":"tool_call","toolCallId":"call-bash",
+            "title":"python3 -c 'import time; time.sleep(240)'","status":"in_progress",
+            "_meta":{"claudeCode":{"toolName":"Bash"}}}
+        }));
+        let handed = normalizer.update("local", "claude", &json!({
+            "sessionId":"remote","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-bash",
+            "status":"in_progress","_meta":{"claudeCode":{"toolName":"Bash","toolResponse":{
+                "stdout":"","stderr":"","interrupted":false,"backgroundTaskId":"bvah8rxvt"
+            }}}}
+        }));
+        let row = serde_json::to_value(handed.last().unwrap()).unwrap();
+        assert_eq!(row["type"], "agent.started");
+        assert_eq!(row["agentId"], "bvah8rxvt");
+        assert_eq!(row["kind"], "command");
+        assert_eq!(row["toolCallId"], "call-bash");
+        // The command itself, which is what the reader is looking for the row by.
+        assert_eq!(row["what"], "python3 -c 'import time; time.sleep(240)'");
+
+        // Said again on the call closing is the same news: one row, not two.
+        let closed = normalizer.update("local", "claude", &json!({
+            "sessionId":"remote","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-bash",
+            "status":"completed","rawOutput":"Command running in background with ID: bvah8rxvt.",
+            "_meta":{"claudeCode":{"toolName":"Bash","toolResponse":{"backgroundTaskId":"bvah8rxvt"}}}}
+        }));
+        assert_eq!(kinds(&closed), vec!["tool.completed"]);
+
+        let launched = normalizer.update("local", "claude", &json!({
+            "sessionId":"remote","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-wf",
+            "status":"in_progress","_meta":{"claudeCode":{"toolName":"Workflow","toolResponse":{
+                "status":"async_launched","taskId":"wepek3i68","taskType":"local_workflow",
+                "workflowName":"two-ones","summary":"Two agents each reply with the single word ONE",
+                "runId":"wf_20f2d55b-250"
+            }}}}
+        }));
+        let run = serde_json::to_value(launched.last().unwrap()).unwrap();
+        assert_eq!(run["type"], "agent.started");
+        assert_eq!(run["agentId"], "wepek3i68");
+        assert_eq!(run["kind"], "run");
+        // Its own summary, not the script: what the run is for is the only part
+        // of it a reader can act on.
+        assert_eq!(run["what"], "Two agents each reply with the single word ONE");
+    }
+
+    /// A helper sent off asynchronously is launched the same way, and it
+    /// already has a row from the call that sent it. A second row would be the
+    /// panel counting one piece of work twice (bw-t26l.20).
+    #[test]
+    fn a_helper_launched_asynchronously_keeps_the_one_row_it_has() {
+        let mut normalizer = AcpNormalizer::default();
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"remote","update":{"sessionUpdate":"tool_call","toolCallId":"call-task",
+            "title":"Task","status":"in_progress","rawInput":{"description":"Audit the tests"},
+            "_meta":{"claudeCode":{"toolName":"Task"}}}
+        }));
+        let launched = normalizer.update("local", "claude", &json!({
+            "sessionId":"remote","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-task",
+            "status":"in_progress","_meta":{"claudeCode":{"toolName":"Task","toolResponse":{
+                "status":"async_launched","taskId":"task-9","taskType":"agent","isAsync":true
+            }}}}
+        }));
+        assert!(
+            !kinds(&launched).iter().any(|kind| kind == "agent.started"),
+            "a helper's own call opened a second row: {:?}",
+            kinds(&launched)
+        );
     }
 
     #[test]
