@@ -55,6 +55,15 @@ const buttonVariants = cva(
         sm: 'h-8 px-2.5 gap-1.5 text-xs [&_svg:not([class*=size-])]:size-3.5',
         xs: 'h-7 px-2 gap-1 text-xs [&_svg:not([class*=size-])]:size-3.5',
         icon: 'size-9 [&_svg:not([class*=size-])]:size-4 shrink-0',
+        // For a button another sized component has adopted, which is the case
+        // whenever `<Badge asChild>` wraps one: the chip already says how tall
+        // the box is, how wide its sides are and how big its letters, and every
+        // one of those settings here would be a second answer to the same
+        // question. Two answers on one element are settled by the order the
+        // built sheet happens to put them in, which is how the rail's card
+        // chips came to draw with their id hard against their own border
+        // (bw-s5op.2). This size draws no box at all, so there is one answer.
+        none: '',
       },
       autoHeight: {
         true: '',

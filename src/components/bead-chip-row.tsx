@@ -52,6 +52,12 @@ export function BeadChip({
   const router = useRouter();
   const params = useSearchParams();
   return (
+    /* The button inside takes `size="none"`: the chip around it is what sizes
+       it. The badge already sets this element's height, its side padding and
+       its type, and a second set of those from the button is what left the id
+       with no room between it and its own border (bw-s5op.2). The button is
+       here for what it does — the pointer, the focus ring, the disabled state
+       — not for a box of its own. */
     <Badge
       asChild
       variant="primary"
@@ -63,11 +69,8 @@ export function BeadChip({
       <Button
         type="button"
         variant="foreground"
-        size="xs"
-        className={cn(
-          'relative !min-h-0 !min-w-0 p-0 font-inherit before:absolute before:-inset-2.5 before:content-[\'\']',
-          size === 'sm' ? 'h-5' : 'h-4',
-        )}
+        size="none"
+        className="relative font-inherit before:absolute before:-inset-2.5 before:content-['']"
         data-testid={testId}
         data-bead-id={id}
         data-bead-status={status}

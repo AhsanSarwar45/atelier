@@ -175,7 +175,23 @@ test('every chip in the app draws the same box', async ({ page, request }) => {
     const cards = page.getByTestId('rail-cards');
     await expect(cards).toBeVisible();
     await expect(page.getByTestId('bead-chip').first()).toBeVisible();
+    // The board is asked what these cards are AFTER the rail draws them, and
+    // the colour is the answer. Waiting for it keeps the shot from catching the
+    // uncoloured beat and calling it the finished chip.
+    await expect(page.locator('[data-bead-status="open"]').first()).toBeVisible();
     await cards.screenshot({ path: `${SHOT}/chip-rail-cards.png` });
+
+    // A card chip has the side padding its size defines, like every other chip
+    // that size. It had none: the button inside it answered the same question
+    // the badge had already answered, and the built sheet picked the button's
+    // (bw-s5op.2).
+    const room = await page.getByTestId('bead-chip').first().evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { left: parseFloat(s.paddingLeft), right: parseFloat(s.paddingRight) };
+    });
+    // 0.325rem is what `size="sm"` spells in badgeVariants.
+    expect(room.left, 'a card chip must not sit its id on its own border').toBeCloseTo(0.325 * 16, 1);
+    expect(room.right).toBeCloseTo(0.325 * 16, 1);
     // Every chip's letters sit on the middle of their own pill, whatever is
     // nested inside it and whatever font it is drawn in. Half a pixel is the
     // tolerance because a 20px pill has no exact middle row at density 1.
