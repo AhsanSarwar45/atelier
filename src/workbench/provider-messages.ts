@@ -47,6 +47,17 @@ export interface ProviderMessageSignal {
   detail?: string | null;
   /** ISO instant after which a time-bounded condition is no longer current. */
   retryAt?: string | null;
+  /**
+   * The provider's own words for when it lifts — `resets 9pm (Asia/Karachi)` —
+   * quoted where it named a wall clock rather than an instant.
+   *
+   * Almost every provider names one this way and none of them names both, so
+   * without this the notice carried no time at all: of every usage limit in the
+   * owner's own record, not one arrived with a `retryAt` (bw-gao7). It is read,
+   * never re-rendered — an hour cannot be recomputed out of a clock face and a
+   * zone name without inventing the date it belongs to.
+   */
+  resets?: string | null;
   action?: ProviderMessageAction | null;
   /** Answer-shaped provider text this semantic signal replaces, when present. */
   sourceMessageId?: string | null;
@@ -75,11 +86,19 @@ function clockReads(iso: string, timeZone?: string): string | null {
   return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', ...(timeZone ? { timeZone } : {}) });
 }
 
-/** Provider-independent copy used by every live and replayed notice. */
+/**
+ * Provider-independent copy used by every live and replayed notice.
+ *
+ * An instant is preferred and drawn in the reader's own zone. Failing one, the
+ * provider's own clause stands as it wrote it: it is the only place the time is
+ * written down, and a notice that says a limit was hit without saying when it
+ * lifts leaves the reader with nothing to do but guess (bw-gao7).
+ */
 export function providerMessageReads(signal: ProviderMessageSignal, timeZone?: string): string {
   const reset = signal.retryAt ? clockReads(signal.retryAt, timeZone) : null;
   const zone = reset && timeZone ? ` (${timeZone})` : '';
-  return `${TITLES[signal.kind]}${reset ? ` · resets ${reset}${zone}` : ''}`;
+  const when = reset ? `resets ${reset}${zone}` : signal.resets?.trim() || null;
+  return `${TITLES[signal.kind]}${when ? ` · ${when}` : ''}`;
 }
 
 export function isProviderMessageKind(value: string): value is ProviderMessageKind {
@@ -135,7 +154,10 @@ export function providerMessageFromText(text: string): ProviderMessageSignal | n
       ? 'context_limit' : rate ? 'rate_limit' : null;
   if (kind === null) return null;
 
-  const when = flat.match(/(?:try again at|resets?)\s+(.+?)(?:\.|$)/i)?.[1]?.replace(/(\d)(?:st|nd|rd|th)\b/g, '$1');
+  // The whole clause, and the time inside it. The clause is what a reader sees
+  // when no instant can be made of it; the time is what an instant is made of.
+  const clause = flat.match(/(?:try again at|resets?)\s+[^·]+/i)?.[0]?.trim().replace(/\.$/, '') ?? null;
+  const when = clause?.match(/(?:try again at|resets?)\s+(.+)/i)?.[1]?.replace(/(\d)(?:st|nd|rd|th)\b/g, '$1');
   const parsed = when ? new Date(when) : null;
   const href = flat.match(/https?:\/\/[^\s]+/)?.[0]?.replace(/[.,]$/, '') ?? null;
   return {
@@ -146,6 +168,10 @@ export function providerMessageFromText(text: string): ProviderMessageSignal | n
     scope: kind === 'usage_limit' || kind === 'authentication' ? 'session' : 'turn',
     detail: flat,
     retryAt: parsed && Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null,
+    // Kept even where the instant above parsed, because it is what the provider
+    // actually wrote and the instant is a reading of it. Its Rust twin
+    // (`server/src/workbench/provider_messages.rs`) is the one that runs.
+    resets: clause,
     action: href ? { label: 'Manage usage', href } : null,
   };
 }

@@ -485,6 +485,43 @@ export const opensOn = (row: MachineRow): boolean =>
   row.lines.length > 1 || row.lines.some((l) => Boolean(l.body));
 
 /**
+ * The sentence a provider writes in the chat's own voice, and the condition
+ * this app files that same fact under.
+ *
+ * One thing happened, and it arrives twice: the provider says it in words, and
+ * a moment later the driver says what it MEANS. The projection collapses the
+ * pair when it can — it removes the message the signal names as its source
+ * (`fold.ts`) — but it can only do that when a source was named, and three
+ * routes name none: a sentence spoken inside a delegated turn, a condition read
+ * off a typed failure rather than off prose, and any message whose completion
+ * the driver had already spent. So the pair survives, and the reader is told
+ * the same thing twice in two different wordings.
+ */
+const SAME_FACT: Record<string, string> = {
+  'provider/usage_limit': 'kit/limit_reached',
+  'provider/authorization': 'kit/org_blocked',
+};
+
+/**
+ * The kinds whose sentence this transcript no longer needs to draw, because the
+ * condition it means is already on the page.
+ *
+ * The condition wins, not the sentence: it carries the time the limit lifts
+ * (`provider-messages.ts`), it keeps its own detail behind a chevron, and it is
+ * current state — it replaces itself as the run goes on, where a sentence would
+ * pile up one copy per attempt (bw-gao7).
+ */
+function saidBySignal(items: TranscriptItem[]): Set<string> {
+  const said = new Set<string>();
+  for (const item of items) {
+    if (item.kind !== 'provider_message') continue;
+    const also = SAME_FACT[`provider/${item.signal.kind}`];
+    if (also !== undefined && providerMessageIsCurrent(item.signal)) said.add(also);
+  }
+  return said;
+}
+
+/**
  * The conversation as it is drawn: every machine line carrying its family, and
  * a run of one kind folded into a single row carrying all of them.
  *
@@ -504,8 +541,10 @@ export const opensOn = (row: MachineRow): boolean =>
  */
 export function drawnRows(items: TranscriptItem[]): DrawnRow[] {
   const rows: DrawnRow[] = [];
+  const alreadySaid = saidBySignal(items);
   for (const item of items) {
     const line = machineLine(item);
+    if (line !== null && alreadySaid.has(line.kind)) continue;
     if (!line) {
       rows.push({ row: 'other', item: hisOwnWords(item) });
       continue;

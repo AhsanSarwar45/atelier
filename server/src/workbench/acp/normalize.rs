@@ -1,6 +1,6 @@
 //! Lossless ACP session updates translated once into Atelier's canonical events.
 
-use super::super::protocol::{record_event_id, Event};
+use super::super::protocol::{record_event_id, Event, EventKind};
 use chrono::Utc;
 use serde_json::{json, Value};
 use std::cell::Cell;
@@ -528,10 +528,17 @@ impl AcpNormalizer {
             .filter(|details| !details.is_empty())
             .map(|details| format!("{title}\n{details}"))
             .unwrap_or_else(|| title.to_string());
+        // The time it lifts travels with the kind: `from_text` read both off the
+        // same title, and a notice that keeps the kind but drops the clock is
+        // the one the reader complained about (bw-gao7).
+        let resets = inferred
+            .as_ref()
+            .map(|signal| signal["resets"].clone())
+            .unwrap_or(Value::Null);
         Some(json!({
             "id":id,"kind":kind,"phase":"active","severity":severity,
             "scope":if matches!(kind, "authentication" | "usage_limit") {"session"} else {"turn"},
-            "detail":detail,"retryAt":Value::Null,"action":Value::Null
+            "detail":detail,"retryAt":Value::Null,"action":Value::Null,"resets":resets
         }))
     }
 
@@ -1787,16 +1794,37 @@ impl AcpNormalizer {
         events
     }
 
+    /// A turn the provider answered with an error rather than with work.
+    ///
+    /// The string is the provider's own — a JSON-RPC message with its `data`
+    /// pretty-printed after it, so a limit arrives here as `Internal error:
+    /// You've hit your session limit · resets 9pm (Asia/Karachi): { "errorKind":
+    /// "rate_limit" }`. It is drawn raw, at the foot of the chat, in red.
+    ///
+    /// So it is drawn only when nothing else can say what happened. Finishing
+    /// the turn reads the same condition off the same words and files it as a
+    /// notice that names it in the app's own vocabulary and carries the time it
+    /// lifts; printing the wire string under that notice tells the reader the
+    /// same thing a second time, in a wording written for a log (bw-gao7).
     pub fn fail_turn(&mut self, session_id: &str, provider: &str, message: &str) -> Vec<Event> {
         let raw = json!({"error":message});
         let mut events = self.finish_turn(session_id, provider, &raw);
         events.pop();
-        events.push(self.envelope(
-            session_id,
-            provider,
-            &raw,
-            json!({"type":"error","message":message,"fatal":false,"source":"acp"}),
-        ));
+        let spoken_for = events.iter().any(|event| {
+            matches!(event.kind, EventKind::ProviderMessage)
+                && event
+                    .fields
+                    .get("signal")
+                    .is_some_and(|signal| signal["phase"] == "active")
+        });
+        if !spoken_for {
+            events.push(self.envelope(
+                session_id,
+                provider,
+                &raw,
+                json!({"type":"error","message":message,"fatal":false,"source":"acp"}),
+            ));
+        }
         events.push(self.envelope(
             session_id,
             provider,
@@ -1832,6 +1860,52 @@ mod tests {
         assert_eq!(kinds(&a), kinds(&b));
         assert_eq!(kinds(&a), vec!["message.started", "text.delta"]);
         assert_eq!(serde_json::to_value(&a[1]).unwrap()["text"], "hello");
+    }
+
+    /// A turn the provider ends by refusing to run says so once, and says when
+    /// it will run again.
+    ///
+    /// Taken from the owner's own event log (chat `e6d3753d`, seq 5875-5884),
+    /// where one session limit reached the screen three times over: as the
+    /// notice, as the sentence the provider streamed just before it, and as the
+    /// wire string `Internal error: … : { "errorKind": "rate_limit" }` in red
+    /// underneath both. The notice was the only one of the three that did not
+    /// name the time it lifts, and it is the one the reader is meant to read
+    /// (bw-gao7).
+    #[test]
+    fn a_turn_the_provider_refused_names_the_time_it_lifts_and_says_it_once() {
+        let said = "You've hit your session limit · resets 9pm (Asia/Karachi)";
+        let mut normalizer = AcpNormalizer::default();
+        normalizer.update(
+            "local",
+            "claude",
+            &json!({"sessionId":"remote","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":said}}}),
+        );
+        let events = normalizer.fail_turn("local", "claude", &format!("Internal error: {said}"));
+
+        assert_eq!(
+            kinds(&events),
+            vec!["message.completed", "provider.message", "session.state"],
+            "the wire string is drawn beside the notice that already says it"
+        );
+        let signal = serde_json::to_value(&events[1]).unwrap();
+        assert_eq!(signal["signal"]["kind"], "usage_limit");
+        assert_eq!(signal["signal"]["resets"], "resets 9pm (Asia/Karachi)");
+        // The message the notice stands in for, so the projection can take the
+        // provider's own sentence off the page.
+        assert!(signal["signal"]["sourceMessageId"].is_string());
+    }
+
+    /// A failure the app cannot name is still the reader's only account of it.
+    #[test]
+    fn a_turn_that_failed_unrecognisably_still_prints_what_the_provider_said() {
+        let mut normalizer = AcpNormalizer::default();
+        let events = normalizer.fail_turn("local", "claude", "the pipe closed");
+        assert_eq!(kinds(&events), vec!["error", "session.state"]);
+        assert_eq!(
+            serde_json::to_value(&events[0]).unwrap()["message"],
+            "the pipe closed"
+        );
     }
 
     #[test]

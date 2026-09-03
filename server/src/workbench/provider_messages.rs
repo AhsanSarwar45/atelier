@@ -7,6 +7,50 @@ fn has_any(text: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| text.contains(needle))
 }
 
+/// Where an ASCII needle starts, whatever case it was written in.
+///
+/// Over bytes rather than over a lowercased copy: lowercasing can change a
+/// string's length, and an index taken from the copy can land inside a
+/// character of the original.
+fn found(haystack: &str, needle: &str) -> Option<usize> {
+    let (bytes, needle) = (haystack.as_bytes(), needle.as_bytes());
+    (0..=bytes.len().checked_sub(needle.len())?)
+        .find(|&at| haystack.is_char_boundary(at) && bytes[at..at + needle.len()].eq_ignore_ascii_case(needle))
+}
+
+/// The provider's own words for when the condition lifts, quoted as it wrote
+/// them.
+///
+/// Its literal, over every one of these in the owner's own record: `You've hit
+/// your session limit · resets 9pm (Asia/Karachi)`, with a date in front of the
+/// time when the wait needs one and ` · progress saved` after it when the turn
+/// was kept. Codex writes the other opening: `… or try again at Sep 3rd, 2036
+/// 9:25 PM.`
+///
+/// Quoted rather than parsed into an instant. Recovering one would mean
+/// inventing a date and resolving a zone named in brackets, and a notice that
+/// names the wrong hour is worse than one that names none — the same reading
+/// `chat-state.ts` already takes for the status chip. `retryAt` stays for the
+/// providers that send a real instant; this is what the rest have to offer, and
+/// without it the notice said only that a limit was hit and never when it lifts
+/// (bw-gao7).
+fn resets_at(flat: &str) -> Option<String> {
+    let at = ["resets", "try again at"]
+        .iter()
+        .filter_map(|opening| found(flat, opening))
+        .min()?;
+    // To the next `·` and no further: what follows one is a separate clause the
+    // kit adds, not part of the time.
+    let clause = flat[at..]
+        .split('·')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .trim_end_matches('.')
+        .trim();
+    (!clause.is_empty()).then(|| clause.to_string())
+}
+
 pub fn from_text(text: &str) -> Option<Value> {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let lower = flat.to_lowercase();
@@ -78,6 +122,7 @@ pub fn from_text(text: &str) -> Option<Value> {
         "severity": if blocking { "blocking" } else { "error" },
         "scope": if blocking { "session" } else { "turn" },
         "detail": flat, "retryAt": Value::Null, "action": Value::Null,
+        "resets": resets_at(&flat),
     }))
 }
 
@@ -130,6 +175,36 @@ mod tests {
         let signal = from_text("HTTP 429: too many requests").unwrap();
         assert_eq!(signal["kind"], "rate_limit");
         assert_eq!(signal["id"], "condition:rate_limit");
+    }
+
+    /// Every usage limit in the owner's own record arrived as prose naming a
+    /// wall clock and none of them carried an instant, so prose is the only
+    /// place the time is written down (bw-gao7).
+    #[test]
+    fn native_workbench_services_a_limit_carries_the_time_it_lifts() {
+        let signal = from_text("You've hit your session limit · resets 9pm (Asia/Karachi)").unwrap();
+        assert_eq!(signal["kind"], "usage_limit");
+        assert_eq!(signal["resets"], "resets 9pm (Asia/Karachi)");
+
+        // What the kit adds after the time is a separate clause, not part of it.
+        assert_eq!(
+            from_text("You've hit your weekly limit · resets Aug 23, 1pm · progress saved").unwrap()
+                ["resets"],
+            "resets Aug 23, 1pm"
+        );
+
+        // Codex writes the other opening, and ends the sentence with a stop.
+        assert_eq!(
+            from_text(
+                "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to \
+                 purchase more credits or try again at Sep 3rd, 2036 9:25 PM."
+            )
+            .unwrap()["resets"],
+            "try again at Sep 3rd, 2036 9:25 PM"
+        );
+
+        // A condition that names no time says so, rather than inventing one.
+        assert_eq!(from_text("HTTP 429: too many requests").unwrap()["resets"], Value::Null);
     }
 
     #[test]
