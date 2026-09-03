@@ -273,6 +273,12 @@ function briefOf(agents: SentAway[], sentBy: string | null): string | null {
  * reading the spinner. `waiting` has been in the state list since the panel was
  * written; nothing ever set it (bw-t26l.20).
  *
+ * All three roads a helper can stop on are the same stop, and are drawn the
+ * same way: a permission, a form it was told to fill in, a plan it put up for
+ * approval. Each names the call that sent the helper, and each holds the
+ * helper until somebody answers. Marking only the permission would have left
+ * the other two spinning.
+ *
  * Only a running row is turned, and only a waiting row is turned back: a parked
  * or finished row is not made to work again by an answer.
  */
@@ -761,13 +767,19 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
         askedBy: briefOf(view.agents, e.parentToolCallId ?? null),
         ...(e.execution ? { execution: e.execution } : {}),
       }];
+      next.agents = nowWaiting(view.agents, e.parentToolCallId ?? null, true);
       return next;
 
-    case 'question.resolved':
+    case 'question.resolved': {
+      const asked = items.find((it) => it.kind === 'question' && it.id === e.requestId) as
+        | TranscriptQuestion
+        | undefined;
       next.items = items.map((it) => it.kind === 'question' && it.id === e.requestId
         ? { ...it, answers: e.answers }
         : it);
+      next.agents = nowWaiting(view.agents, asked?.parentId ?? null, false);
       return next;
+    }
 
     case 'plan.proposed':
       if (items.some((it) => it.kind === 'plan' && it.id === e.proposalId)) {
@@ -788,13 +800,19 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
           },
         ];
       }
+      next.agents = nowWaiting(view.agents, e.parentToolCallId ?? null, true);
       return next;
 
-    case 'plan.resolved':
+    case 'plan.resolved': {
+      const asked = items.find((it) => it.kind === 'plan' && it.id === e.proposalId) as
+        | TranscriptPlan
+        | undefined;
       next.items = items.map((it) => it.kind === 'plan' && it.id === e.proposalId
         ? { ...it, status: e.status, actionId: e.actionId, feedback: e.feedback ?? null }
         : it);
+      next.agents = nowWaiting(view.agents, asked?.parentId ?? null, false);
       return next;
+    }
 
     case 'thinking.progress':
       next.thinkingTokens = e.tokens;
@@ -1223,11 +1241,16 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           askedBy: briefOf(agents, e.parentToolCallId ?? null),
           ...(e.execution ? { execution: e.execution } : {}),
         });
+        waited(agents, e.parentToolCallId ?? null, true);
         break;
 
       case 'question.resolved': {
         const at = items.findIndex((item) => item.kind === 'question' && item.id === e.requestId);
-        if (at !== -1) (items[at] as TranscriptQuestion).answers = e.answers;
+        if (at !== -1) {
+          const asked = items[at] as TranscriptQuestion;
+          asked.answers = e.answers;
+          waited(agents, asked.parentId ?? null, false);
+        }
         break;
       }
 
@@ -1250,6 +1273,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
               ...(e.execution ? { execution: e.execution } : {}),
             });
           }
+          waited(agents, e.parentToolCallId ?? null, true);
         }
         break;
 
@@ -1260,6 +1284,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           plan.status = e.status;
           plan.actionId = e.actionId;
           plan.feedback = e.feedback ?? null;
+          waited(agents, plan.parentId ?? null, false);
         }
         break;
       }

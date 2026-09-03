@@ -176,6 +176,60 @@ describe.each(bothWays)('a chat %s', (_name, fold) => {
     expect(answered.agents.find((a) => a.id === 'task-1')?.state).toBe('running');
   });
 
+  /**
+   * The other two roads a helper can stop on. A form it was told to fill in
+   * and a plan it put up for approval hold it exactly the way a permission
+   * does, and a row that went on spinning through either of them would be the
+   * same spinner beside stopped work.
+   */
+  const answeredTheFirst = (): WbpEvent[] => [
+    ...aChatWithAHelper(),
+    said({ type: 'ask.resolved', askId: 'ask-1', chosen: 'yes' }),
+  ];
+
+  it('says the same about a helper stopped on a form it was told to fill in', () => {
+    const asking = said({
+      type: 'question.requested',
+      requestId: 'q-1',
+      blocking: true,
+      questions: [{
+        id: 'which', header: 'Which one', prompt: 'Which router?',
+        selection: 'single' as const,
+        options: [{ id: 'a', label: 'app' }, { id: 'b', label: 'pages' }],
+        allowCustom: false, secret: false,
+      }],
+      parentToolCallId: 'call-1',
+    });
+    const stopped = fold([...answeredTheFirst(), asking]);
+    expect(stopped.agents.find((a) => a.id === 'task-1')?.state).toBe('waiting');
+
+    const filled = fold([
+      ...answeredTheFirst(),
+      asking,
+      said({ type: 'question.resolved', requestId: 'q-1', answers: [{ questionId: 'which', optionIds: ['a'] }] }),
+    ]);
+    expect(filled.agents.find((a) => a.id === 'task-1')?.state).toBe('running');
+  });
+
+  it('says the same about a helper stopped on a plan it put up for approval', () => {
+    const putUp = said({
+      type: 'plan.proposed',
+      proposalId: 'plan-1',
+      markdown: '1. Read the router',
+      actions: [{ id: 'go', kind: 'accept' as const, label: 'Go ahead' }],
+      parentToolCallId: 'call-1',
+    });
+    const stopped = fold([...answeredTheFirst(), putUp]);
+    expect(stopped.agents.find((a) => a.id === 'task-1')?.state).toBe('waiting');
+
+    const approved = fold([
+      ...answeredTheFirst(),
+      putUp,
+      said({ type: 'plan.resolved', proposalId: 'plan-1', status: 'accepted' as const, actionId: 'go' }),
+    ]);
+    expect(approved.agents.find((a) => a.id === 'task-1')?.state).toBe('running');
+  });
+
   it('still gives the helper’s own conversation every one of those rows', () => {
     const row = view.agents.find((a) => a.id === 'task-1')!;
     expect(saidBy(view.items, row).map((i) => i.id)).toEqual(['t1', 'h1', 'cmd-ok', 'cmd-bad', 'ask-1']);

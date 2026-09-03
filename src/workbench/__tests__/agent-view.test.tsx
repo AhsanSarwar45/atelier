@@ -216,7 +216,11 @@ describe('the pane itself', () => {
     expect(calls[1]).toContain('before=-41');
   });
 
-  it('says so plainly when the agent has not said anything yet', () => {
+  // The name this case used to carry outlived the copy pass that emptied it
+  // (bw-0hfr.2 took the "nothing said yet" line out). A case called "says so
+  // plainly" that asserts nothing is said reads as a broken pane to the next
+  // person who opens the file; it is the silence that is the contract.
+  it('leaves the pane empty when the agent has not said anything yet', () => {
     const row = { ...view.agents.find((a) => a.id === 'task-2')!, state: 'running' as const };
     render(
       <AgentView
