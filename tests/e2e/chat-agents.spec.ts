@@ -1147,9 +1147,18 @@ test.describe('the agents a chat sends off', () => {
     await row.waitFor({ timeout: DELEGATED_MS });
     await expect(row.getByTestId('sent-away-steer'), 'a running row carried no controls').toBeVisible();
 
-    // Parked: it runs on, and the turn comes back. Both halves matter — a park
-    // that ended it would be a stop, and a park that kept the chat waiting
-    // would be nothing at all.
+    // Parked: it runs on, and it says so. A park that ended it would be a stop,
+    // and the row is the only place the difference is visible.
+    //
+    // What parking does NOT do here is hand the turn straight back, and that is
+    // the kit's doing rather than ours: backgrounding releases the MODEL, which
+    // says so and is free to work on, but the turn itself stays open until the
+    // helper's own session ends. Measured on the pinned claude adapter,
+    // 2026-09-03: parked at 09:46:21, the model said "the subagent is running
+    // in the background" at 09:46:23, and `end_turn` came at 09:50:26 — four
+    // minutes later, when the sleep it was waiting on was over. So the turn is
+    // waited for after the agent is ended, below, where ending it is what
+    // finishes the turn.
     await row.getByTestId('sent-away-park').click();
     await expect
       .poll(async () => row.getAttribute('data-state'), {
@@ -1157,9 +1166,6 @@ test.describe('the agents a chat sends off', () => {
         timeout: DELEGATED_MS,
       })
       .toBe('parked');
-    await expect(page.getByTestId('send-button'), 'the chat never got its turn back').toBeVisible({
-      timeout: DELEGATED_MS,
-    });
 
     // Words for it, which go to the chat that sent it. Drawn as relayed,
     // because that is what happened to them.
@@ -1184,6 +1190,11 @@ test.describe('the agents a chat sends off', () => {
         timeout: DELEGATED_MS,
       })
       .toBe('stopped');
+
+    // And with nothing of its own left running, the chat has its turn back.
+    await expect(page.getByTestId('send-button'), 'the chat never got its turn back').toBeVisible({
+      timeout: DELEGATED_MS,
+    });
 
     // The chat itself carried on, which is the difference between stopping one
     // agent and stopping the chat. Asked outright, because a chat that had been
@@ -1237,7 +1248,7 @@ test.describe('the agents a chat sends off', () => {
         async () => {
           if ((await fromAnAgent.count()) > 0) return true;
           try {
-            if ((await open.count()) > 0) await open.first().getByTestId('permission-allow_once').click({ timeout: 2000 });
+            if ((await open.count()) > 0) await open.first().locator('[data-ask-kind="allow_once"]').click({ timeout: 2000 });
           } catch {
             // It was answered, or resolved itself, between the look and the click.
           }
@@ -1267,7 +1278,9 @@ test.describe('the agents a chat sends off', () => {
     await page.screenshot({ path: `${SHOTS}/chat-agents-steer-asked.png`, fullPage: false });
 
     // Answered, and it is working again.
-    await card.getByTestId('permission-allow_once').click();
+    // By the ACP kind, not the option's id: the id is the agent's own word —
+    // Claude says "allow-once" — and the card carries both for exactly this.
+    await card.locator('[data-ask-kind="allow_once"]').click();
     await expect
       .poll(async () => row.getAttribute('data-state'), {
         message: 'the row never went back to working after it was answered',

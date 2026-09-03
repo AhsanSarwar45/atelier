@@ -2296,6 +2296,15 @@ impl AcpDriver {
                         reply,
                     })
                     .await?;
+                // The kit answers a park with whether it actually moved the
+                // work, and a refusal is an answer: it has no live background
+                // task for this agent. Recorded regardless, the row said
+                // "background" about a helper still running in the foreground
+                // — the one thing the button exists to tell the reader, said
+                // wrongly (bw-t26l.20).
+                if result["parked"] == Value::Bool(false) {
+                    return Err("the kit has no background task for this agent".into());
+                }
                 self.record_agent_control(agent_id, state).await?;
                 Ok(result)
             }
