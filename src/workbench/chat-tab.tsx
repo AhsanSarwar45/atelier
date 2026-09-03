@@ -1414,12 +1414,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         // One distance between every two chips on this line, read from the one
         // place it is written. The model/mode group inside it held its own pair
         // half a step closer, so the four chips drew as two pairs instead of a
-        // row (bw-ja9l.10). Wrapped rows sit closer than that, since the gap
-        // across a row and the gap between two rows are not the same distance.
+        // row (bw-ja9l.10), and the limit chips at the far end held theirs
+        // closer still. There is now one distance and it goes both ways: a
+        // wrapped row used to be told to sit closer than the row it came off,
+        // and at four pixels there is nothing closer left to ask for
+        // (bw-r8iy.3).
         className={cn(
           'flex min-h-10 shrink-0 flex-wrap items-center border-b border-border/60 px-4 py-1.5 text-sm',
           CHIP_GAP,
-          'gap-y-1',
         )}
       >
         <ProviderBadge brand={sessionBrand} model={view.model} icon={sessionBrand === 'local' ? <ModelIcon brand={sessionBrand} model={view.model} identity={selectedModel?.family ?? selectedModel?.publisher} className="size-3" /> : undefined} className="hidden sm:inline-flex" />

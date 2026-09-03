@@ -233,6 +233,15 @@ describe('what the chat is running, on its own line', () => {
     const opening = line.slice(0, line.indexOf('>'));
     expect(opening, 'the line spaces its chips by the shared value').toContain('CHIP_GAP');
     expect(opening, 'and never by a number of its own').not.toMatch(/\bgap-[\d.]+/);
+
+    // The limit chips at the far end are the third pair on this line, and they
+    // are where the shared value came from: they had always sat 4px apart while
+    // everything else sat 12px, so the pair read as the one group on the line
+    // and the rest read as scattered marks. Now the line is theirs and they
+    // must not keep a private copy of it (bw-r8iy.3).
+    const usage = readFileSync(resolve(__dirname, '../usage-view.tsx'), 'utf8');
+    const pair = usage.slice(0, usage.indexOf('data-testid="plan-chips"'));
+    expect(pair.slice(pair.lastIndexOf('<span')), 'the limit chips space themselves by the shared value').toContain('CHIP_GAP');
   });
 
   it('gives every tag on the line a mark of its own', () => {

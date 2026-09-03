@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { usePlanUsage } from '@/workbench/live';
+import { CHIP_GAP } from '@/workbench/what-it-runs';
 import type { Brand } from '@/workbench/protocol';
 import {
 
@@ -226,7 +227,7 @@ export function PlanChip({ usage, onOpen }: { usage: PlanUsage; onOpen: () => vo
     .filter(Boolean)
     .join('\n');
   return (
-    <span className="flex items-center gap-1" data-testid="plan-chips">
+    <span className={cn('flex items-center', CHIP_GAP)} data-testid="plan-chips">
       {five && (
         <Badge variant={severityVariant(five.severity)} appearance="light" size="sm" className="font-mono">
           <Button

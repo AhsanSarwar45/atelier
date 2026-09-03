@@ -40,6 +40,8 @@ async function mount(page: Page, projectPath: string) {
     { ...base, seq: 3, type: 'text.delta', messageId: 'answer', text: 'Chips above this line.' },
     { ...base, seq: 4, type: 'message.completed', messageId: 'answer' },
     { ...base, seq: 5, type: 'session.state', state: 'idle', label: 'Ready' },
+    { ...base, seq: 6, type: 'context', used: 107_000, window: 1_000_000 },
+    { ...base, seq: 7, type: 'cost', cost: { kind: 'tokens', input: 20_000_000, output: 4_010_484, total: 24_010_484 } },
   ];
   const snapshot = foldAll(events);
   const beads = [PARENT_CARD, 'wl-kid1', 'wl-kid2'];
@@ -51,10 +53,21 @@ async function mount(page: Page, projectPath: string) {
       readyState = FixtureSocket.OPEN;
       onmessage: ((event: MessageEvent) => void) | null = null;
       constructor(url: string) {
+        const send = (payload: unknown) =>
+          setTimeout(() => this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) })), 0);
         if (new URL(url).searchParams.get('chat') === chat)
-          setTimeout(() => this.onmessage?.(new MessageEvent('message', {
-            data: JSON.stringify({ tag: 'chat.snapshot', scope: chat, data: JSON.stringify(view) }),
-          })), 0);
+          send({ tag: 'chat.snapshot', scope: chat, data: JSON.stringify(view) });
+        // The limit chips read the window's shared stream, not this chat's.
+        send({ tag: 'workbench', data: JSON.stringify({
+          kind: 'usage',
+          brand: 'claude',
+          usage: {
+            available: true, plan: 'max', perModel: [], credits: null, driving: [],
+            at: new Date(0).toISOString(),
+            session: { key: 'five', label: '5h', percent: 81, resetsAt: new Date(0).toISOString(), severity: 'warn' },
+            week: { key: 'week', label: 'wk', percent: 20, resetsAt: null, severity: 'ok' },
+          },
+        }) });
       }
       close() { this.readyState = FixtureSocket.CLOSED; }
       send() {}
@@ -121,6 +134,31 @@ async function offsets(page: Page) {
   });
 }
 
+
+/**
+ * The distance between each pair of neighbouring chips on the status line, in
+ * CSS pixels, left to right — including the two limit chips at the far end,
+ * which had always sat closer to each other than anything else on the line.
+ */
+async function gaps(page: Page) {
+  return page.evaluate(() => {
+    const line = document.querySelector('[data-testid="chat-status-line"]')!;
+    const boxes = [...line.querySelectorAll('[data-slot="badge"]')]
+      .filter((b) => !b.parentElement?.closest('[data-slot="badge"]'))
+      .map((b) => b.getBoundingClientRect())
+      .filter((r) => r.width > 0)
+      .sort((a, b) => a.left - b.left);
+    const out: number[] = [];
+    for (let i = 1; i < boxes.length; i++) {
+      // `ml-auto` opens one deliberate space between the two groups; every
+      // other distance on the line is the shared one.
+      const d = +(boxes[i].left - boxes[i - 1].right).toFixed(2);
+      if (d < 40) out.push(d);
+    }
+    return out;
+  });
+}
+
 test('a status-line chip carries its letters in the middle of its pill', async ({ browser, request }) => {
   const run = join(process.cwd(), 'tests', '.workbench-run-chip-centering');
   const projectPath = makeFixtureProject(join(run, 'project'), join(run, 'reporting'));
@@ -133,7 +171,7 @@ test('a status-line chip carries its letters in the middle of its pill', async (
     project = await made.json();
 
     for (const scale of SCALES) {
-      const context = await browser.newContext({ deviceScaleFactor: scale, viewport: { width: 1200, height: 760 } });
+      const context = await browser.newContext({ deviceScaleFactor: scale, viewport: { width: 1600, height: 760 } });
       const page = await context.newPage();
       await mount(page, projectPath);
       await page.goto(`/project?id=${project!.id}&tab=chat`);
@@ -143,6 +181,11 @@ test('a status-line chip carries its letters in the middle of its pill', async (
       // As it ships.
       await page.getByTestId('chat-status-line').screenshot({ path: `${SHOT}/x${scale}-nudged.png` });
       console.log(`OFFSETS x${scale} nudged ` + JSON.stringify(await offsets(page)));
+      // One distance across the whole line, the limit chips' own (bw-r8iy.3).
+      const spacing = await gaps(page);
+      expect(spacing.length, 'the line must have several chips to space').toBeGreaterThan(3);
+      expect(new Set(spacing), `every gap on the line is one distance, got ${spacing}`).toEqual(new Set([spacing[0]]));
+      expect(spacing[0], 'and that distance is four pixels').toBe(4);
       // And with the one-pixel correction taken back out, so the shots can be
       // told apart by the only thing that differs between them.
       await page.addStyleTag({ content: '[data-slot="badge"] > span:not([data-slot]) { top: 0 !important; }' });

@@ -67,8 +67,15 @@ const BRAND_DEFAULT_LABEL = 'Default model';
  * Exported because this group sits inside that line and must not space its own
  * two chips differently: it is a shrinking device, not a grouping the reader is
  * meant to see. Written once so the two cannot drift (bw-ja9l.10).
+ *
+ * Four pixels, which is what the two limit chips at the right-hand end had
+ * always used between themselves. At twelve the line read as a handful of
+ * separate marks with the eye travelling between them, while that one pair sat
+ * together and looked like the only thing on the line that belonged to
+ * anything. Taking the pair's distance for the whole line settles it the other
+ * way: the chips read as one row, and the pair stops being special (bw-r8iy.3).
  */
-export const CHIP_GAP = 'gap-3';
+export const CHIP_GAP = 'gap-1';
 
 /**
  * The families this app can name, spelled the way the terminal spells them.
