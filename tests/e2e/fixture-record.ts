@@ -297,18 +297,24 @@ export function writeChatWithHelper(opts: {
     const mine = helperNumber(n);
     const sidechain = (extra: Record<string, unknown>, seconds: number): Record<string, unknown> =>
       stamp({ isSidechain: true, agentId, ...extra }, seconds);
+    // Each helper's rows carry ids of their own. A record's uuid is unique
+    // across the whole chat — the reader keys a message by it — so three
+    // helpers written from one template with one set of ids are not three
+    // conversations: the second and third are read as the first one repeated,
+    // and a pane opened on either drew no words at all (bw-t26l.20).
+    const own = (step: number): string => `fixture-h${step}-${agentId}`;
     const helper = [
       sidechain(
-        { parentUuid: null, uuid: 'fixture-h1', type: 'user', message: { role: 'user', content: mine.brief } },
+        { parentUuid: null, uuid: own(1), type: 'user', message: { role: 'user', content: mine.brief } },
         3 + n,
       ),
       sidechain(
         {
-          parentUuid: 'fixture-h1',
-          uuid: 'fixture-h2',
+          parentUuid: own(1),
+          uuid: own(2),
           type: 'assistant',
           message: {
-            id: 'msg_fixture_h1',
+            id: `msg_${agentId}_h1`,
             model: mine.model,
             role: 'assistant',
             usage: spentBy(n),
@@ -319,11 +325,11 @@ export function writeChatWithHelper(opts: {
       ),
       sidechain(
         {
-          parentUuid: 'fixture-h2',
-          uuid: 'fixture-h3',
+          parentUuid: own(2),
+          uuid: own(3),
           type: 'assistant',
           message: {
-            id: 'msg_fixture_h2',
+            id: `msg_${agentId}_h2`,
             model: mine.model,
             role: 'assistant',
             usage: spentBy(n),
@@ -336,8 +342,8 @@ export function writeChatWithHelper(opts: {
       ),
       sidechain(
         {
-          parentUuid: 'fixture-h3',
-          uuid: 'fixture-h4',
+          parentUuid: own(3),
+          uuid: own(4),
           type: 'user',
           message: {
             role: 'user',
@@ -348,11 +354,11 @@ export function writeChatWithHelper(opts: {
       ),
       sidechain(
         {
-          parentUuid: 'fixture-h4',
-          uuid: 'fixture-h5',
+          parentUuid: own(4),
+          uuid: own(5),
           type: 'assistant',
           message: {
-            id: 'msg_fixture_h3',
+            id: `msg_${agentId}_h3`,
             model: mine.model,
             role: 'assistant',
             usage: spentBy(n),

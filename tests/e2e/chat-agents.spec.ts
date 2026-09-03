@@ -241,7 +241,10 @@ test.describe('the agents a chat sends off', () => {
     });
   });
 
-  test('a helper’s own words draw under the call that sent it', async ({ page, request }) => {
+  test('the call that sent a helper says what it is doing, and keeps its words off the page', async ({
+    page,
+    request,
+  }) => {
     const chat = await freshChat(request, page);
     await say(
       request,
@@ -283,18 +286,31 @@ test.describe('the agents a chat sends off', () => {
       })
       .not.toBe('');
 
-    // The helper's own sentences — the whole point. Nothing about the call they
-    // came from is guessed either: the row they hang off is named on the message.
-    const sentences = page.locator(`[data-testid="assistant-message"][data-sent-by="${sentBy}"]`);
-    await sentences.first().waitFor({ timeout: DELEGATED_MS });
+    // And the helper's own sentences are NOT in this transcript. They were,
+    // once, and this case used to insist on it — then the manager ruled that
+    // his transcript is his own turn and a scout reading nine files must not
+    // put nine rows in it (bw-pukk.1). So the line above is the whole of what
+    // the conversation says about a helper's work, and everything else it did
+    // is one click away on its card.
+    const inline = page.locator(`[data-testid="assistant-message"][data-sent-by="${sentBy}"]`);
+    expect(
+      await inline.count(),
+      'the helper\u2019s own sentences were drawn in the manager\u2019s transcript',
+    ).toBe(0);
 
-    // Under it, not merely near it: the sending row comes first in the page.
-    const order = await page.evaluate((id) => {
-      const row = document.querySelector(`[data-tool-id="${id}"]`)!;
-      const said = document.querySelector(`[data-testid="assistant-message"][data-sent-by="${id}"]`)!;
-      return row.compareDocumentPosition(said) & Node.DOCUMENT_POSITION_FOLLOWING ? 'after' : 'before';
-    }, sentBy);
-    expect(order, 'the helper spoke above the call that sent it').toBe('after');
+    // Where they do live: the conversation opened from the helper's own card.
+    // Polled, because the card exists from the moment the call does and the
+    // helper may not have said anything yet.
+    await page.locator('[data-testid="sent-away-row"][data-kind="helper"]').first().click();
+    const pane = page.getByTestId('agent-view');
+    await expect
+      .poll(async () => (await pane.getByTestId('agent-view-said').innerText()).trim(), {
+        message: 'the helper\u2019s own conversation is empty',
+        timeout: DELEGATED_MS,
+      })
+      .not.toBe('');
+    await page.getByTestId('agent-view-close').click();
+    await expect(pane).toHaveCount(0);
 
     // And the chat's own words are still the chat's own: nothing was attributed
     // to a helper that no helper said. Read from the sentence it was told to
@@ -326,8 +342,8 @@ test.describe('the agents a chat sends off', () => {
     };
 
     // Taken while the helper is still working, because that is the picture
-    // this case is about: a call still running, the helper's own sentences
-    // under it, and a line saying what it is doing now.
+    // this case is about: a call still running, a line under it saying what
+    // the helper is doing now, and none of the helper's own rows in between.
     //
     // The spinning line at the foot of the picture is not a fourth row and not
     // a loose call: it is the chat's own working line, which names whatever the
@@ -541,7 +557,13 @@ test.describe('the agents a chat sends off', () => {
     // the ruling itself: the panel carries the news and the conversation does
     // not repeat it.
     const helper = page.locator('[data-testid="sent-away-row"][data-kind="helper"]');
-    await expect(helper.getByTestId('sent-away-result')).toBeVisible({ timeout: DELEGATED_MS });
+    // Attached first, then shown: a helper that has finished folds away behind
+    // its count the moment it does, and the rail opens shut. What the reader
+    // asks for is one click away, which is what this waits out (bw-t26l.20).
+    await expect(helper.getByTestId('sent-away-result')).toBeAttached({ timeout: DELEGATED_MS });
+    const stopped = page.getByTestId('toggle-stopped-agents');
+    if (await stopped.isVisible()) await stopped.click();
+    await expect(helper.getByTestId('sent-away-result')).toBeVisible();
 
     const linesNow = async () =>
       await page
@@ -678,7 +700,11 @@ test.describe('the agents a chat sends off', () => {
 
     // The same agent, by the same id — not merely "a row".
     const again = page.locator(`[data-testid="sent-away-row"][data-agent="${agent}"]`);
-    await again.waitFor({ timeout: HELLO_MS });
+    // This helper finished before the restart, so it is read back folded away
+    // (bw-t26l.20).
+    await again.waitFor({ state: 'attached', timeout: HELLO_MS });
+    const shut = page.getByTestId('toggle-stopped-agents');
+    if (await shut.isVisible()) await shut.click();
     await expect(again).toHaveAttribute('data-kind', 'helper');
     await again.click();
 
@@ -757,22 +783,18 @@ test.describe('the agents a chat sends off', () => {
       // The chat's own answer is the chat's own.
       const itsOwn = page.locator('[data-testid="assistant-message"]:not([data-sent-by])');
       await expect(itsOwn.filter({ hasText: CHAT_SAID })).toHaveCount(1, { timeout: HELLO_MS });
-      // And the helper's words are the helper's, named by the call that sent
-      // it — the whole of this item in one line.
-      const helperSaid = page.locator(`[data-testid="assistant-message"][data-sent-by="${SENT_OFF_CALL}"]`);
-      await expect(helperSaid.filter({ hasText: HELPER_SAID })).toHaveCount(1);
+      // And the helper's sentence is nowhere in his transcript — neither
+      // filed under the call that sent it nor, worse, drawn as the chat's own.
+      // The reading has to keep the two apart to hide the right one: a chat
+      // read back off the disk that mixed them would put a helper's words in
+      // the manager's mouth (bw-7ks.22.7), and his transcript is his own turn
+      // (bw-pukk.1). The call that sent it stays, and so does the card.
+      await expect(page.locator(`[data-testid="assistant-message"][data-sent-by="${SENT_OFF_CALL}"]`)).toHaveCount(0);
       expect(
         await itsOwn.filter({ hasText: HELPER_SAID }).count(),
         'the helper’s sentence was drawn as the chat’s own',
       ).toBe(0);
-      // Under the call that sent it, not merely near it.
-      const order = await page.evaluate((id) => {
-        const row = document.querySelector(`[data-tool-id="${id}"]`);
-        const said = document.querySelector(`[data-testid="assistant-message"][data-sent-by="${id}"]`);
-        if (!row || !said) return 'missing';
-        return row.compareDocumentPosition(said) & Node.DOCUMENT_POSITION_FOLLOWING ? 'after' : 'before';
-      }, SENT_OFF_CALL);
-      expect(order, 'the helper spoke above the call that sent it').toBe('after');
+      await expect(page.locator(`[data-tool-id="${SENT_OFF_CALL}"]`)).toHaveCount(1);
 
       // ---- the panel -------------------------------------------------------
       await expect(page.getByTestId('sent-away-panel')).toHaveAttribute('data-rows', '1');
@@ -797,6 +819,10 @@ test.describe('the agents a chat sends off', () => {
       await page.screenshot({ path: `${SHOTS}/chat-agents-read-back.png`, fullPage: false });
 
       // ---- and its own conversation, one click away ------------------------
+      // The helper has finished, so the rail keeps it folded behind its count:
+      // what it holds in front of the reader is what is still moving.
+      const folded = page.getByTestId('toggle-stopped-agents');
+      if (await folded.isVisible()) await folded.click();
       await row.click();
       const pane = page.getByTestId('agent-view');
       await expect(pane).toHaveAttribute('data-agent', HELPER_AGENT);
