@@ -3,7 +3,6 @@
 import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { ZoomIn } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import type { ImageComparison } from '@/workbench/protocol';
@@ -38,6 +37,19 @@ export function ImageComparisonView({ comparison, onLook }: {
     );
   }
 
+  // A wipe's labels and its zoom control sit UNDER the picture, not on it.
+  // Laid over it they were readable only while the picture was big enough to
+  // have spare room, and a comparison is often the opposite of that: the proof
+  // of a spacing change is a strip of chips a few dozen pixels tall. On the one
+  // the manager was looking at, the two labels — each a whole sentence, because
+  // a label here is the alt text the agent wrote — were wider than the picture
+  // and hid all of it, and the round zoom button pinned to the top corner was
+  // taller than the picture, so the frame's own overflow cut it in half
+  // (bw-7v5c). Below it, neither can cover the picture and nothing clips them,
+  // whatever shape the picture turns out to be.
+  //
+  // Which side is which then has to be said in words. Side by side, position
+  // says it; a wipe draws both halves in one box, so the caption names them.
   return (
     <Panel tone="frame" inset="none" className="mb-2 inline-block max-w-2xl overflow-hidden align-top">
     <div
@@ -50,7 +62,7 @@ export function ImageComparisonView({ comparison, onLook }: {
       aria-valuemax={100}
       aria-valuenow={Math.round(pct)}
       tabIndex={0}
-      className="relative inline-block max-w-full select-none overflow-hidden align-top"
+      className="relative block max-w-full select-none overflow-hidden"
       style={{ touchAction: 'none' }}
       onPointerDown={(event) => { dragging.current = true; frame.current?.setPointerCapture?.(event.pointerId); place(event); }}
       onPointerMove={(event) => { if (dragging.current) place(event); }}
@@ -74,16 +86,21 @@ export function ImageComparisonView({ comparison, onLook }: {
         <img src={comparison.before.dataUrl} alt={comparison.before.alt} className="absolute left-0 top-0 h-full w-auto max-w-none" draggable={false} />
       </div>
       <div className="absolute inset-y-0 w-0.5 cursor-ew-resize bg-background" style={{ left: `${pct}%` }} />
-      <Badge variant="outline" size="xs" className="absolute bottom-2 left-2 bg-background">{comparison.before.alt}</Badge>
-      <Badge variant="outline" size="xs" className="absolute bottom-2 right-2 bg-background">{comparison.after.alt}</Badge>
+    </div>
+    <div className="flex items-start gap-3 border-t border-border/60 px-2 py-1.5">
+      <p data-testid="comparison-before-label" className="min-w-0 flex-1 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">Before</span> {comparison.before.alt}
+      </p>
+      <p data-testid="comparison-after-label" className="min-w-0 flex-1 text-right text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">After</span> {comparison.after.alt}
+      </p>
       {onLook && <Button
         variant="secondary"
         mode="icon"
         size="sm"
         radius="full"
         aria-label="Open comparison to zoom"
-        className="absolute right-2 top-2 z-10 shadow"
-        onPointerDown={(event) => event.stopPropagation()}
+        className="shrink-0"
         onClick={() => onLook(comparison)}
       >
         <ZoomIn />
