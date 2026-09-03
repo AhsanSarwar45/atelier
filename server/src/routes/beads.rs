@@ -447,10 +447,25 @@ fn is_non_issue_record(line: &str) -> bool {
     )
 }
 
-/// Reads comments from .beads/issues.jsonl and inserts them into `comments_map`.
-/// Used when `bd sql` is unavailable (embedded mode).
+/// Reads comments from the project's issues file and inserts them into
+/// `comments_map`. Used when `bd sql` is unavailable (embedded mode).
 fn load_comments_from_jsonl(project_path: &Path, comments_map: &mut HashMap<String, Vec<Comment>>) {
-    let issues_path = project_path.join(".beads").join("issues.jsonl");
+    // The same file the beads themselves are read from. This built the default
+    // path by hand, so on a project whose `.beads/config.yaml` names a
+    // sync-branch — where the real issues file lives in a beads worktree under
+    // `.git` — the board was read from the worktree and its comments from a
+    // file beside it, and every comment silently went missing (bw-t26l.20).
+    let issues_path = resolve_issues_path(project_path);
+    // A project with no board has no issues file, and that is not a failure:
+    // there is simply nothing to read. Warning about it wrote one line per
+    // board poll, so a run that asked about a boardless project buried every
+    // real error in the server log under hundreds of copies of a normal state
+    // — 371 of them in one e2e run, against five lines worth reading
+    // (bw-t26l.20).
+    if !issues_path.exists() {
+        tracing::debug!("no {} to read comments from", issues_path.display());
+        return;
+    }
     let jsonl_beads = match read_beads_from_jsonl(&issues_path) {
         Ok(b) => b,
         Err(e) => {
@@ -2358,6 +2373,55 @@ mod tests {
 
         let result = resolve_issues_path(project);
         assert_eq!(result, project.join(".beads").join("issues.jsonl"));
+    }
+
+    /// Comments come out of the same file the beads themselves came out of.
+    ///
+    /// On a project whose `.beads/config.yaml` names a sync-branch, the real
+    /// issues file lives in a beads worktree under `.git`. The board was read
+    /// from there and its comments from `.beads/issues.jsonl` beside it, so on
+    /// every such project each bead arrived with no comments on it at all and
+    /// nothing in the log said why (bw-t26l.20).
+    #[test]
+    fn comments_are_read_from_the_file_the_board_is_read_from() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path();
+        let beads_dir = project.join(".beads");
+        std::fs::create_dir_all(&beads_dir).unwrap();
+        std::fs::write(beads_dir.join("config.yaml"), "sync-branch: beads-sync\n").unwrap();
+        // The file beside the config, which is NOT the one the board reads.
+        std::fs::write(
+            beads_dir.join("issues.jsonl"),
+            concat!(
+                r#"{"id":"a-1","title":"stale","status":"open","comments":[{"id":"c-1","issue_id":"a-1","#,
+                r#""author":"someone","text":"from the wrong file","created_at":"2026-09-03T00:00:00Z"}]}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let worktree_beads = project
+            .join(".git")
+            .join("beads-worktrees")
+            .join("beads-sync")
+            .join(".beads");
+        std::fs::create_dir_all(&worktree_beads).unwrap();
+        std::fs::write(
+            worktree_beads.join("issues.jsonl"),
+            concat!(
+                r#"{"id":"a-1","title":"real","status":"open","comments":[{"id":"c-2","issue_id":"a-1","#,
+                r#""author":"someone","text":"from the board's own file","created_at":"2026-09-03T00:00:00Z"}]}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let mut comments_map: HashMap<String, Vec<Comment>> = HashMap::new();
+        load_comments_from_jsonl(project, &mut comments_map);
+
+        let read = comments_map.get("a-1").expect("the bead's comments were found");
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].text, "from the board's own file");
     }
 
     // ── CreateBeadRequest deserialization tests ──────────────────────────
