@@ -989,6 +989,42 @@ fn plus_usage(to: &mut Usage, from: &Usage) {
     to.total += from.total;
 }
 
+/// What each agent this chat sent off spent, and the model it spent it on.
+///
+/// Their turns are written to a file apiece beside the record and appear in
+/// none of its own rows, so a reading that stops at the record undercounts a
+/// chat that delegated by everything it delegated (bw-t26l.20).
+fn helper_spend(record: &Path) -> Vec<(Usage, String)> {
+    let Some(stem) = record.file_stem().and_then(|stem| stem.to_str()) else {
+        return Vec::new();
+    };
+    let Ok(entries) = fs::read_dir(record.with_file_name(stem).join("subagents")) else {
+        return Vec::new();
+    };
+    let mut spent = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("agent-") && name.ends_with(".jsonl"))
+        {
+            continue;
+        }
+        let rows = jsonl(&path);
+        let one = usage(&rows);
+        if one.total == 0 {
+            continue;
+        }
+        let model = rows
+            .iter()
+            .find_map(|row| as_nonempty(&row["message"]["model"]))
+            .unwrap_or_else(|| "unnamed".into());
+        spent.push((one, model));
+    }
+    spent
+}
+
 /// Exact all-time token arithmetic used by the former sidecar: each assistant
 /// turn is counted once by message id, helpers come from their own records,
 /// and cache/thinking categories remain separate for the token inspector.
@@ -1025,31 +1061,10 @@ pub fn token_spend(record: &Path) -> Option<Value> {
         plus_usage(&mut entry.0, &one);
         entry.1 += 1;
     }
-    if let Some(stem) = record.file_stem().and_then(|s| s.to_str()) {
-        if let Ok(entries) = fs::read_dir(record.with_file_name(stem).join("subagents")) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if !path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.starts_with("agent-") && n.ends_with(".jsonl"))
-                {
-                    continue;
-                }
-                let helper_rows = jsonl(&path);
-                let spent = usage(&helper_rows);
-                if spent.total == 0 {
-                    continue;
-                }
-                helper_count += 1;
-                plus_usage(&mut helpers, &spent);
-                let model = helper_rows
-                    .iter()
-                    .find_map(|row| as_nonempty(&row["message"]["model"]))
-                    .unwrap_or_else(|| "unnamed".into());
-                plus_usage(&mut models.entry(model).or_default().0, &spent);
-            }
-        }
+    for (spent, model) in helper_spend(record) {
+        helper_count += 1;
+        plus_usage(&mut helpers, &spent);
+        plus_usage(&mut models.entry(model).or_default().0, &spent);
     }
     let mut total = Usage::default();
     plus_usage(&mut total, &own);
@@ -1536,10 +1551,19 @@ pub fn read_history(record: &Path) -> ClaudeHistory {
     if let Some(used) = spent.context {
         events.push(json!({"type":"context", "used":used, "window":spent.window}));
     }
-    if spent.total > 0 {
+    // What the chat spent is what it spent, the agents it sent off included:
+    // the chip this feeds says "including subagents", and a live chat's own
+    // figure already counts them. Their turns are in none of these rows
+    // (bw-t26l.20).
+    let delegated: i64 = helper_spend(record)
+        .iter()
+        .map(|(spent, _)| spent.total)
+        .sum();
+    if spent.total > 0 || delegated > 0 {
         events.push(json!({
             "type":"cost", "cost":{"kind":"tokens", "input":spent.input,
-            "output":spent.output, "total":spent.total}
+            "output":spent.output, "total":spent.total.saturating_add(delegated),
+            "delegated":delegated}
         }));
     }
     ClaudeHistory {
@@ -2141,6 +2165,38 @@ mod tests {
             delegates_work(&transcripts),
             "a helper transcript on disk is a helper the replay cannot rebuild"
         );
+    }
+
+    /// The chip over a chat says "including subagents" and the record says
+    /// nothing about them: a helper's turns are in a file of their own. Read
+    /// from the chat's rows alone, a chat that did most of its work by sending
+    /// it away reports a fraction of its bill (bw-t26l.20).
+    #[test]
+    fn what_a_chat_spent_counts_the_agents_it_sent_off() {
+        let home = tempdir().unwrap();
+        let record = home.path().join(format!("{CHAT}.jsonl"));
+        write(&record, json!({
+            "type":"assistant","message":{"id":"own","model":"claude-opus-5","usage":{"input_tokens":100,"output_tokens":20},
+            "content":[{"type":"tool_use","id":"call-sent","name":"Task","input":{"description":"Count"}}]}
+        }).to_string()+"\n").unwrap();
+        let helper_dir = record.with_file_name(CHAT).join("subagents");
+        create_dir_all(&helper_dir).unwrap();
+        write(helper_dir.join("agent-counted.jsonl"), json!({
+            "type":"assistant","isSidechain":true,"timestamp":"2026-08-30T00:00:00Z",
+            "message":{"id":"helper","model":"haiku","usage":{"input_tokens":700,"output_tokens":80},
+            "content":[{"type":"text","text":"Counted."}]}
+        }).to_string()+"\n").unwrap();
+
+        let cost = read_history(&record)
+            .events
+            .into_iter()
+            .find(|event| event["type"] == "cost")
+            .expect("a chat that spent anything reports what it spent");
+        assert_eq!(cost["cost"]["total"], json!(900), "120 of its own and 780 sent away");
+        assert_eq!(cost["cost"]["delegated"], json!(780));
+        // Its own halves stay its own, so the two readings can be told apart.
+        assert_eq!(cost["cost"]["input"], json!(100));
+        assert_eq!(cost["cost"]["output"], json!(20));
     }
 
     #[test]
