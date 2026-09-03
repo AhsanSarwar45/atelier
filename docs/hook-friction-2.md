@@ -111,6 +111,61 @@ intact:
 worse cost is the lesson it teaches: the first thing a new session learns about
 the gates is that the documented path does not work and the bypass does.
 
+## 4. The lander cannot close what it just landed, and then blames the commit
+
+**Attempted.** The documented last step of a card, from the card's own
+worktree, with the card claimed by this session:
+
+```
+atelier tool board/land bw-s5op.3
+```
+
+**Refused with.**
+
+```
+bd --actor failed: cannot close bw-s5op.3: assignee is "s-d952fe9b",
+actor is "atelier-land"; reclaim or use --force to override
+```
+
+**Why it does not serve the rule.** The rule behind the assignee check is that
+one agent should not close another agent's work. But `atelier-land` is not
+another agent — it is the lander this session invoked, on this session's card,
+one command after this session committed to it. The check reads the ownership
+the workflow spent four commands establishing and calls it a conflict. There is
+no way to satisfy it from inside the workflow either: bd refuses to reassign a
+card while it is `in_progress`, so the card cannot be handed to the lander that
+requires it to be handed over.
+
+The second cost lands on the retry. The rebase and the fast-forward run
+*before* the close, and they succeed — `ours` already had the commit. So the
+second `board/land` looks at an empty range and reports:
+
+```
+no commit subject on bw-s5op.3 names bw-s5op.3
+```
+
+which describes the opposite of what happened. A reader following the message
+goes looking for a badly-named commit that does not exist, when the truth is
+the commit was named correctly and landed the first time. This cost the same
+detour on bw-s5op.1 and bw-s5op.2 before it was recognised here.
+
+**Should have happened.** Two fixes, independent of each other:
+
+- The lander should treat the invoking session's own assignee as its own —
+  `--actor atelier-land` acting on a card assigned to the session that called
+  it is the normal case, not a conflict. Failing that, the lander should
+  reassign the card itself as its first step, since it is the one command that
+  knows both the session and the actor.
+- When the range is empty because the commit already landed, say that. "The
+  commit is already an ancestor of `ours`; nothing to land" is true, and it
+  tells the reader the work is safe. The current message asserts a naming
+  failure it has not checked for.
+
+**Cost.** Three cards, each ending in the same detour: a failed land, a retry
+with a misleading error, `git merge-base --is-ancestor` run by hand to find out
+whether the work was actually safe, and a manual `bd close`. The documented
+finishing move has never once finished a card in this epic.
+
 ## How to add to this file
 
 As in the first book: what was attempted, the refusal text, why the refusal did
