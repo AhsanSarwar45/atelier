@@ -264,7 +264,11 @@ async fn recover_chat_snapshot(
 /// Follow one provider record into the durable event stream. Browser windows
 /// never receive from this task directly: they all consume the same committed
 /// per-session broadcast, so one normalization cannot be delivered twice.
-async fn follow_native_record(
+///
+/// Started by a browser opening the chat, and by the watch poller for a chat
+/// somebody else is working in right now whether or not anybody is looking at
+/// it (workbench.rs, `keep_following_the_worked_in`).
+pub(crate) async fn follow_native_record(
     state: workbench::WorkbenchState,
     session_id: String,
     control: Arc<workbench::ChatFollowControl>,

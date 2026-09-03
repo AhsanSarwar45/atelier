@@ -422,6 +422,10 @@ impl WorkbenchState {
         );
         let mut external_dirty = HashSet::new();
         let mut external_cwds = HashMap::new();
+        // The chats being worked in elsewhere that this task is keeping read.
+        // Held here rather than in the state: the leases must be dropped when
+        // this task ends, and its ending is what says nobody has the app open.
+        let mut followed: HashMap<String, ChatFollowLease> = HashMap::new();
         loop {
             if self.watch_poll_subscribers.load(Ordering::Acquire) == 0 {
                 return;
@@ -447,7 +451,9 @@ impl WorkbenchState {
                     }
                 },
                 _ = hold_tick.tick() => {
-                    let current = serde_json::to_value(self.provider_holds().await).unwrap_or_default();
+                    let holds = self.provider_holds().await;
+                    self.keep_following_the_worked_in(&holds, &mut followed).await;
+                    let current = serde_json::to_value(holds).unwrap_or_default();
                     if current != last_holds {
                         last_holds = current.clone();
                         let _ = self.watch_polls.send(json!({"kind":"running","holds":current}));
@@ -473,6 +479,53 @@ impl WorkbenchState {
                 },
             }
         }
+    }
+
+    /**
+     * Keep reading every chat somebody else is working in right now.
+     *
+     * A chat another program holds is read by tailing that program's own
+     * record file, and until now that reading started when a browser opened
+     * the chat and stopped when it looked away. So a terminal chat went on
+     * working while this app knew nothing about it, and switching to it paid
+     * for all of it at once: the byte cursor is remembered, so the whole
+     * silent stretch arrived as one import — the "stops streaming, then
+     * streams massive amounts of messages at once" the owner reported, and
+     * the reason switching was never instant (bw-t26l.20).
+     *
+     * The set is the holds, not the list: a chat nobody is working in is not
+     * growing, so there is nothing to miss by not reading it. A follower this
+     * keeps alive is the same one a browser opens — the lease is counted, so
+     * neither can stop the other's reading.
+     */
+    async fn keep_following_the_worked_in(
+        &self,
+        holds: &[crate::workbench::external::ProviderHold],
+        followed: &mut HashMap<String, ChatFollowLease>,
+    ) {
+        let mut worked_in = HashSet::new();
+        for hold in holds {
+            let Ok(Some(session)) = self.database().session_by_external_id(hold.id.clone()).await
+            else {
+                continue;
+            };
+            worked_in.insert(session.id.clone());
+            if followed.contains_key(&session.id) {
+                continue;
+            }
+            let (lease, start) = self.chat_follow_subscription(&session.id).await;
+            if let Some(control) = start {
+                let state = self.clone();
+                let id = session.id.clone();
+                tokio::spawn(async move {
+                    crate::routes::live::follow_native_record(state, id, control).await;
+                });
+            }
+            followed.insert(session.id, lease);
+        }
+        // A chat nobody is working in any more is let go. The reader may still
+        // have it open; that lease is their own and is not this one.
+        followed.retain(|id, _| worked_in.contains(id));
     }
 
     pub(crate) async fn provider_holds(&self) -> Vec<crate::workbench::external::ProviderHold> {
@@ -1899,6 +1952,68 @@ mod tests {
             last_active_at: "2026-08-30T00:01:00.000Z".into(),
             last_spoke_at: Some("2026-08-30T00:00:30.000Z".into()),
         }
+    }
+
+    /**
+     * A chat somebody else is working in is read whether or not it is open.
+     *
+     * The lease is what is asserted, because the lease is the decision: while
+     * this task holds one the follower cannot retire, and the reader's own
+     * lease on the same chat is counted separately from it (bw-t26l.20).
+     */
+    #[tokio::test]
+    async fn native_workbench_keeps_reading_a_chat_somebody_else_is_working_in() {
+        let (_directory, state) = fixture();
+        state
+            .database()
+            .create_session(saved_session())
+            .await
+            .unwrap();
+        let working = crate::workbench::external::ProviderHold {
+            id: "thread-1".into(),
+            holder: crate::workbench::external::Holder::Terminal,
+            doing: crate::workbench::external::HeldDoing::Working,
+            detail: None,
+            told: false,
+            since: None,
+            turn_since: None,
+            typical_ms: None,
+            pids: Default::default(),
+        };
+        let mut followed = HashMap::new();
+        state
+            .keep_following_the_worked_in(&[working.clone()], &mut followed)
+            .await;
+        assert_eq!(followed.keys().collect::<Vec<_>>(), vec!["chat-1"]);
+
+        // Asking again while the same chat is still being worked in does not
+        // start a second reading of it.
+        state
+            .keep_following_the_worked_in(&[working], &mut followed)
+            .await;
+        assert_eq!(followed.len(), 1);
+
+        // And a chat nobody is working in any more is let go.
+        state.keep_following_the_worked_in(&[], &mut followed).await;
+        assert!(followed.is_empty());
+
+        // A chat with no row of ours is not followed: there is nowhere to put
+        // what it says.
+        let stranger = crate::workbench::external::ProviderHold {
+            id: "thread-nobody-knows".into(),
+            holder: crate::workbench::external::Holder::Terminal,
+            doing: crate::workbench::external::HeldDoing::Working,
+            detail: None,
+            told: false,
+            since: None,
+            turn_since: None,
+            typical_ms: None,
+            pids: Default::default(),
+        };
+        state
+            .keep_following_the_worked_in(&[stranger], &mut followed)
+            .await;
+        assert!(followed.is_empty());
     }
 
     #[tokio::test]
