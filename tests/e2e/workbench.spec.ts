@@ -17,7 +17,13 @@ import { quadrantPng } from './fixture-png';
  *     reachable at BEADS_E2E_URL (default http://localhost:3008);
  *   - the terminal's own Claude sign-in. No API key is set or read.
  *
- * Run: BEADS_E2E_URL=http://127.0.0.1:3018 npx playwright test tests/e2e/workbench.spec.ts -g live-turn
+ * Run through the harness, which builds both halves, isolates the ports and
+ * the config homes, and copies the bearer credentials into the run:
+ *
+ *   BEADS_E2E_LIVE_PROVIDERS=1 scripts/workbench-e2e.sh tests/e2e/workbench.spec.ts
+ *
+ * Without the flag nothing here can sign in and every case fails on the
+ * provider rather than on the app.
  */
 
 /**
@@ -89,6 +95,17 @@ async function projectAt(request: APIRequestContext, path: string, name?: string
 }
 
 test.describe('workbench', () => {
+  /**
+   * Every case here drives a REAL provider turn, and the harness copies the
+   * bearer credentials into the run only when asked to. Without the flag the
+   * `claude` this starts is not signed in, so a case dies three seconds in on
+   * an empty transcript directory or a blank answer and says nothing about the
+   * app. Say so on the first line instead (bw-t26l.20).
+   */
+  test.beforeAll(() => {
+    expect(process.env.BEADS_E2E_LIVE_PROVIDERS, 'set BEADS_E2E_LIVE_PROVIDERS=1').toBe('1');
+  });
+
   /**
    * `useProject` and the dashboard both resolve a project by filtering the
    * plain project list client-side (`src/hooks/use-project.ts`,
