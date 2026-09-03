@@ -47,18 +47,52 @@ evidence with `atelier tool checks CHECKS-ID`; use `--all`, `--dry`, or
 provider-neutral external-review skill; the app never starts a Python reviewer.
 
 Keep durable findings on the card with `bd update ID --append-notes="..."`.
-Never move a card out of manager review, close work before its named commit has
-landed, or close a parent with unfinished children.
 
-The worktree boundary is wider than editing a file: a shell redirect is judged
-on the file it writes, and a git verb that writes is judged on the repository it
-writes, plumbing included. It is narrower than it once was, too — `/dev/null`
-and the other pseudo-devices are not files, a path in no repository is not
-gated, and a heredoc or commit message that merely names a path is data, not a
-command. `docs/hooks.md` lists every gate and what it enforces.
+## Rules the gates enforce
 
-When a gate is wrong, do not work around it silently: run the one command with
-`ATELIER_BYPASS='why' <command>`, which stands every hook down for that command
-and writes the reason to `hook-bypass.log`. Then record the refusal in
-`docs/hook-friction.md` so the gate can be fixed. `docs/hooks.md` has the wider
-switches, for a session or a tree.
+Hooks are the safeguard, not the first line of enforcement. Know these and you
+will not meet them. `docs/hooks.md` has the detail.
+
+**Where you may write** (`workflow-gate`). Repository changes need an owned card
+and its isolated worktree. The boundary is wider than editing a file: a shell
+redirect is judged on the file it writes (`>`, `>>`, `&>`, `&>>`, `>|`, and what
+`tee` is given), and a git verb that writes is judged on the repository it
+writes — plumbing included (`read-tree`, `update-ref`, `update-index`, `push`,
+and the rest), so there is no walk-around worth looking for. It is narrower than
+it looks, too: `/dev/null` and the other pseudo-devices under `/dev`, `/proc`
+and `/sys` are not files, a path in no repository is not gated at all, and a
+heredoc body, commit message or quoted string that merely names a path is data,
+not a command.
+
+**Landing** (`board-merge-gate`). `atelier tool board/land CARD-ID` is the
+protocol: it rebases, takes the merge slot, fast-forwards the landing branch and
+releases the slot. A raw merge into that branch is held to the same invariants —
+it must be `--ff-only`, the merge slot must not be held by somebody else, and it
+may not overwrite the landing checkout's own uncommitted changes. That last
+refusal names the files, so commit or stash exactly those.
+
+**Status moves** (`board-status-gate`). A card in manager review is the
+manager's to move. A card cannot be closed while there are uncommitted changes
+to tracked files; untracked scratch never blocks a close.
+
+**Ending a turn** (`board-gate`). Do not close work before its named commit has
+landed, and do not close a parent with unfinished children.
+
+**Ending a turn truthfully** (`completion-gate`, Claude sessions only). A reply
+that hands the work to someone later — "future session", "future agent", "left
+for later", "deferred to a later/next…", "in a later session", "next session
+will/should", "a future pass will" — ends the turn. State the concrete blocker
+and what input it needs instead.
+
+## When a gate is wrong
+
+Do not step around it silently. Run the one command with an explicit reason:
+
+```bash
+ATELIER_BYPASS='why this gate is wrong here' <command>
+```
+
+Every hook honours it, on Claude and on Codex alike; it prints the reason and
+appends it to `hook-bypass.log`. Then add the refusal to `docs/hook-friction.md`
+so the gate itself can be fixed. `docs/hooks.md` lists the wider switches, for a
+session or a whole tree.

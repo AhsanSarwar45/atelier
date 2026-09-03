@@ -193,8 +193,15 @@ Rules discovered only by being refused:
 
 **Resolved.** `docs/hooks.md` is new: every hook, what it enforces, what it
 deliberately does not, and the bypass. `machinery/skills/beads/SKILL.md` now
-states the boundary covers redirects and writing git verbs, that it stops at
-pseudo-devices and outside repositories, and points at both files.
+carries a *Rules the gates enforce* section stating each gate's rule up front —
+the write boundary and both directions it was wrong in, the landing invariants,
+the status moves, and the two Stop gates — so the hook is the safeguard rather
+than the way an agent finds out. Both files apply to Codex as well as Claude:
+`server/src/join.rs` wires `.codex/hooks.json` to the same `atelier hook`
+commands, so the gates and the bypass are the binary's, not the provider's. The
+one difference is that Codex wires no Stop event, so `board-gate` and
+`completion-gate` — and the reply-line form of the bypass, which exists only to
+excuse them — are Claude's alone.
 
 ## 6. Every gate now has a documented way past it
 
