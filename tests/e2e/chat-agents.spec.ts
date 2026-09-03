@@ -916,6 +916,13 @@ test.describe('the agents a chat sends off', () => {
       // and not over an empty list that happened to add up.
       await expect(page.getByTestId('sent-away-panel')).toHaveAttribute('data-rows', '3', { timeout: HELLO_MS });
 
+      // All three have finished, so the rail opens with them folded away
+      // behind their count — what it keeps in front of the reader is what is
+      // still moving. This chat has nothing moving, so open the fold before
+      // asking to see a row or to click one (bw-t26l.20).
+      const folded = page.getByTestId('toggle-stopped-agents');
+      if (await folded.isVisible()) await folded.click();
+
       // The whole of it: the chat's own turns AND every one of theirs.
       const chip = page.getByTestId('cost-chip');
       await expect(chip).toBeVisible();
