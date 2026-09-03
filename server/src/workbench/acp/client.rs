@@ -44,7 +44,24 @@ pub struct ListedSession {
     pub meta: Value,
 }
 
-fn initialize_request() -> Result<UntypedMessage, agent_client_protocol::Error> {
+/// How this client introduces itself.
+///
+/// `live` says whether an agent it sends work off to may be handed over as a
+/// session of its own. That is worth having on a chat being driven — a helper
+/// gets its own transcript, its own clock and its own bill — but it is a
+/// promise about a running agent, and a replay has none: the bundled claude
+/// adapter, told this client takes native subagent sessions, withholds every
+/// `Task` call from a `session/load` and sends nothing in their place, so the
+/// delegation vanishes from a chat read back rather than arriving in a better
+/// shape. Measured against the pinned adapter (claude-agent-acp 0.73.0): the
+/// same load answers with the call and its result once the promise is dropped
+/// (bw-t26l.20).
+fn initialize_request(live: bool) -> Result<UntypedMessage, agent_client_protocol::Error> {
+    let mut meta = json!({"subagent-transcript": true});
+    if live {
+        meta["jetbrains"] =
+            json!({"air": {"version":1,"capabilities":["nativeSubagentSessions"]}});
+    }
     UntypedMessage::new(
         "initialize",
         json!({
@@ -60,10 +77,7 @@ fn initialize_request() -> Result<UntypedMessage, agent_client_protocol::Error> 
                 "plan": {},
                 "elicitation": {"form":{},"url":{}},
                 "session": {"configOptions":{"boolean":{}}},
-                "_meta": {
-                    "subagent-transcript": true,
-                    "jetbrains": {"air": {"version":1,"capabilities":["nativeSubagentSessions"]}}
-                }
+                "_meta": meta
             }
         }),
     )
@@ -82,7 +96,7 @@ pub async fn list_sessions(brand: &str, cwd: Option<&Path>) -> Result<Vec<Listed
             AcpAgent::new(config),
             async move |connection: ConnectionTo<Agent>| {
                 let initialized = connection
-                    .send_request(initialize_request()?)
+                    .send_request(initialize_request(false)?)
                     .block_task()
                     .await?;
                 if initialized
@@ -142,7 +156,7 @@ async fn one_shot_request(
     agent_client_protocol::Client
         .builder()
         .connect_with(AcpAgent::new(config), async move |connection: ConnectionTo<Agent>| {
-            let initialized = connection.send_request(initialize_request()?).block_task().await?;
+            let initialized = connection.send_request(initialize_request(false)?).block_task().await?;
             if capability
                 .as_deref()
                 .is_some_and(|path| initialized.pointer(path).is_none())
@@ -290,7 +304,7 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
             AcpAgent::new(config),
             async move |connection: ConnectionTo<Agent>| {
                 let initialized = connection
-                    .send_request(initialize_request()?)
+                    .send_request(initialize_request(false)?)
                     .block_task()
                     .await?;
                 if initialized.pointer("/agentCapabilities/loadSession") != Some(&Value::Bool(true))
@@ -1644,7 +1658,7 @@ impl AcpDriver {
                     let io = task_io.clone();
                     async move {
                         let initialized = connection
-                            .send_request(initialize_request()?)
+                            .send_request(initialize_request(true)?)
                             .block_task()
                             .await?;
                         let agent_controls = initialized
@@ -2972,5 +2986,33 @@ mod tests {
         assert_eq!(claude["systemPrompt"]["type"], "preset");
         assert_eq!(claude["systemPrompt"]["preset"], "claude_code");
         assert_eq!(claude["systemPrompt"]["append"], "shared policy");
+    }
+
+    /// Measured against the pinned claude adapter (0.73.0): a `session/load`
+    /// answers with the `Task` call and its result when this promise is
+    /// absent, and drops both when it is there — so a replay must not make it.
+    #[test]
+    fn only_a_driven_chat_offers_to_host_an_agent_it_sends_off() {
+        let live = initialize_request(true).expect("live handshake");
+        let replay = initialize_request(false).expect("replay handshake");
+        let air = "/clientCapabilities/_meta/jetbrains/air/capabilities";
+
+        assert_eq!(
+            live.params().pointer(air),
+            Some(&json!(["nativeSubagentSessions"]))
+        );
+        assert!(replay.params().pointer(air).is_none());
+        // Everything else a replay needs is unchanged, the transcript of an
+        // agent it sent off included.
+        for handshake in [&live, &replay] {
+            assert_eq!(
+                handshake.params().pointer("/clientCapabilities/_meta/subagent-transcript"),
+                Some(&json!(true))
+            );
+            assert_eq!(
+                handshake.params().pointer("/clientCapabilities/subagents"),
+                Some(&json!({}))
+            );
+        }
     }
 }
