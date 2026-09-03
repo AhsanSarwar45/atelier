@@ -11,6 +11,7 @@ use agent_client_protocol::schema::v1::{
     WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 use agent_client_protocol::Error;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -235,6 +236,15 @@ impl ClientIo {
             .ok_or_else(|| Error::invalid_params().data("unknown ACP terminal"))
     }
 
+    /// What one of this client's terminals has printed so far, for the reader
+    /// rather than for the agent: no session check, because nobody asked —
+    /// this is the client reading its own terminal to draw it.
+    async fn terminal_snapshot(&self, terminal_id: &str) -> Option<(String, bool)> {
+        let terminal = self.terminals.lock().await.get(terminal_id).cloned()?;
+        let output = terminal.output.lock().await;
+        Some((output.text(), output.truncated))
+    }
+
     pub async fn terminal_output(
         &self,
         request: TerminalOutputRequest,
@@ -319,6 +329,46 @@ async fn copy_output(mut reader: impl AsyncRead + Unpin, output: Arc<Mutex<Outpu
             Ok(read) => output.lock().await.push(&bytes[..read]),
         }
     }
+}
+
+/// A `session/update` with every terminal it points at read into it.
+///
+/// ACP lets a tool call carry `{"type":"terminal","terminalId":…}` in place of
+/// its output: the client is the one holding the terminal, so the client is
+/// the one that can read it. Nothing did, so a call that ran its command in a
+/// terminal drew a row with nothing in it — the command ran, the reader
+/// watched an empty box. Read here, before the update is normalized, because
+/// the normalizer is a pure reading of one message and this is a question only
+/// the running client can answer. Each update re-reads it, which is what makes
+/// the output grow on the row while the command is still going (bw-t26l.20).
+pub async fn with_terminal_output(io: &ClientIo, raw: &Value) -> Value {
+    let Some(rows) = raw["update"]["content"].as_array() else {
+        return raw.clone();
+    };
+    if !rows.iter().any(|row| row["type"] == "terminal") {
+        return raw.clone();
+    }
+    let mut filled = Vec::with_capacity(rows.len());
+    for row in rows {
+        let read = match (row["type"].as_str(), row["terminalId"].as_str()) {
+            (Some("terminal"), Some(id)) => io.terminal_snapshot(id).await,
+            _ => None,
+        };
+        match read {
+            Some((text, truncated)) => {
+                let text = if truncated {
+                    format!("[earlier output dropped]\n{text}")
+                } else {
+                    text
+                };
+                filled.push(json!({"type":"content","content":{"type":"text","text":text}}));
+            }
+            None => filled.push(row.clone()),
+        }
+    }
+    let mut out = raw.clone();
+    out["update"]["content"] = Value::Array(filled);
+    out
 }
 
 #[cfg(test)]
@@ -409,5 +459,47 @@ mod tests {
             .terminal_output(TerminalOutputRequest::new("session-1", terminal_id))
             .await
             .is_err());
+    }
+
+    /// A tool call that keeps its output in a terminal, drawn with its output
+    /// in it. The reader is not holding the terminal; this client is, and
+    /// until it read it the row was empty while the command ran (bw-t26l.20).
+    #[tokio::test]
+    async fn a_call_that_points_at_a_terminal_is_filled_in_with_what_it_printed() {
+        let workspace = tempfile::tempdir().unwrap();
+        let io = ClientIo::new(workspace.path().to_path_buf()).unwrap();
+        io.set_session("session-1").await;
+        let created = io
+            .create_terminal(
+                CreateTerminalRequest::new("session-1", "/bin/sh")
+                    .args(vec!["-c".into(), "printf ran-it".into()]),
+            )
+            .await
+            .unwrap();
+        let terminal_id = created.terminal_id.0.to_string();
+        io.wait_terminal(WaitForTerminalExitRequest::new(
+            "session-1",
+            terminal_id.clone(),
+        ))
+        .await
+        .unwrap();
+
+        let update = json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed",
+            "content":[{"type":"terminal","terminalId":terminal_id}]
+        }});
+        let filled = with_terminal_output(&io, &update).await;
+        assert_eq!(
+            filled["update"]["content"][0],
+            json!({"type":"content","content":{"type":"text","text":"ran-it"}})
+        );
+
+        // A terminal this client never opened is left exactly as it came, so
+        // an update it cannot answer for is passed on rather than emptied.
+        let stranger = json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call_update","toolCallId":"call-2",
+            "content":[{"type":"terminal","terminalId":"not-ours"}]
+        }});
+        assert_eq!(with_terminal_output(&io, &stranger).await, stranger);
     }
 }

@@ -1525,6 +1525,7 @@ impl AcpDriver {
             let updates_session = task_session.id.clone();
             let updates_brand = brand;
             let updates_normalizer = normalizer.clone();
+            let updates_io = task_io.clone();
             let updates_replaying = replaying.clone();
             let permission_db = task_database.clone();
             let permission_session = task_session.id.clone();
@@ -1562,7 +1563,11 @@ impl AcpDriver {
                         if updates_replaying.load(Ordering::Acquire) {
                             return Ok(());
                         }
-                        let raw = notification.params().clone();
+                        let raw = super::client_io::with_terminal_output(
+                            &updates_io,
+                            notification.params(),
+                        )
+                        .await;
                         let events = updates_normalizer.lock().await.update(
                             &updates_session,
                             updates_brand,
