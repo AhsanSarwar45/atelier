@@ -43,7 +43,6 @@
 
 use serde::Serialize;
 use serde_json::{json, Map, Value};
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -104,12 +103,9 @@ pub fn is_ours(name: &str) -> bool {
 /// Run the gate: one event on standard input, one line written or removed.
 ///
 /// Gives back what to exit with, which is always 0.
-pub fn run() -> i32 {
-    let mut heard = String::new();
-    if std::io::stdin().read_to_string(&mut heard).is_ok() {
-        if let Some(dir) = sessions_dir() {
-            note(&heard, &dir);
-        }
+pub fn run(heard: &str) -> i32 {
+    if let Some(dir) = sessions_dir() {
+        note(heard, &dir);
     }
     0
 }

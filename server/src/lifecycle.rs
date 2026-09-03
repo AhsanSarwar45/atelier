@@ -3,7 +3,6 @@
 //! truthful lifecycle transitions. Writing preferences only warn.
 
 use serde_json::{json, Value};
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -33,22 +32,44 @@ struct GitCall<'a> {
     cwd: PathBuf,
 }
 
+/// The Git verbs that always change a ref or a working tree.
+///
+/// This list is the rule, so it is written by what a command *does* rather
+/// than by how often it is typed. `read-tree` and `update-ref` are here
+/// because between them they are a merge, spelled differently
+/// (`docs/hook-friction.md` §4): a gate that reads `merge` but not those two
+/// is only selecting for agents who know the plumbing.
 const ALWAYS_MUTATING_GIT: &[&str] = &[
     "add",
     "am",
     "checkout",
+    "checkout-index",
     "cherry-pick",
     "clean",
     "commit",
+    "fast-import",
+    "filter-branch",
     "merge",
     "mv",
+    "pull",
+    "read-tree",
     "rebase",
     "reset",
     "restore",
     "revert",
     "rm",
     "switch",
+    "update-index",
+    "update-ref",
 ];
+
+/// The redirect operators, longest first so `<<-` is never read as `<<`.
+const REDIRECTS: &[&str] = &[
+    "<<<", "<<-", "&>>", "<<", ">>", "&>", ">&", "<&", ">|", ">", "<",
+];
+
+/// The redirect operators that name a file to be written.
+const WRITE_REDIRECTS: &[&str] = &[">", ">>", "&>", "&>>", ">|"];
 
 pub const PROTOCOL_VERSION: u32 = 2;
 
@@ -90,27 +111,26 @@ pub fn is_ours(name: &str) -> bool {
     GATES.contains(&name)
 }
 
-pub fn run(name: &str) -> i32 {
-    let mut input = String::new();
-    if std::io::stdin().read_to_string(&mut input).is_err() {
-        return 0;
-    }
-    let data: Value = serde_json::from_str(&input).unwrap_or_else(|_| json!({}));
+/// Answer one gate, for the event the caller already read and parsed.
+///
+/// Standard input is read once, by `rules::hook`, so that the escape hatch in
+/// `hook_bypass` can see the same event every gate does.
+pub fn run(name: &str, data: &Value) -> i32 {
     let output = match name {
-        "board-actor" | "board-actor.py" => actor(&data),
-        "workflow-gate" | "workflow-gate.py" => workflow(&data),
+        "board-actor" | "board-actor.py" => actor(data),
+        "workflow-gate" | "workflow-gate.py" => workflow(data),
         "board-merge-gate" | "board-merge-gate.py" | "landing-gate" | "landing-gate.py" => {
-            merge_gate(&data)
+            merge_gate(data)
         }
-        "board-status-gate" | "board-status-gate.py" => status_gate(&data),
+        "board-status-gate" | "board-status-gate.py" => status_gate(data),
         "board-touch" | "board-touch.py" => {
-            touch(&data);
+            touch(data);
             None
         }
-        "board-prime" | "board-prime.py" => prime(&data),
-        "board-gate" | "board-gate.py" => stop_gate(&data),
+        "board-prime" | "board-prime.py" => prime(data),
+        "board-gate" | "board-gate.py" => stop_gate(data),
         "wait-gate" | "wait-gate.py" => {
-            wait_warning(&data);
+            wait_warning(data);
             None
         }
         // Presentation and interaction-style hooks are deliberately retired.
@@ -222,86 +242,193 @@ fn deny(reason: impl Into<String>) -> Option<Value> {
     Some(pretool("deny", &reason.into(), None))
 }
 
+fn redirect_at(command: &str, at: usize) -> Option<&'static str> {
+    REDIRECTS
+        .iter()
+        .copied()
+        .find(|operator| command[at..].starts_with(operator))
+}
+
+/// The running state of one pass over a command line.
+struct Lexer<'a> {
+    command: &'a str,
+    segments: Vec<Segment>,
+    words: Vec<Word>,
+    text: String,
+    start: usize,
+    /// The word after `<<` names where the heredoc body ends.
+    expect_delimiter: bool,
+    strip_tabs: bool,
+    /// Heredocs opened on the current line, still waiting for their bodies.
+    pending: Vec<(String, bool)>,
+}
+
+impl<'a> Lexer<'a> {
+    fn new(command: &'a str) -> Self {
+        Lexer {
+            command,
+            segments: Vec::new(),
+            words: Vec::new(),
+            text: String::new(),
+            start: 0,
+            expect_delimiter: false,
+            strip_tabs: false,
+            pending: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, at: usize, character: char) {
+        if self.text.is_empty() {
+            self.start = at;
+        }
+        self.text.push(character);
+    }
+
+    fn finish_word(&mut self, at: usize) {
+        if self.text.is_empty() {
+            return;
+        }
+        let text = std::mem::take(&mut self.text);
+        if self.expect_delimiter {
+            self.expect_delimiter = false;
+            self.pending.push((text.clone(), self.strip_tabs));
+        }
+        let start = self.start;
+        self.words.push(Word {
+            text,
+            start,
+            end: at,
+        });
+    }
+
+    fn finish_segment(&mut self) {
+        if !self.words.is_empty() {
+            self.segments.push(Segment {
+                words: std::mem::take(&mut self.words),
+            });
+        }
+    }
+
+    fn operator(&mut self, at: usize, operator: &str) {
+        self.finish_word(at);
+        self.words.push(Word {
+            text: operator.to_string(),
+            start: at,
+            end: at + operator.len(),
+        });
+        if operator == "<<" || operator == "<<-" {
+            self.expect_delimiter = true;
+            self.strip_tabs = operator == "<<-";
+        }
+    }
+
+    /// Step over the bodies of the heredocs opened on the line just ended.
+    ///
+    /// A heredoc body is data. Reading it as shell is how a document that
+    /// merely names a path came to be refused as a write to that path
+    /// (`docs/hook-friction.md` §3), and how prose containing `rm` came to be
+    /// read as a deletion.
+    fn skip_heredocs(&mut self, mut at: usize) -> usize {
+        while !self.pending.is_empty() {
+            let (delimiter, strip) = self.pending.remove(0);
+            loop {
+                if at >= self.command.len() {
+                    return self.command.len();
+                }
+                let end = self.command[at..]
+                    .find('\n')
+                    .map(|found| at + found)
+                    .unwrap_or(self.command.len());
+                let line = &self.command[at..end];
+                let candidate = if strip {
+                    line.trim_start_matches('\t')
+                } else {
+                    line
+                };
+                at = (end + 1).min(self.command.len());
+                if candidate.trim_end_matches('\r') == delimiter {
+                    break;
+                }
+            }
+        }
+        at
+    }
+}
+
+/// Split a command line into the segments a gate can reason about.
+///
+/// Quoted text and heredoc bodies are data, not command. Redirect operators
+/// are kept as words of their own, so the target that follows one is never
+/// mistaken for an ordinary argument and `2>&1` no longer looks like the `&`
+/// that ends a command.
 fn shell_segments(command: &str) -> Vec<Segment> {
     let bytes = command.as_bytes();
-    let mut segments = Vec::new();
-    let mut words = Vec::new();
-    let mut text = String::new();
-    let mut start = 0;
+    let mut lexer = Lexer::new(command);
     let mut quote = 0u8;
     let mut escaped = false;
-    let finish_word = |at: usize, words: &mut Vec<Word>, text: &mut String, start: usize| {
-        if !text.is_empty() {
-            words.push(Word {
-                text: std::mem::take(text),
-                start,
-                end: at,
-            });
-        }
-    };
-    let finish_segment = |segments: &mut Vec<Segment>, words: &mut Vec<Word>| {
-        if !words.is_empty() {
-            segments.push(Segment {
-                words: std::mem::take(words),
-            });
-        }
-    };
     let mut at = 0;
     while at < bytes.len() {
         let byte = bytes[at];
+        if byte >= 0x80 {
+            // One character at a time, so a path with an accent in it survives
+            // the pass instead of arriving as a run of replacement bytes.
+            let character = command[at..]
+                .chars()
+                .next()
+                .unwrap_or(char::REPLACEMENT_CHARACTER);
+            lexer.push(at, character);
+            escaped = false;
+            at += character.len_utf8();
+            continue;
+        }
         if escaped {
-            text.push(byte as char);
+            lexer.push(at, byte as char);
             escaped = false;
             at += 1;
             continue;
         }
         if quote != b'\'' && byte == b'\\' {
-            if text.is_empty() {
-                start = at;
+            if lexer.text.is_empty() {
+                lexer.start = at;
             }
             escaped = true;
             at += 1;
             continue;
         }
         if quote == 0 && matches!(byte, b'\'' | b'"') {
-            if text.is_empty() {
-                start = at;
+            if lexer.text.is_empty() {
+                lexer.start = at;
             }
             quote = byte;
             at += 1;
             continue;
         }
-        if quote == byte && quote != 0 {
-            quote = 0;
-            at += 1;
-            continue;
-        }
-        if quote == 0 && byte.is_ascii_whitespace() {
-            finish_word(at, &mut words, &mut text, start);
-            if byte == b'\n' {
-                finish_segment(&mut segments, &mut words);
+        if quote != 0 {
+            if quote == byte {
+                quote = 0;
+            } else {
+                lexer.push(at, byte as char);
             }
             at += 1;
             continue;
         }
-        if quote == 0 && matches!(byte, b'<' | b'>') {
-            finish_word(at, &mut words, &mut text, start);
-            let width = if at + 1 < bytes.len() && bytes[at + 1] == byte {
-                2
-            } else {
-                1
-            };
-            words.push(Word {
-                text: command[at..at + width].to_string(),
-                start: at,
-                end: at + width,
-            });
-            at += width;
+        if byte.is_ascii_whitespace() {
+            lexer.finish_word(at);
+            at += 1;
+            if byte == b'\n' {
+                lexer.finish_segment();
+                at = lexer.skip_heredocs(at);
+            }
             continue;
         }
-        if quote == 0 && matches!(byte, b';' | b'|' | b'&') {
-            finish_word(at, &mut words, &mut text, start);
-            finish_segment(&mut segments, &mut words);
+        if let Some(operator) = redirect_at(command, at) {
+            lexer.operator(at, operator);
+            at += operator.len();
+            continue;
+        }
+        if matches!(byte, b';' | b'|' | b'&') {
+            lexer.finish_word(at);
+            lexer.finish_segment();
             at += if at + 1 < bytes.len() && bytes[at + 1] == byte {
                 2
             } else {
@@ -309,15 +436,12 @@ fn shell_segments(command: &str) -> Vec<Segment> {
             };
             continue;
         }
-        if text.is_empty() {
-            start = at;
-        }
-        text.push(byte as char);
+        lexer.push(at, byte as char);
         at += 1;
     }
-    finish_word(bytes.len(), &mut words, &mut text, start);
-    finish_segment(&mut segments, &mut words);
-    segments
+    lexer.finish_word(bytes.len());
+    lexer.finish_segment();
+    lexer.segments
 }
 
 fn executable(word: &str) -> &str {
@@ -327,12 +451,38 @@ fn executable(word: &str) -> &str {
         .unwrap_or(word)
 }
 
+/// Where the command itself starts, past leading assignments and redirects.
 fn first_command_word(segment: &Segment) -> usize {
-    segment
-        .words
-        .iter()
-        .position(|word| !word.text.contains('='))
-        .unwrap_or(segment.words.len())
+    let mut at = 0;
+    while let Some(word) = segment.words.get(at) {
+        if REDIRECTS.contains(&word.text.as_str()) {
+            at += 2;
+            continue;
+        }
+        if word.text.contains('=') {
+            at += 1;
+            continue;
+        }
+        return at;
+    }
+    segment.words.len()
+}
+
+/// The value of a leading `NAME=...` assignment, if the command carries one.
+///
+/// Leading is the whole point: the word has to be in the position bash reads
+/// as an assignment, so prose, an argument or a heredoc body that merely spells
+/// the name out is not mistaken for someone setting it.
+pub(crate) fn leading_assignment(command: &str, name: &str) -> Option<String> {
+    let prefix = format!("{name}=");
+    shell_segments(command).into_iter().find_map(|segment| {
+        let stop = first_command_word(&segment);
+        segment.words[..stop]
+            .iter()
+            .find_map(|word| word.text.strip_prefix(&prefix))
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string)
+    })
 }
 
 fn bd_call(segment: &Segment) -> Option<BdCall<'_>> {
@@ -501,6 +651,35 @@ fn git_mutates(call: &GitCall<'_>) -> bool {
                 "add" | "lock" | "move" | "prune" | "remove" | "repair" | "unlock"
             )
         }),
+        "push" => !args
+            .iter()
+            .any(|word| matches!(word.text.as_str(), "--dry-run" | "-n")),
+        "symbolic-ref" => {
+            args.iter()
+                .any(|word| matches!(word.text.as_str(), "-d" | "--delete"))
+                || args.iter().filter(|word| !word.text.starts_with('-')).count() > 1
+        }
+        "replace" => {
+            args.iter()
+                .any(|word| matches!(word.text.as_str(), "-d" | "--delete"))
+                || args.iter().any(|word| !word.text.starts_with('-'))
+        }
+        "notes" => args
+            .first()
+            .is_some_and(|word| !matches!(word.text.as_str(), "list" | "show")),
+        "sparse-checkout" => args
+            .first()
+            .is_some_and(|word| word.text.as_str() != "list"),
+        "reflog" => args
+            .first()
+            .is_some_and(|word| matches!(word.text.as_str(), "expire" | "delete" | "drop")),
+        "submodule" => args.first().is_some_and(|word| {
+            matches!(
+                word.text.as_str(),
+                "add" | "update" | "init" | "deinit" | "sync" | "set-url" | "set-branch"
+                    | "absorbgitdirs"
+            )
+        }),
         _ => false,
     }
 }
@@ -514,57 +693,77 @@ fn path_from(here: &Path, text: &str) -> PathBuf {
     }
 }
 
+/// Does this target name a file the worktree rule is about?
+///
+/// The null device, the character devices generally, the process and system
+/// pseudo-filesystems, and bash's own `/dev/tcp` socket paths are not files: a
+/// write to one leaves nothing behind in any working tree and cannot escape
+/// one. Refusing them was `docs/hook-friction.md` §1 and §2 — the commonest way
+/// to silence a command, and the project's own way of probing a port, both
+/// refused by a rule about editing a repository. A file descriptor
+/// duplication (`>&2`) and a process substitution are not files either.
+fn writes_a_file(target: &str) -> bool {
+    if target.is_empty() || target.starts_with('&') || target.starts_with('(') {
+        return false;
+    }
+    let path = Path::new(target);
+    !["/dev", "/proc", "/sys"]
+        .iter()
+        .any(|special| path.starts_with(special))
+}
+
+/// The arguments of a command, with its redirects and their targets removed.
+fn operands(args: &[Word]) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while let Some(word) = args.get(at) {
+        if REDIRECTS.contains(&word.text.as_str()) {
+            at += 2;
+            continue;
+        }
+        if !word.text.starts_with('-') {
+            out.push(word.text.as_str());
+        }
+        at += 1;
+    }
+    out
+}
+
 fn shell_file_targets(segment: &Segment, here: &Path) -> Vec<PathBuf> {
     let at = first_command_word(segment);
     let Some(name) = segment.words.get(at).map(|word| executable(&word.text)) else {
         return Vec::new();
     };
     let args = &segment.words[at + 1..];
-    let operands: Vec<&str> = args
-        .iter()
-        .filter(|word| {
-            !word.text.starts_with('-') && !matches!(word.text.as_str(), ">" | ">>" | "<" | "<<")
-        })
-        .map(|word| word.text.as_str())
-        .collect();
-    match name {
-        "cp" | "install" => operands
-            .last()
-            .map(|path| vec![path_from(here, path)])
-            .unwrap_or_default(),
-        "mv" | "rm" | "mkdir" | "touch" | "truncate" => operands
-            .into_iter()
-            .map(|path| path_from(here, path))
-            .collect(),
-        "chmod" | "chown" => operands
-            .into_iter()
-            .skip(1)
-            .map(|path| path_from(here, path))
-            .collect(),
-        "ln" => operands
-            .last()
-            .map(|path| vec![path_from(here, path)])
-            .unwrap_or_default(),
+    let operands = operands(args);
+    let targets: Vec<&str> = match name {
+        "cp" | "install" | "ln" => operands.last().into_iter().copied().collect(),
+        "mv" | "rm" | "mkdir" | "touch" | "truncate" | "tee" => operands,
+        "chmod" | "chown" => operands.into_iter().skip(1).collect(),
         "sed"
             if args
                 .iter()
                 .any(|word| word.text == "-i" || word.text.starts_with("-i")) =>
         {
-            operands
-                .last()
-                .map(|path| vec![path_from(here, path)])
-                .unwrap_or_default()
+            operands.last().into_iter().copied().collect()
         }
         _ => Vec::new(),
-    }
+    };
+    targets
+        .into_iter()
+        .filter(|target| writes_a_file(target))
+        .map(|target| path_from(here, target))
+        .collect()
 }
 
 fn redirection_targets(segment: &Segment, here: &Path) -> Vec<PathBuf> {
     segment
         .words
         .windows(2)
-        .filter(|pair| matches!(pair[0].text.as_str(), ">" | ">>"))
-        .map(|pair| path_from(here, &pair[1].text))
+        .filter(|pair| WRITE_REDIRECTS.contains(&pair[0].text.as_str()))
+        .map(|pair| pair[1].text.as_str())
+        .filter(|target| writes_a_file(target))
+        .map(|target| path_from(here, target))
         .collect()
 }
 
@@ -848,11 +1047,12 @@ fn workflow(data: &Value) -> Option<Value> {
         ));
     }
     for target in targets {
+        // A path in no Git worktree is not a change to anybody's work: a
+        // scratch file, a temporary directory, a log outside the project. The
+        // rule is about repository changes, so a target with no repository is
+        // simply not its business (`docs/hook-friction.md` §1).
         let Some(project) = git_root(&target) else {
-            return deny(format!(
-                "The mutation target is not inside a Git worktree (resolved target: {}).",
-                target.display()
-            ));
+            continue;
         };
         let Some(issue) = issue_at(&project) else {
             return deny(format!(
@@ -905,7 +1105,7 @@ fn merge_refusal(
     fast_forward: bool,
     holder: &str,
     who: &str,
-    dirty: bool,
+    overwritten: &[String],
 ) -> Option<String> {
     if !on_landing {
         return None;
@@ -921,13 +1121,41 @@ fn merge_refusal(
             "The merge slot is held by {holder}; only its owner may land."
         ));
     }
-    if dirty {
-        return Some(
-            "The landing worktree has tracked changes; preserve or commit them before merging."
-                .into(),
-        );
+    if !overwritten.is_empty() {
+        return Some(format!(
+            "The landing worktree has its own uncommitted changes to {}, which this merge would overwrite; commit or stash those files first.",
+            overwritten.join(", ")
+        ));
     }
     None
+}
+
+/// The files this landing would write over, out of those already changed here.
+///
+/// Demanding a spotless tree refused a landing whenever the checkout held any
+/// unrelated edit — which, on a working machine, it usually does
+/// (`docs/hook-friction.md` §4). A fast-forward only writes the files it
+/// actually changes, so those are the only ones worth protecting.
+fn overwritten_by(project: &Path, branch: &str) -> Vec<String> {
+    let changing: Vec<String> = command(project, "git", &["diff", "--name-only", "HEAD", branch])
+        .filter(|(_, ok)| *ok)
+        .map(|(out, _)| out.lines().map(str::to_string).collect())
+        .unwrap_or_default();
+    if changing.is_empty() {
+        return Vec::new();
+    }
+    // `diff --name-only HEAD` rather than `status --porcelain`: it names the
+    // tracked files that differ from the commit, staged or not, with no status
+    // column to parse off the front of each line.
+    command(project, "git", &["diff", "--name-only", "HEAD"])
+        .filter(|(_, ok)| *ok)
+        .map(|(out, _)| {
+            out.lines()
+                .filter(|path| changing.iter().any(|changed| changed == path))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn merge_gate(data: &Value) -> Option<Value> {
@@ -956,13 +1184,17 @@ fn merge_gate(data: &Value) -> Option<Value> {
             .as_ref()
             .and_then(|value| value["holder"].as_str().or_else(|| value["owner"].as_str()))
             .unwrap_or("");
-        let dirty = command(
-            &project,
-            "git",
-            &["status", "--porcelain", "--untracked-files=no"],
-        )
-        .is_some_and(|(out, ok)| ok && !out.is_empty());
-        if let Some(reason) = merge_refusal(on_landing, fast_forward, holder, &who, dirty) {
+        let branch = call.segment.words[call.verb + 1..]
+            .iter()
+            .find(|word| !word.text.starts_with('-') && !REDIRECTS.contains(&word.text.as_str()))
+            .map(|word| word.text.clone())
+            .unwrap_or_default();
+        let overwritten = if on_landing && fast_forward && !branch.is_empty() {
+            overwritten_by(&project, &branch)
+        } else {
+            Vec::new()
+        };
+        if let Some(reason) = merge_refusal(on_landing, fast_forward, holder, &who, &overwritten) {
             return deny(reason);
         }
     }
@@ -1047,6 +1279,64 @@ fn fresh_checks(root: &Path, id: &str, card: &Value) -> bool {
     })
 }
 
+/// The `bd` flags that take a separate value, so the value is never read as
+/// the card the command is about.
+///
+/// `bd update --status closed bw-1` used to be read as a command about a card
+/// named `closed`, which no board has — so the whole gate stood down and the
+/// close went through unchecked.
+const BD_FLAGS_WITH_VALUES: &[&str] = &[
+    "--status",
+    "-s",
+    "--reason",
+    "--assignee",
+    "-a",
+    "--priority",
+    "-p",
+    "--type",
+    "-t",
+    "--title",
+    "--parent",
+    "--description",
+    "-d",
+    "--acceptance",
+    "--design",
+    "--add-label",
+    "--remove-label",
+    "-l",
+    "--set-metadata",
+    "--append-notes",
+    "--notes",
+    "--limit",
+    "--actor",
+    "--db",
+    "--database",
+    "--directory",
+    "-C",
+];
+
+/// The card a `bd` call is about.
+fn subject_id(arguments: &[Word]) -> Option<String> {
+    let mut at = 0;
+    while let Some(word) = arguments.get(at) {
+        let text = word.text.as_str();
+        if REDIRECTS.contains(&text) {
+            at += 2;
+            continue;
+        }
+        if text.starts_with('-') {
+            at += if BD_FLAGS_WITH_VALUES.contains(&text) {
+                2
+            } else {
+                1
+            };
+            continue;
+        }
+        return Some(text.to_string());
+    }
+    None
+}
+
 fn manager_review_refusal(card: &Value, id: &str) -> Option<String> {
     (card["status"].as_str() == Some("manager_review"))
         .then(|| format!("{id} is in the manager's column and only the manager may move it."))
@@ -1080,11 +1370,7 @@ fn status_gate(data: &Value) -> Option<Value> {
         {
             return deny("A forced close can skip blockers and unfinished children; close truthfully without --force.");
         }
-        let Some(id) = arguments
-            .iter()
-            .find(|word| !word.text.starts_with('-'))
-            .map(|word| word.text.clone())
-        else {
+        let Some(id) = subject_id(arguments) else {
             continue;
         };
         let project = command(&here, "git", &["rev-parse", "--show-toplevel"])
@@ -1106,12 +1392,19 @@ fn status_gate(data: &Value) -> Option<Value> {
             ));
         }
         if closing {
+            // Tracked changes only: an untracked scratch file, a build
+            // artifact or a log is not unfinished work, and refusing a close
+            // over one is a refusal that protects nothing.
             if !no_commit(&card)
-                && command(&project, "git", &["status", "--porcelain"])
-                    .is_some_and(|(out, ok)| ok && !out.is_empty())
+                && command(
+                    &project,
+                    "git",
+                    &["status", "--porcelain", "--untracked-files=no"],
+                )
+                .is_some_and(|(out, ok)| ok && !out.is_empty())
             {
                 return deny(format!(
-                    "{id} cannot close while its worktree has uncommitted changes."
+                    "{id} cannot close while its worktree has uncommitted changes to tracked files."
                 ));
             }
             if !fresh_checks(&project, &id, &card) {
@@ -1146,6 +1439,41 @@ fn status_gate(data: &Value) -> Option<Value> {
     None
 }
 
+/// How often a heartbeat is worth a round trip to the board.
+///
+/// `board-touch` runs after every tool call. Asking the board for the
+/// session's cards, heartbeating them and advancing the goal each time put two
+/// or three database round trips in front of every edit an agent made.
+const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// Has enough time passed to be worth telling the board this session is alive?
+///
+/// A missing or unreadable stamp means yes: the throttle exists to save time,
+/// never to lose a heartbeat.
+fn heartbeat_due(who: &str, project: &Path) -> bool {
+    let Some(directory) = crate::identity::data_dir().map(|dir| dir.join("heartbeat")) else {
+        return true;
+    };
+    if std::fs::create_dir_all(&directory).is_err() {
+        return true;
+    }
+    let mut mixed: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in project.to_string_lossy().bytes() {
+        mixed = (mixed ^ u64::from(byte)).wrapping_mul(0x100_0000_01b3);
+    }
+    let stamp = directory.join(format!("{who}-{mixed:016x}"));
+    let fresh = std::fs::metadata(&stamp)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|when| when.elapsed().ok())
+        .is_some_and(|age| age < HEARTBEAT_INTERVAL);
+    if fresh {
+        return false;
+    }
+    let _ = std::fs::write(&stamp, "");
+    true
+}
+
 fn touch(data: &Value) {
     let who = session(data);
     let mut projects: Vec<PathBuf> = mutation_paths(data)
@@ -1158,6 +1486,9 @@ fn touch(data: &Value) {
     projects.sort();
     projects.dedup();
     for project in projects {
+        if !heartbeat_due(&who, &project) {
+            continue;
+        }
         let Some(cards) = bd(
             &project,
             &[
@@ -1342,6 +1673,124 @@ mod tests {
         );
     }
 
+    /// A document is not a command. Refusing a heredoc because its prose named
+    /// a path was `docs/hook-friction.md` §3, and it made the worktree's own
+    /// preferred tool unable to write the file describing the problem.
+    #[test]
+    fn native_machinery_a_heredoc_body_is_data_not_command() {
+        let doc = "cat > docs/hook-friction.md <<'EOF'\n\
+            Refused with `The mutation target ... /dev/nul`, quoting prose.\n\
+            rm -rf /etc > /somewhere/else\n\
+            EOF\n";
+        let data = json!({"tool_name":"Bash", "cwd":"/repo/worktrees/bw-1",
+            "tool_input":{"command": doc}});
+        assert_eq!(
+            mutation_paths(&data),
+            vec![PathBuf::from("/repo/worktrees/bw-1/docs/hook-friction.md")],
+            "the body was read as commands"
+        );
+
+        // The tab-stripping form ends at its delimiter too, and what follows
+        // the body is a command again.
+        let after = "cat <<-END > kept.txt\n\tbody\n\tEND\nrm gone.txt\n";
+        let data = json!({"tool_name":"Bash", "cwd":"/repo/worktrees/bw-1",
+            "tool_input":{"command": after}});
+        assert_eq!(
+            mutation_paths(&data),
+            vec![
+                PathBuf::from("/repo/worktrees/bw-1/kept.txt"),
+                PathBuf::from("/repo/worktrees/bw-1/gone.txt"),
+            ]
+        );
+    }
+
+    /// The null device, a socket path and a file-descriptor duplication are
+    /// not files, and the commonest reason to write one is to say nothing
+    /// (`docs/hook-friction.md` §1 and §2).
+    #[test]
+    fn native_machinery_only_real_files_are_redirect_targets() {
+        let quiet = json!({"tool_name":"Bash", "cwd":"/repo/worktrees/bw-1", "tool_input":{
+            "command":"grep -n pattern file 2>/dev/null >>/dev/null && echo hi >&2"}});
+        assert!(mutation_paths(&quiet).is_empty());
+
+        let probe = json!({"tool_name":"Bash", "cwd":"/repo/worktrees/bw-1", "tool_input":{
+            "command":"echo > /dev/tcp/127.0.0.1/3008"}});
+        assert!(mutation_paths(&probe).is_empty());
+
+        let real = json!({"tool_name":"Bash", "cwd":"/repo/worktrees/bw-1", "tool_input":{
+            "command":"cargo build > build.log 2>&1"}});
+        assert_eq!(
+            mutation_paths(&real),
+            vec![PathBuf::from("/repo/worktrees/bw-1/build.log")]
+        );
+    }
+
+    /// `2>&1` is a redirect, not the `&` that ends a command, so what follows
+    /// it stays part of the same call.
+    #[test]
+    fn native_machinery_a_descriptor_redirect_does_not_end_the_command() {
+        let data = json!({"tool_name":"Bash", "cwd":"/repo", "tool_input":{
+            "command":"git -C worktrees/bw-1 commit -m saved 2>&1 | tee -a /dev/null"}});
+        assert_eq!(
+            mutation_paths(&data),
+            vec![PathBuf::from("/repo/worktrees/bw-1")]
+        );
+    }
+
+    #[test]
+    fn native_machinery_words_survive_a_command_with_accents_in_it() {
+        let segments = shell_segments("touch caf\u{e9}/na\u{ef}ve.txt");
+        let words: Vec<&str> = segments[0].words.iter().map(|w| w.text.as_str()).collect();
+        assert_eq!(words, vec!["touch", "caf\u{e9}/na\u{ef}ve.txt"]);
+    }
+
+    /// A gate that reads the value of `--status` as the card it is judging
+    /// judges a card that does not exist, and then stands down entirely.
+    #[test]
+    fn native_machinery_a_flag_value_is_never_mistaken_for_the_card() {
+        let subject = |command: &str| {
+            let segments = shell_segments(command);
+            let call = bd_call(&segments[0]).unwrap();
+            subject_id(&segments[0].words[call.verb + 1..])
+        };
+        assert_eq!(subject("bd update --status closed bw-1").as_deref(), Some("bw-1"));
+        assert_eq!(subject("bd update bw-1 --status closed").as_deref(), Some("bw-1"));
+        assert_eq!(
+            subject("bd close --reason 'done here' bw-1").as_deref(),
+            Some("bw-1")
+        );
+        assert_eq!(subject("bd update --status=closed bw-1").as_deref(), Some("bw-1"));
+    }
+
+    /// The escape hatch has to be readable off the command a gate is judging,
+    /// and only where bash would read it as an assignment.
+    #[test]
+    fn native_machinery_a_leading_assignment_is_the_only_bypass_a_command_carries() {
+        assert_eq!(
+            leading_assignment(
+                "ATELIER_BYPASS='no way to land' git merge --ff-only bw-1",
+                "ATELIER_BYPASS"
+            )
+            .as_deref(),
+            Some("no way to land")
+        );
+        assert_eq!(
+            leading_assignment("true && ATELIER_BYPASS=stuck rm notes.txt", "ATELIER_BYPASS")
+                .as_deref(),
+            Some("stuck")
+        );
+        for command in [
+            "echo ATELIER_BYPASS=x",
+            "git commit -m 'ATELIER_BYPASS=x'",
+            "ATELIER_BYPASS= git status",
+        ] {
+            assert!(
+                leading_assignment(command, "ATELIER_BYPASS").is_none(),
+                "excused by: {command}"
+            );
+        }
+    }
+
     #[test]
     fn native_machinery_git_reads_remain_ungated_while_writes_share_one_rule() {
         for command in [
@@ -1520,43 +1969,129 @@ mod tests {
         assert!(claim_transition(&mixed).is_none());
     }
 
+    /// A repository change with no owned card is refused; a write with no
+    /// repository at all is not the rule's business (`docs/hook-friction.md` §1).
     #[test]
-    fn native_machinery_non_worktree_mutation_is_denied() {
-        let data =
-            json!({"tool_name":"Edit", "cwd":"/repo", "tool_input":{"file_path":"src/lib.rs"}});
-        let refusal = workflow(&data).expect("a denial");
+    fn native_machinery_only_repository_changes_need_an_owned_card() {
+        let repo = tempfile::tempdir().unwrap();
+        let git = crate::routes::find_git().unwrap();
+        assert!(Command::new(git)
+            .args(["init", "-q", "-b", "ours"])
+            .current_dir(repo.path())
+            .status()
+            .unwrap()
+            .success());
+        let inside = json!({"tool_name":"Edit", "cwd": repo.path(),
+            "tool_input":{"file_path": repo.path().join("src/lib.rs")}});
+        let refusal = workflow(&inside).expect("a denial");
         assert_eq!(refusal["hookSpecificOutput"]["permissionDecision"], "deny");
+
+        let outside = tempfile::tempdir().unwrap();
+        let scratch = json!({"tool_name":"Edit", "cwd": outside.path(),
+            "tool_input":{"file_path": outside.path().join("notes.txt")}});
+        assert!(workflow(&scratch).is_none(), "a scratch file is not a change");
+
+        for command in [
+            "grep -n pattern src/lib.rs 2>/dev/null",
+            "echo probe > /dev/tcp/127.0.0.1/3008",
+            "cargo build >/dev/null 2>&1",
+        ] {
+            let data = json!({"tool_name":"Bash", "cwd": repo.path(),
+                "tool_input":{"command": command}});
+            assert!(workflow(&data).is_none(), "refused: {command}");
+        }
     }
 
     #[test]
     fn native_machinery_lets_a_fast_forward_landing_reach_its_own_gate() {
+        let repo = tempfile::tempdir().unwrap();
+        assert!(Command::new(crate::routes::find_git().unwrap())
+            .args(["init", "-q", "-b", "ours"])
+            .current_dir(repo.path())
+            .status()
+            .unwrap()
+            .success());
         // The landing branch's checkout is nobody's card worktree, so the
         // ownership rule would refuse every landing. A fast-forward merge is
         // the merge gate's business, not the workflow gate's.
-        let landing = json!({"tool_name":"Bash", "cwd":"/repo",
+        let landing = json!({"tool_name":"Bash", "cwd": repo.path(),
             "tool_input":{"command":"git merge --ff-only bw-t26l.20"}});
         assert!(workflow(&landing).is_none());
         // Any other merge is still a change like any other.
-        let ordinary = json!({"tool_name":"Bash", "cwd":"/repo",
+        let ordinary = json!({"tool_name":"Bash", "cwd": repo.path(),
             "tool_input":{"command":"git merge bw-t26l.20"}});
         assert_eq!(
             workflow(&ordinary).expect("a denial")["hookSpecificOutput"]["permissionDecision"],
             "deny"
         );
+        // And so is a landing performed with the plumbing a merge is made of.
+        for plumbing in [
+            "git read-tree -m -u HEAD bw-t26l.20",
+            "git update-ref refs/heads/ours bw-t26l.20",
+            "git push . bw-t26l.20:ours",
+        ] {
+            let data = json!({"tool_name":"Bash", "cwd": repo.path(),
+                "tool_input":{"command": plumbing}});
+            assert_eq!(
+                workflow(&data).expect("a denial")["hookSpecificOutput"]["permissionDecision"],
+                "deny",
+                "walked around the gate: {plumbing}"
+            );
+        }
     }
 
     #[test]
     fn native_machinery_merge_invariants_are_hard_denials() {
-        assert!(merge_refusal(true, false, "", "s-test", false)
+        let clean: &[String] = &[];
+        let clash = [String::from("src/lib.rs")];
+        assert!(merge_refusal(true, false, "", "s-test", clean)
             .unwrap()
             .contains("fast-forward"));
-        assert!(merge_refusal(true, true, "s-other", "s-test", false)
+        assert!(merge_refusal(true, true, "s-other", "s-test", clean)
             .unwrap()
             .contains("s-other"));
-        assert!(merge_refusal(true, true, "s-test", "s-test", true)
+        assert!(merge_refusal(true, true, "s-test", "s-test", &clash)
             .unwrap()
-            .contains("tracked changes"));
-        assert!(merge_refusal(true, true, "s-test", "s-test", false).is_none());
+            .contains("src/lib.rs"));
+        assert!(merge_refusal(true, true, "s-test", "s-test", clean).is_none());
+    }
+
+    /// A landing is refused only over the files it would actually write.
+    ///
+    /// The owner's checkout nearly always holds some unrelated edit. Refusing
+    /// every landing on that basis is `docs/hook-friction.md` §4's residue:
+    /// finished work waiting on a person for no reason a merge would give.
+    #[test]
+    fn native_machinery_a_landing_is_refused_only_over_files_it_would_overwrite() {
+        let repo = tempfile::tempdir().unwrap();
+        let git = crate::routes::find_git().unwrap();
+        let run = |args: &[&str]| {
+            assert!(Command::new(&git)
+                .args(args)
+                .current_dir(repo.path())
+                .status()
+                .unwrap()
+                .success());
+        };
+        run(&["init", "-q", "-b", "ours"]);
+        run(&["config", "user.email", "gate@example.com"]);
+        run(&["config", "user.name", "gate"]);
+        std::fs::write(repo.path().join("landed.txt"), "one\n").unwrap();
+        std::fs::write(repo.path().join("untouched.txt"), "one\n").unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-qm", "first"]);
+        run(&["checkout", "-q", "-b", "bw-1"]);
+        std::fs::write(repo.path().join("landed.txt"), "two\n").unwrap();
+        run(&["commit", "-qam", "bw-1: second"]);
+        run(&["checkout", "-q", "ours"]);
+
+        // An unrelated local edit is not this landing's business.
+        std::fs::write(repo.path().join("untouched.txt"), "local\n").unwrap();
+        assert!(overwritten_by(repo.path(), "bw-1").is_empty());
+
+        // An edit to a file the landing rewrites is.
+        std::fs::write(repo.path().join("landed.txt"), "local\n").unwrap();
+        assert_eq!(overwritten_by(repo.path(), "bw-1"), vec!["landed.txt"]);
     }
 
     #[test]

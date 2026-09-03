@@ -433,27 +433,39 @@ pub fn project_beads(rest: &[String]) -> Result<String, String> {
 ///
 /// A gate that is not here stands down rather than refusing: a copy whose rules
 /// failed to land must not be a copy that cannot finish a turn.
+///
+/// The event is read once, here, so that every gate is offered the same
+/// escape hatch before it runs. See `hook_bypass` for the four ways to say
+/// "not this time" and why each of them exists.
 pub fn hook(name: &str, rest: &[String]) -> Result<i32, String> {
     if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
         return Err(format!("`{name}` is not the name of a gate"));
     }
+    if rest == ["--version"] && crate::lifecycle::is_ours(name) {
+        println!("{}", crate::lifecycle::version());
+        return Ok(0);
+    }
+    let mut heard = String::new();
+    let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut heard);
+    let event: serde_json::Value =
+        serde_json::from_str(&heard).unwrap_or(serde_json::Value::Object(Default::default()));
+    if let Some(bypass) = crate::hook_bypass::asked(&event) {
+        crate::hook_bypass::record(name, &bypass);
+        return Ok(0);
+    }
     // Every executable gate is native. Unknown legacy names stand down so a
     // stale settings file can never make an interpreter a runtime dependency.
     if crate::doing::is_ours(name) {
-        return Ok(crate::doing::run());
+        return Ok(crate::doing::run(&heard));
     }
     if crate::completion_gate::is_ours(name) {
-        return Ok(crate::completion_gate::run());
+        return Ok(crate::completion_gate::run(&heard));
     }
     if crate::board_push::is_ours(name) {
-        return Ok(crate::board_push::run());
+        return Ok(crate::board_push::run(&event));
     }
     if crate::lifecycle::is_ours(name) {
-        if rest == ["--version"] {
-            println!("{}", crate::lifecycle::version());
-            return Ok(0);
-        }
-        return Ok(crate::lifecycle::run(name));
+        return Ok(crate::lifecycle::run(name, &event));
     }
     eprintln!(
         "{}: retired or unknown hook `{name}` stood down",

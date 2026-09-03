@@ -5,7 +5,6 @@
 //! short-circuit here lets that hook keep working on a machine with no Python.
 
 use serde_json::Value;
-use std::io::Read;
 
 pub const GATE: &str = "completion-gate";
 
@@ -29,13 +28,8 @@ pub fn is_ours(name: &str) -> bool {
     name == GATE || name == "completion-gate.py"
 }
 
-pub fn run() -> i32 {
-    let mut heard = String::new();
-    if let Err(error) = std::io::stdin().read_to_string(&mut heard) {
-        eprintln!("{error}");
-        return 1;
-    }
-    match answer(&heard) {
+pub fn run(heard: &str) -> i32 {
+    match answer(heard) {
         Ok(said) => {
             print!("{said}");
             0

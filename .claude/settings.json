@@ -1,5 +1,5 @@
 {
-  "autoCompactWindow": 200000,
+  "autoCompactWindow": 250000,
   "hooks": {
     "PreToolUse": [
       {
@@ -48,7 +48,17 @@
         ]
       }
     ],
-    "SessionStart": [{ "matcher": "", "hooks": [{ "type": "command", "command": "atelier hook board-prime" }] }],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "atelier hook board-prime"
+          }
+        ]
+      }
+    ],
     "SubagentStop": [
       {
         "hooks": [

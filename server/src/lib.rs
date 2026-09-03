@@ -9,6 +9,7 @@ pub mod doing;
 pub mod dolt;
 pub mod dolt_lifecycle;
 pub mod handover;
+pub mod hook_bypass;
 pub mod identity;
 pub mod laid_down;
 pub mod join;

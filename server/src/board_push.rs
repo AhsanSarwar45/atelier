@@ -5,7 +5,6 @@
 //! is unavailable.
 
 use serde_json::Value;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -15,20 +14,8 @@ pub fn is_ours(name: &str) -> bool {
     name == GATE || name == "board-push.py"
 }
 
-pub fn run() -> i32 {
-    let mut heard = String::new();
-    if let Err(error) = std::io::stdin().read_to_string(&mut heard) {
-        eprintln!("{error}");
-        return 1;
-    }
-    let data: Value = match serde_json::from_str(&heard) {
-        Ok(data) => data,
-        Err(error) => {
-            eprintln!("{error}");
-            return 1;
-        }
-    };
-    act(&data, crate::routes::find_bd())
+pub fn run(data: &Value) -> i32 {
+    act(data, crate::routes::find_bd())
 }
 
 fn act(data: &Value, bd: Option<PathBuf>) -> i32 {
