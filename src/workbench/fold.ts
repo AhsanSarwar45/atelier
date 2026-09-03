@@ -105,6 +105,10 @@ export interface TranscriptTool {
   /** The opening window carries the readable title, not the potentially huge
    * body. The body is asked for only when this row is opened. */
   detailsDeferred?: boolean;
+  /** What the call answered with, when it answered with a picture rather than
+   * with words. A screenshot tool's whole answer used to be dropped: the row
+   * said it succeeded and showed nothing (bw-t26l.20). */
+  images?: ImagePayload[];
   /** Classification survives deferred tool bodies so the collapsed row keeps
    * the same category, colour and icon as a live row. */
   ranKind?: import('@/workbench/said-what-it-ran').RanKind;
@@ -492,7 +496,13 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
 
     case 'image':
       next.items = items.map((it) =>
-        it.kind === 'message' && it.id === e.messageId ? { ...it, images: [...it.images, e.image] } : it,
+        e.toolCallId
+          ? it.kind === 'tool' && it.id === e.toolCallId
+            ? { ...it, images: [...(it.images ?? []), e.image] }
+            : it
+          : it.kind === 'message' && it.id === e.messageId
+            ? { ...it, images: [...it.images, e.image] }
+            : it,
       );
       return next;
 
@@ -961,7 +971,15 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         break;
 
       case 'image': {
-        const at = messageAt.get(e.messageId);
+        if (e.toolCallId) {
+          const at = toolAt.get(e.toolCallId);
+          if (at !== undefined) {
+            const it = items[at] as TranscriptTool;
+            it.images = [...(it.images ?? []), e.image];
+          }
+          break;
+        }
+        const at = e.messageId === null ? undefined : messageAt.get(e.messageId);
         if (at !== undefined) {
           const it = items[at] as TranscriptMessage;
           it.images = [...it.images, e.image];

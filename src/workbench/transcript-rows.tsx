@@ -453,10 +453,12 @@ export const ToolRow = memo(function ToolRow({
   item,
   nested,
   sessionId = '',
+  onLook = () => {},
 }: {
   item: Extract<TranscriptItem, { kind: 'tool' }>;
   nested: boolean;
   sessionId?: string;
+  onLook?: (image: LookableImage) => void;
 }) {
   const [open, setOpen] = useOpen();
   const [detail, setDetail] = useState<Pick<typeof item, 'input' | 'output' | 'diff'> | null>(null);
@@ -577,6 +579,15 @@ export const ToolRow = memo(function ToolRow({
           </>
         )}
       </Panel>
+      {/* What the call answered with, when it answered with a picture. Under
+          the row rather than behind its click: a screenshot IS the answer, and
+          an answer nobody can see without knowing to open the row is the
+          failure this replaced (bw-t26l.20). */}
+      {item.images && item.images.length > 0 && (
+        <div className="pt-1">
+          <PictureGrid images={item.images} onLook={onLook} />
+        </div>
+      )}
       {shown.diff && (
         <DiffView
           path={shown.diff.path}
@@ -1253,7 +1264,7 @@ export const TranscriptRow = memo(function TranscriptRow({
 }) {
   switch (item.kind) {
     case 'tool':
-      return <ToolRow item={item} nested={sentOff(item.parentId)} sessionId={sessionId} />;
+      return <ToolRow item={item} nested={sentOff(item.parentId)} sessionId={sessionId} onLook={onLook} />;
     case 'thinking':
       return <ThinkingBlock item={item} />;
     case 'ask':

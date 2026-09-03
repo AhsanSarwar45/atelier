@@ -467,7 +467,13 @@ export type WbpEvent = EventBase &
     | { type: 'agent.identified'; agentId: string; agentType: string }
     | { type: 'diff'; toolCallId: string; path: string; before: string; after: string; line?: number }
     | { type: 'todo'; items: TodoItem[] }
-    | { type: 'image'; messageId: string; image: ImagePayload }
+    /**
+     * One picture. `messageId` names the message it belongs to; `toolCallId`
+     * names the call instead, for a tool that answered with a picture rather
+     * than with words -- a screenshot, a rendered chart, a page it fetched.
+     * Exactly one of the two is set.
+     */
+    | { type: 'image'; messageId: string | null; toolCallId?: string; image: ImagePayload }
     | { type: 'image.compare'; messageId: string; comparison: ImageComparison }
     | { type: 'widget'; messageId: string; widget: ChatWidget }
     /**

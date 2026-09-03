@@ -99,6 +99,12 @@ pub struct AcpNormalizer {
     active_thinking: HashMap<String, String>,
     started_messages: HashSet<String>,
     open_tools: HashSet<String>,
+    /// How many of a call's pictures have already been sent on.
+    ///
+    /// A tool's content arrives whole on every ping, not as a delta, so a call
+    /// that answers with a screenshot and then keeps running would send the
+    /// same screenshot again on each update and once more on the close.
+    tool_pictures: HashMap<String, usize>,
     tool_starts: HashMap<String, Value>,
     subagent_tools: HashSet<String>,
     deferred_agents: HashMap<String, String>,
@@ -132,6 +138,7 @@ impl Default for AcpNormalizer {
             active_thinking: HashMap::new(),
             started_messages: HashSet::new(),
             open_tools: HashSet::new(),
+            tool_pictures: HashMap::new(),
             tool_starts: HashMap::new(),
             subagent_tools: HashSet::new(),
             deferred_agents: HashMap::new(),
@@ -280,12 +287,6 @@ impl AcpNormalizer {
             }),
         );
         serde_json::from_value(event).expect("normalizer only emits typed WBP events")
-    }
-
-    fn content_text(content: &Value) -> Option<&str> {
-        (content["type"] == "text")
-            .then(|| content["text"].as_str())
-            .flatten()
     }
 
     /// A content block as words, for the four ACP kinds that are words.
@@ -1142,8 +1143,13 @@ impl AcpNormalizer {
             Some("user_message_chunk") if self.suppress_local_user => Vec::new(),
             Some("user_message_chunk") => self.message_chunk(session_id, provider, raw, "user", &update["content"]),
             Some("agent_message_chunk") => self.message_chunk(session_id, provider, raw, "assistant", &update["content"]),
-            Some("agent_thought_chunk") => Self::content_text(&update["content"])
-                .map(|text| self.thinking_chunk(session_id, provider, raw, text))
+            // A thought is words, and words are the four kinds `content_words`
+            // reads -- not only a bare text block. An agent that thought about
+            // a file by quoting it, or by linking to it, had the whole thought
+            // dropped on the floor: no thinking row, no note, nothing to say
+            // one had been sent (bw-t26l.20).
+            Some("agent_thought_chunk") => Self::content_words(&update["content"])
+                .map(|text| self.thinking_chunk(session_id, provider, raw, &text))
                 .unwrap_or_default(),
             Some("tool_call") => {
                 let id = update["toolCallId"].as_str().unwrap_or_default().to_string();
@@ -1274,6 +1280,24 @@ impl AcpNormalizer {
                     .and_then(|started| started["title"].as_str())
                     .unwrap_or_default()
                     .to_string();
+                // A tool that answers with a picture -- a screenshot, a
+                // rendered chart, a page it fetched -- had that answer thrown
+                // away: the summary above reads the four content kinds that are
+                // words, and a picture is none of them. The row said the call
+                // succeeded and showed nothing (bw-t26l.20).
+                let pictures = update["content"].as_array().into_iter().flatten()
+                    .filter_map(|row| row.get("content"))
+                    .filter_map(|content| Self::content_picture(content).map(|shot| (content, shot)))
+                    .map(|(content, (mime, data_url))| json!({
+                        "type":"image", "messageId":Value::Null, "toolCallId":id,
+                        "image":{"mime":mime, "dataUrl":data_url,
+                            "alt":content["alt"].as_str().unwrap_or("Tool image")}
+                    }))
+                    .collect::<Vec<_>>();
+                let already = self.tool_pictures.insert(id.clone(), pictures.len()).unwrap_or(0);
+                let pictures = pictures.into_iter().skip(already)
+                    .map(|shot| self.envelope(session_id, provider, raw, shot))
+                    .collect::<Vec<_>>();
                 let diffs = update["content"].as_array().into_iter().flatten()
                     .filter(|row| row["type"] == "diff")
                     .map(|row| self.envelope(
@@ -1289,10 +1313,12 @@ impl AcpNormalizer {
                 if matches!(status, "completed" | "failed") {
                     self.open_tools.remove(&id);
                     self.tool_starts.remove(&id);
+                    self.tool_pictures.remove(&id);
                     let output = Self::display_text(&update["rawOutput"]);
                     let output = if output.is_empty() { summary.clone() } else { output };
                     let mut events = refinements;
                     events.extend(diffs);
+                    events.extend(pictures);
                     events.push(self.envelope(
                         session_id,
                         provider,
@@ -1360,6 +1386,7 @@ impl AcpNormalizer {
                 } else {
                     let mut events = refinements;
                     events.extend(diffs);
+                    events.extend(pictures);
                     events.push(self.envelope(
                         session_id,
                         provider,
@@ -2001,6 +2028,64 @@ mod tests {
         assert_eq!(completed["toolCallId"], "call-1");
         assert_eq!(completed["ok"], true);
         assert_eq!(completed["summary"], "Applied one edit.");
+    }
+
+    /// A tool that answers with a picture had its whole answer thrown away, and
+    /// a thought that quoted a file had the whole thought thrown away: both
+    /// paths read one content kind out of the five ACP carries. A screenshot
+    /// tool's row said "ok" and showed nothing (bw-t26l.20).
+    #[test]
+    fn a_picture_a_tool_answered_with_reaches_the_row_that_asked_for_it() {
+        let mut normalizer = AcpNormalizer::default();
+        let shot = json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call_update",
+            "toolCallId":"call-1",
+            "status":"in_progress",
+            "content":[{"type":"content","content":{
+                "type":"image", "mimeType":"image/png", "data":"iVBORw0KGgo=", "alt":"the board"
+            }}]
+        }});
+        normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call", "toolCallId":"call-1", "title":"Screenshot", "status":"pending"
+        }}));
+        let events = normalizer.update("local", "claude", &shot);
+        let picture = events
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "image")
+            .expect("the tool's picture is the tool's answer");
+        // Hung off the call, not off a message: there is no message here, and a
+        // picture keyed to one that does not exist is a picture nobody draws.
+        assert_eq!(picture["toolCallId"], "call-1");
+        assert_eq!(picture["messageId"], Value::Null);
+        assert_eq!(picture["image"]["alt"], "the board");
+        assert!(picture["image"]["dataUrl"].as_str().unwrap().starts_with("data:image/png;base64,"));
+
+        // Content arrives whole on every ping, not as a delta. The same
+        // screenshot on the close is the same screenshot, and it is not drawn
+        // a second time.
+        let mut closing = shot.clone();
+        closing["update"]["status"] = json!("completed");
+        let again = normalizer.update("local", "claude", &closing);
+        assert_eq!(kinds(&again).iter().filter(|kind| **kind == json!("image")).count(), 0);
+    }
+
+    /// A thought is words, and `content_words` reads the four kinds that are
+    /// words. This read a bare text block only, so an agent that thought about
+    /// a file by linking to it sent a thought nobody ever saw (bw-t26l.20).
+    #[test]
+    fn a_thought_that_links_to_a_file_is_still_a_thought() {
+        let mut normalizer = AcpNormalizer::default();
+        let events = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"agent_thought_chunk",
+            "content":{"type":"resource_link","uri":"file:///work/notes.txt","name":"notes.txt"}
+        }}));
+        let thought = events
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "thinking.delta")
+            .expect("a thought in any of the four word kinds is a thought");
+        assert_eq!(thought["text"], "[notes.txt](file:///work/notes.txt)");
     }
 
     /// ACP carries five kinds of content block and this read two of them.
