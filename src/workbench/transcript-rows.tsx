@@ -42,7 +42,7 @@ import { ChatWidgetView } from '@/workbench/chat-widget-view';
 import { widgetSpecs } from '@/workbench/chat-widgets';
 import { colourOfBand, lookOfRan, markOfRan } from '@/workbench/ran-look';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
-import { refuses } from '@/workbench/protocol';
+import { NOBODY_ANSWERED, refuses } from '@/workbench/protocol';
 import type { AskOption, ImagePayload, LookableImage } from '@/workbench/protocol';
 import { Chipped, SplitPaths, withChips } from '@/workbench/split-paths';
 import { PathChip } from '@/workbench/path-chip';
@@ -99,11 +99,20 @@ export const PermissionCard = memo(function PermissionCard({
     // pressing No on a real ACP card left the card reading "Denied · Edit
     // notes.txt" only in a test: live, it said "Allowed" for a tool the person
     // had just refused (bw-t26l.20).
-    const answered = question
-      ? 'Answered'
-      : refuses(options.find((o) => o.id === chosen)?.kind ?? 'allow_once')
-        ? 'Denied'
-        : 'Allowed';
+    // A card can also be settled by nobody. Stopping a turn, or losing the
+    // provider under it, closes every card still open and marks it with
+    // NOBODY_ANSWERED — a word no agent offers as an option, so it matched
+    // nothing here and fell through the `?? 'allow_once'` below to be drawn as
+    // ALLOWED. A card saying the owner allowed a tool he never answered is the
+    // one thing a permission card exists to prevent (bw-t26l.20).
+    const answered =
+      chosen === NOBODY_ANSWERED
+        ? 'Stopped'
+        : question
+          ? 'Answered'
+          : refuses(options.find((o) => o.id === chosen)?.kind ?? 'allow_once')
+            ? 'Denied'
+            : 'Allowed';
     return (
       <Panel
         data-testid="permission-card"

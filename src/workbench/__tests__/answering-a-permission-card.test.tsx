@@ -17,7 +17,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { AskOption } from '@/workbench/protocol';
+import { NOBODY_ANSWERED, type AskOption } from '@/workbench/protocol';
 import { PermissionCard } from '@/workbench/transcript-rows';
 
 vi.mock('@/workbench/commands', () => ({ sendCommand: vi.fn(async () => ({})) }));
@@ -73,6 +73,16 @@ describe('a permission card from a live agent', () => {
   it('says the request was allowed when it was allowed', () => {
     render(card('allow-with-updates'));
     expect(screen.getByTestId('permission-resolved')).toHaveTextContent('Allowed');
+  });
+
+  it('says the turn was stopped when nobody answered it', () => {
+    // Stopping a turn closes every card still open, and the server marks them
+    // with NOBODY_ANSWERED because no option was pressed. That word matches
+    // none of the agent's ids, so the card fell through to its allow_once
+    // fallback and told the reader he had ALLOWED a tool he never answered
+    // (bw-t26l.20).
+    render(card(NOBODY_ANSWERED));
+    expect(screen.getByTestId('permission-resolved')).toHaveTextContent('Stopped');
   });
 
   it('asks once, rather than asking and then repeating itself underneath', () => {

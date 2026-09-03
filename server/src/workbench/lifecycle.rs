@@ -82,6 +82,14 @@ fn apply_totals(row: &mut AgentRow, event: &mut Value) -> bool {
     before != (row.seconds, row.tokens, row.calls)
 }
 
+/// What a card is marked with when nobody answered it.
+///
+/// Not an option id: no agent offers one by this name, and the card reads it
+/// as "Stopped" precisely because it matches nothing the agent asked. Shared
+/// with the cancel path in `acp::client` so a card the owner never answered
+/// says the same thing however the turn ended (bw-t26l.20).
+pub const NOBODY_ANSWERED: &str = "provider_stopped";
+
 /// Resolve interaction cards whose provider request died with the transport.
 /// Provider adapters own native request handles; the shared lifecycle owns the
 /// WBP meaning shown and persisted by every provider.
@@ -93,14 +101,14 @@ pub fn abandoned_interactions(
     let mut events = Vec::new();
     events.extend(
         asks.into_iter().map(
-            |ask_id| json!({"type":"ask.resolved","askId":ask_id,"chosen":"provider_stopped"}),
+            |ask_id| json!({"type":"ask.resolved","askId":ask_id,"chosen":NOBODY_ANSWERED}),
         ),
     );
     events.extend(questions.into_iter().map(
         |request_id| json!({"type":"question.resolved","requestId":request_id,"answers":null}),
     ));
     events.extend(plans.into_iter().map(|proposal_id| {
-        json!({"type":"plan.resolved","proposalId":proposal_id,"status":"dismissed","actionId":"provider_stopped","feedback":null})
+        json!({"type":"plan.resolved","proposalId":proposal_id,"status":"dismissed","actionId":NOBODY_ANSWERED,"feedback":null})
     }));
     events
 }

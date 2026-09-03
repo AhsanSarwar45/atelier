@@ -452,8 +452,24 @@ struct PermissionBroker {
 }
 
 struct PendingPermission {
-    answer: oneshot::Sender<String>,
-    reject: String,
+    answer: oneshot::Sender<PermissionAnswer>,
+}
+
+/// What a permission card was settled by.
+///
+/// A stopped turn is not a refusal. ACP is explicit that a client sending
+/// `session/cancel` "MUST respond to all pending `session/request_permission`
+/// requests with this `Cancelled` outcome"
+/// (agent-client-protocol-schema, `v1/client.rs`, `RequestPermissionOutcome`).
+/// This used to answer them with the agent's own rejection option instead, so
+/// pressing Stop while a card was up was recorded by the agent as the owner
+/// refusing that tool — and an agent that remembers refusals carried a "no"
+/// the owner never said into every turn after it (bw-t26l.20).
+enum PermissionAnswer {
+    /// The owner pressed one of the options the agent offered.
+    Chose(String),
+    /// The turn was stopped before he pressed anything.
+    Cancelled,
 }
 
 #[derive(Default)]
@@ -480,7 +496,7 @@ impl PermissionBroker {
             .remove(id)
             .ok_or_else(|| format!("permission request {id} is no longer pending"))?
             .answer
-            .send(option.to_string())
+            .send(PermissionAnswer::Chose(option.to_string()))
             .map_err(|_| format!("permission request {id} closed"))
     }
 
@@ -503,7 +519,7 @@ impl PermissionBroker {
         self.plan_options.lock().await.clear();
         let pending = std::mem::take(&mut *self.pending.lock().await);
         for (_, permission) in pending {
-            let _ = permission.answer.send(permission.reject);
+            let _ = permission.answer.send(PermissionAnswer::Cancelled);
         }
     }
 }
@@ -658,24 +674,11 @@ async fn permission(
         .cloned()
         .unwrap_or_default();
     let (answer, receive) = oneshot::channel();
-    let reject = raw["options"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|option| {
-            matches!(
-                option["kind"].as_str(),
-                Some("reject_once" | "reject_always" | "deny")
-            )
-        })
-        .and_then(|option| option["optionId"].as_str())
-        .unwrap_or("reject_once")
-        .to_string();
     broker
         .pending
         .lock()
         .await
-        .insert(ask_id.clone(), PendingPermission { answer, reject });
+        .insert(ask_id.clone(), PendingPermission { answer });
     let plan = raw
         .pointer("/toolCall/rawInput/plan")
         .and_then(Value::as_str)
@@ -730,7 +733,31 @@ async fn permission(
         broker.pending.lock().await.remove(&ask_id);
         return Err(acp_error(error));
     }
-    let selected = receive.await.map_err(acp_error)?;
+    let selected = match receive.await.map_err(acp_error)? {
+        PermissionAnswer::Chose(option) => option,
+        // Stopped before he answered. The card is closed saying so rather than
+        // left open forever, and the agent is told the turn was cancelled
+        // rather than handed a refusal the owner never made. No "Working"
+        // state follows it: the turn is over, and the stop path has already
+        // said where the chat came to rest.
+        PermissionAnswer::Cancelled => {
+            let resolved = if plan.is_some() {
+                json!({"type":"plan.resolved", "sessionId":local_session_id, "seq":0, "at":now(),
+                    "proposalId":ask_id, "status":"dismissed",
+                    "actionId":crate::workbench::lifecycle::NOBODY_ANSWERED, "feedback":null})
+            } else {
+                json!({"type":"ask.resolved", "sessionId":local_session_id, "seq":0, "at":now(),
+                    "askId":ask_id, "chosen":crate::workbench::lifecycle::NOBODY_ANSWERED})
+            };
+            database
+                .append_many(vec![event(resolved)?])
+                .await
+                .map_err(acp_error)?;
+            return Ok(RequestPermissionResponse::new(
+                RequestPermissionOutcome::Cancelled,
+            ));
+        }
+    };
     // Whether the plan was approved is settled by the kind of the option that
     // was pressed, not by the letters in its id. The ids are the agent's own
     // vocabulary — Claude approves with "allow-once" and refuses with "reject",
@@ -2650,15 +2677,20 @@ mod tests {
             .unwrap();
     }
 
+    /// Stopping a turn cancels the cards it left open. It does not refuse them.
+    ///
+    /// This used to send the agent's own rejection option, which reads to the
+    /// agent as the owner saying no to that exact tool. ACP has a word for the
+    /// other thing and requires it: a client that sends `session/cancel` MUST
+    /// answer every pending `session/request_permission` with `Cancelled`.
     #[tokio::test]
-    async fn interrupt_releases_every_pending_provider_question_with_its_native_rejection() {
+    async fn interrupt_cancels_every_pending_provider_question_rather_than_refusing_it() {
         let permissions = PermissionBroker::default();
         let (permission_answer, permission_result) = oneshot::channel();
         permissions.pending.lock().await.insert(
             "permission-1".into(),
             PendingPermission {
                 answer: permission_answer,
-                reject: "provider-deny".into(),
             },
         );
         permissions.plan_options.lock().await.insert(
@@ -2666,7 +2698,10 @@ mod tests {
             ("provider-allow".into(), "provider-deny".into()),
         );
         permissions.cancel_all().await;
-        assert_eq!(permission_result.await.unwrap(), "provider-deny");
+        assert!(matches!(
+            permission_result.await.unwrap(),
+            PermissionAnswer::Cancelled
+        ));
         assert!(permissions.pending.lock().await.is_empty());
         assert!(permissions.plan_options.lock().await.is_empty());
 

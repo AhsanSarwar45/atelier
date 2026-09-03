@@ -72,6 +72,16 @@ export interface AskOption {
   kind: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always' | 'deny' | 'answer';
 }
 
+/**
+ * What a card is marked with when nobody answered it.
+ *
+ * Stopping a turn, or losing the provider under it, closes every card still
+ * open. The server marks them with this rather than with an option id, because
+ * none was pressed. Kept in step with `NOBODY_ANSWERED` in
+ * `server/src/workbench/lifecycle.rs`.
+ */
+export const NOBODY_ANSWERED = 'provider_stopped';
+
 /** Whether a button on a permission card is the one that refuses. */
 export function refuses(kind: AskOption['kind']): boolean {
   return kind === 'reject_once' || kind === 'reject_always' || kind === 'deny';
