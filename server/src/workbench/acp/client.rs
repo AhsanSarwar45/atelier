@@ -30,9 +30,16 @@ type Reply = oneshot::Sender<Result<Value, String>>;
 
 const MAX_SESSION_LIST_PAGES: usize = 100;
 
-/// How long a chat must be silent after a stop before its turn is read as held
-/// rather than working. Long enough that a model mid-sentence says something.
-const HELD_TURN_GRACE: u64 = 8;
+/// How long a chat must be silent before its turn is read as held rather than
+/// working. Everything a working chat does says so in events well inside this:
+/// a model mid-sentence, a tool's progress beats, a helper's own output.
+const HELD_TURN_GRACE: u64 = 25;
+
+/// How often the watch after a stop looks, and how long it keeps looking. The
+/// hold it rescues starts at the stop; a chat still working minutes later got
+/// past it, and a turn that wedges after that is not this turn's story.
+const HELD_TURN_TICK: u64 = 5;
+const HELD_TURN_WATCH: u64 = 300;
 
 /// Provider-neutral metadata returned by ACP `session/list`.
 ///
@@ -1450,39 +1457,63 @@ impl AcpDriver {
      *
      * Cancelling is the reader's own instruction carried out, not a guess: they
      * stopped the only work outstanding. It is only sent when the chat is quiet
-     * — no event of any kind since the stop — still counted as working, and has
+     * — no event of any kind for a while — still counted as working, and has
      * nothing of its own left running. A chat still doing something says so, in
      * events, and keeps its turn.
+     *
+     * The watch waits for that quiet rather than sampling for it once. A stop
+     * usually wakes the model one last time (measured: the stop at 10:16:38,
+     * the model's closing sentence at 10:16:42, then nothing), so a single look
+     * a few seconds later finds the chat busy, walks away, and leaves the wedge
+     * it was written to clear standing.
      */
     fn rescue_held_turn(&self) {
         let database = self.database.clone();
         let controls = self.controls.clone();
         let session_id = self.session.id.clone();
         tokio::spawn(async move {
-            let Ok(before) = database.event_count(session_id.clone()).await else {
+            let tick = std::time::Duration::from_secs(HELD_TURN_TICK);
+            let grace = std::time::Duration::from_secs(HELD_TURN_GRACE);
+            let started = std::time::Instant::now();
+            let mut quiet_since = started;
+            let Ok(mut seen) = database.event_count(session_id.clone()).await else {
                 return;
             };
-            tokio::time::sleep(std::time::Duration::from_secs(HELD_TURN_GRACE)).await;
-            let quiet = database.event_count(session_id.clone()).await == Ok(before);
-            if !quiet {
+            while started.elapsed() < std::time::Duration::from_secs(HELD_TURN_WATCH) {
+                tokio::time::sleep(tick).await;
+                let Ok(count) = database.event_count(session_id.clone()).await else {
+                    return;
+                };
+                if count != seen {
+                    seen = count;
+                    quiet_since = std::time::Instant::now();
+                    continue;
+                }
+                if quiet_since.elapsed() < grace {
+                    continue;
+                }
+                let Ok(Some(session)) = database.get_session(session_id.clone()).await else {
+                    return;
+                };
+                if !turn_is_active(&session.state) {
+                    return;
+                }
+                let Ok(agents) = database.projected_agents(session_id.clone()).await else {
+                    return;
+                };
+                // A helper still running — or parked, which is running out of
+                // sight — is a turn held for a reason. Wait it out rather than
+                // giving up: the reader may stop that one too.
+                if agents.iter().any(|agent| {
+                    !matches!(agent["state"].as_str(), Some("done" | "failed" | "stopped"))
+                }) {
+                    quiet_since = std::time::Instant::now();
+                    continue;
+                }
+                let (reply, _answer) = oneshot::channel();
+                let _ = controls.send(Control::Cancel { reply });
                 return;
             }
-            let Ok(Some(session)) = database.get_session(session_id.clone()).await else {
-                return;
-            };
-            if !turn_is_active(&session.state) {
-                return;
-            }
-            let Ok(agents) = database.projected_agents(session_id).await else {
-                return;
-            };
-            if agents.iter().any(|agent| {
-                !matches!(agent["state"].as_str(), Some("done" | "failed" | "stopped"))
-            }) {
-                return;
-            }
-            let (reply, _answer) = oneshot::channel();
-            let _ = controls.send(Control::Cancel { reply });
         });
     }
 
