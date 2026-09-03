@@ -653,6 +653,7 @@ fn summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
     let mut cwd = None;
     let mut branch = None;
     let mut custom_title = None;
+    let mut own_title = None;
     let mut summary = None;
     let mut first_prompt = None;
     let mut has_conversation = false;
@@ -661,6 +662,7 @@ fn summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
         cwd = as_nonempty(&row["cwd"]).map(PathBuf::from).or(cwd);
         branch = as_nonempty(&row["gitBranch"]).or(branch);
         custom_title = as_nonempty(&row["customTitle"]).or(custom_title);
+        own_title = as_nonempty(&row["aiTitle"]).or(own_title);
         summary = as_nonempty(&row["summary"]).or(summary);
         if matches!(row["type"].as_str(), Some("user" | "assistant"))
             && row["isMeta"] != true
@@ -679,13 +681,23 @@ fn summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
     // Claude's resume index does not offer a record that contains only
     // initialization metadata. Keep explicitly titled/summarized records, but
     // do not turn every abandoned process start into an external chat row.
-    if !has_conversation && custom_title.is_none() && summary.is_none() && first_prompt.is_none() {
+    if !has_conversation
+        && custom_title.is_none()
+        && own_title.is_none()
+        && summary.is_none()
+        && first_prompt.is_none()
+    {
         return None;
     }
     Some(ClaudeSessionSummary {
         session_id,
         last_modified: modified(&path),
-        name: custom_title.or_else(|| {
+        // A name someone set for this chat, then the name the chat made for
+        // itself, and only for a chat that has neither, one of ours cut down
+        // from what was asked. Claude titles its own conversations now; naming
+        // one "Reply Exactly READY" when it calls itself "READY" is the app
+        // talking over it (bw-t26l.20).
+        name: custom_title.or(own_title).or_else(|| {
             summary
                 .as_deref()
                 .and_then(crate::workbench::metadata::conversation_title)
@@ -1277,6 +1289,34 @@ fn tool_outcomes(rows: &[Value]) -> HashMap<String, bool> {
     outcomes
 }
 
+/// Whether a saved chat ever sent work off to a helper.
+///
+/// The bundled claude ACP adapter cannot replay that. On `session/load` it
+/// suppresses every `Task`/`Agent` call, meaning to send `subagent_spawned` in
+/// its place, but it only knows a helper from transcript entries that carry a
+/// `parent_tool_use_id` — and this Claude writes helper transcripts to a
+/// `subagents/` directory instead, never inline. So the calls vanish and no
+/// helper takes their place. A chat that delegated is read here rather than
+/// through ACP; one that did not replays faithfully (bw-t26l.20).
+pub fn delegates_work(record: &Path) -> bool {
+    if let Some(stem) = record.file_stem().and_then(|stem| stem.to_str()) {
+        let dir = record.with_file_name(stem).join("subagents");
+        if fs::read_dir(dir).is_ok_and(|mut entries| entries.any(|entry| entry.is_ok())) {
+            return true;
+        }
+    }
+    jsonl(record).iter().any(|row| {
+        row["message"]["content"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|block| {
+                block["type"] == "tool_use"
+                    && matches!(block["name"].as_str(), Some("Task") | Some("Agent"))
+            })
+    })
+}
+
 fn helper_events(record: &Path, outcomes: &HashMap<String, bool>) -> Vec<Value> {
     let Some(stem) = record.file_stem().and_then(|stem| stem.to_str()) else {
         return Vec::new();
@@ -1741,7 +1781,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_discovery_preserves_custom_titles_and_normalizes_fallbacks() {
+    fn claude_discovery_keeps_the_name_a_chat_has_and_only_invents_one_for_a_chat_with_none() {
         let home = tempdir().unwrap();
         let dir = home.path().join("projects/project");
         create_dir_all(&dir).unwrap();
@@ -1754,6 +1794,31 @@ mod tests {
             sessions[0].name.as_deref(),
             Some("Agent Defined Conversation Name")
         );
+        // The name the chat made for itself, kept exactly as it wrote it.
+        let named = home.path().join("projects/project/11111111-2222-3333-4444-555555555555.jsonl");
+        write(&named, [
+            json!({"type":"ai-title","aiTitle":"READY"}),
+            json!({"type":"user","message":{"role":"user","content":"Reply with exactly: READY"}}),
+        ].iter().map(Value::to_string).collect::<Vec<_>>().join("\n")).unwrap();
+        assert_eq!(
+            list_sessions(home.path(), None, false)
+                .iter()
+                .find(|session| session.session_id.starts_with("11111111"))
+                .and_then(|session| session.name.as_deref()),
+            Some("READY")
+        );
+        // And one that named itself nothing still gets a name of ours.
+        let unnamed = home.path().join("projects/project/22222222-2222-3333-4444-555555555555.jsonl");
+        write(&unnamed, [
+            json!({"type":"user","message":{"role":"user","content":"Reply with exactly: READY"}}),
+        ].iter().map(Value::to_string).collect::<Vec<_>>().join("\n")).unwrap();
+        assert_eq!(
+            list_sessions(home.path(), None, false)
+                .iter()
+                .find(|session| session.session_id.starts_with("22222222"))
+                .and_then(|session| session.name.as_deref()),
+            Some("Reply Exactly READY")
+        );
         let record = dir.join(format!("{CHAT}.jsonl"));
         let mut file = OpenOptions::new().append(true).open(record).unwrap();
         writeln!(
@@ -1763,7 +1828,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            list_sessions(home.path(), None, false)[0].name.as_deref(),
+            list_sessions(home.path(), None, false)
+                .iter()
+                .find(|session| session.session_id == CHAT)
+                .and_then(|session| session.name.as_deref()),
             Some("A Newer Name")
         );
     }
@@ -2027,6 +2095,52 @@ mod tests {
             .events
             .iter()
             .any(|event| event["type"] == "agent.finished" && event["seconds"] == 2));
+    }
+
+    #[test]
+    fn a_chat_that_sent_work_off_is_read_from_the_record_not_through_acp() {
+        let home = tempdir().unwrap();
+        let alone = home.path().join(format!("{CHAT}.jsonl"));
+        write(
+            &alone,
+            json!({"type":"assistant","message":{"content":[{
+                "type":"tool_use","id":"call-read","name":"Read","input":{}
+            }]}})
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+        assert!(
+            !delegates_work(&alone),
+            "a chat that only read a file replays faithfully through ACP"
+        );
+
+        let sent_off = home.path().join("11111111-1111-4111-8111-111111111111.jsonl");
+        write(
+            &sent_off,
+            json!({"type":"assistant","message":{"content":[{
+                "type":"tool_use","id":"call-task","name":"Task","input":{}
+            }]}})
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+        assert!(
+            delegates_work(&sent_off),
+            "the adapter drops the dispatch call, so this one is read from the record"
+        );
+
+        let transcripts = home.path().join("22222222-2222-4222-8222-222222222222.jsonl");
+        write(&transcripts, "").unwrap();
+        let helper_dir = transcripts
+            .with_file_name("22222222-2222-4222-8222-222222222222")
+            .join("subagents");
+        create_dir_all(&helper_dir).unwrap();
+        write(helper_dir.join("helper.jsonl"), "").unwrap();
+        assert!(
+            delegates_work(&transcripts),
+            "a helper transcript on disk is a helper the replay cannot rebuild"
+        );
     }
 
     #[test]

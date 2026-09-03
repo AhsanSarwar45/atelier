@@ -236,7 +236,7 @@ ordinary prompt text, which is how the brand runs one (§7).
 
 ### 2.3 Session state
 
-One enum, and it is what drives the glance strip and the waiting-on-you tray:
+One enum, and it is what drives the waiting-on-you tray:
 
 `idle · thinking · streaming · running_tool · waiting_permission ·
 waiting_choice · waiting_plan · stopped · errored · ended · dormant`
@@ -430,7 +430,7 @@ Routes, all under the proxy at `/api/workbench`:
 | route | purpose |
 |---|---|
 | `GET /events?session=<id>&since=<seq>` | one session's stream; replays from `since`, then tails live |
-| `GET /events` | the cross-project stream: state changes and activity lines for **all** sessions — feeds the tray and the glance strip |
+| `GET /events` | the cross-project stream: state changes and activity lines for **all** sessions — feeds the tray |
 | `POST /command` | every app→driver message of §2.2, one envelope |
 | `GET /sessions?project=` | the sidebar and the restore list |
 | `GET /links/session/:id` / `GET /links/bead/:id` | the joins of §6 |
@@ -689,6 +689,21 @@ the other program was in the middle of would be dropped for good, along with
 everything said after it. So the mark is set only when the whole record was
 taken; a chat left mid-command is read afresh the next time it is opened, which
 costs one re-read and gains the finished work (bw-dmxj.14).
+
+**Read through the protocol, except where the protocol loses it.** The past is
+asked for with ACP `session/load` and fed through the same normalizer the live
+`session/update` stream goes through, so a replayed chat and a live one are the
+same chat drawn by the same code (§3). One case is read the kit's own way
+instead: a Claude chat that sent work off to a helper. On load, the bundled
+claude adapter suppresses every `Task` call, meaning to send `subagent_spawned`
+in its place — but it only recognises a helper from transcript entries carrying
+`parent_tool_use_id`, and this Claude writes helper transcripts to a
+`subagents/` directory instead, never inline. So the calls vanish and nothing
+takes their place: a chat that sent three agents off replays as if it had worked
+alone (measured 2026-09-03; the chat that proved it is
+`tests/e2e/chat-sidebar-sections.spec.ts`). A chat that delegated is read from
+the record; every Codex chat, and every Claude chat that worked alone, comes
+through ACP (bw-t26l.20).
 
 #### 6.3.3 The way back in
 
@@ -1970,6 +1985,48 @@ command family, and a brand is still one driver file:
 - `agent.stop`, `agent.park`, `agent.say` — the three tiers, going the other
   way.
 
+**A helper's ending and its last words race, and the ending usually wins.** A
+native Claude helper is ended in one of three ways, and only one of them is the
+helper saying so: an ending of its own (`subagent_state_update`), the
+dispatching `Task` call completing, or the turn finishing. Launched async, the
+helper goes on talking after the first two, so whichever fired announced a
+result the reader could see was wrong: the card for a helper sent to read two
+files said "I'll read both files." (measured on a live chat, 2026-09-03).
+
+So every place that ends a helper records the result it announced, and the end
+of the turn compares what the helper actually said against that — not against
+any one path's idea of it, since which path fires is a race — and says the whole
+of it again if there is more. The record is kept across turns rather than
+drained with each one: an async helper outlives the turn that launched it, and a
+turn starting from an empty record would report its tail as though it were the
+whole report.
+
+There used to be a fourth ending: the chat speaking again, read as the helper
+being over because for some helpers the kit sends no ending at all. It is a
+guess about a helper that is still out, and on ten live runs it was wrong twice
+— the chat answered while the helper was still reading, and the card kept that
+first sentence until the correction landed, which on a failing run was after the
+reader had already looked. A helper still out is running; nothing but its own
+ending or the end of the turn says otherwise. What it says meanwhile is kept, so
+the turn's ending reports the whole of it.
+
+**The two ids a native helper arrives under.** `subagent_spawned` names a
+session id; the helper's actual work arrives on the parent session stamped
+`_meta.claudeCode.parentToolUseId` — the `Task` call — and the kit sends no
+`tool_call` start for it. The only authoritative join is
+`_meta.claudeCode.toolResponse.agentId` on that call's update, which arrives
+after the rows are already drawn and, in async mode, carries no content at all.
+Where exactly one helper is out and its call was never announced, the call is
+taken to be that helper's; where two are out, no guess is made and the rows keep
+the call they came with. Being wrong here opens an empty pane.
+
+**A message the provider replaces is finished, not left open.** Claude starts a
+second message in the same place — same session, same parent — without
+completing the first, and there is no completion of its own to wait for. The
+replacement is the ending: measured on a live chat, two of a turn's four
+messages were started and never finished, so the reader's transcript kept them
+open for the rest of the session.
+
 Codex helpers shipped 2026-03-16 and are the same shape: their own definition
 file, their own model and effort, threads the parent surfaces, steering asked of
 the parent. So the capability matrix row that said Codex has none is stale, and
@@ -2061,7 +2118,8 @@ doing nothing, and who holds it.
 Why: four screens answered this four ways and none of them answered all of it.
 The open chat's line drew one word; a row in the list drew a pill that was
 either "ready" or "working"; a board card drew a pulsing dot and an activity; the
-glance strip drew a dot, a word and a count of its own. The loudest of them, the
+glance strip, while it was in the bar, drew a dot, a word and a count of its own.
+The loudest of them, the
 green **working** pill, was derived from the marker directory alone — occupancy,
 not activity — so it sat on a terminal that had been at an empty prompt since
 last night, and a chat that really was answering said nothing different. The
@@ -2072,8 +2130,16 @@ of chat is intuitive. currently its awful."
 from what the driver last published and what the sidecar says about the holder,
 to the three facts. Every screen draws that and nothing else, so they cannot
 disagree; it is a function rather than a component because the sidebar row, the
-chat's own line, the board card and the glance strip all need the answer and
-only two of them are in the same tree.
+chat's own line and the board card all need the answer and none of them are in
+the same tree.
+
+**The strip is gone; the tray is not.** The bar carried both — what runs beside
+what waits — until 055a5c8 took the running half out and left the waiting half,
+so what follows the owner across every screen is now the tray alone. Nothing
+under it changed: `isRunning` still answers the same question for the board dot
+and the chat's own line, and the strip itself is one component in the history if
+it is ever wanted back. An e2e case went on asking for it for a week and failed
+on an element deliberately deleted (bw-t26l.20).
 
 **Ten words, one list, and never one word for five things.** `DOING_WORD` in
 `chat-state.ts` is the whole vocabulary a chat may be in — summarising itself,
@@ -2649,7 +2715,7 @@ always a screen, per the owner's standing rule on this job.
 
 6. **The typed-command menu, per brand.** | A screenshot of the composer after typing `/` in a Claude chat shows a menu of that install's real slash commands with descriptions; the same composer in a Codex chat shows exactly four entries — Model, Review, Compact, Skills — with Skills expanding to the live skill list; running Compact in each puts a "compacted" divider in the transcript.
 
-7. **Waiting-on-you tray and glance strip, across projects.** | With sessions running in two different projects, a screenshot of the project list page `/` shows a header badge reading "2", the tray open and listing both blocked sessions with project name and what each is waiting for, and the glance strip below the header showing one activity line per running session; clicking a tray row lands on that chat with the ask focused.
+7. **Waiting-on-you tray, across projects.** | With sessions running in two different projects, a screenshot of the project list page `/` shows a header badge reading "2" and the tray open, listing both blocked sessions with project name and what each is waiting for; clicking a tray row lands on that chat with the ask focused.
 
 8. **Search across all conversations, and spend per project per day.** | A screenshot of the search panel with a query typed shows matches from at least two different chats, each with the matched sentence highlighted and its project and date; a second screenshot of the spend view shows a bar per day grouped by project, with the dollars chart and the tokens chart drawn as two separate charts and no total combining them.
 

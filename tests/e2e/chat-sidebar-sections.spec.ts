@@ -26,12 +26,12 @@
  * Run: scripts/workbench-e2e.sh tests/e2e/chat-sidebar-sections.spec.ts
  */
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
-import { makeFixtureProject, PARENT_CARD } from './fixture-board';
+import { PARENT_CARD, discardFixture, makeFixtureProject } from './fixture-board';
 import { HELPER_AGENT, writeChatWithHelper } from './fixture-record';
 
 /** Where a run leaves its proof. */
@@ -73,7 +73,7 @@ async function projectAt(request: APIRequestContext, path: string): Promise<{ id
 test.describe('the sections of a chat’s right rail', () => {
   test.beforeAll(() => {
     mkdirSync(SHOTS, { recursive: true });
-    rmSync(RUN, { recursive: true, force: true });
+    discardFixture(RUN);
     mkdirSync(RUN, { recursive: true });
   });
   test.describe.configure({ timeout: 300_000 });

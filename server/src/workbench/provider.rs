@@ -43,7 +43,13 @@ impl NativeProviderFactory {
             session_id,
             tokio::spawn(async move {
                 if matches!(session.brand.as_str(), "claude" | "codex") {
-                    if let Err(error) = super::acp::client::load_history(&database, &session).await {
+                    if delegated_claude_chat(&claude_config, &session) {
+                        // The adapter's replay drops helpers entirely; see
+                        // `claude::history::delegates_work`.
+                        let _ = import_claude_history(&database, &claude_config, &session).await;
+                    } else if let Err(error) =
+                        super::acp::client::load_history(&database, &session).await
+                    {
                         tracing::warn!(provider = %session.brand, %error, "ACP session/load unavailable; using compatibility history reader");
                         if session.brand == "claude" {
                             let _ = import_claude_history(&database, &claude_config, &session).await;
@@ -72,6 +78,20 @@ impl NativeProviderFactory {
             let _ = task.await;
         }
     }
+}
+
+/// A saved Claude chat that sent work off to a helper, which ACP `session/load`
+/// cannot replay. Anything else — every Codex chat, and every Claude chat that
+/// worked alone — goes through ACP.
+fn delegated_claude_chat(config: &Path, session: &Session) -> bool {
+    if session.brand != "claude" {
+        return false;
+    }
+    session
+        .external_id
+        .as_deref()
+        .and_then(|external_id| super::claude::history::find_record(config, external_id))
+        .is_some_and(|record| super::claude::history::delegates_work(&record))
 }
 
 fn field<'a>(command: &'a Command, name: &str) -> Option<&'a str> {

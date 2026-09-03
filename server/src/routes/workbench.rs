@@ -882,6 +882,17 @@ fn restore_clock(row: &Value) -> &str {
         .unwrap_or_default()
 }
 
+/// Every saved chat a provider knows about, however it is asked.
+///
+/// ACP `session/list` is the standard way to ask and is asked first, but the
+/// answer is thinner than the record: an id, a folder, a clock, and a title the
+/// adapter guessed. The restore list also draws the branch a chat ran on and
+/// names it the app's own way — by what was first asked of it, not by what the
+/// agent answered ("Reply with exactly: READY", where the adapter offers
+/// "Ready"). Neither is a field `session/list` has. So the record is read
+/// alongside, and lends those two to every chat the adapter listed; the clock
+/// stays the adapter's, and a chat only the record knows is still listed
+/// (bw-t26l.20).
 async fn provider_sessions(
     state: &WorkbenchState,
     project: Option<&str>,
@@ -895,62 +906,106 @@ async fn provider_sessions(
     );
     let mut rows = Vec::new();
     for (brand, result) in [("claude", claude_acp), ("codex", codex_acp)] {
+        let recorded = recorded_sessions(state, brand, project, project_path, everything).await;
         match result {
-            Ok(sessions) => rows.extend(sessions.into_iter().map(|session| json!({
-                "brand":brand,
-                "externalId":session.session_id,
-                "lastActiveAt":session.updated_at,
-                "lastSpokeAt":Value::Null,
-                "name":session.title,
-                "cwd":session.cwd,
-                "branch":Value::Null,
-                "acpMeta":session.meta,
-            }))),
-            Err(error) => {
-                tracing::warn!(provider = brand, %error, "ACP session/list unavailable; using compatibility discovery");
-                if brand == "claude" {
-                    let project_owned = project.map(std::path::PathBuf::from);
-                    let claude_config = state.registry.claude_config_directory().to_path_buf();
-                    rows.extend(tokio::task::spawn_blocking(move || {
-                        crate::workbench::claude::history::list_sessions(
-                            &claude_config,
-                            project_owned.as_deref(),
-                            everything,
-                        )
-                        .into_iter()
-                        .map(|session| json!({
-                            "brand":"claude", "externalId":session.session_id, "lastActiveAt":session.last_modified,
-                            "name":session.name, "cwd":session.cwd, "branch":session.git_branch,
-                            "lastSpokeAt":session.last_spoke_at,
-                        }))
-                        .collect::<Vec<_>>()
-                    }).await.unwrap_or_default());
-                } else {
-                    let cwd = project_path.unwrap_or_else(|| std::path::Path::new("."));
-                    if let Ok(transport) = state.codex_reader(cwd).await {
-                        let listed = crate::workbench::codex::history::list_threads(
-                            &transport,
-                            project_path,
-                            everything,
-                        ).await;
-                        if let Ok(threads) = listed {
-                            rows.extend(threads.into_iter().filter_map(|thread| {
-                                let id = thread["id"].as_str()?;
-                                let updated = thread["updatedAt"].as_i64().and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0).map(|at| at.to_rfc3339()));
-                                let preview = thread["preview"].as_str().unwrap_or_default();
-                                Some(json!({"brand":"codex","externalId":id,"lastActiveAt":updated,
-                                    "name":thread.get("name").filter(|v|!v.is_null()).cloned().unwrap_or_else(||json!(crate::workbench::metadata::conversation_title(preview))),
-                                    "cwd":thread["cwd"],"branch":thread["gitInfo"]["branch"],"lastSpokeAt":thread["path"].as_str().and_then(|path|crate::workbench::codex::history::last_spoke_at(std::path::Path::new(path)))}))
-                            }));
-                        } else {
-                            state.forget_codex_reader(cwd, &transport).await;
+            Ok(sessions) => {
+                let mut recorded: std::collections::HashMap<String, Value> = recorded
+                    .into_iter()
+                    .filter_map(|row| {
+                        Some((row["externalId"].as_str()?.to_lowercase(), row))
+                    })
+                    .collect();
+                for session in sessions {
+                    let known = recorded.remove(&session.session_id.to_lowercase());
+                    let mut row = json!({
+                        "brand":brand,
+                        "externalId":session.session_id,
+                        "lastActiveAt":session.updated_at,
+                        "lastSpokeAt":Value::Null,
+                        "name":session.title,
+                        "cwd":session.cwd,
+                        "branch":Value::Null,
+                        "acpMeta":session.meta,
+                    });
+                    if let Some(known) = known {
+                        // The name and the branch only. The clock stays the
+                        // adapter's: it is the record's own timestamp, and a
+                        // chat that ran yesterday must file under yesterday
+                        // whether or not anything inside it is read.
+                        for field in ["name", "branch"] {
+                            match known.get(field) {
+                                Some(value) if !value.is_null() => {
+                                    row[field] = value.clone();
+                                }
+                                _ => {}
+                            }
                         }
                     }
+                    rows.push(row);
                 }
+                // A chat the adapter did not name is still a chat on disk.
+                rows.extend(recorded.into_values());
+            }
+            Err(error) => {
+                tracing::warn!(provider = brand, %error, "ACP session/list unavailable; using compatibility discovery");
+                rows.extend(recorded);
             }
         }
     }
     rows
+}
+
+/// What the provider's own record says about the saved chats in a folder.
+async fn recorded_sessions(
+    state: &WorkbenchState,
+    brand: &str,
+    project: Option<&str>,
+    project_path: Option<&std::path::Path>,
+    everything: bool,
+) -> Vec<Value> {
+    if brand == "claude" {
+        let project_owned = project.map(std::path::PathBuf::from);
+        let claude_config = state.registry.claude_config_directory().to_path_buf();
+        return tokio::task::spawn_blocking(move || {
+            crate::workbench::claude::history::list_sessions(
+                &claude_config,
+                project_owned.as_deref(),
+                everything,
+            )
+            .into_iter()
+            .map(|session| json!({
+                "brand":"claude", "externalId":session.session_id, "lastActiveAt":session.last_modified,
+                "name":session.name, "cwd":session.cwd, "branch":session.git_branch,
+                "lastSpokeAt":session.last_spoke_at,
+            }))
+            .collect::<Vec<_>>()
+        })
+        .await
+        .unwrap_or_default();
+    }
+    let cwd = project_path.unwrap_or_else(|| std::path::Path::new("."));
+    let Ok(transport) = state.codex_reader(cwd).await else {
+        return Vec::new();
+    };
+    let listed =
+        crate::workbench::codex::history::list_threads(&transport, project_path, everything).await;
+    let Ok(threads) = listed else {
+        state.forget_codex_reader(cwd, &transport).await;
+        return Vec::new();
+    };
+    threads
+        .into_iter()
+        .filter_map(|thread| {
+            let id = thread["id"].as_str()?;
+            let updated = thread["updatedAt"]
+                .as_i64()
+                .and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0).map(|at| at.to_rfc3339()));
+            let preview = thread["preview"].as_str().unwrap_or_default();
+            Some(json!({"brand":"codex","externalId":id,"lastActiveAt":updated,
+                "name":thread.get("name").filter(|v|!v.is_null()).cloned().unwrap_or_else(||json!(crate::workbench::metadata::conversation_title(preview))),
+                "cwd":thread["cwd"],"branch":thread["gitInfo"]["branch"],"lastSpokeAt":thread["path"].as_str().and_then(|path|crate::workbench::codex::history::last_spoke_at(std::path::Path::new(path)))}))
+        })
+        .collect()
 }
 
 async fn restore(

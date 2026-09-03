@@ -1,10 +1,11 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 
-import { makeFixtureProject, PARENT_CARD, REPORT_PROJECT, REPORT_SLUG } from './fixture-board';
+import { PARENT_CARD, REPORT_PROJECT, REPORT_SLUG, bd, discardFixture, makeFixtureProject } from './fixture-board';
+import { openChatTab } from './open-chat-tab';
 import { restartInstance } from './restart';
 import { quadrantPng } from './fixture-png';
 
@@ -40,11 +41,31 @@ function reportsHome(project: string): string {
 }
 
 /**
- * Two sentences first so the answer visibly grows between screenshots, then an
- * edit so a permission card has to appear.
+ * Where the Claude CLI this run drives keeps its transcripts.
+ *
+ * `CLAUDE_CONFIG_DIR` is what the CLI itself reads, and the harness points it
+ * at a directory inside the run so a case that starts a real `claude -p` writes
+ * beside the run rather than into the owner's own history. Reading `~/.claude`
+ * regardless looked at a machine this run never wrote to, so the case died on a
+ * missing directory instead of on anything about the app (bw-t26l.20).
+ */
+function claudeHome(): string {
+  return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+}
+
+/**
+ * A long answer first so it visibly grows between screenshots, then an edit so a
+ * permission card has to appear.
+ *
+ * Six sentences, not the two this asked for at first: two sentences is about a
+ * hundred and fifty characters, which a model can hand over inside one poll, and
+ * then the screenshot taken "mid-flight" is of a finished answer and the growth
+ * the case is named for never happens. The failure was indistinguishable from
+ * streaming being broken, and it was not (bw-t26l.20). Six sentences take long
+ * enough that any poll lands in the middle of them.
  */
 const PROMPT =
-  'In exactly two sentences, say what you are about to do. ' +
+  'In exactly six sentences, say what you are about to do and why, at a leisurely pace. ' +
   'Then append a line saying HELLO to notes.txt using the Edit tool.';
 
 /**
@@ -93,11 +114,14 @@ test.describe('workbench', () => {
   });
 
   test('live-turn streams an answer and asks permission', async ({ page, request }) => {
-    // A real turn: model latency plus a tool round trip.
-    test.setTimeout(300_000);
+    // A real turn: model latency plus a tool round trip. Ten minutes, not five,
+    // because the waits inside add up past five on their own — the answer, the
+    // growth between two reads of it, and then a permission card for every tool
+    // the model reaches for before the Edit one this is really about.
+    test.setTimeout(600_000);
 
     const FIXTURE = fixtureFor('live-turn');
-    rmSync(FIXTURE, { recursive: true, force: true });
+    discardFixture(FIXTURE);
     mkdirSync(FIXTURE, { recursive: true });
     writeFileSync(join(FIXTURE, 'notes.txt'), 'first line\n');
     mkdirSync(SHOTS, { recursive: true });
@@ -106,7 +130,7 @@ test.describe('workbench', () => {
 
     try {
       await page.goto(`/project?id=${project.id}`);
-      await page.getByTestId('tab-chat').click();
+      await openChatTab(page);
 
       await page.getByTestId('new-chat').click();
       await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 30_000 });
@@ -142,17 +166,26 @@ test.describe('workbench', () => {
       // one arrives; that is the card the screenshots must show. Cards are
       // addressed by their own ask id, never by position — a second card
       // appearing must not shift what the assertions point at.
+      //
+      // A card is recognised by what ACP puts on it, which is one human
+      // sentence for the call — "Edit notes.txt", not "Edit". The name is
+      // matched as a word inside that sentence, and the buttons are asked for
+      // by their protocol kind rather than by their id or their label: both of
+      // those are the agent's own vocabulary, and this agent says "allow-once"
+      // and "Yes" where the assertions had guessed "allow_once" and "Allow
+      // once" (bw-t26l.20).
+      const ALLOW_ONCE = '[data-ask-kind="allow_once"]';
       let editAskId: string | null = null;
       for (let i = 0; i < 8 && editAskId === null; i++) {
         const open = page.locator('[data-testid="permission-card"][data-ask-state="open"]').first();
         await expect(open).toBeVisible({ timeout: 120_000 });
         const askId = await open.getAttribute('data-ask-id');
         const toolName = await open.getAttribute('data-tool-name');
-        if (toolName && /^(Edit|Write|MultiEdit)$/.test(toolName)) {
+        if (toolName && /\b(Edit|Write|MultiEdit)\b/.test(toolName)) {
           editAskId = askId;
           break;
         }
-        await open.getByTestId('permission-allow_once').click();
+        await open.locator(ALLOW_ONCE).click();
         await expect(page.locator(`[data-ask-id="${askId}"]`)).toHaveAttribute('data-ask-state', 'resolved', {
           timeout: 60_000,
         });
@@ -160,19 +193,24 @@ test.describe('workbench', () => {
       expect(editAskId, 'an Edit permission card should appear').not.toBeNull();
 
       const editCard = page.locator(`[data-ask-id="${editAskId}"]`);
-      await expect(editCard.getByTestId('permission-allow_once')).toHaveText('Allow once');
-      await expect(editCard.getByTestId('permission-allow_always')).toHaveText('Allow always');
-      await expect(editCard.getByTestId('permission-deny')).toHaveText('Deny');
+      // Every answer the protocol defines is offered, each carrying a label the
+      // agent wrote — whatever that label turns out to say.
+      for (const kind of ['allow_once', 'allow_always', 'reject_once']) {
+        const button = editCard.locator(`[data-ask-kind="${kind}"]`);
+        await expect(button).toBeVisible();
+        await expect(button).not.toHaveText('');
+      }
       await editCard.scrollIntoViewIfNeeded();
       await page.screenshot({ path: join(SHOTS, 'permission-ask.png'), fullPage: false });
 
-      await editCard.getByTestId('permission-allow_once').click();
+      await editCard.locator(ALLOW_ONCE).click();
 
       await expect(editCard).toHaveAttribute('data-ask-state', 'resolved', { timeout: 60_000 });
       await expect(editCard.getByTestId('permission-resolved')).toHaveText('Allowed');
 
-      // The tool the card guarded must then actually run and finish.
-      const editRow = page.locator('[data-testid="tool-row"][data-tool-name="Edit"]').last();
+      // The tool the card guarded must then actually run and finish. The row is
+      // named from the adapter's own metadata, where the name is bare.
+      const editRow = page.locator('[data-testid="tool-row"][data-tool-name^="Edit"]').last();
       await expect(editRow).toHaveAttribute('data-tool-status', 'ok', { timeout: 120_000 });
 
       await expect(page.getByTestId('cost-chip')).toBeVisible({ timeout: 180_000 });
@@ -193,14 +231,38 @@ test.describe('workbench', () => {
   test('transcript shows tools, a diff, a picture, the checklist and a subagent', async ({ page, request }) => {
     test.setTimeout(600_000);
 
-    const FIXTURE = fixtureFor('transcript');
-    rmSync(FIXTURE, { recursive: true, force: true });
-    mkdirSync(FIXTURE, { recursive: true });
+    // A board, because a checklist in this app is a view of an epic and of
+    // nothing else: the panel is drawn from that epic's children, read from
+    // Beads, and a list the agent keeps for itself is deliberately not drawn
+    // (machinery/skills/atelier/SKILL.md, "Live checklist"). Asking the agent
+    // for its own three items therefore tested a thing the product refuses to
+    // do, and the panel it waited for was never coming (bw-t26l.20).
+    const RUN_DIR = fixtureFor('transcript');
+    const FIXTURE = join(RUN_DIR, 'work');
+    discardFixture(RUN_DIR);
+    makeFixtureProject(FIXTURE, join(RUN_DIR, 'reporting'), {
+      specPath: join(RUN_DIR, 'reporting', 'unused.report.json'),
+    });
+    // One child left mid-flight, so the panel has a ticked row and a running
+    // one to draw at the same moment.
+    bd(['update', 'wl-kid2', '--status', 'in_progress'], FIXTURE);
     writeFileSync(join(FIXTURE, 'notes.txt'), 'alpha\nbeta\ngamma\n');
     writeFileSync(join(FIXTURE, 'wheels.md'), '# Wheels\nThey are round.\n');
     writeFileSync(join(FIXTURE, 'brakes.md'), '# Brakes\nThey are hot.\n');
     mkdirSync(SHOTS, { recursive: true });
-    const picture = join(FIXTURE, 'picture.png');
+    // Deliberately outside the project the agent is working in. Left inside it,
+    // an agent that never received the attachment can still open the file off
+    // disk and answer about it — which is exactly what happened, and is how a
+    // prompt that dropped every attached picture on the floor went unnoticed:
+    // the picture was drawn in the person's own bubble, so it looked delivered,
+    // and the agent's answer about it was right for the wrong reason
+    // (bw-t26l.20). Out here, the answer can only come from the attachment.
+    // In the run's own scratch folder rather than beside the pictures a run
+    // commits as evidence: this one is scaffolding the test draws for itself,
+    // and evidence is what a reader is meant to find in there.
+    const scratch = join(__dirname, '..', '.artifacts');
+    mkdirSync(scratch, { recursive: true });
+    const picture = join(scratch, 'attached-quadrants.png');
     writeFileSync(picture, quadrantPng(120));
 
     const project = await projectAt(request, FIXTURE);
@@ -219,7 +281,7 @@ test.describe('workbench', () => {
       const session = (await started.json()) as { id: string };
 
       await page.goto(`/project?id=${project.id}&chat=${session.id}`);
-      await page.getByTestId('tab-chat').click();
+      await openChatTab(page);
       await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 30_000 });
 
       await page.getByTestId('image-input').setInputFiles(picture);
@@ -228,12 +290,26 @@ test.describe('workbench', () => {
       await page.getByTestId('composer').fill(
         [
           'Do all of this in one go, using the tools named:',
-          '1. With TaskCreate, add three checklist items: "Read the notes", "Ask a helper about the docs", "Append HELLO".',
-          '2. TaskUpdate the first to in_progress, Read notes.txt, then TaskUpdate it to completed.',
-          '3. TaskUpdate the second to in_progress, then use the Task tool to launch a general-purpose subagent',
-          '   that reads wheels.md and brakes.md and reports what they say. Then TaskUpdate the second to completed.',
-          '4. TaskUpdate the third to in_progress, then use Edit on notes.txt to change the line "beta" to "BETA" and',
-          '   add a line "HELLO" after "gamma". Leave the third item in_progress — do NOT complete it.',
+          // The checklist tool is asked for by what it does, not by one name:
+          // the adapter turns both TodoWrite and TaskCreate/TaskUpdate into the
+          // ACP `plan` update the panel is drawn from, and which of the two an
+          // agent has depends on its model. The tools exist at all only because
+          // the adapter is launched with the provider's own switch for them,
+          // which it was not: the provider withholds them from every current
+          // model, so the agent said it had "no task/checklist tool at all" and
+          // no plan update ever reached the app (bw-t26l.20; acp/adapter.rs).
+          //
+          // What it publishes is the epic's id, alone. Atelier replaces that
+          // one row with the epic's children and reads their titles and
+          // statuses from the board, so a list the agent writes itself is not
+          // a checklist and is not drawn.
+          `1. Using your checklist tool (TodoWrite, or TaskCreate if that is what you have), publish a checklist`,
+          `   whose single item is exactly "${PARENT_CARD}" — the id of this project's epic, and nothing else.`,
+          '2. Read notes.txt.',
+          '3. Use the Task tool to launch a general-purpose subagent that reads wheels.md and brakes.md',
+          '   and reports what they say.',
+          '4. Use Edit on notes.txt to change the line "beta" to "BETA" and add a line "HELLO" after "gamma".',
+          '   Do not touch the board: no bd commands, and no further checklist changes.',
           '5. Finish by saying, in one sentence, what colours the attached picture has.',
         ].join('\n'),
       );
@@ -248,22 +324,113 @@ test.describe('workbench', () => {
       const diff = page.getByTestId('diff-view').first();
       await expect(diff).toBeVisible();
       await expect(diff.locator('[data-diff-kind="changed"], [data-diff-kind="added"]').first()).toBeVisible();
-      // 3. the picture, in the user's own bubble
+      // 3. the picture, in the user's own bubble — and in the agent's hands
       await expect(page.getByTestId('user-message').getByTestId('message-image').first()).toBeVisible();
-      // 4. the checklist, with one ticked and one running
-      await expect(page.getByTestId('todo-panel')).toBeVisible();
-      await expect(page.locator('[data-testid="todo-item"][data-todo-status="completed"]').first()).toBeVisible();
-      await expect(page.locator('[data-testid="todo-item"][data-todo-status="in_progress"]').first()).toBeVisible();
-      // 5. a subagent's own call, indented under the call that spawned it
-      await expect(page.getByTestId('subagent-tool-row').first()).toBeVisible();
-      // 6. cost, already asserted above
+      // The four quadrants are red, blue, green and yellow, and the file is not
+      // in the project, so nothing but the attachment itself can have told it.
+      // Polled, and across every bubble: the cost chip is reported as soon as
+      // the agent has spent something, not when it has finished, so a turn
+      // whose subagent is still out gets one bubble saying so and the colours
+      // in a later one.
+      const COLOURS = ['red', 'blue', 'green', 'yellow'];
+      const spoken = async () =>
+        (await page.getByTestId('assistant-message').allTextContents()).join(' ').toLowerCase();
+      await expect
+        .poll(async () => {
+          const said = await spoken();
+          return COLOURS.filter((colour) => said.includes(colour));
+        }, {
+          timeout: 240_000,
+          message: 'the agent should have seen the attached picture',
+        })
+        .toEqual(COLOURS);
+      // 4. the checklist: the epic's own children, with one ticked and one
+      //    running, and their titles taken from the board rather than from
+      //    anything the agent wrote.
+      await expect(page.getByTestId('todo-panel')).toBeVisible({ timeout: 30_000 });
+      // `toContainText`, because the ticked row draws its own tick before the
+      // title.
+      await expect(page.locator('[data-testid="todo-item"][data-todo-status="completed"]')).toContainText([
+        'First piece of the work',
+      ]);
+      await expect(page.locator('[data-testid="todo-item"][data-todo-status="in_progress"]')).toContainText([
+        'Second piece of the work',
+      ]);
+      // 5. the subagent: a row on the rail, and — opened — the reading it
+      //    actually did. Not a row in this transcript: work the chat sent away
+      //    is deliberately kept out of it (`sentAway` in
+      //    src/workbench/message-filter.ts, bw-qdim.12), and the reader who
+      //    wants the helper's side clicks through to it.
+      const helper = page.locator('[data-testid="sent-away-row"][data-kind="helper"]').first();
+      await expect(page.getByTestId('sent-away-panel')).toHaveAttribute('data-rows', /[1-9]/, {
+        timeout: 60_000,
+      });
+      // Folded away, because by now it has finished: the panel keeps what is
+      // over behind its own control so the running work stays at the top of the
+      // rail (src/workbench/sent-away.tsx).
+      const folded = page.getByTestId('toggle-stopped-agents');
+      if (await folded.isVisible()) await folded.click();
+      await expect(helper).toBeVisible({ timeout: 60_000 });
+      // The card says what it reported, not just that it is over.
+      await expect(helper.getByTestId('sent-away-result')).toContainText(/wheels|brakes|round|hot/i);
 
-      // A tall window so one screenshot carries all six rather than a scrolled slice.
+      // The helper's pane first, on the window this run was given, and the tall
+      // picture of the whole conversation after it. The other way round the
+      // panel's picture is a lie: a capture taller than the browser's own
+      // window paints `position: fixed` layers over only the first window's
+      // worth of it and leaves the rest unlayered, and the emulation stays
+      // wrong after the window is put back — so an open panel photographed
+      // either at 2400 or at 900 after 2400 showed the conversation underneath
+      // drawn straight through it, undimmed, with nothing wrong with the panel.
+      // Measured 2026-09-03 on a static page with no app code in it at all: the
+      // same `fixed inset-0` dim covers the top of a 2400-tall capture and
+      // stops partway down, whether the viewport was resized to 2400 or born
+      // there.
+
+      // Opened, the helper's own conversation has the two files it was sent to
+      // read. This is the join the app has to get right: the helper's rows
+      // arrive on the parent session stamped with the CALL that spawned it,
+      // while its card carries an agent id, and a pane matched on the wrong one
+      // opens empty (bw-t26l.20).
+      await helper.getByTestId('sent-away-open').click();
+      const said = page.getByTestId('agent-view-said');
+      await expect(said).toBeVisible();
+      await expect
+        .poll(async () => (await said.innerText()).toLowerCase(), {
+          timeout: 60_000,
+          message: "the helper's own pane should show the reading it did",
+        })
+        .toMatch(/wheels\.md[\s\S]*brakes\.md|brakes\.md[\s\S]*wheels\.md/);
+      // `subagent-tool-row`, which is what a row whose parent was sent away is
+      // marked as wherever it is drawn (transcript-rows.tsx). Two of them: one
+      // read per file it was sent to read.
+      const read = said.getByTestId('subagent-tool-row');
+      await expect(read).toHaveCount(2, { timeout: 30_000 });
+      await expect(read.first()).toBeVisible();
+      // Settled before it is photographed. The panel and the dim behind it
+      // both fade in over 200ms (`data-[state=open]:fade-in-0` in
+      // src/components/ui/dialog.tsx) and `page.screenshot` does not wait for
+      // an animation, so a picture taken the moment the rows appear catches
+      // both half-drawn — the conversation underneath showing straight through
+      // the panel, undimmed. Waiting for the two of them to reach full opacity
+      // is also the assertion that the panel is opaque and does dim what it
+      // covers, which is how a reader can tell what they are looking at.
+      const dim = page.locator('[class*="bg-black/50"]');
+      await expect(dim).toBeVisible();
+      await expect(dim).toHaveCSS('opacity', '1');
+      await expect(page.getByTestId('agent-view')).toHaveCSS('opacity', '1');
+      await page.screenshot({ path: join(SHOTS, 'transcript-helper.png'), fullPage: false });
+
+      // Shut, and then a tall window so one picture carries all six of the
+      // things above rather than a scrolled slice of them.
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('agent-view')).toBeHidden();
       await page.setViewportSize({ width: 1440, height: 2400 });
       await page.getByTestId('transcript').evaluate((el) => {
         el.scrollTop = el.scrollHeight;
       });
       await page.screenshot({ path: join(SHOTS, 'transcript.png'), fullPage: false });
+      // 6. cost, already asserted above
     } finally {
       await request.delete(`/api/projects/${project.id}`);
     }
@@ -283,7 +450,7 @@ test.describe('workbench', () => {
     const RUN_DIR = fixtureFor('links');
     const FIXTURE = join(RUN_DIR, REPORT_PROJECT);
     const SPEC = join(reportsHome(REPORT_PROJECT), `${REPORT_SLUG}.report.json`);
-    rmSync(RUN_DIR, { recursive: true, force: true });
+    discardFixture(RUN_DIR);
     rmSync(reportsHome(REPORT_PROJECT), { recursive: true, force: true });
     makeFixtureProject(FIXTURE, join(RUN_DIR, 'reporting'), { specPath: SPEC });
     mkdirSync(SHOTS, { recursive: true });
@@ -304,7 +471,7 @@ test.describe('workbench', () => {
       const session = (await started.json()) as { id: string };
 
       await page.goto(`/project?id=${project.id}&chat=${session.id}`);
-      await page.getByTestId('tab-chat').click();
+      await openChatTab(page);
       await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 30_000 });
 
       // Nothing here names the card to the app: the agent is told to run a bd
@@ -401,7 +568,7 @@ test.describe('workbench', () => {
     test.setTimeout(900_000);
 
     const FIXTURE = fixtureFor('restore');
-    rmSync(FIXTURE, { recursive: true, force: true });
+    discardFixture(FIXTURE);
     mkdirSync(FIXTURE, { recursive: true });
     writeFileSync(join(FIXTURE, 'notes.txt'), 'a line\n');
     mkdirSync(SHOTS, { recursive: true });
@@ -414,7 +581,7 @@ test.describe('workbench', () => {
     });
 
     const slug = FIXTURE.replace(/[^A-Za-z0-9]/g, '-');
-    const slugDir = join(homedir(), '.claude', 'projects', slug);
+    const slugDir = join(claudeHome(), 'projects', slug);
     // The newest, not the first the directory happens to name: earlier runs
     // leave their transcripts here, and resuming one of those would be testing
     // last week's conversation.
@@ -427,6 +594,12 @@ test.describe('workbench', () => {
     const terminalId = newest.replace(/\.jsonl$/, '');
     // Dated a day back so it groups under Yesterday. The file is never opened.
     const yesterday = new Date(Date.now() - 86_400_000);
+    const ownName = readFileSync(join(slugDir, newest), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { type?: string; aiTitle?: string })
+      .find((row) => row.type === 'ai-title')?.aiTitle;
+    expect(ownName, 'the terminal session named itself').toBeTruthy();
     utimesSync(join(slugDir, newest), yesterday, yesterday);
 
     const project = await projectAt(request, FIXTURE);
@@ -489,10 +662,13 @@ test.describe('workbench', () => {
       // Nothing woke itself up over the restart.
       await expect(terminalRow).toHaveAttribute('data-state', 'dormant');
 
-      // The row says what the conversation is: the name Claude holds for it,
-      // which for a session with no title of its own is what was asked of it —
-      // measured, and the same string this test typed into `claude -p`.
-      await expect(terminalRow.getByTestId('row-name')).toHaveText('Reply with exactly: READY');
+      // The row says what the conversation calls itself. Claude names its own
+      // conversations and writes that name into the record; the list shows it
+      // exactly as written, whatever it says — only a chat that never named
+      // itself gets a name of ours, cut down from what was asked. Read from
+      // this run's own record rather than hard-coded: the name is Claude's to
+      // choose, and it has chosen differently for the same prompt.
+      await expect(terminalRow.getByTestId('row-name')).toHaveText(ownName);
       // And where it ran, by the folder's own name — carried on the row rather
       // than drawn on it: the rail is two lines wide now and the chat's own bar
       // names the folder and its branch the moment the row is clicked.
@@ -520,14 +696,22 @@ test.describe('workbench', () => {
   });
 
   /**
-   * The tray and the strip, across projects.
+   * The tray, across projects.
    *
    * Two projects with a real turn running in each, seen from the project list —
    * a screen belonging to neither of them, which is the whole point: what is
    * waiting on the owner follows him everywhere rather than living inside one
    * chat.
+   *
+   * The running half of that pair used to be here too: a `glance-strip` beside
+   * the tray, naming every chat working right now. The owner took it out of the
+   * bar in 055a5c8, leaving the tray alone there, and this case kept asking for
+   * it — so a live run failed for two minutes on an element deliberately
+   * deleted, which says nothing about the app and hid the failures underneath
+   * it (bw-t26l.20). What follows him is now only the tray, and that is all
+   * this asks about.
    */
-  test('tray counts what waits on you across projects, and the strip shows what runs', async ({ page, request }) => {
+  test('tray counts what waits on you across projects', async ({ page, request }) => {
     test.setTimeout(600_000);
     mkdirSync(SHOTS, { recursive: true });
 
@@ -538,7 +722,7 @@ test.describe('workbench', () => {
     try {
       for (const name of ['tray-a', 'tray-b']) {
         const dir = fixtureFor(name);
-        rmSync(dir, { recursive: true, force: true });
+        discardFixture(dir);
         mkdirSync(dir, { recursive: true });
         writeFileSync(join(dir, 'notes.txt'), 'first line\n');
         const project = await projectAt(request, dir);
@@ -557,15 +741,6 @@ test.describe('workbench', () => {
 
       // The project list — neither project's own screen.
       await page.goto('/');
-
-      // While the two turns run, the strip names them both.
-      const strip = page.getByTestId('glance-strip');
-      await expect(strip).toBeVisible({ timeout: 120_000 });
-      await expect
-        .poll(async () => page.getByTestId('glance-row').count(), { timeout: 120_000 })
-        .toBeGreaterThanOrEqual(2);
-      await expect(page.getByTestId('glance-activity').first()).not.toBeEmpty();
-      await page.screenshot({ path: join(SHOTS, 'glance.png'), fullPage: false });
 
       // Both turns reach their edit and stop for permission: the badge reads two.
       const badge = page.getByTestId('tray-badge');
@@ -609,7 +784,7 @@ test.describe('workbench', () => {
 
     const FIXTURE = fixtureFor('from-card');
     const REPORTS = join(__dirname, '..', '.workbench-run-from-card-reports');
-    rmSync(REPORTS, { recursive: true, force: true });
+    discardFixture(REPORTS);
     makeFixtureProject(FIXTURE, REPORTS);
     mkdirSync(SHOTS, { recursive: true });
 
@@ -691,7 +866,7 @@ test.describe('workbench', () => {
     try {
       for (const name of ['spend-a', 'spend-b']) {
         const dir = fixtureFor(name);
-        rmSync(dir, { recursive: true, force: true });
+        discardFixture(dir);
         mkdirSync(dir, { recursive: true });
         const project = await projectAt(request, dir);
         projectIds.push(project.id);

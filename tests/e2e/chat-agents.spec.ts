@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
-import { makeFixtureProject, PARENT_CARD } from './fixture-board';
+import { PARENT_CARD, discardFixture, makeFixtureProject } from './fixture-board';
 import {
   CHAT_SAID,
   EACH_HELPER,
@@ -215,7 +215,7 @@ async function say(request: APIRequestContext, sessionId: string, text: string):
 test.describe('the agents a chat sends off', () => {
   test.beforeAll(() => {
     mkdirSync(SHOTS, { recursive: true });
-    rmSync(FIXTURE, { recursive: true, force: true });
+    discardFixture(FIXTURE);
     mkdirSync(FIXTURE, { recursive: true });
   });
   // One at a time. Four of these start a real agent, and one of those starts a
@@ -732,7 +732,7 @@ test.describe('the agents a chat sends off', () => {
   test('a chat read back from the record keeps its agents apart', async ({ page, request }) => {
     // The panel lives in the right column, which is shut on a narrow screen.
     await page.setViewportSize({ width: 1440, height: 900 });
-    rmSync(RECORD_RUN, { recursive: true, force: true });
+    discardFixture(RECORD_RUN);
     mkdirSync(RECORD_RUN, { recursive: true });
     makeFixtureProject(RECORD_PROJECT, join(RECORD_RUN, 'reporting'));
     const project = await projectAt(request, 'workbench-record', RECORD_PROJECT);
@@ -824,7 +824,7 @@ test.describe('the agents a chat sends off', () => {
    */
   test('a helper that came back red still reads failed once the chat is read back', async ({ page, request }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    rmSync(RED_RUN, { recursive: true, force: true });
+    discardFixture(RED_RUN);
     mkdirSync(RED_RUN, { recursive: true });
     makeFixtureProject(RED_PROJECT, join(RED_RUN, 'reporting'));
     const project = await projectAt(request, 'workbench-red', RED_PROJECT);
@@ -893,7 +893,7 @@ test.describe('the agents a chat sends off', () => {
    */
   test('three agents it sent away, each its own row, and the turn counting all three', async ({ page, request }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    rmSync(SPEND_RUN, { recursive: true, force: true });
+    discardFixture(SPEND_RUN);
     mkdirSync(SPEND_RUN, { recursive: true });
     makeFixtureProject(SPEND_PROJECT, join(SPEND_RUN, 'reporting'));
     const project = await projectAt(request, 'workbench-spend', SPEND_PROJECT);
@@ -987,7 +987,7 @@ test.describe('the agents a chat sends off', () => {
    */
   test('follows an agent a chat sends off while it is being read', async ({ page, request }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    rmSync(GROWS_RUN, { recursive: true, force: true });
+    discardFixture(GROWS_RUN);
     mkdirSync(GROWS_RUN, { recursive: true });
     makeFixtureProject(GROWS_PROJECT, join(GROWS_RUN, 'reporting'));
     const project = await projectAt(request, 'workbench-grows', GROWS_PROJECT);

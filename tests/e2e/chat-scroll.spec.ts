@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
-import { makeFixtureProject, PARENT_CARD } from './fixture-board';
+import { PARENT_CARD, discardFixture, makeFixtureProject } from './fixture-board';
 import {
   HELPER_AGENT,
   HELPER_SAID,
@@ -81,7 +81,7 @@ interface Ground {
 async function makeGround(request: APIRequestContext, name: string): Promise<Ground> {
   const where = ground(name);
   const project = join(where, 'project');
-  rmSync(where, { recursive: true, force: true });
+  discardFixture(where);
   mkdirSync(where, { recursive: true });
   makeFixtureProject(project, join(where, 'reporting'));
   const listed = await projectAt(request, `workbench-scroll-${name}`, project);
