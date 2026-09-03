@@ -47,7 +47,32 @@ const badgeVariants = cva(
   // third of a line above the words around it (bw-8fh2.1). Centring it on the
   // text's own middle does not depend on the icon at all. Everywhere else a chip
   // sits inside a flex row, where vertical-align is not read.
-  'inline-flex items-center whitespace-nowrap justify-center align-middle border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0',
+  //
+  // A chip centres its LINE box, and a line box is not what the eye reads. The
+  // visible top of Latin text is the cap height and its visible bottom is the
+  // alphabetic baseline, and a font's ascent and descent are not symmetric
+  // about those two; centring the line box therefore lands the letters a pixel
+  // above the middle of the pill while the icon beside them lands dead centre.
+  // Measured on the running app at four times screen density: the letters in a
+  // file chip sat 1.00px above the pill's middle, in both the body font and the
+  // monospace one, at this size (bw-s5op.1).
+  //
+  // Five callers had each discovered this and written `relative top-px` on
+  // their own label — so a chip was centred if, and only if, whoever wrote it
+  // had noticed. The correction belongs to the chip, once, which is what this
+  // rule is. `[data-slot]` spares the dot and the button, which are not text.
+  //
+  // Not `text-box: trim-both cap alphabetic`, which is the standard's own
+  // answer to this and would derive the number from the font rather than fix
+  // it: it "does not apply to, or propagate through, flex, grid, or table
+  // formatting contexts" (CSS Inline Layout 3 §6.2), and a chip is an
+  // inline-flex box — so it would have to go on each label instead. There it
+  // WOULD work, and would then trim the line box down to the cap box, which is
+  // shorter than the letters: every label here is wrapped in `truncate`, whose
+  // hidden overflow would cut the tails off g and y all over again, which is
+  // the fault `sm` and `xs` below were widened twice to fix (bw-96is.20,
+  // bw-jaoz.1). One pixel, written down, costs less than that.
+  'inline-flex items-center whitespace-nowrap justify-center align-middle border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0 [&>span:not([data-slot])]:relative [&>span:not([data-slot])]:top-px',
   {
     variants: {
       variant: {

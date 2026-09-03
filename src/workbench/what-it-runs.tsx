@@ -269,7 +269,7 @@ export function WhatItRuns({
           {/* The same mark the model picker under the writing box wears, so the
               two are read as one setting seen twice (bw-ja9l.12). */}
           <Cpu className="size-3 shrink-0" aria-hidden="true" />
-          <span className="relative top-px min-w-0 truncate">{modelLabel}</span>
+          <span className="min-w-0 truncate">{modelLabel}</span>
         </Badge>
       )}
       {mode && (
@@ -290,7 +290,7 @@ export function WhatItRuns({
           className="min-w-0 shrink gap-1 truncate"
         >
           <mode.Mark className="size-3 shrink-0" aria-hidden="true" />
-          <span className="relative top-px min-w-0 truncate">{mode.label}</span>
+          <span className="min-w-0 truncate">{mode.label}</span>
         </Badge>
       )}
       {effortLabel && (
@@ -305,7 +305,7 @@ export function WhatItRuns({
           className="min-w-0 shrink gap-1 truncate"
         >
           <Gauge className="size-3 shrink-0" aria-hidden="true" />
-          <span className="relative top-px min-w-0 truncate">{effortLabel}</span>
+          <span className="min-w-0 truncate">{effortLabel}</span>
         </Badge>
       )}
       {collaborationLabel && (
@@ -320,7 +320,7 @@ export function WhatItRuns({
           className="min-w-0 shrink gap-1 truncate"
         >
           <Workflow className="size-3 shrink-0" aria-hidden="true" />
-          <span className="relative top-px min-w-0 truncate">{collaborationLabel}</span>
+          <span className="min-w-0 truncate">{collaborationLabel}</span>
         </Badge>
       )}
     </span>

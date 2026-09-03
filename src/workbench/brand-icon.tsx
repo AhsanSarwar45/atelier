@@ -50,7 +50,7 @@ export function ProviderBadge({ brand, model, icon, className }: { brand: Brand;
       title={`Coding agent — ${brandName(brand)}`}
     >
       {icon ?? <BrandIcon brand={brand} className="size-3" />}
-      <span className="relative top-px">{brand === 'local' && model ? model.split('::').at(-1) : brandName(brand)}</span>
+      <span>{brand === 'local' && model ? model.split('::').at(-1) : brandName(brand)}</span>
     </Badge>
   );
 }

@@ -1468,7 +1468,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             ) : (
               <Folder className="size-3 shrink-0" aria-hidden="true" />
             )}
-            <span className="relative top-px min-w-0 truncate">{facts.folder}</span>
+            <span className="min-w-0 truncate">{facts.folder}</span>
           </Badge>
         )}
         {/* What this chat is using and what it has spent, then how much of the

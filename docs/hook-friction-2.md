@@ -63,6 +63,54 @@ already has both strings in hand at the moment it refuses.
 identical-looking commands was in the wrong place. Small, and it will happen to
 every agent that backgrounds a build or a test run.
 
+## 3. A brand-new card cannot be claimed, because claiming it is a change
+
+**Attempted.** The documented start of any piece of work, exactly as the
+session brief spells it:
+
+```bash
+git -C . worktree add worktrees/bw-s5op.1 -b bw-s5op.1
+cd worktrees/bw-s5op.1
+bd update bw-s5op.1 --claim
+```
+
+**Refused.** Both halves, in turn. From the main checkout:
+
+```
+Changes require an owned Beads work item in its isolated worktree
+  (resolved target: /home/ahsan/dev/beads-web).
+```
+
+and then, from inside the worktree the bypass had to create:
+
+```
+Beads issue bw-s5op.1 must be claimed and in_progress before this worktree is
+  changed. Resolved target: /home/ahsan/dev/beads-web/worktrees/bw-s5op.1.
+```
+
+**Why it does not serve the rule.** The rule is that repository changes need an
+owned card in its own worktree. Neither refused command is a repository change
+in that sense: `git worktree add` creates the very isolation the rule demands,
+and `bd update --claim` is how a card becomes owned. The gate treats its own
+two preconditions as violations of itself, so the state it requires can never
+be reached from a clean start — the only cards claimable without a bypass are
+ones already claimed. Every session that files new work meets this, and the
+refusal text points at the worktree it just refused to let anyone earn.
+
+**Should have happened.** Two carve-outs, both narrow enough to keep the rule
+intact:
+
+- `git worktree add <path> -b <ID>` under the repository's own worktree
+  directory is the rule being obeyed, not broken. Let it through.
+- `bd update <ID> --claim`, and only `--claim`, is the transition into
+  ownership. It should pass whenever the card is currently unowned; every other
+  `bd` write can stay gated exactly as it is.
+
+**Cost.** Four refused commands, one read of `docs/hooks.md`, and two entries in
+`hook-bypass.log` that record nothing anyone wanted to be warned about. The
+worse cost is the lesson it teaches: the first thing a new session learns about
+the gates is that the documented path does not work and the bypass does.
+
 ## How to add to this file
 
 As in the first book: what was attempted, the refusal text, why the refusal did
