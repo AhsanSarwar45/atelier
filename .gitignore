@@ -103,6 +103,7 @@ __pycache__/
 # the browser's output folder, and the marker a run drops recording how it went.
 # The screenshots at tests/results/*.png are evidence and stay tracked.
 /tests/.*-run*/
+/tests/.*-run*.log
 /tests/.artifacts/
 /test-results/
 
