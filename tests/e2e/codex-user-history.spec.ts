@@ -136,7 +136,6 @@ test('the Rust Codex importer restores one ordered copy of the person and agent 
     await expect(row.getByTestId('row-name')).toHaveText(TITLE);
     await expect(row.locator('span.font-mono').first()).toHaveText('10:00 AM');
     await expect(row.getByTestId('external-origin')).toHaveCount(0);
-    await expect(row.getByTestId('chat-external')).toHaveCount(0);
 
     const name = await row.getByTestId('row-name').boundingBox();
     const clock = await row.locator('span.font-mono').first().boundingBox();

@@ -15,7 +15,7 @@ import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatState } from '@/workbench/chat-state';
-import { ChatStateChip, ExternalBadge } from '@/workbench/chat-state-chip';
+import { ChatStateChip } from '@/workbench/chat-state-chip';
 
 /** The app's own chip height, from the badge's `sm`: 1.25rem of it. */
 const NORMAL = 'h-5';
@@ -68,13 +68,6 @@ describe('the marks on a chat row', () => {
     const chip = screen.getByTestId('chat-state');
     expect(chip.className, 'the rail’s chip is a size of its own again').toContain(NORMAL);
     expect(chip.className).not.toContain(SHORTER);
-  });
-
-  it('and so does the badge that says somebody else has the chat', () => {
-    render(<ExternalBadge holder="terminal" />);
-    const badge = screen.getByTestId('chat-external');
-    expect(badge.className).toContain(NORMAL);
-    expect(badge.className).not.toContain(SHORTER);
   });
 });
 

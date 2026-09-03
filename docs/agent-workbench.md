@@ -610,7 +610,7 @@ when a project has forty of them:
 |---|---|
 | first | the conversation's own **name** — the brand's title for it, not ours |
 | second | a **chip per card** it worked on, which opens that card, and a **chip naming the folder** it ran in |
-| beside them | the **state chip** — what it is doing this second — and, when another program holds the conversation, the **external badge** beside it (§6.3.4) |
+| beside them | the **state chip** — what it is doing this second — and, when another program holds the conversation, the **external mark** beside the name, whose tooltip names the holder (§6.3.4). Said once: a badge under the name repeating the word "external" was removed (bw-68kf.1) |
 
 The folder is the whole point of the second chip: a worktree's directory is
 named after the worktree, so two chats on the same project in different trees
@@ -2208,17 +2208,30 @@ is what a chat a terminal holds draws too, because to a reader those are the
 same fact. A chat waiting on the reader wears a different mark, a hand, since it
 is not working and saying so is the point.
 
-**The badge never stands in place of the doing.** Another program holding the
-conversation is a third fact, drawn as an `external` badge beside the mark, with
-the kind of holder in its tooltip — a terminal, or a program driving through the
-kit. It is drawn only on chats somebody else holds, so it means something by
-being there; the word it replaced meant "occupied" and was read as "working",
-which is the whole of what went wrong. Three cues keep it apart from the mark
-it stands beside without anyone reading either — its own colour, square corners
-against the mark's round ones, and a glyph for the kind of holder. It first
-shipped as `secondary`/`outline`, a pair `Badge` has no compound rule for, so
-it fell back to the same flat grey as an idle mark and disappeared altogether
-into the background of the selected row (bw-96is.10).
+**Who holds it never stands in place of the doing, and is said once.** Another
+program holding the conversation is a third fact, drawn as a small external mark
+beside the conversation's name, with the kind of holder in its tooltip — a
+terminal, or a program driving through the kit. It is drawn only on chats
+somebody else holds, so it means something by being there; the word it replaced
+meant "occupied" and was read as "working", which is the whole of what went
+wrong.
+
+It used to be said twice: the mark beside the name, and an `external` badge on
+the line below carrying the same word again. On a two-line row that is one fact
+occupying both lines, and the mark is the one the reader meets first, so the
+badge was removed and its tooltip's sentence — the holder — moved onto the mark
+(bw-68kf.1). The badge's own history is why the sentence was kept rather than
+dropped: it first shipped as `secondary`/`outline`, a pair `Badge` has no
+compound rule for, so it fell back to the same flat grey as an idle mark and
+disappeared into the background of the selected row (bw-96is.10, bw-96is.19) —
+twice fixed for being unreadable, and a mark nobody can read is worth what the
+tooltip says and no more.
+
+**A hold that claims nothing opens no line.** The chip draws nothing at all for
+a hold whose holder reports neither a state nor a verb, and the badge used to be
+the only thing on that second line for such a chat. Without it the rail asks for
+a word before it opens the line, or a held row would carry an empty strip under
+its name (`chat-sidebar.tsx`).
 
 **A held chat has no writing box, and the line in its place agrees with the
 mark.** The box used to be drawn in full and refuse every keystroke — a locked

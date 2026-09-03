@@ -162,7 +162,7 @@ async function drawnRows(page: Page): Promise<RowMark[]> {
         running: el.getAttribute('data-running') === 'yes',
         working: chip?.getAttribute('data-working') === 'yes',
         word: chip?.getAttribute('data-word') ?? null,
-        external: el.querySelector('[data-testid="chat-external"]') !== null,
+        external: el.querySelector('[data-testid="external-origin"]') !== null,
       };
     }),
   );
@@ -179,7 +179,7 @@ async function rowNow(page: Page, key: string): Promise<RowMark | null> {
       running: el.getAttribute('data-running') === 'yes',
       working: chip?.getAttribute('data-working') === 'yes',
       word: chip?.getAttribute('data-word') ?? null,
-      external: el.querySelector('[data-testid="chat-external"]') !== null,
+      external: el.querySelector('[data-testid="external-origin"]') !== null,
     };
   }, key);
 }
@@ -403,7 +403,7 @@ test.describe('a chat another program is running', () => {
       await expect(page.getByTestId('composer')).toHaveCount(0);
       await expect(page.getByTestId('send-button')).toHaveCount(0);
 
-      await expect(row.getByTestId('chat-external')).toBeVisible();
+      await expect(row.getByTestId('external-origin')).toBeVisible();
       await expect(page.getByTestId('session-state'), 'status regressed into the transcript header').toHaveCount(0);
 
       // The whole of it: something said over there turns up here, with nobody
@@ -424,7 +424,7 @@ test.describe('a chat another program is running', () => {
     // box is back by itself because the stream it went away on says so.
     await expect(page.getByTestId('composer')).toBeEnabled({ timeout: 30_000 });
     await expect(page.getByTestId('held-elsewhere')).toHaveCount(0);
-    await expect(row.getByTestId('chat-external')).toHaveCount(0);
+    await expect(row.getByTestId('external-origin')).toHaveCount(0);
   });
 
   /**

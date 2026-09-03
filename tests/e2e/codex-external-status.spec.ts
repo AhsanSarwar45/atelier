@@ -113,7 +113,7 @@ test('a live external Codex chat has rich sidebar activity and no transcript-hea
     const row = page.locator(`[data-testid="restore-row"][data-external-id="${THREAD}"]`);
     await expect(row).toBeVisible({ timeout: 30_000 });
     await expect(row).toHaveAttribute('data-running', 'yes');
-    await expect(row.getByTestId('chat-external')).toBeVisible();
+    await expect(row.getByTestId('external-origin')).toBeVisible();
     await expect(row.getByTestId('row-pill')).toContainText('Running');
     await expect(row.getByTestId('row-pill')).toContainText('Reading server/src/workbench/external.rs');
 
@@ -124,7 +124,7 @@ test('a live external Codex chat has rich sidebar activity and no transcript-hea
 
     await stop(child);
     await expect(row).toHaveAttribute('data-running', 'no', { timeout: 30_000 });
-    await expect(row.getByTestId('chat-external')).toHaveCount(0);
+    await expect(row.getByTestId('external-origin')).toHaveCount(0);
     await expect(page.getByTestId('held-elsewhere')).toHaveCount(0);
     await expect(page.getByTestId('composer')).toBeEnabled();
   } finally {

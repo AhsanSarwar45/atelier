@@ -101,7 +101,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe('a chat another program is in', () => {
-  test('draws the moving mark and the badge together, and drops the mark alone when they stop', async ({
+  test('draws the moving mark and the external mark together, and drops the moving one alone when they stop', async ({
     page,
     request,
   }) => {
@@ -120,11 +120,14 @@ test.describe('a chat another program is in', () => {
       const row = rowFor(page, chat.id);
       await expect(row, 'the chat being worked in was not offered').toBeVisible({ timeout: 30_000 });
 
-      // Both, on the row: the mark that says it is working AND the badge that
-      // says the work is somebody else's. The badge is the whole of what the
-      // old pill said, and it said it in place of this (bw-96is).
+      // Both, on the row: the chip that says it is working AND the mark beside
+      // the name that says the work is somebody else's. That pair is the whole
+      // of what the old single pill said, and it said it in place of this
+      // (bw-96is). The badge that used to repeat the second half under the name
+      // is gone — one row said "external" twice (bw-68kf.1).
       await expect(row.getByTestId('row-pill')).toHaveAttribute('data-working', 'yes', { timeout: 30_000 });
-      await expect(row.getByTestId('chat-external')).toBeVisible();
+      await expect(row.getByTestId('external-origin')).toBeVisible();
+      await expect(row.getByTestId('chat-external')).toHaveCount(0);
 
       await row.getByTestId('row-name').click();
       await expect(page.getByTestId('transcript').getByText(opening)).toBeVisible({ timeout: 30_000 });
@@ -144,23 +147,23 @@ test.describe('a chat another program is in', () => {
         .toBeGreaterThan(first!);
 
       // That terminal comes back to a prompt. Same marker, same conversation,
-      // one word changed — so the badge stays and the mark goes, which is the
-      // exact reading the old pill could not make.
+      // one word changed — so the external mark stays and the moving one goes,
+      // which is the exact reading the old pill could not make.
       claimConversation(chat.id, { status: 'idle' });
       await expect(chip).toHaveAttribute('data-working', 'no', { timeout: 30_000 });
       await expect(chip).toHaveAttribute('data-word', 'Idle');
       expect(await secondsOn(chip), 'a chat doing nothing was still counting').toBeNull();
-      await expect(row.getByTestId('chat-external')).toBeVisible();
+      await expect(row.getByTestId('external-origin')).toBeVisible();
     } finally {
       release();
     }
 
-    // And when they let go of it altogether, the badge goes with them.
-    await expect(rowFor(page, chat.id).getByTestId('chat-external')).toHaveCount(0, { timeout: 30_000 });
+    // And when they let go of it altogether, the mark goes with them.
+    await expect(rowFor(page, chat.id).getByTestId('external-origin')).toHaveCount(0, { timeout: 30_000 });
     chat.forget();
   });
 
-  test('wears a badge no chat of ours wears', async ({ page, request }) => {
+  test('wears a mark no chat of ours wears', async ({ page, request }) => {
     test.setTimeout(180_000);
     const project = await aFixtureProject(request);
     const chat = aChatSomebodyElseIsIn(project.path, 'Look at the rail again');
@@ -170,92 +173,90 @@ test.describe('a chat another program is in', () => {
       await openChatTab(page, project);
       await expect(rowFor(page, chat.id)).toBeVisible({ timeout: 30_000 });
       // The rail merges the live stream into the fetched list; give that its
-      // beat before counting badges off the document.
+      // beat before counting marks off the document.
       await page.waitForTimeout(1500);
 
-      // The badge means something by being there, which it can only do if it
-      // is on the held chats and on nothing else. Counted over the whole rail
+      // The mark means something by being there, which it can only do if it is
+      // on the held chats and on nothing else. Counted over the whole rail
       // rather than on one row, because "only shows on external ones" is a
-      // claim about every other row (bw-96is.5).
+      // claim about every other row (bw-96is.5). The badge is counted too, and
+      // must be nowhere: it said the same thing a second time (bw-68kf.1).
       const seen = await page.evaluate(() =>
         Array.from(document.querySelectorAll('[data-testid="restore-row"]')).map((el) => ({
           key: el.getAttribute('data-row-key') ?? '',
           held: el.getAttribute('data-running') === 'yes',
+          mark: el.querySelector('[data-testid="external-origin"]') !== null,
           badge: el.querySelector('[data-testid="chat-external"]') !== null,
         })),
       );
       expect(seen.length, 'the rail drew nothing').toBeGreaterThan(0);
       expect(seen.some((r) => r.held), 'no chat on the rail is held by another program').toBe(true);
-      const wrong = seen.filter((r) => r.held !== r.badge);
+      const wrong = seen.filter((r) => r.held !== r.mark);
       expect(wrong, `${wrong.length} rows disagree with themselves about who holds them`).toEqual([]);
+      const twice = seen.filter((r) => r.badge);
+      expect(twice, `${twice.length} rows say they are external a second time`).toEqual([]);
     } finally {
       release();
     }
     chat.forget();
   });
 
-  test('keeps its badge whole on the row the reader has open, and apart from the mark beside it', async ({
+  test('keeps its external mark visible on the row the reader has open', async ({
     page,
     request,
   }) => {
     test.setTimeout(180_000);
     const project = await aFixtureProject(request);
-    const chat = aChatSomebodyElseIsIn(project.path, 'Read the badge on the open row');
+    const chat = aChatSomebodyElseIsIn(project.path, 'Read the mark on the open row');
     const release = claimConversation(chat.id, { status: 'busy' });
 
     try {
       await openChatTab(page, project);
       const row = rowFor(page, chat.id);
       await expect(row.getByTestId('row-pill')).toHaveAttribute('data-working', 'yes', { timeout: 30_000 });
-      const badge = row.getByTestId('chat-external');
-      await expect(badge).toBeVisible();
+      const mark = row.getByTestId('external-origin');
+      await expect(mark).toBeVisible();
+      // Who holds it is still said, now only here: the tooltip carries what the
+      // badge's did (bw-68kf.1).
+      await expect(mark).toHaveAttribute('data-holder', 'terminal');
+      await expect(mark).toHaveAttribute('title', /terminal/);
 
-      // What it measures is the drawn box, not a class name: the badge was
-      // asked for a look the badge component has no rule for, fell back to a
-      // flat grey with a transparent border, and on the selected row — whose
-      // background is that same grey — there was nothing left of it to see
-      // (bw-96is.10).
-      const alone = await badge.boundingBox();
-      expect(alone, 'the badge drew no box at all').not.toBeNull();
-      expect(alone!.width, 'the badge drew nothing wide').toBeGreaterThan(0);
-      expect(alone!.height, 'the badge drew nothing tall').toBeGreaterThan(0);
+      // What it measures is the drawn box, not a class name. The badge this
+      // replaced was asked for a look the badge component had no rule for, fell
+      // back to a flat grey with a transparent border, and on the selected row
+      // — whose background is that same grey — there was nothing left of it to
+      // see (bw-96is.10). The mark has no fill and no edge by design, so what
+      // is asked of it is that it be drawn, keep its size when its row is
+      // selected, and not be the colour of what it stands on.
+      const alone = await mark.boundingBox();
+      expect(alone, 'the mark drew no box at all').not.toBeNull();
+      expect(alone!.width, 'the mark drew nothing wide').toBeGreaterThan(0);
+      expect(alone!.height, 'the mark drew nothing tall').toBeGreaterThan(0);
 
       await row.getByTestId('row-name').click();
       await expect(page.getByTestId('transcript')).toBeVisible({ timeout: 30_000 });
       await expect(row, 'the row left the rail when it was opened').toBeVisible();
-      const opened = await badge.boundingBox();
-      expect(opened, 'the badge vanished on the row the reader has open').not.toBeNull();
-      expect(opened!.width, 'the badge changed width when its row was selected').toBeCloseTo(alone!.width, 0);
-      expect(opened!.height, 'the badge changed height when its row was selected').toBeCloseTo(alone!.height, 0);
+      const opened = await mark.boundingBox();
+      expect(opened, 'the mark vanished on the row the reader has open').not.toBeNull();
+      expect(opened!.width, 'the mark changed width when its row was selected').toBeCloseTo(alone!.width, 0);
+      expect(opened!.height, 'the mark changed height when its row was selected').toBeCloseTo(alone!.height, 0);
 
-      // A box the right size is not a box anybody can see. The badge went on
-      // vanishing into the open row long after this case was written, because
-      // all this case asked of its border was that it be SOME colour — and the
-      // colour it was, was the open row's own (bw-96is.19). What the eye does
-      // is compare the badge against what is behind it, so that is what is
-      // compared here: a shape survives by having a fill of its own or an edge
-      // of its own, and the open row is the case where it has neither.
       const against = await page.evaluate((id: string) => {
         const row_ = document.querySelector(`[data-testid="restore-row"][data-external-id="${id}"]`);
-        const seen = row_?.querySelector('[data-testid="chat-external"]');
+        const seen = row_?.querySelector('[data-testid="external-origin"]');
         if (!row_ || !seen) return null;
-        const a = getComputedStyle(seen);
         return {
-          fill: a.backgroundColor,
-          edge: a.borderTopColor,
-          edgeWidth: parseFloat(a.borderTopWidth),
+          ink: getComputedStyle(seen).color,
           behind: getComputedStyle(row_).backgroundColor,
         };
       }, chat.id);
-      expect(against, 'the open row drew no badge').not.toBeNull();
+      expect(against, 'the open row drew no mark').not.toBeNull();
       const gone = /rgba\(0, 0, 0, 0\)|transparent/;
-      const stands =
-        (against!.fill !== against!.behind && !gone.test(against!.fill)) ||
-        (against!.edgeWidth > 0 && !gone.test(against!.edge) && against!.edge !== against!.behind);
+      expect(gone.test(against!.ink), `the mark is drawn in nothing at all: ${against!.ink}`).toBe(false);
       expect(
-        stands,
-        `the badge has neither a fill nor an edge of its own on the open row: fill ${against!.fill}, edge ${against!.edge}, row ${against!.behind}`,
-      ).toBe(true);
+        against!.ink,
+        `the mark is the open row's own colour: ${against!.ink} on ${against!.behind}`,
+      ).not.toBe(against!.behind);
 
       await expect(page.getByTestId('session-state'), 'status regressed into the transcript header').toHaveCount(0);
     } finally {
@@ -399,7 +400,7 @@ test.describe('a chat another program is in', () => {
     chat.forget();
   });
 
-  test('centres the rich status and external badge on its sidebar row', async ({ page, request }) => {
+  test('centres the rich status on its sidebar row', async ({ page, request }) => {
     test.setTimeout(180_000);
     const project = await aFixtureProject(request);
     const opening = 'Measure the chips';
@@ -436,14 +437,13 @@ test.describe('a chat another program is in', () => {
       expect(below, 'the word on the row chip touches its bottom edge').toBeGreaterThan(0);
       expect(Math.abs(above - below), `the row word sits ${above}px from the top and ${below}px from the bottom`).toBeLessThanOrEqual(1);
 
-      // The badge beside it is the other half of what he compared, and it is
-      // drawn from the same size.
-      const badge = await row.getByTestId('chat-external').boundingBox();
-      expect(badge, 'the row drew no badge').not.toBeNull();
-      expect(
-        badge!.height,
-        `the badge is ${badge!.height}px tall against the chip's ${onRow.box.height}px`,
-      ).toBeCloseTo(onRow.box.height, 0);
+      // The mark beside the name is the other half of what he compared, and it
+      // sits on the name's line rather than the chip's, so what is asked of it
+      // is that it be drawn at all — the badge that used to be measured here
+      // against the chip's height is gone (bw-68kf.1).
+      const mark = await row.getByTestId('external-origin').boundingBox();
+      expect(mark, 'the row drew no external mark').not.toBeNull();
+      expect(mark!.height, 'the external mark drew nothing tall').toBeGreaterThan(0);
     } finally {
       release();
     }
@@ -606,9 +606,9 @@ test.describe('a chat another program is in', () => {
         // Its own mark beside it: five words in one typeface still read alike
         // at a glance, and the mark is what makes them different at a glance.
         await expect(pill.getByTestId('chat-state-mark')).toHaveAttribute('data-mark', one.mark);
-        // The badge saying whose chat this is stays beside all five, because it
+        // The mark saying whose chat this is stays beside all five, because it
         // was never an answer to what the chat is doing (bw-96is).
-        await expect(row.getByTestId('chat-external')).toBeVisible();
+        await expect(row.getByTestId('external-origin')).toBeVisible();
         // Which one it is — "auto", "3 helpers", the reset time — is part of
         // the rich status, not expendable decoration. The chip preserves both
         // ends with a middle ellipsis when the fixed rail is narrow.
@@ -679,7 +679,7 @@ test.describe('a chat nothing is running', () => {
     // say about a chat that is asleep: most of a list is asleep, and a mark on
     // every row is a mark on none (chat-state.ts, bw-96is).
     await expect(row.getByTestId('row-pill')).toHaveCount(0);
-    await expect(row.getByTestId('chat-external')).toHaveCount(0);
+    await expect(row.getByTestId('external-origin')).toHaveCount(0);
 
     await row.getByTestId('row-name').click();
     await expect(page.getByTestId('transcript').getByText(opening)).toBeVisible({ timeout: 30_000 });

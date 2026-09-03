@@ -41,8 +41,8 @@ import {
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { request } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { chatState, holderOnly, type HeldChat } from '@/workbench/chat-state';
-import { ChatStateChip, ExternalBadge } from '@/workbench/chat-state-chip';
+import { chatState, holderOnly, HOLDER_WORD, type HeldChat } from '@/workbench/chat-state';
+import { ChatStateChip } from '@/workbench/chat-state-chip';
 import {
   useHeardFromOutside,
   useHeldFactsAreOld,
@@ -737,11 +737,21 @@ export function ChatSidebar({
                     >
                       {row.title ?? 'Untitled chat'}
                     </Button>
+                    {/* Said once, here, and nowhere else on the row. There
+                        used to be a badge under this as well, spelling out
+                        "external" beside the chip — two marks for one fact on a
+                        two-line row, and the mark beside the name is the one
+                        the reader meets first (the manager, 2026-09-03). What
+                        the badge alone carried, the holder, moved into this
+                        tooltip rather than being dropped: a terminal somebody
+                        types in and a program driving the kit are not the same
+                        thing to whoever is deciding whether to take the chat. */}
                     {state.external && (
                       <span
                         data-testid="external-origin"
-                        aria-label="External chat"
-                        title="External chat — currently owned outside Atelier"
+                        data-holder={state.external.holder}
+                        aria-label={`${HOLDER_WORD[state.external.holder]}.`}
+                        title={`${HOLDER_WORD[state.external.holder]}.`}
                         className="flex size-3.5 shrink-0 items-center text-muted-foreground"
                       >
                         <ExternalLink aria-hidden="true" className="size-3.5" />
@@ -808,9 +818,10 @@ export function ChatSidebar({
                     so the rail was spending a line of three on a fact the next
                     screen carries anyway (the manager, 2026-08-23).
 
-                    The badge saying somebody else is in there rides at the far
-                    end of this line rather than on the folder's, which is where
-                    it sat when there was a folder line to sit on.
+                    Whoever else is in there is said beside the name and not
+                    again here: the badge that used to ride at the far end of
+                    this line said "external" a second time on a row that had
+                    already said it (the manager, 2026-09-03).
 
                     The same reading the chat's own line draws, in the same words
                     (chat-state.ts). A row that is asleep says nothing at all,
@@ -822,7 +833,13 @@ export function ChatSidebar({
                     closable ||
                     state.working ||
                     state.waiting ||
-                    ownership.kind === 'elsewhere') && (
+                    // Only where the holder has said something we can draw. The
+                    // chip draws nothing at all for a hold that claims neither
+                    // a state nor a verb, and this clause used to be here for
+                    // the badge beside it — without the badge it would open an
+                    // empty line under the name and push every row below it
+                    // down by nothing anybody can read.
+                    (ownership.kind === 'elsewhere' && rowState.word !== '')) && (
                     <div className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden">
                       {busy === key || ending === key ? (
                         <Badge
@@ -847,11 +864,8 @@ export function ChatSidebar({
                         // "Helping", "Retrying" or "Summarising" only becomes
                         // actionable when the helper, reset time, or current
                         // work remains visible. ChatStateChip middle-ellipsizes
-                        // that clause so it and the external badge can coexist.
+                        // that clause rather than dropping it.
                         <ChatStateChip state={rowState} testId="row-pill" className="min-w-0 shrink" />
-                      )}
-                      {ownership.kind === 'elsewhere' && state.external && (
-                        <ExternalBadge holder={state.external.holder} className="ml-auto shrink-0" />
                       )}
                     </div>
                   )}

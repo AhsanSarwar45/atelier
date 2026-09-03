@@ -193,12 +193,32 @@ describe('a chat begun in another tool', () => {
     render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={() => {}} />);
 
     await waitFor(() => expect(rows()).toHaveLength(1));
-    expect(screen.getByTestId('chat-external')).toBeInTheDocument();
+    // Said once. The mark beside the name is the whole of it, and it names the
+    // holder in its own tooltip; the badge that used to repeat the word
+    // "external" under the name is gone (the manager, 2026-09-03).
+    expect(screen.queryByTestId('chat-external')).toBeNull();
+    expect(screen.getByTestId('external-origin')).toHaveAttribute('data-holder', 'terminal');
     expect(screen.getByTestId('external-origin')).toHaveAttribute(
       'title',
-      'External chat — currently owned outside Atelier',
+      'Somebody has this chat open in a terminal.',
     );
     expect(screen.getByTestId('row-pill')).toHaveTextContent('Idle');
+  });
+
+  it('opens no second line for a hold that claims nothing at all', async () => {
+    // The badge was the only thing that line ever had on it for this hold: the
+    // chip draws nothing without a word, so the line would be empty.
+    list = [row({
+      origin: 'terminal', externalId: 'outside-1', runningElsewhere: true,
+      held: { id: 'outside-1', holder: 'terminal', doing: 'unknown', since: null },
+    })];
+    const ChatSidebar = await freshSidebar();
+    render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={() => {}} />);
+
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(screen.getByTestId('external-origin')).toBeInTheDocument();
+    expect(screen.queryByTestId('row-pill')).toBeNull();
+    expect(rows()[0].textContent).not.toContain('external');
   });
 
   it('joins the list on the word alone, with nothing clicked', async () => {

@@ -39,7 +39,7 @@ import {
   type Doing,
   type HeldChat,
 } from '@/workbench/chat-state';
-import { ChatStateChip, ExternalBadge } from '@/workbench/chat-state-chip';
+import { ChatStateChip } from '@/workbench/chat-state-chip';
 import { withLive } from '@/workbench/chat-sidebar';
 import { liveState, type LiveSession } from '@/workbench/live';
 import type { RestoreRow, SessionState } from '@/workbench/protocol';
@@ -253,7 +253,7 @@ describe('a chat somebody else holds', () => {
       expect(mark(read)).toEqual({ word: 'Working', moving: true });
     });
 
-    it(`${holder}, idle: the mark says Idle and counts nothing, and the badge stays`, () => {
+    it(`${holder}, idle: the mark says Idle and counts nothing, and the hold is still read`, () => {
       const read = chatState({ state: 'dormant', held: held({ holder, doing: 'idle', since: null }) });
       expect(read.word).toBe('Idle');
       expect(read.working).toBe(false);
@@ -262,15 +262,14 @@ describe('a chat somebody else holds', () => {
       expect(mark(read)).toEqual({ word: 'Idle', moving: false });
     });
 
-    it(`${holder}, nothing known: no mark at all, and the badge is the whole claim`, () => {
+    it(`${holder}, nothing known: no mark at all, and only the hold to report`, () => {
       const read = chatState({ state: 'dormant', held: held({ holder, doing: 'unknown', since: null }) });
       expect(read.word).toBe('');
       expect(read.working).toBe(false);
       expect(read.external).toEqual({ holder });
-      // The chip draws nothing rather than an empty pill.
+      // The chip draws nothing rather than an empty pill. Who holds it is
+      // still read off the state — the rail draws that beside the name.
       expect(mark(read).word).toBeNull();
-      render(<ExternalBadge holder={holder} />);
-      expect(screen.getByTestId('chat-external').getAttribute('data-holder')).toBe(holder);
     });
   }
 

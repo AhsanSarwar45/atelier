@@ -1,10 +1,11 @@
 /**
  * The one thing every screen draws about a chat.
  *
- * A moving mark and its own verb while something is happening, one word where
- * it stands otherwise, and — beside it, never instead of it — the badge that
- * says another program is holding it. The reading behind it is
- * {@link chatState}; this file is only how it looks (bw-96is).
+ * A moving mark and its own verb while something is happening, and one word
+ * where it stands otherwise. Who holds a chat is said elsewhere — the mark
+ * beside its name on the rail — and never in this chip, because the word it
+ * replaced said "occupied" and was read as "working" (bw-96is). The reading
+ * behind it is {@link chatState}; this file is only how it looks.
  *
  * The seconds come off one clock for the whole page. A list of forty rows drew
  * forty intervals before, each one waking React on its own second, and the
@@ -26,27 +27,13 @@ import {
   Moon,
   RefreshCw,
   Shrink,
-  SquareTerminal,
   Terminal,
 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { HOLDER_WORD, type ChatState, type Holder, type StateMark } from '@/workbench/chat-state';
+import { type ChatState, type StateMark } from '@/workbench/chat-state';
 import { forHowLong } from '@/workbench/elapsed';
-
-/**
- * The mark on the badge, one per kind of holder.
- *
- * It carries the tooltip's fact without the tooltip: a window somebody types
- * in, or a program driving the kit. It is also half of what tells the badge
- * from the chip beside it at a glance — the other half being the colour and
- * the corners (bw-96is.10).
- */
-const HOLDER_ICON: Record<Holder, typeof Bot> = {
-  terminal: SquareTerminal,
-  program: Bot,
-};
 
 /**
  * The mark for each standing a chat can be in.
@@ -213,8 +200,9 @@ export function ChatStateChip({
   // halves are is a reading of the string, and the markup below is only where
   // they go (bw-gnzl).
   const [said, ended] = state.detail ? splitDetail(state.detail) : ['', ''];
-  // Nothing is known and nothing is claimed: the external badge beside this is
-  // the whole of what the screen can honestly say.
+  // Nothing is known and nothing is claimed, so nothing is drawn. The screens
+  // that draw this decide for themselves whether a line with no chip on it is
+  // still a line worth opening (chat-sidebar.tsx).
   if (!state.word) return null;
 
   const Mark = MARK[state.mark];
@@ -318,70 +306,6 @@ export function ChatStateChip({
       )}
     >
       {body}
-    </Badge>
-  );
-}
-
-/**
- * The badge that says this conversation is somebody else's right now.
- *
- * Never in place of the chip: a held chat that is answering says both, which is
- * the whole correction — the word it replaced said "occupied" and was read as
- * "working" (bw-96is).
- *
- * Three things keep it apart from the chip it stands next to, none of which is
- * reading it: its own colour, square corners against the chip's round ones, and
- * a mark for the kind of holder. It was drawn `secondary`/`outline`, for which
- * the badge has no rule of its own, so it fell back to the same flat grey as an
- * idle chip — and on a selected row, whose background is that same grey, it
- * lost its shape entirely and read as loose text (bw-96is.10).
- *
- * Quieter than the chip on purpose: an outline against the chip's fill. What
- * the chat is doing is the thing being read; who holds it is the footnote.
- */
-export function ExternalBadge({
-  holder,
-  className,
-}: {
-  holder: Holder;
-  className?: string;
-}) {
-  const Mark = HOLDER_ICON[holder];
-  return (
-    <Badge
-      variant="info"
-      appearance="outline"
-      size="sm"
-      shape="default"
-      data-testid="chat-external"
-      data-holder={holder}
-      // The sentence is the reading's, not this file's, so the tooltip on a row
-      // and the line where that chat's writing box would be cannot drift apart
-      // (bw-96is.13). It punctuates here because a tooltip is one sentence; the
-      // line continues its own.
-      title={`${HOLDER_WORD[holder]}.`}
-      // Outline, not fill. A filled badge in its own colour beat the chip
-      // beside it, so the eye landed on who holds the chat before what the
-      // chat is doing, which is the wrong way round.
-      //
-      // Which makes the border the whole of its shape, and the first attempt
-      // at one drew nothing: `border-[var(--color-info-accent)]/45` asks the
-      // styling tool to fade an arbitrary variable, which it cannot do, so it
-      // emitted no border rule at all — the built sheet had that colour as
-      // text and as a background and never as an edge — and the badge went on
-      // vanishing into the open row exactly as before (bw-96is.19).
-      //
-      // Mixed from its own text colour instead, the same way the chip beside
-      // it is (bw-96is.16): that compiles, and it cannot collide with what the
-      // badge is standing on, because the text has to be readable against
-      // whatever that is or there would be nothing to read.
-      className={cn(
-        'shrink-0 gap-1 border-[color-mix(in_srgb,currentColor_55%,transparent)] bg-transparent',
-        className,
-      )}
-    >
-      <Mark aria-hidden="true" />
-      external
     </Badge>
   );
 }
