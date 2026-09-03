@@ -575,11 +575,18 @@ pub fn terminate_pid(pid: u32) -> std::io::Result<()> {
 /// the line before a compaction and the boundary line that ends it, so the
 /// claim stands for the whole run and dies on the boundary.
 ///
+/// The grace is for the one line a state writes as it begins: typing `/compact`
+/// puts the command in the record at the same instant the gate fires, and which
+/// of the two lands first is a race nobody wins. Two seconds settles it and
+/// costs nothing against a run of a hundred and fifty.
+///
 /// This is why the gate is registered on two events rather than seven. It used
 /// to announce a state and then need `PostCompact`, `Stop`, `PostToolUse`,
 /// `UserPromptSubmit` and `SessionEnd` to take the announcement back, all of
 /// them saying only "something happened" — which the record already says
 /// (bw-t26l.20).
+const TOLD_GRACE_MS: i64 = 2_000;
+
 fn told(
     sessions: &Path,
     id: &str,
@@ -588,7 +595,7 @@ fn told(
 ) -> Option<(HeldDoing, i64, Option<String>)> {
     let path = sessions.join(format!("{id}.doing.json"));
     let row: ToldDoing = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
-    if spoke_at.is_some_and(|at| at > row.since) {
+    if spoke_at.is_some_and(|at| at > row.since + TOLD_GRACE_MS) {
         return None;
     }
     // Keep the vocabulary and lifetime identical to the former shared reader:

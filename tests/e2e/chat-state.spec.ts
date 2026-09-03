@@ -513,7 +513,10 @@ test.describe('a chat another program is in', () => {
     test.setTimeout(180_000);
     const project = await aFixtureProject(request);
     const opening = 'Summarise where we got to';
-    const chat = aChatSomebodyElseIsIn(project.path, opening);
+    // Quiet since before the compaction began, which is what a record looks
+    // like while one runs: measured at 97 to 186 seconds of silence on the
+    // fourteen in this project's own longest record.
+    const chat = aChatSomebodyElseIsIn(project.path, opening, { spokeAgo: 70_000 });
     const release = claimConversation(chat.id, { status: 'busy' });
     // Sixty-two seconds in: half of the middle run measured on this machine, so
     // the bar is caught halfway rather than at either end (summarising.ts).
@@ -579,7 +582,11 @@ test.describe('a chat another program is in', () => {
     ] as const;
 
     const made = FIVE.map((it) => {
-      const chat = aChatSomebodyElseIsIn(project.path, `A chat that is ${it.doing}`);
+      // Silent since before it entered the state it is in — a chat cannot be
+      // four minutes into a permission prompt and have spoken a moment ago.
+      const chat = aChatSomebodyElseIsIn(project.path, `A chat that is ${it.doing}`, {
+        spokeAgo: it.ago + 5_000,
+      });
       return {
         ...it,
         chat,

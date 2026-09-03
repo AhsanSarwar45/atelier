@@ -143,6 +143,13 @@ export function claimConversation(conversation: string, how: Holding = {}): () =
  *
  * `ago` is how long the session has been in that state, which is the number the
  * screen counts and the bar fills from.
+ *
+ * A state announced this way stands only while the conversation is silent — its
+ * next line is what ends it — so a chat that has been in one for `ago` must
+ * have a record that last spoke longer ago than that. That is what
+ * `aChatSomebodyElseIsIn`'s `spokeAgo` is for, and a run that forgets it is
+ * writing a chat that cannot exist: one compacting for a minute that spoke a
+ * moment ago.
  */
 export function saysItIsDoing(
   conversation: string,
@@ -158,7 +165,13 @@ export function saysItIsDoing(
 }
 
 /** One line of a record, in the shape the tool writes and the kit reads back. */
-function line(chat: { id: string; cwd: string }, parent: string | null, role: 'user' | 'assistant', text: string) {
+function line(
+  chat: { id: string; cwd: string },
+  parent: string | null,
+  role: 'user' | 'assistant',
+  text: string,
+  at: number = Date.now(),
+) {
   const uuid = randomUUID();
   return {
     uuid,
@@ -171,7 +184,7 @@ function line(chat: { id: string; cwd: string }, parent: string | null, role: 'u
           ? { role: 'user', content: text }
           : { role: 'assistant', content: [{ type: 'text', text }] },
       uuid,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(at).toISOString(),
       userType: 'external',
       entrypoint: 'cli',
       cwd: chat.cwd,
@@ -214,12 +227,16 @@ function blocks(
  * What this writes instead is a record the sidecar genuinely reads, by the same
  * kit call it uses for every other chat.
  */
-export function aChatSomebodyElseIsIn(projectPath: string, opening: string) {
+export function aChatSomebodyElseIsIn(
+  projectPath: string,
+  opening: string,
+  how: { spokeAgo?: number } = {},
+) {
   const chat = { id: randomUUID(), cwd: projectPath };
   const dir = recordDir(projectPath);
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${chat.id}.jsonl`);
-  const first = line(chat, null, 'user', opening);
+  const first = line(chat, null, 'user', opening, Date.now() - (how.spokeAgo ?? 0));
   writeFileSync(file, `${first.row}\n`);
   let last = first.uuid;
   return {
