@@ -43,6 +43,7 @@ pub struct WorkbenchState {
     usage_refreshes: Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     discovery_cache: Arc<tokio::sync::Mutex<HashMap<String, (std::time::Instant, Vec<Value>)>>>,
     discoveries: Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+    listing_refused: Arc<tokio::sync::Mutex<HashMap<String, std::time::Instant>>>,
     claude_usage_reader:
         Arc<tokio::sync::Mutex<Option<crate::workbench::claude::transport::ClaudeTransport>>>,
     codex_readers: Arc<
@@ -111,6 +112,7 @@ impl WorkbenchState {
             usage_refreshes: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             discovery_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             discoveries: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            listing_refused: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             claude_usage_reader: Arc::new(tokio::sync::Mutex::new(None)),
             codex_readers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             codex_records: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -997,6 +999,35 @@ async fn fresh_discovery(
         .map(|(_, rows)| rows.clone())
 }
 
+/// How long a provider that cannot answer `session/list` is left alone.
+///
+/// Starting an adapter to be told "Authentication required" costs the same as
+/// starting one that answers, and a provider that is not signed in says it
+/// every time. Measured on a run of this app's own tests: seventeen of them,
+/// one per discovery, each paying for a process that could not help.
+const LISTING_REFUSED_FOR: Duration = Duration::from_secs(60);
+
+/// Ask one provider for its saved chats, unless it has just refused.
+async fn ask_provider_to_list(
+    state: &WorkbenchState,
+    brand: &str,
+    filter: Option<&std::path::Path>,
+) -> Result<Vec<crate::workbench::acp::client::ListedSession>, String> {
+    if let Some(refused) = state.listing_refused.lock().await.get(brand) {
+        if refused.elapsed() < LISTING_REFUSED_FOR {
+            return Err(format!("{brand} refused session/list a moment ago"));
+        }
+    }
+    let listed = crate::workbench::acp::client::list_sessions(brand, filter).await;
+    let mut refusals = state.listing_refused.lock().await;
+    if listed.is_err() {
+        refusals.insert(brand.to_string(), std::time::Instant::now());
+    } else {
+        refusals.remove(brand);
+    }
+    listed
+}
+
 /// Every saved chat a provider knows about, however it is asked.
 ///
 /// ACP `session/list` is the standard way to ask and is asked first, but the
@@ -1016,8 +1047,8 @@ async fn provider_sessions(
     let project_path = project.map(std::path::Path::new);
     let filter = (!everything).then_some(project_path).flatten();
     let (claude_acp, codex_acp) = tokio::join!(
-        crate::workbench::acp::client::list_sessions("claude", filter),
-        crate::workbench::acp::client::list_sessions("codex", filter),
+        ask_provider_to_list(state, "claude", filter),
+        ask_provider_to_list(state, "codex", filter),
     );
     let mut rows = Vec::new();
     for (brand, result) in [("claude", claude_acp), ("codex", codex_acp)] {
@@ -2342,6 +2373,35 @@ mod tests {
                 .await
                 .is_none()
         );
+    }
+
+    /**
+     * A provider that cannot answer is left alone for a while.
+     *
+     * Starting an adapter to be told "Authentication required" costs what
+     * starting one that answers costs, and a provider that is not signed in
+     * refuses every time it is asked (bw-t26l.20).
+     */
+    #[tokio::test]
+    async fn native_workbench_stops_asking_a_provider_that_just_refused_to_list() {
+        let (_directory, state) = fixture();
+        state
+            .listing_refused
+            .lock()
+            .await
+            .insert("codex".into(), std::time::Instant::now());
+        let answer = ask_provider_to_list(&state, "codex", None).await;
+        assert!(answer.is_err_and(|why| why.contains("a moment ago")));
+
+        // A refusal old enough is not an answer, and the provider is asked
+        // again — here there is no adapter to ask, so it refuses afresh.
+        state.listing_refused.lock().await.insert(
+            "codex".into(),
+            std::time::Instant::now() - LISTING_REFUSED_FOR - Duration::from_secs(1),
+        );
+        let answer = ask_provider_to_list(&state, "codex", None).await;
+        assert!(answer.is_err_and(|why| !why.contains("a moment ago")));
+        assert!(state.listing_refused.lock().await.contains_key("codex"));
     }
 
     #[tokio::test]
