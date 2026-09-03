@@ -628,22 +628,50 @@ impl Store {
             busy_since,
         })
     }
+    /// The activity of every chat that ever reported one, read from its latest
+    /// `session.state` row alone.
+    ///
+    /// This is the query behind every chat-list snapshot, so it is asked on
+    /// every socket open and again whenever a live feed falls behind. It used
+    /// to filter the whole event table by type, which no index served: on a
+    /// board of a million events that was a read of the entire file — two
+    /// gigabytes from disk, five to fifty seconds — on the one thread every
+    /// other read and every append waits behind (bw-uxoe). Now `event_by_type`
+    /// finds the newest state row of each chat without touching another, and
+    /// only a chat that is still counting reads its own short run of states
+    /// to say since when.
     pub fn session_activities(&self) -> rusqlite::Result<HashMap<String, SessionActivity>> {
-        let mut statement=self.connection.prepare("WITH states AS (SELECT session_id,seq,json_extract(json,'$.state') state,COALESCE(json_extract(json,'$.label'),'') label,json_extract(json,'$.at') at FROM event WHERE type='session.state'), latest AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY session_id ORDER BY seq DESC) rank FROM states) SELECT l.session_id,l.state,l.label,CASE WHEN l.state IN ('starting','thinking','streaming','running_tool','waiting_permission') THEN (SELECT s.at FROM states s WHERE s.session_id=l.session_id AND s.seq>COALESCE((SELECT MAX(x.seq) FROM states x WHERE x.session_id=l.session_id AND x.seq<l.seq AND (x.state!=l.state OR x.label!=l.label)),0) ORDER BY s.seq LIMIT 1) ELSE NULL END FROM latest l WHERE l.rank=1")?;
+        let mut statement = self.connection.prepare(
+            "SELECT e.session_id, json_extract(e.json,'$.state'), COALESCE(json_extract(e.json,'$.label'),'') \
+             FROM (SELECT session_id, MAX(seq) seq FROM event WHERE type='session.state' GROUP BY session_id) latest \
+             JOIN event e ON e.session_id=latest.session_id AND e.seq=latest.seq",
+        )?;
         let rows = statement.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                SessionActivity {
-                    label: if row.get::<_, String>(1)? == "dormant" {
-                        String::new()
-                    } else {
-                        row.get(2)?
-                    },
-                    busy_since: row.get(3)?,
-                },
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
             ))
         })?;
-        rows.collect()
+        let latest: Vec<_> = rows.collect::<rusqlite::Result<_>>()?;
+        let mut activities = HashMap::with_capacity(latest.len());
+        for (session_id, state, label) in latest {
+            let Some(state) = state else { continue };
+            let counting = matches!(
+                state.as_str(),
+                "starting" | "thinking" | "streaming" | "running_tool" | "waiting_permission"
+            );
+            let activity = if counting {
+                self.session_activity(&session_id)?
+            } else {
+                SessionActivity {
+                    label: if state == "dormant" { String::new() } else { label },
+                    busy_since: None,
+                }
+            };
+            activities.insert(session_id, activity);
+        }
+        Ok(activities)
     }
 
     pub fn token_stats(&self, session_id: &str) -> rusqlite::Result<TokenStats> {
@@ -1889,6 +1917,8 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
         r#"CREATE UNIQUE INDEX IF NOT EXISTS event_by_provider_identity
              ON event(session_id, provider, provider_thread_id, provider_event_id)
              WHERE provider_event_id IS NOT NULL;
+           CREATE INDEX IF NOT EXISTS event_by_type
+             ON event(type, session_id, seq);
            CREATE TABLE IF NOT EXISTS transcript_item (
              session_id TEXT NOT NULL,
              item_key TEXT NOT NULL,
@@ -3115,6 +3145,69 @@ mod tests {
         assert!(store
             .create_session(&session("again", "claude", Some("term-1"), "2026-09-04T00:00:00.000Z"))
             .is_err());
+    }
+
+    /// The chat list's activity column is read through the type index, from
+    /// each chat's newest state row — never by a walk of every event (bw-uxoe).
+    #[test]
+    fn workbench_core_session_activities_read_only_the_latest_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        for id in ["busy", "resting", "silent"] {
+            store
+                .create_session(&session(id, "claude", None, "2026-08-20T00:00:00Z"))
+                .unwrap();
+        }
+        let state = |session_id: &str, seq: i64, state: &str, label: &str, at: &str| -> Event {
+            serde_json::from_value(json!({
+                "type":"session.state", "sessionId":session_id, "seq":seq, "at":at,
+                "state":state, "label":label
+            }))
+            .unwrap()
+        };
+        for event in [
+            state("busy", 1, "thinking", "Thinking", "2026-08-20T00:00:01Z"),
+            state("busy", 2, "streaming", "Working", "2026-08-20T00:00:02Z"),
+            state("busy", 3, "streaming", "Working", "2026-08-20T00:00:03Z"),
+            state("resting", 1, "streaming", "Working", "2026-08-20T00:00:01Z"),
+            state("resting", 2, "dormant", "Dormant", "2026-08-20T00:00:02Z"),
+        ] {
+            assert!(store.append_event(&event).unwrap());
+        }
+
+        let activities = store.session_activities().unwrap();
+        assert_eq!(activities.len(), 2, "a chat with no state row has no activity");
+        assert_eq!(activities["busy"].label, "Working");
+        assert_eq!(
+            activities["busy"].busy_since.as_deref(),
+            Some("2026-08-20T00:00:02Z"),
+            "since the first row of the current run, not the newest"
+        );
+        assert_eq!(activities["resting"].label, "");
+        assert_eq!(activities["resting"].busy_since, None);
+        assert_eq!(activities["busy"], store.session_activity("busy").unwrap());
+
+        let index: i64 = store
+            .connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='event_by_type'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(index, 1, "the type index is part of every opened database");
+        let plan: Vec<String> = store
+            .connection
+            .prepare("EXPLAIN QUERY PLAN SELECT session_id, MAX(seq) FROM event WHERE type='session.state' GROUP BY session_id")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(
+            plan.iter().any(|step| step.contains("event_by_type")),
+            "the latest state is found through the type index, not a scan: {plan:?}"
+        );
     }
 
     fn columns_for_test(connection: &Connection, table: &str) -> Vec<String> {

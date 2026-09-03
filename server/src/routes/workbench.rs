@@ -1039,17 +1039,33 @@ async fn ask_provider_to_list(
 /// alongside, and lends those two to every chat the adapter listed; the clock
 /// stays the adapter's, and a chat only the record knows is still listed
 /// (bw-t26l.20).
+///
+/// Asking starts an adapter process per provider and waits for it to read its
+/// records: a second when the machine is quiet, half a minute or more when the
+/// file cache is cold. The chat list asks every time a record moves on disk
+/// and every opened chat asks again, so an adapter that has not answered in
+/// eight seconds is let go for the record scan that already stands in when
+/// there is no adapter at all (bw-uxoe). The local list is drawn before any of
+/// this, and a chat begun elsewhere still arrives on the live feed.
 async fn provider_sessions(
     state: &WorkbenchState,
     project: Option<&str>,
     everything: bool,
 ) -> Vec<Value> {
+    const ANSWER_WITHIN: Duration = Duration::from_secs(8);
     let project_path = project.map(std::path::Path::new);
     let filter = (!everything).then_some(project_path).flatten();
-    let (claude_acp, codex_acp) = tokio::join!(
-        ask_provider_to_list(state, "claude", filter),
-        ask_provider_to_list(state, "codex", filter),
-    );
+    let ask = |brand: &'static str| async move {
+        match tokio::time::timeout(ANSWER_WITHIN, ask_provider_to_list(state, brand, filter)).await
+        {
+            Ok(answer) => answer,
+            Err(_) => Err(format!(
+                "no session/list answer within {}s",
+                ANSWER_WITHIN.as_secs()
+            )),
+        }
+    };
+    let (claude_acp, codex_acp) = tokio::join!(ask("claude"), ask("codex"));
     let mut rows = Vec::new();
     for (brand, result) in [("claude", claude_acp), ("codex", codex_acp)] {
         let recorded = recorded_sessions(state, brand, project, project_path, everything).await;
