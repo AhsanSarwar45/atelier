@@ -263,6 +263,34 @@ function briefOf(agents: SentAway[], sentBy: string | null): string | null {
   return agents.find((a) => (a.toolCallId ?? a.id) === sentBy)?.what || null;
 }
 
+/**
+ * A helper stops working the moment it asks, and starts again when it is told.
+ *
+ * The panel's row is the only place a reader sees the helper at all, and while
+ * a question of its own was standing the row went on saying "working" — a
+ * spinner beside work that had already stopped, waiting for the very person
+ * reading the spinner. `waiting` has been in the state list since the panel was
+ * written; nothing ever set it (bw-t26l.20).
+ *
+ * Only a running row is turned, and only a waiting row is turned back: a parked
+ * or finished row is not made to work again by an answer.
+ */
+function nowWaiting(agents: SentAway[], sentBy: string | null, waiting: boolean): SentAway[] {
+  if (sentBy === null) return agents;
+  const from: AgentState = waiting ? 'running' : 'waiting';
+  const to: AgentState = waiting ? 'waiting' : 'running';
+  return agents.map((a) => ((a.toolCallId ?? a.id) === sentBy && a.state === from ? { ...a, state: to } : a));
+}
+
+/** The same turn, on the rows a replay builds in place. */
+function waited(agents: SentAway[], sentBy: string | null, waiting: boolean): void {
+  if (sentBy === null) return;
+  const from: AgentState = waiting ? 'running' : 'waiting';
+  for (const row of agents) {
+    if ((row.toolCallId ?? row.id) === sentBy && row.state === from) row.state = waiting ? 'waiting' : 'running';
+  }
+}
+
 export interface SessionView {
   brand: Brand | null;
   items: TranscriptItem[];
@@ -712,11 +740,15 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
           askedBy: briefOf(view.agents, e.parentToolCallId ?? null),
         },
       ];
+      next.agents = nowWaiting(view.agents, e.parentToolCallId ?? null, true);
       return next;
 
-    case 'ask.resolved':
+    case 'ask.resolved': {
+      const asked = items.find((it) => it.kind === 'ask' && it.id === e.askId) as TranscriptAsk | undefined;
       next.items = items.map((it) => (it.kind === 'ask' && it.id === e.askId ? { ...it, chosen: e.chosen } : it));
+      next.agents = nowWaiting(view.agents, asked?.parentId ?? null, false);
       return next;
+    }
 
     case 'question.requested':
       next.items = [...items, {
@@ -1167,11 +1199,16 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           parentId: e.parentToolCallId ?? null,
           askedBy: briefOf(agents, e.parentToolCallId ?? null),
         });
+        waited(agents, e.parentToolCallId ?? null, true);
         break;
 
       case 'ask.resolved': {
         const at = askAt.get(e.askId);
-        if (at !== undefined) (items[at] as TranscriptAsk).chosen = e.chosen;
+        if (at !== undefined) {
+          const asked = items[at] as TranscriptAsk;
+          asked.chosen = e.chosen;
+          waited(agents, asked.parentId ?? null, false);
+        }
         break;
       }
 

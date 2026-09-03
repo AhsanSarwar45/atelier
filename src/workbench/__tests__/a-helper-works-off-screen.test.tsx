@@ -164,6 +164,18 @@ describe.each(bothWays)('a chat %s', (_name, fold) => {
     expect(ask?.kind === 'ask' && ask.parentId).toBe('call-1');
   });
 
+  it('says on the row that the helper has stopped working and is waiting to be answered', () => {
+    expect(view.agents.find((a) => a.id === 'task-1')?.state).toBe('waiting');
+  });
+
+  it('puts the row back to work when the question is answered', () => {
+    const answered = fold([
+      ...aChatWithAHelper(),
+      said({ type: 'ask.resolved', askId: 'ask-1', chosen: 'yes' }),
+    ]);
+    expect(answered.agents.find((a) => a.id === 'task-1')?.state).toBe('running');
+  });
+
   it('still gives the helper’s own conversation every one of those rows', () => {
     const row = view.agents.find((a) => a.id === 'task-1')!;
     expect(saidBy(view.items, row).map((i) => i.id)).toEqual(['t1', 'h1', 'cmd-ok', 'cmd-bad', 'ask-1']);

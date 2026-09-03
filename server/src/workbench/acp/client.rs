@@ -619,7 +619,7 @@ async fn permission(
     // at all (measured against the pinned claude adapter, 2026-09-03).
     let sent_by = match raw.pointer("/toolCall/_meta/claudeCode/parentToolUseId") {
         Some(Value::String(call)) if !call.is_empty() => match normalizer.as_ref() {
-            Some(state) => Value::String(state.lock().await.agent_of_call(call)),
+            Some(state) => Value::String(state.lock().await.agent_asking(call)),
             None => Value::String(call.clone()),
         },
         _ => Value::Null,
