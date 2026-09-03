@@ -20,13 +20,43 @@
  */
 'use client';
 
-import { Cpu, Gauge, Shield, ShieldAlert, ShieldCheck, ShieldHalf, ShieldOff, Workflow } from 'lucide-react';
+import { Cloud, Cpu, Gauge, Shield, ShieldAlert, ShieldCheck, ShieldHalf, ShieldOff, Workflow } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { effortInWords, inWords, PERMISSION_MODE, UNKNOWN_MODE_TONE } from '@/workbench/machine-words';
-import { BRAND_DEFAULT_MODEL, type CollaborationModeChoice, type EffortChoice, type ModelChoice } from '@/workbench/protocol';
+import { BRAND_DEFAULT_MODEL, type ApiProvider, type CollaborationModeChoice, type EffortChoice, type ModelChoice } from '@/workbench/protocol';
+
+/**
+ * The endpoint a chat is talking to, drawn only when it is not the ordinary one.
+ *
+ * The agent reports this itself, and for nearly every chat the answer is the
+ * plain Anthropic API — a chip saying so on every chat forever would be noise.
+ * The chip exists for the other answer: a chat on Bedrock, on Vertex, or
+ * pointed at a proxy is spending different money and answering to a different
+ * account, and until this was read the screen said nothing about it at all
+ * (bw-t26l.20).
+ */
+const ORDINARY_API = { apiType: 'anthropic', baseUrl: 'https://api.anthropic.com' };
+
+export function endpointWords(providers: ApiProvider[]): { label: string; title: string } | null {
+  const current = providers.find((provider) => provider.current)?.current;
+  if (!current) return null;
+  if (current.apiType === ORDINARY_API.apiType && current.baseUrl === ORDINARY_API.baseUrl) return null;
+  // Its host, not the whole URL: a chip is a few characters wide and the rest
+  // of the address is in the tooltip beside it.
+  let host = current.baseUrl;
+  try {
+    host = new URL(current.baseUrl).host || current.baseUrl;
+  } catch {
+    // Not a URL the browser will parse. Then the string it sent is the answer.
+  }
+  return {
+    label: current.apiType === ORDINARY_API.apiType ? host : inWords(current.apiType),
+    title: `API — ${inWords(current.apiType)} at ${current.baseUrl}`,
+  };
+}
 
 /** The brand's own word for a chat nobody has pinned a model to. */
 const BRAND_DEFAULT_LABEL = 'Default model';
@@ -204,6 +234,7 @@ export function WhatItRuns({
   efforts = [],
   collaborationMode,
   collaborationModes = [],
+  providers = [],
   className,
 }: {
   model: string | null;
@@ -214,6 +245,8 @@ export function WhatItRuns({
   efforts?: EffortChoice[];
   collaborationMode?: string | null;
   collaborationModes?: CollaborationModeChoice[];
+  /** What the agent says about the API it is pointed at, where it says anything. */
+  providers?: ApiProvider[];
   className?: string;
 }) {
   const mode = modeWords(permissionMode);
@@ -225,6 +258,7 @@ export function WhatItRuns({
   const effortLabel = effort
     ? efforts.find((choice) => choice.value === effort)?.displayName ?? effortInWords(effort)
     : null;
+  const endpoint = endpointWords(providers);
   const collaborationLabel = collaborationMode
     ? collaborationModes.find((choice) => choice.value === collaborationMode)?.displayName ?? inWords(collaborationMode)
     : null;
@@ -321,6 +355,20 @@ export function WhatItRuns({
         >
           <Workflow className="size-3 shrink-0" aria-hidden="true" />
           <span className="min-w-0 truncate">{collaborationLabel}</span>
+        </Badge>
+      )}
+      {endpoint && (
+        <Badge
+          variant="warning"
+          appearance="outline"
+          size="sm"
+          shape="circle"
+          data-testid="chat-endpoint-chip"
+          title={endpoint.title}
+          className="min-w-0 shrink gap-1 truncate"
+        >
+          <Cloud className="size-3 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate">{endpoint.label}</span>
         </Badge>
       )}
     </span>

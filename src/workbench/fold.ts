@@ -23,6 +23,7 @@ import type {
   AgentDefinition,
   AgentKind,
   AgentState,
+  ApiProvider,
   AskOption,
   Audience,
   Brand,
@@ -334,9 +335,11 @@ export interface SessionMenu {
   configOptions: SessionConfigOption[];
   /** Which steering controls this session's brand has for the work it sent away. */
   agentControls: AgentControl[];
+  /** The API endpoints this session's agent reports being pointed at. */
+  providers: ApiProvider[];
 }
 
-const NO_MENU: SessionMenu = { commands: [], skills: [], models: [], efforts: [], permissionModes: [], collaborationModes: [], agentDefinitions: [], agentControls: [], configOptions: [] };
+const NO_MENU: SessionMenu = { commands: [], skills: [], models: [], efforts: [], permissionModes: [], collaborationModes: [], agentDefinitions: [], agentControls: [], configOptions: [], providers: [] };
 
 /** A chat with nothing drawn yet. Exported so the fold can be checked on its own. */
 export const EMPTY: SessionView = {
@@ -408,6 +411,7 @@ function menuOf(sent: Partial<SessionMenu>): SessionMenu {
     agentDefinitions: list(sent.agentDefinitions, NO_MENU.agentDefinitions),
     agentControls: list(sent.agentControls, NO_MENU.agentControls),
     configOptions: list(sent.configOptions, NO_MENU.configOptions),
+    providers: list(sent.providers, NO_MENU.providers),
   };
 }
 

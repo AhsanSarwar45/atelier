@@ -30,6 +30,10 @@ type Reply = oneshot::Sender<Result<Value, String>>;
 
 const MAX_SESSION_LIST_PAGES: usize = 100;
 
+/// How long a chat must be silent after a stop before its turn is read as held
+/// rather than working. Long enough that a model mid-sentence says something.
+const HELD_TURN_GRACE: u64 = 8;
+
 /// Provider-neutral metadata returned by ACP `session/list`.
 ///
 /// This is deliberately the only discovery shape the workbench consumes. An
@@ -1347,6 +1351,7 @@ fn menu_fields_with_local_catalog(
     local_models: &Value,
     agent_controls: &Value,
     agent_definitions: &Value,
+    providers: &Value,
 ) -> Value {
     let mut menu = menu_fields(
         brand,
@@ -1363,6 +1368,10 @@ fn menu_fields_with_local_catalog(
     {
         menu["models"] = local_models.clone();
     }
+    // Asked for once, at the handshake, and carried on every menu after it: a
+    // menu rebuilt for a model change that dropped the endpoint would take the
+    // line off the screen for a reason that has nothing to do with it.
+    menu["providers"] = providers.clone();
     menu
 }
 
@@ -1424,6 +1433,57 @@ impl AcpDriver {
             self.control(|reply| Control::Prompt { content, reply })
                 .await
         }
+    }
+
+    /**
+     * The turn a stopped helper leaves open, and the only thing that closes it.
+     *
+     * The kit holds a turn's `session/prompt` open while the helpers that turn
+     * spawned are still live, so their output, their questions and the summary
+     * the model writes afterwards all land inside the turn. A helper the reader
+     * STOPS never wakes the model: no summary is written, no idle follows, and
+     * the adapter's own note calls this an accepted residual — naming the two
+     * things that settle a held turn, a cancel or the next prompt. Left alone
+     * the chat says "Working" with nothing working, until somebody speaks
+     * (measured 2026-09-03: the last event of such a turn at 10:02:33, and
+     * silence for the five minutes after it).
+     *
+     * Cancelling is the reader's own instruction carried out, not a guess: they
+     * stopped the only work outstanding. It is only sent when the chat is quiet
+     * — no event of any kind since the stop — still counted as working, and has
+     * nothing of its own left running. A chat still doing something says so, in
+     * events, and keeps its turn.
+     */
+    fn rescue_held_turn(&self) {
+        let database = self.database.clone();
+        let controls = self.controls.clone();
+        let session_id = self.session.id.clone();
+        tokio::spawn(async move {
+            let Ok(before) = database.event_count(session_id.clone()).await else {
+                return;
+            };
+            tokio::time::sleep(std::time::Duration::from_secs(HELD_TURN_GRACE)).await;
+            let quiet = database.event_count(session_id.clone()).await == Ok(before);
+            if !quiet {
+                return;
+            }
+            let Ok(Some(session)) = database.get_session(session_id.clone()).await else {
+                return;
+            };
+            if !turn_is_active(&session.state) {
+                return;
+            }
+            let Ok(agents) = database.projected_agents(session_id).await else {
+                return;
+            };
+            if agents.iter().any(|agent| {
+                !matches!(agent["state"].as_str(), Some("done" | "failed" | "stopped"))
+            }) {
+                return;
+            }
+            let (reply, _answer) = oneshot::channel();
+            let _ = controls.send(Control::Cancel { reply });
+        });
     }
 
     async fn record_agent_control(&self, agent_id: &str, state: &str) -> Result<(), String> {
@@ -1691,6 +1751,25 @@ impl AcpDriver {
                         let supports_close = initialized
                             .pointer("/agentCapabilities/sessionCapabilities/close")
                             .is_some();
+                        // Which API the agent is actually talking to. An agent
+                        // that says it has providers is asked; one that does
+                        // not is not, and its chat says nothing about an
+                        // endpoint it cannot report (bw-t26l.20).
+                        let providers = if initialized
+                            .pointer("/agentCapabilities/providers")
+                            .is_some()
+                        {
+                            connection
+                                .send_request(UntypedMessage::new("providers/list", json!({}))?)
+                                .block_task()
+                                .await
+                                .ok()
+                                .and_then(|answer| answer.get("providers").cloned())
+                                .filter(Value::is_array)
+                                .unwrap_or_else(|| json!([]))
+                        } else {
+                            json!([])
+                        };
                         let (remote_id, mut modes, mut config_options) = if create_remote {
                             let response = connection
                                 .send_request(NewSessionRequest::new(PathBuf::from(
@@ -1819,6 +1898,7 @@ impl AcpDriver {
                             &task_local_models,
                             &agent_controls,
                             &task_agent_definitions,
+                            &providers,
                         );
                         normalizer.lock().await.set_menu(menu.clone());
                         task_database
@@ -1963,6 +2043,7 @@ impl AcpDriver {
                                                         &task_local_models,
                                                         &agent_controls,
                                                         &task_agent_definitions,
+                                                        &providers,
                                                     ));
                                                 }
                                                 Err(error) => {
@@ -2003,6 +2084,7 @@ impl AcpDriver {
                                                 &task_local_models,
                                                 &agent_controls,
                                                 &task_agent_definitions,
+                                                &providers,
                                             );
                                             normalizer.lock().await.set_menu(menu.clone());
                                             task_database.append(menu_event(
@@ -2306,6 +2388,9 @@ impl AcpDriver {
                     return Err("the kit has no background task for this agent".into());
                 }
                 self.record_agent_control(agent_id, state).await?;
+                if matches!(command.kind, CommandKind::AgentStop) {
+                    self.rescue_held_turn();
+                }
                 Ok(result)
             }
             CommandKind::AgentSay => {
@@ -2821,6 +2906,7 @@ mod tests {
             &Value::Null,
             &json!(["stop", "say"]),
             &json!([{"name":"reviewer"}]),
+            &json!([]),
         );
         let menu = menu_event("local", menu).unwrap();
         let menu = serde_json::to_value(menu).unwrap();
@@ -2899,6 +2985,7 @@ mod tests {
                 {"value":"ollama::qwen3","displayName":"qwen3","runtime":"ollama"},
                 {"value":"openai-compatible::gemma","displayName":"gemma","runtime":"openai-compatible"}
             ]),
+            &json!([]),
             &json!([]),
             &json!([]),
         );

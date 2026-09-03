@@ -315,6 +315,12 @@ export type WbpEvent = EventBase &
          * them, which is the truth — there is nothing there to steer with.
          */
         agentControls: AgentControl[];
+        /**
+         * Which API this chat's agent is actually talking to, as the agent
+         * itself reports it (`providers/list`). Absent from an agent that has
+         * no providers capability, which is most of them.
+         */
+        providers?: ApiProvider[];
       }
     /**
      * What the session is set to now — after the owner changed one of them from
@@ -578,6 +584,21 @@ export type WbpEvent = EventBase &
  * is a script that drives agents of its own. Anything the kit invents later is
  * drawn as `helper`, which is what most of them are.
  */
+/**
+ * One endpoint an agent can be pointed at.
+ *
+ * The reader's question is never "which of five API types exist" — it is "am I
+ * on the API I think I am". A chat run against Bedrock, a Vertex project, or a
+ * proxy costs different money and answers to a different account, and until
+ * this was read the screen said nothing about it at all (bw-t26l.20).
+ */
+export interface ApiProvider {
+  providerId: string;
+  supported: string[];
+  required?: boolean;
+  current: { apiType: string; baseUrl: string } | null;
+}
+
 export type AgentKind = 'helper' | 'command' | 'watch' | 'run';
 
 /**

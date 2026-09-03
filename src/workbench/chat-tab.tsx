@@ -1441,6 +1441,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           efforts={view.menu.efforts}
           collaborationMode={view.collaborationMode}
           collaborationModes={view.menu.collaborationModes}
+          providers={view.menu.providers}
           className="hidden sm:flex"
         />
         {facts?.folder && (
