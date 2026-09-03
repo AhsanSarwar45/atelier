@@ -101,6 +101,22 @@ pub fn allowance(message: &Value) -> Value {
     })
 }
 
+/// The same signal, raised from the protocol rather than from prose.
+///
+/// ACP has a code for this — `AuthRequired`, -32000, "Authentication is
+/// required before this operation can be performed" (schema `v1/error.rs`).
+/// Every path here read the words instead, so a provider that answered with
+/// the code and a terse message came out the far end as "Provider
+/// unavailable": indistinguishable from a broken install, with no sign-in
+/// offered and no way back into the chat (bw-t26l.20).
+pub fn needs_signing_in(detail: &str) -> Value {
+    json!({
+        "id":"condition:authentication", "kind":"authentication", "phase":"active",
+        "severity":"blocking", "scope":"session",
+        "detail":detail, "retryAt":Value::Null, "action":Value::Null,
+    })
+}
+
 pub fn resolved(kind: &str) -> Value {
     json!({"id":format!("condition:{kind}"),"kind":kind,"phase":"resolved","severity":"info","scope":"turn"})
 }

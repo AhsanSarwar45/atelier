@@ -612,7 +612,30 @@ fn session_meta(brand: &str, policy: &str) -> Meta {
     meta
 }
 
+/// The message an ACP failure is recorded under, and whether it is a sign-in.
+///
+/// `Display` for the crate's error prints the message and drops the code, so
+/// anything that stringifies first can no longer tell -32000 from a crash. Read
+/// the code here, while it is still there.
+fn transport_failure(error: &agent_client_protocol::Error) -> (String, bool) {
+    let signing_in = i32::from(error.code) == -32000;
+    let said = error.to_string();
+    if signing_in && said.trim().is_empty() {
+        return ("This provider needs you to sign in.".into(), true);
+    }
+    (said, signing_in)
+}
+
 async fn record_transport_failure(database: &ChatDb, session: &Session, message: &str) {
+    record_failure(database, session, message, false).await
+}
+
+async fn record_failure(
+    database: &ChatDb,
+    session: &Session,
+    message: &str,
+    signing_in: bool,
+) {
     let _ = database
         .update_session(
             session.id.clone(),
@@ -623,10 +646,27 @@ async fn record_transport_failure(database: &ChatDb, session: &Session, message:
             None,
         )
         .await;
-    let events = [
+    // "Provider unavailable" for a provider that is perfectly available and
+    // simply wants signing into reads as a broken install, and it offered
+    // nothing to do about it. The app already knows how to draw a sign-in --
+    // `provider-messages.ts` has had the words for it all along -- it was only
+    // ever told by sniffing the provider's prose (bw-t26l.20).
+    let mut events = vec![
         json!({"type":"error", "sessionId":session.id, "seq":0, "at":now(), "message":message, "fatal":true, "source":"acp"}),
-        json!({"type":"session.state", "sessionId":session.id, "seq":0, "at":now(), "state":"errored", "label":"Provider unavailable"}),
-    ].into_iter().filter_map(|value| serde_json::from_value(value).ok()).collect();
+        json!({"type":"session.state", "sessionId":session.id, "seq":0, "at":now(), "state":"errored",
+            "label":if signing_in { "Sign in to continue" } else { "Provider unavailable" }}),
+    ];
+    if signing_in {
+        events.insert(
+            0,
+            json!({"type":"provider.message", "sessionId":session.id, "seq":0, "at":now(),
+                "signal":crate::workbench::provider_messages::needs_signing_in(message)}),
+        );
+    }
+    let events = events
+        .into_iter()
+        .filter_map(|value| serde_json::from_value(value).ok())
+        .collect();
     let _ = database.append_many(events).await;
 }
 
@@ -2246,26 +2286,27 @@ impl AcpDriver {
                     }
                 })
                 .await;
+            // Read before it is stringified: `Display` for an ACP error prints
+            // the message and drops the code, and -32000 is the difference
+            // between "this is broken" and "sign in" (bw-t26l.20).
+            let failure = result.as_ref().err().map(transport_failure);
             if let Some(ready) = ready.lock().await.take() {
-                let _ = ready.send(Err(result
-                    .err()
-                    .map(|error| error.to_string())
-                    .unwrap_or_else(|| "ACP adapter stopped during initialization".into())));
+                let _ = ready.send(Err(failure.unwrap_or_else(|| {
+                    ("ACP adapter stopped during initialization".into(), false)
+                })));
             } else if !stopped_closing.load(Ordering::Acquire) {
-                let message = result
-                    .err()
-                    .map(|error| error.to_string())
-                    .unwrap_or_else(|| "ACP adapter stopped unexpectedly".into());
-                record_transport_failure(&stopped_database, &stopped_session, &message).await;
+                let (message, signing_in) = failure
+                    .unwrap_or_else(|| ("ACP adapter stopped unexpectedly".into(), false));
+                record_failure(&stopped_database, &stopped_session, &message, signing_in).await;
                 let _ = ended_send.send(message);
             };
         });
         let initialized = initialized
             .await
-            .map_err(|_| "ACP adapter stopped during initialization".to_string())
+            .map_err(|_| ("ACP adapter stopped during initialization".to_string(), false))
             .and_then(|result| result);
-        if let Err(message) = initialized {
-            record_transport_failure(&database, &session, &message).await;
+        if let Err((message, signing_in)) = initialized {
+            record_failure(&database, &session, &message, signing_in).await;
             return Err(message);
         }
         let session = database
@@ -2680,6 +2721,41 @@ mod tests {
         let taken = prompt_content(&command, true).unwrap();
         assert!(matches!(taken[1], ContentBlock::Image(_)), "{taken:?}");
         assert_eq!(taken.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_provider_that_wants_signing_in_says_so_instead_of_reading_as_broken() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let session = test_session("idle");
+        database.create_session(session.clone()).await.unwrap();
+
+        // What the adapter actually answers when nobody is signed in: the ACP
+        // code for it, and a message too terse for any phrase-matcher to read.
+        let refused = agent_client_protocol::Error::auth_required();
+        let (message, signing_in) = transport_failure(&refused);
+        assert!(signing_in, "-32000 is the sign-in code, not a crash");
+        record_failure(&database, &session, &message, signing_in).await;
+
+        let events = database.events_since(session.id.clone(), 0).await.unwrap();
+        // The chat offers a way back in ...
+        let signal = events
+            .iter()
+            .find(|event| event.kind == crate::workbench::protocol::EventKind::ProviderMessage)
+            .expect("a signed-out provider raises the sign-in condition");
+        assert_eq!(signal.fields["signal"]["kind"], "authentication");
+        assert_eq!(signal.fields["signal"]["severity"], "blocking");
+        // ... and the row says the same thing, rather than "Provider unavailable".
+        let state = events
+            .iter()
+            .find(|event| event.kind == crate::workbench::protocol::EventKind::SessionState)
+            .expect("the session is marked");
+        assert_eq!(state.fields["label"], "Sign in to continue");
+
+        // A genuine crash is still a crash: no sign-in is offered for it.
+        let broken = agent_client_protocol::Error::internal_error();
+        let (_, crashed_signing_in) = transport_failure(&broken);
+        assert!(!crashed_signing_in);
     }
 
     #[tokio::test]
