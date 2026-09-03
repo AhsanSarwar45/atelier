@@ -676,7 +676,11 @@ test.describe('workbench', () => {
       await page.screenshot({ path: join(SHOTS, 'restore.png'), fullPage: false });
 
       // ---- one click brings the terminal session back ---------------------
-      await terminalRow.getByTestId('resume-row').click();
+      // The click is on the row's own name. There is no Resume button any more:
+      // b3cbddd took it out, on the rule that a list of chats opens a chat when
+      // you click it, and `chat-list.spec.ts` holds the app to that. This case
+      // kept clicking the button that commit deleted (bw-t26l.20).
+      await terminalRow.getByTestId('row-name').click();
       await expect(page.getByTestId('restore-error')).toHaveCount(0);
       await expect(terminalRow.getByTestId('row-pill')).toHaveText('ready', { timeout: 180_000 });
       await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 60_000 });

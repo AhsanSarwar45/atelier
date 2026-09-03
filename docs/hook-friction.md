@@ -82,6 +82,16 @@ run one `git merge --ff-only` per slice. That is the opposite of the "commit and
 merge small logical chunks as you go" the owner asks for — the smaller the
 chunks, the more human merges the gate demands.
 
+**Fixed in source, not yet in effect.** `ff11fb4` changes the workflow gate to
+let a `--ff-only` merge through to the merge gate, which is the one written to
+police a landing (fast-forward only, the merge slot's holder, a clean landing
+tree); `server/src/lifecycle.rs::lands` and its test say so. But the hook runs
+the installed `atelier` binary, not this worktree's build, so nothing changes
+until that binary is reinstalled — which is the owner's environment, not an
+agent's to overwrite. **Whoever picks this up: reinstall `atelier` (the repo's
+`scripts/install-local.sh`) and check that a landing now reaches the merge gate,
+including that a non-fast-forward merge is still refused.**
+
 **Should have happened.** One of:
 
 - allow a fast-forward-only merge into the main branch from the main checkout
