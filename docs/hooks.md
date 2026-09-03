@@ -108,6 +108,21 @@ Keep the board and the session's activity in step. None of them refuses
 anything. `board-touch` fires on nearly every tool call, so it does at most one
 board round trip per 45 seconds per session and project.
 
+`doing` is the odd one: it serves chats Atelier does **not** drive. A chat this
+app drives over ACP reports what it is doing on the wire — tool calls,
+permission requests, modes, usage — but a `claude` session in somebody's own
+terminal is read from its record on disk, and a compaction in progress and a
+permission prompt waiting for an answer appear in no record. `doing` writes
+those two, and only those two, to `<claude>/sessions/<id>.doing.json` for the
+screens to read.
+
+It is registered with every other gate here, in the **project's own**
+`.claude/settings.json`, by `atelier init`. Until 2026-09 it wrote itself into
+the reader's global `~/.claude/settings.json` at every startup instead — one
+file for every project on the computer, edited by a program they had only
+started. `atelier init` now takes those old registrations back out and says how
+many it removed.
+
 ## When the gate is wrong
 
 Use the bypass, finish the work, and add a numbered section to

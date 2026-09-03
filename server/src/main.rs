@@ -4,7 +4,7 @@
 //! behind them. The one name the product answers to lives in `identity.rs`.
 
 use atelier::{
-    command_line, db, doing, dolt, dolt_lifecycle, handover, identity, needs, reachable, routes,
+    command_line, db, dolt, dolt_lifecycle, handover, identity, needs, reachable, routes,
     rules, service, serving, terminal, workbench,
 };
 
@@ -571,21 +571,9 @@ async fn serve(open_browser: bool) {
     }
     println!("Ready.");
 
-    // What a chat says it is doing only reaches the screen if the session is
-    // told to say it, and being told is one line in a settings file nobody
-    // should have to know about. So the first run writes it, and says so once
-    // (bw-14ij.1). A copy that cannot write there still serves the board.
-    match doing::wire_up() {
-        Ok((done, settings)) => {
-            if let Some(line) = doing::said_it(&done, &settings) {
-                println!("{line}");
-            }
-        }
-        Err(e) => tracing::warn!(
-            "Your chats were not wired up to say what they are doing: {}",
-            e
-        ),
-    }
+    // What a chat says it is doing is wired up by `atelier init`, in the
+    // project's own settings, beside every other gate this program registers.
+    // Starting the app writes nothing to anybody's configuration (bw-t26l.20).
 
     if open_browser || env_flag("ATELIER_OPEN_BROWSER") || env_flag("BEADS_WEB_OPEN_BROWSER") {
         if let Err(e) = open::that(format!("http://localhost:{}", port)) {

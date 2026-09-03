@@ -15,6 +15,10 @@ const MANAGED: &[&str] = &[
     "board-prime.py", "board-push.py", "completion-gate.py", "board-gate.py",
     "report-gate.py", "publish-gate.py", "plan-doc-lint.py", "picture-gate.py",
     "agent-fence.py", "slice-gate.py", "helper-proof.py", "habit-reading.py",
+    // What a chat says it is doing, for chats this program does not drive.
+    // Registered here rather than in the reader's global settings, which is
+    // one file for every project on the computer (bw-t26l.20).
+    "doing",
 ];
 
 const CLAUDE: &[(&str, &str, &[&str])] = &[
@@ -23,8 +27,17 @@ const CLAUDE: &[(&str, &str, &[&str])] = &[
     ("PostToolUse", "Edit|Write|MultiEdit|NotebookEdit|Bash|AskUserQuestion|ExitPlanMode|Agent|Task|Monitor|TaskCreate|SendMessage", &["board-touch"]),
     ("SubagentStop", "", &["board-touch"]),
     ("SessionStart", "", &["board-prime"]),
-    ("SessionEnd", "", &["board-push"]),
-    ("Stop", "", &["board-gate"]),
+    ("SessionEnd", "", &["board-push", "doing"]),
+    ("Stop", "", &["board-gate", "doing"]),
+    // The five events the `doing` gate needs that no other gate here wants.
+    // A chat this program only watches cannot say from its record that it is
+    // compacting or stopped on a permission prompt; these say it. The list is
+    // `doing::EVENTS`, less the two above (bw-t26l.20).
+    ("PreCompact", "", &["doing"]),
+    ("PostCompact", "", &["doing"]),
+    ("Notification", "", &["doing"]),
+    ("PostToolUse", "", &["doing"]),
+    ("UserPromptSubmit", "", &["doing"]),
 ];
 
 const CODEX: &[(&str, &str, &[&str])] = &[
@@ -185,6 +198,34 @@ mod tests {
         value["hooks"]["PreToolUse"].as_array().into_iter().flatten()
             .flat_map(|block| block["hooks"].as_array().into_iter().flatten())
             .filter_map(|hook| hook["command"].as_str()).collect()
+    }
+
+    /// Every event the `doing` gate answers to is registered by joining a
+    /// project, and stripped by leaving one. It used to be written into the
+    /// reader's global settings at every startup instead — one file for every
+    /// project on the computer, edited by a program they only started
+    /// (bw-t26l.20).
+    #[test]
+    fn a_joined_project_wires_what_a_chat_says_it_is_doing_and_leaving_takes_it_out() {
+        let mut claude = json!({});
+        wire_value(&mut claude, CLAUDE, true);
+        for (event, _) in crate::doing::EVENTS {
+            let commands = claude["hooks"][event]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|block| block["hooks"].as_array().into_iter().flatten())
+                .filter_map(|hook| hook["command"].as_str())
+                .collect::<Vec<_>>();
+            assert!(
+                commands.contains(&"atelier hook doing"),
+                "{event} does not run the gate: {commands:?}"
+            );
+        }
+
+        strip_value(&mut claude);
+        let left = serde_json::to_string(&claude).unwrap();
+        assert!(!left.contains("hook doing"), "leaving left it behind: {left}");
     }
 
     #[test]

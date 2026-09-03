@@ -2163,7 +2163,10 @@ only ever more specific than what it replaced. `unknown` on either side is that
 side declining to answer, not an answer, so it never displaces the other.
 
 **The told tier distrusts its own file.** A session writes
-`<config>/sessions/<id>.doing.json` beside the marker Claude Code writes, and
+`<config>/sessions/<id>.doing.json` beside the marker Claude Code writes — the
+`doing` hook does the writing, and it is registered in the **project's** own
+`.claude/settings.json` by `atelier init`, never in the reader's global one
+(`docs/hooks.md`) — and
 `doing-told.ts` reads it as nothing-said whenever it is unreadable, not JSON,
 carries a word the table does not have, carries a clock more than a minute
 ahead of ours, or makes a claim old enough that the session has plainly moved

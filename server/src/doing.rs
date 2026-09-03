@@ -23,8 +23,16 @@
 //! Two halves, and they meet at a word:
 //!
 //!   * `atelier hook doing` is the gate, fed one event on standard input.
-//!   * `wire_up` writes that command into the reader's own Claude settings the
-//!     first time the app runs, and says one line about having done it.
+//!   * `join::install` writes that command into the PROJECT's own
+//!     `.claude/settings.json` when somebody runs `atelier init`, beside every
+//!     other gate this program registers, and `join::remove` takes it out
+//!     again.
+//!
+//! It used to write itself into the reader's global `~/.claude/settings.json`
+//! at every startup instead. That is one file for every project on the
+//! computer, edited by a program the person only started, and it outlived the
+//! app — so `unwire_global` now takes those registrations back out, and
+//! nothing here writes there again (bw-t26l.20).
 //!
 //! The reader of what this writes is `src/workbench/doing-told.ts`, which
 //! distrusts every byte: a half-written, abandoned or nonsensical line reads as
@@ -42,7 +50,7 @@
 //! reader, which can work it out from the record.
 
 use serde::Serialize;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -73,13 +81,12 @@ const ASKING: &str = "needs your permission to use ";
 /// A detail is a few words on a chip, never a paragraph.
 const MOST: usize = 80;
 
-/// The seven events, and whether the entry carries an empty matcher.
+/// The seven events this gate answers to.
 ///
-/// The shapes are the ones already proven to fire in this repository's own
-/// settings file rather than a guess at what the schema tolerates: three of
-/// these events are written there with `"matcher": ""` and four with no matcher
-/// at all, and both have been running the gate for weeks.
-const EVENTS: [(&str, bool); 7] = [
+/// `join::install` is what registers them, in the project's own settings; this
+/// list is here because it is this module's business which events it needs, and
+/// `join`'s table names them beside every other gate.
+pub const EVENTS: [(&str, bool); 7] = [
     // A compaction begins, and ends.
     ("PreCompact", true),
     ("PostCompact", true),
@@ -262,168 +269,81 @@ fn next() -> u64 {
     COUNT.fetch_add(1, Ordering::Relaxed)
 }
 
-/// What the wiring found to do.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Wired {
-    /// It was already wired to this copy. Nothing was written.
-    Already,
-    /// It was not wired at all, and now is.
-    Added,
-    /// It was wired to a copy that has since moved, and now names this one.
-    Moved,
-}
-
-/// Wire the reader's own chats up to say what they are doing.
+/// Take this gate back out of the reader's global Claude settings.
 ///
-/// The registration goes in the settings that hold for every project on this
-/// computer rather than one checkout's, because a chat is a chat wherever it
-/// was opened, and a per-project file would leave the states appearing in the
-/// one folder somebody remembered to set up.
+/// Older copies of this program wrote themselves in there at every startup.
+/// Nothing does now — the registration belongs to the project, written by
+/// `atelier init` — so what those runs left behind is removed here rather than
+/// left pointing at a binary that may not even be there. Only entries that are
+/// this gate are touched; everything else in the file is written back exactly
+/// as it was found, and a file that cannot be read is left alone.
 ///
-/// Everything already in that file is kept: it is read, one branch of it is
-/// added to, and it is written back whole. A file that cannot be read is an
-/// error and is not touched, because a settings file this could not parse is a
-/// settings file it must not overwrite.
-pub fn wire_up() -> Result<(Wired, PathBuf), String> {
+/// Says how many registrations it took out, which is 0 on every computer that
+/// never ran one of those copies.
+pub fn unwire_global() -> Result<(usize, PathBuf), String> {
     let Some(dir) = claude_dir() else {
         return Err("this computer names no home folder".to_string());
     };
     let settings = dir.join("settings.json");
-    let exe = std::env::current_exe().map_err(|e| format!("this program cannot say where it is: {e}"))?;
-    let done = wire(&settings, &exe)?;
-    Ok((done, settings))
-}
-
-/// The one line it says about having done it.
-pub fn said_it(done: &Wired, settings: &Path) -> Option<String> {
-    match done {
-        Wired::Already => None,
-        Wired::Added => Some(format!(
-            "{} wired your chats up to say what they are doing — added to {}.",
-            crate::identity::DISPLAY,
-            settings.display()
-        )),
-        Wired::Moved => Some(format!(
-            "{} moved, so your chats were wired up to it again in {}.",
-            crate::identity::DISPLAY,
-            settings.display()
-        )),
-    }
+    let taken = unwire(&settings)?;
+    Ok((taken, settings))
 }
 
 /// The rule behind it, kept apart from the environment so it can be run
 /// against a folder that is not the reader's own.
-fn wire(settings: &Path, exe: &Path) -> Result<Wired, String> {
-    // Quoted, because a hook command is handed to a shell and the folder a
-    // person installs into has a space in it more often than not.
-    let want = format!("\"{}\" hook {GATE}", exe.display());
-
-    let mut root = match std::fs::read_to_string(settings) {
-        Ok(text) if text.trim().is_empty() => Map::new(),
-        Ok(text) => match serde_json::from_str::<Value>(&text) {
-            Ok(Value::Object(held)) => held,
-            _ => {
-                return Err(format!(
-                    "{} is not something this can read, so it was left alone",
-                    settings.display()
-                ))
-            }
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Map::new(),
+fn unwire(settings: &Path) -> Result<usize, String> {
+    let text = match std::fs::read_to_string(settings) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
         Err(e) => return Err(format!("{}: {e}", settings.display())),
     };
-
-    let hooks = match root.entry("hooks").or_insert_with(|| Value::Object(Map::new())) {
-        Value::Object(hooks) => hooks,
+    let mut root: Value = match serde_json::from_str(&text) {
+        Ok(Value::Object(held)) => Value::Object(held),
         _ => {
             return Err(format!(
-                "the gates in {} are not written the way this understands, so it was left alone",
+                "{} is not something this can read, so it was left alone",
                 settings.display()
             ))
         }
     };
-
-    let mut done = Wired::Already;
-    for (event, matcher) in EVENTS {
-        let listed = match hooks.entry(event).or_insert_with(|| Value::Array(Vec::new())) {
-            Value::Array(listed) => listed,
-            _ => {
-                return Err(format!(
-                    "the {event} gates in {} are not written the way this understands, so it was left alone",
-                    settings.display()
-                ))
-            }
-        };
-        match standing(listed) {
-            Some(held) if held == want => {}
-            // The copy it names has moved — a new install, or a binary carried
-            // to another folder. Left alone, the gate would be a command that
-            // is not there and every chat would quietly stop saying anything.
-            Some(_) => {
-                point_at(listed, &want);
-                if done == Wired::Already {
-                    done = Wired::Moved;
-                }
-            }
-            None => {
-                listed.push(entry(&want, matcher));
-                done = Wired::Added;
-            }
-        }
-    }
-
-    if done == Wired::Already {
-        return Ok(done);
-    }
-    write_whole(settings, &Value::Object(root))?;
-    Ok(done)
-}
-
-/// One registration, in the shape a settings file holds them.
-fn entry(command: &str, matcher: bool) -> Value {
-    let mut held = Map::new();
-    if matcher {
-        held.insert("matcher".to_string(), Value::String(String::new()));
-    }
-    held.insert(
-        "hooks".to_string(),
-        json!([{ "type": "command", "command": command }]),
-    );
-    Value::Object(held)
-}
-
-/// The command this gate is registered as here already, if it is at all.
-fn standing(listed: &[Value]) -> Option<String> {
-    for held in listed {
-        let Some(hooks) = held.get("hooks").and_then(Value::as_array) else {
+    let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) else {
+        return Ok(0);
+    };
+    let mut taken = 0;
+    for (_, listed) in hooks.iter_mut() {
+        let Some(blocks) = listed.as_array_mut() else {
             continue;
         };
-        for hook in hooks {
-            if let Some(command) = hook.get("command").and_then(Value::as_str) {
-                if ours(command) {
-                    return Some(command.to_string());
-                }
+        for block in blocks.iter_mut() {
+            if let Some(held) = block.get_mut("hooks").and_then(Value::as_array_mut) {
+                let before = held.len();
+                held.retain(|hook| {
+                    !hook.get("command").and_then(Value::as_str).is_some_and(ours)
+                });
+                taken += before - held.len();
             }
         }
+        // A block left with nothing in it is this program's litter, not the
+        // reader's: it only ever held this gate.
+        blocks.retain(|block| {
+            block["hooks"]
+                .as_array()
+                .is_none_or(|held| !held.is_empty())
+        });
     }
-    None
-}
-
-/// Point the registration already there at this copy, wherever it sits.
-fn point_at(listed: &mut [Value], want: &str) {
-    for held in listed.iter_mut() {
-        let Some(hooks) = held.get_mut("hooks").and_then(Value::as_array_mut) else {
-            continue;
-        };
-        for hook in hooks.iter_mut() {
-            let is_ours = hook.get("command").and_then(Value::as_str).map(ours).unwrap_or(false);
-            if is_ours {
-                if let Some(command) = hook.get_mut("command") {
-                    *command = Value::String(want.to_string());
-                }
-            }
+    if taken == 0 {
+        return Ok(0);
+    }
+    // An event this program emptied out entirely goes too, for the same reason.
+    if let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) {
+        hooks.retain(|_, listed| listed.as_array().is_none_or(|blocks| !blocks.is_empty()));
+        let empty = hooks.is_empty();
+        if empty {
+            root.as_object_mut().expect("an object").remove("hooks");
         }
     }
+    write_whole(settings, &root)?;
+    Ok(taken)
 }
 
 /// Is this command line this gate, whichever copy of the program it names?
@@ -451,6 +371,7 @@ fn write_whole(settings: &Path, root: &Value) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     /// A chat's name, which is what the line is filed under.
     const CHAT: &str = "a-conversation";
@@ -484,53 +405,10 @@ mod tests {
         serde_json::from_str(&text).ok()
     }
 
+    /// What older copies wrote into the reader's global settings, taken back
+    /// out — and nothing else in that file touched (bw-t26l.20).
     #[test]
-    fn a_computer_that_has_never_run_it_gets_the_gate_and_one_line_saying_so() {
-        // What the manager asked for: it wires itself up the first time it
-        // runs, and tells him it did.
-        let home = tempfile::tempdir().expect("a folder");
-        let settings = settings_in(home.path());
-
-        let done = wire(&settings, Path::new("/opt/atelier")).expect("the wiring to happen");
-
-        assert_eq!(done, Wired::Added);
-        let held = read(&settings);
-        for (event, _) in EVENTS {
-            assert_eq!(
-                commands(&held, event),
-                vec!["\"/opt/atelier\" hook doing".to_string()],
-                "{event} was not wired"
-            );
-        }
-        let said = said_it(&done, &settings).expect("a line saying it did");
-        assert_eq!(said.lines().count(), 1, "more than one line: {said}");
-        assert!(said.contains("what they are doing"), "{said}");
-    }
-
-    #[test]
-    fn running_it_a_second_time_changes_nothing_at_all() {
-        // A settings file rewritten on every start is a settings file whose
-        // history is this program's log.
-        let home = tempfile::tempdir().expect("a folder");
-        let settings = settings_in(home.path());
-        wire(&settings, Path::new("/opt/atelier")).expect("the first run");
-        let after_first = std::fs::read(&settings).expect("a settings file");
-
-        let done = wire(&settings, Path::new("/opt/atelier")).expect("the second run");
-
-        assert_eq!(done, Wired::Already);
-        assert_eq!(said_it(&done, &settings), None, "it announced itself twice");
-        assert_eq!(
-            std::fs::read(&settings).expect("a settings file"),
-            after_first,
-            "the second run rewrote the file"
-        );
-    }
-
-    #[test]
-    fn everything_the_reader_already_had_is_still_there() {
-        // It writes into a file somebody maintains by hand. Anything of theirs
-        // this drops, they find out about by something of theirs stopping.
+    fn what_older_copies_wrote_into_the_global_settings_is_taken_back_out() {
         let home = tempfile::tempdir().expect("a folder");
         let settings = settings_in(home.path());
         std::fs::write(
@@ -538,27 +416,38 @@ mod tests {
             serde_json::to_string_pretty(&json!({
                 "model": "opus",
                 "hooks": {
-                    "Stop": [{"hooks": [{"type": "command", "command": "their-own-gate.py"}]}],
-                    "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "theirs.py"}]}]
+                    "PreCompact": [{"matcher": "", "hooks": [
+                        {"type": "command", "command": "\"/opt/atelier\" hook doing"}
+                    ]}],
+                    "Stop": [{"hooks": [
+                        {"type": "command", "command": "their-own-gate.py"},
+                        {"type": "command", "command": "\"/opt/atelier\" hook doing"}
+                    ]}]
                 }
             }))
             .unwrap(),
         )
         .expect("a settings file to start from");
 
-        wire(&settings, Path::new("/opt/atelier")).expect("the wiring to happen");
+        assert_eq!(unwire(&settings).expect("the removal"), 2);
 
         let held = read(&settings);
         assert_eq!(held["model"], json!("opus"), "a setting of theirs was dropped");
-        assert!(
-            commands(&held, "Stop").contains(&"their-own-gate.py".to_string()),
-            "their own Stop gate was dropped"
+        assert_eq!(
+            commands(&held, "Stop"),
+            vec!["their-own-gate.py".to_string()],
+            "their own gate went with ours"
         );
         assert!(
-            commands(&held, "PreToolUse").contains(&"theirs.py".to_string()),
-            "an event this does not touch was rewritten"
+            held["hooks"].get("PreCompact").is_none(),
+            "an event holding nothing but ours was left behind: {held}"
         );
-        assert!(commands(&held, "Stop").iter().any(|c| ours(c)), "and ours is not there");
+
+        // Nothing of ours left, so a second run has nothing to do and does not
+        // rewrite the file.
+        let after = std::fs::read(&settings).expect("a settings file");
+        assert_eq!(unwire(&settings).expect("the second run"), 0);
+        assert_eq!(std::fs::read(&settings).expect("a settings file"), after);
     }
 
     #[test]
@@ -569,7 +458,7 @@ mod tests {
         let settings = settings_in(home.path());
         std::fs::write(&settings, "{ this is not json").expect("a settings file");
 
-        let refused = wire(&settings, Path::new("/opt/atelier"));
+        let refused = unwire(&settings);
 
         assert!(refused.is_err(), "it wrote over a file it could not read");
         assert_eq!(
@@ -578,25 +467,14 @@ mod tests {
         );
     }
 
+    /// A computer that never ran one of those copies has no global settings
+    /// file at all, and this must not make one.
     #[test]
-    fn the_program_moving_takes_the_wiring_with_it() {
-        // An upgrade, or a binary carried to another folder. Left alone, the
-        // gate names a command that is not there and every chat quietly stops
-        // saying anything.
+    fn a_computer_with_no_global_settings_is_left_without_any() {
         let home = tempfile::tempdir().expect("a folder");
         let settings = settings_in(home.path());
-        wire(&settings, Path::new("/somewhere/old/atelier")).expect("the first run");
-
-        let done = wire(&settings, Path::new("/somewhere/new/atelier")).expect("the second run");
-
-        assert_eq!(done, Wired::Moved);
-        for (event, _) in EVENTS {
-            assert_eq!(
-                commands(&read(&settings), event),
-                vec!["\"/somewhere/new/atelier\" hook doing".to_string()],
-                "{event} was left pointing at the copy that moved, or wired twice"
-            );
-        }
+        assert_eq!(unwire(&settings).expect("nothing to do"), 0);
+        assert!(!settings.exists(), "it wrote a settings file of its own");
     }
 
     #[test]

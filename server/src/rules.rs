@@ -287,6 +287,22 @@ fn init_with(
         );
     }
     crate::join::install(&root, &manifest)?;
+    // Older copies wrote the doing gate into the reader's own global Claude
+    // settings at every startup. It belongs to the project now, and was just
+    // written there, so what those runs left behind goes (bw-t26l.20).
+    match crate::doing::unwire_global() {
+        Ok((taken, settings)) if taken > 0 => {
+            writeln!(
+                output,
+                "Took {taken} old chat-status hook{} out of {} — they belong to the project now.",
+                if taken == 1 { "" } else { "s" },
+                settings.display()
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        Ok(_) => {}
+        Err(why) => eprintln!("warning: {why}"),
+    }
     show_project(&root, &manifest)?;
     Ok(0)
 }
