@@ -1156,19 +1156,35 @@ async fn restore(
                 last_active_at: at,
                 last_spoke_at: known["lastSpokeAt"].as_str().map(str::to_string),
             };
-            match state.database().create_session(session.clone()).await {
-                Ok(()) => Some(session.id),
-                Err(error) => {
-                    let raced = state
-                        .database()
-                        .session_by_external_id(external_id.to_string())
-                        .await?
-                        .map(|session| session.id);
-                    if raced.is_none() {
-                        tracing::warn!(%error, %external_id, "could not cache ACP-discovered session");
+            // The rows above are only the ones this request's own listing
+            // drew. A row cached by a request already in flight — the sidebar
+            // asks on open, on focus and on every project switch — is not in
+            // them, and creating a second one for the same chat is how one
+            // terminal chat came to be drawn four times (bw-t26l.20). Ask the
+            // database, which sees every request's writes, before writing.
+            match state
+                .database()
+                .session_by_external_id(external_id.to_string())
+                .await?
+            {
+                Some(cached) => Some(cached.id),
+                None => match state.database().create_session(session.clone()).await {
+                    Ok(()) => Some(session.id),
+                    Err(error) => {
+                        // Two of them looked in the same breath. The unique
+                        // pair refuses the second write, and the row the first
+                        // one made is the answer for both.
+                        let raced = state
+                            .database()
+                            .session_by_external_id(external_id.to_string())
+                            .await?
+                            .map(|session| session.id);
+                        if raced.is_none() {
+                            tracing::warn!(%error, %external_id, "could not cache ACP-discovered session");
+                        }
+                        raced
                     }
-                    raced
-                }
+                },
             }
         } else {
             None

@@ -1913,6 +1913,114 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
              json TEXT NOT NULL,
              PRIMARY KEY (session_id, agent_id)
            );"#,
+    )?;
+
+    one_row_per_external_chat(transaction)
+}
+
+/**
+ * One row per chat another program is holding, enforced by the database.
+ *
+ * A chat opened in a terminal is discovered rather than created here, and the
+ * discovery caches a row for it the first time it is seen. Two of those
+ * requests in flight at once each looked, each found nothing, and each cached
+ * a row: the recovery for that race asked the database which row had won, and
+ * the database had no opinion, because nothing said the pair was unique.
+ * Measured on a real install: four rows for one terminal chat, all four
+ * written in the same millisecond, all four drawn in the sidebar under the
+ * same name (bw-t26l.20).
+ *
+ * So the pair is made unique, once, and the duplicates already written are
+ * collapsed onto the row that read the most of the chat. What the losers hold
+ * of the transcript is a shorter copy of the same conversation and is read
+ * again from the provider on the next open; what they hold of the reader's own
+ * work — the cards they were linked to, the spend they were billed — is moved
+ * onto the survivor rather than dropped.
+ */
+fn one_row_per_external_chat(transaction: &Transaction<'_>) -> rusqlite::Result<()> {
+    let already: Option<String> = transaction
+        .query_row(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='session_by_external'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if already.is_some() {
+        return Ok(());
+    }
+
+    // The survivor of each group, and every row it replaces. Ordered by how
+    // much of the chat each one actually read, so the row the reader has been
+    // looking at is the one that stays.
+    let mut statement = transaction.prepare(
+        r#"SELECT brand, external_id, id,
+                  (SELECT COUNT(*) FROM event WHERE event.session_id = session.id) AS depth
+             FROM session
+            WHERE external_id IS NOT NULL
+              AND EXISTS (SELECT 1 FROM session AS peer
+                           WHERE peer.brand = session.brand
+                             AND peer.external_id = session.external_id
+                             AND peer.id <> session.id)
+            ORDER BY brand, external_id, depth DESC,
+                     COALESCE(last_spoke_at, last_active_at) DESC, created_at DESC, id"#,
+    )?;
+    let ranked: Vec<(String, String)> = statement
+        .query_map([], |row| {
+            Ok((
+                format!(
+                    "{}\u{0}{}",
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?
+                ),
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    drop(statement);
+
+    let mut winner: Option<String> = None;
+    let mut group = String::new();
+    for (key, id) in ranked {
+        if key != group {
+            group = key;
+            winner = Some(id);
+            continue;
+        }
+        let Some(keep) = winner.as_deref() else {
+            continue;
+        };
+        // The reader's own work first, so nothing of theirs is deleted with
+        // the row. `OR IGNORE` because the survivor may already carry the
+        // same card or the same billed turn.
+        transaction.execute(
+            "UPDATE OR IGNORE bead_link SET session_id = ?1 WHERE session_id = ?2",
+            [keep, id.as_str()],
+        )?;
+        transaction.execute(
+            "UPDATE OR IGNORE turn SET session_id = ?1 WHERE session_id = ?2",
+            [keep, id.as_str()],
+        )?;
+        for table in [
+            "event",
+            "message",
+            "bead_link",
+            "turn",
+            "summary_run",
+            "transcript_item",
+            "transcript_agent",
+            "transcript_projection",
+        ] {
+            transaction.execute(
+                &format!("DELETE FROM {table} WHERE session_id = ?1"),
+                [id.as_str()],
+            )?;
+        }
+        transaction.execute("DELETE FROM session WHERE id = ?1", [id.as_str()])?;
+    }
+
+    transaction.execute_batch(
+        "CREATE UNIQUE INDEX session_by_external ON session(brand, external_id)
+           WHERE external_id IS NOT NULL;",
     )
 }
 
@@ -2948,6 +3056,65 @@ mod tests {
                 .unwrap();
             assert_eq!(found, 1, "missing {table}");
         }
+    }
+
+    /**
+     * Four rows for one terminal chat, collapsed onto the one that read most
+     * of it — and made impossible afterwards (bw-t26l.20).
+     *
+     * The duplicates are written the way the race wrote them, with the index
+     * out of the way, because that is the state every install that ran the old
+     * code is in. What is asserted is what the reader loses and keeps: one row
+     * in the sidebar, the fullest transcript of the four, and their own card
+     * link and billed turn carried over from a row that is gone.
+     */
+    #[test]
+    fn workbench_store_keeps_one_row_per_chat_another_program_holds() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        let store = Store::open(&path).unwrap();
+        store.connection().execute_batch(
+            r#"DROP INDEX session_by_external;
+               INSERT INTO session (id,brand,external_id,project_id,project_path,cwd,
+                                    permission_mode,title,state,origin,created_at,last_active_at)
+                 VALUES ('thin','claude','term-1','p','/p','/p','default','App performance issues',
+                         'dormant','terminal','2026-09-03T11:03:05.801Z','2026-09-03T11:03:05.801Z'),
+                        ('empty','claude','term-1','p','/p','/p','default','App performance issues',
+                         'dormant','terminal','2026-09-03T11:03:05.801Z','2026-09-03T11:03:05.801Z'),
+                        ('full','claude','term-1','p','/p','/p','default','App performance issues',
+                         'dormant','terminal','2026-09-03T11:03:05.801Z','2026-09-03T11:03:05.801Z'),
+                        ('alone','codex','term-2','p','/p','/p','on-request','Something else',
+                         'dormant','terminal','2026-09-03T11:03:05.801Z','2026-09-03T11:03:05.801Z');
+               INSERT INTO event (session_id,seq,at,type,json)
+                 VALUES ('thin',1,'2026-09-03T11:03:06.000Z','message.started','{}'),
+                        ('full',1,'2026-09-03T11:03:06.000Z','message.started','{}'),
+                        ('full',2,'2026-09-03T11:03:07.000Z','message.started','{}'),
+                        ('alone',1,'2026-09-03T11:03:06.000Z','message.started','{}');
+               INSERT INTO bead_link (session_id,bead_id,via,first_seen_at)
+                 VALUES ('thin','bw-1','said','2026-09-03T11:03:06.000Z');
+               INSERT INTO turn (session_id,project_id,brand,day,at,usd,input,output,total)
+                 VALUES ('empty','p','claude','2026-09-03','2026-09-03T11:03:06.000Z',0.5,1,2,3);"#,
+        )
+        .unwrap();
+        drop(store);
+
+        let store = Store::open(&path).unwrap();
+        let left: Vec<String> = store
+            .list_sessions(Some("p"))
+            .unwrap()
+            .into_iter()
+            .map(|session| session.id)
+            .collect();
+        assert_eq!(left, vec!["full".to_string(), "alone".to_string()]);
+        assert_eq!(store.beads_for_session("full").unwrap(), vec!["bw-1"]);
+        assert_eq!(store.spend().unwrap().len(), 1);
+        assert_eq!(store.event_count("full").unwrap(), 2);
+        assert_eq!(store.event_count("alone").unwrap(), 1);
+
+        // And the pair cannot be written twice again.
+        assert!(store
+            .create_session(&session("again", "claude", Some("term-1"), "2026-09-04T00:00:00.000Z"))
+            .is_err());
     }
 
     fn columns_for_test(connection: &Connection, table: &str) -> Vec<String> {
