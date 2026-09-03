@@ -270,6 +270,74 @@ impl AcpNormalizer {
             .flatten()
     }
 
+    /// A content block as words, for the four ACP kinds that are words.
+    ///
+    /// Text is itself. A link to a resource is the link: the reader can follow
+    /// it, and the machine note this used to become — the block's JSON under
+    /// "ACP sent resource_link content" — is not something anyone can follow.
+    /// A resource carried whole is its text under the name of where it came
+    /// from, fenced, because a file quoted into a message is not the speaker's
+    /// prose. Pictures and sound are not words; `content_picture` takes the
+    /// ones it can draw and the rest stay notes (bw-t26l.20).
+    fn content_words(content: &Value) -> Option<String> {
+        match content["type"].as_str() {
+            Some("text") => content["text"].as_str().map(str::to_string),
+            Some("resource_link") => {
+                let uri = content["uri"].as_str().filter(|uri| !uri.is_empty())?;
+                let name = content["title"]
+                    .as_str()
+                    .or_else(|| content["name"].as_str())
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or(uri);
+                Some(format!("[{name}]({uri})"))
+            }
+            Some("resource") => {
+                let resource = &content["resource"];
+                let text = resource["text"].as_str()?;
+                match resource["uri"].as_str().filter(|uri| !uri.is_empty()) {
+                    Some(uri) => Some(format!("{uri}\n\n```\n{text}\n```")),
+                    None => Some(format!("```\n{text}\n```")),
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// A content block as a picture, drawn from the block itself or from a
+    /// resource carried whole whose bytes are an image. Anything else — sound,
+    /// a PDF, a blob of an unnamed kind — has no drawing here and stays a note.
+    fn content_picture(content: &Value) -> Option<(String, String)> {
+        let (mime, data, uri) = match content["type"].as_str() {
+            Some("image") => (
+                content["mimeType"].as_str().unwrap_or("image/png"),
+                content["data"].as_str().unwrap_or_default(),
+                content["uri"].as_str().unwrap_or_default(),
+            ),
+            Some("resource") => {
+                let resource = &content["resource"];
+                let mime = resource["mimeType"].as_str().unwrap_or_default();
+                if !mime.starts_with("image/") {
+                    return None;
+                }
+                (
+                    mime,
+                    resource["blob"].as_str().unwrap_or_default(),
+                    resource["uri"].as_str().unwrap_or_default(),
+                )
+            }
+            _ => return None,
+        };
+        if data.is_empty() && !uri.starts_with("data:") {
+            return None;
+        }
+        let data_url = if uri.starts_with("data:") {
+            uri.to_string()
+        } else {
+            format!("data:{mime};base64,{data}")
+        };
+        Some((mime.to_string(), data_url))
+    }
+
     fn display_text(value: &Value) -> String {
         match value {
             Value::Null => String::new(),
@@ -758,7 +826,7 @@ impl AcpNormalizer {
         role: &str,
         content: &Value,
     ) -> Vec<Event> {
-        if Self::content_text(content).is_none() && content["type"] != "image" {
+        if Self::content_words(content).is_none() && Self::content_picture(content).is_none() {
             let content_kind = content["type"].as_str().unwrap_or("unknown");
             return vec![self.opaque_note(
                 session_id,
@@ -785,11 +853,11 @@ impl AcpNormalizer {
                 .as_ref()
                 .filter(|id| self.subagent_tools.contains(*id))
             {
-                if let Some(text) = Self::content_text(content) {
+                if let Some(text) = Self::content_words(content) {
                     self.deferred_agents
                         .entry(agent.clone())
                         .or_default()
-                        .push_str(text);
+                        .push_str(&text);
                 }
             }
         }
@@ -839,12 +907,12 @@ impl AcpNormalizer {
                     json!({"type":"message.started","messageId":id,"role":role,"parentToolCallId":parent}),
                 ));
         }
-        if let Some(text) = Self::content_text(content) {
+        if let Some(text) = Self::content_words(content) {
             if role == "assistant" {
                 self.message_text
                     .entry(id.clone())
                     .or_default()
-                    .push_str(text);
+                    .push_str(&text);
                 // Everything said under a helper, kept whether or not the
                 // helper is still on the books. A native subagent's ending and
                 // its own last words race, and the ending wins about half the
@@ -861,7 +929,7 @@ impl AcpNormalizer {
                     if !words.is_empty() && previous.is_some_and(|was| was != id) {
                         words.push_str("\n\n");
                     }
-                    words.push_str(text);
+                    words.push_str(&text);
                 }
             }
             events.push(self.envelope(
@@ -870,18 +938,7 @@ impl AcpNormalizer {
                 raw,
                 json!({"type":"text.delta","messageId":id,"text":text}),
             ));
-        } else {
-            let mime = content["mimeType"].as_str().unwrap_or("image/png");
-            let data_url = content["uri"]
-                .as_str()
-                .filter(|uri| uri.starts_with("data:"))
-                .map(str::to_string)
-                .unwrap_or_else(|| {
-                    format!(
-                        "data:{mime};base64,{}",
-                        content["data"].as_str().unwrap_or_default()
-                    )
-                });
+        } else if let Some((mime, data_url)) = Self::content_picture(content) {
             events.push(self.envelope(
                 session_id,
                 provider,
@@ -1020,7 +1077,7 @@ impl AcpNormalizer {
                     .as_array()
                     .into_iter()
                     .flatten()
-                    .filter_map(|row| row.get("content").and_then(Self::content_text))
+                    .filter_map(|row| row.get("content").and_then(Self::content_words))
                     .collect::<Vec<_>>()
                     .join("\n");
                 let started_name = self.tool_starts.get(&id)
@@ -1617,6 +1674,64 @@ mod tests {
             let events = normalizer.finish_turn("local", "claude", &json!({"stopReason":reason}));
             assert_eq!(kinds(&events), vec!["session.state"], "{reason} said something");
         }
+    }
+
+    /// ACP carries five kinds of content block and this read two of them.
+    /// A file linked into a message and a file carried whole in one both
+    /// arrived as a machine note reading "ACP sent resource content" over a
+    /// line of JSON — the reader could not follow the link or read the file,
+    /// and on a chat opened for reading, where an attached file is how most
+    /// prompts start, that note was the prompt (bw-t26l.20).
+    #[test]
+    fn a_linked_file_and_a_file_carried_whole_are_both_readable() {
+        let mut normalizer = AcpNormalizer::default();
+        let linked = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"user_message_chunk",
+            "content":{"type":"resource_link","name":"notes.md","uri":"file:///work/notes.md"}
+        }}));
+        assert_eq!(kinds(&linked), vec!["message.started", "text.delta"]);
+        assert_eq!(
+            serde_json::to_value(&linked[1]).unwrap()["text"],
+            "[notes.md](file:///work/notes.md)"
+        );
+
+        let carried = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"user_message_chunk",
+            "content":{"type":"resource","resource":{
+                "uri":"file:///work/one.rs","mimeType":"text/x-rust","text":"fn one() {}"
+            }}
+        }}));
+        let text = serde_json::to_value(&carried[0]).unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        // Where it came from, then the file itself, fenced: quoted into a
+        // message, a file is not the speaker's own prose.
+        assert!(text.starts_with("file:///work/one.rs"), "{text}");
+        assert!(text.contains("```\nfn one() {}\n```"), "{text}");
+    }
+
+    /// A picture carried as a resource is a picture. Sound is not, and has
+    /// nowhere to be drawn, so it stays the lossless note it always was.
+    #[test]
+    fn an_embedded_picture_is_drawn_and_sound_stays_a_note() {
+        let mut normalizer = AcpNormalizer::default();
+        let drawn = normalizer.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"agent_message_chunk",
+            "content":{"type":"resource","resource":{
+                "uri":"file:///work/shot.png","mimeType":"image/png","blob":"aGVsbG8="
+            }}
+        }}));
+        assert_eq!(kinds(&drawn), vec!["message.started", "image"]);
+        let image = serde_json::to_value(&drawn[1]).unwrap();
+        assert_eq!(image["image"]["mime"], "image/png");
+        assert_eq!(image["image"]["dataUrl"], "data:image/png;base64,aGVsbG8=");
+
+        let heard = normalizer.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"agent_message_chunk",
+            "content":{"type":"audio","mimeType":"audio/wav","data":"aGVsbG8="}
+        }}));
+        assert_eq!(kinds(&heard), vec!["note"]);
     }
 
     #[test]
