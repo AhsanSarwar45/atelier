@@ -72,7 +72,26 @@ const badgeVariants = cva(
   // hidden overflow would cut the tails off g and y all over again, which is
   // the fault `sm` and `xs` below were widened twice to fix (bw-96is.20,
   // bw-jaoz.1). One pixel, written down, costs less than that.
-  'inline-flex items-center whitespace-nowrap justify-center align-middle border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0 [&>span:not([data-slot])]:relative [&>span:not([data-slot])]:top-px',
+  //
+  // Inside a chip, a quoted word is drawn by the chip and not by the page. A
+  // chip in a message is built from what the reader wrote, and if the label was
+  // written in backticks — `board-actor.py` — the markdown leaves a `<code>`
+  // inside the chip, which the typography preset then gives a grey fill, its
+  // own padding and its own corners (`prose-code:*` in markdown-body.tsx). That
+  // block is taller than the room inside the pill, so it was painted straight
+  // over the chip's border along the top and bottom, leaving the two rounded
+  // ends showing and nothing between them: the manager reported chips with "a
+  // border around the corners but not the centre" (bw-s5op.3).
+  //
+  // Marked important because the preset's dark-mode rule carries two classes
+  // and would otherwise outrank a plain descendant rule — and with the `!` in
+  // FRONT, because this project builds with Tailwind 3.4, where a trailing `!`
+  // is not the important marker but part of the class name, so the rule is
+  // never emitted and nothing warns. `[font:inherit]` rather than a list of
+  // resets: it returns family, size, weight and line height to the chip's in
+  // one declaration, which is what `size` below spent two comments getting
+  // right.
+  'inline-flex items-center whitespace-nowrap justify-center align-middle border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0 [&>span:not([data-slot])]:relative [&>span:not([data-slot])]:top-px [&_code]:!bg-transparent [&_code]:!p-0 [&_code]:!rounded-none [&_code]:!text-inherit [&_code]:![font:inherit]',
   {
     variants: {
       variant: {

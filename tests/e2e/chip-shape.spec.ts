@@ -203,6 +203,26 @@ test('every chip in the app draws the same box', async ({ page, request }) => {
     // 3. The file chips written into a message.
     const links = page.getByTestId('markdown-file-link');
     await expect(links).toHaveCount(7);
+    // Nothing inside a chip paints its own box. A label written in backticks
+    // leaves a `<code>` in the chip, and the typography preset used to give it
+    // a fill, padding and corners of its own — a block taller than the room
+    // inside the pill, laid straight over the chip's border top and bottom, so
+    // the chip read as two rounded ends with nothing between them (bw-s5op.3).
+    const painted = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-testid="markdown-file-link"] code')].map((code) => {
+        const s = getComputedStyle(code);
+        const chip = code.closest('[data-testid="markdown-file-link"]')!.getBoundingClientRect();
+        const own = code.getBoundingClientRect();
+        return { fill: s.backgroundColor, pad: s.padding, taller: +(own.height - chip.height).toFixed(2) };
+      }),
+    );
+    expect(painted.length, 'a chip whose label is in backticks must be on screen').toBeGreaterThan(0);
+    for (const code of painted) {
+      expect(code.fill, 'a quoted word inside a chip must not fill its own box').toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+      expect(code.pad, 'a quoted word inside a chip must not pad its own box').toBe('0px');
+      expect(code.taller, 'a quoted word inside a chip must not outgrow the chip').toBeLessThanOrEqual(0);
+    }
+
     const first = (await links.first().boundingBox())!;
     const last = (await links.last().boundingBox())!;
     await page.screenshot({
