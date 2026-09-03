@@ -81,25 +81,24 @@ const ASKING: &str = "needs your permission to use ";
 /// A detail is a few words on a chip, never a paragraph.
 const MOST: usize = 80;
 
-/// The seven events this gate answers to.
+/// The two events this gate answers to.
+///
+/// One per state, and no event whose only job is to take a state back. A
+/// claim ends when the conversation writes its next line, which the reader
+/// already watches for (`workbench::external::told`) — the record is the
+/// authority on "something happened", and asking a session to report it a
+/// second time bought nothing but five more registrations in somebody's
+/// settings file (bw-t26l.20).
 ///
 /// `join::install` is what registers them, in the project's own settings; this
 /// list is here because it is this module's business which events it needs, and
 /// `join`'s table names them beside every other gate.
-pub const EVENTS: [(&str, bool); 7] = [
-    // A compaction begins, and ends.
+pub const EVENTS: [(&str, bool); 2] = [
+    // A compaction begins. It ends when the record's boundary line lands.
     ("PreCompact", true),
-    ("PostCompact", true),
-    // A permission prompt is the one wait that is a state.
+    // A permission prompt is the one wait that is a state. It ends when the
+    // answer — approved, denied, or typed past — writes the next line.
     ("Notification", true),
-    // The turn ends, whatever it was doing.
-    ("Stop", false),
-    // The session goes away.
-    ("SessionEnd", false),
-    // The tool ran, so the permission prompt was answered.
-    ("PostToolUse", false),
-    // He typed instead of answering it.
-    ("UserPromptSubmit", false),
 ];
 
 /// Is this the gate the program answers to itself?
@@ -149,11 +148,6 @@ fn note(heard: &str, sessions: &Path) {
         // Its own word for why: `manual` is him typing /compact and watching,
         // `auto` is the window filling up, and the screen says which.
         Some("PreCompact") => say(sessions, id, SUMMARISING, a_word(&data, &["trigger", "matcher"])),
-        Some("PostCompact") | Some("SessionEnd") => hush(sessions, id, None),
-        // Stop fires when the turn ends, and also on clear, resume and compact.
-        // A compaction in flight has its own end signal, so the summarising
-        // claim is left alone here and only the wait is cleared.
-        Some("Stop") => hush(sessions, id, Some(WAITING)),
         // Six seconds after the prompt goes up, not the instant it does: the
         // tool holds this notification back that long and drops it entirely if
         // he answers first, so a wait the screen names is a wait he is actually
@@ -163,7 +157,6 @@ fn note(heard: &str, sessions: &Path) {
                 say(sessions, id, WAITING, asked_about(&data));
             }
         }
-        Some("PostToolUse") | Some("UserPromptSubmit") => hush(sessions, id, Some(WAITING)),
         _ => {}
     }
 }
@@ -200,27 +193,6 @@ fn say(sessions: &Path, id: &str, doing: &str, detail: Option<String>) {
     if std::fs::rename(&tmp, line_for(sessions, id)).is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
-}
-
-/// Remove the line — every state ends by there being nothing to say.
-///
-/// `only` narrows it to one claim: the tool finishing running answers a
-/// permission prompt and says nothing at all about a compaction, and a clear
-/// that fires while one is in flight would otherwise blank the bar mid-fill.
-fn hush(sessions: &Path, id: &str, only: Option<&str>) {
-    let target = line_for(sessions, id);
-    if let Some(claim) = only {
-        let Ok(text) = std::fs::read_to_string(&target) else {
-            return;
-        };
-        let Ok(Value::Object(standing)) = serde_json::from_str::<Value>(&text) else {
-            return;
-        };
-        if standing.get("doing").and_then(Value::as_str) != Some(claim) {
-            return;
-        }
-    }
-    let _ = std::fs::remove_file(&target);
 }
 
 fn line_for(sessions: &Path, id: &str) -> PathBuf {
@@ -493,16 +465,6 @@ mod tests {
     }
 
     #[test]
-    fn a_compaction_ending_takes_the_line_away() {
-        let home = tempfile::tempdir().expect("a folder");
-        let sessions = home.path().join("sessions");
-        fire(&sessions, json!({"hook_event_name": "PreCompact", "session_id": CHAT}));
-        fire(&sessions, json!({"hook_event_name": "PostCompact", "session_id": CHAT}));
-
-        assert_eq!(line(&sessions), None);
-    }
-
-    #[test]
     fn a_permission_prompt_names_the_tool_out_of_the_sentence_it_is_asked_in() {
         // There is no tool name on that payload. The sentence is where the tool
         // is named, and the chip has room for the one word (bw-jaoz.14.13).
@@ -543,28 +505,50 @@ mod tests {
     }
 
     #[test]
-    fn the_turn_ending_clears_a_wait_and_leaves_a_compaction_alone() {
-        // Stop fires on clear, resume and compact as well as at the end of a
-        // turn, and a compaction has its own end signal. Clearing here would
-        // blank the bar halfway through filling.
+    fn the_events_it_asks_to_be_wired_to_are_the_ones_it_answers() {
+        // Every registration costs a line in somebody's settings file, so a
+        // gate that asks for an event it does nothing with is asking for
+        // nothing. The two it asks for are the two states it can claim.
         let home = tempfile::tempdir().expect("a folder");
         let sessions = home.path().join("sessions");
 
+        for (event, _) in EVENTS {
+            fire(
+                &sessions,
+                json!({"hook_event_name": event, "session_id": CHAT,
+                       "notification_type": "permission_prompt",
+                       "message": "Claude needs your permission to use Edit"}),
+            );
+            assert!(
+                line(&sessions).is_some(),
+                "{event} is registered and says nothing"
+            );
+            std::fs::remove_file(sessions.join(format!("{CHAT}.doing.json"))).expect("the line");
+        }
+    }
+
+    #[test]
+    fn the_events_that_only_took_a_claim_back_are_not_asked_for_any_more() {
+        // The record says "something happened" already, and the reader ends a
+        // claim on the conversation's next line, so these five bought only
+        // registrations (bw-t26l.20).
+        let home = tempfile::tempdir().expect("a folder");
+        let sessions = home.path().join("sessions");
         fire(&sessions, json!({"hook_event_name": "PreCompact", "session_id": CHAT}));
-        fire(&sessions, json!({"hook_event_name": "Stop", "session_id": CHAT}));
+
+        for gone in ["PostCompact", "Stop", "SessionEnd", "PostToolUse", "UserPromptSubmit"] {
+            assert!(
+                !EVENTS.iter().any(|(event, _)| *event == gone),
+                "{gone} is still registered"
+            );
+            fire(&sessions, json!({"hook_event_name": gone, "session_id": CHAT}));
+        }
+
         assert_eq!(
             line(&sessions).expect("the compaction to still stand")["doing"],
-            json!("summarising")
+            json!("summarising"),
+            "an event it no longer asks for still moved the line"
         );
-
-        fire(
-            &sessions,
-            json!({"hook_event_name": "Notification", "session_id": CHAT,
-                   "notification_type": "permission_prompt",
-                   "message": "Claude needs your permission to use Edit"}),
-        );
-        fire(&sessions, json!({"hook_event_name": "PostToolUse", "session_id": CHAT}));
-        assert_eq!(line(&sessions), None, "the answered wait was left standing");
     }
 
     #[test]

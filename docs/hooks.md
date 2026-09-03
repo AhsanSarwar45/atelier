@@ -110,11 +110,23 @@ board round trip per 45 seconds per session and project.
 
 `doing` is the odd one: it serves chats Atelier does **not** drive. A chat this
 app drives over ACP reports what it is doing on the wire — tool calls,
-permission requests, modes, usage — but a `claude` session in somebody's own
-terminal is read from its record on disk, and a compaction in progress and a
-permission prompt waiting for an answer appear in no record. `doing` writes
-those two, and only those two, to `<claude>/sessions/<id>.doing.json` for the
-screens to read.
+permission requests, modes, usage — and a saved chat is discovered and replayed
+over ACP too (`session/list`, `session/resume`). But `SessionInfo`, all ACP
+returns for a chat nobody is driving, is an id, a folder, a title and a clock;
+there is no state on it and no method in the protocol to ask for one. Claude
+Code's own marker carries a single bit, busy or idle. So a compaction in
+progress and a permission prompt waiting for an answer are visible from nowhere
+but inside the session, and `doing` writes those two — and only those two — to
+`<claude>/sessions/<id>.doing.json` for the screens to read.
+
+**Two events, one per state.** `PreCompact` and `Notification`, and nothing
+else. A claim ends when the conversation writes its next line, which the reader
+already watches for: measured on fourteen real compactions, a record is silent
+for 97 to 186 seconds while one runs and speaks the moment it finishes. It used
+to take `PostCompact`, `Stop`, `PostToolUse`, `UserPromptSubmit` and
+`SessionEnd` as well, all of them saying only "something happened" — which the
+record says by itself. A line left behind by a session that was killed is swept
+by the reader, which is the one thing a hook could never do.
 
 It is registered with every other gate here, in the **project's own**
 `.claude/settings.json`, by `atelier init`. Until 2026-09 it wrote itself into

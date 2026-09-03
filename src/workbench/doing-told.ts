@@ -31,18 +31,19 @@ export interface ToldDoing {
 /**
  * How long a told summarising claim is worth believing.
  *
- * There is no hook for the end of a compaction — only for its start — so the
- * end is inferred, and a session killed mid-compaction would otherwise leave a
- * bar filling on the screen until the marker went away. Fifteen minutes is far
- * past the longest run measured on this machine (371 seconds) and far short of
- * a wait anybody would sit through.
+ * A compaction ends when the record's boundary line lands, and that is what
+ * ends the claim; this is the backstop for a session killed mid-compaction,
+ * whose record never moves again. Fifteen minutes is far past the longest run
+ * measured on this machine (371 seconds) and far short of a wait anybody would
+ * sit through.
  */
 export const TOLD_SUMMARY_LIFE_MS = 900_000;
 
 /**
  * A permission prompt has no life at all: it stands until a person answers it,
- * and people go to lunch. The hook that clears it is the one that fires when
- * the turn ends.
+ * and people go to lunch. What ends it is the conversation writing its next
+ * line — the tool result, or whatever he typed instead — which the reader
+ * checks before believing any claim at all.
  */
 const NO_LIFE: ReadonlySet<Doing> = new Set<Doing>(['waiting']);
 

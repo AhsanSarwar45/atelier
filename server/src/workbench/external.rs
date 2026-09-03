@@ -133,6 +133,35 @@ impl ProviderActivity {
     }
 }
 
+/// When the conversation itself last said anything, from the last line that
+/// carries a clock.
+///
+/// Not the file's modified time. A record collects bookkeeping rows with no
+/// timestamp on them — `mode`, `permission-mode`, `bridge-session` — and those
+/// move the file without the conversation moving, so an mtime cannot be used to
+/// decide whether a state a session announced is over.
+fn record_spoke_at(path: &Path) -> Option<i64> {
+    let mut file = File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    let length = size.min(1_048_576);
+    file.seek(SeekFrom::Start(size.saturating_sub(length)))
+        .ok()?;
+    let mut bytes = Vec::with_capacity(length as usize);
+    file.take(length).read_to_end(&mut bytes).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    text.lines().rev().find_map(|line| {
+        let row: Value = serde_json::from_str(line).ok()?;
+        stamp_ms(row["timestamp"].as_str()?)
+    })
+}
+
+/// An RFC 3339 stamp as milliseconds since the epoch.
+fn stamp_ms(text: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(text)
+        .ok()
+        .map(|when| when.timestamp_millis())
+}
+
 fn last_record_row(path: &Path) -> Option<Value> {
     let mut file = File::open(path).ok()?;
     let size = file.metadata().ok()?.len();
@@ -535,9 +564,33 @@ pub fn terminate_pid(pid: u32) -> std::io::Result<()> {
     }
 }
 
-fn told(sessions: &Path, id: &str, now_ms: i64) -> Option<(HeldDoing, i64, Option<String>)> {
+/// What a session said about itself, while it is still true.
+///
+/// `spoke_at` is when its conversation last said anything, and it is what ends
+/// the claim: a state a session announces — a compaction beginning, a
+/// permission prompt going up — lasts exactly until the conversation writes its
+/// next line, because that line is the thing the session was not doing while it
+/// was in that state. Measured on the fourteen compactions in this project's
+/// own longest record: the conversation is silent for 97 to 186 seconds between
+/// the line before a compaction and the boundary line that ends it, so the
+/// claim stands for the whole run and dies on the boundary.
+///
+/// This is why the gate is registered on two events rather than seven. It used
+/// to announce a state and then need `PostCompact`, `Stop`, `PostToolUse`,
+/// `UserPromptSubmit` and `SessionEnd` to take the announcement back, all of
+/// them saying only "something happened" — which the record already says
+/// (bw-t26l.20).
+fn told(
+    sessions: &Path,
+    id: &str,
+    now_ms: i64,
+    spoke_at: Option<i64>,
+) -> Option<(HeldDoing, i64, Option<String>)> {
     let path = sessions.join(format!("{id}.doing.json"));
     let row: ToldDoing = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
+    if spoke_at.is_some_and(|at| at > row.since) {
+        return None;
+    }
     // Keep the vocabulary and lifetime identical to the former shared reader:
     // every concrete status is valid, waiting has no expiry, and every other
     // claim expires after fifteen minutes. Restricting this to summarising and
@@ -603,13 +656,15 @@ pub fn claude_holds(config: &Path, proc_root: &Path, now_ms: i64) -> Vec<Provide
     let mut holds: Vec<_> = newest
         .into_values()
         .map(|marker| {
-            let said = told(&sessions, &marker.session_id, now_ms);
+            let record = crate::workbench::claude::history::find_record(config, &marker.session_id);
+            let spoke_at = record.as_deref().and_then(record_spoke_at);
+            let said = told(&sessions, &marker.session_id, now_ms, spoke_at);
             let (doing, since, detail, was_told) = if let Some((doing, since, detail)) = said {
                 (doing, Some(since), detail, true)
             } else {
-                let read =
-                    crate::workbench::claude::history::find_record(config, &marker.session_id)
-                        .and_then(|record| record_doing(&record, now_ms));
+                let read = record
+                    .as_deref()
+                    .and_then(|record| record_doing(record, now_ms));
                 let marked = marker.status.as_deref().and_then(marker_doing);
                 let (doing, since, detail) = match marked {
                     Some(HeldDoing::Working) => {
@@ -639,7 +694,35 @@ pub fn claude_holds(config: &Path, proc_root: &Path, now_ms: i64) -> Vec<Provide
         })
         .collect();
     holds.sort_by(|a, b| a.id.cmp(&b.id));
+    sweep_told(&sessions, &holds);
     holds
+}
+
+/// Take away the lines left by sessions that are gone.
+///
+/// The gate that writes them cannot be relied on to remove them: a session that
+/// is killed, or whose machine loses power, fires no last event. Reading this
+/// directory is the moment we know which sessions are still there, so it is the
+/// moment to tidy — and the reader is the one that must not leave litter in
+/// somebody's home (bw-t26l.20).
+fn sweep_told(sessions: &Path, holds: &[ProviderHold]) {
+    let Ok(entries) = fs::read_dir(sessions) else {
+        return;
+    };
+    let alive: std::collections::HashSet<String> =
+        holds.iter().map(|hold| hold.id.to_lowercase()).collect();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(id) = name
+            .to_str()
+            .and_then(|name| name.strip_suffix(".doing.json"))
+        else {
+            continue;
+        };
+        if !alive.contains(&id.to_lowercase()) {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 fn uuid_in(text: &str) -> Vec<String> {
@@ -1511,6 +1594,87 @@ mod tests {
             detail.as_deref(),
             Some("Work out why the summarising bar holds at the…")
         );
+    }
+
+    /// A state a session announces lasts until its conversation writes the
+    /// next line — which is what let five of the seven registrations go.
+    #[test]
+    fn what_a_chat_said_it_was_doing_ends_when_it_speaks_again() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = root.path().join("sessions");
+        fs::create_dir_all(&sessions).unwrap();
+        let chat = "e9d5c0f6-1111-4222-8333-444455556666";
+        fs::write(
+            sessions.join(format!("{chat}.doing.json")),
+            serde_json::json!({"doing":"summarising","since":1_800_000_000_000i64,"detail":"auto"})
+                .to_string(),
+        )
+        .unwrap();
+        let now = 1_800_000_100_000i64;
+
+        // Silent through the compaction — measured at 97 to 186 seconds on the
+        // fourteen in this project's own longest record.
+        let quiet = root.path().join("quiet.jsonl");
+        fs::write(&quiet, "{\"type\":\"user\",\"timestamp\":\"2027-01-15T08:00:00.000Z\"}\n").unwrap();
+        let before = record_spoke_at(&quiet);
+        let (doing, _, detail) = told(&sessions, chat, now, before).expect("the claim to stand");
+        assert_eq!(doing, HeldDoing::Summarising);
+        assert_eq!(detail.as_deref(), Some("auto"));
+
+        // The boundary line lands: the compaction is over, and nothing had to
+        // fire a second hook to say so.
+        let spoken = root.path().join("spoken.jsonl");
+        fs::write(
+            &spoken,
+            "{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"timestamp\":\"2027-01-15T08:05:00.000Z\"}\n",
+        )
+        .unwrap();
+        assert_eq!(told(&sessions, chat, now, record_spoke_at(&spoken)), None);
+
+        // Bookkeeping rows carry no clock and must not end anything: a record
+        // whose last line is one of those is read past, back to the last thing
+        // the conversation actually said.
+        let mixed = root.path().join("mixed.jsonl");
+        fs::write(
+            &mixed,
+            "{\"type\":\"user\",\"timestamp\":\"2027-01-15T08:00:00.000Z\"}\n{\"type\":\"bridge-session\"}\n",
+        )
+        .unwrap();
+        assert_eq!(record_spoke_at(&mixed), before);
+    }
+
+    /// The gate cannot tidy after a session that was killed, so the reader
+    /// does. Nothing of ours is left in somebody's home folder.
+    #[test]
+    fn a_line_left_by_a_chat_that_is_gone_is_taken_away() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = root.path().join("sessions");
+        fs::create_dir_all(&sessions).unwrap();
+        let living = sessions.join("11111111-1111-4111-8111-111111111111.doing.json");
+        let dead = sessions.join("22222222-2222-4222-8222-222222222222.doing.json");
+        let theirs = sessions.join("3903.json");
+        for path in [&living, &dead, &theirs] {
+            fs::write(path, "{}").unwrap();
+        }
+
+        sweep_told(
+            &sessions,
+            &[ProviderHold {
+                id: "11111111-1111-4111-8111-111111111111".into(),
+                holder: Holder::Terminal,
+                doing: HeldDoing::Working,
+                detail: None,
+                told: false,
+                since: None,
+                turn_since: None,
+                typical_ms: None,
+                pids: BTreeSet::new(),
+            }],
+        );
+
+        assert!(living.exists(), "it swept a chat that is still there");
+        assert!(!dead.exists(), "it left a line behind");
+        assert!(theirs.exists(), "it removed the tool's own marker");
     }
 
     #[test]

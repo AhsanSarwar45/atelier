@@ -27,17 +27,16 @@ const CLAUDE: &[(&str, &str, &[&str])] = &[
     ("PostToolUse", "Edit|Write|MultiEdit|NotebookEdit|Bash|AskUserQuestion|ExitPlanMode|Agent|Task|Monitor|TaskCreate|SendMessage", &["board-touch"]),
     ("SubagentStop", "", &["board-touch"]),
     ("SessionStart", "", &["board-prime"]),
-    ("SessionEnd", "", &["board-push", "doing"]),
-    ("Stop", "", &["board-gate", "doing"]),
-    // The five events the `doing` gate needs that no other gate here wants.
-    // A chat this program only watches cannot say from its record that it is
-    // compacting or stopped on a permission prompt; these say it. The list is
-    // `doing::EVENTS`, less the two above (bw-t26l.20).
+    ("SessionEnd", "", &["board-push"]),
+    ("Stop", "", &["board-gate"]),
+    // The two events the `doing` gate needs that no other gate here wants. A
+    // chat this program only watches cannot say from its record that it is
+    // compacting or stopped on a permission prompt; these say it. There is one
+    // per state and nothing else: the reader ends a claim when the
+    // conversation writes its next line, so the events that used to take a
+    // claim back are not asked for (`doing::EVENTS`, bw-t26l.20).
     ("PreCompact", "", &["doing"]),
-    ("PostCompact", "", &["doing"]),
     ("Notification", "", &["doing"]),
-    ("PostToolUse", "", &["doing"]),
-    ("UserPromptSubmit", "", &["doing"]),
 ];
 
 const CODEX: &[(&str, &str, &[&str])] = &[

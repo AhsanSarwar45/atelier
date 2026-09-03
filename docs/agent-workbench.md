@@ -2170,8 +2170,9 @@ side declining to answer, not an answer, so it never displaces the other.
 `doing-told.ts` reads it as nothing-said whenever it is unreadable, not JSON,
 carries a word the table does not have, carries a clock more than a minute
 ahead of ours, or makes a claim old enough that the session has plainly moved
-on. There is no hook for the *end* of a compaction, only its start, so a told
-summarising claim expires at fifteen minutes — far past the longest run
+on. A told claim stands only while the conversation is silent — the record's next
+line is what ends it, so the gate rides two events and none whose job is to
+take a claim back — and a told summarising claim expires at fifteen minutes — far past the longest run
 measured on this machine (371s) and far short of a wait anybody would sit
 through. A permission prompt never expires: it stands until a person answers
 it, and people go to lunch.
