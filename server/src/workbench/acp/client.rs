@@ -691,10 +691,22 @@ async fn permission(
         return Err(acp_error(error));
     }
     let selected = receive.await.map_err(acp_error)?;
+    // Whether the plan was approved is settled by the kind of the option that
+    // was pressed, not by the letters in its id. The ids are the agent's own
+    // vocabulary — Claude approves with "allow-once" and refuses with "reject",
+    // and reading either for the substring "allow" is a guess that happens to
+    // hold for that one agent and for nothing else (bw-t26l.20).
     let resolved = if plan.is_some() {
+        let approved = raw["options"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|option| option["optionId"] == selected.as_str())
+            .and_then(|option| option["kind"].as_str())
+            .is_some_and(|kind| kind.starts_with("allow"));
         json!({"type":"plan.resolved", "sessionId":local_session_id, "seq":0, "at":now(),
-            "proposalId":ask_id, "status":if selected.contains("allow"){"approved"}else{"changes_requested"},
-            "actionId":if selected.contains("allow"){"approve"}else{"request_changes"}})
+            "proposalId":ask_id, "status":if approved{"approved"}else{"changes_requested"},
+            "actionId":if approved{"approve"}else{"request_changes"}})
     } else {
         json!({"type":"ask.resolved", "sessionId":local_session_id, "seq":0, "at":now(),
             "askId":ask_id, "chosen":selected})
@@ -870,6 +882,31 @@ fn typed_elicitation_content(schema: &Value, content: &Value) -> Value {
     Value::Object(content)
 }
 
+/// Whether a notification was the agent reporting that a URL elicitation is
+/// over, and if so, closing it.
+///
+/// A URL elicitation finishes somewhere else entirely — the sign-in page in the
+/// owner's browser — so the agent, watching for the callback, is the one who
+/// knows it is done, and says so with `elicitation/complete`. Every notification
+/// but `session/update` used to be dropped, which left the "Open sign-in link"
+/// card standing after the sign-in had already succeeded and made the only way
+/// past it a Continue click that told the agent nothing it did not already know
+/// (bw-t26l.20).
+///
+/// Accepting is what that click would have done, so the card resolves and the
+/// prompt goes on. A completion for an elicitation that is no longer pending is
+/// not an error: the person may have clicked Continue first, and the agent is
+/// entitled to say so anyway.
+async fn elicitation_completed(broker: &ElicitationBroker, method: &str, params: &Value) -> bool {
+    if method != "elicitation/complete" {
+        return false;
+    }
+    if let Some(id) = params["elicitationId"].as_str() {
+        let _ = broker.answer(id, json!({"action":"accept"})).await;
+    }
+    true
+}
+
 async fn elicitation(
     request: CreateElicitationRequest,
     database: ChatDb,
@@ -940,6 +977,43 @@ async fn elicitation(
     serde_json::from_value(wire).map_err(acp_error)
 }
 
+/// The base64 payload and the media type of one attached picture.
+///
+/// The app carries a picture as `{mime, dataUrl}`: that is the shape the writing
+/// box sends, the shape the transcript is drawn from, and the shape every other
+/// reader of a picture in this tree expects. ACP wants the two halves apart, so
+/// the data URL has to be taken apart here — and reading `data`, `base64` and
+/// `mimeType` keys that nothing in the app has ever set meant the payload came
+/// back empty every time, the block was dropped by the emptiness guard, and the
+/// prompt went out as text alone. The picture sat in the person's own bubble
+/// looking delivered while the agent answered "there was no picture attached to
+/// your message" and went looking for one on disk instead (bw-t26l.20).
+///
+/// The older key names are still read first, so a caller that already holds the
+/// two halves apart does not have to build a data URL to hand them over.
+fn attached_picture(image: &Value) -> Option<(String, String)> {
+    let (declared, encoded) = match image["dataUrl"]
+        .as_str()
+        .and_then(|url| url.strip_prefix("data:"))
+        .and_then(|rest| rest.split_once(";base64,"))
+    {
+        Some((mime, payload)) => (Some(mime), Some(payload)),
+        None => (None, None),
+    };
+    let data = image["data"]
+        .as_str()
+        .or_else(|| image["base64"].as_str())
+        .or(encoded)
+        .filter(|data| !data.is_empty())?;
+    let mime = image["mimeType"]
+        .as_str()
+        .or_else(|| image["mime"].as_str())
+        .or(declared)
+        .filter(|mime| !mime.is_empty())
+        .unwrap_or("image/png");
+    Some((data.to_string(), mime.to_string()))
+}
+
 fn prompt_content(command: &Command) -> Result<Vec<ContentBlock>, String> {
     let text = command
         .fields
@@ -954,12 +1028,7 @@ fn prompt_content(command: &Command) -> Result<Vec<ContentBlock>, String> {
         .into_iter()
         .flatten()
     {
-        let data = image["data"]
-            .as_str()
-            .or_else(|| image["base64"].as_str())
-            .unwrap_or_default();
-        let mime = image["mimeType"].as_str().unwrap_or("image/png");
-        if !data.is_empty() {
+        if let Some((data, mime)) = attached_picture(image) {
             content.push(ContentBlock::Image(ImageContent::new(data, mime)));
         }
     }
@@ -1449,6 +1518,7 @@ impl AcpDriver {
             let elicitation_db = task_database.clone();
             let elicitation_session = task_session.id.clone();
             let elicitation_broker = task_elicitations.clone();
+            let completed_elicitations = task_elicitations.clone();
             let stopped_database = task_database.clone();
             let stopped_session = task_session.clone();
             let stopped_closing = task_closing.clone();
@@ -1463,6 +1533,15 @@ impl AcpDriver {
                 .builder()
                 .on_receive_notification(
                     async move |notification: UntypedMessage, _connection| {
+                        if elicitation_completed(
+                            &completed_elicitations,
+                            notification.method(),
+                            notification.params(),
+                        )
+                        .await
+                        {
+                            return Ok(());
+                        }
                         if notification.method() != "session/update" {
                             return Ok(());
                         }
@@ -2283,6 +2362,61 @@ mod tests {
         }
     }
 
+    fn prompt_with_images(images: Value) -> Command {
+        let mut fields = serde_json::Map::new();
+        fields.insert("text".into(), json!("what is in this picture?"));
+        fields.insert("images".into(), images);
+        Command {
+            kind: CommandKind::PromptSend,
+            fields,
+        }
+    }
+
+    /// The writing box attaches a picture as `{mime, dataUrl, alt}`, so that is
+    /// the shape the prompt has to survive. It used to be read for `data` and
+    /// `base64` keys that the app has never sent: the block was dropped, the
+    /// prompt went out as text alone, and the agent — with the picture sitting
+    /// in the person's own bubble looking delivered — answered that no picture
+    /// had been attached (bw-t26l.20).
+    #[test]
+    fn an_attached_picture_reaches_the_agent() {
+        let command = prompt_with_images(json!([{
+            "mime": "image/png",
+            "dataUrl": "data:image/png;base64,iVBORw0KGgo=",
+            "alt": "a screenshot",
+        }]));
+        let content = prompt_content(&command).unwrap();
+        assert_eq!(content.len(), 2, "the text and the picture both go out");
+        match &content[1] {
+            ContentBlock::Image(image) => {
+                assert_eq!(image.data, "iVBORw0KGgo=");
+                assert_eq!(image.mime_type, "image/png");
+            }
+            other => panic!("the picture must go as an image block, got {other:?}"),
+        }
+    }
+
+    /// A caller that already holds the two halves apart does not have to build a
+    /// data URL to hand them over, and one that sends neither is not turned into
+    /// an empty picture the agent has to make sense of.
+    #[test]
+    fn a_picture_is_read_from_whichever_half_the_caller_holds() {
+        let command = prompt_with_images(json!([
+            {"base64": "QUJD", "mimeType": "image/jpeg"},
+            {"mime": "image/gif", "dataUrl": "not-a-data-url"},
+            {"alt": "nothing at all"},
+        ]));
+        let content = prompt_content(&command).unwrap();
+        assert_eq!(content.len(), 2, "only the picture with a payload goes out");
+        match &content[1] {
+            ContentBlock::Image(image) => {
+                assert_eq!(image.data, "QUJD");
+                assert_eq!(image.mime_type, "image/jpeg");
+            }
+            other => panic!("the picture must go as an image block, got {other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn a_second_user_turn_steers_the_active_turn_and_stays_durable() {
         let root = tempfile::tempdir().unwrap();
@@ -2389,6 +2523,56 @@ mod tests {
         elicitations.cancel_all().await;
         assert_eq!(question_result.await.unwrap(), json!({"action":"decline"}));
         assert!(elicitations.pending.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_sign_in_finished_in_the_browser_closes_its_own_card() {
+        let broker = ElicitationBroker::default();
+        let (answer, received) = oneshot::channel();
+        broker.pending.lock().await.insert(
+            "sign-in-1".into(),
+            PendingElicitation {
+                answer,
+                // No schema: a URL elicitation asks for no fields, only that the
+                // owner goes and does the thing the link leads to.
+                schema: None,
+                custom_fields: HashMap::new(),
+                native_questions: false,
+            },
+        );
+
+        // Anything else stays the update handler's business, untouched.
+        assert!(
+            !elicitation_completed(
+                &broker,
+                "session/update",
+                &json!({"update":{"sessionUpdate":"agent_message_chunk"}}),
+            )
+            .await
+        );
+        assert!(broker.is_pending("sign-in-1").await);
+
+        assert!(
+            elicitation_completed(
+                &broker,
+                "elicitation/complete",
+                &json!({"elicitationId":"sign-in-1"}),
+            )
+            .await
+        );
+        assert_eq!(received.await.unwrap(), json!({"action":"accept"}));
+        assert!(!broker.is_pending("sign-in-1").await);
+
+        // Said twice, or said after the owner already pressed Continue: still
+        // ours to swallow, never an error thrown back at the agent.
+        assert!(
+            elicitation_completed(
+                &broker,
+                "elicitation/complete",
+                &json!({"elicitationId":"sign-in-1"}),
+            )
+            .await
+        );
     }
 
     #[tokio::test]

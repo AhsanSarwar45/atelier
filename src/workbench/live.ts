@@ -1,9 +1,9 @@
 /**
  * Every running chat, in one place, from one connection.
  *
- * The waiting-on-you tray, the glance strip and the live dot on a board card
- * are three views of the same fact — what each session is doing right now — so
- * they share a single module-level store rather than each opening its own
+ * The waiting-on-you tray and the live dot on a board card are two views of the
+ * same fact — what each session is doing right now — so they share a single
+ * module-level store rather than each opening its own
  * (docs/agent-workbench.md §8.6). The idiom is the repo's own:
  * `useSyncExternalStore` over a listener set, as in `use-theme.ts`.
  *
@@ -92,7 +92,7 @@ export function waitsOnYou(s: LiveSession): boolean {
   return s.state === 'waiting_permission' || s.state === 'errored';
 }
 
-/** Working right now: the glance strip's whole condition. */
+/** Working right now, as opposed to stopped for an answer or asleep. */
 export function isRunning(s: LiveSession): boolean {
   return s.state === 'thinking' || s.state === 'streaming' || s.state === 'running_tool';
 }
@@ -362,9 +362,9 @@ function moves(id: string, next?: SessionState): boolean {
 /**
  * Where the seconds on a chip count from, once a state event has landed.
  *
- * Three screens draw that number — the row in the list, the glance strip and a
- * board card — and all three read it from here, so what a chat has been at for
- * forty seconds says forty on every one of them.
+ * Two screens draw that number — the row in the list and a board card — and
+ * both read it from here, so what a chat has been at for forty seconds says
+ * forty on either of them.
  *
  * The rule is the piece of work, not the event: two reads in a row are both
  * `running_tool` with the same words, and restarting on the second would show a

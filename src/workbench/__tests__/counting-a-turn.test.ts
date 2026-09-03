@@ -1,10 +1,10 @@
 /**
  * The seconds on a chip, and where they count from.
  *
- * Three screens draw that number — the row in the list, the glance strip and a
- * board card — and all three read it off one field the live stream keeps
- * (`busySince`). A mistake here is silent: a wrong number is still a number, in
- * three places at once, and until this nothing exercised it (bw-96is.12).
+ * Two screens draw that number — the row in the list and a board card — and both
+ * read it off one field the live stream keeps (`busySince`). A mistake here is
+ * silent: a wrong number is still a number, in both places at once, and until
+ * this nothing exercised it (bw-96is.12).
  *
  * The rule it holds to is that the count belongs to the piece of work, not to
  * the event: an agent reading two files in a row publishes `running_tool`

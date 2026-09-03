@@ -130,6 +130,18 @@ fn launch_config_at(
         "CLAUDE_CODE_EXECUTABLE"
     };
     config = config.env(variable, provider.to_string_lossy());
+    if brand == "claude" {
+        // The checklist panel is drawn from ACP `plan` updates, and the adapter
+        // makes one out of every TodoWrite and every TaskCreate/TaskUpdate/
+        // TaskList the agent runs. The provider, though, withholds those tools
+        // by default from Opus 4.8, Sonnet 5, Fable 5, Mythos 5 and anything
+        // newer — so on the models anyone would actually pick, the agent had no
+        // way to keep a checklist, said so in its own words, and the panel that
+        // this app has built, folded and drawn all along could never appear
+        // (bw-t26l.20). This is the switch the provider itself documents for
+        // handing them back.
+        config = config.env("CLAUDE_CODE_ENABLE_TODO_TOOLS", "1");
+    }
     Some(config)
 }
 
@@ -220,6 +232,31 @@ mod tests {
         let adapter = root.path().join(executable_name("claude"));
         std::fs::write(&adapter, b"adapter").unwrap();
         assert!(launch_config_at(adapter, "claude", None).is_none());
+    }
+
+    /// The checklist panel needs the tools the checklist is made of.
+    ///
+    /// The adapter turns TodoWrite and the Task* tools into ACP `plan` updates,
+    /// which is the only thing the panel is ever drawn from — and the provider
+    /// withholds those tools by default on every current model, so without this
+    /// the panel is unreachable through the bundled Claude runtime and the
+    /// agent tells the person there is no checklist tool at all (bw-t26l.20).
+    #[test]
+    fn claude_adapter_keeps_the_checklist_tools_the_plan_panel_is_drawn_from() {
+        let root = tempfile::tempdir().unwrap();
+        let adapter = root.path().join(executable_name("claude"));
+        let provider = root.path().join(if cfg!(windows) {
+            "claude-provider.exe"
+        } else {
+            "claude-provider"
+        });
+        std::fs::write(&adapter, b"adapter").unwrap();
+        std::fs::write(&provider, b"provider").unwrap();
+        let config = launch_config_at(adapter, "claude", None).unwrap();
+        assert_eq!(
+            config.environment().get("CLAUDE_CODE_ENABLE_TODO_TOOLS"),
+            Some(&"1".to_string())
+        );
     }
 
     #[test]

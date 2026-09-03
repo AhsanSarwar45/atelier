@@ -105,6 +105,11 @@ pub struct AcpNormalizer {
     goose_tasks: HashMap<String, String>,
     agent_tools: HashMap<String, String>,
     agent_names: HashMap<String, String>,
+    task_agents: HashMap<String, String>,
+    unbound_agents: Vec<String>,
+    agent_words: HashMap<String, String>,
+    agent_word_message: HashMap<String, String>,
+    agent_reports: HashMap<String, (String, String)>,
     active_signals: HashMap<String, String>,
     suppress_local_user: bool,
     menu: Value,
@@ -131,6 +136,11 @@ impl Default for AcpNormalizer {
             goose_tasks: HashMap::new(),
             agent_tools: HashMap::new(),
             agent_names: HashMap::new(),
+            task_agents: HashMap::new(),
+            unbound_agents: Vec::new(),
+            agent_words: HashMap::new(),
+            agent_word_message: HashMap::new(),
+            agent_reports: HashMap::new(),
             active_signals: HashMap::new(),
             suppress_local_user: false,
             menu: json!({"commands":[],"skills":[],"models":[],"efforts":[],"permissionModes":[],"collaborationModes":[],"agentDefinitions":[],"agentControls":[],"configOptions":[]}),
@@ -659,13 +669,50 @@ impl AcpNormalizer {
         .then_some(id)
     }
 
-    fn parent_tool_call(&self, raw: &Value) -> Option<String> {
+    fn parent_tool_call(&mut self, raw: &Value) -> Option<String> {
         let thread = raw["sessionId"].as_str().unwrap_or("root");
-        raw["update"]
+        match raw["update"]
             .pointer("/_meta/claudeCode/parentToolUseId")
             .and_then(Value::as_str)
-            .map(str::to_string)
-            .or_else(|| self.agent_tools.get(thread).cloned())
+        {
+            Some(call) => Some(self.agent_for_call(call.to_string())),
+            None => self.agent_tools.get(thread).cloned(),
+        }
+    }
+
+    /**
+     * Which sent-away agent a call belongs to, for a native subagent whose call
+     * the kit never announced.
+     *
+     * Claude's own subagents arrive twice over: once as `subagent_spawned`,
+     * which names a session of its own, and then as work stamped with the
+     * `Task` call that started it — a call for which no `tool_call` is ever
+     * sent. The two strings are different and nothing in either update joins
+     * them, so read by the agent's id the helper's pane opened on nothing
+     * (measured against a real chat, 2026-09-03: agent `a631a0e9…`, rows
+     * stamped `toolu_01KzuX…`). The join is only stated at the end, in the
+     * finished call's `toolResponse.agentId`, which is far too late for the
+     * rows already drawn.
+     *
+     * So an unannounced call, arriving while exactly one spawned agent is
+     * unclaimed, IS that agent's call. Where more than one is out at once the
+     * guess would be a coin toss, and it is not made: those rows keep the call
+     * they came with, as they did before, until `toolResponse.agentId` says
+     * which was which.
+     */
+    fn agent_for_call(&mut self, call: String) -> String {
+        if let Some(agent) = self.task_agents.get(&call) {
+            return agent.clone();
+        }
+        let announced = self.open_tools.contains(&call)
+            || self.tool_starts.contains_key(&call)
+            || self.subagent_tools.contains(&call);
+        if announced || self.unbound_agents.len() != 1 {
+            return call;
+        }
+        let agent = self.unbound_agents.remove(0);
+        self.task_agents.insert(call, agent.clone());
+        agent
     }
 
     fn message_chunk(
@@ -690,6 +737,14 @@ impl AcpNormalizer {
         let mut events = Vec::new();
         let thread = raw["sessionId"].as_str().unwrap_or("root");
         let parent = self.parent_tool_call(raw);
+        // What an asynchronous helper says is kept, not announced: it is still
+        // running, and the chat carrying on around it says nothing about
+        // whether it is done. The manager speaking again used to be read as the
+        // helper being over, which is a guess, and on a real chat it was wrong
+        // about one run in five — the helper answered afterwards and the card
+        // was left saying "I'll read both files." The helper's own terminal
+        // state ends it when there is one; otherwise the end of the turn does
+        // (bw-t26l.20).
         if role == "assistant" {
             if let Some(agent) = parent
                 .as_ref()
@@ -700,26 +755,6 @@ impl AcpNormalizer {
                         .entry(agent.clone())
                         .or_default()
                         .push_str(text);
-                }
-            } else {
-                let finished = self.deferred_agents.keys().cloned().collect::<Vec<_>>();
-                for agent in finished {
-                    let result = self.deferred_agents.remove(&agent).unwrap_or_default();
-                    if let Some((_, id)) = self.active_messages.remove(&format!("{thread}:{agent}"))
-                    {
-                        events.extend(self.complete_message(
-                            session_id,
-                            provider,
-                            raw,
-                            id,
-                            Value::Null,
-                        ));
-                    }
-                    self.subagent_tools.remove(&agent);
-                    events.push(self.envelope(session_id, provider, raw, json!({
-                        "type":"agent.finished", "agentId":agent, "state":"done", "result":result,
-                        "seconds":0, "tokens":0, "calls":0, "model":Value::Null
-                    })));
                 }
             }
         }
@@ -733,22 +768,29 @@ impl AcpNormalizer {
             .as_str()
             .filter(|id| !id.is_empty())
             .map(|id| format!("acp-{id}"));
-        let id = match (sent_id, self.active_messages.get(&lane)) {
+        let active = self.active_messages.get(&lane).cloned();
+        let id = match (sent_id, &active) {
             (Some(id), _) => id,
             (None, Some((active_role, id))) if active_role == role => id.clone(),
-            _ => {
-                if let Some((_, id)) = self.active_messages.remove(&lane) {
-                    events.extend(self.complete_message(
-                        session_id,
-                        provider,
-                        raw,
-                        id,
-                        Value::Null,
-                    ));
-                }
-                self.next_id("message")
-            }
+            _ => self.next_id("message"),
         };
+        // Whatever was being said in this place before is over: the provider
+        // has moved on to another message. Left unsaid, the reader's
+        // transcript keeps it open forever and never settles it — measured on
+        // a real chat, where two of the turn's four messages were started and
+        // never finished (bw-t26l.20).
+        if let Some((_, was)) = active {
+            if was != id {
+                self.active_messages.remove(&lane);
+                events.extend(self.complete_message(
+                    session_id,
+                    provider,
+                    raw,
+                    was,
+                    Value::Null,
+                ));
+            }
+        }
         self.active_messages
             .insert(lane.clone(), (role.to_string(), id.clone()));
         if self.started_messages.insert(id.clone()) {
@@ -768,6 +810,24 @@ impl AcpNormalizer {
                     .entry(id.clone())
                     .or_default()
                     .push_str(text);
+                // Everything said under a helper, kept whether or not the
+                // helper is still on the books. A native subagent's ending and
+                // its own last words race, and the ending wins about half the
+                // time: told only what had been said by then, the card
+                // announced "I'll read both files" as the answer to a question
+                // about two files (bw-t26l.20). One blank line between the
+                // things it said, because they are separate messages and run
+                // together they read as one sentence that never was.
+                if let Some(under) = parent.as_deref() {
+                    let previous = self
+                        .agent_word_message
+                        .insert(under.to_string(), id.clone());
+                    let words = self.agent_words.entry(under.to_string()).or_default();
+                    if !words.is_empty() && previous.is_some_and(|was| was != id) {
+                        words.push_str("\n\n");
+                    }
+                    words.push_str(text);
+                }
             }
             events.push(self.envelope(
                 session_id,
@@ -886,6 +946,18 @@ impl AcpNormalizer {
             Some("tool_call_update") => {
                 let id = update["toolCallId"].as_str().unwrap_or_default().to_string();
                 let status = update["status"].as_str().unwrap_or("in_progress");
+                // The kit finally says which call sent which native subagent.
+                // Late for the rows already drawn — `agent_for_call` guesses so
+                // they are not lost — but it settles the question for the rest,
+                // and it is the only place the two ids are ever stated together.
+                if let Some(agent) = update
+                    .pointer("/_meta/claudeCode/toolResponse/agentId")
+                    .and_then(Value::as_str)
+                    .filter(|agent| !agent.is_empty())
+                {
+                    self.task_agents.insert(id.clone(), agent.to_string());
+                    self.unbound_agents.retain(|out| out != agent);
+                }
                 let mut refinements = Vec::new();
                 if !update["rawInput"].is_null() {
                     if let Some(mut started) = self.tool_starts.get(&id).cloned() {
@@ -961,11 +1033,14 @@ impl AcpNormalizer {
                                 json!({"type":"cost","cost":self.cumulative_usage.value(),"source":"acp-subagent"}),
                             ));
                         }
+                        let state = if status == "completed" { "done" } else { "failed" };
+                        self.agent_reports
+                            .insert(id.clone(), (state.to_string(), summary.clone()));
                         events.push(self.envelope(
                             session_id,
                             provider,
                             raw,
-                            json!({"type":"agent.finished","agentId":id,"state":if status=="completed"{"done"}else{"failed"},"result":summary,"seconds":seconds,"tokens":tokens,"calls":calls,"model":model}),
+                            json!({"type":"agent.finished","agentId":id,"state":state,"result":summary,"seconds":seconds,"tokens":tokens,"calls":calls,"model":model}),
                         ));
                     }
                     if started_name == "load" {
@@ -982,6 +1057,8 @@ impl AcpNormalizer {
                                 } else {
                                     "failed"
                                 };
+                                self.agent_reports
+                                    .insert(agent.clone(), (state.to_string(), summary.clone()));
                                 events.push(self.envelope(
                                     session_id,
                                     provider,
@@ -1146,13 +1223,23 @@ impl AcpNormalizer {
                 } else {
                     "failed"
                 };
+                let summary = update.get("summary").cloned().unwrap_or(Value::Null);
+                if let Some(task) = update["asyncTaskId"].as_str() {
+                    self.agent_reports.insert(
+                        task.to_string(),
+                        (
+                            state.to_string(),
+                            summary.as_str().unwrap_or_default().to_string(),
+                        ),
+                    );
+                }
                 vec![self.envelope(
                     session_id,
                     provider,
                     raw,
                     json!({
                         "type":"agent.finished", "agentId":update["asyncTaskId"],
-                        "state":state, "result":update.get("summary").cloned().unwrap_or(Value::Null),
+                        "state":state, "result":summary,
                         "seconds":0, "tokens":0, "calls":0, "model":Value::Null,
                         "acp":update
                     }),
@@ -1162,6 +1249,9 @@ impl AcpNormalizer {
                 let child = update["subagentSessionId"].as_str().unwrap_or_default().to_string();
                 self.agent_tools.insert(child.clone(), child.clone());
                 self.subagent_tools.insert(child.clone());
+                if !self.unbound_agents.contains(&child) {
+                    self.unbound_agents.push(child.clone());
+                }
                 let name = update["name"].as_str().unwrap_or("child").to_string();
                 self.agent_names.insert(child.clone(), name.clone());
                 vec![self.envelope(
@@ -1200,6 +1290,21 @@ impl AcpNormalizer {
                     events
                 } else {
                     self.subagent_tools.remove(child);
+                    self.unbound_agents.retain(|out| out != child);
+                    self.deferred_agents.remove(child);
+                    // What it has said so far, as its result: this update
+                    // carries no report of its own. What it says AFTER this is
+                    // reported at the end of the turn, once there is nothing
+                    // left for it to add.
+                    let said = self
+                        .agent_words
+                        .get(child)
+                        .filter(|said| !said.is_empty())
+                        .cloned();
+                    self.agent_reports.insert(
+                        child.to_string(),
+                        (state.to_string(), said.clone().unwrap_or_default()),
+                    );
                     let mut events = Vec::new();
                     if self.add_agent_usage(child, tokens, included) {
                         events.push(self.envelope(
@@ -1211,7 +1316,7 @@ impl AcpNormalizer {
                         session_id,
                         provider,
                         raw,
-                        json!({"type":"agent.finished","agentId":child,"state":state,"result":Value::Null,"seconds":seconds,"tokens":tokens,"calls":calls,"model":model,"acp":update}),
+                        json!({"type":"agent.finished","agentId":child,"state":state,"result":said,"seconds":seconds,"tokens":tokens,"calls":calls,"model":model,"acp":update}),
                     ));
                     events
                 }
@@ -1256,17 +1361,61 @@ impl AcpNormalizer {
         self.suppress_local_user = false;
         let failure = Self::typed_failure(raw);
         let mut events = Vec::new();
-        for (agent, result) in std::mem::take(&mut self.deferred_agents) {
+        for (agent, chunks) in std::mem::take(&mut self.deferred_agents) {
+            // Its words as the reader saw them, message breaks and all, rather
+            // than the raw run of chunks; the two say the same thing, and
+            // reporting the spaced one keeps the correction below quiet.
+            let result = match self.agent_words.get(&agent) {
+                Some(said) if !said.is_empty() => said.clone(),
+                _ => chunks,
+            };
             if result.is_empty() {
                 continue;
             }
             self.subagent_tools.remove(&agent);
+            self.agent_reports
+                .insert(agent.clone(), ("done".to_string(), result.clone()));
             events.push(self.envelope(
                 session_id,
                 provider,
                 raw,
                 json!({
                     "type":"agent.finished", "agentId":agent, "state":"done", "result":result,
+                    "seconds":0, "tokens":0, "calls":0, "model":Value::Null
+                }),
+            ));
+        }
+        // A helper that finished before it had finished speaking. Its ending
+        // said what it had said by then; this says the whole of it, now that
+        // the turn is over and there is no more to come. Every place that ends
+        // a helper records the result it announced, and this compares against
+        // that rather than against any one of them, because which one fires is
+        // a race: an ending of the helper's own, the chat speaking again, or
+        // the dispatching call completing (bw-t26l.20). Kept across turns, not
+        // drained: an async helper outlives the turn it was launched in, and a
+        // second turn that started from an empty record would report its tail
+        // as though it were the whole report.
+        let corrections = self
+            .agent_reports
+            .iter()
+            .filter_map(|(agent, (state, reported))| {
+                let said = self.agent_words.get(agent)?;
+                (!said.is_empty() && said != reported).then(|| {
+                    (agent.clone(), state.clone(), said.clone())
+                })
+            })
+            .collect::<Vec<_>>();
+        for (agent, state, said) in corrections {
+            // Recorded as the thing now standing, so the next turn corrects
+            // only what is new rather than saying this again.
+            self.agent_reports
+                .insert(agent.clone(), (state.clone(), said.clone()));
+            events.push(self.envelope(
+                session_id,
+                provider,
+                raw,
+                json!({
+                    "type":"agent.finished", "agentId":agent, "state":state, "result":said,
                     "seconds":0, "tokens":0, "calls":0, "model":Value::Null
                 }),
             ));
@@ -2090,16 +2239,13 @@ mod tests {
                 "messageId":"parent-message","content":{"type":"text","text":"PARENT DONE"}}
             }),
         );
-        assert_eq!(
-            kinds(&parent),
-            vec![
-                "message.completed",
-                "agent.finished",
-                "message.started",
-                "text.delta"
-            ]
-        );
-        let finished = serde_json::to_value(&parent[1]).unwrap();
+        assert_eq!(kinds(&parent), vec!["message.started", "text.delta"]);
+        let settled = normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
+        let finished = settled
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "agent.finished")
+            .expect("the end of the turn is what ends a helper with no ending of its own");
         assert_eq!(finished["result"], "CHILD DONE");
     }
 
@@ -2121,6 +2267,278 @@ mod tests {
         assert_eq!(progress["tokens"], 0);
         assert_eq!(progress["calls"], 0);
         assert_eq!(progress["state"], "running");
+    }
+
+    /**
+     * Claude's own subagent, and the join nothing on the wire states in time.
+     *
+     * `subagent_spawned` names a session (`a631a0e9…` in the chat this is drawn
+     * from), and everything the helper then does arrives on the PARENT session
+     * stamped with the `Task` call that sent it (`toolu_01KzuX…`) — a call for
+     * which no `tool_call` is ever announced. The pane reads a helper's words
+     * by the agent it opened, so with the two ids left apart it opened on an
+     * empty conversation every time (bw-t26l.20).
+     */
+    #[test]
+    fn a_native_subagents_work_is_filed_under_the_agent_the_reader_opens() {
+        let mut normalizer = AcpNormalizer::default();
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"subagent_spawned",
+            "subagentSessionId":"agent-1","name":"Read the docs","task":"Read wheels.md","capabilities":{}}
+        }));
+
+        let read = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"tool_call",
+            "toolCallId":"call-read","title":"Read wheels.md","kind":"read",
+            "_meta":{"claudeCode":{"toolName":"Read","parentToolUseId":"task-call"}}}
+        }));
+        let started = serde_json::to_value(&read[0]).unwrap();
+        assert_eq!(started["parentToolCallId"], "agent-1", "the helper's call belongs to the helper");
+
+        let said = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-1","content":{"type":"text","text":"They are round."},
+            "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
+        }));
+        let message = serde_json::to_value(&said[0]).unwrap();
+        assert_eq!(message["parentToolCallId"], "agent-1");
+
+        // Finished, the card carries what it reported: this update says nothing
+        // about a result, and those are the only words it ever sent.
+        let finished = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"subagent_state_update",
+            "subagentSessionId":"agent-1","state":"completed"}
+        }));
+        let finished = serde_json::to_value(finished.last().unwrap()).unwrap();
+        assert_eq!(finished["type"], "agent.finished");
+        assert_eq!(finished["agentId"], "agent-1");
+        assert_eq!(finished["result"], "They are round.");
+
+        // And the root's own words are the root's, still.
+        let root = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-2","content":{"type":"text","text":"Done."}}
+        }));
+        assert_eq!(kinds(&root), vec!["message.started", "text.delta"]);
+        assert_eq!(serde_json::to_value(&root[0]).unwrap()["parentToolCallId"], Value::Null);
+    }
+
+    /**
+     * A helper's ending and its last words arrive in either order, and when the
+     * ending comes first the card announced whatever it had said by then — "I'll
+     * read both files" as its answer about two files (measured 2026-09-03). The
+     * rest is reported at the end of the turn, once there is no more to come.
+     */
+    #[test]
+    fn a_helper_that_finished_before_it_stopped_speaking_still_reports_what_it_said() {
+        let mut normalizer = AcpNormalizer::default();
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"subagent_spawned",
+            "subagentSessionId":"agent-1","name":"Read the docs","task":"Read wheels.md","capabilities":{}}
+        }));
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-1","content":{"type":"text","text":"I'll read both files."},
+            "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
+        }));
+        let early = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"subagent_state_update",
+            "subagentSessionId":"agent-1","state":"completed"}
+        }));
+        let early = serde_json::to_value(early.last().unwrap()).unwrap();
+        assert_eq!(early["result"], "I'll read both files.");
+
+        // The chat's own answer, in between: measured on a real chat, the
+        // manager answers first and the helper's report lands after it.
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-root","content":{"type":"text","text":"All four steps are done."}}
+        }));
+        // Its actual report, after its own ending.
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-2","content":{"type":"text","text":"They are round and hot."},
+            "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
+        }));
+        let settled = normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
+        let corrected = settled
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "agent.finished")
+            .expect("the turn ends by saying what the helper reported");
+        assert_eq!(corrected["agentId"], "agent-1");
+        assert_eq!(corrected["state"], "done");
+        assert_eq!(corrected["result"], "I'll read both files.\n\nThey are round and hot.");
+
+        // And once said, it is not said again on the next turn.
+        let quiet = normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
+        assert!(!kinds(&quiet).iter().any(|kind| *kind == "agent.finished"));
+    }
+
+    /**
+     * The provider starting a second message where the first one was is the
+     * only ending the first one gets — claude sends no completion of its own
+     * for it. Measured on a real chat: two of the turn's four messages were
+     * started and never finished, so the reader's transcript kept them open
+     * (bw-t26l.20).
+     */
+    #[test]
+    fn a_message_replaced_in_its_own_place_is_finished_rather_than_left_open() {
+        let mut normalizer = AcpNormalizer::default();
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-1","content":{"type":"text","text":"First."}}
+        }));
+        let replaced = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-2","content":{"type":"text","text":"Second."}}
+        }));
+        let replaced = replaced
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .collect::<Vec<_>>();
+        let done = replaced
+            .iter()
+            .find(|event| event["type"] == "message.completed")
+            .expect("the message that was replaced is finished");
+        assert_eq!(done["messageId"], "acp-m-1");
+        // And it is finished before the one replacing it is announced.
+        let started = replaced
+            .iter()
+            .position(|event| event["type"] == "message.started")
+            .expect("the new message is announced");
+        let finished = replaced
+            .iter()
+            .position(|event| event["type"] == "message.completed")
+            .unwrap();
+        assert!(finished < started);
+
+        // The end of the turn finishes the survivor and nothing twice over.
+        let settled = normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
+        let endings = settled
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .filter(|event| event["type"] == "message.completed")
+            .map(|event| event["messageId"].as_str().unwrap_or_default().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(endings, vec!["acp-m-2".to_string()]);
+    }
+
+    /**
+     * The shape a real chat actually had (measured 2026-09-03, and reproduced
+     * on 2 of 10 live runs): the helper said "I'll read both files.", the chat
+     * spoke while it was still reading, and only afterwards did the helper file
+     * its report. Read as an ending, the chat speaking put that first sentence
+     * on the card as the answer to a question about two files. It is not read
+     * as an ending: a helper still out is still running, and what ends it is an
+     * ending of its own or the end of the turn.
+     */
+    #[test]
+    fn a_helper_still_out_is_not_declared_over_because_the_chat_spoke() {
+        let mut normalizer = AcpNormalizer::default();
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"subagent_spawned",
+            "subagentSessionId":"agent-1","name":"Read the docs","task":"Read wheels.md","capabilities":{}}
+        }));
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-1","content":{"type":"text","text":"I'll read both files."},
+            "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
+        }));
+        // The chat answering says nothing about the helper, which is still out.
+        let spoke = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-root","content":{"type":"text","text":"The helper is still going."}}
+        }));
+        assert!(
+            !kinds(&spoke).iter().any(|kind| *kind == "agent.finished"),
+            "the chat speaking is not an ending: {:?}",
+            kinds(&spoke)
+        );
+
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-2","content":{"type":"text","text":"They are round and hot."},
+            "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
+        }));
+        let settled = normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
+        let endings = settled
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .filter(|event| event["type"] == "agent.finished")
+            .collect::<Vec<_>>();
+        assert_eq!(endings.len(), 1, "ended once, not once per guess");
+        let corrected = &endings[0];
+        assert_eq!(corrected["agentId"], "agent-1");
+        assert_eq!(corrected["result"], "I'll read both files.\n\nThey are round and hot.");
+
+        let quiet = normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
+        assert!(!kinds(&quiet).iter().any(|kind| *kind == "agent.finished"));
+
+        // An async helper outlives the turn that launched it. What it says in
+        // the next one is added to what it already said, not put in place of
+        // it: reported as the tail alone, the card would lose the report it
+        // was already showing.
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-3","content":{"type":"text","text":"And both are two lines long."},
+            "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
+        }));
+        let later = normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
+        let later = later
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "agent.finished")
+            .expect("what it said in the second turn is reported too");
+        assert_eq!(
+            later["result"],
+            "I'll read both files.\n\nThey are round and hot.\n\nAnd both are two lines long."
+        );
+    }
+
+    /**
+     * Two helpers out at once, and no honest way to tell whose call is whose
+     * until the kit says so. The guess is not made: the rows keep the call they
+     * came with rather than being filed under whichever agent was spawned first
+     * (bw-t26l.20).
+     */
+    #[test]
+    fn two_helpers_at_once_are_not_guessed_between() {
+        let mut normalizer = AcpNormalizer::default();
+        for agent in ["agent-1", "agent-2"] {
+            normalizer.update("local", "claude", &json!({
+                "sessionId":"root", "update":{"sessionUpdate":"subagent_spawned",
+                "subagentSessionId":agent,"name":"Helper","task":"Work","capabilities":{}}
+            }));
+        }
+        let said = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-1","content":{"type":"text","text":"Working"},
+            "_meta":{"claudeCode":{"parentToolUseId":"call-b"}}}
+        }));
+        assert_eq!(serde_json::to_value(&said[0]).unwrap()["parentToolCallId"], "call-b");
+
+        // Said outright, the join is taken and kept.
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"tool_call_update",
+            "toolCallId":"call-b","status":"in_progress",
+            "_meta":{"claudeCode":{"toolName":"Agent","toolResponse":{"agentId":"agent-2"}}}}
+        }));
+        let after = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-2","content":{"type":"text","text":"Still working"},
+            "_meta":{"claudeCode":{"parentToolUseId":"call-b"}}}
+        }));
+        assert_eq!(serde_json::to_value(&after[0]).unwrap()["parentToolCallId"], "agent-2");
+
+        // And with one of the two now claimed, the other's call is no longer
+        // ambiguous.
+        let other = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-3","content":{"type":"text","text":"Me too"},
+            "_meta":{"claudeCode":{"parentToolUseId":"call-a"}}}
+        }));
+        assert_eq!(serde_json::to_value(&other[0]).unwrap()["parentToolCallId"], "agent-1");
     }
 
     #[test]

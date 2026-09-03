@@ -55,11 +55,26 @@ export function asleepHere(state: SessionState): boolean {
   return state === 'dormant';
 }
 
-/** A button on a permission card. */
+/**
+ * A button on a permission card.
+ *
+ * `kind` is the protocol's own word for what the button does, and is the only
+ * part of the button that reads the same for every agent: the id is the agent's
+ * vocabulary ("allow-once", "allow-with-updates", "reject") and so is the label
+ * ("Yes", "No"). A refusal arrives from ACP as `reject_once` or `reject_always`
+ * — never as `deny`, which was the only refusal this union named, so nothing
+ * looking for a refusal ever found one (bw-t26l.20). `deny` stays for the
+ * questions the app raises itself.
+ */
 export interface AskOption {
   id: string;
   label: string;
-  kind: 'allow_once' | 'allow_always' | 'deny' | 'answer';
+  kind: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always' | 'deny' | 'answer';
+}
+
+/** Whether a button on a permission card is the one that refuses. */
+export function refuses(kind: AskOption['kind']): boolean {
+  return kind === 'reject_once' || kind === 'reject_always' || kind === 'deny';
 }
 
 /** One provider-neutral choice in a question form. */

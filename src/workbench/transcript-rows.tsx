@@ -42,6 +42,7 @@ import { ChatWidgetView } from '@/workbench/chat-widget-view';
 import { widgetSpecs } from '@/workbench/chat-widgets';
 import { colourOfBand, lookOfRan, markOfRan } from '@/workbench/ran-look';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
+import { refuses } from '@/workbench/protocol';
 import type { AskOption, ImagePayload, LookableImage } from '@/workbench/protocol';
 import { Chipped, SplitPaths, withChips } from '@/workbench/split-paths';
 import { PathChip } from '@/workbench/path-chip';
@@ -90,7 +91,19 @@ export const PermissionCard = memo(function PermissionCard({
   const raisedBy = sentBy ? askedBy || 'an agent this chat sent off' : null;
 
   if (chosen) {
-    const answered = question ? 'Answered' : chosen === 'deny' ? 'Denied' : 'Allowed';
+    // What was chosen is an option id in the agent's own vocabulary — Claude
+    // refuses with "reject", another agent with something else — so the id is
+    // no use for telling a refusal from a permission. Its kind is the
+    // protocol's word and is the same everywhere, and the option it belongs to
+    // is right here. Comparing the id against "deny" instead meant that
+    // pressing No on a real ACP card left the card reading "Denied · Edit
+    // notes.txt" only in a test: live, it said "Allowed" for a tool the person
+    // had just refused (bw-t26l.20).
+    const answered = question
+      ? 'Answered'
+      : refuses(options.find((o) => o.id === chosen)?.kind ?? 'allow_once')
+        ? 'Denied'
+        : 'Allowed';
     return (
       <Panel
         data-testid="permission-card"
@@ -125,16 +138,35 @@ export const PermissionCard = memo(function PermissionCard({
         </div>
       )}
       <div className="text-sm font-medium text-foreground">{question ? toolName : `Allow ${toolName}?`}</div>
-      <div className="mt-0.5 break-all font-mono text-xs text-muted-foreground">{title}</div>
+      {/* Only when it says something the line above did not. An ACP permission
+          request carries one human sentence for the call — "Edit notes.txt" —
+          and it arrives as both the name and the detail, so the card asked
+          "Allow Edit notes.txt?" and then repeated "Edit notes.txt" underneath
+          it in mono, as though the second line were the file it was about
+          (bw-t26l.20). Agents that do send a bare tool name still get both. */}
+      {title !== toolName && (
+        <div className="mt-0.5 break-all font-mono text-xs text-muted-foreground">{title}</div>
+      )}
       {href && <a href={href} target="_blank" rel="noreferrer" className="mt-2 block break-all text-xs text-primary underline">Open {href}</a>}
       <div className="mt-3 flex flex-wrap gap-2">
         {options.map((o) => (
           <Button
             key={o.id}
             size="sm"
-            variant={o.kind === 'deny' ? 'outline' : o.kind === 'allow_always' ? 'secondary' : 'primary'}
+            // The refusal is drawn as the quiet one. Asking whether the kind
+            // was "deny" was asking about a word ACP does not use, so on every
+            // real card the No button came out styled exactly like the Yes
+            // beside it — the two answers to the question offered with equal
+            // weight (bw-t26l.20).
+            variant={refuses(o.kind) ? 'outline' : o.kind === 'allow_always' ? 'secondary' : 'primary'}
             disabled={pending !== null}
             data-testid={`permission-${o.id}`}
+            // The option's id is the agent's own word — Claude says
+            // "allow-once", another agent says something else — while its ACP
+            // kind is the protocol's, and the same for every agent. Both are on
+            // the button so anything looking for "the one that allows" can ask
+            // for the kind rather than guess at a vocabulary (bw-t26l.20).
+            data-ask-kind={o.kind}
             onClick={() => {
               setPending(o.id);
               void sendCommand({ type: 'ask.answer', sessionId, askId, optionId: o.id }).catch(() =>
