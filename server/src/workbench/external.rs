@@ -673,12 +673,31 @@ pub fn claude_holds(config: &Path, proc_root: &Path, now_ms: i64) -> Vec<Provide
                     .as_deref()
                     .and_then(|record| record_doing(record, now_ms));
                 let marked = marker.status.as_deref().and_then(marker_doing);
+                // A marker's status is a claim about the moment it was
+                // written; the record goes on being written after it. Where
+                // the record has spoken since, it is the newer of the two and
+                // answers — the same rule the announced status is held to
+                // above. Without it a chat whose marker last said "idle"
+                // stayed Idle on the list through a whole working turn, which
+                // is most of a turn: the marker is written when a turn ends
+                // and the record on every line of the next one (bw-t26l.20).
+                let outrun = match (spoke_at, marker.status_at) {
+                    (Some(spoke), Some(at)) => spoke > at + TOLD_GRACE_MS,
+                    (Some(_), None) => true,
+                    _ => false,
+                };
                 let (doing, since, detail) = match marked {
                     Some(HeldDoing::Working) => {
                         read.unwrap_or((HeldDoing::Working, marker.status_at, None))
                     }
-                    Some(HeldDoing::Idle) => (HeldDoing::Idle, None, None),
-                    Some(doing) => (doing, marker.status_at, None),
+                    Some(HeldDoing::Idle) => match read {
+                        Some(read) if outrun => read,
+                        _ => (HeldDoing::Idle, None, None),
+                    },
+                    Some(doing) => match read {
+                        Some(read) if outrun => read,
+                        _ => (doing, marker.status_at, None),
+                    },
                     None => read.unwrap_or((HeldDoing::Unknown, None, None)),
                 };
                 (doing, since, detail, false)
@@ -1371,6 +1390,57 @@ mod tests {
 
         fs::write(proc_root.join("42/stat"), stat("reused")).unwrap();
         assert!(claude_holds(&config, &proc_root, 1_000).is_empty());
+    }
+
+    /**
+     * A marker that last said "idle" does not go on saying it while the chat
+     * is working (bw-t26l.20).
+     *
+     * The marker is written when a turn ends; the record is written on every
+     * line of the next one. So for most of a working turn the marker's word is
+     * the older of the two, and taking it at face value drew a busy terminal
+     * chat as Idle on the list — which is what the owner reported seeing "in a
+     * lot of situations".
+     */
+    #[test]
+    fn native_workbench_services_an_idle_marker_loses_to_a_record_still_being_written() {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("claude");
+        let sessions = config.join("sessions");
+        let records = config.join("projects/-project");
+        let proc_root = root.path().join("proc");
+        fs::create_dir_all(&sessions).unwrap();
+        fs::create_dir_all(&records).unwrap();
+        fs::create_dir_all(proc_root.join("42")).unwrap();
+        fs::write(proc_root.join("42/stat"), stat("9001")).unwrap();
+        fs::write(
+            sessions.join("42.json"),
+            serde_json::json!({
+                "sessionId": CHAT, "pid": 42, "cwd": "/project", "startedAt": 100,
+                "procStart": "9001", "entrypoint": "cli", "kind": "interactive",
+                "status": "idle", "statusUpdatedAt": 1_764_000_000_000i64
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let record = records.join(format!("{CHAT}.jsonl"));
+        let working = serde_json::json!({
+            "type":"assistant","timestamp":"2026-09-03T11:00:00.000Z",
+            "message":{"content":[{"type":"tool_use","name":"Bash"}]}
+        });
+        fs::write(&record, format!("{working}\n")).unwrap();
+        let hold = claude_holds(&config, &proc_root, 1_764_000_060_000).remove(0);
+        assert_eq!(hold.doing, HeldDoing::Working, "the record has spoken since");
+
+        // And where the record has NOT spoken since, the marker's word stands.
+        let answered = serde_json::json!({
+            "type":"assistant","timestamp":"2025-01-01T00:00:00.000Z",
+            "message":{"content":[{"type":"text","text":"Done."}]}
+        });
+        fs::write(&record, format!("{answered}\n")).unwrap();
+        let hold = claude_holds(&config, &proc_root, 1_764_000_060_000).remove(0);
+        assert_eq!(hold.doing, HeldDoing::Idle);
     }
 
     #[cfg(unix)]
