@@ -90,7 +90,10 @@ chunks, the more human merges the gate demands.
 - provide a landing command the agent is told about. The beads CLI has
   `bd merge-slot acquire`, which reads like part of such a protocol, but nothing
   in the skill or the session-start message says landing goes through it, or what
-  to run once the slot is held.
+  to run once the slot is held. Measured: acquiring the slot (`✓ Acquired merge
+  slot: bw-merge-slot, Holder: s-9495be4e`) does not lift the gate — the same
+  fast-forward merge is refused with the slot held, so either the slot is not the
+  landing protocol or the gate does not know about it.
 
 **Cost.** Every slice of finished, tested work waits on the owner.
 
