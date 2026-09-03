@@ -1,0 +1,100 @@
+
+> atelier@0.21.2 build
+> next build
+
+  ▲ Next.js 14.2.35
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Skipping linting
+   Checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/7) ...
+   Generating static pages (1/7) 
+   Generating static pages (3/7) 
+   Generating static pages (5/7) 
+ ✓ Generating static pages (7/7)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                              Size     First Load JS
+┌ ○ /                                    15.9 kB         258 kB
+├ ○ /_not-found                          880 B          89.6 kB
+├ ○ /project                             953 kB         1.19 MB
+├ ○ /settings                            11.6 kB         195 kB
+└ ○ /settings/agent-files                4.71 kB         212 kB
++ First Load JS shared by all            88.8 kB
+  ├ chunks/1528-8f104cc0884372dc.js      32 kB
+  ├ chunks/1dd3208c-09b141c9f7f692b6.js  53.6 kB
+  └ other shared chunks (total)          3.17 kB
+
+
+○  (Static)  prerendered as static content
+
+   Compiling atelier v0.21.2 (/home/ahsan/dev/beads-web/worktrees/bw-t26l.20/server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.47s
+{"status":"ok","workbench":"native"}
+
+Running 2 tests using 1 worker
+
+  ✘  1 [chromium] › tests/e2e/chat-agents.spec.ts:732:7 › the agents a chat sends off › a chat read back from the record keeps its agents apart (15.5s)
+  ✘  2 [chromium] › tests/e2e/chat-agents.spec.ts:894:7 › the agents a chat sends off › three agents it sent away, each its own row, and the turn counting all three (20.2s)
+
+
+  1) [chromium] › tests/e2e/chat-agents.spec.ts:732:7 › the agents a chat sends off › a chat read back from the record keeps its agents apart 
+
+    Error: expect(locator).toHaveCount(expected) failed
+
+    Locator:  locator('[data-testid="assistant-message"][data-sent-by="toolu_01FixtureSentItOff"]').filter({ hasText: 'Reading the board now.' })
+    Expected: 1
+    Received: 0
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveCount" with timeout 5000ms
+      - waiting for locator('[data-testid="assistant-message"][data-sent-by="toolu_01FixtureSentItOff"]').filter({ hasText: 'Reading the board now.' })
+        14 × locator resolved to 0 elements
+           - unexpected value "0"
+
+
+      761 |       // it — the whole of this item in one line.
+      762 |       const helperSaid = page.locator(`[data-testid="assistant-message"][data-sent-by="${SENT_OFF_CALL}"]`);
+    > 763 |       await expect(helperSaid.filter({ hasText: HELPER_SAID })).toHaveCount(1);
+          |                                                                 ^
+      764 |       expect(
+      765 |         await itsOwn.filter({ hasText: HELPER_SAID }).count(),
+      766 |         'the helper’s sentence was drawn as the chat’s own',
+        at /home/ahsan/dev/beads-web/worktrees/bw-t26l.20/tests/e2e/chat-agents.spec.ts:763:65
+
+    Error Context: tests/.artifacts/e2e-chat-agents-the-agents-cb077-cord-keeps-its-agents-apart-chromium/error-context.md
+
+  2) [chromium] › tests/e2e/chat-agents.spec.ts:894:7 › the agents a chat sends off › three agents it sent away, each its own row, and the turn counting all three 
+
+    Error: expect(locator).toHaveAttribute(expected) failed
+
+    Locator:  getByTestId('cost-chip')
+    Expected: "35200"
+    Received: "6400"
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveAttribute" with timeout 5000ms
+      - waiting for getByTestId('cost-chip')
+        14 × locator resolved to <span data-slot="badge" data-total="6400" data-kind="tokens" data-testid="cost-chip" title="Total usage including subagents" class="items-center whitespace-nowrap justify-center align-middle border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0 rounded-sm px-[0.325rem] h-5 min-w-5 gap-1 text-[0.6875rem] leading-[0.9375rem] [&_svg]:size-3 bg-secondary text-secondary-foreground hidden font-mono sm:inline-flex">…</span>
+           - unexpected value "6400"
+
+
+      921 |       await expect(chip).toBeVisible();
+      922 |       await expect(chip).toHaveAttribute('data-kind', 'tokens');
+    > 923 |       await expect(chip).toHaveAttribute('data-total', String(written.spend.total));
+          |                          ^
+      924 |       // Said as a sum rather than as one number, so a failure says which half
+      925 |       // went missing: the delegated work is most of this chat's bill.
+      926 |       expect(written.spend.total, 'the fixture spent nothing on its helpers').toBe(
+        at /home/ahsan/dev/beads-web/worktrees/bw-t26l.20/tests/e2e/chat-agents.spec.ts:923:26
+
+    Error Context: tests/.artifacts/e2e-chat-agents-the-agents-27691-the-turn-counting-all-three-chromium/error-context.md
+
+  2 failed
+    [chromium] › tests/e2e/chat-agents.spec.ts:732:7 › the agents a chat sends off › a chat read back from the record keeps its agents apart 
+    [chromium] › tests/e2e/chat-agents.spec.ts:894:7 › the agents a chat sends off › three agents it sent away, each its own row, and the turn counting all three 

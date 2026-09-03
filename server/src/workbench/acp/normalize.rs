@@ -163,6 +163,26 @@ impl AcpNormalizer {
         }
     }
 
+    /**
+     * Which sent-away agent a call belongs to, asked without claiming anything.
+     *
+     * The permission road is not the update road: a question arrives on its own
+     * request, out of turn, and the state it reads belongs to the stream beside
+     * it. So it may look up a join that has already been made, and may NOT make
+     * one — `agent_for_call` binds an unclaimed agent to the first unannounced
+     * call it sees, and a question is not the work that proves the binding.
+     *
+     * Unjoined, the call itself is the answer: the panel matches a row by its
+     * agent id OR by the call that started it, so an unjoined call still names
+     * the helper on screen (bw-t26l.20).
+     */
+    pub fn agent_of_call(&self, call: &str) -> String {
+        self.task_agents
+            .get(call)
+            .cloned()
+            .unwrap_or_else(|| call.to_string())
+    }
+
     pub fn seed_usage(&mut self, cost: Option<&Value>) {
         if let Some(cost) = cost.filter(|cost| cost["kind"] == "tokens") {
             self.cumulative_usage = TokenTally::cost(cost);
@@ -2730,6 +2750,33 @@ mod tests {
         assert_eq!(progress["tokens"], 0);
         assert_eq!(progress["calls"], 0);
         assert_eq!(progress["state"], "running");
+    }
+
+    /**
+     * A question arrives on its own request, beside the stream, and asks the
+     * stream who sent the helper that raised it. It may read the join; it may
+     * not make one, or a helper's first question would claim an agent that a
+     * later piece of work belonged to (bw-t26l.20).
+     */
+    #[test]
+    fn asking_who_sent_a_call_claims_nothing() {
+        let mut normalizer = AcpNormalizer::default();
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"subagent_spawned",
+            "subagentSessionId":"agent-1","name":"Count","task":"Count the rows","capabilities":{}}
+        }));
+
+        // Unjoined, the call is its own answer — and the unclaimed agent is
+        // still there for the work that proves the binding.
+        assert_eq!(normalizer.agent_of_call("task-call"), "task-call");
+
+        let read = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"tool_call",
+            "toolCallId":"call-read","title":"Read wheels.md","kind":"read",
+            "_meta":{"claudeCode":{"toolName":"Read","parentToolUseId":"task-call"}}}
+        }));
+        assert_eq!(serde_json::to_value(&read[0]).unwrap()["parentToolCallId"], "agent-1");
+        assert_eq!(normalizer.agent_of_call("task-call"), "agent-1");
     }
 
     /**

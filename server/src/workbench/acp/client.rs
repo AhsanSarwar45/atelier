@@ -608,8 +608,22 @@ async fn permission(
     database: ChatDb,
     local_session_id: String,
     broker: Arc<PermissionBroker>,
+    normalizer: Option<Arc<Mutex<AcpNormalizer>>>,
 ) -> Result<RequestPermissionResponse, agent_client_protocol::Error> {
     let raw = serde_json::to_value(&request).map_err(acp_error)?;
+    // A question a sent-away helper raised is stamped with the call that sent
+    // it, in the same place the helper's work is: `_meta.claudeCode`. Without
+    // it every question read as the chat's own, so a helper's question was
+    // drawn with no word about who was waiting on the answer, and the helper's
+    // own pane — which finds its rows by that call — never showed the question
+    // at all (measured against the pinned claude adapter, 2026-09-03).
+    let sent_by = match raw.pointer("/toolCall/_meta/claudeCode/parentToolUseId") {
+        Some(Value::String(call)) if !call.is_empty() => match normalizer.as_ref() {
+            Some(state) => Value::String(state.lock().await.agent_of_call(call)),
+            None => Value::String(call.clone()),
+        },
+        _ => Value::Null,
+    };
     let ask_id = raw["toolCall"]["toolCallId"]
         .as_str()
         .filter(|id| !id.is_empty())
@@ -693,6 +707,7 @@ async fn permission(
             "type":"ask.permission", "sessionId":local_session_id, "seq":0, "at":now(),
             "askId":ask_id, "toolName":tool_title,
             "title":tool_title, "input":tool_input,
+            "parentToolCallId":sent_by,
             "options":options, "acp":raw
         }))?
     };
@@ -1530,6 +1545,7 @@ impl AcpDriver {
             let permission_db = task_database.clone();
             let permission_session = task_session.id.clone();
             let permission_broker = task_permissions.clone();
+            let permission_normalizer = normalizer.clone();
             let elicitation_db = task_database.clone();
             let elicitation_session = task_session.id.clone();
             let elicitation_broker = task_elicitations.clone();
@@ -1584,6 +1600,7 @@ impl AcpDriver {
                             permission_db.clone(),
                             permission_session.clone(),
                             permission_broker.clone(),
+                            Some(permission_normalizer.clone()),
                         )
                         .await?;
                         responder.respond(response)
