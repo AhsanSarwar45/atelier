@@ -428,6 +428,80 @@ test.describe('a chat another program is running', () => {
   });
 
   /**
+   * A chat another program is working in is read while nobody here is looking.
+   *
+   * The reading used to start when the chat was opened and stop when the reader
+   * looked away, so a terminal chat went on working with this app knowing
+   * nothing about it, and switching back paid for the whole silent stretch at
+   * once — a quiet chat that suddenly produced everything it had said, and a
+   * switch that was never instant. Now the watch poller keeps reading every
+   * chat somebody else holds, and this is that: something said while the
+   * reader was in another chat is in the store before the row is clicked, and
+   * on the screen the moment it is (bw-t26l.20).
+   *
+   * The marker says "idle" on purpose. It is the word a terminal writes when a
+   * turn ends and does not rewrite while the next one runs, and it was taken at
+   * face value: a chat mid-command drawn as Idle. The record has spoken since,
+   * so the record answers.
+   */
+  test('keeps reading a chat another program runs while the reader is elsewhere', async ({ page, request }) => {
+    test.setTimeout(180_000);
+    const project = await aProjectOfItsOwn(request, 'unwatched');
+    putAwayAfter(() => project.remove());
+    const opening = 'Rework the sidebar while nobody is watching';
+    const elsewhere = 'Read the release notes back to me';
+    const chat = aChatSomebodyElseIsIn(project.path, opening);
+    const other = aChatSomebodyElseIsIn(project.path, elsewhere);
+    const release = claimConversation(chat.id, { status: 'idle' });
+    const row = page.locator(`[data-testid="restore-row"][data-external-id="${chat.id}"]`);
+    const otherRow = page.locator(`[data-testid="restore-row"][data-external-id="${other.id}"]`);
+
+    try {
+      await openChatTab(page, project);
+      await expect(row, 'the chat being worked in was not offered').toBeVisible({ timeout: 30_000 });
+      // Read once, so the app has a row of its own for it; then look away.
+      await row.getByTestId('row-name').click();
+      await expect(page.getByTestId('transcript').getByText(opening)).toBeVisible({ timeout: 30_000 });
+      await otherRow.getByTestId('row-name').click();
+      await expect(page.getByTestId('transcript').getByText(elsewhere)).toBeVisible({ timeout: 30_000 });
+
+      // The other program goes on working while nobody here is looking: it
+      // says something, then starts a command it has not got the answer to.
+      const said = 'the suite came back green, 282 passed';
+      chat.says(said);
+      chat.runs('Bash', { command: 'npm run build' });
+
+      // The row says it is working, whatever the marker last wrote.
+      await expect(row.getByTestId('row-pill')).toContainText('Working', { timeout: 30_000 });
+      await page.screenshot({ path: 'tests/results/chat-live-worked-in-while-elsewhere.png' });
+
+      // What it said was read while nobody looked: it is in the store before
+      // the row is clicked.
+      const q = new URLSearchParams({ project: project.id, path: project.path });
+      const rows = (await (await request.get(`${backend()}/api/workbench/restore?${q}`)).json()) as RestoreRow[];
+      const sessionId = rows.find((r) => r.externalId === chat.id)?.sessionId;
+      expect(sessionId, 'the chat has no row of its own').toBeTruthy();
+      await expect
+        .poll(
+          async () => {
+            const stored = (await (
+              await request.get(`${backend()}/api/workbench/history?session=${sessionId}&before=9007199254740991`)
+            ).json()) as { items: unknown[] };
+            return JSON.stringify(stored.items).includes(said);
+          },
+          { timeout: 30_000, message: 'what was said while nobody looked was never read' },
+        )
+        .toBe(true);
+
+      // So switching to it is switching, not loading.
+      await row.getByTestId('row-name').click();
+      await expect(page.getByTestId('transcript').getByText(said)).toBeVisible({ timeout: 3_000 });
+    } finally {
+      release();
+    }
+  });
+
+  /**
    * What the other program was in the middle of when the reader walked away.
    *
    * A record being written to right now ends in commands whose answers have not
