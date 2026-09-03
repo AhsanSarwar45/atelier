@@ -689,7 +689,7 @@ fn mutation_paths(data: &Value) -> Vec<PathBuf> {
                     return targets;
                 }
                 if let Some(call) = git_call(&segment, &here) {
-                    if git_mutates(&call) {
+                    if git_mutates(&call) && !lands(&call) {
                         targets.push(call.cwd);
                     }
                     return targets;
@@ -700,6 +700,22 @@ fn mutation_paths(data: &Value) -> Vec<PathBuf> {
             .collect(),
         _ => Vec::new(),
     }
+}
+
+/// A fast-forward merge, which is how finished work lands.
+///
+/// It writes nothing of its own: it moves a branch onto commits that were
+/// written, named and reviewed under their own card, in that card's worktree.
+/// The landing branch's checkout is not anybody's card worktree and never can
+/// be, so the ownership rule would refuse every landing there is — and refuse
+/// it in the one place the instructions say to do it. The merge gate is what
+/// governs a landing (fast-forward only, the merge slot's holder, a clean tree),
+/// so leave this to it.
+fn lands(call: &GitCall<'_>) -> bool {
+    call.segment.words[call.verb].text == "merge"
+        && call.segment.words[call.verb + 1..]
+            .iter()
+            .any(|word| word.text == "--ff-only")
 }
 
 fn worktree_issue(path: &Path) -> Option<String> {
@@ -1510,6 +1526,23 @@ mod tests {
             json!({"tool_name":"Edit", "cwd":"/repo", "tool_input":{"file_path":"src/lib.rs"}});
         let refusal = workflow(&data).expect("a denial");
         assert_eq!(refusal["hookSpecificOutput"]["permissionDecision"], "deny");
+    }
+
+    #[test]
+    fn native_machinery_lets_a_fast_forward_landing_reach_its_own_gate() {
+        // The landing branch's checkout is nobody's card worktree, so the
+        // ownership rule would refuse every landing. A fast-forward merge is
+        // the merge gate's business, not the workflow gate's.
+        let landing = json!({"tool_name":"Bash", "cwd":"/repo",
+            "tool_input":{"command":"git merge --ff-only bw-t26l.20"}});
+        assert!(workflow(&landing).is_none());
+        // Any other merge is still a change like any other.
+        let ordinary = json!({"tool_name":"Bash", "cwd":"/repo",
+            "tool_input":{"command":"git merge bw-t26l.20"}});
+        assert_eq!(
+            workflow(&ordinary).expect("a denial")["hookSpecificOutput"]["permissionDecision"],
+            "deny"
+        );
     }
 
     #[test]
