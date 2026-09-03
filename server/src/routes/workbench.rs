@@ -41,6 +41,8 @@ pub struct WorkbenchState {
     hold_memory: Arc<tokio::sync::Mutex<HoldMemory>>,
     usage_cache: Arc<tokio::sync::Mutex<HashMap<String, (std::time::Instant, Value)>>>,
     usage_refreshes: Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+    discovery_cache: Arc<tokio::sync::Mutex<HashMap<String, (std::time::Instant, Vec<Value>)>>>,
+    discoveries: Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     claude_usage_reader:
         Arc<tokio::sync::Mutex<Option<crate::workbench::claude::transport::ClaudeTransport>>>,
     codex_readers: Arc<
@@ -107,6 +109,8 @@ impl WorkbenchState {
             hold_memory: Arc::new(tokio::sync::Mutex::new(HoldMemory::default())),
             usage_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             usage_refreshes: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            discovery_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            discoveries: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             claude_usage_reader: Arc::new(tokio::sync::Mutex::new(None)),
             codex_readers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             codex_records: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -253,6 +257,14 @@ impl WorkbenchState {
         if let Some(reader) = removed {
             reader.close().await;
         }
+    }
+
+    async fn discovery(&self, key: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut running = self.discoveries.lock().await;
+        running
+            .entry(key.to_string())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
     }
 
     async fn usage_refresh(&self, brand: &str) -> Arc<tokio::sync::Mutex<()>> {
@@ -882,6 +894,56 @@ fn restore_clock(row: &Value) -> &str {
         .unwrap_or_default()
 }
 
+/// How long one discovery answer serves every reader who asks for the same
+/// folder. Discovery is not a database read: it starts an ACP adapter for each
+/// provider, waits out its handshake, pages `session/list`, and reads the
+/// provider's own record beside it. The sidebar asks on open, on focus and on
+/// every project switch, so the answers overlapped — each one paying that price
+/// again, and each one holding a connection open while the others did.
+const DISCOVERY_FRESH: Duration = Duration::from_secs(5);
+
+/// Every saved chat a provider knows about, asked once for everyone.
+///
+/// Callers asking about the same folder in the same breath wait on one another
+/// rather than starting their own adapters, and the one that runs leaves its
+/// answer behind for the rest of the window. This is also what keeps a chat to
+/// one row: two overlapping discoveries each saw a chat no row matched, and
+/// each cached a row for it (bw-t26l.20).
+async fn provider_sessions_shared(
+    state: &WorkbenchState,
+    project: Option<&str>,
+    everything: bool,
+) -> Vec<Value> {
+    let key = format!("{}\u{0}{everything}", project.unwrap_or_default());
+    if let Some(rows) = fresh_discovery(&state.discovery_cache, &key).await {
+        return rows;
+    }
+    let running = state.discovery(&key).await;
+    let _running = running.lock().await;
+    if let Some(rows) = fresh_discovery(&state.discovery_cache, &key).await {
+        return rows;
+    }
+    let rows = provider_sessions(state, project, everything).await;
+    state
+        .discovery_cache
+        .lock()
+        .await
+        .insert(key, (std::time::Instant::now(), rows.clone()));
+    rows
+}
+
+async fn fresh_discovery(
+    cache: &tokio::sync::Mutex<HashMap<String, (std::time::Instant, Vec<Value>)>>,
+    key: &str,
+) -> Option<Vec<Value>> {
+    cache
+        .lock()
+        .await
+        .get(key)
+        .filter(|(at, _)| at.elapsed() < DISCOVERY_FRESH)
+        .map(|(_, rows)| rows.clone())
+}
+
 /// Every saved chat a provider knows about, however it is asked.
 ///
 /// ACP `session/list` is the standard way to ask and is asked first, but the
@@ -1043,7 +1105,7 @@ async fn restore(
             restore_row(session, linked, &holds)
         })
         .collect();
-    let known_sessions = provider_sessions(&state, query.path.as_deref(), everything).await;
+    let known_sessions = provider_sessions_shared(&state, query.path.as_deref(), everything).await;
     for known in known_sessions {
         let key = format!(
             "{}:{}",
@@ -2124,6 +2186,47 @@ mod tests {
         assert_eq!(rows[0]["sessionId"], "chat-1");
         assert_eq!(rows[0]["title"], "The chat that must remain visible");
         assert_eq!(rows[0]["runningElsewhere"], false);
+    }
+
+    /**
+     * One discovery answer serves everyone who asks in the same breath.
+     *
+     * The sidebar asks on open, on focus and on every project switch, and each
+     * ask used to start an ACP adapter per provider and read the provider's
+     * whole record beside it. What is asserted here is the gate that stops
+     * that: an answer inside its window is handed back as it stands, and one
+     * past it is not (bw-t26l.20).
+     */
+    #[tokio::test]
+    async fn native_workbench_shares_one_discovery_between_overlapping_asks() {
+        let (_directory, state) = fixture();
+        let key = format!("/work/project\u{0}false");
+        let listed = vec![json!({"brand":"claude","externalId":"thread-1"})];
+        state
+            .discovery_cache
+            .lock()
+            .await
+            .insert(key.clone(), (std::time::Instant::now(), listed.clone()));
+        let rows = provider_sessions_shared(&state, Some("/work/project"), false).await;
+        assert_eq!(rows, listed, "a fresh answer is handed back as it stands");
+
+        state.discovery_cache.lock().await.insert(
+            key.clone(),
+            (
+                std::time::Instant::now() - DISCOVERY_FRESH - Duration::from_secs(1),
+                listed,
+            ),
+        );
+        assert!(
+            fresh_discovery(&state.discovery_cache, &key).await.is_none(),
+            "an answer past its window is asked again"
+        );
+        // And the folder is part of what makes an answer this reader's.
+        assert!(
+            fresh_discovery(&state.discovery_cache, "/somewhere/else\u{0}false")
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]
