@@ -455,6 +455,41 @@ impl AcpNormalizer {
             .and_then(Self::failure_signal)
     }
 
+    /// What a turn that did not simply end has to say for itself.
+    ///
+    /// ACP names five stop reasons and only `end_turn` means the work is
+    /// done. Of the rest, `refusal` the spec asks in so many words to be
+    /// reflected in the UI — the prompt and everything after it is left out
+    /// of the next one, so a reader who is not told will retype it and get
+    /// nothing — and the two ceilings stop a turn in the middle of its work.
+    /// Read as a condition of the turn rather than as a failure, because
+    /// nothing broke: the agent answered, and the answer was that it stopped.
+    /// `cancelled` says only that the reader's own stop button worked, so it
+    /// passes without a notice (bw-t26l.20).
+    fn stop_reason_signal(raw: &Value) -> Option<Value> {
+        let (kind, detail) = match raw["stopReason"].as_str()? {
+            "refusal" => (
+                "refusal",
+                "The agent declined to continue. This prompt and everything after it \
+                 will not be part of the next one.",
+            ),
+            "max_tokens" => (
+                "turn_limit",
+                "The turn stopped at the model's token ceiling before it was finished.",
+            ),
+            "max_turn_requests" => (
+                "turn_limit",
+                "The turn stopped at the provider's ceiling on requests in one turn.",
+            ),
+            _ => return None,
+        };
+        Some(json!({
+            "id":format!("condition:{kind}"), "kind":kind, "phase":"active",
+            "severity":"error", "scope":"turn", "detail":detail,
+            "retryAt":Value::Null, "action":Value::Null
+        }))
+    }
+
     fn record_signal(&mut self, signal: &Value) {
         if let (Some(id), Some(kind)) = (signal["id"].as_str(), signal["kind"].as_str()) {
             self.active_signals.insert(id.to_string(), kind.to_string());
@@ -1462,6 +1497,17 @@ impl AcpNormalizer {
         } else {
             events.extend(self.resolve_signals(session_id, provider, raw));
         }
+        // Recorded after the resolving above, so it stands until the turn
+        // after this one finishes rather than being cleared by its own turn.
+        if let Some(signal) = Self::stop_reason_signal(raw) {
+            self.record_signal(&signal);
+            events.push(self.envelope(
+                session_id,
+                provider,
+                raw,
+                json!({"type":"provider.message","signal":signal}),
+            ));
+        }
         events.push(self.envelope(
             session_id,
             provider,
@@ -1524,6 +1570,53 @@ mod tests {
         normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello"}}}));
         let events = normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
         assert_eq!(kinds(&events), vec!["message.completed", "session.state"]);
+    }
+
+    /// A turn can end four ways that are not "done", and the reader was told
+    /// none of them: the transcript went quiet and the chip said Ready. The
+    /// spec asks for a refusal in particular to be shown, because the prompt
+    /// it refused is dropped from the next one — retyping it is the reader's
+    /// obvious next move and would silently do nothing (bw-t26l.20).
+    #[test]
+    fn a_turn_that_stopped_short_says_so() {
+        for (reason, kind) in [
+            ("refusal", "refusal"),
+            ("max_tokens", "turn_limit"),
+            ("max_turn_requests", "turn_limit"),
+        ] {
+            let mut normalizer = AcpNormalizer::default();
+            let events = normalizer.finish_turn("local", "claude", &json!({"stopReason":reason}));
+            assert_eq!(
+                kinds(&events),
+                vec!["provider.message", "session.state"],
+                "{reason} passed without a word"
+            );
+            let signal = serde_json::to_value(&events[0]).unwrap();
+            assert_eq!(signal["signal"]["kind"], kind);
+            assert_eq!(signal["signal"]["phase"], "active");
+            assert_eq!(signal["signal"]["scope"], "turn");
+            assert!(
+                signal["signal"]["detail"]
+                    .as_str()
+                    .is_some_and(|detail| !detail.is_empty()),
+                "a notice with nothing to read is not a notice"
+            );
+            // Nothing broke — the agent answered, and the answer was that it
+            // stopped — so the chat is ready for the next thing, not errored.
+            let state = serde_json::to_value(&events[1]).unwrap();
+            assert_eq!(state["state"], "idle");
+        }
+    }
+
+    /// The ordinary ending, and cancelling, stay silent: one is the work being
+    /// done, the other is the reader's own stop button reporting success.
+    #[test]
+    fn an_ordinary_ending_and_a_cancelled_one_raise_no_notice() {
+        for reason in ["end_turn", "cancelled"] {
+            let mut normalizer = AcpNormalizer::default();
+            let events = normalizer.finish_turn("local", "claude", &json!({"stopReason":reason}));
+            assert_eq!(kinds(&events), vec!["session.state"], "{reason} said something");
+        }
     }
 
     #[test]

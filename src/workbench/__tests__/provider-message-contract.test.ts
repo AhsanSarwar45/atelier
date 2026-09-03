@@ -11,7 +11,7 @@ describe('provider-neutral operational message contract', () => {
     expect(PROVIDER_MESSAGE_KINDS).toEqual([
       'usage_limit', 'rate_limit', 'authentication', 'authorization',
       'service_unavailable', 'network', 'provider_error', 'retrying',
-      'interrupted', 'model_unavailable', 'context_limit', 'unknown',
+      'interrupted', 'model_unavailable', 'context_limit', 'refusal', 'turn_limit', 'unknown',
     ]);
     for (const kind of PROVIDER_MESSAGE_KINDS) expect(isProviderMessageKind(kind)).toBe(true);
   });

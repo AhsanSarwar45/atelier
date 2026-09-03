@@ -15,6 +15,12 @@ export const PROVIDER_MESSAGE_KINDS = [
   'interrupted',
   'model_unavailable',
   'context_limit',
+  // A turn that ended without finishing. ACP names five stop reasons and only
+  // `end_turn` means the work is done: a refusal the spec asks to be shown,
+  // because the prompt it refused is left out of the next one, and the two
+  // ceilings (tokens, requests in a turn) cut a turn off mid-work.
+  'refusal',
+  'turn_limit',
   'unknown',
 ] as const;
 
@@ -58,6 +64,8 @@ const TITLES: Record<ProviderMessageKind, string> = {
   interrupted: 'This turn was interrupted',
   model_unavailable: 'This model is unavailable',
   context_limit: 'This conversation is out of context space',
+  refusal: 'The agent declined to continue',
+  turn_limit: 'This turn stopped before it finished',
   unknown: 'The provider reported a problem',
 };
 
@@ -89,7 +97,8 @@ const STATUS_LABEL: Record<ProviderMessageKind, string> = {
   usage_limit: 'Limit reached', rate_limit: 'Rate limited', authentication: 'Sign-in required',
   authorization: 'Not allowed', service_unavailable: 'Provider unavailable', network: 'Connection lost',
   provider_error: 'Provider failed', retrying: 'Retrying', interrupted: 'Interrupted',
-  model_unavailable: 'Model unavailable', context_limit: 'Context full', unknown: 'Provider problem',
+  model_unavailable: 'Model unavailable', context_limit: 'Context full',
+  refusal: 'Declined', turn_limit: 'Stopped short', unknown: 'Provider problem',
 };
 
 /** The same condition reduced to the compact, colored session-status vocabulary. */
