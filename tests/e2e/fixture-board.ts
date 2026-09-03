@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 /**
  * A throwaway project for a test to drive an agent against: its own git repo,
@@ -16,8 +16,25 @@ export const OPEN_CARD = 'wl-kid2';
 export const REPORT_PROJECT = 'linkdemo';
 export const REPORT_SLUG = 'link-demo';
 
-function bd(args: string[], cwd: string): void {
-  execFileSync('bd', args, { cwd, stdio: 'pipe', timeout: 60_000 });
+/**
+ * One `bd` call against the throwaway board, and what it said if it failed.
+ *
+ * Piped rather than inherited so a fixture does not scribble over the run's
+ * output, which means a failure arrives as a bare `ETIMEDOUT` or `status 1`
+ * with everything bd actually said thrown away — twice in one live run the only
+ * evidence was the word ETIMEDOUT (bw-t26l.20). The minute it was given was
+ * also short: `bd init` writes a Dolt database, installs four sets of hooks and
+ * commits, which takes seconds on an idle machine and much longer under a suite
+ * driving several real agents at once.
+ */
+export function bd(args: string[], cwd: string): void {
+  try {
+    execFileSync('bd', args, { cwd, stdio: 'pipe', timeout: 240_000 });
+  } catch (error) {
+    const failed = error as { stdout?: Buffer; stderr?: Buffer };
+    const said = [failed.stdout?.toString(), failed.stderr?.toString()].filter(Boolean).join('\n').trim();
+    throw new Error(`bd ${args.join(' ')} in ${cwd} failed: ${String(error)}${said ? `\n${said}` : ''}`);
+  }
 }
 
 /** A spec the report builder accepts: it insists on all six slots. */
@@ -124,6 +141,20 @@ export interface FixtureOptions {
  * `reporting/tools` is a symlink to the real builder so the page is built the
  * way the app builds it, while every page and spec stays inside the fixture.
  */
+/**
+ * Throw a fixture tree away, waiting out whoever is still writing in it.
+ *
+ * Deleting the project returns as soon as the app has let go, but the embedded
+ * Dolt server it was holding takes a moment longer to stop, and it writes while
+ * it stops: a plain recursive remove walks into `.beads/embeddeddolt/…/noms`,
+ * empties it, and fails with ENOTEMPTY because the process put a file back
+ * (observed on chat-edit-links, 2026-09-03). Retrying is what node offers for
+ * exactly this, and the tree is gone within a second.
+ */
+export function discardFixture(dir: string): void {
+  rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+}
+
 export function makeFixtureProject(dir: string, reportsDir: string, opts: FixtureOptions = {}): string {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
@@ -133,6 +164,33 @@ export function makeFixtureProject(dir: string, reportsDir: string, opts: Fixtur
   execFileSync('git', ['config', 'user.name', 'workbench test'], { cwd: dir, stdio: 'pipe' });
 
   bd(['init', '--prefix', 'wl'], dir);
+  // The manifest, because without one the app does not believe this project
+  // keeps a board: `/api/beads` answers 404 "Beads is disabled for this
+  // project" for any registered project whose manifest does not say
+  // `use_beads` (server/src/routes/beads.rs), and every reader of the board on
+  // the screen swallows that and draws nothing. A fixture that seeds cards and
+  // then denies having a board is a fixture that quietly tests the empty case:
+  // it is how a chat checklist — which is a view of this epic, read back
+  // through that endpoint — could never appear (bw-t26l.20).
+  mkdirSync(join(dir, '.atelier'), { recursive: true });
+  writeFileSync(
+    join(dir, '.atelier', 'project.toml'),
+    [
+      'schema_version = 1',
+      '',
+      '[project]',
+      `display_name = "${basename(dir)}"`,
+      'use_beads = true',
+      'summary = ""',
+      '',
+      '[git]',
+      'completed_work_branch = "master"',
+      '',
+      '[beads]',
+      'issue_id_prefix = "wl"',
+      '',
+    ].join('\n'),
+  );
   const seed = [
     { id: PARENT_CARD, title: 'The card this chat works on', status: 'open', issue_type: 'epic', priority: 1 },
     { id: 'wl-kid1', title: 'First piece of the work', status: 'closed', issue_type: 'task', priority: 1 },

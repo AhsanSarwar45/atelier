@@ -17,6 +17,12 @@ export default defineConfig({
     // Overridable so a worktree can drive its own instance without touching
     // the one serving the owner's board on 3008.
     baseURL: process.env.BEADS_E2E_URL ?? 'http://localhost:3008',
+    // No single action waits forever. Without a bound here a click on an
+    // element that is never coming back is limited only by the whole test's
+    // deadline, and the failure that arrives says "Test timeout exceeded"
+    // naming neither the line nor the locator — five and ten minutes spent, and
+    // nothing learned from either (bw-t26l.20).
+    actionTimeout: 30_000,
     viewport: { width: 1440, height: 900 },
     colorScheme: 'dark',
   },

@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { foldAll } from '../../src/workbench/fold';
 import type { WbpEvent } from '../../src/workbench/protocol';
-import { makeFixtureProject } from './fixture-board';
+import { discardFixture, makeFixtureProject } from './fixture-board';
 
 const CHAT = 'chat-edit-links-fixture';
 
@@ -77,6 +77,6 @@ test('edit paths open in the editor at the first changed line', async ({ page, r
     await page.screenshot({ path: 'tests/results/chat-edit-links-after.png', fullPage: false });
   } finally {
     if (project) await request.delete(`/api/projects/${project.id}`);
-    rmSync(run, { recursive: true, force: true });
+    discardFixture(run);
   }
 });

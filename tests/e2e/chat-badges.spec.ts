@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { rmSync } from 'node:fs';
+
 import { join } from 'node:path';
 
 import { foldAll } from '../../src/workbench/fold';
 import type { WbpEvent } from '../../src/workbench/protocol';
-import { makeFixtureProject, PARENT_CARD } from './fixture-board';
+import { PARENT_CARD, discardFixture, makeFixtureProject } from './fixture-board';
 
 const CHAT = 'chat-badges-fixture';
 
@@ -80,6 +80,6 @@ test('provider formatting differences share card and typed file badges', async (
     await page.screenshot({ path: process.env.CHAT_BADGES_SCREENSHOT || 'tests/results/chat-badges-after.png', fullPage: false });
   } finally {
     if (project) await request.delete(`/api/projects/${project.id}`);
-    rmSync(run, { recursive: true, force: true });
+    discardFixture(run);
   }
 });

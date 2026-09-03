@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { openChatTab } from './open-chat-tab';
+
 const FIXTURE = join(__dirname, '..', '.workbench-run-desktop-panels');
 const SHOT = join(__dirname, '..', 'results', 'desktop-panels-after.png');
 
@@ -32,7 +34,7 @@ test('both desktop dividers resize their panels while the transcript viewport fi
 
     await page.setViewportSize({ width: 1920, height: 1000 });
     await page.goto(`/project?id=${project.id}&chat=${session.id}`);
-    await page.getByTestId('tab-chat').click();
+    await openChatTab(page);
     await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 30_000 });
 
     const left = page.getByTestId('chat-rail');
