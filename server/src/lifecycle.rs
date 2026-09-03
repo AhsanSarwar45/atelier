@@ -684,13 +684,111 @@ fn git_mutates(call: &GitCall<'_>) -> bool {
     }
 }
 
+/// A thing a command would change: what the command called it, the directory
+/// that name was resolved against, and where it came to.
+///
+/// A refusal that names only the resolved path is the hardest kind to act on
+/// when the command held no absolute path at all — a relative target resolved
+/// from a working directory the agent did not expect looks impossible until
+/// both ends are said (`docs/hook-friction-2.md` §2).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Target {
+    named: String,
+    from: PathBuf,
+    path: PathBuf,
+}
+
+impl Target {
+    fn named(here: &Path, named: &str) -> Self {
+        Target {
+            named: named.to_string(),
+            from: here.to_path_buf(),
+            path: path_from(here, named),
+        }
+    }
+
+    /// A whole directory, changed by a command that works in place.
+    fn here(here: &Path) -> Self {
+        let here = tidy(here);
+        Target {
+            named: String::new(),
+            from: here.clone(),
+            path: here,
+        }
+    }
+
+    /// How a refusal says where this came from. The resolution is only worth
+    /// spelling out when it did something — an absolute path resolved to
+    /// itself.
+    fn spelled(&self) -> String {
+        if self.named.is_empty() || Path::new(&self.named).is_absolute() {
+            return format!("resolved target: {}", self.path.display());
+        }
+        format!(
+            "target `{}` resolved from {} \u{2192} {}",
+            self.named,
+            self.from.display(),
+            self.path.display()
+        )
+    }
+}
+
 fn path_from(here: &Path, text: &str) -> PathBuf {
     let path = PathBuf::from(text);
-    if path.is_absolute() {
+    tidy(&if path.is_absolute() {
         path
     } else {
         here.join(path)
+    })
+}
+
+/// A path with its `.` and `..` steps taken, without asking the disk.
+///
+/// The target of a refusal often does not exist yet, so it cannot be
+/// canonicalized — and a message that reads
+/// `worktrees/bw-1/../../src/lib.rs` explains a resolution by obscuring it.
+fn tidy(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => match out.components().next_back() {
+                // `/..` is `/`, and a `..` with nothing above it to take is
+                // part of where the path points.
+                Some(std::path::Component::RootDir) => {}
+                Some(std::path::Component::Normal(_)) => {
+                    out.pop();
+                }
+                _ => out.push(part),
+            },
+            part => out.push(part),
+        }
     }
+    if out.as_os_str().is_empty() {
+        return PathBuf::from(".");
+    }
+    out
+}
+
+/// The checkout every worktree of a repository shares.
+///
+/// `git_root` answers with the worktree it was asked from, so two worktrees of
+/// one project look like two projects to it. Deciding whether a new worktree
+/// belongs to this project is exactly the question it cannot answer.
+fn project_root(path: &Path) -> Option<PathBuf> {
+    let mut probe = path;
+    while !probe.is_dir() {
+        probe = probe.parent()?;
+    }
+    command(
+        probe,
+        "git",
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .filter(|(_, ok)| *ok)
+    .map(|(out, _)| PathBuf::from(out.trim()))
+    .filter(|path| !path.as_os_str().is_empty())
+    .and_then(|path| path.parent().map(Path::to_path_buf))
 }
 
 /// Does this target name a file the worktree rule is about?
@@ -729,7 +827,7 @@ fn operands(args: &[Word]) -> Vec<&str> {
     out
 }
 
-fn shell_file_targets(segment: &Segment, here: &Path) -> Vec<PathBuf> {
+fn shell_file_targets(segment: &Segment, here: &Path) -> Vec<Target> {
     let at = first_command_word(segment);
     let Some(name) = segment.words.get(at).map(|word| executable(&word.text)) else {
         return Vec::new();
@@ -752,18 +850,18 @@ fn shell_file_targets(segment: &Segment, here: &Path) -> Vec<PathBuf> {
     targets
         .into_iter()
         .filter(|target| writes_a_file(target))
-        .map(|target| path_from(here, target))
+        .map(|target| Target::named(here, target))
         .collect()
 }
 
-fn redirection_targets(segment: &Segment, here: &Path) -> Vec<PathBuf> {
+fn redirection_targets(segment: &Segment, here: &Path) -> Vec<Target> {
     segment
         .words
         .windows(2)
         .filter(|pair| WRITE_REDIRECTS.contains(&pair[0].text.as_str()))
         .map(|pair| pair[1].text.as_str())
         .filter(|target| writes_a_file(target))
-        .map(|target| path_from(here, target))
+        .map(|target| Target::named(here, target))
         .collect()
 }
 
@@ -854,10 +952,32 @@ fn actor(data: &Value) -> Option<Value> {
     Some(pretool("allow", "board identity", Some(updated)))
 }
 
-fn mutation_paths(data: &Value) -> Vec<PathBuf> {
+/// What one command in a line would change.
+fn segment_targets(segment: &Segment, here: &Path) -> Vec<Target> {
+    let mut targets = redirection_targets(segment, here);
+    if let Some(call) = bd_call(segment) {
+        if matches!(
+            call.segment.words[call.verb].text.as_str(),
+            "close" | "create" | "reopen" | "update"
+        ) {
+            targets.push(Target::here(&bd_cwd(&call, here)));
+        }
+        return targets;
+    }
+    if let Some(call) = git_call(segment, here) {
+        if git_mutates(&call) && !lands(&call) && !isolates(&call) {
+            targets.push(Target::here(&call.cwd));
+        }
+        return targets;
+    }
+    targets.extend(shell_file_targets(segment, here));
+    targets
+}
+
+fn mutation_targets(data: &Value) -> Vec<Target> {
     match tool_name(data) {
         "Edit" | "Write" | "MultiEdit" | "NotebookEdit" | "apply_patch" => {
-            let target = [
+            let named = [
                 "file_path",
                 "filePath",
                 "notebook_path",
@@ -865,40 +985,26 @@ fn mutation_paths(data: &Value) -> Vec<PathBuf> {
                 "path",
             ]
             .iter()
-            .find_map(|key| tool_input(data)[key].as_str())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| cwd(data));
-            vec![if target.is_absolute() {
-                target
-            } else {
-                cwd(data).join(target)
+            .find_map(|key| tool_input(data)[key].as_str());
+            vec![match named {
+                Some(named) => Target::named(&cwd(data), named),
+                None => Target::here(&cwd(data)),
             }]
         }
         "Bash" => calls(shell(data), &cwd(data))
             .into_iter()
-            .flat_map(|(segment, here)| {
-                let mut targets = redirection_targets(&segment, &here);
-                if let Some(call) = bd_call(&segment) {
-                    if matches!(
-                        call.segment.words[call.verb].text.as_str(),
-                        "close" | "create" | "reopen" | "update"
-                    ) {
-                        targets.push(bd_cwd(&call, &here));
-                    }
-                    return targets;
-                }
-                if let Some(call) = git_call(&segment, &here) {
-                    if git_mutates(&call) && !lands(&call) {
-                        targets.push(call.cwd);
-                    }
-                    return targets;
-                }
-                targets.extend(shell_file_targets(&segment, &here));
-                targets
-            })
+            .flat_map(|(segment, here)| segment_targets(&segment, &here))
             .collect(),
         _ => Vec::new(),
     }
+}
+
+#[cfg(test)]
+fn mutation_paths(data: &Value) -> Vec<PathBuf> {
+    mutation_targets(data)
+        .into_iter()
+        .map(|target| target.path)
+        .collect()
 }
 
 /// A fast-forward merge, which is how finished work lands.
@@ -915,6 +1021,48 @@ fn lands(call: &GitCall<'_>) -> bool {
         && call.segment.words[call.verb + 1..]
             .iter()
             .any(|word| word.text == "--ff-only")
+}
+
+/// `git worktree add worktrees/<ID> -b <ID>`, which builds the isolation the
+/// ownership rule demands rather than breaching it.
+///
+/// The rule is that a repository change needs an owned card in its own
+/// worktree. This is the command the instructions give for making that
+/// worktree, so refusing it made the state the gate requires unreachable from
+/// a clean start: the only cards claimable without a bypass were the ones
+/// already claimed (`docs/hook-friction-2.md` §3). The carve-out is the exact
+/// documented shape and nothing else — the destination must sit in the
+/// project's own worktree directory, be named for the card, and the branch
+/// being created must be that same card. Every other `worktree` subcommand
+/// stays gated.
+fn isolates(call: &GitCall<'_>) -> bool {
+    if call.segment.words[call.verb].text != "worktree" {
+        return false;
+    }
+    let arguments = &call.segment.words[call.verb + 1..];
+    let words = operands(arguments);
+    if words.first() != Some(&"add") {
+        return false;
+    }
+    let Some(destination) = words.get(1).map(|text| path_from(&call.cwd, text)) else {
+        return false;
+    };
+    let Some(issue) = worktree_issue(&destination) else {
+        return false;
+    };
+    let leaf = destination.file_name().and_then(|name| name.to_str());
+    if leaf != Some(issue.as_str()) && leaf != Some(format!("bd-{issue}").as_str()) {
+        return false;
+    }
+    // A `worktrees/<ID>` component is not enough on its own: the new worktree
+    // has to belong to the project it is a worktree of.
+    if project_root(&destination) != project_root(&call.cwd) {
+        return false;
+    }
+    arguments
+        .windows(2)
+        .filter(|pair| matches!(pair[0].text.as_str(), "-b" | "-B"))
+        .any(|pair| pair[1].text == issue)
 }
 
 fn worktree_issue(path: &Path) -> Option<String> {
@@ -951,18 +1099,31 @@ fn issue_at(path: &Path) -> Option<String> {
 
 fn claim_transition(data: &Value) -> Option<(String, PathBuf)> {
     let parsed = calls(shell(data), &cwd(data));
-    let meaningful: Vec<_> = parsed
+    let bd_calls: Vec<usize> = parsed
         .iter()
-        .filter_map(|(segment, here)| {
-            let call = bd_call(segment)?;
-            let effective = bd_cwd(&call, here);
-            Some((call, effective))
-        })
+        .enumerate()
+        .filter(|(_, (segment, _))| bd_call(segment).is_some())
+        .map(|(at, _)| at)
         .collect();
-    if meaningful.len() != 1 || meaningful.len() != parsed.len() {
+    let &[at] = bd_calls.as_slice() else {
+        return None;
+    };
+    // The line may do other things, so long as none of them would change
+    // anything: making the worktree and stepping into it are the two commands
+    // the documented start of work puts either side of the claim
+    // (`docs/hook-friction-2.md` §3). Anything that writes is judged on its
+    // own merits, which keeps `rm file && bd update ID --claim` refused.
+    if parsed
+        .iter()
+        .enumerate()
+        .any(|(other, (segment, here))| other != at && !segment_targets(segment, here).is_empty())
+    {
         return None;
     }
-    let (call, here) = &meaningful[0];
+    let (segment, from) = &parsed[at];
+    let call = bd_call(segment)?;
+    let here = &bd_cwd(&call, from);
+    let call = &call;
     if call.segment.words[call.verb].text != "update" {
         return None;
     }
@@ -974,7 +1135,26 @@ fn claim_transition(data: &Value) -> Option<(String, PathBuf)> {
     {
         return None;
     }
-    Some((issue, (*here).clone()))
+    Some((issue, here.clone()))
+}
+
+/// The worktree a line makes for itself, when it makes the one it then claims.
+///
+/// The documented start of work is three commands on one line: make the
+/// worktree, step into it, claim the card. A gate runs before any of them, so
+/// the worktree it would want to see does not exist yet, and judging the claim
+/// on a directory the same line is about to create refuses the whole
+/// documented opening (`docs/hook-friction-2.md` §3).
+fn isolation_made(data: &Value, issue: &str) -> Option<PathBuf> {
+    calls(shell(data), &cwd(data))
+        .into_iter()
+        .filter_map(|(segment, here)| {
+            let call = git_call(&segment, &here)?;
+            let arguments = &call.segment.words[call.verb + 1..];
+            let destination = operands(arguments).get(1).copied()?;
+            isolates(&call).then(|| path_from(&call.cwd, destination))
+        })
+        .find(|made| worktree_issue(made).as_deref() == Some(issue))
 }
 
 fn creates_first_work(data: &Value) -> bool {
@@ -1013,7 +1193,7 @@ fn ownership_refusal(card: &Value, issue: &str, who: &str) -> Option<String> {
 }
 
 fn workflow(data: &Value) -> Option<Value> {
-    let targets = mutation_paths(data);
+    let targets = mutation_targets(data);
     if targets.is_empty() {
         return None;
     }
@@ -1021,7 +1201,9 @@ fn workflow(data: &Value) -> Option<Value> {
         return None;
     }
     if let Some((issue, here)) = claim_transition(data) {
-        if issue_at(&here).as_deref() != Some(&issue) {
+        let isolated = issue_at(&here).as_deref() == Some(&issue)
+            || isolation_made(data, &issue).as_deref() == Some(here.as_path());
+        if !isolated {
             return deny(format!(
                 "Claim {issue} from its own isolated worktree, not {}.",
                 here.display()
@@ -1051,13 +1233,13 @@ fn workflow(data: &Value) -> Option<Value> {
         // scratch file, a temporary directory, a log outside the project. The
         // rule is about repository changes, so a target with no repository is
         // simply not its business (`docs/hook-friction.md` §1).
-        let Some(project) = git_root(&target) else {
+        let Some(project) = git_root(&target.path) else {
             continue;
         };
         let Some(issue) = issue_at(&project) else {
             return deny(format!(
-                "Changes require an owned Beads work item in its isolated worktree (resolved target: {}).",
-                project.display()
+                "Changes require an owned Beads work item in its isolated worktree ({}).",
+                target.spelled()
             ));
         };
         let Some(card) =
@@ -1067,7 +1249,7 @@ fn workflow(data: &Value) -> Option<Value> {
             continue;
         };
         if let Some(reason) = ownership_refusal(&card, &issue, &session(data)) {
-            return deny(format!("{reason} Resolved target: {}.", project.display()));
+            return deny(format!("{reason} The {}.", target.spelled()));
         }
     }
     None
@@ -1476,9 +1658,9 @@ fn heartbeat_due(who: &str, project: &Path) -> bool {
 
 fn touch(data: &Value) {
     let who = session(data);
-    let mut projects: Vec<PathBuf> = mutation_paths(data)
+    let mut projects: Vec<PathBuf> = mutation_targets(data)
         .into_iter()
-        .filter_map(|path| git_root(&path))
+        .filter_map(|target| git_root(&target.path))
         .collect();
     if projects.is_empty() {
         projects.push(root(data));
@@ -1667,7 +1849,7 @@ mod tests {
         assert_eq!(
             mutation_paths(&files),
             vec![
-                PathBuf::from("/repo/worktrees/bw-1/../bw-2/copied"),
+                PathBuf::from("/repo/worktrees/bw-2/copied"),
                 PathBuf::from("/repo/worktrees/bw-1/notes.txt"),
             ]
         );
@@ -1789,6 +1971,109 @@ mod tests {
                 "excused by: {command}"
             );
         }
+    }
+
+    /// A refusal that names only where a relative path landed makes the one
+    /// thing the agent cannot see the only thing it says
+    /// (`docs/hook-friction-2.md` §2).
+    #[test]
+    fn native_machinery_a_refusal_says_both_ends_of_the_resolution() {
+        let here = Path::new("/repo");
+        assert_eq!(
+            Target::named(here, "tests/run.log").spelled(),
+            "target `tests/run.log` resolved from /repo \u{2192} /repo/tests/run.log"
+        );
+        // An absolute path resolved to itself; saying so twice explains nothing.
+        assert_eq!(
+            Target::named(here, "/elsewhere/run.log").spelled(),
+            "resolved target: /elsewhere/run.log"
+        );
+        assert_eq!(Target::here(here).spelled(), "resolved target: /repo");
+        // The steps are taken, so the reader sees where it actually landed.
+        assert_eq!(
+            Target::named(Path::new("/repo/worktrees/bw-1"), "../../src/lib.rs").spelled(),
+            "target `../../src/lib.rs` resolved from /repo/worktrees/bw-1 \u{2192} /repo/src/lib.rs"
+        );
+    }
+
+    #[test]
+    fn native_machinery_tidies_a_path_without_asking_the_disk() {
+        assert_eq!(tidy(Path::new("/a/./b/../c")), PathBuf::from("/a/c"));
+        assert_eq!(tidy(Path::new("/a/.")), PathBuf::from("/a"));
+        // Nothing above the root to pop, and a relative path keeps the steps
+        // it cannot take.
+        assert_eq!(tidy(Path::new("/../a")), PathBuf::from("/a"));
+        assert_eq!(tidy(Path::new("../a")), PathBuf::from("../a"));
+        assert_eq!(tidy(Path::new(".")), PathBuf::from("."));
+    }
+
+    /// The gate treated its own two preconditions as breaches of itself, so
+    /// the state it demanded could never be reached from a clean start
+    /// (`docs/hook-friction-2.md` §3).
+    #[test]
+    fn native_machinery_lets_a_session_earn_the_worktree_the_rule_demands() {
+        let home = tempfile::tempdir().unwrap();
+        let repo = home.path().join("project");
+        std::fs::create_dir(&repo).unwrap();
+        assert!(Command::new("git")
+            .args(["init", "-q", "-b", "ours"])
+            .current_dir(&repo)
+            .status()
+            .unwrap()
+            .success());
+        let isolating = |command: &str| {
+            let segments = shell_segments(command);
+            segments
+                .iter()
+                .filter_map(|segment| git_call(segment, &repo))
+                .any(|call| isolates(&call))
+        };
+
+        assert!(isolating("git -C . worktree add worktrees/bw-1 -b bw-1"));
+        assert!(isolating("git worktree add worktrees/bw-1 -b bw-1"));
+        assert!(isolating("git worktree add .worktrees/bd-bw-1 -b bw-1"));
+
+        // The branch must be the card the destination is named for, the
+        // destination must be the project's own worktree directory, and no
+        // other subcommand is the rule being obeyed.
+        assert!(!isolating("git worktree add worktrees/bw-1 -b other"));
+        assert!(!isolating("git worktree add worktrees/sneaky -b bw-1"));
+        assert!(!isolating("git worktree add worktrees/bw-1"));
+        assert!(!isolating("git worktree remove worktrees/bw-1"));
+        assert!(!isolating("git worktree add /elsewhere/worktrees/bw-1 -b bw-1"));
+    }
+
+    /// The documented opening is three commands on one line, and the gate runs
+    /// before any of them: the worktree it wants to see is the one the line is
+    /// about to make.
+    #[test]
+    fn native_machinery_reads_the_claim_a_whole_opening_line_makes() {
+        let opening = "git -C . worktree add worktrees/bw-1 -b bw-1\n\
+            cd worktrees/bw-1\n\
+            bd update bw-1 --claim";
+        let data = json!({"tool_name":"Bash", "cwd":"/repo",
+            "tool_input":{"command": opening}});
+        assert_eq!(
+            claim_transition(&data).unwrap(),
+            ("bw-1".to_string(), PathBuf::from("/repo/worktrees/bw-1")),
+            "the claim is the only thing this line changes"
+        );
+        assert_eq!(
+            isolation_made(&data, "bw-1"),
+            Some(PathBuf::from("/repo/worktrees/bw-1")),
+            "the line makes the worktree it then claims into"
+        );
+
+        // A command that writes rides along with nothing excusing it.
+        let smuggled = json!({"tool_name":"Bash", "cwd":"/repo", "tool_input":{"command":
+            "cd worktrees/bw-1\nrm ../../src/lib.rs && bd update bw-1 --claim"}});
+        assert!(claim_transition(&smuggled).is_none());
+
+        // And a claim into a worktree nothing in the line creates is still
+        // judged on the worktree it names.
+        let elsewhere = json!({"tool_name":"Bash", "cwd":"/repo",
+            "tool_input":{"command":"bd update bw-1 --claim"}});
+        assert_eq!(isolation_made(&elsewhere, "bw-1"), None);
     }
 
     #[test]

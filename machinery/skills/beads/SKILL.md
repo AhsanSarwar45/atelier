@@ -62,14 +62,23 @@ and the rest), so there is no walk-around worth looking for. It is narrower than
 it looks, too: `/dev/null` and the other pseudo-devices under `/dev`, `/proc`
 and `/sys` are not files, a path in no repository is not gated at all, and a
 heredoc body, commit message or quoted string that merely names a path is data,
-not a command.
+not a command. A refusal names the target as you wrote it and the directory it
+was resolved against; read that closely for a backgrounded command, which starts
+in the main checkout rather than your worktree.
+
+**Starting a card** (`workflow-gate`). The opening above passes as written —
+`git worktree add worktrees/<ID> -b <ID>`, `cd`, `bd update <ID> --claim` —
+whether you run it as one line or three. Only that shape: a destination outside
+the project's worktree directory, a branch that is not the card, or any other
+command on the line that writes something, and the line is judged normally.
 
 **Landing** (`board-merge-gate`). `atelier tool board/land CARD-ID` is the
 protocol: it rebases, takes the merge slot, fast-forwards the landing branch and
 releases the slot. A raw merge into that branch is held to the same invariants —
 it must be `--ff-only`, the merge slot must not be held by somebody else, and it
 may not overwrite the landing checkout's own uncommitted changes. That last
-refusal names the files, so commit or stash exactly those.
+refusal names the files, so commit or stash exactly those. `board/land` is safe
+to run twice: if the commits already landed it says so and finishes the close.
 
 **Status moves** (`board-status-gate`). A card in manager review is the
 manager's to move. A card cannot be closed while there are uncommitted changes
@@ -94,5 +103,5 @@ ATELIER_BYPASS='why this gate is wrong here' <command>
 
 Every hook honours it, on Claude and on Codex alike; it prints the reason and
 appends it to `hook-bypass.log`. Then add the refusal to `docs/hook-friction.md`
-so the gate itself can be fixed. `docs/hooks.md` lists the wider switches, for a
+or `docs/hook-friction-2.md` — either book — so the gate itself can be fixed. `docs/hooks.md` lists the wider switches, for a
 session or a whole tree.

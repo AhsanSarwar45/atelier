@@ -293,7 +293,7 @@ fn land(rest: &[String]) -> Result<i32, String> {
     let branch = git(&work, &["branch", "--show-current"])?;
     let landing = landing_name(&work);
     if branch == landing { return Err(format!("{landing} is the landing branch; run board/land from the branch carrying the work")); }
-    let subjects = git(&work, &["log", "--format=%s", &format!("{landing}..{branch}")])?;
+    let (already, subjects) = landed_subjects(&work, &branch, &landing)?;
     if !subjects.lines().any(|subject| subject_names(subject, id)) {
         return Err(format!("no commit subject on {branch} names {id}"));
     }
@@ -303,24 +303,69 @@ fn land(rest: &[String]) -> Result<i32, String> {
     let carried: Vec<String> = open_work.iter().filter_map(|row| row["id"].as_str())
         .filter(|work_id| subjects.lines().any(|subject| subject_names(subject, work_id)))
         .map(str::to_string).collect();
-    git(&work, &["rebase", &landing])?;
-    let main = main_copy(&work, &landing)?;
-    let actor = std::env::var("BEADS_ACTOR").unwrap_or_else(|_| "atelier-land".into());
-    bd(&work, &["--actor".into(), actor.clone(), "merge-slot".into(), "acquire".into()])?;
-    let merged = git(&main, &["merge", "--ff-only", &branch]);
-    let _ = bd(&work, &["--actor".into(), actor.clone(), "merge-slot".into(), "release".into()]);
-    merged?;
+    let actor = landing_actor(std::env::var("BEADS_ACTOR").ok().as_deref(), &item);
+    if !already {
+        git(&work, &["rebase", &landing])?;
+        let main = main_copy(&work, &landing)?;
+        bd(&work, &["--actor".into(), actor.clone(), "merge-slot".into(), "acquire".into()])?;
+        let merged = git(&main, &["merge", "--ff-only", &branch]);
+        let _ = bd(&work, &["--actor".into(), actor.clone(), "merge-slot".into(), "release".into()]);
+        merged?;
+    }
     for work_id in &carried {
         bd(&work, &["--actor".into(), actor.clone(), "close".into(), work_id.clone(),
             "--reason".into(), format!("commit naming {work_id} landed on {landing}")])?;
     }
     advance_goal(&work, &goal)?;
-    if carried.is_empty() {
-        println!("landed {id} on {landing}; closed nothing because no open work-item id was named by a landed commit subject");
+    let how = if already {
+        format!("{id} had already landed on {landing}, so there was nothing to merge")
     } else {
-        println!("landed {id} on {landing}; closed {}", carried.join(", "));
+        format!("landed {id} on {landing}")
+    };
+    if carried.is_empty() {
+        println!("{how}; closed nothing because no open work-item id was named by a landed commit subject");
+    } else {
+        println!("{how}; closed {}", carried.join(", "));
     }
     Ok(0)
+}
+
+/// The subjects a land should judge, and whether the work is already on the
+/// landing branch.
+///
+/// A land that fails after the fast-forward — the close step is the one that
+/// does — leaves the commits on the landing branch, so the range is empty when
+/// the agent retries. Reading that as a naming failure sends the reader
+/// hunting for a badly-named commit that does not exist, when the truth is the
+/// commit was named correctly and the work is safe
+/// (`docs/hook-friction-2.md` §4).
+fn landed_subjects(work: &Path, branch: &str, landing: &str) -> Result<(bool, String), String> {
+    let range = git(work, &["log", "--format=%s", &format!("{landing}..{branch}")])?;
+    if !range.is_empty() || git(work, &["merge-base", "--is-ancestor", branch, landing]).is_err() {
+        return Ok((false, range));
+    }
+    // Once the branch is an ancestor there is no range that isolates its own
+    // commits, so read the whole branch. What may be closed is bounded either
+    // way: an open `step:work` child of this goal.
+    Ok((true, git(work, &["log", "--format=%s", branch])?))
+}
+
+/// Who the lander acts as.
+///
+/// Its authority is the authority of the session that invoked it: it runs in
+/// that session's worktree, on a card that session owns and has just committed
+/// to. Acting under a name of its own made bd read that ownership as a
+/// conflict, and there was no way to satisfy it from inside the workflow — bd
+/// will not reassign an `in_progress` card, so the card could not be handed to
+/// the lander that demanded it be handed over (`docs/hook-friction-2.md` §4).
+/// Acting as the owner keeps the rule the assignee check exists for: work
+/// owned by somebody else still refuses.
+fn landing_actor(configured: Option<&str>, item: &Value) -> String {
+    configured
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| item["assignee"].as_str().filter(|who| !who.is_empty()))
+        .unwrap_or("atelier-land")
+        .to_string()
 }
 
 fn subject_names(subject: &str, id: &str) -> bool {
@@ -540,6 +585,59 @@ mod tests {
         assert!(subject_names("bw-one.12: finish native machinery", "bw-one.12"));
         assert!(!subject_names("bw-one.123: a different card", "bw-one.12"));
         assert!(!subject_names("mention bw-one.12 only in a body we did not pass", "bw-one.1"));
+    }
+
+    /// `docs/hook-friction-2.md` §4: the lander closing this session's own work
+    /// under a name of its own read the ownership the workflow had just
+    /// established as a conflict.
+    #[test]
+    fn native_machinery_the_lander_acts_as_the_card_it_was_given() {
+        let mine = serde_json::json!({"id":"bw-1", "assignee":"s-abc"});
+        let nobodys = serde_json::json!({"id":"bw-1"});
+        assert_eq!(landing_actor(None, &mine), "s-abc");
+        assert_eq!(landing_actor(None, &nobodys), "atelier-land");
+        assert_eq!(landing_actor(Some("s-set"), &mine), "s-set");
+        assert_eq!(landing_actor(Some("  "), &mine), "s-abc", "blank is unset");
+    }
+
+    /// `docs/hook-friction-2.md` §4: the retry after a failed close reported a
+    /// naming failure, which describes the opposite of what happened.
+    #[test]
+    fn native_machinery_a_land_knows_its_work_is_already_on_the_branch() {
+        let repo = tempfile::tempdir().unwrap();
+        let run = |args: &[&str]| {
+            assert!(Command::new("git")
+                .args(args)
+                .current_dir(repo.path())
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .status()
+                .unwrap()
+                .success(), "git {args:?}");
+        };
+        run(&["init", "-q", "-b", "ours"]);
+        std::fs::write(repo.path().join("a"), "a").unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-qm", "base"]);
+        run(&["checkout", "-qb", "bw-1"]);
+        std::fs::write(repo.path().join("b"), "b").unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-qm", "bw-1: the work"]);
+
+        let (already, subjects) = landed_subjects(repo.path(), "bw-1", "ours").unwrap();
+        assert!(!already, "nothing has landed yet");
+        assert_eq!(subjects, "bw-1: the work", "only the branch's own commits");
+
+        run(&["checkout", "-q", "ours"]);
+        run(&["merge", "-q", "--ff-only", "bw-1"]);
+        let (already, subjects) = landed_subjects(repo.path(), "bw-1", "ours").unwrap();
+        assert!(already, "the commit is an ancestor of the landing branch");
+        assert!(
+            subjects.lines().any(|line| subject_names(line, "bw-1")),
+            "the retry can still see the commit that names the card"
+        );
     }
 
     #[test]

@@ -56,6 +56,16 @@ the part the beads skill never said:
 
 What it does **not** count, each of which used to cost a round trip:
 
+- **Starting a card.** `git worktree add worktrees/<ID> -b <ID>` builds the
+  isolation the rule demands, and `bd update <ID> --claim` is how a card becomes
+  owned; refusing them made the state the gate requires unreachable from a clean
+  start. The documented opening passes as one line — make the worktree, step
+  into it, claim the card — including the claim into the worktree that same line
+  creates. Both carve-outs are exact: another `worktree` subcommand, a
+  destination outside the project, a branch that is not the card, or any command
+  on the line that writes something, and the line is judged normally
+  (`docs/hook-friction-2.md` §3).
+
 - **Anything that is not a real file.** `/dev/null`, `/dev/tcp/host/port`,
   `/proc`, `/sys`, `>&2`, and process substitution are not writes. Silencing a
   command and probing a port are ordinary and ungated (§1, §2).
@@ -64,6 +74,12 @@ What it does **not** count, each of which used to cost a round trip:
   document that discusses `/etc/passwd` is writing a document (§3).
 - **Anywhere outside a Git worktree.** A path in no repository is not a change
   to anybody's work; scratch directories and `/tmp` are free.
+
+A refusal names the target as the command wrote it, the directory it was
+resolved against, and where it landed — the resolution is usually the whole
+explanation, and a background command that starts in the main checkout rather
+than your worktree is the case where it matters
+(`docs/hook-friction-2.md` §2).
 
 ### `board-merge-gate` — PreToolUse on Bash
 
@@ -76,7 +92,11 @@ holds the merge slot, and that the landing does not overwrite uncommitted work
 tree.
 
 `atelier tool board/land CARD-ID` does all of this for you, including the slot.
-Reach for the raw merge only when that fails.
+Reach for the raw merge only when that fails. The lander acts as the card's own
+assignee, so closing work you own is not read as somebody else closing it, and
+it is safe to run twice: if the commits already reached the landing branch it
+says so and finishes the close rather than reporting a naming failure
+(`docs/hook-friction-2.md` §4).
 
 ### `board-status-gate` — PreToolUse on Bash
 
@@ -138,8 +158,9 @@ many it removed.
 ## When the gate is wrong
 
 Use the bypass, finish the work, and add a numbered section to
-`docs/hook-friction.md` saying what you attempted, what came back, and why the
-refusal did not serve the rule it was enforcing. That file is the input to the
+`docs/hook-friction.md` — or `docs/hook-friction-2.md`, which exists so two
+agents can write at once — saying what you attempted, what came back, and why
+the refusal did not serve the rule it was enforcing. That file is the input to the
 next round of tuning; the bypass log is only evidence that something happened.
 
 ## Changing a gate

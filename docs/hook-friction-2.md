@@ -63,6 +63,21 @@ already has both strings in hand at the moment it refuses.
 identical-looking commands was in the wrong place. Small, and it will happen to
 every agent that backgrounds a build or a test run.
 
+**Resolved.** A refusal carries the target it judged rather than only the path
+it arrived at. A relative one now reads:
+
+```
+Changes require an owned Beads work item in its isolated worktree
+  (target `tests/.e2e-run-x.log` resolved from /home/ahsan/dev/beads-web
+   → /home/ahsan/dev/beads-web/tests/.e2e-run-x.log)
+```
+
+An absolute target resolved to itself, so it still says `resolved target: …`
+and nothing more. Paths are tidied lexically on the way out, so a target
+reached through `..` names where it landed instead of how it got there.
+`native_machinery_a_refusal_says_both_ends_of_the_resolution`,
+`native_machinery_tidies_a_path_without_asking_the_disk`.
+
 ## 3. A brand-new card cannot be claimed, because claiming it is a change
 
 **Attempted.** The documented start of any piece of work, exactly as the
@@ -110,6 +125,29 @@ intact:
 `hook-bypass.log` that record nothing anyone wanted to be warned about. The
 worse cost is the lesson it teaches: the first thing a new session learns about
 the gates is that the documented path does not work and the bypass does.
+
+**Resolved**, as both carve-outs, and narrowly.
+
+- `git worktree add worktrees/<ID> -b <ID>` passes. The destination must sit in
+  the project's own worktree directory (`worktrees/<ID>` or
+  `.worktrees/bd-<ID>`), be named for the card, belong to the same project —
+  compared by the checkout every worktree shares, not by `--show-toplevel`,
+  which answers with the worktree it was asked from — and the branch created
+  must be that same card. `worktree remove`, a destination elsewhere, a
+  mismatched branch and a bare `add` all stay gated.
+- `bd update <ID> --claim` passes whenever the card is unowned, as it already
+  did; what did not pass was the documented *line*. The claim carve-out
+  required the line to hold nothing but the claim, and the documented opening
+  holds three commands. It now asks the weaker and truer question: does
+  anything else on this line change something? Making the worktree and stepping
+  into it do not, so the block passes verbatim; `rm file && bd update ID
+  --claim` still does not.
+- The gate runs before the line does, so the worktree the claim wants to be
+  judged in does not exist yet. A claim into the worktree the same line creates
+  is judged against that destination.
+
+`native_machinery_lets_a_session_earn_the_worktree_the_rule_demands`,
+`native_machinery_reads_the_claim_a_whole_opening_line_makes`.
 
 ## 4. The lander cannot close what it just landed, and then blames the commit
 
@@ -165,6 +203,22 @@ detour on bw-s5op.1 and bw-s5op.2 before it was recognised here.
 with a misleading error, `git merge-base --is-ancestor` run by hand to find out
 whether the work was actually safe, and a manual `bd close`. The documented
 finishing move has never once finished a card in this epic.
+
+**Resolved**, as both fixes.
+
+- The lander acts as the card's own assignee, so a session closing work it owns
+  is the ordinary case it looks like. `BEADS_ACTOR` still overrides, and an
+  unassigned card still falls back to `atelier-land`. The rule the assignee
+  check exists for is untouched: work owned by another session still refuses.
+- The retry tells the truth. When the range is empty because the branch is
+  already an ancestor of the landing branch, the lander says so — `had already
+  landed on ours, so there was nothing to merge` — skips the rebase, the slot
+  and the merge, and goes on to close the work items the landed commits named.
+  A second `board/land` now finishes the card instead of describing a naming
+  failure that did not happen.
+
+`native_machinery_the_lander_acts_as_the_card_it_was_given`,
+`native_machinery_a_land_knows_its_work_is_already_on_the_branch`.
 
 ## How to add to this file
 
