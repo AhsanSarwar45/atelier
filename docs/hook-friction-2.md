@@ -220,6 +220,42 @@ finishing move has never once finished a card in this epic.
 `native_machinery_the_lander_acts_as_the_card_it_was_given`,
 `native_machinery_a_land_knows_its_work_is_already_on_the_branch`.
 
+## 5. A card whose id has no digit can never be landed
+
+**Attempted.** The documented last step of a card, from its own worktree, on a
+branch whose one commit is named for it:
+
+```
+git log --oneline ours..bw-uxoe
+29f9a78 fix(bw-uxoe): the chat list, opening a chat and starting one answer at once again
+atelier tool board/land bw-uxoe
+```
+
+**Refused with.**
+
+```
+no commit subject on bw-uxoe names bw-uxoe
+```
+
+**Why it does not serve the rule.** The rule is that a landing commit must name
+its card. The subject does. The lander reads card ids out of a subject with
+`card_ids` in `server/src/board_tools.rs`, which keeps a word only if it holds
+a hyphen *and a digit*. `bw-uxoe` is an id `bd create` handed out; it has no
+digit, so it is invisible to the check, and no subject in any form — `bw-uxoe:`,
+`fix(bw-uxoe):`, the bare id — can satisfy it. The message then reports the
+opposite of what happened, as entry 4 already noted for the empty-range case.
+
+**Should have happened.** Either the check asks whether the subject contains
+the id it was given (a substring test needs no guess about what an id looks
+like), or the shape it does guess matches what `bd` actually issues. The
+truthful message on a miss would quote the subjects it read.
+
+**Cost.** Two lands refused, a read of the lander's source to learn why, and
+the card landed by hand with the fast-forward merge the gate allows.
+
+**Worked around.** `git merge --ff-only bw-uxoe` from the `ours` checkout, then
+`bd close`.
+
 ## How to add to this file
 
 As in the first book: what was attempted, the refusal text, why the refusal did
