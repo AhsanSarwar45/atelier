@@ -692,8 +692,22 @@ impl Store {
             rusqlite::params![chrono::Utc::now().to_rfc3339(), CLAUDE_IMPORT_RECIPE, IMPORT_RECIPE, session_id],
         )
     }
+    /// Where the outside follower has read to, and NOTHING about whether this
+    /// chat's own history was ever read in.
+    ///
+    /// It used to say both. The follower starts at the end of the record — the
+    /// import is what puts everything before that on the page — and it wrote
+    /// that cursor down as an import of its own. A chat whose import is slow
+    /// was therefore marked imported milliseconds after it was opened, and the
+    /// import that followed found the work already claimed and left. Every
+    /// external chat read through ACP `session/load` opened blank: the adapter
+    /// takes seconds to start, and the follower needs four milliseconds
+    /// (measured 2026-09-03, bw-t26l.20). Only `mark_imported` says imported.
     pub fn remember_followed(&self, session_id: &str, at: i64) -> rusqlite::Result<usize> {
-        self.connection.execute("UPDATE session SET followed_to=?1,followed_drawn=0,imported_at=COALESCE(imported_at,?2),imported_recipe=CASE brand WHEN 'claude' THEN ?3 ELSE ?4 END WHERE id=?5",rusqlite::params![at,chrono::Utc::now().to_rfc3339(),CLAUDE_IMPORT_RECIPE,IMPORT_RECIPE,session_id])
+        self.connection.execute(
+            "UPDATE session SET followed_to=?1,followed_drawn=0 WHERE id=?2",
+            rusqlite::params![at, session_id],
+        )
     }
     pub fn was_driven_here(&self, session_id: &str) -> rusqlite::Result<bool> {
         Ok(self.connection.query_row("SELECT 1 FROM event WHERE session_id=?1 AND type='session.started' AND COALESCE(json_extract(json,'$.readOnly'),0)!=1 LIMIT 1",[session_id],|_|Ok(())).optional()?.is_some())
@@ -2017,6 +2031,23 @@ mod tests {
             ))
             .unwrap();
 
+        // Following says nothing about whether this chat was ever read in.
+        // Said the other way — and it was — the follower's first tick claimed
+        // the import, and the import that arrived seconds later left the page
+        // blank because the work looked done (bw-t26l.20).
+        store.remember_followed("external", 12_345).unwrap();
+        assert_eq!(
+            store.imported_by("external").unwrap(),
+            None,
+            "the follower claimed an import nobody had done"
+        );
+        assert_eq!(
+            store.followed_to("external").unwrap(),
+            None,
+            "a cursor from before the import was read as though the import had happened"
+        );
+
+        store.mark_imported("external").unwrap();
         store.remember_followed("external", 12_345).unwrap();
         assert_eq!(store.followed_to("external").unwrap(), Some(12_345));
 
