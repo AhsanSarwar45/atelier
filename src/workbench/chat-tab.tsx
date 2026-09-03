@@ -1561,6 +1561,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         )}
         {!view.loading && (
           <DrawnTranscript
+            /* One per chat, and never the last chat's. The measurements a
+               virtualiser makes belong to the rows it made them for, and this
+               tab is never remounted between chats — so switching to a chat
+               already in the cache (`loading` is false for it, so nothing is
+               unmounted) carried the previous chat's measured heights and
+               scroll offset into the new one, and the pane came to rest a
+               little short of the end instead of on it (bw-t26l.20). */
+            key={sessionId ?? 'none'}
             rows={drawn}
             loadedItems={view.items.length}
             primaryItems={view.items.filter((item) => !sentAway(item)).length}

@@ -216,7 +216,7 @@ describe.each(bothWays)('a chat %s', (_name, fold) => {
       type: 'plan.proposed',
       proposalId: 'plan-1',
       markdown: '1. Read the router',
-      actions: [{ id: 'go', kind: 'accept' as const, label: 'Go ahead' }],
+      actions: [{ id: 'go', kind: 'approve' as const, label: 'Go ahead' }],
       parentToolCallId: 'call-1',
     });
     const stopped = fold([...answeredTheFirst(), putUp]);
@@ -225,7 +225,7 @@ describe.each(bothWays)('a chat %s', (_name, fold) => {
     const approved = fold([
       ...answeredTheFirst(),
       putUp,
-      said({ type: 'plan.resolved', proposalId: 'plan-1', status: 'accepted' as const, actionId: 'go' }),
+      said({ type: 'plan.resolved', proposalId: 'plan-1', status: 'approved' as const, actionId: 'go' }),
     ]);
     expect(approved.agents.find((a) => a.id === 'task-1')?.state).toBe('running');
   });
