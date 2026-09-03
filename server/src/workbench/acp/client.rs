@@ -1081,13 +1081,22 @@ fn attached_picture(image: &Value) -> Option<(String, String)> {
     Some((data.to_string(), mime.to_string()))
 }
 
-fn prompt_content(command: &Command) -> Result<Vec<ContentBlock>, String> {
+/// What is sent for a message, with the attachments the agent will take.
+///
+/// `takes_pictures` is what the agent said about `promptCapabilities.image`.
+/// An agent that cannot take one is told so in words rather than handed a
+/// block it will refuse: the refusal fails the entire `session/prompt`, and
+/// what is lost with it is the sentence the owner typed (bw-t26l.20). The
+/// picture cannot be delivered either way; the difference is whether his turn
+/// happens and he is told why, or neither.
+fn prompt_content(command: &Command, takes_pictures: bool) -> Result<Vec<ContentBlock>, String> {
     let text = command
         .fields
         .get("text")
         .and_then(Value::as_str)
         .ok_or_else(|| "text is required".to_string())?;
     let mut content = vec![ContentBlock::Text(TextContent::new(text))];
+    let mut refused = 0usize;
     for image in command
         .fields
         .get("images")
@@ -1096,8 +1105,18 @@ fn prompt_content(command: &Command) -> Result<Vec<ContentBlock>, String> {
         .flatten()
     {
         if let Some((data, mime)) = attached_picture(image) {
+            if !takes_pictures {
+                refused += 1;
+                continue;
+            }
             content.push(ContentBlock::Image(ImageContent::new(data, mime)));
         }
+    }
+    if refused > 0 {
+        content.push(ContentBlock::Text(TextContent::new(format!(
+            "[{refused} {} left off: this agent says it cannot be sent pictures.]",
+            if refused == 1 { "picture was" } else { "pictures were" }
+        ))));
     }
     Ok(content)
 }
@@ -1426,6 +1445,17 @@ pub struct AcpDriver {
     ended: mpsc::UnboundedReceiver<String>,
     permissions: Arc<PermissionBroker>,
     elicitations: Arc<ElicitationBroker>,
+    /// Whether this agent said it can be sent a picture.
+    ///
+    /// ACP gates image blocks in a prompt on `promptCapabilities.image`
+    /// (schema `v1/content.rs`: "Requires the `image` prompt capability when
+    /// included in prompts"). We never read it and always sent the block, so
+    /// attaching a picture to a chat on an agent that cannot take one failed
+    /// the whole `session/prompt` — losing what he had typed along with the
+    /// attachment, under a red error that named neither (bw-t26l.20). Set
+    /// from the initialize answer; true until it says otherwise, because an
+    /// agent that declares nothing is not thereby refusing.
+    takes_pictures: Arc<AtomicBool>,
 }
 
 impl AcpDriver {
@@ -1620,6 +1650,8 @@ impl AcpDriver {
         let closing = Arc::new(AtomicBool::new(false));
         let permissions = Arc::new(PermissionBroker::default());
         let elicitations = Arc::new(ElicitationBroker::default());
+        let takes_pictures = Arc::new(AtomicBool::new(true));
+        let task_takes_pictures = takes_pictures.clone();
         let task_database = database.clone();
         let task_session = session.clone();
         let task_agent_definitions = if brand == "codex" {
@@ -1809,6 +1841,15 @@ impl AcpDriver {
                         let supports_close = initialized
                             .pointer("/agentCapabilities/sessionCapabilities/close")
                             .is_some();
+                        // Only a stated `false` is a refusal. An agent that
+                        // declares no promptCapabilities at all has not said
+                        // it cannot take a picture, and the ones this app
+                        // bundles all can.
+                        if initialized.pointer("/agentCapabilities/promptCapabilities/image")
+                            == Some(&Value::Bool(false))
+                        {
+                            task_takes_pictures.store(false, Ordering::SeqCst);
+                        }
                         // Which API the agent is actually talking to. An agent
                         // that says it has providers is asked; one that does
                         // not is not, and its chat says nothing about an
@@ -2239,6 +2280,7 @@ impl AcpDriver {
             ended,
             permissions,
             elicitations,
+            takes_pictures,
         })
     }
 
@@ -2261,7 +2303,7 @@ impl AcpDriver {
                     command.fields["text"].as_str().unwrap_or_default(),
                 )
                 .await?;
-                let content = prompt_content(command)?;
+                let content = prompt_content(command, self.takes_pictures.load(Ordering::SeqCst))?;
                 let images = command
                     .fields
                     .get("images")
@@ -2573,7 +2615,7 @@ mod tests {
             "dataUrl": "data:image/png;base64,iVBORw0KGgo=",
             "alt": "a screenshot",
         }]));
-        let content = prompt_content(&command).unwrap();
+        let content = prompt_content(&command, true).unwrap();
         assert_eq!(content.len(), 2, "the text and the picture both go out");
         match &content[1] {
             ContentBlock::Image(image) => {
@@ -2594,7 +2636,7 @@ mod tests {
             {"mime": "image/gif", "dataUrl": "not-a-data-url"},
             {"alt": "nothing at all"},
         ]));
-        let content = prompt_content(&command).unwrap();
+        let content = prompt_content(&command, true).unwrap();
         assert_eq!(content.len(), 2, "only the picture with a payload goes out");
         match &content[1] {
             ContentBlock::Image(image) => {
@@ -2603,6 +2645,41 @@ mod tests {
             }
             other => panic!("the picture must go as an image block, got {other:?}"),
         }
+    }
+
+    /// An agent that says it cannot take pictures still gets the sentence.
+    ///
+    /// ACP gates an image block on `promptCapabilities.image`, and an agent
+    /// that has not advertised it refuses the whole `session/prompt` when one
+    /// arrives. We sent it regardless, so attaching a picture in such a chat
+    /// lost the words the owner had typed along with it, under an error that
+    /// named neither. The picture cannot be delivered either way; his turn can.
+    #[test]
+    fn a_picture_an_agent_cannot_take_does_not_take_the_message_down_with_it() {
+        let command = prompt_with_images(json!([{
+            "mime": "image/png",
+            "dataUrl": "data:image/png;base64,iVBORw0KGgo=",
+            "alt": "a screenshot",
+        }]));
+
+        let content = prompt_content(&command, false).unwrap();
+        let words = content
+            .iter()
+            .map(|block| match block {
+                ContentBlock::Text(text) => text.text.clone(),
+                other => panic!("nothing but words may go to an agent that takes no pictures, got {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(words[0], "what is in this picture?");
+        // And he is told, in the turn itself, why the thing he attached is not
+        // in it. Silence would have the agent answer about a picture it never
+        // received, which is the failure this replaced.
+        assert!(words[1].contains("cannot be sent pictures"), "{words:?}");
+
+        // The same command to an agent that can take one is unchanged.
+        let taken = prompt_content(&command, true).unwrap();
+        assert!(matches!(taken[1], ContentBlock::Image(_)), "{taken:?}");
+        assert_eq!(taken.len(), 2);
     }
 
     #[tokio::test]
@@ -2621,6 +2698,7 @@ mod tests {
             ended,
             permissions: Arc::new(PermissionBroker::default()),
             elicitations: Arc::new(ElicitationBroker::default()),
+            takes_pictures: Arc::new(AtomicBool::new(true)),
         };
         let sent = tokio::spawn(async move {
             driver
@@ -2853,6 +2931,7 @@ mod tests {
             ended,
             permissions: Arc::new(PermissionBroker::default()),
             elicitations: Arc::new(ElicitationBroker::default()),
+            takes_pictures: Arc::new(AtomicBool::new(true)),
         };
 
         driver
@@ -2926,6 +3005,7 @@ mod tests {
             ended,
             permissions: Arc::new(PermissionBroker::default()),
             elicitations: Arc::new(ElicitationBroker::default()),
+            takes_pictures: Arc::new(AtomicBool::new(true)),
         };
 
         driver
