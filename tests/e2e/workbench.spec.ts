@@ -1,10 +1,10 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 
-import { PARENT_CARD, REPORT_PROJECT, REPORT_SLUG, bd, discardFixture, makeFixtureProject } from './fixture-board';
+import { PARENT_CARD, bd, discardFixture, makeFixtureProject } from './fixture-board';
 import { openChatTab } from './open-chat-tab';
 import { restartInstance } from './restart';
 import { quadrantPng } from './fixture-png';
@@ -33,18 +33,6 @@ import { quadrantPng } from './fixture-png';
  */
 const fixtureFor = (name: string) => join(__dirname, '..', `.workbench-run-${name}`);
 const SHOTS = join(__dirname, '..', 'results');
-
-/**
- * Where the instance under test keeps its report specs.
- *
- * A report is filed under the name of the project's own folder, and that is
- * how the app finds it again — so a run whose report has to be readable in the
- * app files it here, exactly as a real one is filed.
- */
-function reportsHome(project: string): string {
-  const data = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
-  return join(data, 'atelier', 'reports', project);
-}
 
 /**
  * Where the Claude CLI this run drives keeps its transcripts.
@@ -454,22 +442,25 @@ test.describe('workbench', () => {
   });
 
   /**
-   * The interconnection: chat to card, card back to chat, and a report that
-   * opens large. Runs against a throwaway board the fixture builds — never a
-   * live one — with permissions bypassed so the screens stay uncluttered.
+   * The interconnection: chat to card, and the card back to the chat. Runs
+   * against a throwaway board the fixture builds — never a live one — with
+   * permissions bypassed so the screens stay uncluttered.
+   *
+   * A third part used to sit between those two, asking for the report the chat
+   * had just written: drawn in the stream, opened in its own tab, and still
+   * there after a Back. The owner retired reports outright in 384beb2 — the
+   * tab, the routes, the builder and the blocks all went — and this kept
+   * asking for `report-inline` regardless, so a live run spent a minute
+   * waiting on an element deliberately deleted and failed on it every time
+   * (bw-t26l.20). What is left is the join, which is what the case is for.
    */
-  test('links a chat to the card it touched, carries row chips both ways, and shows the report it made', async ({ page, request }) => {
+  test('links a chat to the card it touched and carries row chips both ways', async ({ page, request }) => {
     test.setTimeout(600_000);
 
-    // The app opens a report by the project it sits under, so this run's
-    // project folder is named for the report project and its spec is filed
-    // where the instance keeps its specs — the way a real report is filed.
     const RUN_DIR = fixtureFor('links');
-    const FIXTURE = join(RUN_DIR, REPORT_PROJECT);
-    const SPEC = join(reportsHome(REPORT_PROJECT), `${REPORT_SLUG}.report.json`);
+    const FIXTURE = join(RUN_DIR, 'linked');
     discardFixture(RUN_DIR);
-    rmSync(reportsHome(REPORT_PROJECT), { recursive: true, force: true });
-    makeFixtureProject(FIXTURE, join(RUN_DIR, 'reporting'), { specPath: SPEC });
+    makeFixtureProject(FIXTURE, join(RUN_DIR, 'reporting'));
     mkdirSync(SHOTS, { recursive: true });
 
     const project = await projectAt(request, FIXTURE, 'workbench-links');
@@ -497,9 +488,6 @@ test.describe('workbench', () => {
         [
           `Run this exact shell command and show me its output: bd note ${PARENT_CARD} "looked at by the workbench"`,
           '',
-          `Then use the Edit tool on ${SPEC} to change its`,
-          '"eyebrow" line to say: Written from the chat that made it.',
-          '',
           'Do nothing else.',
         ].join('\n'),
       );
@@ -518,27 +506,6 @@ test.describe('workbench', () => {
       expect(onBoard.status()).toBe(200);
       const chats = (await onBoard.json()) as { sessionId: string }[];
       expect(chats.map((c) => c.sessionId)).toContain(session.id);
-
-      // ---- (c) the report, in the stream then in its own place ------------
-      const inline = page.getByTestId('report-inline');
-      await expect(inline).toBeVisible({ timeout: 60_000 });
-      await inline.scrollIntoViewIfNeeded();
-      await page.setViewportSize({ width: 1440, height: 1400 });
-      await page.screenshot({ path: join(SHOTS, 'link-c-inline.png'), fullPage: false });
-
-      // Clicking it goes to the report's own place under this project — not a
-      // modal, and not a page held in a frame (bw-7ks.21.15).
-      await inline.click();
-      await expect(page).toHaveURL(/tab=reports.*report=/);
-      await expect(page.getByTestId('report-part').first()).toBeVisible({ timeout: 90_000 });
-      // And what is drawn really is the report, not the builder's refusal.
-      await expect(page.locator('text=Linked From The Chat').first()).toBeVisible({ timeout: 60_000 });
-      await expect(page.locator('iframe')).toHaveCount(0);
-      await page.screenshot({ path: join(SHOTS, 'link-c.png'), fullPage: false });
-
-      // Back is the conversation he was reading, at the message that named it.
-      await page.goBack();
-      await expect(page.getByTestId('report-inline')).toBeVisible({ timeout: 30_000 });
 
       // ---- (b) the card's own side of the join ----------------------------
       await page.setViewportSize({ width: 1440, height: 1000 });
@@ -567,8 +534,6 @@ test.describe('workbench', () => {
       const row = page.locator(`[data-testid="restore-row"][data-row-key="${session.id}"]`);
       await expect(row).toHaveAttribute('data-beads', new RegExp(`\\b${PARENT_CARD}\\b`), { timeout: 60_000 });
     } finally {
-      // The run's report is filed among the real ones, so it is taken away again.
-      rmSync(reportsHome(REPORT_PROJECT), { recursive: true, force: true });
       await request.delete(`/api/projects/${project.id}`);
     }
   });
@@ -699,7 +664,14 @@ test.describe('workbench', () => {
       // kept clicking the button that commit deleted (bw-t26l.20).
       await terminalRow.getByTestId('row-name').click();
       await expect(page.getByTestId('restore-error')).toHaveCount(0);
-      await expect(terminalRow.getByTestId('row-pill')).toHaveText('ready', { timeout: 180_000 });
+      // Awake, and the row itself says so. A chat at rest wears no pill at
+      // all: the rail draws one only for a chat that is working, waiting, or
+      // held by somebody else (chat-sidebar.tsx). So this spent three minutes
+      // waiting for an element that exists only in the seconds the resumed
+      // chat happens to be busy, and asked it for 'ready' in a vocabulary
+      // that has said 'Ready' since 8a898ea. What "brought back" means is
+      // that the row is no longer asleep (bw-t26l.20).
+      await expect(terminalRow).not.toHaveAttribute('data-state', 'dormant', { timeout: 180_000 });
       await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 60_000 });
 
       await page.getByTestId('composer').fill('Reply with exactly: RESUMED');
