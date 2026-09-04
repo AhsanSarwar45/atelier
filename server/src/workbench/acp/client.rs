@@ -2137,11 +2137,24 @@ impl AcpDriver {
                                                 let raw = serde_json::to_value(response).map_err(acp_error)?;
                                                 normalizer.lock().await.finish_turn(&local_id, provider, &raw)
                                             }
-                                            Err(error) => normalizer.lock().await.fail_turn(
-                                                &local_id,
-                                                provider,
-                                                &error.to_string(),
-                                            ),
+                                            // The error whole — code, message
+                                            // and data — rather than the
+                                            // sentence `Display` makes of it.
+                                            // Stringifying here is what left
+                                            // every reader downstream matching
+                                            // English to get the meaning back
+                                            // (bw-d516).
+                                            Err(error) => {
+                                                let failure = serde_json::to_value(&error)
+                                                    .unwrap_or_else(|_| json!({
+                                                        "code": i32::from(error.code),
+                                                        "message": error.to_string(),
+                                                    }));
+                                                normalizer
+                                                    .lock()
+                                                    .await
+                                                    .fail_turn(&local_id, provider, &failure)
+                                            }
                                         };
                                         database.append_many(events).await.map_err(acp_error)?;
                                         Ok(())

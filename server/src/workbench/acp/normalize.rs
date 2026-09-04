@@ -603,6 +603,58 @@ impl AcpNormalizer {
         }))
     }
 
+    /// What ACP itself says went wrong, read off the error and not out of it.
+    ///
+    /// A JSON-RPC error object carries three things — `code`, `message` and
+    /// `data` — and only the code is ACP's own. `Display` prints the other two
+    /// and drops it (schema v2, `error.rs`), so a caller that stringifies
+    /// before reading has nothing left but a sentence: -32000 and a crash come
+    /// out the same shape, and the only way back to the difference is matching
+    /// English at it. That is what this exists to stop. The code is a number
+    /// while it is still here, so read it here.
+    ///
+    /// ACP names no usage limit, no rate limit and no retry — the whole of its
+    /// vocabulary is the codes below and the stop reasons in
+    /// {@link stop_reason_signal}. A kit that has more to say puts it in
+    /// `data`, which the spec leaves implementation-defined, and reading that
+    /// is the kit's own business rather than the protocol's (bw-d516).
+    fn acp_error_signal(error: &Value) -> Option<Value> {
+        let said = Self::acp_error_reads(error);
+        match error["code"].as_i64()? as i32 {
+            // AuthRequired. The one code that names a condition the reader can
+            // act on, and the sign-in it offers is the way back into the chat.
+            -32000 => Some(crate::workbench::provider_messages::needs_signing_in(
+                if said.trim().is_empty() {
+                    "This provider needs you to sign in."
+                } else {
+                    &said
+                },
+            )),
+            _ => None,
+        }
+    }
+
+    /// The error as a sentence, for the reader who gets no better account.
+    ///
+    /// The crate prints its own errors this way and we cannot borrow it: what
+    /// arrives here is the object, deliberately, and `Display` belongs to the
+    /// type we took it apart from.
+    fn acp_error_reads(error: &Value) -> String {
+        let message = error["message"].as_str().unwrap_or_default().to_string();
+        match &error["data"] {
+            Value::Null => message,
+            data => {
+                let pretty =
+                    serde_json::to_string_pretty(data).unwrap_or_else(|_| data.to_string());
+                if message.is_empty() {
+                    pretty
+                } else {
+                    format!("{message}: {pretty}")
+                }
+            }
+        }
+    }
+
     fn record_signal(&mut self, signal: &Value) {
         if let (Some(id), Some(kind)) = (signal["id"].as_str(), signal["kind"].as_str()) {
             self.active_signals.insert(id.to_string(), kind.to_string());
@@ -1872,10 +1924,24 @@ impl AcpNormalizer {
     /// notice that names it in the app's own vocabulary and carries the time it
     /// lifts; printing the wire string under that notice tells the reader the
     /// same thing a second time, in a wording written for a log (bw-gao7).
-    pub fn fail_turn(&mut self, session_id: &str, provider: &str, message: &str) -> Vec<Event> {
-        let raw = json!({"error":message});
+    /// A turn the provider ended by failing, read from the error it failed with.
+    ///
+    /// The error is ACP's own object and not the sentence `Display` makes of
+    /// it, which is the whole point: see {@link acp_error_signal}.
+    pub fn fail_turn(&mut self, session_id: &str, provider: &str, error: &Value) -> Vec<Event> {
+        let said = Self::acp_error_reads(error);
+        let raw = json!({"error":error});
         let mut events = self.finish_turn(session_id, provider, &raw);
         events.pop();
+        if let Some(signal) = Self::acp_error_signal(error) {
+            self.record_signal(&signal);
+            events.push(self.envelope(
+                session_id,
+                provider,
+                &raw,
+                json!({"type":"provider.message","signal":signal}),
+            ));
+        }
         let spoken_for = events.iter().any(|event| {
             matches!(event.kind, EventKind::ProviderMessage)
                 && event
@@ -1888,7 +1954,7 @@ impl AcpNormalizer {
                 session_id,
                 provider,
                 &raw,
-                json!({"type":"error","message":message,"fatal":false,"source":"acp"}),
+                json!({"type":"error","message":said,"fatal":false,"source":"acp"}),
             ));
         }
         events.push(self.envelope(
@@ -1947,7 +2013,17 @@ mod tests {
             "claude",
             &json!({"sessionId":"remote","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":said}}}),
         );
-        let events = normalizer.fail_turn("local", "claude", &format!("Internal error: {said}"));
+        // The error as ACP hands it over, which is how his own arrived:
+        // InternalError, the kit's sentence, and the kind it named in `data`.
+        let events = normalizer.fail_turn(
+            "local",
+            "claude",
+            &json!({
+                "code": -32603,
+                "message": format!("Internal error: {said}"),
+                "data": {"errorKind": "rate_limit"},
+            }),
+        );
 
         assert_eq!(
             kinds(&events),
@@ -1966,11 +2042,51 @@ mod tests {
     #[test]
     fn a_turn_that_failed_unrecognisably_still_prints_what_the_provider_said() {
         let mut normalizer = AcpNormalizer::default();
-        let events = normalizer.fail_turn("local", "claude", "the pipe closed");
+        let events = normalizer.fail_turn(
+            "local",
+            "claude",
+            &json!({"code": -32603, "message": "the pipe closed"}),
+        );
         assert_eq!(kinds(&events), vec!["error", "session.state"]);
         assert_eq!(
             serde_json::to_value(&events[0]).unwrap()["message"],
             "the pipe closed"
+        );
+    }
+
+    /// A provider that wants signing in says so in its code, and is read there.
+    ///
+    /// ACP gives -32000 exactly one meaning, and the message beside it is the
+    /// agent's to write — terse, empty, or in a language nobody here matches
+    /// on. Everything downstream used to see the sentence alone, so this came
+    /// out as an unnameable failure: a red line and `Failed`, with no sign-in
+    /// offered and no way back into the chat (bw-d516).
+    #[test]
+    fn a_turn_refused_for_want_of_signing_in_is_read_from_its_code() {
+        let mut normalizer = AcpNormalizer::default();
+        let events = normalizer.fail_turn(
+            "local",
+            "claude",
+            &json!({"code": -32000, "message": "Authentication required"}),
+        );
+        assert_eq!(
+            kinds(&events),
+            vec!["provider.message", "session.state"],
+            "the notice stands in for the wire string, which is not written"
+        );
+        let signal = serde_json::to_value(&events[0]).unwrap();
+        assert_eq!(signal["signal"]["kind"], "authentication");
+        assert_eq!(signal["signal"]["severity"], "blocking");
+
+        // And with nothing said beside the code, the reader is still told what
+        // to do rather than shown an empty box.
+        let mut bare = AcpNormalizer::default();
+        let events = bare.fail_turn("local", "claude", &json!({"code": -32000, "message": ""}));
+        let signal = serde_json::to_value(&events[0]).unwrap();
+        assert_eq!(signal["signal"]["kind"], "authentication");
+        assert_eq!(
+            signal["signal"]["detail"],
+            "This provider needs you to sign in."
         );
     }
 
