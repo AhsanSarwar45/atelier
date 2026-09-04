@@ -2,6 +2,7 @@
 name = "atelier"
 version = "0.21.2"
 edition = "2021"
+license = "MIT"
 
 # The command a person types. One name, from `src/identity.rs`.
 [[bin]]

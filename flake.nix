@@ -73,6 +73,7 @@
             meta = {
               description = "Visual Kanban UI for Beads CLI";
               homepage = "https://github.com/AhsanSarwar45/atelier";
+              license = pkgs.lib.licenses.mit;
               mainProgram = "atelier";
             };
           };
