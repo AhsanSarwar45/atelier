@@ -493,12 +493,15 @@ function BackToNow({ missed, shown, onClick }: { missed: number; shown: boolean;
 export function TodoPanel({ items }: { items: TodoItem[] }) {
   const complete = items.filter((item) => item.status === 'completed').length;
   const allComplete = complete === items.length;
-  const [expanded, setExpanded] = useState(!allComplete);
+  // An opened chat is opened to be read: the checklist starts as its one-line
+  // header, and the reader unfolds it when they want it (bw-i7pg.1).
+  const [expanded, setExpanded] = useState(false);
   const wasComplete = useRef(allComplete);
 
   useEffect(() => {
-    // A new active plan deserves to be seen immediately. Once its last item is
-    // checked, it gets out of the transcript's way without disappearing.
+    // A plan that becomes active while the chat is open deserves to be seen.
+    // Once its last item is checked, it gets out of the transcript's way
+    // without disappearing.
     if (allComplete && !wasComplete.current) setExpanded(false);
     if (!allComplete && wasComplete.current) setExpanded(true);
     wasComplete.current = allComplete;
@@ -526,7 +529,13 @@ export function TodoPanel({ items }: { items: TodoItem[] }) {
         )}
         <span className="ml-auto text-xs tabular-nums text-muted-foreground">{complete}/{items.length}</span>
       </Button>
-      <ul id="active-checklist-items" hidden={!expanded} className="space-y-1 border-t border-border/60 px-3 py-2">
+      {/* A long epic is a list, not a wall: it is capped and scrolls itself
+          rather than pushing the transcript off the screen (bw-i7pg.1). */}
+      <ul
+        id="active-checklist-items"
+        hidden={!expanded}
+        className="max-h-[min(16rem,40vh)] space-y-1 overflow-y-auto border-t border-border/60 px-3 py-2"
+      >
         {items.map((t) => (
           <li key={t.id} data-testid="todo-item" data-todo-status={t.status} className="flex items-center gap-2 text-sm">
             <span

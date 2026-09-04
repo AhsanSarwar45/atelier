@@ -42,21 +42,32 @@ describe('the live checklist', () => {
     expect(checklistForEpic(active, board)).toEqual([]);
   });
 
-  it('appears expanded while work is active and can be collapsed to one row', () => {
+  it('starts as one row on an opened chat and unfolds when asked', () => {
     render(<TodoPanel items={active} />);
 
     const toggle = screen.getByRole('button', { name: /checklist/i });
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('Fix the screen')).toBeVisible();
-
-    fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByTestId('todo-panel')).toHaveAttribute('data-expanded', 'no');
     expect(screen.getByText('1/2')).toBeVisible();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Fix the screen')).toBeVisible();
+  });
+
+  it('caps the unfolded list so a long epic scrolls instead of filling the screen', () => {
+    render(<TodoPanel items={active} />);
+    fireEvent.click(screen.getByRole('button', { name: /checklist/i }));
+
+    const list = document.getElementById('active-checklist-items');
+    expect(list?.className).toContain('overflow-y-auto');
+    expect(list?.className).toMatch(/max-h-/);
   });
 
   it('automatically collapses when the last item completes', () => {
     const view = render(<TodoPanel items={active} />);
+    fireEvent.click(screen.getByRole('button', { name: /checklist/i }));
+    expect(screen.getByRole('button', { name: /checklist/i })).toHaveAttribute('aria-expanded', 'true');
     view.rerender(<TodoPanel items={active.map((item) => ({ ...item, status: 'completed' as const }))} />);
 
     expect(screen.getByRole('button', { name: /checklist/i })).toHaveAttribute('aria-expanded', 'false');
