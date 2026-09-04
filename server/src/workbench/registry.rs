@@ -538,9 +538,18 @@ impl WorkbenchRegistry {
         }))
         .map_err(|error| error.to_string())?;
         self.database.append(event).await?;
+        // Choosing a model makes a local chat usable, which is what this says.
+        // It said it whatever the chat was doing, so picking a model in the
+        // middle of a turn drew that turn as finished — the clock stopped, the
+        // row left the working list, and nothing afterwards put it right
+        // (bw-xfb4).
         if command.kind == CommandKind::SessionModel
             && session.brand == super::local::BRAND
             && session.model.is_some()
+            && !matches!(
+                session.state.as_str(),
+                "thinking" | "streaming" | "running_tool" | "waiting_permission"
+            )
         {
             let ready: crate::workbench::protocol::Event = serde_json::from_value(json!({
                 "type":"session.state", "sessionId":session.id, "seq":0,
@@ -1065,6 +1074,94 @@ mod tests {
                 ),
             "reading a chat that is waiting for its model must not file it as asleep"
         );
+    }
+
+    /// Choosing a model for a local chat does not draw its turn as finished.
+    ///
+    /// Picking a model makes such a chat usable, and this said so by publishing
+    /// Ready — whatever the chat was doing. Done mid-turn it stopped the clock
+    /// and dropped the row out of the working list, with the turn still running
+    /// and nothing after it to put either right. The manager: "some chats are
+    /// straight up showing as idle even they are are working" (bw-xfb4).
+    #[tokio::test]
+    async fn native_workbench_registry_never_calls_a_working_local_chat_ready() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let chat = |id: &str, state: &str| crate::workbench::store::Session {
+            id: id.into(),
+            brand: super::super::local::BRAND.into(),
+            external_id: None,
+            project_id: "project".into(),
+            project_path: "/project".into(),
+            cwd: "/project".into(),
+            model: Some("qwen3".into()),
+            permission_mode: "default".into(),
+            effort: None,
+            collaboration_mode: None,
+            title: Some("Local".into()),
+            state: state.into(),
+            origin: "app".into(),
+            created_at: "2026-09-05T00:00:00Z".into(),
+            last_active_at: "2026-09-05T00:00:00Z".into(),
+            last_spoke_at: None,
+        };
+        database.create_session(chat("working", "running_tool")).await.unwrap();
+        database.create_session(chat("resting", "idle")).await.unwrap();
+        // A model can only be pinned if the chat advertises it, so both are
+        // handed the catalogue the pin is checked against.
+        for id in ["working", "resting"] {
+            let menu: crate::workbench::protocol::Event = serde_json::from_value(json!({
+                "type":"session.menu","sessionId":id,"seq":0,"at":"2026-09-05T00:00:01Z",
+                "models":[{"value":"qwen3","label":"Qwen 3"}]
+            }))
+            .unwrap();
+            database.append(menu).await.unwrap();
+        }
+        let registry = WorkbenchRegistry::new(
+            database.clone(),
+            RegistryPaths {
+                home: root.path().into(),
+                claude_config: root.path().join("claude"),
+                codex_home: root.path().join("codex"),
+                media: root.path().join("media"),
+            },
+            Arc::new(FakeFactory {
+                calls: Arc::new(AtomicUsize::new(0)),
+            }),
+        );
+
+        let ready_events = |id: &'static str| {
+            let database = database.clone();
+            async move {
+                database
+                    .view_events(id.into())
+                    .await
+                    .unwrap()
+                    .iter()
+                    .map(|event| serde_json::to_value(event).unwrap())
+                    .filter(|event| event["type"] == "session.state")
+                    .map(|event| event["state"].as_str().unwrap_or_default().to_string())
+                    .collect::<Vec<_>>()
+            }
+        };
+
+        for id in ["working", "resting"] {
+            registry
+                .execute(&command(
+                    CommandKind::SessionModel,
+                    json!({"sessionId":id,"model":"qwen3"}),
+                ))
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            ready_events("working").await,
+            Vec::<String>::new(),
+            "a chat mid-turn was drawn as finished by a model being chosen"
+        );
+        // And a chat at rest is still told it is ready, which is what this
+        // write is for.
+        assert_eq!(ready_events("resting").await, vec!["idle"]);
     }
 
     #[tokio::test]

@@ -864,14 +864,21 @@ impl AcpNormalizer {
                 Some("notLoaded") => ("dormant", "Asleep"),
                 _ => ("idle", "Ready"),
             };
-            events.push(self.envelope(
-                session_id,
-                provider,
-                raw,
-                json!({
-                    "type":"session.state","state":state,"label":label,"acp":update
-                }),
-            ));
+            // Anything this build has no word for lands on Ready, which is a
+            // reasonable floor for a chat at rest and a lie about one that is
+            // working: it stopped the clock, dropped the row out of the working
+            // list, and left nothing after it to put either right. So the floor
+            // is only taken when there is no turn to contradict it (bw-xfb4).
+            if state != "idle" || !self.turn_is_open() {
+                events.push(self.envelope(
+                    session_id,
+                    provider,
+                    raw,
+                    json!({
+                        "type":"session.state","state":state,"label":label,"acp":update
+                    }),
+                ));
+            }
         } else if update.pointer("/_meta/codex/closed") == Some(&Value::Bool(true))
             || update.pointer("/_meta/codex/archived") == Some(&Value::Bool(true))
         {
@@ -883,7 +890,13 @@ impl AcpNormalizer {
                     "type":"session.state","state":"dormant","label":"Asleep","acp":update
                 }),
             ));
-        } else if update.pointer("/_meta/codex/archived") == Some(&Value::Bool(false)) {
+        } else if update.pointer("/_meta/codex/archived") == Some(&Value::Bool(false))
+            && !self.turn_is_open()
+        {
+            // Not archived is a fact about filing, not about work. It published
+            // Ready outright, so an adapter that mentioned archival while a turn
+            // ran drew the chat as finished — with the turn still going, and
+            // nothing after it to correct the word (bw-xfb4).
             events.push(self.envelope(
                 session_id,
                 provider,
@@ -1116,6 +1129,17 @@ impl AcpNormalizer {
             return Some(("streaming", None));
         }
         None
+    }
+
+    /// Whether a turn of this chat's is still going.
+    ///
+    /// Read off the standing this stream last published, which is set the first
+    /// time a turn does anything and cleared when the turn ends. Asked by
+    /// everything that would otherwise write "Ready" over work in flight — a
+    /// chat drawn as finished in the middle of a turn stops its clock, drops it
+    /// out of the working list, and has nothing after it to put it right.
+    fn turn_is_open(&self) -> bool {
+        self.said_standing.is_some()
     }
 
     /// The chat saying what it is doing, whenever that changes.
@@ -3070,6 +3094,68 @@ mod tests {
         let note = serde_json::to_value(&events[1]).unwrap();
         assert_eq!(note["kind"], "acp/cost");
         assert!(note["body"].as_str().unwrap().contains("EUR"));
+    }
+
+    /**
+     * A chat with a turn in flight is never written Ready over the top of it.
+     *
+     * Two writes did. One is the floor under a thread status this build has no
+     * word for; the other is an adapter mentioning that the chat is not
+     * archived, which is a fact about filing and not about work. Either one
+     * arriving mid-turn drew the chat as finished: the clock stopped, the row
+     * left the working list, and nothing after it put either right — the turn
+     * goes on and publishes no state of its own until it ends.
+     *
+     * The manager saw the other half of it too: "some chats are straight up
+     * showing as idle even they are are working" (bw-xfb4).
+     */
+    #[test]
+    fn a_turn_in_flight_is_never_written_ready_over_the_top_of() {
+        let states = |events: &[Event]| -> Vec<String> {
+            events
+                .iter()
+                .map(|event| serde_json::to_value(event).unwrap())
+                .filter(|event| event["type"] == "session.state")
+                .map(|event| event["state"].as_str().unwrap_or_default().to_string())
+                .collect()
+        };
+        let filing = json!({"sessionId":"remote","update":{
+            "sessionUpdate":"session_info_update","_meta":{"codex":{"archived":false}}
+        }});
+        let unknown = json!({"sessionId":"remote","update":{
+            "sessionUpdate":"session_info_update","_meta":{"codex":{"threadStatus":{"type":"quiescing"}}}
+        }});
+
+        // At rest both still say Ready: a chat with nothing in flight is Ready,
+        // and this takes nothing away from that.
+        let mut resting = AcpNormalizer::default();
+        assert_eq!(states(&resting.update("local", "codex", &filing)), vec!["idle"]);
+        assert_eq!(states(&resting.update("local", "codex", &unknown)), vec!["idle"]);
+
+        // Mid-turn neither of them speaks.
+        let mut working = AcpNormalizer::default();
+        working.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call","toolCallId":"call-1","title":"Run the tests",
+            "kind":"execute","rawInput":{"command":"cargo test --lib"}
+        }}));
+        assert!(working.turn_is_open());
+        assert_eq!(
+            states(&working.update("local", "codex", &filing)),
+            Vec::<String>::new(),
+            "a chat mid-turn was drawn as finished because it was not archived"
+        );
+        assert_eq!(
+            states(&working.update("local", "codex", &unknown)),
+            Vec::<String>::new(),
+            "a status this build has no word for stopped a turn that was running"
+        );
+
+        // And the turn's own ending still says it, which is the one write that
+        // is entitled to.
+        assert_eq!(
+            states(&working.finish_turn("local", "codex", &json!({"stopReason":"end_turn"}))),
+            vec!["idle"]
+        );
     }
 
     #[test]
