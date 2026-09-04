@@ -35,12 +35,16 @@ export interface ProjectProbe {
   existing: boolean;
   storage?: ManifestStorage;
   manifestPath?: string;
+  /** Whether this computer has bd at all (bw-3tkl.2). */
+  beadsAvailable: boolean;
 }
 
 export interface ProjectSettingsAnswer {
   manifest: ProjectManifest;
   path: string;
   storage: ManifestStorage;
+  /** See ProjectProbe.beadsAvailable. */
+  beadsAvailable: boolean;
 }
 
 /**

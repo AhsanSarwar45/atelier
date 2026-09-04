@@ -42,6 +42,10 @@ pub struct ProjectProbe {
     pub existing: bool,
     pub storage: Option<ManifestStorage>,
     pub manifest_path: Option<String>,
+    /// Whether this computer has `bd` at all. A screen that cannot offer a
+    /// board does not ask about one: the checkbox is not drawn rather than
+    /// drawn and then refused on save (bw-3tkl.2).
+    pub beads_available: bool,
 }
 
 #[derive(Deserialize)]
@@ -59,6 +63,8 @@ pub struct InitializeProjectInput {
 pub struct ProjectSettingsAnswer {
     #[serde(flatten)]
     pub located: LocatedManifest,
+    /// See `ProjectProbe::beads_available`.
+    pub beads_available: bool,
 }
 
 #[derive(Deserialize)]
@@ -107,15 +113,17 @@ fn apply_beads_mode(root: &std::path::Path, manifest: &ProjectManifest) -> Resul
 pub async fn probe_project(
     Json(input): Json<ProbeProjectInput>,
 ) -> Result<Json<ProjectProbe>, (StatusCode, Json<ErrorResponse>)> {
+    let beads_available = crate::routes::find_bd().is_some();
     if input.path.starts_with("dolt://") {
         let data = data_dir().map_err(manifest_error)?;
         if let Some(located) = project_manifest::locate_key(&input.path, &data) {
             return Ok(Json(ProjectProbe { manifest: located.manifest, existing: true,
-                storage: Some(ManifestStorage::Personal), manifest_path: Some(located.path.to_string_lossy().to_string()) }));
+                storage: Some(ManifestStorage::Personal), manifest_path: Some(located.path.to_string_lossy().to_string()),
+                beads_available }));
         }
         let name = input.path.trim_start_matches("dolt://").replace(['_', '-'], " ");
         return Ok(Json(ProjectProbe { manifest: project_manifest::infer_virtual(&name), existing: false,
-            storage: None, manifest_path: None }));
+            storage: None, manifest_path: None, beads_available }));
     }
     let root = std::fs::canonicalize(&input.path)
         .map_err(|error| manifest_error(format!("{} could not be read: {error}", input.path)))?;
@@ -125,9 +133,10 @@ pub async fn probe_project(
             existing: true,
             storage: Some(located.storage),
             manifest_path: Some(located.path.to_string_lossy().to_string()),
+            beads_available,
         }));
     }
-    Ok(Json(ProjectProbe { manifest: project_manifest::infer(&root), existing: false, storage: None, manifest_path: None }))
+    Ok(Json(ProjectProbe { manifest: project_manifest::infer(&root), existing: false, storage: None, manifest_path: None, beads_available }))
 }
 
 pub async fn initialize_project(
@@ -205,7 +214,7 @@ pub async fn get_project_settings(
     let project = db.get_project(&id).map_err(db_error_response)?;
     let located = located_for(&project.path, project.local_path.as_deref(), &data_dir().map_err(manifest_error)?)
         .ok_or_else(|| manifest_error("project has no manifest; initialize it first".into()))?;
-    Ok(Json(ProjectSettingsAnswer { located }))
+    Ok(Json(ProjectSettingsAnswer { located, beads_available: crate::routes::find_bd().is_some() }))
 }
 
 pub async fn update_project_settings(
@@ -237,7 +246,8 @@ pub async fn update_project_settings(
         db.update_project(&id, UpdateProjectInput { name: Some(manifest.project.display_name.clone()), path: None, local_path: None })
             .map_err(db_error_response)?;
     }
-    Ok(Json(ProjectSettingsAnswer { located: LocatedManifest { manifest, ..located } }))
+    Ok(Json(ProjectSettingsAnswer { located: LocatedManifest { manifest, ..located },
+        beads_available: crate::routes::find_bd().is_some() }))
 }
 
 pub async fn move_project_manifest(
@@ -251,7 +261,7 @@ pub async fn move_project_manifest(
     let path = project_manifest::move_to(&root, &data_dir().map_err(manifest_error)?, input.storage).map_err(manifest_error)?;
     let located = project_manifest::locate(&root, &data_dir().map_err(manifest_error)?)
         .ok_or_else(|| manifest_error(format!("{} was written but could not be read", path.display())))?;
-    Ok(Json(ProjectSettingsAnswer { located }))
+    Ok(Json(ProjectSettingsAnswer { located, beads_available: crate::routes::find_bd().is_some() }))
 }
 
 impl DbError {
@@ -313,6 +323,7 @@ pub async fn list_projects(
         }
     }
 
+    let beads_available = crate::routes::find_bd().is_some();
     let mut result = Vec::with_capacity(projects.len());
     for project in projects {
         // Cache reads are best-effort — log and fall back to None on error
@@ -328,8 +339,14 @@ pub async fn list_projects(
                 None
             }
         };
-        let uses_beads = located_for(&project.path, project.local_path.as_deref(), &data_dir().map_err(manifest_error)?)
-            .map(|found| found.manifest.project.use_beads).unwrap_or(false);
+        // A board this computer cannot read is not a board to draw. The
+        // manifest still says what the project is; `usesBeads` says what the
+        // screen can honestly show, so a machine with no `bd` gets the
+        // chat-only shape rather than a board tab whose every read is a 503
+        // (bw-3tkl.2).
+        let uses_beads = beads_available
+            && located_for(&project.path, project.local_path.as_deref(), &data_dir().map_err(manifest_error)?)
+                .map(|found| found.manifest.project.use_beads).unwrap_or(false);
         result.push(ProjectWithTagsAndCounts {
             uses_beads,
             project,
@@ -512,6 +529,23 @@ mod tests {
             archived_at: None,
             is_test: false,
         }
+    }
+
+    /// The screen learns whether this computer has bd from the same answer
+    /// that carries the manifest, so the board question is drawn or not drawn
+    /// without a second round trip (bw-3tkl.2).
+    #[test]
+    fn the_probe_says_whether_this_computer_has_bd() {
+        let probe = ProjectProbe {
+            manifest: crate::project_manifest::infer(std::path::Path::new(".")),
+            existing: false,
+            storage: None,
+            manifest_path: None,
+            beads_available: false,
+        };
+        let json = serde_json::to_string(&probe).unwrap();
+        assert!(json.contains("\"beadsAvailable\":false"), "{json}");
+        assert!(!json.contains("beads_available"), "{json}");
     }
 
     #[test]

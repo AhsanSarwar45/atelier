@@ -51,6 +51,9 @@ export function AddProjectDialog({
   const [doltServers, setDoltServers] = useState<DoltServer[]>([]);
   const [serversLoading, setServersLoading] = useState(false);
   const [manifest, setManifest] = useState<ProjectManifest | null>(null);
+  // Whether this computer has bd. A board it cannot open is not offered
+  // (bw-3tkl.2).
+  const [beadsAvailable, setBeadsAvailable] = useState(true);
   const [storage, setStorage] = useState<ManifestStorage>('personal');
   const [branches, setBranches] = useState<string[]>([]);
   const { toast } = useToast();
@@ -123,7 +126,10 @@ export function AddProjectDialog({
 
       setProjectPath(cleanPath);
       setProjectName(probe.manifest.project.display_name);
-      setManifest(probe.manifest);
+      setBeadsAvailable(probe.beadsAvailable !== false);
+      setManifest(probe.beadsAvailable === false
+        ? { ...probe.manifest, project: { ...probe.manifest.project, use_beads: false } }
+        : probe.manifest);
       setStorage(probe.storage ?? 'personal');
       setBranches(gitBranches.branches.map((branch) => branch.name));
       setShowNameInput(true);
@@ -378,13 +384,15 @@ export function AddProjectDialog({
               </div>
               {manifest && (
                 <>
-                  <label className="flex items-center gap-2 text-sm text-t-secondary">
-                    <Checkbox
-                      checked={manifest.project.use_beads}
-                      onCheckedChange={(checked) => setManifest({ ...manifest, project: { ...manifest.project, use_beads: checked === true } })}
-                    />
-                    Use task tracking for project work
-                  </label>
+                  {beadsAvailable && (
+                    <label className="flex items-center gap-2 text-sm text-t-secondary">
+                      <Checkbox
+                        checked={manifest.project.use_beads}
+                        onCheckedChange={(checked) => setManifest({ ...manifest, project: { ...manifest.project, use_beads: checked === true } })}
+                      />
+                      Use task tracking for project work
+                    </label>
+                  )}
                   <div className="space-y-2">
                     <label htmlFor="manifest-storage" className="text-sm font-medium text-t-secondary">Store project settings</label>
                     <Select

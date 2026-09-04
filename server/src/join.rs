@@ -49,7 +49,7 @@ const CODEX: &[(&str, &str, &[&str])] = &[
 const GUARD_MARK: &str = "# Atelier landing guard";
 
 pub fn install(root: &Path, manifest: &ProjectManifest) -> Result<(), String> {
-    let bd = crate::routes::find_bd().ok_or_else(|| "Beads is required for this project".to_string())?;
+    let bd = crate::routes::find_bd().ok_or_else(|| crate::routes::BD_MISSING.to_string())?;
     if !root.join(".beads").is_dir() {
         let status = Command::new(&bd).args(["init", "--prefix", &manifest.beads.issue_id_prefix])
             .current_dir(root).status().map_err(|error| format!("could not start bd: {error}"))?;

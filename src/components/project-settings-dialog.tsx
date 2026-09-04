@@ -64,6 +64,10 @@ export function ProjectSettingsDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pathError, setPathError] = useState<string | null>(null);
   const [manifest, setManifest] = useState<ProjectManifest | null>(null);
+  // See the same flag in add-project-dialog: no bd, no board question
+  // (bw-3tkl.2). A project that already uses Beads keeps its setting; the
+  // control is simply not drawn for a computer that cannot honour it.
+  const [beadsAvailable, setBeadsAvailable] = useState(true);
   const [storage, setStorage] = useState<ManifestStorage>('personal');
   const [branches, setBranches] = useState<string[]>([]);
   const { toast } = useToast();
@@ -79,6 +83,7 @@ export function ProjectSettingsDialog({
       setBrowsing(null);
       setPathError(null);
       api.projects.settings(projectId).then((answer) => {
+        setBeadsAvailable(answer.beadsAvailable !== false);
         setManifest(answer.manifest);
         setStorage(answer.storage);
       }).catch(() => setManifest(null));
@@ -316,9 +321,9 @@ export function ProjectSettingsDialog({
               <div className="grid gap-6 border-t border-b-default pt-5 md:grid-cols-2">
                 <section className="space-y-3">
                   <h3 className="font-medium text-t-primary">Workflow</h3>
-                  <label className="flex items-center gap-2 text-sm"><Checkbox checked={manifest.project.use_beads} onCheckedChange={(checked) => setManifest({ ...manifest, project: { ...manifest.project, use_beads: checked === true } })} />Use task tracking for project work</label>
+                  {beadsAvailable && <label className="flex items-center gap-2 text-sm"><Checkbox checked={manifest.project.use_beads} onCheckedChange={(checked) => setManifest({ ...manifest, project: { ...manifest.project, use_beads: checked === true } })} />Use task tracking for project work</label>}
                   <label className="block space-y-1 text-sm"><span>Project summary</span><Input value={manifest.project.summary} onChange={(e) => setManifest({ ...manifest, project: { ...manifest.project, summary: e.target.value } })} /></label>
-                  {manifest.project.use_beads && <>
+                  {beadsAvailable && manifest.project.use_beads && <>
                     <label className="block space-y-1 text-sm"><span>Issue ID prefix</span><Input value={manifest.beads.issue_id_prefix} onChange={(e) => setManifest({ ...manifest, beads: { ...manifest.beads, issue_id_prefix: e.target.value } })} /></label>
                     <label className="block space-y-1 text-sm"><span>Completed-work branch</span><Input list="settings-branches" value={manifest.git.completed_work_branch} onChange={(e) => setManifest({ ...manifest, git: { ...manifest.git, completed_work_branch: e.target.value } })} /><datalist id="settings-branches">{branches.map((branch) => <option key={branch} value={branch} />)}</datalist></label>
                     <label className="flex items-center gap-2 text-sm"><Checkbox checked={manifest.git.agents_may_merge_completed_work} onCheckedChange={(checked) => setManifest({ ...manifest, git: { ...manifest.git, agents_may_merge_completed_work: checked === true } })} />Allow agents to merge completed work</label>

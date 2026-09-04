@@ -124,6 +124,52 @@ enum Mode {
     Chat,
 }
 
+/// What setup should do about Beads, before anything has been written.
+#[derive(Debug, PartialEq, Eq)]
+enum Decision {
+    /// The mode is already known — a flag said it, or the question can be put.
+    Settled(Mode),
+    /// Put the question to the reader.
+    Ask,
+    /// Chat, because this computer has no `bd`; the note says so out loud.
+    ChatWithoutBd(String),
+    /// Set nothing up, and say why.
+    Refuse(String),
+}
+
+/// Whether to ask about Beads, and what to do when this computer has no `bd`.
+///
+/// A computer with no `bd` is not asked about Beads: the question had one
+/// answer it could honour, and asking it anyway ended in `bd init` failing
+/// *after* the manifest had been written — a project recorded as a board with
+/// no board behind it. What a stranger's machine cannot do, it is told rather
+/// than offered.
+///
+/// Silence is not consent to lose a board, either. A project already set up
+/// for Beads keeps its setting and hears why nothing changed, rather than
+/// being quietly rewritten to chat because a tool went missing (bw-3tkl.2).
+fn decide_mode(
+    chosen: Option<Mode>,
+    beads_available: bool,
+    uses_beads: bool,
+    display_name: &str,
+) -> Decision {
+    match chosen {
+        Some(Mode::Beads) if !beads_available => {
+            Decision::Refuse(crate::routes::BD_MISSING.to_string())
+        }
+        Some(mode) => Decision::Settled(mode),
+        None if beads_available => Decision::Ask,
+        None if uses_beads => Decision::Refuse(format!(
+            "{display_name} already uses Beads, and this computer has no bd to read it with. {}",
+            crate::routes::BD_MISSING
+        )),
+        None => Decision::ChatWithoutBd(
+            "No bd on this computer, so this project is set up for chat.".to_string(),
+        ),
+    }
+}
+
 fn init_with(
     rest: &[String],
     input: &mut dyn BufRead,
@@ -181,9 +227,20 @@ fn init_with(
         .as_ref()
         .map(|found| found.manifest.clone())
         .unwrap_or_else(|| crate::project_manifest::infer(&root));
-    let mode = match chosen {
-        Some(mode) => mode,
-        None => ask_for_mode(input, output, manifest.project.use_beads)?,
+    let mode = match decide_mode(
+        chosen,
+        crate::routes::find_bd().is_some(),
+        manifest.project.use_beads,
+        &manifest.project.display_name,
+    ) {
+        Decision::Settled(mode) => mode,
+        Decision::Refuse(why) => return Err(why),
+        Decision::ChatWithoutBd(note) => {
+            writeln!(output, "{note}")
+                .map_err(|e| format!("the setup note could not be shown: {e}"))?;
+            Mode::Chat
+        }
+        Decision::Ask => ask_for_mode(input, output, manifest.project.use_beads)?,
     };
     manifest.project.use_beads = mode == Mode::Beads;
     manifest.project.display_name = chosen_name.unwrap_or_else(|| {
@@ -648,5 +705,56 @@ mod tests {
         assert!(String::from_utf8(shown)
             .unwrap()
             .contains("Please answer yes or no."));
+    }
+
+    /// A computer with `bd` still gets the question, both ways round.
+    #[test]
+    fn asks_about_beads_when_bd_is_here() {
+        assert_eq!(decide_mode(None, true, false, "Sample"), Decision::Ask);
+        assert_eq!(decide_mode(None, true, true, "Sample"), Decision::Ask);
+    }
+
+    /// A flag still decides, so a script that says `--chat` is not re-asked.
+    #[test]
+    fn a_flag_settles_it() {
+        assert_eq!(decide_mode(Some(Mode::Chat), true, false, "Sample"), Decision::Settled(Mode::Chat));
+        assert_eq!(decide_mode(Some(Mode::Beads), true, false, "Sample"), Decision::Settled(Mode::Beads));
+        // Chat needs no bd, so a computer without one can still be told chat.
+        assert_eq!(decide_mode(Some(Mode::Chat), false, false, "Sample"), Decision::Settled(Mode::Chat));
+    }
+
+    /// No bd, no question — and the reason is said rather than left to a
+    /// failure further down (bw-3tkl.2).
+    #[test]
+    fn a_new_project_without_bd_is_never_asked_about_beads() {
+        let decision = decide_mode(None, false, false, "Sample");
+        let Decision::ChatWithoutBd(note) = decision else {
+            panic!("expected chat, got {decision:?}");
+        };
+        assert!(note.to_lowercase().contains("no bd"), "{note}");
+        assert!(!note.contains('?'), "the note is not a question: {note}");
+    }
+
+    /// `--beads` on a computer with no bd is refused before anything is
+    /// written, and the refusal says where to get bd.
+    #[test]
+    fn asking_for_beads_without_bd_is_refused_up_front() {
+        assert_eq!(
+            decide_mode(Some(Mode::Beads), false, false, "Sample"),
+            Decision::Refuse(crate::routes::BD_MISSING.to_string())
+        );
+    }
+
+    /// A board already set up is not quietly taken away because bd went
+    /// missing: setup refuses rather than rewriting the project to chat.
+    #[test]
+    fn a_beads_project_is_not_downgraded_when_bd_goes_missing() {
+        let decision = decide_mode(None, false, true, "Sample");
+        let Decision::Refuse(why) = decision else {
+            panic!("expected a refusal, got {decision:?}");
+        };
+        assert!(why.contains("Sample"), "{why}");
+        assert!(why.contains("already uses Beads"), "{why}");
+        assert!(why.contains("bd CLI not found"), "{why}");
     }
 }
