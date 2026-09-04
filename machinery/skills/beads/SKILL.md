@@ -48,6 +48,16 @@ provider-neutral external-review skill; the app never starts a Python reviewer.
 
 Keep durable findings on the card with `bd update ID --append-notes="..."`.
 
+## Live checklist
+
+A checklist is a view of an epic, not a second task list maintained by the
+agent. Show one only when the work has a Beads epic: pass that epic's ID as the
+single item in the provider checklist. Atelier replaces it with the epic's
+direct children and reads every title and status from Beads, so never copy the
+children into the checklist or update their checklist statuses by hand. For a
+standalone ticket or work with no epic, do not publish a checklist. The agent's
+only ongoing responsibility is keeping track of the ticket it is working on.
+
 ## Rules the gates enforce
 
 Hooks are the safeguard, not the first line of enforcement. Know these and you

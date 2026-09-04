@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { presentableWidget } from '../../src/workbench/chat-widgets';
 
 const instructions = [readFileSync('machinery/skills/atelier/SKILL.md', 'utf8')];
+// The checklist is a board view, so its rules live in the skill only a Beads
+// project is given. A chat-only session is never handed them (bw-3tkl.3).
+const beads = readFileSync('machinery/skills/beads/SKILL.md', 'utf8');
 
 describe('agent chat widget instructions', () => {
   it.each(instructions)('teaches both when to use widgets and when prose is better', (text) => {
@@ -30,10 +33,15 @@ describe('agent chat widget instructions', () => {
   });
 
   it('makes the live checklist an epic-backed view instead of agent-maintained state', () => {
-    expect(instructions[0]).toMatch(/checklist is a view of an epic/i);
-    expect(instructions[0]).toMatch(/epic's ID as the\s+single item/i);
-    expect(instructions[0]).toMatch(/reads every title and status from Beads/i);
-    expect(instructions[0]).toMatch(/never[\s\S]*update .*checklist statuses by hand/i);
-    expect(instructions[0]).toMatch(/standalone ticket.*do not publish a checklist/i);
+    expect(beads).toMatch(/checklist is a view of an epic/i);
+    expect(beads).toMatch(/epic's ID as the\s+single item/i);
+    expect(beads).toMatch(/reads every title and status from Beads/i);
+    expect(beads).toMatch(/never[\s\S]*update .*checklist statuses by hand/i);
+    expect(beads).toMatch(/standalone ticket.*do not publish a checklist/i);
+  });
+
+  it('keeps the checklist rules out of the skill every session gets', () => {
+    expect(instructions[0]).not.toMatch(/checklist/i);
+    expect(instructions[0]).not.toMatch(/beads/i);
   });
 });

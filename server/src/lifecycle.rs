@@ -1717,6 +1717,11 @@ fn touch(data: &Value) {
 }
 
 fn prime(data: &Value) -> Option<Value> {
+    // No bd, no board, so nothing to prime a session with. This used to be
+    // built before anyone asked whether the board could be reached at all,
+    // and an agent on a computer without bd was told to claim work and given
+    // an empty ready list to claim it from (bw-3tkl.3).
+    crate::routes::find_bd()?;
     let project = root(data);
     let who = session(data);
     let ready = bd(&project, &["ready", "--limit", "8", "--json"])

@@ -239,7 +239,7 @@ test.describe('workbench', () => {
     // A board, because a checklist in this app is a view of an epic and of
     // nothing else: the panel is drawn from that epic's children, read from
     // Beads, and a list the agent keeps for itself is deliberately not drawn
-    // (machinery/skills/atelier/SKILL.md, "Live checklist"). Asking the agent
+    // (machinery/skills/beads/SKILL.md, "Live checklist"). Asking the agent
     // for its own three items therefore tested a thing the product refuses to
     // do, and the panel it waited for was never coming (bw-t26l.20).
     const RUN_DIR = fixtureFor('transcript');
