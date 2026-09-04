@@ -1254,9 +1254,10 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
                 // `isApiErrorMessage` on the rows that are errors; the live
                 // path reads the ACP error for the same reason.
                 if parent.is_none() && row["isApiErrorMessage"] == true {
-                    if let Some(mut signal) = crate::workbench::kit_words::condition("claude", &text)
-                    {
-                        signal["sourceMessageId"] = json!(id);
+                    if let Some(signal) = crate::workbench::kit_words::condition("claude", &text) {
+                        // Drawn beside the row it was read from, never in place
+                        // of it: `sourceMessageId` meant "delete this message",
+                        // and nothing may mean that (bw-by3w).
                         events.push(json!({"type":"provider.message","signal":signal}));
                     }
                 }
@@ -2167,7 +2168,8 @@ mod tests {
             .expect("a replayed limit went unreported");
         assert_eq!(signal["signal"]["kind"], "usage_limit");
         assert_eq!(signal["signal"]["resets"], "resets 9pm (Asia/Karachi)");
-        assert!(signal["signal"]["sourceMessageId"].is_string());
+        // Beside the row, never instead of it (bw-by3w).
+        assert!(signal["signal"]["sourceMessageId"].is_null());
     }
 
     /// Work the chat left running is on the record twice: the tool's own

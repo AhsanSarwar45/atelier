@@ -934,11 +934,20 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
     case 'provider.message': {
       // A provider condition is current state, not an immutable chat utterance.
       // Its stable id replaces the previous observation and resolution removes
-      // it. If prose was streamed before its meaning arrived, remove that
-      // answer-shaped row as part of the same projection.
-      const without = items.filter((it) =>
-        !(it.kind === 'provider_message' && it.id === e.signal.id) &&
-        !(e.signal.sourceMessageId && it.kind === 'message' && it.id === e.signal.sourceMessageId));
+      // it.
+      //
+      // What it does NOT remove is a message. It used to take the answer named
+      // by `sourceMessageId` out of the transcript, so that a limit reported in
+      // prose was said once rather than twice — and that made a signal filed
+      // against the wrong message destructive: the answer was gone from the
+      // page, and gone for good, because the projection is what draws every
+      // reload. Then the next clean turn resolved the condition, which removed
+      // the notice as well, and the reader was left with a gap where his answer
+      // had been and nothing at all to say why (bw-by3w).
+      //
+      // Saying a limit twice costs a duplicated sentence. Removing a message
+      // costs the message. A notice stands beside what it is about.
+      const without = items.filter((it) => !(it.kind === 'provider_message' && it.id === e.signal.id));
       next.error = null;
       next.items = e.signal.phase === 'resolved'
         ? without
@@ -1418,10 +1427,12 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         break;
 
       case 'provider.message': {
+        // The condition's own previous observation, and nothing else. Never a
+        // message: see the twin of this in `foldEvent` for why a notice that
+        // could delete an answer is a notice that can lose one (bw-by3w).
         for (let at = items.length - 1; at >= 0; at -= 1) {
           const item = items[at]!;
-          if ((item.kind === 'provider_message' && item.id === e.signal.id) ||
-              (e.signal.sourceMessageId && item.kind === 'message' && item.id === e.signal.sourceMessageId)) items.splice(at, 1);
+          if (item.kind === 'provider_message' && item.id === e.signal.id) items.splice(at, 1);
         }
         view.error = null;
         if (e.signal.phase === 'active') items.push({ kind: 'provider_message', id: e.signal.id, signal: e.signal });

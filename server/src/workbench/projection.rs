@@ -663,12 +663,18 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
             EventKind::ProviderMessage => {
                 let signal = value(event, "signal");
                 let id = signal["id"].as_str().unwrap_or_default();
-                let source = signal["sourceMessageId"].as_str();
-                items.retain(|row| {
-                    !(row["kind"] == "provider_message" && row["id"] == id
-                        || source
-                            .is_some_and(|source| row["kind"] == "message" && row["id"] == source))
-                });
+                // The condition's own previous observation, and nothing else.
+                //
+                // This also took out the message named by `sourceMessageId`, to
+                // keep a limit from being said twice — and it is the half that
+                // made the removal permanent. A browser can be reloaded; this is
+                // what a reload is served FROM, so an answer dropped here never
+                // reached the page again. A signal filed against the wrong
+                // message therefore deleted a real answer from the record's own
+                // reading of itself, and the next clean turn resolved the
+                // condition and took the notice away too, leaving a gap with
+                // nothing to explain it (bw-by3w).
+                items.retain(|row| !(row["kind"] == "provider_message" && row["id"] == id));
                 view.insert("error".into(), Value::Null);
                 if signal["phase"] == "active" {
                     let mut row = item("provider_message", id.to_string());
@@ -717,6 +723,71 @@ mod tests {
             .cloned()
             .map(|event| serde_json::from_value(event).unwrap())
             .collect()
+    }
+
+    /// A record already holding a wrong signal draws its answer again.
+    ///
+    /// This is the half that made the fault permanent and the half a reload
+    /// cannot get around: the browser is served from here. A signal naming a
+    /// message took that message out, so an answer wrongly filed as a condition
+    /// was gone from every subsequent read of the record — and when the next
+    /// clean turn resolved the condition, the notice went too and left a gap.
+    ///
+    /// The events below are the shape one of the manager's own chats holds. He
+    /// found it after installing the fix that stopped new ones being written:
+    /// "now that i have reloaded the page, that message isn't even visible,
+    /// neither as normal message nor as the wrong categorized mesage". Nothing
+    /// rewrites what is stored, so the reading has to be what changes (bw-by3w).
+    #[test]
+    fn workbench_core_projection_never_lets_a_condition_delete_an_answer() {
+        let said = "The sidebar reads the condition's own word instead of Failed.";
+        let event = |seq: i64, value: Value| -> Event {
+            let mut value = value;
+            let object = value.as_object_mut().unwrap();
+            object.insert("sessionId".into(), json!("chat"));
+            object.insert("seq".into(), json!(seq));
+            object.insert("at".into(), json!("2026-09-04T12:00:00Z"));
+            serde_json::from_value(value).unwrap()
+        };
+        let signal = |phase: &str| {
+            json!({"type":"provider.message","signal":{
+                "id":"usage:session","kind":"usage_limit","phase":phase,
+                "severity":if phase == "active" {"blocking"} else {"info"},
+                "scope":"session","sourceMessageId":"answer"
+            }})
+        };
+        let told = vec![
+            event(1, json!({"type":"message.started","messageId":"answer","role":"assistant"})),
+            event(2, json!({"type":"text.delta","messageId":"answer","text":said})),
+            event(3, json!({"type":"message.completed","messageId":"answer"})),
+            // Written by a build that read every answer's prose for a
+            // condition. It is in the record for good.
+            event(4, signal("active")),
+        ];
+        let drawn = fold_all(&told);
+        let kinds = |view: &Projection| {
+            view.items()
+                .iter()
+                .map(|row| row["kind"].as_str().unwrap_or_default().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            kinds(&drawn),
+            vec!["message", "provider_message"],
+            "the answer was taken off the page by a notice standing over it"
+        );
+        assert_eq!(drawn.items()[0]["text"], said);
+
+        // And when the condition lifts, the notice goes and the answer stays.
+        let mut recovered = told;
+        recovered.push(event(5, signal("resolved")));
+        let drawn = fold_all(&recovered);
+        assert_eq!(
+            kinds(&drawn),
+            vec!["message"],
+            "resolving the condition left a gap where the answer had been"
+        );
+        assert_eq!(drawn.items()[0]["text"], said);
     }
 
     #[test]

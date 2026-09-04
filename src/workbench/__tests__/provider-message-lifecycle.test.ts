@@ -21,7 +21,14 @@ describe('provider message lifecycle', () => {
     expect(view.items.filter((item) => item.kind === 'provider_message')).toEqual([]);
   });
 
-  it('removes answer-shaped provider prose without deleting ordinary transcript content', () => {
+  // A signal never deletes a message, however confidently it names one. It
+  // used to, so a condition filed against the wrong message took a real answer
+  // off the page — and off every reload, because the projection is what a
+  // reload is served from. Then the next clean turn resolved the condition and
+  // removed the notice as well, leaving a gap with nothing to explain it. A
+  // limit said twice costs a duplicated sentence; this cost the sentence
+  // (bw-by3w).
+  it('draws a condition beside the message it names and never in place of it', () => {
     const view = foldAll([
       { type: 'message.started', messageId: 'ordinary', role: 'assistant', seq: 1, sessionId: 'chat', at: '2026-08-30T08:00:01Z' },
       { type: 'text.delta', messageId: 'ordinary', text: 'Your files are ready.', seq: 2, sessionId: 'chat', at: '2026-08-30T08:00:02Z' },
@@ -30,7 +37,11 @@ describe('provider message lifecycle', () => {
       { type: 'text.delta', messageId: 'vendor-error', text: "You've hit your limit", seq: 5, sessionId: 'chat', at: '2026-08-30T08:00:05Z' },
       event(6, signal('active', { sourceMessageId: 'vendor-error' })),
     ]);
-    expect(view.items).toMatchObject([{ kind: 'message', id: 'ordinary' }, { kind: 'provider_message', id: 'usage:session' }]);
+    expect(view.items).toMatchObject([
+      { kind: 'message', id: 'ordinary' },
+      { kind: 'message', id: 'vendor-error' },
+      { kind: 'provider_message', id: 'usage:session' },
+    ]);
   });
 
   it('expires a timed condition and keeps untimed durable conditions', () => {

@@ -59,7 +59,15 @@ export interface ProviderMessageSignal {
    */
   resets?: string | null;
   action?: ProviderMessageAction | null;
-  /** Answer-shaped provider text this semantic signal replaces, when present. */
+  /**
+   * Kept only because records already hold it, and read by nothing.
+   *
+   * It named an answer-shaped message the notice REPLACED, and both projections
+   * acted on it by deleting that message — so a signal filed against the wrong
+   * one deleted a real answer, permanently, because a reload is served from the
+   * projection. A notice is drawn beside what it is about now, and nothing may
+   * mean "delete this message" (bw-by3w).
+   */
   sourceMessageId?: string | null;
 }
 

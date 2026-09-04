@@ -704,21 +704,13 @@ impl AcpNormalizer {
     /// to be made over the text of every message the agent completed, which is
     /// how an ordinary answer discussing a limit became one (bw-7pfr).
     ///
-    /// `spoken` is what the agent had said when the turn failed. A kit reports
-    /// its limit twice — once as prose it streams, once in the error — and the
-    /// notice stands in for that sentence rather than being drawn under it, so
-    /// a message whose own words the error repeats is named as the source.
-    fn error_prose_signal(brand: &str, said: &str, spoken: &[(String, String)]) -> Option<Value> {
-        let mut signal = crate::workbench::kit_words::condition(brand, said)?;
-        let error = Self::flattened(said);
-        let source = spoken.iter().find(|(_, text)| {
-            let text = Self::flattened(text);
-            !text.is_empty() && error.contains(&text)
-        });
-        if let Some((id, _)) = source {
-            signal["sourceMessageId"] = json!(id);
-        }
-        Some(signal)
+    /// A kit reports its limit twice — once as prose it streams, once in the
+    /// error — and the notice is drawn beside that sentence rather than in
+    /// place of it. It used to name the message as `sourceMessageId`, which
+    /// meant "delete this", and nothing means that any more: a notice that can
+    /// delete an answer is a notice that can lose one, and it did (bw-by3w).
+    fn error_prose_signal(brand: &str, said: &str) -> Option<Value> {
+        crate::workbench::kit_words::condition(brand, said)
     }
 
     /// The error as a sentence, for the reader who gets no better account.
@@ -2150,15 +2142,6 @@ impl AcpNormalizer {
     /// it, which is the whole point: see {@link acp_error_signal}.
     pub fn fail_turn(&mut self, session_id: &str, provider: &str, error: &Value) -> Vec<Event> {
         let said = Self::acp_error_reads(error);
-        // What the agent had said when the turn failed, taken before finishing
-        // it drains them. Only so the notice can name the sentence it stands in
-        // for; the condition itself is read off the error.
-        let spoken = self
-            .active_messages
-            .values()
-            .filter(|(_, id)| self.root_assistant_messages.contains(id))
-            .filter_map(|(_, id)| Some((id.clone(), self.message_text.get(id)?.clone())))
-            .collect::<Vec<_>>();
         let raw = json!({"error":error});
         let mut events = self.finish_turn(session_id, provider, &raw);
         events.pop();
@@ -2169,7 +2152,7 @@ impl AcpNormalizer {
         // structure; prose is what this reads.
         let message = error["message"].as_str().unwrap_or_default();
         if let Some(signal) = Self::acp_error_signal(error)
-            .or_else(|| Self::error_prose_signal(provider, message, &spoken))
+            .or_else(|| Self::error_prose_signal(provider, message))
         {
             self.record_signal(&signal);
             events.push(self.envelope(
@@ -2283,9 +2266,9 @@ mod tests {
         let signal = serde_json::to_value(&events[1]).unwrap();
         assert_eq!(signal["signal"]["kind"], "usage_limit");
         assert_eq!(signal["signal"]["resets"], "resets 9pm (Asia/Karachi)");
-        // The message the notice stands in for, so the projection can take the
-        // provider's own sentence off the page.
-        assert!(signal["signal"]["sourceMessageId"].is_string());
+        // And it names no message to delete. Standing IN FOR an answer is what
+        // made a misfiled signal destructive (bw-by3w).
+        assert!(signal["signal"]["sourceMessageId"].is_null());
 
         // And the chat wears the limit's own word, so the list agrees with the
         // notice on the page instead of calling it a chat that broke.
@@ -2340,13 +2323,12 @@ mod tests {
         }
     }
 
-    /// The notice stands in for the kit's sentence, and only for that sentence.
+    /// A notice never carries an instruction to delete a message.
     ///
-    /// A turn can fail after the agent has done real work, and the answer it
-    /// had written by then is not the provider's account of the failure. It is
-    /// named as the notice's source only when the error repeats its words.
+    /// A turn can fail after the agent has done real work, and that answer is
+    /// still the reader's. The condition is drawn beside it (bw-by3w).
     #[test]
-    fn a_failure_replaces_the_kit_s_own_sentence_and_no_other() {
+    fn a_failure_never_names_a_message_for_removal() {
         let mut normalizer = AcpNormalizer::default();
         normalizer.update(
             "local",
@@ -2365,8 +2347,7 @@ mod tests {
             .next()
             .expect("the limit went unreported");
         assert_eq!(signal["kind"], "usage_limit");
-        // The answer stays on the page: the error does not repeat it, so the
-        // notice is drawn beside it rather than over it.
+        // The answer stays on the page whatever the error said.
         assert!(signal["sourceMessageId"].is_null());
     }
 
