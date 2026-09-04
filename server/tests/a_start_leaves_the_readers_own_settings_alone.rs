@@ -1,17 +1,21 @@
-//! The first start of the program itself, watched from outside.
+//! A start of the program, watched from outside, and what it does to the
+//! reader's own Claude settings: nothing.
 //!
-//! Everything else about this feature is proved at a helper with a folder
-//! handed to it: `wire()` given a settings file, `said_it()` given an answer.
-//! None of that touches the two steps a person actually takes — running the
-//! program, and reading the line it prints. Take the whole
-//! `doing::wire_up()` block out of `serve()` and every one of those tests
-//! stays green while a fresh download wires up nothing and says nothing,
-//! which is the fault this job exists to fix (bw-14ij.4).
+//! This file used to prove the opposite. A first start wrote this program's
+//! chat-status gate into `<CLAUDE_CONFIG_DIR>/settings.json` and said so
+//! (bw-14ij.4) — one file shared by every project on the computer, edited by a
+//! program the person had only started, and outliving the app that wrote it.
+//! That was taken out: the registration belongs to the PROJECT, written by
+//! `atelier init` beside every other gate, and `atelier init` also takes the
+//! old global ones back out (bw-t26l.20).
 //!
-//! So: a real start against a folder that has never seen this program, the
-//! line read off its own standard output, the settings file read off disk —
-//! and then a second start against the same folder, which must say nothing
-//! and change nothing.
+//! The rule behind that removal is proved at a helper, against a folder handed
+//! to it (`doing::unwire`). What no helper can see is a start of the program
+//! itself reaching for the reader's file again — put a write back into
+//! `serve()` and every one of those tests stays green. So: a real start
+//! against a home folder that has never seen this program, and a second
+//! against one that already holds settings of the reader's own, both read off
+//! disk afterwards.
 
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -19,13 +23,14 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::Duration;
 
-/// The sentence a first start owes the reader (doing.rs, `said_it`).
-const SAID: &str = "wired your chats up to say what they are doing";
-/// The last of the fixed lines a start prints before it wires anything up.
+/// The last of the fixed lines a start prints. Anything a start had to say
+/// about wiring was said by here.
 const SETTLED: &str = "Ready.";
 /// Long enough for a cold binary to bind and print; short enough to fail a run
 /// rather than hang it.
 const PATIENCE: Duration = Duration::from_secs(60);
+/// What a registration of ours looks like wherever it is written (doing.rs).
+const OURS: &str = "hook doing";
 
 /// A start of the program, with its output arriving line by line.
 struct Started {
@@ -41,10 +46,9 @@ impl Started {
         // A shell the running copy started carries ATELIER_DATA_DIR and
         // ATELIER_PORT, and each beats what this test hands over: the folder
         // (identity.rs) and the port (main.rs). Inherited, the start below
-        // looks at the owner's own data folder, finds his copy already
-        // holding that port, and says so rather than wiring anything up. The
-        // whole family goes, not the two that were seen doing it, so this
-        // stays isolated as more of them are added.
+        // looks at the owner's own data folder and finds his copy already
+        // holding that port. The whole family goes, not the two that were seen
+        // doing it, so this stays isolated as more of them are added.
         for (name, _) in std::env::vars() {
             if name.starts_with("ATELIER_") {
                 program.env_remove(name);
@@ -121,57 +125,60 @@ fn a_free_port() -> u16 {
     held.local_addr().expect("its number").port()
 }
 
+/// Everything one start says, from its first line to a second after it has
+/// settled.
+fn everything_said(home: &Path, data: &Path) -> Vec<String> {
+    let started = Started::against(home, data, a_free_port());
+    let mut heard = started.spoke_until(SETTLED);
+    // The wiring used to run in the same breath as those lines, so a start
+    // that reached for the file again would have said so by the time the next
+    // second is out.
+    heard.extend(started.anything_more(Duration::from_secs(1)));
+    heard
+}
+
 #[test]
-fn a_first_start_wires_the_chats_up_and_says_so_once() {
+fn a_start_writes_nothing_into_a_home_folder_that_has_never_seen_it() {
     let home = tempfile::tempdir().expect("a folder");
     let data = tempfile::tempdir().expect("a folder for its own files");
     let settings = home.path().join("settings.json");
 
-    // ---- the first start, on a computer that has never run this -----------
-    let first = Started::against(home.path(), data.path(), a_free_port());
-    let heard = first.spoke_until(SAID);
-    let line = heard.last().expect("a line");
-    assert!(
-        line.contains(&settings.display().to_string()),
-        "it said it wired the chats up but not where: {line}"
-    );
-    drop(first);
+    let heard = everything_said(home.path(), data.path());
 
-    let written = std::fs::read_to_string(&settings)
-        .unwrap_or_else(|e| panic!("nothing was written to {}: {e}", settings.display()));
-    let written: serde_json::Value =
-        serde_json::from_str(&written).expect("something the tool can read");
-    let hooks = written["hooks"]
-        .as_object()
-        .unwrap_or_else(|| panic!("no hooks were written: {written}"));
     assert!(
-        hooks.contains_key("PreCompact"),
-        "the event this whole feature turns on is not among {:?}",
-        hooks.keys().collect::<Vec<_>>()
+        !std::path::Path::new(&settings).exists(),
+        "a start made {}, which belongs to the reader: {}",
+        settings.display(),
+        std::fs::read_to_string(&settings).unwrap_or_default()
     );
-    let whole = serde_json::to_string(&written).expect("readable");
     assert!(
-        whole.contains("hook doing"),
-        "the settings name no command of ours: {whole}"
+        !heard.iter().any(|line| line.contains(&settings.display().to_string())),
+        "a start announced itself into the reader's settings: {heard:?}"
     );
+}
 
-    // ---- and the second, against the same folder --------------------------
-    let second = Started::against(home.path(), data.path(), a_free_port());
-    let again = second.spoke_until(SETTLED);
-    // The wiring runs in the same breath as those lines, so anything it had to
-    // say has been said by the time the next second is out.
-    let after = second.anything_more(Duration::from_secs(3));
-    drop(second);
+#[test]
+fn a_start_leaves_settings_the_reader_already_had_exactly_as_they_were() {
+    let home = tempfile::tempdir().expect("a folder");
+    let data = tempfile::tempdir().expect("a folder for its own files");
+    let settings = home.path().join("settings.json");
+    // A file with a gate of the reader's own in it, so a start that rewrites
+    // the file at all — even to add nothing — is caught.
+    let theirs = r#"{
+  "model": "opus",
+  "hooks": {
+    "PreCompact": [{"matcher": "", "hooks": [{"type": "command", "command": "their-own-gate.py"}]}]
+  }
+}
+"#;
+    std::fs::write(&settings, theirs).expect("a settings file to start from");
 
-    let spoken: Vec<&String> = again.iter().chain(after.iter()).collect();
+    everything_said(home.path(), data.path());
+
+    let after = std::fs::read_to_string(&settings).expect("the settings still there");
+    assert_eq!(after, theirs, "a start rewrote settings of the reader's own");
     assert!(
-        !spoken.iter().any(|l| l.contains(SAID)),
-        "a second start announced itself all over again: {spoken:?}"
-    );
-    let untouched = std::fs::read_to_string(&settings).expect("the settings still there");
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&untouched).expect("readable"),
-        written,
-        "a second start rewrote settings it had already written"
+        !after.contains(OURS),
+        "a start wrote this program's gate into the reader's own file: {after}"
     );
 }
