@@ -375,6 +375,15 @@ export type WbpEvent = EventBase &
         title: string;
         /** Set when the call was made by a subagent; the id of the call that spawned it. */
         parentToolCallId: string | null;
+        /**
+         * What ACP itself says this call is: `read`, `edit`, `execute` and the
+         * rest of `ToolKind`. Null when the agent did not say. Every rule in
+         * `said-what-it-ran.ts` guesses this from the tool's NAME, which only
+         * works for names it has heard of (bw-t26l.20).
+         */
+        acpKind?: string | null;
+        /** The files this call says it touched, and where in them. Null when it named none. */
+        locations?: { path: string; line?: number | null }[] | null;
       }
     | { type: 'tool.completed'; toolCallId: string; ok: boolean; output: string; title?: string }
     /**

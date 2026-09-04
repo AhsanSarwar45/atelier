@@ -289,6 +289,25 @@ impl AcpNormalizer {
         serde_json::from_value(event).expect("normalizer only emits typed WBP events")
     }
 
+    /// The places a call says it touched, or null when it names none.
+    ///
+    /// A path and an optional line, which is exactly what the row already knows
+    /// how to draw: `PathChip` makes an address clickable and `EditPath` takes
+    /// a line with it. Anything without a readable path is dropped rather than
+    /// drawn as an empty chip.
+    fn locations(update: &Value) -> Value {
+        let places = update["locations"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|place| {
+                let path = place["path"].as_str().filter(|path| !path.is_empty())?;
+                Some(json!({"path":path, "line":place["line"]}))
+            })
+            .collect::<Vec<_>>();
+        if places.is_empty() { Value::Null } else { json!(places) }
+    }
+
     /// A content block as words, for the four ACP kinds that are words.
     ///
     /// Text is itself. A link to a resource is the link: the reader can follow
@@ -1158,7 +1177,14 @@ impl AcpNormalizer {
                 let input = self.tool_input(update);
                 let title = Self::tool_title(update, &name);
                 let parent = self.parent_tool_call(raw);
-                let started = json!({"type":"tool.started","toolCallId":id,"name":name.clone(),"title":title.clone(),"parentToolCallId":parent.clone(),"input":input.clone(),"acp":update});
+                // What ACP itself says this call is, and where it touched.
+                // Both were dropped: the row's whole classification came from
+                // guessing at the tool's NAME, so an agent whose shell tool is
+                // not called `Bash` had its command drawn as a `key: value`
+                // form, and a call that named the files it read named them to
+                // nobody (bw-t26l.20).
+                let started = json!({"type":"tool.started","toolCallId":id,"name":name.clone(),"title":title.clone(),"parentToolCallId":parent.clone(),"input":input.clone(),
+                    "acpKind":update["kind"], "locations":Self::locations(update), "acp":update});
                 self.tool_starts.insert(id.clone(), started.clone());
                 let mut events = vec![self.envelope(session_id, provider, raw, started)];
                 if let Some(under) = parent {
@@ -1230,15 +1256,28 @@ impl AcpNormalizer {
                     self.task_agents.insert(id.clone(), agent.to_string());
                     self.unbound_agents.retain(|out| out != agent);
                 }
+                // Where a call touched usually arrives on a later ping than
+                // the call itself -- the agent does not know which files it
+                // read until it has read them -- so a refinement is worth
+                // sending for that alone, not only for arguments.
+                let places = Self::locations(update);
+                let states_more = self.tool_starts.get(&id).is_some_and(|started| {
+                    (!update["kind"].is_null() && started["acpKind"] != update["kind"])
+                        || (!places.is_null() && started["locations"] != places)
+                });
                 let mut refinements = Vec::new();
-                if !update["rawInput"].is_null() {
+                if !update["rawInput"].is_null() || states_more {
                     if let Some(mut started) = self.tool_starts.get(&id).cloned() {
-                        let refined = self.tool_input(update);
-                        if let (Some(current), Some(addition)) = (started["input"].as_object_mut(), refined.as_object()) {
-                            current.extend(addition.clone());
-                        } else {
-                            started["input"] = refined;
+                        if !update["rawInput"].is_null() {
+                            let refined = self.tool_input(update);
+                            if let (Some(current), Some(addition)) = (started["input"].as_object_mut(), refined.as_object()) {
+                                current.extend(addition.clone());
+                            } else {
+                                started["input"] = refined;
+                            }
                         }
+                        if !update["kind"].is_null() { started["acpKind"] = update["kind"].clone(); }
+                        if !places.is_null() { started["locations"] = places; }
                         let name = Self::tool_name(update);
                         if !update["title"].is_null() { started["title"] = Self::tool_title(update, &name); }
                         started["name"] = json!(name);
@@ -2068,6 +2107,52 @@ mod tests {
         closing["update"]["status"] = json!("completed");
         let again = normalizer.update("local", "claude", &closing);
         assert_eq!(kinds(&again).iter().filter(|kind| **kind == json!("image")).count(), 0);
+    }
+
+    /// ACP states what a call IS and where it touched. Both were dropped, so
+    /// the row's whole classification came from guessing at the tool's name --
+    /// which works only for names the table has heard of (bw-t26l.20).
+    #[test]
+    fn what_acp_said_the_call_was_and_where_it_touched_reaches_the_row() {
+        let mut normalizer = AcpNormalizer::default();
+        let opened = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call", "toolCallId":"call-1", "title":"cargo test",
+            "kind":"execute", "rawInput":{"command":"cargo test"}
+        }}));
+        let started = opened
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "tool.started")
+            .expect("the call opened");
+        assert_eq!(started["acpKind"], "execute");
+        assert_eq!(started["locations"], Value::Null);
+
+        // Where a call touched arrives on a later ping -- an agent does not know
+        // which files it read until it has read them -- so that alone is worth
+        // re-announcing the row for.
+        let later = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call_update", "toolCallId":"call-1", "status":"in_progress",
+            "locations":[
+                {"path":"/work/src/lib.rs","line":42},
+                {"path":"","line":1}
+            ]
+        }}));
+        let refined = later
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "tool.started")
+            .expect("the row is told where it touched");
+        // The kind it already had survives, and a place with no readable path
+        // is dropped rather than drawn as an empty chip.
+        assert_eq!(refined["acpKind"], "execute");
+        assert_eq!(refined["locations"], json!([{"path":"/work/src/lib.rs","line":42}]));
+
+        // The same places again are not the row being told anything new.
+        let again = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call_update", "toolCallId":"call-1", "status":"in_progress",
+            "locations":[{"path":"/work/src/lib.rs","line":42}]
+        }}));
+        assert_eq!(kinds(&again).iter().filter(|kind| **kind == json!("tool.started")).count(), 0);
     }
 
     /// A thought is words, and `content_words` reads the four kinds that are

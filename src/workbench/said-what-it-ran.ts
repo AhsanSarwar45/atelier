@@ -2259,6 +2259,40 @@ export const KNOWN_HEADS: string[] = Object.keys(HEADS);
 export const KNOWN_TOOLS: string[] = Object.keys(CALLS);
 
 /**
+ * What ACP's own word for a call means in this file's vocabulary.
+ *
+ * ACP states what a call IS -- `read`, `edit`, `execute` -- and every rule in
+ * this file guesses it from the tool's NAME instead. That guess only works for
+ * tools this table has heard of, so an agent whose shell tool is not called
+ * `Bash` and whose reader is not called `Read` drew a column of colourless,
+ * markless rows next to a chat that knew perfectly well what each one was
+ * (bw-t26l.20).
+ *
+ * The name still wins where it is known: it says what the call DID, in a
+ * sentence, and `execute` says only that something ran. This is the floor, not
+ * the ceiling.
+ *
+ * `think` and `other` have no honest translation here -- there is no kind for
+ * an agent's private reasoning, and `other` is the protocol's own word for "no
+ * idea" -- so they map to nothing and the row stays as plain as it was.
+ */
+const ACP_KINDS: Record<string, RanKind> = {
+  read: 'read',
+  edit: 'edit',
+  delete: 'grave',
+  move: 'edit',
+  search: 'search',
+  execute: 'run',
+  fetch: 'web',
+  switch_mode: 'system',
+};
+
+/** What ACP said a call is, in this file's kinds, or null when it said nothing useful. */
+export function ranOfAcp(kind: string | null | undefined): RanKind | null {
+  return (kind ? ACP_KINDS[kind] : null) ?? null;
+}
+
+/**
  * What one tool call did, in English, or null to leave it as it was.
  *
  * Null is not a failure: it is the manager's own ruling that a command no rule

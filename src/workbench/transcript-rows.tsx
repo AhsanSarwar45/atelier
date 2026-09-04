@@ -41,7 +41,7 @@ import { comparisonSpecs } from '@/workbench/chat-media';
 import { ChatWidgetView } from '@/workbench/chat-widget-view';
 import { widgetSpecs } from '@/workbench/chat-widgets';
 import { colourOfBand, lookOfRan, markOfRan } from '@/workbench/ran-look';
-import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
+import { ranOfAcp, whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import { NOBODY_ANSWERED, refuses } from '@/workbench/protocol';
 import type { AskOption, ImagePayload, LookableImage } from '@/workbench/protocol';
 import { Chipped, SplitPaths, withChips } from '@/workbench/split-paths';
@@ -466,11 +466,18 @@ export const ToolRow = memo(function ToolRow({
   const dot =
     item.status === 'running' ? 'bg-amber-400 animate-pulse' : item.status === 'ok' ? 'bg-emerald-500' : 'bg-red-500';
   // A shell row's arguments ARE its command: written out as `key: value` it
-  // read as a form rather than as the line that was run (bw-4wcd.2).
-  const shell = shown.name === 'Bash' && typeof shown.input.command === 'string';
+  // read as a form rather than as the line that was run (bw-4wcd.2). Asked of
+  // ACP as well as of the name, because "the shell tool is called Bash" is true
+  // of one agent and the protocol says the same thing about all of them
+  // (bw-t26l.20).
+  const shell =
+    (shown.name === 'Bash' || item.acpKind === 'execute') && typeof shown.input.command === 'string';
   const asked = shell ? String(shown.input.command) : whatItWasAsked(shown.input);
   const tongue = languagesOf(shown.name, shown.input);
   const hasBody = item.detailsDeferred || asked !== '' || Boolean(shown.output?.trim());
+  // A row already showing a diff of the file it edited does not also need a
+  // chip naming that file underneath it.
+  const places = (item.locations ?? []).filter((place) => place.path !== shown.diff?.path);
   // What the call did, said in English behind a mark for the kind of thing it
   // was. A command no rule knows keeps the words it was typed in, and that is
   // the only shell text left on a closed row (bw-7ks.24).
@@ -481,7 +488,10 @@ export const ToolRow = memo(function ToolRow({
   const ran = item.detailsDeferred && !detail && item.ranKind
     ? { said: item.title, kind: item.ranKind, grave: item.ranGrave ?? false }
     : whatItRan(shown.name, shown.input);
-  const ranKind = ran?.kind ?? item.ranKind;
+  // What ACP said it is, when no rule here recognises the name. A floor, not a
+  // ceiling: a rule that knows the tool says what the call DID, and `execute`
+  // says only that something ran (bw-t26l.20).
+  const ranKind = ran?.kind ?? item.ranKind ?? ranOfAcp(item.acpKind) ?? undefined;
   const ranGrave = ran?.grave ?? item.ranGrave ?? false;
   const Mark = ranKind && markOfRan(ranKind);
   // A chain that deletes something is red whatever else it mostly did: the
@@ -579,6 +589,22 @@ export const ToolRow = memo(function ToolRow({
           </>
         )}
       </Panel>
+      {/* Where the call touched, in the agent's own words rather than guessed
+          out of its arguments. A search that looked in six files said nothing
+          about any of them; the chips are clickable, the same as everywhere
+          else an address appears (bw-t26l.20). */}
+      {places.length > 0 && (
+        <div data-testid="tool-locations" className="flex flex-wrap gap-1 pl-4 pt-0.5">
+          {places.map((place) => (
+            <EditPath
+              key={`${place.path}:${place.line ?? ''}`}
+              path={place.path}
+              raw={place.path.split('/').slice(-2).join('/')}
+              line={place.line ?? undefined}
+            />
+          ))}
+        </div>
+      )}
       {/* What the call answered with, when it answered with a picture. Under
           the row rather than behind its click: a screenshot IS the answer, and
           an answer nobody can see without knowing to open the row is the

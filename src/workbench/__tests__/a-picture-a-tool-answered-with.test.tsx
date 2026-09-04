@@ -41,7 +41,7 @@ const took = (): WbpEvent[] => [
     toolCallId: 'call-1',
     image: { mime: 'image/png', dataUrl: SHOT, alt: 'the board' },
   }),
-  said({ type: 'tool.completed', toolCallId: 'call-1', ok: true, output: '', summary: '' }),
+  said({ type: 'tool.completed', toolCallId: 'call-1', ok: true, output: '' }),
 ];
 
 describe('a picture a tool answered with', () => {

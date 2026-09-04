@@ -109,6 +109,10 @@ export interface TranscriptTool {
    * with words. A screenshot tool's whole answer used to be dropped: the row
    * said it succeeded and showed nothing (bw-t26l.20). */
   images?: ImagePayload[];
+  /** What ACP itself said this call is, when no rule here recognises its name. */
+  acpKind?: string | null;
+  /** The files this call says it touched, and where in them. */
+  locations?: { path: string; line?: number | null }[];
   /** Classification survives deferred tool bodies so the collapsed row keeps
    * the same category, colour and icon as a live row. */
   ranKind?: import('@/workbench/said-what-it-ran').RanKind;
@@ -571,6 +575,8 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
         diff: null,
         input: argumentsOf(e.input),
         output: null,
+        ...(e.acpKind ? { acpKind: e.acpKind } : {}),
+        ...(e.locations ? { locations: e.locations } : {}),
       };
       // One call is one row, wherever the word about it came from. A chat
       // somebody else is working in now draws a command while it runs and
@@ -578,9 +584,17 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       // and back is told about that same running command again — which has to
       // refresh the row already standing rather than add a second one below it
       // (bw-jaoz.5).
+      // A re-announcement REFRESHES the row; it does not empty it. What the
+      // call answered with arrives on its own events -- a diff, a picture --
+      // and rebuilding the row from the announcement alone threw those away
+      // the moment the agent said one more thing about the call (bw-t26l.20).
       const twice = items.some((it) => it.kind === 'tool' && it.id === e.toolCallId);
       next.items = twice
-        ? items.map((it) => (it.kind === 'tool' && it.id === e.toolCallId ? row : it))
+        ? items.map((it) =>
+            it.kind === 'tool' && it.id === e.toolCallId
+              ? { ...row, diff: it.diff ?? row.diff, ...(it.images ? { images: it.images } : {}) }
+              : it,
+          )
         : [...items, row];
       return next;
     }
@@ -1065,6 +1079,8 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           diff: null,
           input: argumentsOf(e.input),
           output: null,
+          ...(e.acpKind ? { acpKind: e.acpKind } : {}),
+          ...(e.locations ? { locations: e.locations } : {}),
         };
         // The same call twice is the same row: see the note on the other fold.
         const at = toolAt.get(e.toolCallId);
@@ -1072,7 +1088,8 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           toolAt.set(e.toolCallId, items.length);
           items.push(row);
         } else {
-          items[at] = row;
+          const was = items[at] as TranscriptTool;
+          items[at] = { ...row, diff: was.diff ?? row.diff, ...(was.images ? { images: was.images } : {}) };
         }
         break;
       }
