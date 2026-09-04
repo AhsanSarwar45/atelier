@@ -370,9 +370,29 @@ impl Store {
         found
     }
 
-    /// Restore-list rows, preserving the former default that an untitled chat
-    /// with no message is not an offer to resume. `everything` deliberately
-    /// exposes those rows for diagnosis.
+    /// Restore-list rows: an untitled chat with nothing said in it is not an
+    /// offer to resume — unless the person started it here, by hand.
+    ///
+    /// The old rule was title-or-a-message alone, and it was written against
+    /// the chats we did not start: the kit's index is full of unnamed review
+    /// agents, and offering those back is the fault §6.3.1 exists to prevent.
+    /// A chat begun at the New Chat button is the opposite case. It is the one
+    /// thing on that list the person definitely meant to have, and `origin`
+    /// already tells the two apart — only `CommandKind::SessionStart` writes
+    /// `app`, while everything discovered or opened from outside writes
+    /// `terminal`.
+    ///
+    /// Claude and Codex hid the gap. A chat of theirs with no title and no
+    /// message is still an ACP session the provider knows about, so provider
+    /// discovery hands it back and the row returns. Local has no such rescue —
+    /// `list_sessions` asks only claude and codex, and could not ask a local
+    /// runtime anyway, since that call passes no model and `launch_config` has
+    /// none without one. And a local chat is created with no title, no message
+    /// and no driver on purpose: it is waiting for the model to be chosen. So
+    /// the one chat that most needed the list was the one it dropped, at once
+    /// and for good (bw-u6cl.1).
+    ///
+    /// `everything` deliberately exposes every row for diagnosis.
     pub fn list_restore_sessions(
         &self,
         project_id: Option<&str>,
@@ -381,7 +401,7 @@ impl Store {
         if everything {
             return self.list_sessions(project_id);
         }
-        let visible = r#"(title IS NOT NULL OR EXISTS (
+        let visible = r#"(title IS NOT NULL OR origin='app' OR EXISTS (
             SELECT 1 FROM event WHERE event.session_id=session.id
               AND event.type='message.started' LIMIT 1))"#;
         let sql = match project_id {
@@ -2493,6 +2513,8 @@ mod tests {
         for id in ["empty", "spoken", "titled"] {
             let mut row = session(id, "claude", None, "2026-08-20T00:00:00Z");
             row.title = (id == "titled").then(|| "Kept title".into());
+            // The rule this test is about is for the chats we did not start.
+            row.origin = "terminal".into();
             store.create_session(&row).unwrap();
         }
         let message: Event = serde_json::from_value(json!({
@@ -2518,6 +2540,44 @@ mod tests {
                 .unwrap()
                 .len(),
             3
+        );
+    }
+
+    /// A chat begun at the New Chat button is on the list from the moment it
+    /// is made.
+    ///
+    /// This is the shape a local chat is deliberately created in: no title, no
+    /// message, no model, no driver — it is waiting to be told which model to
+    /// use. Under the old title-or-a-message rule it was dropped from the
+    /// restore list at once, and unlike Claude and Codex nothing rediscovered
+    /// it, so the chat the person had just asked for was never seen again
+    /// (bw-u6cl.1). A chat of the same shape that we did not start stays
+    /// hidden, which is the rule this one is carved out of.
+    #[test]
+    fn restore_sessions_offer_a_chat_the_person_started_here_before_anything_is_said() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+
+        let mut started_here = session("local-new", "local", None, "2026-09-04T00:00:00Z");
+        started_here.title = None;
+        started_here.model = None;
+        started_here.origin = "app".into();
+        store.create_session(&started_here).unwrap();
+
+        let mut from_outside = session("outside-new", "claude", None, "2026-09-04T00:00:00Z");
+        from_outside.title = None;
+        from_outside.origin = "terminal".into();
+        store.create_session(&from_outside).unwrap();
+
+        let offered = store
+            .list_restore_sessions(Some("project-1"), false)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(
+            offered,
+            std::collections::HashSet::from(["local-new".to_string()])
         );
     }
 

@@ -636,13 +636,24 @@ rather than showing something we cannot stand behind (decision 13).
 
 Constraint: the list holds the chats a person began. A chat an agent started to
 do a piece of work for another chat is behind a switch, off by default, and so
-is one with nothing said in it yet.
+is one from somewhere else with nothing said in it yet.
 
 External reality: the agent kit's index separates the two itself —
 `listSessions({includeProgrammatic: false})` is the same filter the terminal's
 own `/resume` picker uses. Measured on Corsetta, 2026-08-16: 306 chats offered,
 218 of them a person's; the 88 it withholds are every "You are reviewing a
 change" review agent and every unnamed one (bw-p61.3).
+
+The nothing-said rule is for those chats, and only those. A chat begun at this
+app's own New Chat button is on the list from the moment it is made, named or
+not, spoken in or not — `origin` is what tells the two apart, and only starting
+a chat here writes `app`. Said plainly because the rule had already cost the
+one case that needed it most: a local chat is created with no title, no message
+and no model on purpose, since the model is chosen inside the chat, and a
+Claude or Codex chat in that same state is quietly handed back by provider
+discovery while a local one has no discovery to be handed back by. So the chat
+the person had just asked for left the list the instant it was made, and never
+returned (bw-u6cl.1).
 
 #### 6.3.2 What an open chat shows of what was said before
 
