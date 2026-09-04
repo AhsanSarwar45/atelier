@@ -363,7 +363,15 @@ pub async fn with_terminal_output(io: &ClientIo, raw: &Value) -> Value {
                 };
                 filled.push(json!({"type":"content","content":{"type":"text","text":text}}));
             }
-            None => filled.push(row.clone()),
+            // Not this client's terminal: on a live chat that is an agent
+            // naming an id nobody handed it, and on a replay it is a terminal
+            // that closed with the session it belonged to. Either way the row
+            // said NOTHING -- the normalizer reads content that is words and a
+            // terminal block is not words -- so the reader was left looking at
+            // a command with an empty box under it, which is the same thing
+            // this function was written to stop (bw-t26l.20).
+            None => filled.push(json!({"type":"content","content":{"type":"text",
+                "text":"[this command's terminal is closed, so what it printed cannot be read back]"}})),
         }
     }
     let mut out = raw.clone();
@@ -494,12 +502,18 @@ mod tests {
             json!({"type":"content","content":{"type":"text","text":"ran-it"}})
         );
 
-        // A terminal this client never opened is left exactly as it came, so
-        // an update it cannot answer for is passed on rather than emptied.
+        // A terminal this client never opened -- an id nobody handed it, or one
+        // that closed with the session it belonged to -- says so. Left as it
+        // came it read as nothing at all, and the reader was looking at a
+        // command with an empty box under it.
         let stranger = json!({"sessionId":"remote","update":{
             "sessionUpdate":"tool_call_update","toolCallId":"call-2",
             "content":[{"type":"terminal","terminalId":"not-ours"}]
         }});
-        assert_eq!(with_terminal_output(&io, &stranger).await, stranger);
+        let said = with_terminal_output(&io, &stranger).await;
+        let text = said["update"]["content"][0]["content"]["text"]
+            .as_str()
+            .expect("a closed terminal is a sentence, not a silence");
+        assert!(text.contains("terminal is closed"), "{text}");
     }
 }

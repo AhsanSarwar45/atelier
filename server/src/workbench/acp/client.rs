@@ -67,6 +67,68 @@ pub struct ListedSession {
 /// shape. Measured against the pinned adapter (claude-agent-acp 0.73.0): the
 /// same load answers with the call and its result once the promise is dropped
 /// (bw-t26l.20).
+/// The seven `fs/*` and `terminal/*` handlers, attached to a builder.
+///
+/// Every handshake this app makes says `fs` and `terminal` are supported, and
+/// only the live one had the handlers behind that claim. A replay or a
+/// discovery client that an agent took at its word got `method_not_found` back
+/// for a capability it had just been promised. A macro rather than a function
+/// because a builder's type is the whole chain built so far (bw-t26l.20).
+macro_rules! serving_client_io {
+    ($builder:expr, $io:expr) => {{
+        let read_io = $io.clone();
+        let write_io = $io.clone();
+        let create_terminal_io = $io.clone();
+        let terminal_output_io = $io.clone();
+        let release_terminal_io = $io.clone();
+        let wait_terminal_io = $io.clone();
+        let kill_terminal_io = $io.clone();
+        $builder
+            .on_receive_request(
+                async move |request: ReadTextFileRequest, responder, _connection| {
+                    responder.respond(read_io.read(request).await?)
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |request: WriteTextFileRequest, responder, _connection| {
+                    responder.respond(write_io.write(request).await?)
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |request: CreateTerminalRequest, responder, _connection| {
+                    responder.respond(create_terminal_io.create_terminal(request).await?)
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |request: TerminalOutputRequest, responder, _connection| {
+                    responder.respond(terminal_output_io.terminal_output(request).await?)
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |request: ReleaseTerminalRequest, responder, _connection| {
+                    responder.respond(release_terminal_io.release_terminal(request).await?)
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |request: WaitForTerminalExitRequest, responder, _connection| {
+                    responder.respond(wait_terminal_io.wait_terminal(request).await?)
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |request: KillTerminalRequest, responder, _connection| {
+                    responder.respond(kill_terminal_io.kill_terminal(request).await?)
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+    }};
+}
+
 /// The one version of ACP this client speaks.
 ///
 /// Sent on every handshake and checked against what comes back: the agent
@@ -322,6 +384,13 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
     let update_events = collected.clone();
     let update_session = local_id.clone();
     let update_brand = brand.clone();
+    // A replay serves the same `fs/*` and `terminal/*` calls a live chat does.
+    // It advertises them either way -- the handshake is the same one -- and
+    // until now there was nothing behind that claim here: an agent that took
+    // the client at its word mid-load got `method_not_found` for a capability
+    // it had just been promised (bw-t26l.20).
+    let io = ClientIo::new(cwd.clone())?;
+    let updates_io = io.clone();
     let client = agent_client_protocol::Client
         .builder()
         .on_receive_notification(
@@ -329,7 +398,8 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
                 if notification.method() != "session/update" {
                     return Ok(());
                 }
-                let raw = notification.params().clone();
+                let raw =
+                    super::client_io::with_terminal_output(&updates_io, notification.params()).await;
                 let events = update_normalizer
                     .lock()
                     .await
@@ -341,6 +411,7 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
             },
             agent_client_protocol::on_receive_notification!(),
         );
+    let client = serving_client_io!(client, io);
     let finish_normalizer = normalizer.clone();
     let finish_events = collected.clone();
     let finish_session = local_id.clone();
@@ -1779,13 +1850,6 @@ impl AcpDriver {
             let stopped_database = task_database.clone();
             let stopped_session = task_session.clone();
             let stopped_closing = task_closing.clone();
-            let read_io = task_io.clone();
-            let write_io = task_io.clone();
-            let create_terminal_io = task_io.clone();
-            let terminal_output_io = task_io.clone();
-            let release_terminal_io = task_io.clone();
-            let wait_terminal_io = task_io.clone();
-            let kill_terminal_io = task_io.clone();
             let client = agent_client_protocol::Client
                 .builder()
                 .on_receive_notification(
@@ -1846,48 +1910,8 @@ impl AcpDriver {
                     },
                     agent_client_protocol::on_receive_request!(),
                 )
-                .on_receive_request(
-                    async move |request: ReadTextFileRequest, responder, _connection| {
-                        responder.respond(read_io.read(request).await?)
-                    },
-                    agent_client_protocol::on_receive_request!(),
-                )
-                .on_receive_request(
-                    async move |request: WriteTextFileRequest, responder, _connection| {
-                        responder.respond(write_io.write(request).await?)
-                    },
-                    agent_client_protocol::on_receive_request!(),
-                )
-                .on_receive_request(
-                    async move |request: CreateTerminalRequest, responder, _connection| {
-                        responder.respond(create_terminal_io.create_terminal(request).await?)
-                    },
-                    agent_client_protocol::on_receive_request!(),
-                )
-                .on_receive_request(
-                    async move |request: TerminalOutputRequest, responder, _connection| {
-                        responder.respond(terminal_output_io.terminal_output(request).await?)
-                    },
-                    agent_client_protocol::on_receive_request!(),
-                )
-                .on_receive_request(
-                    async move |request: ReleaseTerminalRequest, responder, _connection| {
-                        responder.respond(release_terminal_io.release_terminal(request).await?)
-                    },
-                    agent_client_protocol::on_receive_request!(),
-                )
-                .on_receive_request(
-                    async move |request: WaitForTerminalExitRequest, responder, _connection| {
-                        responder.respond(wait_terminal_io.wait_terminal(request).await?)
-                    },
-                    agent_client_protocol::on_receive_request!(),
-                )
-                .on_receive_request(
-                    async move |request: KillTerminalRequest, responder, _connection| {
-                        responder.respond(kill_terminal_io.kill_terminal(request).await?)
-                    },
-                    agent_client_protocol::on_receive_request!(),
-                );
+                ;
+            let client = serving_client_io!(client, task_io);
             let agent = AcpAgent::new(config);
             let ready = Arc::new(Mutex::new(Some(ready)));
             let connection_ready = ready.clone();

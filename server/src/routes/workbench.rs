@@ -2255,6 +2255,9 @@ mod tests {
         state.database().append(notice()).await.unwrap();
         let mut catalog = saved_session();
         catalog.id = "catalog-chat".into();
+        // Another chat is another thread. One row per chat another program is
+        // holding is what the store enforces now (bw-t26l.20).
+        catalog.external_id = Some("thread-2".into());
         catalog.project_id = "another-project".into();
         state.database().create_session(catalog).await.unwrap();
         let menu: Event = serde_json::from_value(json!({

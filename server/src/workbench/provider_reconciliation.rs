@@ -47,7 +47,11 @@ mod tests {
             .create_session(Session {
                 id: id.into(),
                 brand: "claude".into(),
-                external_id: Some("outside".into()),
+                // Its OWN thread. Two chats cannot both be the same one another
+                // program is holding, and the store now says so -- a shared id
+                // here is a fixture describing something the app forbids
+                // (bw-t26l.20).
+                external_id: Some(format!("outside-{id}")),
                 project_id: "p".into(),
                 project_path: "/p".into(),
                 cwd: "/p".into(),
