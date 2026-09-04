@@ -67,8 +67,41 @@ pub struct ListedSession {
 /// shape. Measured against the pinned adapter (claude-agent-acp 0.73.0): the
 /// same load answers with the call and its result once the promise is dropped
 /// (bw-t26l.20).
+/// The one version of ACP this client speaks.
+///
+/// Sent on every handshake and checked against what comes back: the agent
+/// answers with the version it will actually use, which is not always the one
+/// it was asked for.
+const SPEAKS: u64 = 1;
+
+/// Whether the version the agent came back with is one this client can speak.
+///
+/// The handshake negotiates: the agent replies with the version it will use,
+/// and a client that cannot speak it is told to stop there rather than talk
+/// past it. Nothing read this, so an agent that answered "0" -- the pre-release
+/// version, which this app has never spoken -- was carried on with, and the
+/// failure surfaced later as unexplained nonsense somewhere in the middle of a
+/// turn instead of as one sentence at the door (bw-t26l.20).
+///
+/// Only a STATED mismatch refuses. An adapter that omits the field has not said
+/// it is speaking something else, and the ones this app bundles all speak 1.
+fn agreed_version(initialized: &Value) -> Result<(), agent_client_protocol::Error> {
+    match initialized["protocolVersion"].as_u64() {
+        Some(agreed) if agreed != SPEAKS => Err(acp_error(format!(
+            "this agent speaks ACP {agreed}; this app speaks {SPEAKS}"
+        ))),
+        _ => Ok(()),
+    }
+}
+
 fn initialize_request(live: bool) -> Result<UntypedMessage, agent_client_protocol::Error> {
-    let mut meta = json!({"subagent-transcript": true});
+    // `subagent-transcript` and `jetbrains` are extensions, and ACP puts an
+    // extension under `_meta`. `subagents` is one too -- there is no such field
+    // in the spec -- but the adapters this app ships read it off the top level,
+    // so it is stated in both places: under `_meta` where the protocol says an
+    // extension lives, and beside the real capabilities where the shipped
+    // adapter looks for it (bw-t26l.20).
+    let mut meta = json!({"subagent-transcript": true, "subagents": {}});
     if live {
         meta["jetbrains"] =
             json!({"air": {"version":1,"capabilities":["nativeSubagentSessions"]}});
@@ -76,7 +109,7 @@ fn initialize_request(live: bool) -> Result<UntypedMessage, agent_client_protoco
     UntypedMessage::new(
         "initialize",
         json!({
-            "protocolVersion": 1,
+            "protocolVersion": SPEAKS,
             "clientInfo": {
                 "name":"atelier", "title":"Atelier",
                 "version":env!("CARGO_PKG_VERSION")
@@ -110,6 +143,7 @@ pub async fn list_sessions(brand: &str, cwd: Option<&Path>) -> Result<Vec<Listed
                     .send_request(initialize_request(false)?)
                     .block_task()
                     .await?;
+                agreed_version(&initialized)?;
                 if initialized
                     .pointer("/agentCapabilities/sessionCapabilities/list")
                     .is_none()
@@ -168,6 +202,7 @@ async fn one_shot_request(
         .builder()
         .connect_with(AcpAgent::new(config), async move |connection: ConnectionTo<Agent>| {
             let initialized = connection.send_request(initialize_request(false)?).block_task().await?;
+            agreed_version(&initialized)?;
             if capability
                 .as_deref()
                 .is_some_and(|path| initialized.pointer(path).is_none())
@@ -318,6 +353,7 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
                     .send_request(initialize_request(false)?)
                     .block_task()
                     .await?;
+                agreed_version(&initialized)?;
                 if initialized.pointer("/agentCapabilities/loadSession") != Some(&Value::Bool(true))
                 {
                     return Err(acp_error("agent does not advertise session/load"));
@@ -1873,6 +1909,7 @@ impl AcpDriver {
                             .send_request(initialize_request(true)?)
                             .block_task()
                             .await?;
+                        agreed_version(&initialized)?;
                         let agent_controls = initialized
                             .pointer("/_meta/atelier/subagentControls")
                             .filter(|controls| controls.is_array())
@@ -3349,10 +3386,38 @@ mod tests {
                 handshake.params().pointer("/clientCapabilities/_meta/subagent-transcript"),
                 Some(&json!(true))
             );
+            // Beside the real capabilities, where the adapters this app ships
+            // read it, AND under `_meta`, where the protocol says an extension
+            // lives. `subagents` is not a field of the spec's client
+            // capabilities (bw-t26l.20).
             assert_eq!(
                 handshake.params().pointer("/clientCapabilities/subagents"),
                 Some(&json!({}))
             );
+            assert_eq!(
+                handshake.params().pointer("/clientCapabilities/_meta/subagents"),
+                Some(&json!({}))
+            );
+            assert_eq!(handshake.params()["protocolVersion"], json!(SPEAKS));
         }
+    }
+
+    /// The handshake NEGOTIATES: the agent answers with the version it will
+    /// actually use, not necessarily the one it was asked for. Nothing read
+    /// that answer, so an agent speaking something else was carried on with and
+    /// the failure surfaced later as nonsense mid-turn (bw-t26l.20).
+    #[test]
+    fn an_agent_speaking_another_acp_is_stopped_at_the_door() {
+        // The pre-release version, which this app has never spoken.
+        let refused = agreed_version(&json!({"protocolVersion": 0}))
+            .expect_err("version 0 is not version 1");
+        let said = refused.to_string();
+        assert!(said.contains("speaks ACP 0"), "{said}");
+        assert!(said.contains("speaks 1"), "{said}");
+
+        agreed_version(&json!({"protocolVersion": 1})).expect("the version this app speaks");
+        // Only a STATED mismatch refuses: an adapter that omits the field has
+        // not said it is speaking something else.
+        agreed_version(&json!({"agentCapabilities": {}})).expect("silence is not a mismatch");
     }
 }
