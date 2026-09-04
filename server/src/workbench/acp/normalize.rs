@@ -433,15 +433,17 @@ impl AcpNormalizer {
         if !self.root_assistant_messages.remove(&id) || text.is_empty() {
             return events;
         }
-        if let Some(mut signal) = crate::workbench::kit_words::condition(provider, &text) {
-            signal["sourceMessageId"] = json!(id);
-            events.push(self.envelope(
-                session_id,
-                provider,
-                raw,
-                json!({"type":"provider.message","signal":signal}),
-            ));
-        }
+        // No reading of the words for a condition here. An answer is an
+        // answer: this ran over the text of every completed message the agent
+        // spoke, so an answer that merely MENTIONED signing in, or a model
+        // being unavailable, or a context window, was filed as that condition
+        // — blocking, at that, for the first of the three — and the projection
+        // then took the answer off the page and drew the notice in its place.
+        // The manager, with three such answers on screen and each one replaced
+        // by a banner naming something that had not happened: "normal agent
+        // messages (non-tool calls) should never be categorized". They are not,
+        // now. A kit that has a condition to report fails the turn to report
+        // it, and {@link fail_turn} reads it there, off the error (bw-7pfr).
         for widget in crate::workbench::media::widget_specs(&text) {
             events.push(self.envelope(
                 session_id,
@@ -645,6 +647,41 @@ impl AcpNormalizer {
             )),
             _ => None,
         }
+    }
+
+    /// The same words, however the kit spaced them.
+    fn flattened(text: &str) -> String {
+        text.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// The condition a kit reports in prose, read off the error it failed with.
+    ///
+    /// ACP has one code that names a condition and no vocabulary at all for a
+    /// usage limit, a rate limit or a retry, so a kit with one of those to
+    /// report writes it as a sentence — and the sentence arrives here, in the
+    /// error, alongside whatever it put in `data`. Reading it is a guess about
+    /// one vendor's habits, which is why it takes a brand and lives behind
+    /// `kit_words`.
+    ///
+    /// The guess is confined to a turn the provider actually refused. It used
+    /// to be made over the text of every message the agent completed, which is
+    /// how an ordinary answer discussing a limit became one (bw-7pfr).
+    ///
+    /// `spoken` is what the agent had said when the turn failed. A kit reports
+    /// its limit twice — once as prose it streams, once in the error — and the
+    /// notice stands in for that sentence rather than being drawn under it, so
+    /// a message whose own words the error repeats is named as the source.
+    fn error_prose_signal(brand: &str, said: &str, spoken: &[(String, String)]) -> Option<Value> {
+        let mut signal = crate::workbench::kit_words::condition(brand, said)?;
+        let error = Self::flattened(said);
+        let source = spoken.iter().find(|(_, text)| {
+            let text = Self::flattened(text);
+            !text.is_empty() && error.contains(&text)
+        });
+        if let Some((id, _)) = source {
+            signal["sourceMessageId"] = json!(id);
+        }
+        Some(signal)
     }
 
     /// The error as a sentence, for the reader who gets no better account.
@@ -2061,10 +2098,27 @@ impl AcpNormalizer {
     /// it, which is the whole point: see {@link acp_error_signal}.
     pub fn fail_turn(&mut self, session_id: &str, provider: &str, error: &Value) -> Vec<Event> {
         let said = Self::acp_error_reads(error);
+        // What the agent had said when the turn failed, taken before finishing
+        // it drains them. Only so the notice can name the sentence it stands in
+        // for; the condition itself is read off the error.
+        let spoken = self
+            .active_messages
+            .values()
+            .filter(|(_, id)| self.root_assistant_messages.contains(id))
+            .filter_map(|(_, id)| Some((id.clone(), self.message_text.get(id)?.clone())))
+            .collect::<Vec<_>>();
         let raw = json!({"error":error});
         let mut events = self.finish_turn(session_id, provider, &raw);
         events.pop();
-        if let Some(signal) = Self::acp_error_signal(error) {
+        // The kit's sentence alone, not `said`: that has the error's `data`
+        // pretty-printed after a colon, and a clause read off the whole of it
+        // runs on into the JSON — `resets 9pm (Asia/Karachi): { "errorKind":
+        // "rate_limit" }`. `data` is structure and belongs to whatever reads
+        // structure; prose is what this reads.
+        let message = error["message"].as_str().unwrap_or_default();
+        if let Some(signal) = Self::acp_error_signal(error)
+            .or_else(|| Self::error_prose_signal(provider, message, &spoken))
+        {
             self.record_signal(&signal);
             events.push(self.envelope(
                 session_id,
@@ -2186,6 +2240,82 @@ mod tests {
         let state = serde_json::to_value(&events[2]).unwrap();
         assert_eq!(state["state"], "stopped");
         assert_eq!(state["label"], "Limit reached");
+    }
+
+    /// An answer is an answer, whatever it happens to be about.
+    ///
+    /// The manager, with three of his own answers on screen and each one gone,
+    /// replaced by a banner naming something that had not happened — `Sign in
+    /// to continue` over an answer about a sign-in chip, `This model is
+    /// unavailable` over one about a local model server, `This conversation is
+    /// out of context space` over one about a search tool that saves context:
+    /// "normal agent messages (non-tool calls) should never be categorized".
+    ///
+    /// Each sentence below is one the reader would have to be able to write
+    /// without the chat stopping, and each is checked to still match the prose
+    /// reading first — otherwise this passes for the wrong reason the day a
+    /// needle changes (bw-7pfr).
+    #[test]
+    fn an_ordinary_answer_that_mentions_a_condition_is_not_filed_as_one() {
+        for said in [
+            "The sidebar reads the condition's own word — \"Limit reached\", \
+             \"Sign-in required\" — instead of a blanket \"Failed\".",
+            "Nothing is listening on 8080, so the model list comes back \
+             unavailable and the model is never resident.",
+            "TinySearch lets a small model search the web without burning the \
+             whole context window.",
+        ] {
+            assert!(
+                crate::workbench::kit_words::condition("claude", said).is_some(),
+                "the prose reading no longer matches, so this proves nothing: {said}"
+            );
+            let mut normalizer = AcpNormalizer::default();
+            normalizer.update(
+                "local",
+                "claude",
+                &json!({"sessionId":"remote","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":said}}}),
+            );
+            let events = normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
+            assert_eq!(
+                kinds(&events),
+                vec!["message.completed", "session.state"],
+                "an answer was filed as the condition it described: {said}"
+            );
+            // And the chat is neither stopped nor broken by having said it.
+            let state = serde_json::to_value(events.last().unwrap()).unwrap();
+            assert_eq!(state["state"], "idle");
+            assert_eq!(state["label"], "Ready");
+        }
+    }
+
+    /// The notice stands in for the kit's sentence, and only for that sentence.
+    ///
+    /// A turn can fail after the agent has done real work, and the answer it
+    /// had written by then is not the provider's account of the failure. It is
+    /// named as the notice's source only when the error repeats its words.
+    #[test]
+    fn a_failure_replaces_the_kit_s_own_sentence_and_no_other() {
+        let mut normalizer = AcpNormalizer::default();
+        normalizer.update(
+            "local",
+            "claude",
+            &json!({"sessionId":"remote","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Here is the audit so far."}}}),
+        );
+        let events = normalizer.fail_turn(
+            "local",
+            "claude",
+            &json!({"code": -32603, "message": "You've hit your session limit"}),
+        );
+        let signal = events
+            .iter()
+            .filter(|event| matches!(event.kind, EventKind::ProviderMessage))
+            .filter_map(|event| event.fields.get("signal"))
+            .next()
+            .expect("the limit went unreported");
+        assert_eq!(signal["kind"], "usage_limit");
+        // The answer stays on the page: the error does not repeat it, so the
+        // notice is drawn beside it rather than over it.
+        assert!(signal["sourceMessageId"].is_null());
     }
 
     /// A failure the app cannot name is still the reader's only account of it.

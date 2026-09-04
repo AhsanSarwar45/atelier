@@ -1244,7 +1244,16 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
             }
             events.push(json!({"type":"message.completed", "messageId":id}));
             if role == "assistant" {
-                if parent.is_none() {
+                // A row the kit marked as an error of its own, and only such a
+                // row. Reading the words for a condition is a guess about one
+                // vendor's habits and it belongs where the vendor has already
+                // said something went wrong: run over every assistant row, it
+                // filed an answer that discussed a limit — or signing in, or a
+                // context window — as that condition, and replaced the answer
+                // on the page with a notice naming it (bw-7pfr). The kit writes
+                // `isApiErrorMessage` on the rows that are errors; the live
+                // path reads the ACP error for the same reason.
+                if parent.is_none() && row["isApiErrorMessage"] == true {
                     if let Some(mut signal) = crate::workbench::kit_words::condition("claude", &text)
                     {
                         signal["sourceMessageId"] = json!(id);
@@ -2120,6 +2129,45 @@ mod tests {
         assert_eq!(pinned["model"], "claude-sonnet");
         assert_eq!(pinned["permissionMode"], "plan");
         assert_eq!(pinned["effort"], "high");
+    }
+
+    /// A replayed answer is read as an answer, and only an error as an error.
+    ///
+    /// The live path had the same fault and it is the same fix: read the words
+    /// for a condition where the kit has already said something went wrong,
+    /// never over every assistant row. Replay is the half that outlives a
+    /// reload, so an answer miscategorised here came back miscategorised every
+    /// time the chat was opened (bw-7pfr).
+    #[test]
+    fn a_replayed_answer_that_mentions_a_condition_is_not_filed_as_one() {
+        let said = "You've hit your session limit · resets 9pm (Asia/Karachi)";
+        let answer = vec![
+            json!({"type":"assistant","uuid":"a1","message":{"content":[
+                {"type":"text","text":format!("The notice reads `{said}`, which is the condition's own words.")}
+            ]}})
+            .to_string(),
+        ];
+        assert!(
+            !replay_lines(&answer)
+                .iter()
+                .any(|event| event["type"] == "provider.message"),
+            "an answer quoting a limit was replayed as one"
+        );
+
+        // The kit's own error row still reports the condition, and still names
+        // the sentence the notice stands in for.
+        let failed = vec![
+            json!({"type":"assistant","uuid":"a1","isApiErrorMessage":true,
+                   "message":{"content":[{"type":"text","text":said}]}})
+            .to_string(),
+        ];
+        let signal = replay_lines(&failed)
+            .into_iter()
+            .find(|event| event["type"] == "provider.message")
+            .expect("a replayed limit went unreported");
+        assert_eq!(signal["signal"]["kind"], "usage_limit");
+        assert_eq!(signal["signal"]["resets"], "resets 9pm (Asia/Karachi)");
+        assert!(signal["signal"]["sourceMessageId"].is_string());
     }
 
     /// Work the chat left running is on the record twice: the tool's own
