@@ -515,14 +515,22 @@ impl Store {
             .and_then(|value| value.get("eventId"))
             .and_then(serde_json::Value::as_str);
         let json = serde_json::to_string(event).map_err(json_error)?;
-        let changed = self.connection.execute(
-            r#"INSERT INTO event
+        // Cached, because this is the one statement an import runs thousands of
+        // times in a row: opening one saved chat of the manager's writes 4,717
+        // events, and re-parsing this SQL for each of them is work with nothing
+        // to show for it (bw-t26l.20).
+        let changed = self
+            .connection
+            .prepare_cached(
+                r#"INSERT INTO event
                  (session_id, seq, at, type, json, provider, provider_thread_id, provider_event_id)
                VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
                ON CONFLICT(session_id, provider, provider_thread_id, provider_event_id)
                  WHERE provider_event_id IS NOT NULL DO NOTHING"#,
-            params![session_id, seq, at, kind, json, provider, thread_id, event_id],
-        )?;
+            )?
+            .execute(params![
+                session_id, seq, at, kind, json, provider, thread_id, event_id
+            ])?;
         if changed == 1 {
             self.remove_superseded_progress(event, session_id, seq)?;
         }
@@ -947,10 +955,9 @@ impl Store {
         role: &str,
         at: &str,
     ) -> rusqlite::Result<()> {
-        self.connection.execute(
-            "INSERT OR IGNORE INTO message (session_id, message_id, role, text, at) VALUES (?1,?2,?3,'',?4)",
-            params![session_id, message_id, role, at],
-        )?;
+        self.connection
+            .prepare_cached("INSERT OR IGNORE INTO message (session_id, message_id, role, text, at) VALUES (?1,?2,?3,'',?4)")?
+            .execute(params![session_id, message_id, role, at])?;
         Ok(())
     }
 
@@ -960,10 +967,9 @@ impl Store {
         message_id: &str,
         text: &str,
     ) -> rusqlite::Result<()> {
-        self.connection.execute(
-            "UPDATE message SET text = text || ?1 WHERE session_id = ?2 AND message_id = ?3",
-            params![text, session_id, message_id],
-        )?;
+        self.connection
+            .prepare_cached("UPDATE message SET text = text || ?1 WHERE session_id = ?2 AND message_id = ?3")?
+            .execute(params![text, session_id, message_id])?;
         Ok(())
     }
 

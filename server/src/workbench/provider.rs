@@ -424,16 +424,51 @@ async fn import_claude_history(
         imported.push(reset_event(&session.id)?);
     }
     imported.push(import_event(session, "claude", pinned)?);
-    for mut value in identified {
-        let Some(object) = value.as_object_mut() else {
-            continue;
-        };
+    // Several at a time. A saved chat of the manager's normalizes 4,717 events
+    // here, and each one is an independent addressing-and-typing of one value
+    // — work with nothing to share and nothing to order (bw-t26l.20).
+    let stamp = |mut value: Value| -> Option<Result<Event, String>> {
+        let object = value.as_object_mut()?;
         object.insert("sessionId".into(), json!(session.id));
         object.insert("seq".into(), json!(0));
         object
             .entry("at")
             .or_insert_with(|| json!(session.last_active_at));
-        imported.push(serde_json::from_value(value).map_err(|error| error.to_string())?);
+        Some(serde_json::from_value(value).map_err(|error| error.to_string()))
+    };
+    let hands = std::thread::available_parallelism()
+        .map(|hands| hands.get())
+        .unwrap_or(1)
+        .clamp(1, 8);
+    let typed: Vec<Result<Event, String>> = if hands <= 1 || identified.len() < 512 {
+        identified.into_iter().filter_map(stamp).collect()
+    } else {
+        let chunk = identified.len().div_ceil(hands).max(1);
+        // Split, never copied: these values carry whole messages.
+        let mut rest = identified;
+        let mut chunks: Vec<Vec<Value>> = Vec::with_capacity(hands);
+        while !rest.is_empty() {
+            let keep = rest.split_off(chunk.min(rest.len()));
+            chunks.push(rest);
+            rest = keep;
+        }
+        std::thread::scope(|scope| {
+            let hands: Vec<_> = chunks
+                .into_iter()
+                .map(|slice| {
+                    let stamp = &stamp;
+                    scope.spawn(move || slice.into_iter().filter_map(stamp).collect::<Vec<_>>())
+                })
+                .collect();
+            hands
+                .into_iter()
+                .filter_map(|hand| hand.join().ok())
+                .flatten()
+                .collect()
+        })
+    };
+    for event in typed {
+        imported.push(event?);
     }
     let normalized = opened.elapsed().as_millis();
     let count = imported.len();
