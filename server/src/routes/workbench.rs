@@ -1123,11 +1123,17 @@ async fn provider_sessions(
                         "acpMeta":session.meta,
                     });
                     if let Some(known) = known {
-                        // The name and the branch only. The clock stays the
-                        // adapter's: it is the record's own timestamp, and a
-                        // chat that ran yesterday must file under yesterday
-                        // whether or not anything inside it is read.
-                        for field in ["name", "branch"] {
+                        // The clocks too, when the record has them. The
+                        // adapter reports what the filesystem says a chat's
+                        // file was last written; the record reports the last
+                        // thing that happened inside it, and knows the one
+                        // clock this list is actually dated by — when the
+                        // person last spoke, which `session/list` has no field
+                        // for at all (bw-zhs9, `whenHeSpoke`). Without it a
+                        // chat whose last word is 10:00 AM sits under 10:14 PM,
+                        // the minute its file happened to be written, and only
+                        // when the adapter is the one answering (bw-t26l.20).
+                        for field in ["name", "branch", "lastActiveAt", "lastSpokeAt"] {
                             match known.get(field) {
                                 Some(value) if !value.is_null() => {
                                     row[field] = value.clone();
