@@ -1094,6 +1094,18 @@ impl CodexNormalizer {
                 self.rollout_apply = None;
             }
         }
+        // Every line of a rollout says when it happened. Say it, or the events
+        // read out of a record are dated by the moment this app got round to
+        // reading them: a chat worked in at ten this morning, noticed at two,
+        // sorts above one that is genuinely newer and reads as if the person
+        // had just spoken in it (bw-t26l.22).
+        if let Some(at) = row["timestamp"].as_str() {
+            for event in &mut events {
+                if let Some(object) = event.as_object_mut() {
+                    object.entry("at").or_insert_with(|| json!(at));
+                }
+            }
+        }
         events
     }
 }
