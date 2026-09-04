@@ -139,6 +139,14 @@ pub struct SessionPatch {
     pub collaboration_mode: Option<Option<String>>,
 }
 
+/// One match, as the panel draws it: the sentence it fell in, the words that
+/// matched inside that sentence, and enough about the chat to name it and open
+/// it (search-panel.tsx, `Match`).
+///
+/// `text` is the whole message and `sentence` the part worth reading. Both,
+/// because a caller that wants the message should not have to search again for
+/// it, and the panel should not have to hold a chat's worth of words to draw
+/// one line.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchHit {
@@ -146,7 +154,12 @@ pub struct SearchHit {
     pub message_id: String,
     pub role: String,
     pub text: String,
+    pub sentence: String,
+    #[serde(rename = "match")]
+    pub matched: String,
     pub at: String,
+    pub title: Option<String>,
+    pub project_id: String,
 }
 
 #[derive(Clone, Debug)]
@@ -968,21 +981,85 @@ impl Store {
             .replace('%', "\\%")
             .replace('_', "\\_");
         let mut statement = self.connection.prepare(
-            r#"SELECT session_id, message_id, role, text, at FROM message
-               WHERE text LIKE ?1 ESCAPE '\' ORDER BY at DESC LIMIT ?2"#,
+            r#"SELECT m.session_id, m.message_id, m.role, m.text, m.at, s.title, s.project_id
+               -- Left, so a message is never dropped for want of a chat row to
+               -- name it. A hit the reader cannot place still says the word
+               -- was said; a hit that is not returned says it never was.
+               FROM message m LEFT JOIN session s ON s.id = m.session_id
+               WHERE m.text LIKE ?1 ESCAPE '\' ORDER BY m.at DESC LIMIT ?2"#,
         )?;
         let found = statement
             .query_map(params![format!("%{escaped}%"), limit as i64], |row| {
+                let text: String = row.get(3)?;
+                let (sentence, matched) = Self::sentence_around(&text, query);
                 Ok(SearchHit {
                     session_id: row.get(0)?,
                     message_id: row.get(1)?,
                     role: row.get(2)?,
-                    text: row.get(3)?,
+                    text,
+                    sentence,
+                    matched,
                     at: row.get(4)?,
+                    title: row.get(5)?,
+                    project_id: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
                 })
             })?
             .collect();
         found
+    }
+
+    /// The sentence a match fell in, and the words as they were actually
+    /// written there.
+    ///
+    /// The words, not the query: someone searching `periwinkle` should see
+    /// `PERIWINKLE` marked in the line, and the panel marks by finding the
+    /// returned string in the returned sentence — a lowercased query would
+    /// mark nothing (`split`, search-panel.tsx).
+    ///
+    /// A sentence ends at `.`, `?`, `!` or a line break, and is capped: a chat
+    /// can say two thousand words without a full stop, and a panel row is one
+    /// line high.
+    fn sentence_around(text: &str, query: &str) -> (String, String) {
+        const MOST: usize = 240;
+        let hay = text.to_lowercase();
+        let needle = query.to_lowercase();
+        let Some(at) = hay.find(&needle).filter(|_| !needle.is_empty()) else {
+            return (text.chars().take(MOST).collect(), String::new());
+        };
+        // Byte offsets from the lowercased copy only line up with the original
+        // while lowercasing keeps every character's width, which it does not
+        // for every alphabet. When they do not, the whole message stands in for
+        // the sentence and nothing is marked — a poorer answer, never a panic.
+        let Some(matched) = text.get(at..at + needle.len()).map(str::to_string) else {
+            return (text.chars().take(MOST).collect(), String::new());
+        };
+        let ends = |c: char| matches!(c, '.' | '?' | '!' | '\n' | '\r');
+        let from = text[..at].rfind(ends).map(|i| i + 1).unwrap_or(0);
+        let to = text[at..]
+            .find(ends)
+            .map(|i| at + i + 1)
+            .unwrap_or(text.len());
+        let sentence = text[from..to].trim();
+        if sentence.chars().count() <= MOST {
+            return (sentence.to_string(), matched);
+        }
+        // Kept around the match rather than from the start, so the words that
+        // matched are in what is kept.
+        let want = MOST / 2;
+        let start = text[from..at]
+            .char_indices()
+            .rev()
+            .take(want)
+            .last()
+            .map(|(i, _)| from + i)
+            .unwrap_or(at);
+        let end = text[at..to]
+            .char_indices()
+            .take(want)
+            .last()
+            .map(|(i, c)| at + i + c.len_utf8())
+            .unwrap_or(to);
+        (format!("…{}…", text[start..end].trim()), matched)
     }
 
     pub fn remember_turn(&self, turn: &Turn) -> rusqlite::Result<()> {

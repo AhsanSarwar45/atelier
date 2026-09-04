@@ -924,6 +924,17 @@ mod tests {
         assert_eq!(found.len(), 1, "the word was said once and found {} times", found.len());
         assert_eq!(found[0].text, "The word is PERIWINKLE in spend-a.");
         assert_eq!(found[0].role, "assistant");
+        // What the panel draws: the sentence, and the words as they were
+        // written in it. Marking is done by finding the second inside the
+        // first, so a hit that answers neither draws an empty mark — which is
+        // what the search screen did (search-panel.tsx, `split`).
+        assert_eq!(found[0].sentence, "The word is PERIWINKLE in spend-a.");
+        assert_eq!(found[0].matched, "PERIWINKLE");
+
+        // Asked for in lower case, marked as it was said.
+        let lower = store.search("periwinkle", 10).unwrap();
+        assert_eq!(lower[0].matched, "PERIWINKLE");
+        assert!(lower[0].sentence.contains(&lower[0].matched));
 
         // A message the provider took back is one nobody said.
         persist(said("message.retracted", json!({"messageId":"m1"})));
