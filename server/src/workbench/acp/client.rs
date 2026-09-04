@@ -2156,6 +2156,7 @@ impl AcpDriver {
                                     let provider = brand;
                                     let remote_id = remote_id.clone();
                                     let normalizer = normalizer.clone();
+                                    let local_model = task_session.model.clone();
                                     let spawned = connection.spawn(async move {
                                         let result = prompt_connection
                                             .send_request(PromptRequest::new(remote_id, content))
@@ -2164,7 +2165,23 @@ impl AcpDriver {
                                         let events = match result {
                                             Ok(response) => {
                                                 let raw = serde_json::to_value(response).map_err(acp_error)?;
-                                                normalizer.lock().await.finish_turn(&local_id, provider, &raw)
+                                                // A turn that says it ended is
+                                                // taken at its word unless the
+                                                // runtime it ran on has gone,
+                                                // which is the one ending an
+                                                // agent cannot report.
+                                                let cut_off = match (provider, local_model.as_deref()) {
+                                                    (super::super::local::BRAND, Some(model)) => {
+                                                        super::super::local::unreachable_endpoint(model).await
+                                                    }
+                                                    _ => None,
+                                                };
+                                                let mut normalizer = normalizer.lock().await;
+                                                match cut_off {
+                                                    Some(endpoint) => normalizer
+                                                        .finish_turn_cut_off(&local_id, provider, &raw, &endpoint),
+                                                    None => normalizer.finish_turn(&local_id, provider, &raw),
+                                                }
                                             }
                                             // The error whole — code, message
                                             // and data — rather than the

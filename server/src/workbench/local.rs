@@ -95,10 +95,24 @@ pub fn decode_model(value: &str) -> Option<(Runtime, &str)> {
     Some((runtime(runtime_id)?, model))
 }
 
+/// Discovery's budget: a runtime that is not there must not delay the picker.
+const DISCOVERY_PATIENCE: Duration = Duration::from_millis(120);
+
+/// The budget for asking whether a runtime is still there, which is a
+/// different question from whether it is there at all. Nothing is waiting on
+/// this answer, and a busy server that is loading a model can be slow to
+/// answer a catalog request while being perfectly alive — so saying it stopped
+/// on a 120ms silence would be a lie told to a working machine.
+const LIVENESS_PATIENCE: Duration = Duration::from_secs(2);
+
 async fn get_json(runtime: Runtime, url: String) -> Option<Value> {
+    get_json_within(runtime, url, DISCOVERY_PATIENCE).await
+}
+
+async fn get_json_within(runtime: Runtime, url: String, patience: Duration) -> Option<Value> {
     let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_millis(60))
-        .timeout(Duration::from_millis(120))
+        .connect_timeout(patience.min(Duration::from_millis(60)))
+        .timeout(patience)
         .build()
         .ok()?;
     let request = client.get(url);
@@ -162,6 +176,35 @@ pub fn preferred_model(models: &[LocalModel], remembered: Option<&str>) -> Optio
     models.first().map(|model| model.value.clone())
 }
 
+fn catalog_url(runtime: Runtime) -> String {
+    match runtime {
+        Runtime::Ollama => format!("{}/api/tags", runtime.endpoint()),
+        Runtime::OpenAiCompatible => {
+            let base = runtime.endpoint();
+            if base.ends_with("/v1") {
+                format!("{base}/models")
+            } else {
+                format!("{base}/v1/models")
+            }
+        }
+    }
+}
+
+/// The address of the runtime behind this model, when it has stopped
+/// answering — and nothing when it is still there.
+///
+/// Asked at the end of a local turn, because that is the one moment the app
+/// is told an answer is complete and has no way to check. See
+/// {@link Normalizer::finish_turn_cut_off} for why the agent cannot tell us.
+pub async fn unreachable_endpoint(model: &str) -> Option<String> {
+    let (runtime, _) = decode_model(model)?;
+    let endpoint = runtime.endpoint();
+    match get_json_within(runtime, catalog_url(runtime), LIVENESS_PATIENCE).await {
+        Some(_) => None,
+        None => Some(endpoint),
+    }
+}
+
 pub async fn models(runtime: Runtime) -> Vec<LocalModel> {
     match runtime {
         Runtime::Ollama => {
@@ -169,7 +212,7 @@ pub async fn models(runtime: Runtime) -> Vec<LocalModel> {
             // alongside the catalog costs no extra wall clock and is the only
             // way to know which model is free to start on.
             let (value, running) = tokio::join!(
-                get_json(runtime, format!("{}/api/tags", runtime.endpoint())),
+                get_json(runtime, catalog_url(runtime)),
                 get_json(runtime, format!("{}/api/ps", runtime.endpoint()))
             );
             let Some(value) = value else {
@@ -178,13 +221,7 @@ pub async fn models(runtime: Runtime) -> Vec<LocalModel> {
             ollama_catalog(&value, running.as_ref())
         }
         Runtime::OpenAiCompatible => {
-            let base = runtime.endpoint();
-            let url = if base.ends_with("/v1") {
-                format!("{base}/models")
-            } else {
-                format!("{base}/v1/models")
-            };
-            let Some(value) = get_json(runtime, url).await else {
+            let Some(value) = get_json(runtime, catalog_url(runtime)).await else {
                 return Vec::new();
             };
             openai_catalog(&value)
@@ -293,12 +330,38 @@ pub async fn catalog() -> Vec<LocalModel> {
     models
 }
 
+/// Why local cannot be started, in the words of the thing that is missing.
+///
+/// "Unavailable" on its own is the least useful true sentence the picker can
+/// say: the reader cannot tell a runtime they forgot to start from an install
+/// that is broken, and those want opposite things done about them. Both are
+/// named here, and the addresses that were tried are part of the answer —
+/// they are the reader's own loopback ports, and knowing which one was asked
+/// is most of knowing what to start. The API key is never part of it
+/// (bw-u6cl.9).
+fn unavailable_reason(models: &[LocalModel], adapter: Option<&std::path::PathBuf>) -> Option<String> {
+    if adapter.is_none() {
+        return Some("the bundled local ACP adapter was not found".into());
+    }
+    if models.is_empty() {
+        return Some(format!(
+            "no local model runtime answered at {} or {}",
+            Runtime::OpenAiCompatible.endpoint(),
+            Runtime::Ollama.endpoint()
+        ));
+    }
+    None
+}
+
 pub async fn providers() -> Vec<Value> {
     let models = catalog().await;
+    let adapter = super::acp::adapter::find(BRAND);
+    let reason = unavailable_reason(&models, adapter.as_ref());
     let providers = vec![serde_json::json!({
         "brand":BRAND, "name":"Local models",
-        "available":!models.is_empty() && super::acp::adapter::find(BRAND).is_some(),
-        "path":Value::Null, "adapterPath":super::acp::adapter::find(BRAND),
+        "available":reason.is_none(),
+        "path":Value::Null, "adapterPath":adapter,
+        "availabilityReason":reason,
         "installUrl":"https://block.github.io/goose/docs/getting-started/providers",
         "models":models,
     })];

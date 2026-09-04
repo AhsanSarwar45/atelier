@@ -655,6 +655,56 @@ impl AcpNormalizer {
         }))
     }
 
+    /// What a turn means when the runtime it was running on has gone.
+    ///
+    /// An agent has no way to tell a stream that ended from a stream that was
+    /// cut: the socket closes either way, and goose reports `end_turn` for
+    /// both. So a local runtime that dies mid-answer produces a turn that
+    /// looks finished — a half-written answer presented as the whole of it,
+    /// and the chat titled from the fragment. Nothing in the protocol carries
+    /// the difference, so the runtime is asked directly at the one moment the
+    /// answer is claimed to be over, and its silence is said here.
+    ///
+    /// Every word already said is kept. They arrived and they are true; it is
+    /// only the ending that was not (bw-u6cl.9).
+    fn runtime_gone_signal(endpoint: &str) -> Value {
+        json!({
+            "id":"condition:runtime_stopped", "kind":"runtime_stopped",
+            "phase":"active", "severity":"error", "scope":"turn",
+            "detail":format!(
+                "The local model runtime at {endpoint} stopped answering, so this answer \
+                 ends where it was cut rather than where it was finished. Everything above \
+                 was really said. Start the runtime again and ask for the rest."
+            ),
+            "retryAt":Value::Null, "action":Value::Null
+        })
+    }
+
+    /// {@link finish_turn} for a turn whose runtime is no longer answering.
+    ///
+    /// The notice goes in ahead of the closing state, so the reader meets the
+    /// reason and then the chat settling, in that order.
+    pub fn finish_turn_cut_off(
+        &mut self,
+        session_id: &str,
+        provider: &str,
+        raw: &Value,
+        endpoint: &str,
+    ) -> Vec<Event> {
+        let mut events = self.finish_turn(session_id, provider, raw);
+        let signal = Self::runtime_gone_signal(endpoint);
+        self.record_signal(&signal);
+        let notice = self.envelope(
+            session_id,
+            provider,
+            raw,
+            json!({"type":"provider.message","signal":signal}),
+        );
+        let before_closing = events.len().saturating_sub(1);
+        events.insert(before_closing, notice);
+        events
+    }
+
     /// What ACP itself says went wrong, read off the error and not out of it.
     ///
     /// A JSON-RPC error object carries three things — `code`, `message` and
@@ -2449,7 +2499,59 @@ mod tests {
         }
     }
 
-    /// The ordinary ending, and cancelling, stay silent: one is the work being
+    /// An answer cut off by the runtime dying is not an answer that finished.
+    ///
+    /// The agent reports `end_turn` either way — the socket closes the same on
+    /// a finished stream and a killed one — so without this the reader is
+    /// handed half an answer as the whole of it, and the chat titles itself
+    /// from the fragment (bw-u6cl.9).
+    #[test]
+    fn an_answer_cut_off_by_a_dead_runtime_says_so_and_keeps_every_word() {
+        let mut normalizer = AcpNormalizer::default();
+        normalizer.update(
+            "local",
+            "local",
+            &json!({"sessionId":"remote","update":{
+                "sessionUpdate":"agent_message_chunk",
+                "content":{"type":"text","text":"Working on it and still going"}
+            }}),
+        );
+        let events = normalizer.finish_turn_cut_off(
+            "local",
+            "local",
+            &json!({"stopReason":"end_turn"}),
+            "http://127.0.0.1:8080",
+        );
+        // The words already said are closed off, not thrown away, and the
+        // reason arrives before the chat settles.
+        assert_eq!(
+            kinds(&events),
+            vec!["message.completed", "provider.message", "session.state"]
+        );
+        let notice = serde_json::to_value(&events[1]).unwrap();
+        assert_eq!(notice["signal"]["kind"], "runtime_stopped");
+        assert_eq!(notice["signal"]["severity"], "error");
+        assert_eq!(notice["signal"]["scope"], "turn");
+        let detail = notice["signal"]["detail"].as_str().unwrap_or_default();
+        assert!(
+            detail.contains("http://127.0.0.1:8080"),
+            "the reader is not told which runtime went: {detail}"
+        );
+        // The chat itself is fine — goose is still there and can be asked
+        // again the moment the runtime is back.
+        let state = serde_json::to_value(events.last().unwrap()).unwrap();
+        assert_eq!(state["state"], "idle");
+    }
+
+    /// The same turn, with the runtime still answering, says nothing extra.
+    #[test]
+    fn an_answer_whose_runtime_is_still_there_is_taken_at_its_word() {
+        let mut normalizer = AcpNormalizer::default();
+        let events = normalizer.finish_turn("local", "local", &json!({"stopReason":"end_turn"}));
+        assert_eq!(kinds(&events), vec!["session.state"]);
+    }
+
+    /// The ordinary ending, and cancelling, stay silent:    /// The ordinary ending, and cancelling, stay silent: one is the work being
     /// done, the other is the reader's own stop button reporting success.
     #[test]
     fn an_ordinary_ending_and_a_cancelled_one_raise_no_notice() {
