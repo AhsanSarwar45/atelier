@@ -1494,6 +1494,25 @@ fn mode_to_acp(brand: &str, mode: &str) -> String {
     .to_string()
 }
 
+/// Whether the agent said it has this mode, in the one place ACP says so.
+///
+/// `session/set_mode` is not a request to invent a mode; it names one of the
+/// modes the agent listed in `availableModes` at `session/new`. Atelier's
+/// saved permission mode is its own, and an agent under no obligation to share
+/// its vocabulary — goose lists no modes at all — answers a mode it never
+/// offered with a fatal `Invalid params`, which is how a local chat that had
+/// just started correctly ended up reading 'Provider unavailable'. So the list
+/// is consulted before the ask. An agent that lists nothing is asked for
+/// nothing and keeps whatever mode it starts in, which the menu then reports
+/// honestly (bw-u6cl.11).
+fn offers_mode(modes: &Value, mode: &str) -> bool {
+    modes["availableModes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|offered| offered["id"] == mode)
+}
+
 fn options_for_menu(brand: &str, seed_model: Option<&str>, options: &Value) -> Value {
     if brand != super::super::local::BRAND {
         return options.clone();
@@ -2045,7 +2064,10 @@ impl AcpDriver {
                         let mut local_model = task_session.model.clone();
                         if create_remote {
                             let desired_mode = mode_to_acp(brand, &task_session.permission_mode);
-                            if !desired_mode.is_empty() && modes["currentModeId"] != desired_mode {
+                            if !desired_mode.is_empty()
+                                && modes["currentModeId"] != desired_mode
+                                && offers_mode(&modes, &desired_mode)
+                            {
                                 connection.send_request(SetSessionModeRequest::new(remote_id.clone(), desired_mode.clone())).block_task().await?;
                                 modes["currentModeId"] = json!(desired_mode);
                             }
@@ -3188,6 +3210,21 @@ mod tests {
                 && event.fields["state"] == "dormant"
                 && event.fields["label"] == "Asleep"
         }));
+    }
+
+    #[test]
+    fn a_mode_is_only_asked_for_when_the_agent_said_it_has_one() {
+        let codex = json!({"currentModeId":"read-only","availableModes":[
+            {"id":"read-only"},{"id":"agent"},{"id":"agent-full-access"}
+        ]});
+        assert!(offers_mode(&codex, &mode_to_acp("codex", "on-request")));
+        assert!(!offers_mode(&codex, "shopping"));
+
+        // goose answers session/new with no modes at all; there is nothing to
+        // ask it for, and asking anyway is what killed the chat.
+        let goose = json!({"currentModeId":Value::Null});
+        assert!(!offers_mode(&goose, &mode_to_acp("local", "on-request")));
+        assert!(!offers_mode(&json!({"availableModes":[]}), "on-request"));
     }
 
     #[test]
