@@ -76,7 +76,12 @@ test('provider formatting differences share card and typed file badges', async (
     await expect(page.locator('[data-testid="markdown-web-badge"][data-web-kind="issue"]')).toHaveCount(1);
     await expect(page.locator('[data-testid="markdown-web-badge"][data-web-kind="commit"]')).toHaveCount(1);
     await expect(page.locator('[data-testid="markdown-web-badge"][data-web-kind="site"]')).toHaveCount(1);
-    await expect(page.getByTestId('external-favicon')).toHaveAttribute('decoding', 'async');
+    // No mark reaches this site here — the driver fails any request for
+    // `/favicon.ico` of its own accord — so the badge stands on the globe it
+    // falls back to, with no half-drawn picture beside it. That a mark REPLACES
+    // that globe when one does arrive is proved in site-badge-mark.spec.ts.
+    await expect(page.locator('[data-testid="markdown-web-badge"][data-web-kind="site"] svg')).toHaveCount(1);
+    await expect(page.getByTestId('external-favicon')).toHaveCount(0);
     await page.screenshot({ path: process.env.CHAT_BADGES_SCREENSHOT || 'tests/results/chat-badges-after.png', fullPage: false });
   } finally {
     if (project) await request.delete(`/api/projects/${project.id}`);

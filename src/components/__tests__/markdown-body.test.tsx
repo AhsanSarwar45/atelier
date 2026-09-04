@@ -65,6 +65,27 @@ describe('Markdown file links', () => {
     expect(openExternal).not.toHaveBeenCalled();
   });
 
+  it('replaces the globe with the site\'s own mark once the mark has loaded', () => {
+    render(<MarkdownBody>{'[site](https://example.com)'}</MarkdownBody>);
+    const badge = screen.getByTestId('markdown-web-badge');
+    // Both are here while the mark is on its way, but only the globe is drawn:
+    // an image nobody has put in the page fetches nothing.
+    expect(badge.querySelectorAll('svg')).toHaveLength(1);
+    expect(screen.getByTestId('external-favicon')).not.toBeVisible();
+
+    fireEvent.load(screen.getByTestId('external-favicon'));
+    expect(screen.getByTestId('external-favicon')).toBeVisible();
+    expect(badge.querySelectorAll('svg')).toHaveLength(0);
+  });
+
+  it('keeps the globe, and draws no broken picture, when a site has no mark', () => {
+    render(<MarkdownBody>{'[site](https://example.com)'}</MarkdownBody>);
+    const badge = screen.getByTestId('markdown-web-badge');
+    fireEvent.error(screen.getByTestId('external-favicon'));
+    expect(screen.queryByTestId('external-favicon')).toBeNull();
+    expect(badge.querySelectorAll('svg')).toHaveLength(1);
+  });
+
   it.each([
     ['commit', 'https://github.com/openai/codex/commit/1234567890abcdef', 'openai/codex@1234567'],
     ['pull', 'https://github.com/openai/codex/pull/42', 'openai/codex #42'],

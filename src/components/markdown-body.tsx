@@ -5,7 +5,7 @@
  * a fenced block or an address looks the same wherever it was written. There is
  * no second renderer; a place that needs different spacing passes `tight`.
  */
-import type { MouseEventHandler, ReactNode } from "react";
+import { useState, type MouseEventHandler, type ReactNode } from "react";
 
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -200,20 +200,59 @@ function SiteIcon({ target }: { target: WebTarget }) {
     const Icon = WEB_KINDS[target.kind].icon;
     return <Icon className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />;
   }
+  // Keyed on the address so a badge redrawn for a different site starts from
+  // the globe again rather than showing the last site's mark while the new one
+  // is still on its way.
+  return <SiteMark key={target.favicon} favicon={target.favicon} />;
+}
+
+/**
+ * The globe stands in for a site's own mark until the mark itself arrives, and
+ * is then REPLACED by it — one icon on the badge at any moment, always in the
+ * same place.
+ *
+ * The two used to be stacked: a globe and the mark both absolutely placed in a
+ * box of their own, so a site that had a mark drew it over the globe rather
+ * than in place of it — and drew it a whole line away. An absolutely placed box
+ * is still moved by its own margins, and a picture inside a message is written
+ * by the typography preset with `2em` of margin above and below (`.prose
+ * :where(img)`), which at this text size is about the height of a line: the
+ * mark landed off the top-left corner of the pill BELOW its own, over a globe
+ * belonging to another site (the manager's report, seven sources in one
+ * answer). Swapping one icon for the other cannot overlap, and `my-0` puts the
+ * preset's margin back to nothing now that the mark is a box in the line rather
+ * than one floating over it.
+ *
+ * The mark is mounted from the first draw, hidden until it has loaded, because
+ * an image that is not in the page fetches nothing: rendering the globe alone
+ * and the mark only once loaded would be waiting for a load nobody asked for.
+ * `display` is set inline rather than by class or the `hidden` attribute so
+ * that no rule of the badge's own can outrank it and reveal a half-loaded mark.
+ */
+function SiteMark({ favicon }: { favicon: string }) {
+  const [mark, setMark] = useState<'waiting' | 'drawn' | 'missing'>('waiting');
   return (
-    <span className="relative mr-0.5 h-3 w-3 shrink-0" aria-hidden="true">
-      <Globe2 className="absolute inset-0 h-3 w-3" />
-      <img
-        src={target.favicon}
-        alt=""
-        loading="eager"
-        decoding="async"
-        referrerPolicy="no-referrer"
-        className="absolute inset-0 h-3 w-3 rounded-[2px] object-contain"
-        data-testid="external-favicon"
-        onError={(event) => { event.currentTarget.hidden = true; }}
-      />
-    </span>
+    <>
+      {mark === 'drawn' ? null : <Globe2 className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />}
+      {mark === 'missing' ? null : (
+        <img
+          src={favicon}
+          alt=""
+          aria-hidden="true"
+          loading="eager"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          // The same box the globe occupies, down to the pixel the chip's own
+          // rule pulls every icon left by (`[&_svg]:-ms-px` in badge.tsx),
+          // which reaches svg icons only.
+          className="my-0 mr-0.5 -ms-px h-3 w-3 shrink-0 rounded-[2px] object-contain"
+          style={mark === 'drawn' ? undefined : { display: 'none' }}
+          data-testid="external-favicon"
+          onLoad={() => setMark('drawn')}
+          onError={() => setMark('missing')}
+        />
+      )}
+    </>
   );
 }
 
