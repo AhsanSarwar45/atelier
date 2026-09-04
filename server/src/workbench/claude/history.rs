@@ -1245,7 +1245,7 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
             events.push(json!({"type":"message.completed", "messageId":id}));
             if role == "assistant" {
                 if parent.is_none() {
-                    if let Some(mut signal) = crate::workbench::provider_messages::from_text(&text)
+                    if let Some(mut signal) = crate::workbench::kit_words::condition("claude", &text)
                     {
                         signal["sourceMessageId"] = json!(id);
                         events.push(json!({"type":"provider.message","signal":signal}));

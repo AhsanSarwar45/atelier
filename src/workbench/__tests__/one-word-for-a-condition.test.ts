@@ -64,4 +64,24 @@ describe('one word for a condition, whichever side reads it', () => {
   it('names no provider in either of them', () => {
     for (const word of rustWords().values()) expect(word).not.toMatch(/claude|codex|anthropic|openai|gemini/i);
   });
+
+  /**
+   * And neither core reads a kit's prose.
+   *
+   * "you need to use proper acp integration, don't put any provider specific
+   * stuff" — the manager, on a fix that had put a vendor's phrasing in the
+   * shared file. The Rust core has the same guard over itself; this one is
+   * over the screen's, which had a second copy of the same guesswork sitting
+   * unreachable behind its own green tests (bw-d516).
+   */
+  it('leaves every kit\'s own wording to the driver', () => {
+    const core = readFileSync(resolve(__dirname, '..', 'provider-messages.ts'), 'utf8').toLowerCase();
+    for (const word of ['claude', 'codex', 'anthropic', 'openai', 'gemini', 'try again at']) {
+      expect(core, `the neutral core names \`${word}\``).not.toContain(word);
+    }
+    // What it says is the app's own copy, drawn the same for every kit. What
+    // it must not do is go looking through a kit's sentence for the meaning,
+    // and that has one tell.
+    expect(core, 'the neutral core is reading prose').not.toContain('tolowercase');
+  });
 });

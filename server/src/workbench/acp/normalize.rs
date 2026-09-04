@@ -429,7 +429,7 @@ impl AcpNormalizer {
         if !self.root_assistant_messages.remove(&id) || text.is_empty() {
             return events;
         }
-        if let Some(mut signal) = crate::workbench::provider_messages::from_text(&text) {
+        if let Some(mut signal) = crate::workbench::kit_words::condition(provider, &text) {
             signal["sourceMessageId"] = json!(id);
             events.push(self.envelope(
                 session_id,
@@ -520,23 +520,32 @@ impl AcpNormalizer {
         }
     }
 
-    fn failure_signal(failure: &Value) -> Option<Value> {
+    fn failure_signal(brand: &str, failure: &Value) -> Option<Value> {
         let id = failure["id"].as_str()?.to_string();
         let title = failure["title"]
             .as_str()
             .unwrap_or("The provider reported a problem");
-        let inferred = crate::workbench::provider_messages::from_text(title);
-        let kind = inferred
-            .as_ref()
-            .and_then(|signal| signal["kind"].as_str())
-            .unwrap_or_else(|| match failure["category"].as_str() {
-                Some("connection") => "network",
-                Some("access") => "authorization",
-                Some("limit") => "rate_limit",
-                Some("request") => "provider_error",
-                Some("service") => "service_unavailable",
-                _ => "unknown",
-            });
+        let inferred = crate::workbench::kit_words::condition(brand, title);
+        // The category the extension states, before the title it wrote. It had
+        // these the other way round, so a stated `limit` was overruled by a
+        // guess at its own prose — and the guess is the part that can be wrong
+        // (bw-d516). `limit` is the coarser word of the two, so a title that
+        // names the exact limit is still allowed to sharpen it.
+        let stated = match failure["category"].as_str() {
+            Some("connection") => Some("network"),
+            Some("access") => Some("authorization"),
+            Some("limit") => Some("rate_limit"),
+            Some("request") => Some("provider_error"),
+            Some("service") => Some("service_unavailable"),
+            _ => None,
+        };
+        let guessed = inferred.as_ref().and_then(|signal| signal["kind"].as_str());
+        let kind = match (stated, guessed) {
+            (Some("rate_limit"), Some("usage_limit")) => "usage_limit",
+            (Some(stated), _) => stated,
+            (None, Some(guessed)) => guessed,
+            (None, None) => "unknown",
+        };
         let severity = match failure["severity"].as_str() {
             Some("warning") => "warning",
             Some("info") => "info",
@@ -562,10 +571,10 @@ impl AcpNormalizer {
         }))
     }
 
-    fn typed_failure(value: &Value) -> Option<Value> {
+    fn typed_failure(brand: &str, value: &Value) -> Option<Value> {
         value
             .pointer("/_meta/jetbrains/air/sessionFailure")
-            .and_then(Self::failure_signal)
+            .and_then(|failure| Self::failure_signal(brand, failure))
     }
 
     /// What a turn that did not simply end has to say for itself.
@@ -682,7 +691,7 @@ impl AcpNormalizer {
     fn session_info(&mut self, session_id: &str, provider: &str, raw: &Value) -> Vec<Event> {
         let update = &raw["update"];
         let mut events = Vec::new();
-        if let Some(signal) = Self::typed_failure(update) {
+        if let Some(signal) = Self::typed_failure(provider, update) {
             self.record_signal(&signal);
             events.push(self.envelope(
                 session_id,
@@ -1789,7 +1798,7 @@ impl AcpNormalizer {
 
     pub fn finish_turn(&mut self, session_id: &str, provider: &str, raw: &Value) -> Vec<Event> {
         self.suppress_local_user = false;
-        let failure = Self::typed_failure(raw);
+        let failure = Self::typed_failure(provider, raw);
         let mut events = Vec::new();
         for (agent, chunks) in std::mem::take(&mut self.deferred_agents) {
             // Its words as the reader saw them, message breaks and all, rather

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
+
 import { foldAll } from '@/workbench/fold';
 import { drawnRows } from '@/workbench/machine-lines';
-import { providerMessageFromText, providerMessageReads, type ProviderMessageSignal } from '@/workbench/provider-messages';
 import type { WbpEvent } from '@/workbench/protocol';
+import { providerMessageReads, type ProviderMessageSignal } from '@/workbench/provider-messages';
 
 const event = (signal: ProviderMessageSignal, seq = 1): WbpEvent => ({
   type: 'provider.message', signal, seq, sessionId: 'chat', at: '2026-08-30T08:00:00Z',
@@ -83,24 +84,5 @@ describe('provider message normalization', () => {
     expect(both.map((row) => row.row === 'machine' && row.kind)).toEqual(['provider/usage_limit']);
     expect(both[0]!.row === 'machine' && both[0]!.lines[0]!.text)
       .toBe("You've hit your session limit · resets 9pm (Asia/Karachi)");
-  });
-
-  it('adapts legacy provider prose only at the provider boundary', () => {
-    expect(providerMessageFromText(
-      "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 3rd, 2036 9:25 PM.",
-    )).toMatchObject({ kind: 'usage_limit', severity: 'blocking', scope: 'session', action: { label: 'Manage usage' } });
-    expect(providerMessageFromText("You've hit your session limit · resets 3:10pm (Asia/Karachi)"))
-      .toMatchObject({ kind: 'usage_limit', severity: 'blocking', scope: 'session' });
-  });
-
-  it.each([
-    ['Too many requests (HTTP 429)', 'rate_limit'],
-    ['Authentication failed: invalid API key', 'authentication'],
-    ['Service temporarily unavailable', 'service_unavailable'],
-    ['Network connection timed out', 'network'],
-    ['The selected model is unavailable', 'model_unavailable'],
-    ['Context window limit exceeded', 'context_limit'],
-  ])('maps %s to %s', (text, kind) => {
-    expect(providerMessageFromText(text)?.kind).toBe(kind);
   });
 });
