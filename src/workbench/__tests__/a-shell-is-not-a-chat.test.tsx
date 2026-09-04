@@ -1,6 +1,12 @@
 /**
  * A command opens as the terminal that ran it, never as a conversation
- * (bw-t26l.20).
+ * (bw-t26l.20) — and is drawn as a shell on its row, without the two things a
+ * shell has never had (bw-sb5g).
+ *
+ * The terminal belongs to what the row OPENS, and to nothing else. Drawn under
+ * every command in the conversation as well, it turned a transcript of a day's
+ * work into a column of black rectangles, which is not what was asked for and
+ * is not what the conversation is for.
  *
  * The sent-away panel files helpers, plans and commands under one word, and
  * every one of them opened the same pane: a transcript, a "Message subagent"
@@ -14,7 +20,7 @@
  * browser. What reaches the grid is read off `write`, because jsdom lays
  * nothing out and a grid with no measurable character draws no rows.
  */
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { Terminal } from '@xterm/xterm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -23,6 +29,8 @@ import { AgentView } from '@/workbench/agent-view';
 import { commandRun } from '@/workbench/command-run';
 import { EMPTY, foldAll, reduce, type SessionView } from '@/workbench/fold';
 import { isOver, type TerminalRun, type WbpEvent } from '@/workbench/protocol';
+import { SentAwayPanel } from '@/workbench/sent-away';
+import { TranscriptRow } from '@/workbench/transcript-rows';
 
 const AT = '2026-09-04T09:00:00.000Z';
 const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null };
@@ -259,5 +267,87 @@ describe('the pane a command opens', () => {
 
     expect(screen.getByTestId('agent-view-said')).toBeTruthy();
     expect(screen.queryByTestId('agent-view-shell')).toBeNull();
+  });
+});
+
+/**
+ * What the reader is handed in the rail, before anything is opened.
+ *
+ * A command spends nothing — this machine runs it, not a model — so the coins
+ * beside it always read `0`, and what it "answered" is the tail of its own
+ * output, which is two lines torn out of the middle of a build. Both were
+ * drawn because the row was written for a helper and a command borrowed it
+ * whole (bw-sb5g.2).
+ */
+describe('the row a command gets in the rail', () => {
+  const railFor = (events: WbpEvent[]) => {
+    const { agents, items } = foldAll(events);
+    render(<SentAwayPanel agents={agents} items={items} sessionId="chat-1" controls={[]} />);
+    // Finished work sits behind the control that names how many there are.
+    fireEvent.click(screen.getByTestId('toggle-stopped-agents'));
+  };
+
+  it('says SHELL, and neither what it cost nor what it answered', () => {
+    railFor(ranACommand(ourTerminal()));
+
+    expect(screen.getByTestId('sent-away-row').getAttribute('data-kind')).toBe('command');
+    // The word on the row is the thing the reader is looking at. The CSS
+    // uppercases it; the word underneath is what is asserted.
+    expect(screen.getByTestId('sent-away-kind').textContent).toBe('shell');
+    expect(screen.queryByTestId('sent-away-spend')).toBeNull();
+    expect(screen.queryByTestId('sent-away-result')).toBeNull();
+  });
+
+  it('leaves a helper’s row exactly as it was', () => {
+    railFor([
+      said({
+        type: 'agent.started',
+        agentId: 'help-1',
+        toolCallId: 'call-9',
+        kind: 'helper',
+        what: 'find the callers',
+        agentType: 'general-purpose',
+        model: null,
+      }),
+      said({
+        type: 'agent.finished',
+        agentId: 'help-1',
+        state: 'done',
+        result: 'Three callers, all in the router.',
+        seconds: 40,
+        tokens: 12_000,
+        calls: 3,
+        model: null,
+      }),
+    ]);
+
+    expect(screen.getByTestId('sent-away-kind').textContent).toBe('helper');
+    expect(screen.getByTestId('sent-away-spend')).toBeTruthy();
+    expect(screen.getByTestId('sent-away-result').textContent).toContain('Three callers');
+  });
+});
+
+/**
+ * And the conversation is left alone (bw-sb5g.1).
+ *
+ * The same events, folded the same way, drawn by the row the transcript draws
+ * with: a command reads as a command in it, with what it printed behind its
+ * own click, and no grid mounted anywhere. A terminal under every command in
+ * the conversation turned a transcript of a day's work into a column of black
+ * rectangles.
+ */
+describe('the same command in the conversation', () => {
+  it('draws no terminal, and keeps the body it always had', () => {
+    const { items } = foldAll(ranACommand(ourTerminal()));
+    const call = items.find((item) => item.kind === 'tool');
+    expect(call, 'the command should be a tool row').toBeTruthy();
+
+    render(<TranscriptRow item={call!} sessionId="chat-1" mentions={PLAINLY} onLook={() => {}} />);
+
+    expect(screen.queryByTestId('ran-terminal')).toBeNull();
+    // The row is titled in the app's own words ("Ran the Rust tests"), so the
+    // way in is the row itself rather than the command it was made with.
+    fireEvent.click(screen.getByRole('button', { name: /Ran the Rust tests/ }));
+    expect(screen.getByTestId('tool-output')).toBeTruthy();
   });
 });

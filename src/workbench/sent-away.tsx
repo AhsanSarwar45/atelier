@@ -57,7 +57,10 @@ const TICK_MS = 1000;
  */
 export const KINDS: Record<AgentKind, { label: string; Icon: typeof Bot }> = {
   helper: { label: 'helper', Icon: Bot },
-  command: { label: 'command', Icon: Terminal },
+  // A shell, because that is what the reader is looking at. `command` was the
+  // word for the EVENT that started it, and on the row it read as one more
+  // helper with a different glyph (bw-sb5g.2).
+  command: { label: 'shell', Icon: Terminal },
   watch: { label: 'watch', Icon: Eye },
   run: { label: 'run', Icon: Workflow },
 };
@@ -273,6 +276,10 @@ function AgentRow({
   const { label: kind, Icon } = KINDS[row.kind];
   const model = modelNamed(row.model);
   const over = isOver(row.state);
+  // A shell is not a helper, and the row says less about it because there is
+  // less to say: no agent spent tokens on it, and its answer is the output it
+  // printed rather than a paragraph worth quoting here (bw-sb5g.2).
+  const shell = row.kind === 'command';
 
   return (
     <Panel
@@ -343,14 +350,19 @@ function AgentRow({
           <Clock className="h-3 w-3" aria-hidden="true" />
           {forHowLong(liveSeconds(row, now))}
         </span>
-        <span
-          data-testid="sent-away-spend"
-          className="flex shrink-0 items-center gap-1"
-          title={`${row.tokens.toLocaleString()} tokens over ${row.calls} call${row.calls === 1 ? '' : 's'}`}
-        >
-          <Coins className="h-3 w-3" aria-hidden="true" />
-          {spend(row.tokens)}
-        </span>
+        {/* Nothing was billed for a shell. A command is run by this machine,
+            not by a model, so its coins were always `0` — a price tag on a
+            thing that has no price (bw-sb5g.2). */}
+        {!shell && (
+          <span
+            data-testid="sent-away-spend"
+            className="flex shrink-0 items-center gap-1"
+            title={`${row.tokens.toLocaleString()} tokens over ${row.calls} call${row.calls === 1 ? '' : 's'}`}
+          >
+            <Coins className="h-3 w-3" aria-hidden="true" />
+            {spend(row.tokens)}
+          </span>
+        )}
         {row.calls > 0 && (
           <span data-testid="sent-away-calls" className="shrink-0">
             {row.calls} call{row.calls === 1 ? '' : 's'}
@@ -371,8 +383,11 @@ function AgentRow({
         className="text-[11px]"
       />
       {/* Its answer once it is done. Never beside the present tense of a thing
-          that has finished, which is why the mark above settles first. */}
-      {over && row.result && (
+          that has finished, which is why the mark above settles first. A shell
+          has no answer to quote: what it "said" is the last two lines of its
+          own output, and two lines of a build torn out of the middle of it say
+          less than nothing. Its output is in the panel it opens (bw-sb5g.2). */}
+      {over && row.result && !shell && (
         <p data-testid="sent-away-result" className="line-clamp-2 text-[11px] text-muted-foreground" title={row.result}>
           {row.result}
         </p>
