@@ -1055,6 +1055,9 @@ async fn ask_provider_to_list(
     } else {
         refusals.remove(brand);
     }
+    // What the list learned is worth telling the transcript, which opens next
+    // and would otherwise start the same adapter to hear the same refusal.
+    crate::workbench::acp::client::note_adapter_answer(brand, listed.is_err()).await;
     listed
 }
 

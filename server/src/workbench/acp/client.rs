@@ -2711,9 +2711,64 @@ impl ProviderDriver for AcpDriver {
     }
 }
 
+/// How long an adapter that turned this app away is left alone.
+///
+/// Starting an adapter to be told "Authentication required" costs what starting
+/// one that answers costs, and a provider that is not signed in says it to
+/// every endpoint, not one. The refusal is therefore worth remembering across
+/// endpoints: the chat list learns it first, on a timer, and the transcript
+/// that opens a moment later would otherwise pay for the same discovery again.
+///
+/// Brand-wide, and short. A refusal that was really about one chat sends the
+/// next minute's asks down the compatibility readers, which read the same
+/// records and produce the same transcripts — a slower way to be right
+/// (bw-t26l.20).
+const ADAPTER_REFUSED_FOR: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn adapter_refusals() -> &'static Mutex<HashMap<String, std::time::Instant>> {
+    static REFUSALS: std::sync::OnceLock<Mutex<HashMap<String, std::time::Instant>>> =
+        std::sync::OnceLock::new();
+    REFUSALS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Whether this brand's adapter turned the app away a moment ago, whichever
+/// endpoint found out.
+pub async fn adapter_refused_recently(brand: &str) -> bool {
+    adapter_refusals()
+        .lock()
+        .await
+        .get(brand)
+        .is_some_and(|refused| refused.elapsed() < ADAPTER_REFUSED_FOR)
+}
+
+/// Write down what an adapter just did, so the next endpoint need not find out.
+pub async fn note_adapter_answer(brand: &str, refused: bool) {
+    let mut refusals = adapter_refusals().lock().await;
+    if refused {
+        refusals.insert(brand.to_string(), std::time::Instant::now());
+    } else {
+        refusals.remove(brand);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One refusal answers for every endpoint that would have found it out.
+    ///
+    /// The chat list asks first and the transcript opens a moment later; both
+    /// used to start an adapter to hear the same "Authentication required"
+    /// (bw-t26l.20).
+    #[tokio::test]
+    async fn an_adapter_that_refused_one_endpoint_is_left_alone_by_the_next() {
+        let brand = "brand-that-refuses";
+        assert!(!adapter_refused_recently(brand).await);
+        note_adapter_answer(brand, true).await;
+        assert!(adapter_refused_recently(brand).await);
+        note_adapter_answer(brand, false).await;
+        assert!(!adapter_refused_recently(brand).await);
+    }
 
     fn test_session(state: &str) -> Session {
         Session {
