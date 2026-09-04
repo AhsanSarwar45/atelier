@@ -96,6 +96,16 @@ pub struct AcpNormalizer {
     active_messages: HashMap<String, (String, String)>,
     message_text: HashMap<String, String>,
     root_assistant_messages: HashSet<String>,
+    /// How many of a message's finished visuals have already been sent on.
+    ///
+    /// Per message, because a widget is drawn from an event and the fence in
+    /// the words is only how it was written: no event, no picture, just the
+    /// JSON in a code block. They used to be read at the end of the TURN, and
+    /// an agent's turn runs as long as it keeps working — the manager watched
+    /// three of them sit as raw JSON on his screen while the turn that wrote
+    /// them went on for another hour (2026-09-04). A block closes when its
+    /// closing fence arrives, which is the moment it can be drawn.
+    visuals_said: HashMap<String, (usize, usize)>,
     active_thinking: HashMap<String, String>,
     started_messages: HashSet<String>,
     open_tools: HashSet<String>,
@@ -138,6 +148,7 @@ impl Default for AcpNormalizer {
             active_messages: HashMap::new(),
             message_text: HashMap::new(),
             root_assistant_messages: HashSet::new(),
+            visuals_said: HashMap::new(),
             active_thinking: HashMap::new(),
             started_messages: HashSet::new(),
             open_tools: HashSet::new(),
@@ -444,7 +455,31 @@ impl AcpNormalizer {
         // messages (non-tool calls) should never be categorized". They are not,
         // now. A kit that has a condition to report fails the turn to report
         // it, and {@link fail_turn} reads it there, off the error (bw-7pfr).
-        for widget in crate::workbench::media::widget_specs(&text) {
+        events.extend(self.visuals(session_id, provider, raw, &id, &text));
+        self.visuals_said.remove(&id);
+        events
+    }
+
+    /// The finished visuals in what a message has said, each sent on once.
+    ///
+    /// Called on every chunk and again when the message ends, so a widget is
+    /// drawn the moment its closing fence lands rather than whenever the turn
+    /// that wrote it happens to stop. The count of what has already been sent
+    /// is what keeps the second call from drawing them all again; a block
+    /// cannot un-close, so counting is enough and nothing has to be compared.
+    fn visuals(
+        &mut self,
+        session_id: &str,
+        provider: &str,
+        raw: &Value,
+        id: &str,
+        text: &str,
+    ) -> Vec<Event> {
+        let mut events = Vec::new();
+        let (widgets_said, comparisons_said) = self.visuals_said.get(id).copied().unwrap_or((0, 0));
+        let widgets = crate::workbench::media::widget_specs(text);
+        let comparisons = crate::workbench::media::comparison_specs(text, &self.cwd);
+        for widget in widgets.iter().skip(widgets_said) {
             events.push(self.envelope(
                 session_id,
                 provider,
@@ -452,7 +487,7 @@ impl AcpNormalizer {
                 json!({"type":"widget","messageId":id,"widget":widget}),
             ));
         }
-        for comparison in crate::workbench::media::comparison_specs(&text, &self.cwd) {
+        for comparison in comparisons.iter().skip(comparisons_said) {
             events.push(self.envelope(
                 session_id,
                 provider,
@@ -460,6 +495,8 @@ impl AcpNormalizer {
                 json!({"type":"image.compare","messageId":id,"comparison":comparison}),
             ));
         }
+        self.visuals_said
+            .insert(id.to_string(), (widgets.len(), comparisons.len()));
         events
     }
 
@@ -1088,10 +1125,18 @@ impl AcpNormalizer {
         }
         let started = self.tool_starts.get(id);
         let empty = |value: &Value| value.as_str().unwrap_or_default().is_empty();
-        if empty(&run["command"]) {
+        // The command the call was made with wins whenever it is known, even
+        // over one already written down: a pending Bash call arrives titled
+        // `Terminal` with no arguments at all, and the real command line comes
+        // a message later. Taken as a fallback in the order they arrive, the
+        // placeholder got there first and stayed — `$ Terminal` sat over a
+        // running grid where `$ sleep 40` belonged (measured, 2026-09-04).
+        let told = started.and_then(|start| start["input"]["command"].as_str());
+        if let Some(command) = told.filter(|command| !command.is_empty()) {
+            run["command"] = json!(command);
+        } else if empty(&run["command"]) {
             let command = started
-                .and_then(|start| start["input"]["command"].as_str())
-                .or_else(|| started.and_then(|start| start["title"].as_str()))
+                .and_then(|start| start["title"].as_str())
                 .unwrap_or_default();
             run["command"] = json!(command);
         }
@@ -1284,6 +1329,13 @@ impl AcpNormalizer {
                 if let Some(under) = parent.clone() {
                     let said = self.message_text.get(&id).cloned().unwrap_or_default();
                     events.extend(self.doing_now(session_id, provider, raw, &under, &said));
+                } else if text.contains('`') && self.root_assistant_messages.contains(&id) {
+                    // Only when the chunk carries a backtick: a block that has
+                    // just closed closed on one, and reading a comparison
+                    // means reading its two pictures off the disk — not work
+                    // to redo for every word an agent says afterwards.
+                    let said = self.message_text.get(&id).cloned().unwrap_or_default();
+                    events.extend(self.visuals(session_id, provider, raw, &id, &said));
                 }
             }
         } else if let Some((mime, data_url)) = Self::content_picture(content) {
@@ -2637,17 +2689,58 @@ mod tests {
     #[test]
     fn final_root_text_keeps_atelier_widget_post_processing() {
         let mut normalizer = AcpNormalizer::default();
-        normalizer.update("local", "codex", &json!({"sessionId":"remote","update":{
+        let said = normalizer.update("local", "codex", &json!({"sessionId":"remote","update":{
             "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done\n```atelier-widget\n{\"type\":\"metrics\",\"items\":[{\"label\":\"Checks\",\"value\":1}]}\n```"}
         }}));
-        let events = normalizer.finish_turn("local", "codex", &json!({"stopReason":"end_turn"}));
-        assert_eq!(
-            kinds(&events),
-            vec!["message.completed", "widget", "session.state"]
-        );
-        let widget = serde_json::to_value(&events[1]).unwrap();
+        // Drawn when the block closed, which is here.
+        assert_eq!(kinds(&said), vec!["message.started", "text.delta", "widget"]);
+        let widget = serde_json::to_value(&said[2]).unwrap();
         assert_eq!(widget["messageId"], "acp-message-1");
         assert_eq!(widget["widget"]["type"], "metrics");
+
+        // And not again when the turn ends, however much later that is.
+        let events = normalizer.finish_turn("local", "codex", &json!({"stopReason":"end_turn"}));
+        assert_eq!(kinds(&events), vec!["message.completed", "session.state"]);
+    }
+
+    #[test]
+    fn a_widget_is_drawn_when_its_block_closes_not_when_the_turn_does() {
+        // The manager's screen, 2026-09-04: three widgets written in one answer
+        // and all three still raw JSON in a code block, because the turn that
+        // wrote them went on working for another hour. A turn is not a message
+        // and a message is not a block; a block is done when its fence closes.
+        let mut normalizer = AcpNormalizer::default();
+        let chunk = |text: &str| {
+            json!({"sessionId":"remote","update":{
+                "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":text}
+            }})
+        };
+
+        let opened = normalizer.update("local", "codex", &chunk("Here it is.\n\n```atelier-widget\n{\"type\":\"table\",\"columns\":[\"a\"],"));
+        // Half a block is not a block: nothing to draw yet.
+        assert_eq!(kinds(&opened), vec!["message.started", "text.delta"]);
+
+        let closed = normalizer.update("local", "codex", &chunk("\"rows\":[[\"1\"]]}\n```\n"));
+        assert_eq!(kinds(&closed), vec!["text.delta", "widget"]);
+        assert_eq!(
+            serde_json::to_value(&closed[1]).unwrap()["widget"]["type"],
+            "table"
+        );
+
+        // Still working, and the widget is on screen already.
+        let more = normalizer.update("local", "codex", &chunk(" And now the second one.\n"));
+        assert_eq!(kinds(&more), vec!["text.delta"]);
+
+        let second = normalizer.update("local", "codex", &chunk("```atelier-widget\n{\"type\":\"metrics\",\"items\":[{\"label\":\"Checks\",\"value\":\"1\"}]}\n```\n"));
+        // The second one only, not the first one over again.
+        assert_eq!(kinds(&second), vec!["text.delta", "widget"]);
+        assert_eq!(
+            serde_json::to_value(&second[1]).unwrap()["widget"]["type"],
+            "metrics"
+        );
+
+        let events = normalizer.finish_turn("local", "codex", &json!({"stopReason":"end_turn"}));
+        assert_eq!(kinds(&events), vec!["message.completed", "session.state"]);
     }
 
     #[test]

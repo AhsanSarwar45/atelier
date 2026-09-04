@@ -130,20 +130,32 @@ describe('what a command is read from', () => {
     expect(run.output).toBe('running 3 tests\ntest result: ok.');
   });
 
+  it('shows the command the call was made with, not the placeholder it opened as', () => {
+    // A pending Bash call is titled `Terminal` and carries no arguments; the
+    // command line follows a message later, on the call. A terminal that was
+    // named before that and never mentioned again — nothing printed, nothing
+    // exited — keeps the placeholder unless the call is read.
+    const events = ranACommand(ourTerminal({ command: 'Terminal', output: '', seconds: 0 })).slice(0, 3);
+    const { agents, items } = view(events);
+    const { run } = commandRun(agents[0]!, items, 8);
+
+    expect(run.command).toBe('cargo test --lib');
+  });
+
   it('does not put the launcher’s exit code under a command still running', () => {
     // A backgrounded command: the call that launched it returned at once,
     // exit 0, and the work it started is still going. Read off the pane on
     // 2026-09-04 — the header said `running` and the terminal in it said
     // `✓ exit 0`, about the same `sleep 300`.
-    const events = ranACommand(ourTerminal({ command: 'sleep 300', output: '', seconds: 0 })).slice(0, 3);
+    const events = ranACommand(ourTerminal({ output: '', seconds: 0 })).slice(0, 3);
     const { agents, items } = view(events);
     expect(isOver(agents[0]!.state)).toBe(false);
 
     const { run, outcome } = commandRun(agents[0]!, items, 41);
 
-    expect(run.command).toBe('sleep 300');
+    expect(run.command).toBe('cargo test --lib');
     expect(run.running).toBe(true);
-    // The 0 belongs to whatever put it in the background, not to `sleep 300`.
+    // The 0 belongs to whatever put it in the background, not to the command.
     expect(run.exitCode).toBeNull();
     expect(outcome).toBeNull();
     // And the clock the row has been keeping, since the call's own is spent.

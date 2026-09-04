@@ -103,7 +103,16 @@ export function commandRun(
   const told = call?.terminal;
   // A terminal reported by an agent that ran the shell itself carries no
   // clock, and this row has one. Ours carries its own and keeps it.
-  const ours = told && told.seconds <= 0 ? { ...told, seconds } : told;
+  //
+  // And the command line off the call, when the call has one. A pending Bash
+  // call arrives titled `Terminal` with no arguments, and its real command
+  // comes a message later — on the call, not always on the terminal, which
+  // may never be mentioned again if the command prints nothing. `$ Terminal`
+  // over a running grid, where `$ sleep 40` belonged (measured, 2026-09-04).
+  const line = said(call, 'command');
+  const ours = told && (told.seconds <= 0 || (line && line !== told.command))
+    ? { ...told, command: line || told.command, seconds: told.seconds > 0 ? told.seconds : seconds }
+    : told;
   if (ours) {
     // A terminal of ours that still says "running" in a chat that has stopped
     // is a terminal nobody is left to close — the chat that owned it went away
