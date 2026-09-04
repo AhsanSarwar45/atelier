@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import type { Bead } from '@/types';
 import { sendCommand } from '@/workbench/use-session';
 import type { Brand } from '@/workbench/protocol';
-import { firstAvailableProvider, providerIsAvailable, useProviders } from '@/workbench/providers';
+import { firstAvailableProvider, providerIsAvailable, useProviders, whyUnavailable } from '@/workbench/providers';
 import { brandName } from '@/workbench/brand-icon';
 import { rememberUnsentLine } from '@/workbench/drafts';
 
@@ -59,9 +59,16 @@ export function StartFromCard({ bead, projectId, projectPath }: StartFromCardPro
   return (
     <div className="mt-6">
       <div className="mb-2 flex gap-2" role="group" aria-label="Coding agent">
-        {providers.map(({ brand: choice, available, installUrl }) => (
-          <Button key={choice} size="sm" variant={brand === choice ? 'primary' : 'secondary'} disabled={!available} title={available ? undefined : `Install ${choice}: ${installUrl}`} onClick={() => setBrand(choice)}>
-            {brandName(choice)}
+        {providers.map((provider) => (
+          <Button
+            key={provider.brand}
+            size="sm"
+            variant={brand === provider.brand ? 'primary' : 'secondary'}
+            disabled={!provider.available}
+            title={provider.available ? undefined : whyUnavailable(provider)}
+            onClick={() => setBrand(provider.brand)}
+          >
+            {brandName(provider.brand)}
           </Button>
         ))}
       </div>

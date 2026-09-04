@@ -110,8 +110,14 @@ async fn get_json(runtime: Runtime, url: String) -> Option<Value> {
 }
 
 async fn get_json_within(runtime: Runtime, url: String, patience: Duration) -> Option<Value> {
+    // Half the budget to get a socket, the whole of it to get an answer, with
+    // a floor so the fast discovery pass still gives up on a port nobody is
+    // listening on almost at once. A flat 60ms cap would have applied to the
+    // liveness check too, and calling a busy server dead because it took
+    // 61ms to accept is the exact mistake this file is here to stop.
+    let connect = (patience / 2).max(Duration::from_millis(60));
     let client = reqwest::Client::builder()
-        .connect_timeout(patience.min(Duration::from_millis(60)))
+        .connect_timeout(connect.min(patience))
         .timeout(patience)
         .build()
         .ok()?;

@@ -58,6 +58,7 @@ pub fn standing(signal: &Value) -> (&'static str, &'static str) {
         "context_limit" => "Context full",
         "refusal" => "Declined",
         "turn_limit" => "Stopped short",
+        "runtime_stopped" => "Runtime stopped",
         _ => "Provider problem",
     };
     (state, word)

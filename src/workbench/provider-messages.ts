@@ -21,6 +21,12 @@ export const PROVIDER_MESSAGE_KINDS = [
   // ceilings (tokens, requests in a turn) cut a turn off mid-work.
   'refusal',
   'turn_limit',
+  // The runtime under a local model went away while it was answering. Not
+  // `network` — nothing is between the two, they are the same machine — and
+  // not `service_unavailable`, which is a provider that answered and said no.
+  // This is a process that stopped, and the words for it are different: the
+  // reader starts it again (bw-u6cl.9).
+  'runtime_stopped',
   'unknown',
 ] as const;
 
@@ -85,6 +91,7 @@ const TITLES: Record<ProviderMessageKind, string> = {
   context_limit: 'This conversation is out of context space',
   refusal: 'The agent declined to continue',
   turn_limit: 'This turn stopped before it finished',
+  runtime_stopped: 'The local model runtime stopped',
   unknown: 'The provider reported a problem',
 };
 
@@ -125,7 +132,8 @@ const STATUS_LABEL: Record<ProviderMessageKind, string> = {
   authorization: 'Not allowed', service_unavailable: 'Provider unavailable', network: 'Connection lost',
   provider_error: 'Provider failed', retrying: 'Retrying', interrupted: 'Interrupted',
   model_unavailable: 'Model unavailable', context_limit: 'Context full',
-  refusal: 'Declined', turn_limit: 'Stopped short', unknown: 'Provider problem',
+  refusal: 'Declined', turn_limit: 'Stopped short', runtime_stopped: 'Runtime stopped',
+  unknown: 'Provider problem',
 };
 
 /** The same condition reduced to the compact, colored session-status vocabulary. */

@@ -67,3 +67,17 @@ export function providerIsAvailable(providers: ProviderAvailability[], brand: Br
 export function firstAvailableProvider(providers: ProviderAvailability[]): Brand | null {
   return providers.find((provider) => provider.available)?.brand ?? null;
 }
+
+/**
+ * Why a provider cannot be started, in one line the reader can act on.
+ *
+ * "Install Local models: <url>" is the wrong sentence for the commonest way
+ * local is unavailable — the adapter is installed and the runtime simply is
+ * not running — and it sends the reader to a download page for software they
+ * already have. When the server said what is actually missing, that is what is
+ * shown; the install line is the fallback for a provider that has none
+ * (bw-u6cl.9).
+ */
+export function whyUnavailable(provider: Pick<ProviderAvailability, 'name' | 'installUrl' | 'availabilityReason'>): string {
+  return provider.availabilityReason ?? `Install ${provider.name}: ${provider.installUrl}`;
+}

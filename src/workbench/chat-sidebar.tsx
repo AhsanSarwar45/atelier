@@ -56,7 +56,7 @@ import { byWhatIsWorking, folderOf, laterOf, laterSpoke, whenHeSpoke, type Brand
 import { heldElsewhere, sessionOwnership } from '@/workbench/running';
 import { sendCommand } from '@/workbench/use-session';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
-import { useProviders } from '@/workbench/providers';
+import { useProviders, whyUnavailable } from '@/workbench/providers';
 import { ModelIcon } from '@/workbench/model-icon';
 
 /**
@@ -628,9 +628,14 @@ export function ChatSidebar({
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-56">
                     <DropdownMenuLabel>Start with</DropdownMenuLabel>
-                    {providers.map(({ brand, available, installUrl }) => (
-                      <DropdownMenuItem key={brand} disabled={!available} title={available ? undefined : `Install ${brandName(brand)}: ${installUrl}`} onSelect={() => onNewChat(brand)}>
-                        <BrandIcon brand={brand} /> New {brandName(brand)} chat
+                    {providers.map((provider) => (
+                      <DropdownMenuItem
+                        key={provider.brand}
+                        disabled={!provider.available}
+                        title={provider.available ? undefined : whyUnavailable(provider)}
+                        onSelect={() => onNewChat(provider.brand)}
+                      >
+                        <BrandIcon brand={provider.brand} /> New {brandName(provider.brand)} chat
                       </DropdownMenuItem>
                     ))}
                     {onNewChatDefault && (

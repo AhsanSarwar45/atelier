@@ -91,7 +91,7 @@ import { BrandIcon, ProviderBadge, brandName } from '@/workbench/brand-icon';
 import { workingLine } from '@/workbench/working-line';
 import { PictureViewer } from '@/workbench/picture-viewer';
 import { useEpicChecklist } from '@/workbench/epic-checklist';
-import { firstAvailableProvider, providerIsAvailable, useProviders } from '@/workbench/providers';
+import { firstAvailableProvider, providerIsAvailable, useProviders, whyUnavailable } from '@/workbench/providers';
 import { ModelIcon } from '@/workbench/model-icon';
 
 export { PictureViewer } from '@/workbench/picture-viewer';
@@ -1226,19 +1226,35 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             <DialogDescription>This choice applies to this new chat.</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-2">
-            {providers.map(({ brand, available, installUrl }) => (
+            {providers.map((provider) => (
               <Button
-                key={brand}
-                variant={newBrand === brand ? 'primary' : 'outline'}
-                data-testid={`new-chat-provider-${brand}`}
-                onClick={() => setNewBrand(brand)}
-                disabled={!available}
-                title={available ? undefined : `Install ${brandName(brand)}: ${installUrl}`}
+                key={provider.brand}
+                variant={newBrand === provider.brand ? 'primary' : 'outline'}
+                data-testid={`new-chat-provider-${provider.brand}`}
+                onClick={() => setNewBrand(provider.brand)}
+                disabled={!provider.available}
+                title={provider.available ? undefined : whyUnavailable(provider)}
               >
-                <BrandIcon brand={brand} /> {brandName(brand)}
+                <BrandIcon brand={provider.brand} /> {brandName(provider.brand)}
               </Button>
             ))}
           </div>
+          {/* Why, in the dialog rather than only on a tooltip. A greyed button
+              is a dead end for a reader who cannot hover — and the commonest
+              reason local is grey is a runtime they have not started, which is
+              a thing they can go and fix in ten seconds if anybody tells them
+              (bw-u6cl.9). */}
+          {providers.some((provider) => !provider.available) && (
+            <ul data-testid="provider-unavailable-reasons" className="flex flex-col gap-0.5 text-[11px] text-muted-foreground">
+              {providers
+                .filter((provider) => !provider.available)
+                .map((provider) => (
+                  <li key={provider.brand} data-testid={`provider-why-${provider.brand}`}>
+                    <span className="font-medium text-foreground/80">{brandName(provider.brand)}</span>: {whyUnavailable(provider)}
+                  </li>
+                ))}
+            </ul>
+          )}
           <DialogFooter className="gap-2 sm:space-x-0">
             <div className="flex min-h-9 items-center gap-2 rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground">
               <Checkbox
@@ -1386,19 +1402,32 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       <div className="flex flex-1 flex-col items-center justify-center gap-4">
         <p className="text-muted-foreground">No chat selected</p>
         <div className="flex items-center gap-2" role="group" aria-label="Coding agent">
-          {providers.map(({ brand, available, installUrl }) => (
+          {providers.map((provider) => (
             <Button
-              key={brand}
-              variant={newBrand === brand ? 'primary' : 'secondary'}
-              onClick={() => setNewBrand(brand)}
-              disabled={starting || !available}
-              title={available ? undefined : `Install ${brandName(brand)}: ${installUrl}`}
-              data-testid={`agent-${brand}`}
+              key={provider.brand}
+              variant={newBrand === provider.brand ? 'primary' : 'secondary'}
+              onClick={() => setNewBrand(provider.brand)}
+              disabled={starting || !provider.available}
+              title={provider.available ? undefined : whyUnavailable(provider)}
+              data-testid={`agent-${provider.brand}`}
             >
-              {brandName(brand)}
+              {brandName(provider.brand)}
             </Button>
           ))}
         </div>
+        {/* Same reason as in the dialog above: the reader is looking at a grey
+            button and the only useful thing this screen can do is say why. */}
+        {providers.some((provider) => !provider.available) && (
+          <ul data-testid="provider-unavailable-reasons" className="flex max-w-md flex-col gap-0.5 text-center text-[11px] text-muted-foreground">
+            {providers
+              .filter((provider) => !provider.available)
+              .map((provider) => (
+                <li key={provider.brand} data-testid={`provider-why-${provider.brand}`}>
+                  <span className="font-medium text-foreground/80">{brandName(provider.brand)}</span>: {whyUnavailable(provider)}
+                </li>
+              ))}
+          </ul>
+        )}
         <Button variant="primary" onClick={() => void start()} disabled={starting || !newBrandAvailable} data-testid="new-chat">
           {starting ? null : <Plus data-testid="new-chat-empty-plus" aria-hidden="true" />}
           {starting ? 'Starting…' : `New ${brandName(newBrand)} chat`}
