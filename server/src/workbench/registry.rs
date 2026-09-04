@@ -298,6 +298,21 @@ impl WorkbenchRegistry {
     /// conversation, its driver and durable state are the source of truth;
     /// asking the provider factory to "open" it would incorrectly demote the
     /// live row to dormant and race a second driver against the first one.
+    ///
+    /// A driver is the usual proof of ownership, but not the only one. A local
+    /// chat that has not been told which model to use is created awake and
+    /// deliberately driverless — there is nothing to start until the model is
+    /// known — and reading it by address is exactly what happens next, because
+    /// starting a chat navigates straight to it. Judged on the driver alone
+    /// that read demoted the chat to "Asleep" 116ms after it was made, which
+    /// then dropped it out of the sidebar, whose live half keeps only what is
+    /// awake. The chat the person had just asked for went to sleep on arrival
+    /// (bw-u6cl.2).
+    ///
+    /// Deliberately narrow: only a local chat that is *still awake* and has no
+    /// model yet. Once it is dormant this process no longer owns it and the
+    /// stale-state healing below is right again — which is what
+    /// `reading_by_address_reconciles_a_stale_saved_session` holds.
     async fn already_live_open(&self, command: &Command) -> Result<Option<Value>, String> {
         let mut session = None;
         if let Some(id) = command.fields.get("sessionId").and_then(Value::as_str) {
@@ -311,7 +326,10 @@ impl WorkbenchRegistry {
         let Some(session) = session else {
             return Ok(None);
         };
-        if !self.has_driver(&session.id).await {
+        let awaiting_its_model = session.state != "dormant"
+            && session.brand == super::local::BRAND
+            && session.model.is_none();
+        if !self.has_driver(&session.id).await && !awaiting_its_model {
             return Ok(None);
         }
         serde_json::to_value(session)
@@ -982,6 +1000,71 @@ mod tests {
                 |event| event.kind == crate::workbench::protocol::EventKind::SessionState
                     && event.fields["state"] == "dormant"
             ));
+    }
+
+    /// Reading a brand-new local chat by address does not put it to sleep.
+    ///
+    /// Starting a chat navigates straight to it, so this read happens within a
+    /// breath of the chat being made. A local chat waiting to be told its
+    /// model has no driver on purpose, and judging it on the driver alone
+    /// filed it as "Asleep" — after which the sidebar dropped it, because the
+    /// live half of that list keeps only what is awake (bw-u6cl.2).
+    #[tokio::test]
+    async fn reading_a_new_local_chat_by_address_leaves_it_awake() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        database
+            .create_session(crate::workbench::store::Session {
+                id: "waiting".into(),
+                brand: super::super::local::BRAND.into(),
+                external_id: None,
+                project_id: "project".into(),
+                project_path: "/project".into(),
+                cwd: "/project".into(),
+                // No model yet: this is the whole shape under test.
+                model: None,
+                permission_mode: "on-request".into(),
+                effort: None,
+                collaboration_mode: None,
+                title: None,
+                state: "idle".into(),
+                origin: "app".into(),
+                created_at: "2026-09-04T00:00:00Z".into(),
+                last_active_at: "2026-09-04T00:00:00Z".into(),
+                last_spoke_at: None,
+            })
+            .await
+            .unwrap();
+        let registry = WorkbenchRegistry::new(
+            database.clone(),
+            RegistryPaths {
+                home: root.path().into(),
+                claude_config: root.path().join("claude"),
+                codex_home: root.path().join("codex"),
+                media: root.path().join("media"),
+            },
+            Arc::new(crate::workbench::provider::NativeProviderFactory::new(
+                root.path().join("claude"),
+            )),
+        );
+
+        registry.looked_at("waiting").await;
+
+        let session = database.get_session("waiting".into()).await.unwrap().unwrap();
+        assert_eq!(session.state, "idle");
+        assert!(!registry.has_driver("waiting").await);
+        assert!(
+            !database
+                .events_since("waiting".into(), 0)
+                .await
+                .unwrap()
+                .iter()
+                .any(
+                    |event| event.kind == crate::workbench::protocol::EventKind::SessionState
+                        && event.fields["state"] == "dormant"
+                ),
+            "reading a chat that is waiting for its model must not file it as asleep"
+        );
     }
 
     #[tokio::test]
