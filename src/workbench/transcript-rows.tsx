@@ -417,9 +417,14 @@ export function whatItWasAsked(input: Record<string, unknown>): string {
  * the only thing that decides — there is no longer a control that opens every
  * row at once, and what he does not want to read he switches off by name
  * (bw-jkh2.13).
+ *
+ * A row that carries a diff is the exception, and opens itself: the diff IS
+ * that row's answer, it used to be drawn under the card where no click could
+ * put it away, and a change nobody can see without knowing to open the row is
+ * the failure this replaced (bw-cso1.1).
  */
-export function useOpen(): [boolean, (open: boolean) => void] {
-  return useState(false);
+export function useOpen(start = false): [boolean, (open: boolean) => void] {
+  return useState(start);
 }
 
 /**
@@ -473,9 +478,24 @@ export const ToolRow = memo(function ToolRow({
   sessionId?: string;
   onLook?: (image: LookableImage) => void;
 }) {
-  const [open, setOpen] = useOpen();
+  // What the row IS, asked of the row itself rather than of what a click has
+  // fetched: a paged transcript keeps the kind and drops the diff, so this is
+  // the only thing an edit row knows about itself before it is opened.
+  const edit = Boolean(item.diff) || item.ranKind === 'edit';
+  const [open, setOpen] = useOpen(edit);
   const [detail, setDetail] = useState<Pick<typeof item, 'input' | 'output' | 'diff'> | null>(null);
   const shown = detail ? { ...item, ...detail } : item;
+  // A paged transcript leaves its bodies on the server. They are wanted the
+  // moment the row is open — by the reader's click, or, on an edit row, by the
+  // row opening itself — so the fetch hangs off `open` and not off the click.
+  useEffect(() => {
+    if (!open || !item.detailsDeferred || detail || !sessionId) return;
+    void request(
+      `/api/workbench/tool?session=${encodeURIComponent(sessionId)}&tool=${encodeURIComponent(item.id)}`,
+    ).then(async (res) => {
+      if (res.ok) setDetail((await res.json()) as Pick<typeof item, 'input' | 'output' | 'diff'>);
+    });
+  }, [open, item.detailsDeferred, item.id, detail, sessionId]);
   const dot =
     item.status === 'running' ? 'bg-amber-400 animate-pulse' : item.status === 'ok' ? 'bg-emerald-500' : 'bg-red-500';
   // A shell row's arguments ARE its command: written out as `key: value` it
@@ -487,7 +507,9 @@ export const ToolRow = memo(function ToolRow({
     (shown.name === 'Bash' || item.acpKind === 'execute') && typeof shown.input.command === 'string';
   const asked = shell ? String(shown.input.command) : whatItWasAsked(shown.input);
   const tongue = languagesOf(shown.name, shown.input);
-  const hasBody = item.detailsDeferred || asked !== '' || Boolean(shown.output?.trim());
+  // A diff is a body: an edit row whose arguments the server dropped has
+  // nothing else behind the click, and the toggle must still shut the diff.
+  const hasBody = item.detailsDeferred || edit || asked !== '' || Boolean(shown.output?.trim());
   // Only the places the row does not already name. `Read wheels.md` with a chip
   // reading `work/wheels.md` under it says the same thing twice, and Read and
   // Edit are most of the rows in a chat -- the chips earn their line on a call
@@ -550,17 +572,7 @@ export const ToolRow = memo(function ToolRow({
           size="inherit"
           data-testid="tool-toggle"
           disabled={!hasBody}
-          onClick={() => {
-            const opening = !open;
-            setOpen(opening);
-            if (opening && item.detailsDeferred && !detail && sessionId) {
-              void request(
-                `/api/workbench/tool?session=${encodeURIComponent(sessionId)}&tool=${encodeURIComponent(item.id)}`,
-              ).then(async (res) => {
-                if (res.ok) setDetail((await res.json()) as Pick<typeof item, 'input' | 'output' | 'diff'>);
-              });
-            }
-          }}
+          onClick={() => setOpen(!open)}
           className="w-full justify-start gap-2 rounded-none p-0 text-left enabled:hover:text-foreground"
         >
           <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
@@ -599,12 +611,24 @@ export const ToolRow = memo(function ToolRow({
             {item.summary}
           </p>
         )}
-        {open && (
+        {open && (shown.diff ? (
+          /* An edit's diff is the whole of what it did, and the arguments it
+             was handed and the sentence it printed only say the same thing
+             again in worse words. So the card holds the diff INSTEAD of them,
+             and holds it behind its own click rather than under itself, where
+             nothing could put a screen of changed lines away (bw-cso1.1). */
+          <DiffView
+            path={shown.diff.path}
+            before={shown.diff.before}
+            after={shown.diff.after}
+            line={shown.diff.line}
+          />
+        ) : (
           <>
             <Body label={shell ? 'ran' : 'asked'} text={asked} testId="tool-input" language={tongue.asked} />
             <Body label="printed" text={shown.output ?? ''} testId="tool-output" language={tongue.printed} />
           </>
-        )}
+        ))}
       </Panel>
       {/* Where the call touched, in the agent's own words rather than guessed
           out of its arguments. A search that looked in six files said nothing
@@ -630,14 +654,6 @@ export const ToolRow = memo(function ToolRow({
         <div className="pt-1">
           <PictureGrid images={item.images} onLook={onLook} />
         </div>
-      )}
-      {shown.diff && (
-        <DiffView
-          path={shown.diff.path}
-          before={shown.diff.before}
-          after={shown.diff.after}
-          line={shown.diff.line}
-        />
       )}
     </div>
   );

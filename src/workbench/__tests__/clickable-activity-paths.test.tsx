@@ -49,6 +49,8 @@ describe('file links in activity', () => {
     const event = { target: chip, altKey: false, stopPropagation: vi.fn(), preventDefault: vi.fn() };
     expect(openPathClicked(event)).toBe(true);
     expect(openLocalPath).toHaveBeenCalledWith(path, 'vscode', 73);
-    expect(screen.getByTestId('tool-row')).toHaveAttribute('data-open', 'false');
+    // An edit row is drawn open, so "the chip did not toggle it" reads as the
+    // row still being open rather than still being shut (bw-cso1.1).
+    expect(screen.getByTestId('tool-row')).toHaveAttribute('data-open', 'true');
   });
 });
