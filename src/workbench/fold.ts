@@ -306,6 +306,35 @@ function waited(agents: SentAway[], sentBy: string | null, waiting: boolean): vo
   }
 }
 
+/**
+ * A chat with nothing driving it has nothing in flight.
+ *
+ * A row goes quiet when the kit says so, and for work sent off in the
+ * background the kit is the only thing that ever says so — so a chat that
+ * ends while a command is out leaves that row saying "working" with no
+ * process, no driver and nothing left that could ever contradict it. Measured
+ * on the owner's own board, 2026-09-04: 57 of the 75 rows still claiming to
+ * work belonged to chats that were asleep, the oldest by fifteen hours.
+ *
+ * Asleep is the only state this reads. `idle` is a turn that ended, and a
+ * command sent to the background is meant to outlive its turn; ending those
+ * would be the same lie told the other way. Asleep means the driver is gone,
+ * and the shells a driver started go with it (bw-t26l.20).
+ *
+ * Said as `stopped`, never as `done`: nobody watched these finish, and a row
+ * that claims success it did not see is worse than one that admits it lost
+ * sight of the work. The reason rides on the row so the reader is not left
+ * guessing why it settled.
+ */
+const LOST_SIGHT = 'The chat it was running in went to sleep, so nothing reported how it ended.';
+
+function nothingIsDriving(agents: SentAway[], state: SessionState): SentAway[] {
+  if (state !== 'dormant' || !agents.some((a) => !isOver(a.state))) return agents;
+  return agents.map((a) =>
+    isOver(a.state) ? a : { ...a, state: 'stopped' as AgentState, result: a.result ?? LOST_SIGHT },
+  );
+}
+
 export interface SessionView {
   brand: Brand | null;
   items: TranscriptItem[];
@@ -452,7 +481,10 @@ export function asView(sent: Partial<SessionView> | null | undefined): SessionVi
       item.kind === 'tool' && !isArguments(item.input) ? { ...item, input: argumentsOf(item.input) } : item,
     ),
     todos: list(raw.todos, EMPTY.todos),
-    agents: list(raw.agents, EMPTY.agents),
+    // Read on the way in as well as on every state event, because a snapshot
+    // arrives already folded: a chat restored asleep with rows still saying
+    // "working" would never see another `session.state` to correct them.
+    agents: nothingIsDriving(list(raw.agents, EMPTY.agents), raw.state ?? EMPTY.state),
     beads: list(raw.beads, EMPTY.beads),
     menu: menuOf(menu),
   };
@@ -478,6 +510,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       if (e.state !== 'errored') next.error = null;
       // A turn that is over owes no thinking count to the next one.
       if (e.state === 'idle' || e.state === 'errored' || e.state === 'stopped') next.thinkingTokens = 0;
+      next.agents = nothingIsDriving(view.agents, e.state);
       return next;
 
     case 'message.started':
@@ -966,6 +999,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         view.stateLabel = e.label;
         if (e.state !== 'errored') view.error = null;
         if (e.state === 'idle' || e.state === 'errored' || e.state === 'stopped') view.thinkingTokens = 0;
+        view.agents = nothingIsDriving(view.agents, e.state);
         break;
 
       case 'message.started':
