@@ -449,6 +449,19 @@ export const SENT_OFF = 'ml-6 border-l-2 border-violet-500/50 pl-3';
  */
 export const sentOff = (parentId: string | null | undefined): boolean => parentId != null;
 
+/**
+ * Whether a row's own title already names this file.
+ *
+ * Loosely, on the last two segments, because a title is written for a reader
+ * and cut to fit: `Read work/wheels.md` names `/home/x/proj/work/wheels.md`
+ * even though it does not contain it.
+ */
+function namesPlace(title: string, path: string): boolean {
+  const parts = path.split('/').filter(Boolean);
+  const tail = parts.slice(-2).join('/');
+  return title.includes(tail) || (parts.length > 0 && title.includes(parts[parts.length - 1]!));
+}
+
 export const ToolRow = memo(function ToolRow({
   item,
   nested,
@@ -475,9 +488,13 @@ export const ToolRow = memo(function ToolRow({
   const asked = shell ? String(shown.input.command) : whatItWasAsked(shown.input);
   const tongue = languagesOf(shown.name, shown.input);
   const hasBody = item.detailsDeferred || asked !== '' || Boolean(shown.output?.trim());
-  // A row already showing a diff of the file it edited does not also need a
-  // chip naming that file underneath it.
-  const places = (item.locations ?? []).filter((place) => place.path !== shown.diff?.path);
+  // Only the places the row does not already name. `Read wheels.md` with a chip
+  // reading `work/wheels.md` under it says the same thing twice, and Read and
+  // Edit are most of the rows in a chat -- the chips earn their line on a call
+  // that touched several files, or one whose title names none of them.
+  const places = (item.locations ?? []).filter(
+    (place) => place.path !== shown.diff?.path && !namesPlace(item.title, place.path),
+  );
   // What the call did, said in English behind a mark for the kind of thing it
   // was. A command no rule knows keeps the words it was typed in, and that is
   // the only shell text left on a closed row (bw-7ks.24).

@@ -68,6 +68,25 @@ describe('what ACP said the call was', () => {
     }
   });
 
+  it('leaves out the place the row already names', () => {
+    const call = foldAll([
+      said({
+        type: 'tool.started',
+        toolCallId: 'call-2',
+        name: 'file.read',
+        input: { path: '/work/server/src/lib.rs' },
+        title: 'Read src/lib.rs',
+        parentToolCallId: null,
+        acpKind: 'read',
+        locations: [{ path: '/work/server/src/lib.rs', line: null }],
+      }),
+    ]).items.find((it): it is TranscriptTool => it.kind === 'tool')!;
+    render(<ToolRow item={call} nested={false} />);
+    // Read and Edit are most of the rows in a chat, and their titles name the
+    // file already. A chip repeating it is a second line saying nothing.
+    expect(screen.queryByTestId('tool-locations')).toBeNull();
+  });
+
   it('colours the row and prints the command as a command', () => {
     const call = foldAll(foreign()).items.find((it): it is TranscriptTool => it.kind === 'tool')!;
     const drawn = render(<ToolRow item={call} nested={false} />);
