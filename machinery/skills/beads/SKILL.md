@@ -72,12 +72,12 @@ whether you run it as one line or three. Only that shape: a destination outside
 the project's worktree directory, a branch that is not the card, or any other
 command on the line that writes something, and the line is judged normally.
 
-**Landing** (`board-merge-gate`). `atelier tool board/land CARD-ID` is the
-protocol: it rebases, takes the merge slot, fast-forwards the landing branch and
-releases the slot. A raw merge into that branch is held to the same invariants —
-it must be `--ff-only`, the merge slot must not be held by somebody else, and it
-may not overwrite the landing checkout's own uncommitted changes. That last
-refusal names the files, so commit or stash exactly those. `board/land` is safe
+**Landing** (`board-merge-gate`). The command above is the protocol: it
+rebases, takes the merge slot, fast-forwards the landing branch and releases the
+slot. A raw merge into that branch is held to the same invariants — it must be
+`--ff-only`, the merge slot must not be held by somebody else, and it may not
+overwrite the landing checkout's own uncommitted changes. That last refusal
+names the files, so commit or stash exactly those. `board/land` is safe
 to run twice: if the commits already landed it says so and finishes the close.
 
 **Status moves** (`board-status-gate`). A card in manager review is the
