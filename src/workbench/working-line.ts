@@ -85,7 +85,13 @@ export function workingLine(now: {
   const reported = now.running?.seconds ?? 0;
   if (now.busy) {
     return {
-      label: now.label,
+      // The one reading's word, which IS the driver's own when the driver named
+      // one: a chat of ours now publishes its standing without a word half the
+      // time and leaves the vocabulary to the screen, the same vocabulary the
+      // rail draws for a chat another program holds (bw-xfb4). Read straight
+      // off the driver's label, this line went blank the moment it did — a
+      // spinner, a clock, and "· sleep 45" with nothing in front of it.
+      label: now.state.word || now.label,
       detail: now.state.detail,
       typicalMs: now.typicalMs ?? null,
       doing: now.state.doing,

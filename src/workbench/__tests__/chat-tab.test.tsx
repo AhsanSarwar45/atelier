@@ -127,6 +127,24 @@ describe('a chat a driver of ours is working in', () => {
     expect(now?.thought).toBe(1_200);
   });
 
+  it('and takes the screen’s word when the driver publishes none', () => {
+    // A standing published without a word — which is most of them now, so the
+    // screen's own vocabulary decides it and a chat of ours doing what a held
+    // chat is doing reads the same (bw-xfb4). Read straight off the label, this
+    // line drew a spinner, a clock and "· sleep 45" with nothing in front.
+    const now = workingLine({
+      busy: true,
+      label: '',
+      since: NOW,
+      waiting: false,
+      thought: 0,
+      state: { word: 'Running', working: true, waiting: false, doing: 'running', detail: 'sleep 45', told: true, mark: 'running', since: NOW, turnSince: null, external: null },
+      running: null,
+    });
+    expect(now?.label).toBe('Running');
+    expect(now?.detail).toBe('sleep 45');
+  });
+
   it('and its own waiting mark, which is the one state that is asking him', () => {
     const now = workingLine({
       busy: true,
