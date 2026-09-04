@@ -1438,16 +1438,26 @@ fn passing_check(text: &str, tree: &str) -> bool {
         && !text.contains("=FAILED")
 }
 
+/// The name a run's evidence is filed under: the tree of what is committed.
+///
+/// A tree, not a commit. It is what a run actually checked, it is what the
+/// evidence says (`checks: tree HASH ...`), and it survives the thing that
+/// happens to every card here — a rebase, which gives the same files a new
+/// commit. Read as a commit, a green run's own evidence went stale the moment
+/// its branch was rebased, and no checks card could be closed at all
+/// (bw-zd18).
+fn checked_tree(root: &Path) -> Option<String> {
+    let (tree, ok) = command(root, "git", &["rev-parse", "HEAD^{tree}"])?;
+    (ok && !tree.is_empty()).then_some(tree)
+}
+
 fn fresh_checks(root: &Path, id: &str, card: &Value) -> bool {
     if !labels(card).contains(&"step:checks") {
         return true;
     }
-    let Some((tree, ok)) = command(root, "git", &["rev-parse", "HEAD"]) else {
+    let Some(tree) = checked_tree(root) else {
         return false;
     };
-    if !ok || tree.is_empty() {
-        return false;
-    }
     let comments = bd(root, &["comments", id, "--json"])
         .map(rows)
         .unwrap_or_default();
@@ -2401,5 +2411,63 @@ mod tests {
         assert!(passing_check("checks: tree abc cargo=PASSED", "abc"));
         assert!(!passing_check("checks: tree old cargo=PASSED", "abc"));
         assert!(!passing_check("checks: tree abc cargo=FAILED", "abc"));
+    }
+
+    /// Evidence is filed under the tree, so the rebase every card here ends
+    /// with does not throw a green run away (bw-zd18).
+    #[test]
+    fn native_machinery_check_evidence_outlives_a_rewritten_commit() {
+        let repo = tempfile::tempdir().unwrap();
+        let git = crate::routes::find_git().unwrap();
+        let run = |args: &[&str]| {
+            assert!(Command::new(&git)
+                .args(args)
+                .current_dir(repo.path())
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .status()
+                .unwrap()
+                .success());
+        };
+        run(&["init", "-q", "-b", "ours"]);
+        std::fs::write(repo.path().join("a.txt"), "one").unwrap();
+        run(&["add", "a.txt"]);
+        run(&["commit", "-qm", "one"]);
+
+        let recorded = checked_tree(repo.path()).expect("the tree a run would record");
+        run(&["commit", "-q", "--amend", "-m", "one, said again"]);
+        assert_eq!(
+            checked_tree(repo.path()).as_deref(),
+            Some(recorded.as_str()),
+            "a rewritten commit threw away evidence for files that never changed"
+        );
+
+        std::fs::write(repo.path().join("a.txt"), "two").unwrap();
+        run(&["commit", "-qam", "two"]);
+        assert_ne!(
+            checked_tree(repo.path()).as_deref(),
+            Some(recorded.as_str()),
+            "evidence for the old files still counts for new ones"
+        );
+    }
+
+    /// The two halves read each other, which is the whole of what went wrong:
+    /// a green run wrote `Project checks=719/0` and this gate was looking for
+    /// the word PASSED, so the run recorded a pass its own close could not
+    /// read and every checks card stood open (bw-zd18).
+    #[test]
+    fn what_a_run_records_is_what_this_gate_accepts() {
+        let green = crate::board_tools::proof_of("abc", &["Project checks", "cargo"], &[true, true]);
+        assert!(
+            passing_check(&green, "abc"),
+            "a green run recorded evidence its own close cannot read: {green}"
+        );
+        let red = crate::board_tools::proof_of("abc", &["Project checks"], &[false]);
+        assert!(
+            !passing_check(&red, "abc"),
+            "a run with a failing suite recorded a pass: {red}"
+        );
     }
 }

@@ -402,7 +402,44 @@ fn result_token(name: &str, output: &str, ok: bool) -> String {
         }
     }
     if !ok && failed == 0 { failed = 1; }
-    if passed == 0 && failed == 0 { format!("{name}=ran-ok") } else { format!("{name}={passed}/{failed}") }
+    let counts = if passed == 0 && failed == 0 { String::new() } else { format!(" ({passed} passed, {failed} failed)") };
+    format!("{name}={}{counts}", if failed == 0 { "PASSED" } else { "FAILED" })
+}
+
+/// What a person hands `--record`, in the one form the card and the gate read.
+///
+/// `NAME=PASSED` and `NAME=FAILED` are the words the card asks for. Counts are
+/// taken too — `NAME=719/0` is what a suite's own summary looks like, and it
+/// was the only form this accepted while the card asked for the other one.
+fn recorded_token(name: &str, said: &str) -> Result<String, String> {
+    let plain = said.trim();
+    if plain.eq_ignore_ascii_case("passed") || plain.eq_ignore_ascii_case("failed") {
+        return Ok(format!("{name}={}", plain.to_ascii_uppercase()));
+    }
+    let (passed, failed) = plain
+        .split_once('/')
+        .ok_or_else(|| format!("--record {name}= must say PASSED, FAILED, or PASSED/FAILED counts"))?;
+    let passed: u64 = passed.trim().parse().map_err(|_| "recorded counts must be integers".to_string())?;
+    let failed: u64 = failed.trim().parse().map_err(|_| "recorded counts must be integers".to_string())?;
+    Ok(format!(
+        "{name}={} ({passed} passed, {failed} failed)",
+        if failed == 0 { "PASSED" } else { "FAILED" }
+    ))
+}
+
+/// The line a run leaves on its card, built the way `checks` builds it, so
+/// what the close gate is held to is the real thing rather than a copy of it.
+#[cfg(test)]
+pub(crate) fn proof_of(tree: &str, suites: &[&str], ok: &[bool]) -> String {
+    let tokens: Vec<String> = suites
+        .iter()
+        .zip(ok)
+        .map(|(name, &ok)| {
+            let summary = if ok { "test result: ok. 719 passed; 0 failed" } else { "test result: FAILED. 700 passed; 19 failed" };
+            result_token(name, summary, ok)
+        })
+        .collect();
+    format!("checks: tree {tree} {}", tokens.join(" "))
 }
 
 fn card_ids(text: &str) -> Vec<String> {
@@ -437,13 +474,13 @@ fn checks(rest: &[String]) -> Result<i32, String> {
     let mut failure = None;
     if !recorded.is_empty() {
         for result in recorded {
-            let (name, counts) = result.split_once('=').ok_or_else(|| "--record must be NAME=PASSED/FAILED".to_string())?;
+            let (name, said) = result.split_once('=').ok_or_else(|| "--record must be NAME=PASSED or NAME=FAILED".to_string())?;
             if !settings.verification.commands.iter().any(|suite| suite.name == name) {
                 return Err(format!("--record names {name}, which this project does not declare"));
             }
-            let (_, failed) = counts.split_once('/').ok_or_else(|| "--record must be NAME=PASSED/FAILED".to_string())?;
-            if failed.parse::<u64>().map_err(|_| "recorded counts must be integers")? > 0 { failure = Some(name.to_string()); }
-            tokens.push(format!("{name}={counts}"));
+            let token = recorded_token(name, said)?;
+            if token.contains("=FAILED") { failure = Some(name.to_string()); }
+            tokens.push(token);
         }
     } else {
         if selected.is_empty() { return Err("No declared suite matches the changed paths. Use --all to run every suite, or record evidence on the card explicitly.".into()); }
