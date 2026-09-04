@@ -664,20 +664,28 @@ test.describe('workbench', () => {
       // kept clicking the button that commit deleted (bw-t26l.20).
       await terminalRow.getByTestId('row-name').click();
       await expect(page.getByTestId('restore-error')).toHaveCount(0);
-      // Awake, and the row itself says so. A chat at rest wears no pill at
-      // all: the rail draws one only for a chat that is working, waiting, or
-      // held by somebody else (chat-sidebar.tsx). So this spent three minutes
-      // waiting for an element that exists only in the seconds the resumed
-      // chat happens to be busy, and asked it for 'ready' in a vocabulary
-      // that has said 'Ready' since 8a898ea. What "brought back" means is
-      // that the row is no longer asleep (bw-t26l.20).
-      await expect(terminalRow).not.toHaveAttribute('data-state', 'dormant', { timeout: 180_000 });
+      // Opening is read-only, on purpose: no agent is started and the row
+      // stays asleep until something is said in it (provider.rs, the
+      // SessionOpen arm — "the first prompt is what wakes (or resumes) its
+      // provider"). So the click is proved by the conversation appearing, not
+      // by a pill: the words the terminal session said yesterday are on
+      // screen, which is what makes this the same chat and not a new one.
+      // This case asked instead for a pill that only exists while a chat is
+      // busy, and later for a state the app deliberately does not enter on a
+      // click, and spent three minutes each time waiting for neither
+      // (bw-t26l.20).
       await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 60_000 });
+      await expect(page.getByTestId('assistant-message').first()).toContainText('READY', {
+        timeout: 180_000,
+      });
 
       await page.getByTestId('composer').fill('Reply with exactly: RESUMED');
       await page.getByTestId('send-button').click();
       const answer = page.getByTestId('assistant-message').last();
       await expect(answer).toContainText('RESUMED', { timeout: 300_000 });
+      // And now it is awake — the prompt is what woke it, and the rail says so
+      // on the row that was clicked.
+      await expect(terminalRow).not.toHaveAttribute('data-state', 'dormant', { timeout: 60_000 });
       await page.screenshot({ path: join(SHOTS, 'restore-resumed.png'), fullPage: false });
 
       // ---- and the app's own chat is placed the same way ------------------
@@ -883,12 +891,20 @@ test.describe('workbench', () => {
         });
       }
 
-      // Both turns have to finish: the cost only arrives when the turn is done.
+      // Both turns have to finish: the cost only arrives when the turn is
+      // done. In tokens, not in dollars — this asked for `usd > 0`, and
+      // Claude reports no price at all, so the answer was 0 for five minutes
+      // every time. A subscription has no per-turn dollar figure to give;
+      // ACP carries one only from a provider that bills by the call
+      // (normalize.rs, the `usd` cost update) (bw-t26l.20).
       await expect
         .poll(
           async () => {
-            const rows = (await (await request.get('/api/workbench/spend')).json()) as { usd: number }[];
-            return rows.filter((r) => r.usd > 0).length;
+            const rows = (await (await request.get('/api/workbench/spend')).json()) as {
+              projectId: string;
+              tokens: number;
+            }[];
+            return rows.filter((r) => r.tokens > 0 && projectIds.includes(r.projectId)).length;
           },
           { timeout: 300_000 },
         )

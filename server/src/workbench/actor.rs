@@ -537,6 +537,13 @@ fn persist_event(
         return Ok(None);
     }
     apply_session_fact(store, session_id, &event)?;
+    if event.kind == EventKind::Cost {
+        store.remember_turn_cost(
+            session_id,
+            string(&event, "at").as_deref().unwrap_or_default(),
+            event.fields.get("cost").unwrap_or(&serde_json::Value::Null),
+        )?;
+    }
     if event.kind == EventKind::LinkBead {
         if let Some(bead_id) = string(&event, "beadId") {
             store.remember_bead_link(

@@ -968,6 +968,74 @@ impl Store {
         Ok(())
     }
 
+    /// What one finished turn added, taken from the `cost` event that ends it.
+    ///
+    /// Nothing wrote to this table outside its own unit test, so
+    /// `/api/workbench/spend` answered `[]` for every project on every day it
+    /// was ever asked, and read as "nothing has been spent" rather than as
+    /// "nobody is counting" (bw-t26l.20).
+    ///
+    /// The event carries the running total for the whole chat, because that is
+    /// what the chat header draws. This table is summed across chats and days,
+    /// so writing the running total on every turn would count the first turn
+    /// once more for each turn after it. Only this turn's own share is
+    /// recorded: what the chat has now, less what it has already been charged
+    /// for here.
+    ///
+    /// A provider that names no dollars — Claude speaks tokens, and a
+    /// subscription has no per-turn price to report — leaves `usd` null rather
+    /// than claiming zero, which is a different statement.
+    pub fn remember_turn_cost(
+        &self,
+        session_id: &str,
+        at: &str,
+        cost: &serde_json::Value,
+    ) -> rusqlite::Result<()> {
+        let Some((project_id, brand)) = self
+            .connection
+            .query_row(
+                "SELECT project_id, brand FROM session WHERE id = ?1",
+                params![session_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+        else {
+            return Ok(());
+        };
+        let number = |field: &str| cost[field].as_i64().unwrap_or_default().max(0);
+        let usd = cost["usd"].as_f64().filter(|usd| *usd > 0.0);
+        let (was_usd, was_input, was_output, was_total) = self.connection.query_row(
+            r#"SELECT COALESCE(SUM(usd), 0), COALESCE(SUM(input), 0),
+                      COALESCE(SUM(output), 0), COALESCE(SUM(total), 0)
+               FROM turn WHERE session_id = ?1"#,
+            params![session_id],
+            |row| Ok((row.get::<_, f64>(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+        let share = |now: i64, was: i64| Some(now - was).filter(|share| *share > 0);
+        let turn = Turn {
+            session_id: session_id.to_string(),
+            project_id,
+            brand,
+            // The day is cut from this, so an event that arrived without a
+            // clock would file itself under the empty day and never group.
+            at: if at.len() >= 10 {
+                at.to_string()
+            } else {
+                chrono::Utc::now().to_rfc3339()
+            },
+            usd: usd.map(|usd| usd - was_usd).filter(|share| *share > 0.0),
+            input: share(number("input"), was_input),
+            output: share(number("output"), was_output),
+            total: share(number("total"), was_total),
+        };
+        // A turn that added nothing anyone can count is not a row. The header
+        // still redraws its running total from the event itself.
+        if turn.usd.is_none() && turn.total.is_none() && turn.input.is_none() {
+            return Ok(());
+        }
+        self.remember_turn(&turn)
+    }
+
     pub fn spend(&self) -> rusqlite::Result<Vec<Spend>> {
         let mut statement = self.connection.prepare(
             r#"SELECT day, project_id, brand,
@@ -2098,6 +2166,64 @@ mod tests {
             last_active_at: at.to_string(),
             last_spoke_at: None,
         }
+    }
+
+    /// What a chat has spent is a running total, and the spend table is a sum.
+    ///
+    /// Three turns of one chat, each `cost` event naming everything the chat
+    /// has used so far. Summed back, that has to be the last event's figure
+    /// and not the three added together (bw-t26l.20).
+    #[test]
+    fn what_a_turn_added_is_recorded_once_however_often_the_running_total_is_said() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        store
+            .create_session(&session("chat-1", "claude", None, "2026-08-20T00:00:00.000Z"))
+            .unwrap();
+        for (at, total) in [
+            ("2026-08-20T00:01:00.000Z", 100),
+            ("2026-08-20T00:02:00.000Z", 260),
+            ("2026-08-20T00:03:00.000Z", 300),
+        ] {
+            store
+                .remember_turn_cost(
+                    "chat-1",
+                    at,
+                    &serde_json::json!({"kind":"tokens","input":total,"output":0,"total":total}),
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            store.spend().unwrap(),
+            [Spend {
+                day: "2026-08-20".to_string(),
+                project_id: "project-1".to_string(),
+                brand: "claude".to_string(),
+                usd: 0.0,
+                tokens: 300,
+            }]
+        );
+
+        // A turn that added nothing writes nothing, so the same event arriving
+        // twice cannot invent a second turn.
+        store
+            .remember_turn_cost(
+                "chat-1",
+                "2026-08-20T00:04:00.000Z",
+                &serde_json::json!({"kind":"tokens","input":300,"output":0,"total":300}),
+            )
+            .unwrap();
+        assert_eq!(store.spend().unwrap()[0].tokens, 300);
+
+        // And a chat this store has never heard of is not a row at all.
+        store
+            .remember_turn_cost(
+                "no-such-chat",
+                "2026-08-20T00:05:00.000Z",
+                &serde_json::json!({"kind":"tokens","total":99}),
+            )
+            .unwrap();
+        assert_eq!(store.spend().unwrap().len(), 1);
     }
 
     #[test]
