@@ -256,6 +256,44 @@ the card landed by hand with the fast-forward merge the gate allows.
 **Worked around.** `git merge --ff-only bw-uxoe` from the `ours` checkout, then
 `bd close`.
 
+## 6. A checks card cannot close while a suite unrelated to it is red
+
+**Attempted.** `bd close bw-oion.2`, the checks step of a card whose whole
+change is one SQL query in `server/src/workbench/store.rs`. The declared suite
+is `npm test && (cd server && cargo test)`, and `atelier tool checks` had just
+recorded it against the current tree.
+
+**Refused with.**
+
+```
+bw-oion.2 is the checks step and has no fresh passing evidence for the current Git tree
+```
+
+**Why it does not serve the rule.** The rule is that a checks card may not
+claim evidence it does not have. It has evidence: the suite ran on this tree
+and the result is recorded. What it does not have is a *green* suite, because
+two failures live on `ours` and predate the card — `check-agent-workflow.test.ts`
+counts three copies of a managed command where it expects two, and
+`a_first_start_wires_the_chats_up` never hears its announcement. Both were
+proved independent of the change by replacing this card's `store.rs` with the
+parent commit's and watching them fail unchanged. The server library suite is
+677 green. So the gate holds every checks card on the board hostage to two
+failures no card introduced, and the only ways past it are to fix work nobody
+asked for or to record a result that is not true.
+
+**Should have happened.** The refusal should name the suites that failed and
+say whether any of them touched what this card changed; and there should be a
+way to record a red suite as *known red, filed as CARD* so the evidence stays
+truthful and the card can still close. The gate would then refuse only a card
+whose own change broke something.
+
+**Cost.** A full second run of both suites to see the failures on their own, a
+third run of the cargo test with the parent commit's file to prove it was not
+this change, and two cards opened for failures outside this work.
+
+**Worked around.** `ATELIER_BYPASS` with the reason, after recording the two
+failures and their new cards on bw-oion.2.
+
 ## How to add to this file
 
 As in the first book: what was attempted, the refusal text, why the refusal did
