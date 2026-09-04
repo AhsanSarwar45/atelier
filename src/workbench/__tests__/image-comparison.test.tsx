@@ -45,7 +45,15 @@ describe('zooming image comparisons', () => {
     expect(screen.getByTestId('comparison-transform-before')).toHaveAttribute('data-scale', '1.5');
     expect(screen.getByTestId('comparison-transform-after')).toHaveAttribute('data-scale', '1.5');
 
-    fireEvent.change(screen.getByRole('slider', { name: 'Before and after split' }), { target: { value: '70' } });
-    expect(screen.getByRole('slider', { name: 'Before and after split' })).toHaveValue('70');
+    // The line itself is the control, and it answers the keyboard as well as
+    // the pointer — the pointer half needs a laid-out box, so it is proved in
+    // the browser (tests/e2e/image-compare-short.spec.ts).
+    const split = screen.getByRole('slider', { name: 'Before and after split' });
+    expect(split).toHaveAttribute('aria-valuenow', '50');
+    fireEvent.keyDown(split, { key: 'ArrowRight' });
+    expect(split).toHaveAttribute('aria-valuenow', '52');
+    fireEvent.keyDown(split, { key: 'ArrowLeft' });
+    fireEvent.keyDown(split, { key: 'ArrowLeft' });
+    expect(split).toHaveAttribute('aria-valuenow', '48');
   });
 });

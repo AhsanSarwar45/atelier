@@ -1,11 +1,10 @@
 'use client';
 
 import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent } from 'react';
-import { Minus, Plus, RotateCcw, X } from 'lucide-react';
+import { GripVertical, Minus, Plus, RotateCcw, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import type { ImageComparison, ImagePayload, LookableImage } from '@/workbench/protocol';
 
@@ -119,6 +118,56 @@ function SideBySide({ comparison, transform, onChange }: { comparison: ImageComp
   );
 }
 
+/**
+ * The line between the two pictures, and the thing you take hold of to move it.
+ *
+ * It used to be neither: the line was `pointer-events-none` and the split was
+ * moved by a bare range input sitting in the caption row below, which drew as
+ * an unlabelled grey circle between the two labels. The manager could not move
+ * the line and could not tell what the circle was (bw-kcri). The line is the
+ * control now, which is where the hand goes anyway.
+ *
+ * The visible line is two pixels wide, so the strip that takes the pointer is
+ * widened around it and the knob marks where to grab. `stopPropagation` on the
+ * way down is what settles it against the viewport behind, which pans the
+ * picture on the same gesture once it is zoomed in.
+ */
+function Split({ pct, onChange }: { pct: number; onChange: (value: number) => void }) {
+  const strip = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+  const place = (clientX: number) => {
+    const box = strip.current?.parentElement?.getBoundingClientRect();
+    if (box && box.width > 0) onChange(Math.max(0, Math.min(100, ((clientX - box.left) / box.width) * 100)));
+  };
+  return (
+    <div
+      ref={strip}
+      data-testid="comparison-split"
+      role="slider"
+      aria-label="Before and after split"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(pct)}
+      tabIndex={0}
+      className="absolute inset-y-0 z-10 flex w-4 -translate-x-1/2 cursor-ew-resize touch-none justify-center"
+      style={{ left: `${pct}%` }}
+      onPointerDown={(event) => { event.stopPropagation(); dragging.current = true; strip.current?.setPointerCapture?.(event.pointerId); place(event.clientX); }}
+      onPointerMove={(event) => { if (dragging.current) place(event.clientX); }}
+      onPointerUp={() => { dragging.current = false; }}
+      onPointerCancel={() => { dragging.current = false; }}
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowLeft') { event.preventDefault(); onChange(Math.max(0, pct - 2)); }
+        if (event.key === 'ArrowRight') { event.preventDefault(); onChange(Math.min(100, pct + 2)); }
+      }}
+    >
+      <span aria-hidden className="h-full w-0.5 bg-white shadow" />
+      <span aria-hidden className="absolute top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-full bg-white text-black shadow">
+        <GripVertical className="size-4" />
+      </span>
+    </div>
+  );
+}
+
 function Wipe({ comparison, transform, onChange }: { comparison: ImageComparison; transform: ImageTransform; onChange: (value: ImageTransform) => void }) {
   const [pct, setPct] = useState(50);
   return (
@@ -128,13 +177,20 @@ function Wipe({ comparison, transform, onChange }: { comparison: ImageComparison
         <div className="pointer-events-none absolute inset-0 overflow-hidden" style={{ clipPath: `inset(0 ${100 - pct}% 0 0)` }}>
           <TransformLayer transform={transform} testId="comparison-transform-before"><Picture image={comparison.before} /></TransformLayer>
         </div>
-        <div className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-white shadow" style={{ left: `${pct}%` }} />
+        <Split pct={pct} onChange={setPct} />
       </ZoomViewport>
-      <label className="mx-auto flex w-full max-w-xl items-center gap-3 text-xs text-white">
-        <span>{comparison.before.alt}</span>
-        <Input aria-label="Before and after split" type="range" min={0} max={100} value={pct} onChange={(event) => setPct(Number(event.target.value))} className="h-auto min-w-0 flex-1 border-0 bg-transparent p-0 shadow-none" />
-        <span>{comparison.after.alt}</span>
-      </label>
+      {/* The same two columns the inline widget captions itself with, so the
+          picture the reader clicked and the one that opened read alike. Full
+          width: squeezed into a centred `max-w-xl` beside the old slider, two
+          sentence-long labels broke into a stack of short ragged lines. */}
+      <div className="flex w-full items-start gap-6 px-2 text-xs text-white">
+        <p data-testid="comparison-before-label" className="min-w-0 flex-1">
+          <span className="font-medium">Before</span> {comparison.before.alt}
+        </p>
+        <p data-testid="comparison-after-label" className="min-w-0 flex-1 text-right">
+          <span className="font-medium">After</span> {comparison.after.alt}
+        </p>
+      </div>
     </div>
   );
 }

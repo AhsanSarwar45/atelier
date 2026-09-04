@@ -109,5 +109,43 @@ test('a wide, short wipe comparison keeps its labels and zoom button clear of th
       return points.map(([x, y]) => button.contains(document.elementFromPoint(x, y)));
     });
     expect(face, 'part of the zoom button is covered or clipped away').toEqual([true, true, true, true, true]);
+
+    // Expanded, the line between the two pictures is what you drag, and the
+    // labels read as the same two columns the inline widget uses. What the
+    // manager found here was a line that would not move and a bare range
+    // input drawn as an unexplained grey circle between two squeezed labels
+    // (bw-kcri).
+    await zoom.click();
+    const dialog = page.getByTestId('picture-viewer');
+    await expect(dialog).toBeVisible();
+    const split = dialog.getByRole('slider', { name: 'Before and after split' });
+    await expect(split).toHaveAttribute('aria-valuenow', '50');
+    expect(await dialog.locator('input[type=range]').count(), 'the expanded view still has a bare range control').toBe(0);
+
+    const viewport = dialog.getByTestId('comparison-zoom-viewport');
+    const viewportBox = (await viewport.boundingBox())!;
+    const splitBox = (await split.boundingBox())!;
+    await page.mouse.move(splitBox.x + splitBox.width / 2, splitBox.y + splitBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(viewportBox.x + viewportBox.width * 0.75, splitBox.y + splitBox.height / 2, { steps: 8 });
+    await page.mouse.up();
+    const dragged = Number(await split.getAttribute('aria-valuenow'));
+    expect(dragged, 'dragging the line did not move the split').toBeGreaterThan(65);
+    expect(dragged).toBeLessThanOrEqual(100);
+
+    // Two columns, each a real share of the width, and neither on top of the other.
+    const [beforeLabel, afterLabel] = await Promise.all([
+      dialog.getByTestId('comparison-before-label').boundingBox(), dialog.getByTestId('comparison-after-label').boundingBox(),
+    ]);
+    if (!beforeLabel || !afterLabel) throw new Error('Expected both labels under the expanded picture');
+    expect(overlaps(beforeLabel, afterLabel), 'the expanded labels sit on top of each other').toBe(false);
+    expect(beforeLabel.width).toBeGreaterThan(300);
+    expect(afterLabel.width).toBeGreaterThan(300);
+    expect(Math.abs(beforeLabel.y - afterLabel.y), 'the two labels do not start on the same line').toBeLessThanOrEqual(2);
+    await page.screenshot({ path: 'tests/results/image-compare-short-expanded.png' });
+
+    // The keyboard reaches it too.
+    await split.press('ArrowLeft');
+    expect(Number(await split.getAttribute('aria-valuenow'))).toBe(dragged - 2);
   } finally { if (project) await request.delete(`/api/projects/${project.id}`); }
 });
