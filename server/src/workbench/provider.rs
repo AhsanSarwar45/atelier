@@ -379,7 +379,9 @@ async fn import_claude_history(
     let followed_from = std::fs::metadata(&record)
         .ok()
         .map(|meta| meta.len() as i64);
+    let opened = std::time::Instant::now();
     let history = super::claude::history::read_history(&record);
+    let read_ms = opened.elapsed().as_millis();
     let mut historical_session = session.clone();
     historical_session.model = history.settings.model.clone();
     historical_session.effort = history.settings.effort.clone();
@@ -433,7 +435,15 @@ async fn import_claude_history(
             .or_insert_with(|| json!(session.last_active_at));
         imported.push(serde_json::from_value(value).map_err(|error| error.to_string())?);
     }
+    let normalized = opened.elapsed().as_millis();
+    let count = imported.len();
     database.append_replay(imported).await?;
+    tracing::info!(
+        session_id = %session.id, read_ms, events = count,
+        normalize_ms = normalized - read_ms,
+        store_ms = opened.elapsed().as_millis() - normalized,
+        "read a saved Claude record"
+    );
     if let Some(at) = followed_from {
         database.remember_followed(session.id.clone(), at).await?;
     }

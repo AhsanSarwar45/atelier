@@ -69,16 +69,41 @@ fn valid_session_id(id: &str) -> bool {
     Uuid::parse_str(id).is_ok()
 }
 
+/// Every row of a JSONL record, in the order it was written.
+///
+/// A record this app opens is measured in megabytes — five for one saved chat
+/// of the manager's — and reading it is the largest single cost of opening
+/// that chat. Lines are independent, so past a size where threads are worth
+/// their setup the parsing is split across them and stitched back in order
+/// (bw-t26l.20).
 fn jsonl(path: &Path) -> Vec<Value> {
-    fs::read_to_string(path)
-        .ok()
-        .into_iter()
-        .flat_map(|text| {
-            text.lines()
-                .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
-                .collect::<Vec<_>>()
-        })
-        .collect()
+    const WORTH_SPLITTING: usize = 1 << 20;
+    let Ok(text) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let parse = |line: &str| serde_json::from_str::<Value>(line.trim()).ok();
+    let hands = std::thread::available_parallelism()
+        .map(|hands| hands.get())
+        .unwrap_or(1)
+        .clamp(1, 8);
+    if hands <= 1 || text.len() < WORTH_SPLITTING {
+        return text.lines().filter_map(parse).collect();
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    let chunk = lines.len().div_ceil(hands).max(1);
+    std::thread::scope(|scope| {
+        let readers: Vec<_> = lines
+            .chunks(chunk)
+            .map(|slice| {
+                scope.spawn(move || slice.iter().filter_map(|line| parse(line)).collect::<Vec<_>>())
+            })
+            .collect();
+        readers
+            .into_iter()
+            .filter_map(|reader| reader.join().ok())
+            .flatten()
+            .collect()
+    })
 }
 
 fn byte_window(path: &Path, from: i64, limit: usize) -> Vec<Value> {
@@ -916,7 +941,7 @@ fn images(message: &Value) -> (String, Vec<Value>) {
     (text, pictures)
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Usage {
     input: i64,
     fresh: i64,
@@ -1341,6 +1366,10 @@ struct HelperFacts {
     first_at: String,
     events: Vec<Value>,
     finish: Value,
+    /// What this helper spent, counted while its file was already open.
+    spent: Usage,
+    /// How long the file was when it was read, for the follower's cursor.
+    size: u64,
 }
 
 fn helper_facts(path: &Path) -> Option<HelperFacts> {
@@ -1409,6 +1438,8 @@ fn helper_facts(path: &Path) -> Option<HelperFacts> {
         first_at: first.unwrap_or_default(),
         events,
         finish,
+        spent,
+        size: fs::metadata(path).map(|meta| meta.len()).unwrap_or_default(),
     })
 }
 
@@ -1454,19 +1485,53 @@ pub fn delegates_work(record: &Path) -> bool {
     })
 }
 
-fn helper_events(record: &Path, outcomes: &HashMap<String, bool>) -> Vec<Value> {
+/// Read every helper record beside one chat, several at a time.
+///
+/// A chat that delegated has a file per helper, and this app's own reproduction
+/// has twenty-six of them totalling twelve megabytes. Read one after another
+/// they were most of the time a saved chat took to open, on a machine with
+/// nothing else to do with its other cores (bw-t26l.20).
+fn helper_records(record: &Path) -> Vec<HelperFacts> {
     let Some(stem) = record.file_stem().and_then(|stem| stem.to_str()) else {
         return Vec::new();
     };
-    let dir = record.with_file_name(stem).join("subagents");
-    let Ok(entries) = fs::read_dir(dir) else {
+    let Ok(entries) = fs::read_dir(record.with_file_name(stem).join("subagents")) else {
         return Vec::new();
     };
-    let mut helpers = Vec::new();
-    for entry in entries.flatten() {
-        let Some(mut helper) = helper_facts(&entry.path()) else {
-            continue;
-        };
+    let paths: Vec<PathBuf> = entries.flatten().map(|entry| entry.path()).collect();
+    let hands = std::thread::available_parallelism()
+        .map(|hands| hands.get())
+        .unwrap_or(1)
+        .clamp(1, 8)
+        .min(paths.len().max(1));
+    if hands <= 1 {
+        return paths.iter().filter_map(|path| helper_facts(path)).collect();
+    }
+    let chunk = paths.len().div_ceil(hands);
+    std::thread::scope(|scope| {
+        let readers: Vec<_> = paths
+            .chunks(chunk)
+            .map(|slice| scope.spawn(move || slice.iter().filter_map(|path| helper_facts(path)).collect::<Vec<_>>()))
+            .collect();
+        readers
+            .into_iter()
+            .filter_map(|reader| reader.join().ok())
+            .flatten()
+            .collect()
+    })
+}
+
+/// Every helper turn beside one chat, and what those helpers spent.
+///
+/// Both, from one reading. The spend used to come from a second walk of the
+/// same directory (`helper_spend`), so importing a chat that had delegated
+/// parsed its helpers' records twice — twelve megabytes twice, on a chat this
+/// app's own tests open (bw-t26l.20).
+fn helper_events(facts: Vec<HelperFacts>, outcomes: &HashMap<String, bool>) -> (Vec<Value>, i64) {
+    let mut helpers = Vec::with_capacity(facts.len());
+    let mut delegated = 0i64;
+    for mut helper in facts {
+        delegated += helper.spent.total;
         if let Some(ok) = helper
             .tool_call_id
             .as_ref()
@@ -1478,7 +1543,10 @@ fn helper_events(record: &Path, outcomes: &HashMap<String, bool>) -> Vec<Value> 
         helpers.push((helper.first_at, helper.events));
     }
     helpers.sort_by(|a, b| a.0.cmp(&b.0));
-    helpers.into_iter().flat_map(|(_, events)| events).collect()
+    (
+        helpers.into_iter().flat_map(|(_, events)| events).collect(),
+        delegated,
+    )
 }
 
 /// Incremental view of the helper records beside one externally-owned chat.
@@ -1512,14 +1580,8 @@ impl HelperFollower {
         // `read_history` has already normalized every current helper file.
         // Seed the incremental cursor and identities from that exact view so
         // the first follower tick cannot replay the imported prefix.
-        for path in follower.paths() {
-            let Ok(size) = fs::metadata(&path).map(|meta| meta.len()) else {
-                continue;
-            };
-            let Some(mut helper) = helper_facts(&path) else {
-                continue;
-            };
-            follower.sizes.insert(helper.agent_id.clone(), size);
+        for mut helper in helper_records(record) {
+            follower.sizes.insert(helper.agent_id.clone(), helper.size);
             if let Some(call) = &helper.tool_call_id {
                 follower.calls.insert(call.clone(), helper.agent_id.clone());
             }
@@ -1665,11 +1727,18 @@ pub fn read_history(record: &Path) -> ClaudeHistory {
     // follower tick. Read the provider record once, off the request path. The
     // durable event store pages the normalized transcript; truncating here
     // would give external chats a different, permanently incomplete history.
-    let rows = jsonl(record);
+    // The chat's own record and its helpers' are separate files with nothing
+    // to say to each other until both are read, so read them at the same time.
+    let (rows, facts) = std::thread::scope(|scope| {
+        let reading = scope.spawn(|| helper_records(record));
+        let rows = jsonl(record);
+        (rows, reading.join().unwrap_or_default())
+    });
     let spent = usage(&rows);
     let conversation = ordered_conversation(&rows, false);
     let mut events = transcript_events(&conversation, None);
-    events.extend(helper_events(record, &tool_outcomes(&rows)));
+    let (helpers, delegated) = helper_events(facts, &tool_outcomes(&rows));
+    events.extend(helpers);
     if let Some(used) = spent.context {
         events.push(json!({"type":"context", "used":used, "window":spent.window}));
     }
@@ -1677,10 +1746,6 @@ pub fn read_history(record: &Path) -> ClaudeHistory {
     // the chip this feeds says "including subagents", and a live chat's own
     // figure already counts them. Their turns are in none of these rows
     // (bw-t26l.20).
-    let delegated: i64 = helper_spend(record)
-        .iter()
-        .map(|(spent, _)| spent.total)
-        .sum();
     if spent.total > 0 || delegated > 0 {
         events.push(json!({
             "type":"cost", "cost":{"kind":"tokens", "input":spent.input,
