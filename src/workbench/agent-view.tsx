@@ -279,26 +279,32 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
             </h2>
             {/* The same three numbers the row carries, off the same clock, so
                 opening one is not a different account of it from the one that
-                was clicked. */}
-            <div className="mt-0.5 flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
-              {model && (
-                <span data-testid="agent-view-model" title={row.model ?? undefined}>
-                  {model}
+                was clicked — and none of them for a shell, which has no model,
+                spent nothing, and keeps its own clock in the terminal's footer
+                a few pixels below. What is left in this bar for a shell is the
+                command and the badge, which is all it was ever asked for
+                (bw-sb5g.3). */}
+            {!isShell && (
+              <div className="mt-0.5 flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
+                {model && (
+                  <span data-testid="agent-view-model" title={row.model ?? undefined}>
+                    {model}
+                  </span>
+                )}
+                <span className="flex items-center gap-1" data-testid="agent-view-for">
+                  <Clock className="h-3 w-3" aria-hidden="true" />
+                  {forHowLong(liveSeconds(row, now))}
                 </span>
-              )}
-              <span className="flex items-center gap-1" data-testid="agent-view-for">
-                <Clock className="h-3 w-3" aria-hidden="true" />
-                {forHowLong(liveSeconds(row, now))}
-              </span>
-              <span
-                className="flex items-center gap-1"
-                data-testid="agent-view-spend"
-                title={`${row.tokens.toLocaleString()} tokens over ${row.calls} call${row.calls === 1 ? '' : 's'}`}
-              >
-                <Coins className="h-3 w-3" aria-hidden="true" />
-                {spend(row.tokens)}
-              </span>
-            </div>
+                <span
+                  className="flex items-center gap-1"
+                  data-testid="agent-view-spend"
+                  title={`${row.tokens.toLocaleString()} tokens over ${row.calls} call${row.calls === 1 ? '' : 's'}`}
+                >
+                  <Coins className="h-3 w-3" aria-hidden="true" />
+                  {spend(row.tokens)}
+                </span>
+              </div>
+            )}
           </div>
           <AgentSteering row={row} sessionId={sessionId} controls={controls} />
           <Badge variant={state.variant} appearance="light" size="xs" data-testid="agent-view-state">
@@ -353,8 +359,10 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
         {!isShell && !isOver(row.state) && controls.includes('say') && <RelayBox row={row} sessionId={sessionId} />}
 
         {/* Its answer, kept where a reader who opened this to find it looks:
-            at the end of what it said, not scrolled back into the chat. */}
-        {row.result && !shell?.run.output.includes(row.result.trim()) && (
+            at the end of what it said, not scrolled back into the chat. Never
+            for a shell: what a command "answered" is its own output, which the
+            grid above already holds in full (bw-sb5g.3). */}
+        {row.result && !isShell && (
           <div className="border-t border-border/60 px-4 py-3">
             <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Result</h3>
             <p className="mt-1 whitespace-pre-wrap text-xs text-foreground" data-testid="agent-view-result">
