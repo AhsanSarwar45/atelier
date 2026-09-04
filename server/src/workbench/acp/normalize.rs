@@ -105,6 +105,9 @@ pub struct AcpNormalizer {
     /// that answers with a screenshot and then keeps running would send the
     /// same screenshot again on each update and once more on the close.
     tool_pictures: HashMap<String, usize>,
+    /// Each running command's terminal, kept whole across the pings that
+    /// describe it. See {@link AcpNormalizer::terminal_of}.
+    terminals: HashMap<String, Value>,
     tool_starts: HashMap<String, Value>,
     subagent_tools: HashSet<String>,
     deferred_agents: HashMap<String, String>,
@@ -139,6 +142,7 @@ impl Default for AcpNormalizer {
             started_messages: HashSet::new(),
             open_tools: HashSet::new(),
             tool_pictures: HashMap::new(),
+            terminals: HashMap::new(),
             tool_starts: HashMap::new(),
             subagent_tools: HashSet::new(),
             deferred_agents: HashMap::new(),
@@ -994,6 +998,88 @@ impl AcpNormalizer {
     }
 
     /**
+     * One command's terminal, kept whole across the pings that describe it.
+     *
+     * ACP says a tool call can BE a command by carrying
+     * `{"type":"terminal","terminalId":…}` instead of words. Who holds that
+     * terminal decides how it is read:
+     *
+     * - **This client holds it** (`terminal/create`). Then every ping arrives
+     *   already complete, read first-hand off the process before it reached
+     *   here (`with_terminal_output`), and there is nothing to assemble.
+     * - **The agent holds it**, because that provider runs its own shell.
+     *   Then the facts arrive scattered, and measured against the bundled
+     *   Claude adapter on 2026-09-04 they arrive in three separate messages:
+     *   the terminal is NAMED on the pending call, what it printed comes on an
+     *   update carrying `_meta.terminal_output` and no content at all, and the
+     *   exit code comes on the close, by which time the output is gone again.
+     *
+     * So the pieces are remembered per call and merged, newest reading first,
+     * and a ping that carries less than the one before it does not take
+     * anything away. Read on its own, the close said a command with no command
+     * line, no output and an exit code — which is exactly what the screen drew
+     * the first time this was tried against a live chat (bw-t26l.20).
+     *
+     * The command line and the directory come from the call's own start, which
+     * is the only message that ever states them.
+     */
+    fn terminal_of(&mut self, id: &str, update: &Value, content: Option<&Value>) -> Value {
+        let meta = &update["_meta"];
+        let named = |row: &Value| row["terminal_id"].as_str() == Some(id);
+        let printed = &meta["terminal_output"];
+        let exit = &meta["terminal_exit"];
+        let told = named(&meta["terminal_info"]) || named(printed) || named(exit);
+        let Some(mut run) = content.cloned().or_else(|| {
+            told.then(|| json!({"type":"terminal","terminalId":id,"command":"","cwd":"",
+                    "output":"","truncated":false,"exitCode":Value::Null,"signal":Value::Null,
+                    "seconds":0.0,"running":true}))
+        }) else {
+            // Nothing about a terminal in this message. What is already known
+            // still stands: an update that says only "still going" is not an
+            // update that says the output has gone away.
+            return self.terminals.get(id).cloned().unwrap_or(Value::Null);
+        };
+        if named(printed) {
+            if let Some(data) = printed["data"].as_str() {
+                run["output"] = json!(data);
+            }
+        }
+        if named(exit) {
+            run["exitCode"] = exit["exit_code"].clone();
+            run["signal"] = exit["signal"].clone();
+            run["running"] = json!(false);
+        }
+        let started = self.tool_starts.get(id);
+        let empty = |value: &Value| value.as_str().unwrap_or_default().is_empty();
+        if empty(&run["command"]) {
+            let command = started
+                .and_then(|start| start["input"]["command"].as_str())
+                .or_else(|| started.and_then(|start| start["title"].as_str()))
+                .unwrap_or_default();
+            run["command"] = json!(command);
+        }
+        if empty(&run["cwd"]) {
+            if let Some(cwd) = started.and_then(|start| start["input"]["cwd"].as_str()) {
+                run["cwd"] = json!(cwd);
+            }
+        }
+        if let Some(before) = self.terminals.get(id) {
+            if empty(&run["output"]) {
+                run["output"] = before["output"].clone();
+                run["truncated"] = before["truncated"].clone();
+            }
+            if empty(&run["command"]) {
+                run["command"] = before["command"].clone();
+            }
+            if run["seconds"].as_f64().unwrap_or_default() <= 0.0 {
+                run["seconds"] = before["seconds"].clone();
+            }
+        }
+        self.terminals.insert(id.to_string(), run.clone());
+        run
+    }
+
+    /**
      * Work the chat handed to the background, which nothing else on the wire
      * ever mentions again.
      *
@@ -1405,13 +1491,13 @@ impl AcpNormalizer {
                 // used to be flattened into a paragraph of output before it
                 // reached here, which is why a shell was drawn as a
                 // conversation instead of as a terminal (bw-t26l.20).
-                let terminal = update["content"]
+                let block = update["content"]
                     .as_array()
                     .into_iter()
                     .flatten()
                     .find(|row| row["type"] == "terminal" && row["command"].is_string())
-                    .cloned()
-                    .unwrap_or(Value::Null);
+                    .cloned();
+                let mut terminal = self.terminal_of(&id, update, block.as_ref());
                 let diffs = update["content"].as_array().into_iter().flatten()
                     .filter(|row| row["type"] == "diff")
                     .map(|row| self.envelope(
@@ -1428,6 +1514,17 @@ impl AcpNormalizer {
                     self.open_tools.remove(&id);
                     self.tool_starts.remove(&id);
                     self.tool_pictures.remove(&id);
+                    self.terminals.remove(&id);
+                    // A call that is over was running a command that is over,
+                    // unless the whole point of it was to outlive the call.
+                    // Said either way round it is the row's own account of
+                    // itself, and a finished command left saying "running"
+                    // spins beside a chat that has moved on (bw-t26l.20).
+                    if left_running.is_none() {
+                        if let Some(run) = terminal.as_object_mut() {
+                            run.insert("running".into(), json!(false));
+                        }
+                    }
                     let output = Self::display_text(&update["rawOutput"]);
                     let output = if output.is_empty() { summary.clone() } else { output };
                     // A command whose answer is its terminal has no words of
@@ -3036,6 +3133,64 @@ mod tests {
         assert_eq!(finished["type"], "agent.finished");
         assert_eq!(finished["state"], "done");
         assert_eq!(finished["result"], "Built");
+    }
+
+    /// One command, told in four messages, put back together as one terminal.
+    ///
+    /// Exactly the shape a live Claude chat sent on 2026-09-04, in order: the
+    /// call names a terminal and says nothing else about it; the command line
+    /// arrives on its own; what it printed arrives on a message with no
+    /// content at all; and the exit code arrives on the close, by which time
+    /// the output is gone again.
+    ///
+    /// Read one message at a time -- which is how this was written first --
+    /// the close said a command with no command line, no output, and an exit
+    /// code, and the screen drew exactly that (bw-t26l.20).
+    #[test]
+    fn a_command_told_in_pieces_is_one_terminal_by_the_end() {
+        let mut normalizer = AcpNormalizer::default();
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"remote","update":{"sessionUpdate":"tool_call","toolCallId":"call-1",
+            "title":"Terminal","status":"pending","kind":"execute","rawInput":{},
+            "content":[{"type":"terminal","terminalId":"call-1"}],
+            "_meta":{"claudeCode":{"toolName":"Bash"},"terminal_info":{"terminal_id":"call-1"}}}
+        }));
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"remote","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1",
+            "title":"printf 'FAIL\\n'; exit 3","kind":"execute",
+            "rawInput":{"command":"printf 'FAIL\\n'; exit 3","description":"Fail on purpose"},
+            "_meta":{"claudeCode":{"toolName":"Bash"}}}
+        }));
+        let printed = normalizer.update("local", "claude", &json!({
+            "sessionId":"remote","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1",
+            "_meta":{"terminal_output":{"terminal_id":"call-1","data":"\u{1b}[31mFAIL\u{1b}[0m"}}}
+        }));
+        // The output is on the row while the command is still going, which is
+        // the whole reason a terminal is drawn rather than an answer printed.
+        let ping = serde_json::to_value(printed.last().unwrap()).unwrap();
+        assert_eq!(ping["type"], "tool.progress");
+        assert_eq!(ping["terminal"]["output"], "\u{1b}[31mFAIL\u{1b}[0m");
+        assert_eq!(ping["terminal"]["command"], "printf 'FAIL\\n'; exit 3");
+        assert_eq!(ping["terminal"]["running"], true);
+
+        let closed = normalizer.update("local", "claude", &json!({
+            "sessionId":"remote","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1",
+            "status":"failed","content":[{"type":"terminal","terminalId":"call-1"}],
+            "_meta":{"claudeCode":{"toolName":"Bash"},
+                "terminal_exit":{"terminal_id":"call-1","exit_code":3,"signal":null}}}
+        }));
+        let over = serde_json::to_value(closed.last().unwrap()).unwrap();
+        assert_eq!(over["type"], "tool.completed");
+        assert_eq!(over["terminal"]["command"], "printf 'FAIL\\n'; exit 3");
+        // Carried from two messages back: the close said nothing about what
+        // was printed, and a row that believed it would have emptied itself
+        // in front of the reader.
+        assert_eq!(over["terminal"]["output"], "\u{1b}[31mFAIL\u{1b}[0m");
+        assert_eq!(over["terminal"]["exitCode"], 3);
+        assert_eq!(over["terminal"]["running"], false);
+        // And everything that asks what a call printed is answered too, not
+        // just the screen that reads the terminal.
+        assert!(over["output"].as_str().unwrap().contains("FAIL"));
     }
 
     /// The claude adapter never sends `async_task_spawned`. A command left

@@ -544,6 +544,42 @@ fn persist_event(
             event.fields.get("cost").unwrap_or(&serde_json::Value::Null),
         )?;
     }
+    // What was said, in the table that "everything ever said" is searched in.
+    //
+    // Nothing wrote to it outside its own unit tests, so `/api/workbench/search`
+    // answered every word in every chat with `[]` -- and read as "nobody has
+    // ever said that" rather than as "nobody is keeping the words"
+    // (bw-t26l.20).
+    match event.kind {
+        EventKind::MessageStarted => {
+            if let Some(message_id) = string(&event, "messageId") {
+                store.open_message(
+                    session_id,
+                    &message_id,
+                    string(&event, "role").as_deref().unwrap_or("assistant"),
+                    string(&event, "at").as_deref().unwrap_or(""),
+                )?;
+            }
+        }
+        EventKind::TextDelta => {
+            // Grown rather than set: this is one piece of a sentence that
+            // arrives a few characters at a time.
+            if let (Some(message_id), Some(text)) =
+                (string(&event, "messageId"), string(&event, "text"))
+            {
+                store.grow_message(session_id, &message_id, &text)?;
+            }
+        }
+        EventKind::MessageRetracted => {
+            // A message the provider took back is one nobody said, and a
+            // search that still answered with it would be quoting a chat
+            // about a line that is not in it.
+            if let Some(message_id) = string(&event, "messageId") {
+                store.retract_message(session_id, &message_id)?;
+            }
+        }
+        _ => {}
+    }
     if event.kind == EventKind::LinkBead {
         if let Some(bead_id) = string(&event, "beadId") {
             store.remember_bead_link(
@@ -840,6 +876,49 @@ mod tests {
             SessionUpdate::Event(event) => event,
             SessionUpdate::ReplayCommitted { .. } => panic!("expected a live event"),
         }
+    }
+
+    /// Everything ever said, in the table the search reads.
+    ///
+    /// A word reaches the record as a message that opens and then grows a few
+    /// characters at a time, and the search is a `LIKE` over the whole
+    /// sentence — so a chat whose words were never assembled has nothing to
+    /// match, whatever it said. Nothing assembled them: `open_message` and
+    /// `grow_message` were called by their own unit tests and by nothing else,
+    /// and `/api/workbench/search` answered `[]` for every word in every chat
+    /// on this machine (bw-t26l.20).
+    #[test]
+    fn what_a_chat_said_is_searchable_once_it_has_been_said() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let said = |kind: &str, fields: serde_json::Value| -> Event {
+            let mut value = json!({"type":kind,"sessionId":"chat-1","seq":0,
+                "at":"2026-09-04T00:00:00.000Z"});
+            for (name, field) in fields.as_object().unwrap() {
+                value[name] = field.clone();
+            }
+            serde_json::from_value(value).unwrap()
+        };
+
+        let mut seq = 0;
+        let mut persist = |event: Event| {
+            seq += 1;
+            persist_event(&store, "chat-1", event, seq).unwrap();
+        };
+        persist(said("message.started", json!({"messageId":"m1","role":"assistant"})));
+        // A sentence in pieces, which is how one actually arrives.
+        persist(said("text.delta", json!({"messageId":"m1","text":"The word is PERI"})));
+        persist(said("text.delta", json!({"messageId":"m1","text":"WINKLE in spend-a."})));
+        persist(said("message.completed", json!({"messageId":"m1"})));
+
+        let found = store.search("PERIWINKLE", 10).unwrap();
+        assert_eq!(found.len(), 1, "the word was said once and found {} times", found.len());
+        assert_eq!(found[0].text, "The word is PERIWINKLE in spend-a.");
+        assert_eq!(found[0].role, "assistant");
+
+        // A message the provider took back is one nobody said.
+        persist(said("message.retracted", json!({"messageId":"m1"})));
+        assert!(store.search("PERIWINKLE", 10).unwrap().is_empty());
     }
 
     #[tokio::test]

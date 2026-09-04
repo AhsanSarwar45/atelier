@@ -100,6 +100,24 @@ fn truthy_string(event: &Event, field: &str) -> Value {
     }
 }
 
+/// The terminal a command is running, kept on the row it is read back from.
+///
+/// A chat read out of the record is built here rather than by the browser's
+/// own fold, and this was the one field the two disagreed about: live, a
+/// command was a terminal; reloaded, the same command was a paragraph again,
+/// because the projection never carried it. Measured on a live chat on
+/// 2026-09-04 — the terminal was on the row until the page was refreshed
+/// (bw-t26l.20).
+///
+/// A ping that carries none leaves the one already on the row: the exit code
+/// arrives on a message that says nothing about what was printed, and the
+/// output arrives on one that says nothing about the exit.
+fn carry_terminal(row: &mut Value, event: &Event) {
+    if let Some(terminal) = event.fields.get("terminal").filter(|value| !value.is_null()) {
+        row["terminal"] = terminal.clone();
+    }
+}
+
 fn copy_if_present(target: &mut Map<String, Value>, event: &Event, field: &str) {
     if let Some(value) = event.fields.get(field) {
         target.insert(field.to_string(), value.clone());
@@ -318,6 +336,7 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                         json!("failed")
                     };
                     items[at]["output"] = value(event, "output");
+                    carry_terminal(&mut items[at], event);
                     if event
                         .fields
                         .get("title")
@@ -345,6 +364,7 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                     {
                         items[at]["summary"] = value(event, "summary");
                     }
+                    carry_terminal(&mut items[at], event);
                 }
             }
             EventKind::AgentStarted => {
