@@ -43,6 +43,7 @@ import type {
   QuestionField,
   SessionConfigOption,
   SessionState,
+  TerminalRun,
   TodoItem,
   WbpEvent,
 } from './protocol';
@@ -113,6 +114,15 @@ export interface TranscriptTool {
   acpKind?: string | null;
   /** The files this call says it touched, and where in them. */
   locations?: { path: string; line?: number | null }[];
+  /**
+   * The command this call is running, when the call IS a command.
+   *
+   * Set only for a terminal this app owns, which is ACP's own way of running a
+   * shell (`terminal/create`). The row draws a terminal from it rather than a
+   * paragraph of output, and it carries the exit code, so the row can say how
+   * the command ended without any provider having to remember to say so.
+   */
+  terminal?: TerminalRun;
   /** Classification survives deferred tool bodies so the collapsed row keeps
    * the same category, colour and icon as a live row. */
   ranKind?: import('@/workbench/said-what-it-ran').RanKind;
@@ -637,7 +647,17 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       // here, which is why a command could never be opened (bw-1u1).
       next.items = items.map((it) =>
         it.kind === 'tool' && it.id === e.toolCallId
-          ? { ...it, status: e.ok ? 'ok' : 'failed', output: e.output, title: e.title ?? it.title }
+          ? {
+              ...it,
+              status: e.ok ? 'ok' : 'failed',
+              output: e.output,
+              title: e.title ?? it.title,
+              // The last reading wins, and a ping that carried none leaves the
+              // one already on the row: a terminal that has closed is still
+              // the terminal that ran, and blanking it would take the output
+              // off the screen at the moment the reader goes to read it.
+              ...(e.terminal ? { terminal: e.terminal } : {}),
+            }
           : it,
       );
       return next;
@@ -654,7 +674,12 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       // the line says what the helper is doing, and it is still doing it.
       next.items = items.map((it) =>
         it.kind === 'tool' && it.id === e.toolCallId
-          ? { ...it, seconds: Math.max(it.seconds, e.seconds), summary: e.summary || it.summary }
+          ? {
+              ...it,
+              seconds: Math.max(it.seconds, e.seconds),
+              summary: e.summary || it.summary,
+              ...(e.terminal ? { terminal: e.terminal } : {}),
+            }
           : it,
       );
       return next;
@@ -1135,6 +1160,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           it.status = e.ok ? 'ok' : 'failed';
           it.output = e.output;
           if (e.title) it.title = e.title;
+          if (e.terminal) it.terminal = e.terminal;
         }
         break;
       }
@@ -1147,6 +1173,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           // clock, and its zero must not erase the one already on the row.
           it.seconds = Math.max(it.seconds, e.seconds);
           if (e.summary) it.summary = e.summary;
+          if (e.terminal) it.terminal = e.terminal;
         }
         break;
       }

@@ -293,6 +293,35 @@ interface EventBase {
   execution?: ExecutionContext;
 }
 
+/**
+ * A command this app is running for an agent, as the terminal that runs it.
+ *
+ * ACP's own shape for "this tool call IS a command"
+ * (`ToolCallContent::Terminal`): the agent asks the CLIENT to create the
+ * terminal, so this side owns the process and is the only one that knows the
+ * command line, where it ran, and how it ended. That last part is what makes
+ * a terminal row incapable of hanging — no provider has to remember to tell
+ * us it finished, because we are the one that ran it.
+ *
+ * `running` is the whole of the difference between a command still going and
+ * one that is over. Both `exitCode` and `signal` are absent while it runs, and
+ * a command killed by a signal has no exit code to report at all.
+ */
+export interface TerminalRun {
+  terminalId: string;
+  /** The command line as it would be typed, not the wire's program-and-args. */
+  command: string;
+  cwd: string;
+  /** What it has printed so far, standard output and standard error interleaved. */
+  output: string;
+  /** Whether the head of the output was dropped to stay inside the byte cap. */
+  truncated: boolean;
+  exitCode: number | null;
+  signal: string | null;
+  seconds: number;
+  running: boolean;
+}
+
 export type WbpEvent = EventBase &
   (
     | { type: 'session.started'; brand: Brand; externalId: string | null; model: string | null; cwd: string; permissionMode: string; effort?: string | null; collaborationMode?: string | null }
@@ -385,7 +414,15 @@ export type WbpEvent = EventBase &
         /** The files this call says it touched, and where in them. Null when it named none. */
         locations?: { path: string; line?: number | null }[] | null;
       }
-    | { type: 'tool.completed'; toolCallId: string; ok: boolean; output: string; title?: string }
+    | {
+        type: 'tool.completed';
+        toolCallId: string;
+        ok: boolean;
+        output: string;
+        title?: string;
+        /** The terminal this call ran, when it ran one. See {@link TerminalRun}. */
+        terminal?: TerminalRun | null;
+      }
     /**
      * How long this call has been running, as the brand counts it, and — when the call sent an agent
      * away — what that agent is doing now, in its own words. The brand asks the
@@ -393,7 +430,14 @@ export type WbpEvent = EventBase &
      * minute; it belongs on the row that sent it, not as another line in the
      * transcript (bw-7ks.22.2).
      */
-    | { type: 'tool.progress'; toolCallId: string; seconds: number; summary?: string }
+    | {
+        type: 'tool.progress';
+        toolCallId: string;
+        seconds: number;
+        summary?: string;
+        /** The terminal this call is running, while it runs it. See {@link TerminalRun}. */
+        terminal?: TerminalRun | null;
+      }
     /**
      * A piece of work the chat handed to something else, from the moment it is
      * sent (docs/agent-workbench.md §8.2.7). One row in the panel, whatever the

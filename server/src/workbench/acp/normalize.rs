@@ -1398,6 +1398,20 @@ impl AcpNormalizer {
                 let pictures = pictures.into_iter().skip(already)
                     .map(|shot| self.envelope(session_id, provider, raw, shot))
                     .collect::<Vec<_>>();
+                // The terminal this call is running, if it is running one.
+                // ACP's own way of saying a tool call IS a command
+                // (`ToolCallContent::Terminal`), and the one shape every
+                // provider that runs commands through the client speaks. It
+                // used to be flattened into a paragraph of output before it
+                // reached here, which is why a shell was drawn as a
+                // conversation instead of as a terminal (bw-t26l.20).
+                let terminal = update["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|row| row["type"] == "terminal" && row["command"].is_string())
+                    .cloned()
+                    .unwrap_or(Value::Null);
                 let diffs = update["content"].as_array().into_iter().flatten()
                     .filter(|row| row["type"] == "diff")
                     .map(|row| self.envelope(
@@ -1423,7 +1437,7 @@ impl AcpNormalizer {
                         session_id,
                         provider,
                         raw,
-                        json!({"type":"tool.completed","toolCallId":id,"ok":status=="completed","output":output,"summary":summary,"acp":update}),
+                        json!({"type":"tool.completed","toolCallId":id,"ok":status=="completed","output":output,"summary":summary,"terminal":terminal,"acp":update}),
                     ));
                     if let Some(left) = left_running {
                         events.push(self.envelope(session_id, provider, raw, left));
@@ -1491,7 +1505,7 @@ impl AcpNormalizer {
                         session_id,
                         provider,
                         raw,
-                        json!({"type":"tool.progress","toolCallId":id,"seconds":0,"summary":summary,"status":status,"acp":update}),
+                        json!({"type":"tool.progress","toolCallId":id,"seconds":0,"summary":summary,"status":status,"terminal":terminal,"acp":update}),
                     ));
                     if let Some(left) = left_running {
                         events.push(self.envelope(session_id, provider, raw, left));

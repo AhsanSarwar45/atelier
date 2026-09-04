@@ -56,11 +56,68 @@ impl OutputTail {
     }
 }
 
+/// One command this client is running on an agent's behalf.
+///
+/// What it was asked to run is kept beside what it has printed. The reader
+/// needs the command line and where it ran as much as the output — a pane of
+/// text with no command above it says nothing about what produced it — and
+/// only this side knows them: the agent sends `terminal/create` and then only
+/// ever names the terminal by id (bw-t26l.20).
 #[derive(Clone)]
 struct Terminal {
+    command: String,
+    args: Vec<String>,
+    cwd: PathBuf,
+    started: std::time::Instant,
     output: Arc<Mutex<OutputTail>>,
     status: watch::Receiver<Option<TerminalExitStatus>>,
     kill: mpsc::Sender<()>,
+}
+
+/// A terminal as the screen needs it: the command, where it ran, what it has
+/// printed so far, and how it ended if it has.
+pub struct TerminalRun {
+    pub command: String,
+    pub cwd: String,
+    pub output: String,
+    pub truncated: bool,
+    pub exit_code: Option<u32>,
+    pub signal: Option<String>,
+    pub seconds: f64,
+    pub running: bool,
+}
+
+impl TerminalRun {
+    fn value(&self, id: &str) -> Value {
+        json!({
+            "type":"terminal", "terminalId":id, "command":self.command, "cwd":self.cwd,
+            "output":self.output, "truncated":self.truncated,
+            "exitCode":self.exit_code, "signal":self.signal,
+            "seconds":self.seconds, "running":self.running
+        })
+    }
+}
+
+/// The command line as it was asked for, written the way a reader reads one.
+///
+/// ACP hands over a program and its arguments separately, because this client
+/// never runs anything through a shell. Drawing that as a JSON array would be
+/// showing the reader the wire rather than the command, so the pieces are put
+/// back together — and any piece carrying a space or a quote is quoted, so
+/// what is drawn is a line that would run.
+fn command_line(command: &str, args: &[String]) -> String {
+    std::iter::once(command)
+        .chain(args.iter().map(String::as_str))
+        .map(|word| {
+            if word.is_empty() || word.contains(|c: char| c.is_whitespace() || c == '\'' || c == '"')
+            {
+                format!("'{}'", word.replace('\'', r"'\''"))
+            } else {
+                word.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[derive(Clone)]
@@ -166,6 +223,7 @@ impl ClientIo {
             .and_then(|value| usize::try_from(value).ok())
             .unwrap_or(DEFAULT_OUTPUT_LIMIT)
             .clamp(1, MAX_OUTPUT_LIMIT);
+        let shown_cwd = cwd.clone();
         let mut command = Command::new(&request.command);
         command
             .args(&request.args)
@@ -218,6 +276,10 @@ impl ClientIo {
         self.terminals.lock().await.insert(
             id.clone(),
             Terminal {
+                command: request.command.clone(),
+                args: request.args.clone(),
+                cwd: shown_cwd,
+                started: std::time::Instant::now(),
                 output,
                 status,
                 kill,
@@ -236,13 +298,23 @@ impl ClientIo {
             .ok_or_else(|| Error::invalid_params().data("unknown ACP terminal"))
     }
 
-    /// What one of this client's terminals has printed so far, for the reader
-    /// rather than for the agent: no session check, because nobody asked —
-    /// this is the client reading its own terminal to draw it.
-    async fn terminal_snapshot(&self, terminal_id: &str) -> Option<(String, bool)> {
+    /// One of this client's terminals as the reader needs it: no session
+    /// check, because nobody asked — this is the client reading its own
+    /// terminal to draw it.
+    pub async fn terminal_snapshot(&self, terminal_id: &str) -> Option<TerminalRun> {
         let terminal = self.terminals.lock().await.get(terminal_id).cloned()?;
+        let exit = terminal.status.borrow().clone();
         let output = terminal.output.lock().await;
-        Some((output.text(), output.truncated))
+        Some(TerminalRun {
+            command: command_line(&terminal.command, &terminal.args),
+            cwd: terminal.cwd.to_string_lossy().into_owned(),
+            output: output.text(),
+            truncated: output.truncated,
+            exit_code: exit.as_ref().and_then(|status| status.exit_code),
+            signal: exit.as_ref().and_then(|status| status.signal.clone()),
+            seconds: terminal.started.elapsed().as_secs_f64(),
+            running: exit.is_none(),
+        })
     }
 
     pub async fn terminal_output(
@@ -355,14 +427,14 @@ pub async fn with_terminal_output(io: &ClientIo, raw: &Value) -> Value {
             _ => None,
         };
         match read {
-            Some((text, truncated)) => {
-                let text = if truncated {
-                    format!("[earlier output dropped]\n{text}")
-                } else {
-                    text
-                };
-                filled.push(json!({"type":"content","content":{"type":"text","text":text}}));
-            }
+            // Kept as a terminal, not flattened into a paragraph. The command,
+            // where it ran, how long it has taken and how it ended are all
+            // things only this side knows, and a wall of text with none of
+            // them above it does not say what produced it. The screen draws a
+            // terminal from this; the words were all it had before, and they
+            // were the reason a shell was read as a conversation
+            // (bw-t26l.20).
+            Some(run) => filled.push(run.value(row["terminalId"].as_str().unwrap_or_default())),
             // Not this client's terminal: on a live chat that is an agent
             // naming an id nobody handed it, and on a replay it is a terminal
             // that closed with the session it belonged to. Either way the row
@@ -469,9 +541,15 @@ mod tests {
             .is_err());
     }
 
-    /// A tool call that keeps its output in a terminal, drawn with its output
-    /// in it. The reader is not holding the terminal; this client is, and
+    /// A tool call that keeps its output in a terminal, drawn as the terminal
+    /// it is. The reader is not holding the terminal; this client is, and
     /// until it read it the row was empty while the command ran (bw-t26l.20).
+    ///
+    /// Everything the screen needs to draw a shell rather than a paragraph
+    /// comes out of here: the command line, the directory it ran in, what it
+    /// printed, and how it ended. All four are first-hand — this process
+    /// started that one — so a row cannot hang waiting for a provider to
+    /// remember to say a command finished.
     #[tokio::test]
     async fn a_call_that_points_at_a_terminal_is_filled_in_with_what_it_printed() {
         let workspace = tempfile::tempdir().unwrap();
@@ -480,7 +558,7 @@ mod tests {
         let created = io
             .create_terminal(
                 CreateTerminalRequest::new("session-1", "/bin/sh")
-                    .args(vec!["-c".into(), "printf ran-it".into()]),
+                    .args(vec!["-c".into(), "printf ran-it; exit 3".into()]),
             )
             .await
             .unwrap();
@@ -497,10 +575,20 @@ mod tests {
             "content":[{"type":"terminal","terminalId":terminal_id}]
         }});
         let filled = with_terminal_output(&io, &update).await;
+        let block = &filled["update"]["content"][0];
+        assert_eq!(block["type"], "terminal");
+        assert_eq!(block["output"], "ran-it");
+        // Quoted back as a line somebody could run again, which is the
+        // commonest thing anybody wants from a command an agent ran.
+        assert_eq!(block["command"], "/bin/sh -c 'printf ran-it; exit 3'");
         assert_eq!(
-            filled["update"]["content"][0],
-            json!({"type":"content","content":{"type":"text","text":"ran-it"}})
+            block["cwd"].as_str().unwrap(),
+            workspace.path().canonicalize().unwrap().to_string_lossy()
         );
+        // The exit code nobody had to be told: this process reaped that one.
+        assert_eq!(block["exitCode"], 3);
+        assert_eq!(block["running"], false);
+        assert_eq!(block["truncated"], false);
 
         // A terminal this client never opened -- an id nobody handed it, or one
         // that closed with the session it belonged to -- says so. Left as it

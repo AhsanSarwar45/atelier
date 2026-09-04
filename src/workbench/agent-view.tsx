@@ -31,8 +31,10 @@ import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
 import { request } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { commandRun } from '@/workbench/command-run';
 import type { SentAway, TranscriptItem } from '@/workbench/fold';
 import type { AgentControl } from '@/workbench/protocol';
+import { RanTerminal } from '@/workbench/ran-terminal';
 import { AgentSteering, forHowLong, isOver, KINDS, liveSeconds, modelNamed, spend, STATES, useNow } from '@/workbench/sent-away';
 import { TranscriptRow } from '@/workbench/transcript-rows';
 import { sendCommand } from '@/workbench/use-session';
@@ -138,6 +140,11 @@ export interface AgentViewProps {
 
 export function AgentView({ row, items, sessionId, controls, mentions, onClose }: AgentViewProps) {
   const sentBy = row.toolCallId ?? row.id;
+  // A command has no conversation, and never had one. What it has is a
+  // terminal, and this pane draws that instead: no transcript is read for it,
+  // no older pages are fetched, and no box invites the reader to talk to a
+  // shell (command-run.ts).
+  const isShell = row.kind === 'command';
   const live = useMemo(() => saidBy(items, row), [items, row]);
   const [history, setHistory] = useState<TranscriptItem[]>(live);
   const [historyReady, setHistoryReady] = useState(false);
@@ -163,6 +170,7 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
   }, [history, historyReady, live]);
 
   useEffect(() => {
+    if (isShell) return;
     const generation = requestGeneration.current + 1;
     requestGeneration.current = generation;
     openingKeys.current = new Set(liveRef.current.map((item) => `${item.kind}:${item.id}`));
@@ -192,7 +200,7 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
     return () => {
       if (requestGeneration.current === generation) requestGeneration.current += 1;
     };
-  }, [sentBy, sessionId]);
+  }, [isShell, sentBy, sessionId]);
 
   const loadOlder = useCallback(async (): Promise<void> => {
     if (loadingOlderRef.current || !hasOlder || cursor === null) return;
@@ -249,6 +257,7 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
   // counting live between the kit's reports, and a pane that answered `0s`
   // beside a row reading `2s` is two accounts of one agent (measured 2026-08-20).
   const now = useNow(!isOver(row.state));
+  const shell = isShell ? commandRun(row, items, liveSeconds(row, now)) : null;
 
   return (
     <Overlay
@@ -300,21 +309,27 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
           </Button>
         </div>
 
-        <div
-          ref={historyRef}
-          className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4 [overflow-anchor:none]"
-          data-testid="agent-view-said"
-          data-can-load-older={hasOlder}
-          onScroll={(event) => {
-            if (event.currentTarget.scrollTop <= 32) void loadOlder();
-          }}
-        >
-          {loadingOlder && <div className="text-center text-[11px] text-muted-foreground" data-testid="agent-view-older-loading">Loading older messages…</div>}
-          {historyError && <div className="text-center text-[11px] text-red-500" data-testid="agent-view-history-error">{historyError}</div>}
-          {said.map((item) => (
-            <TranscriptRow key={item.id} item={item} sessionId={sessionId} mentions={mentions} onLook={() => {}} />
-          ))}
-        </div>
+        {shell ? (
+          <div className="min-h-0 flex-1 overflow-y-auto p-4" data-testid="agent-view-shell">
+            <RanTerminal run={shell.run} outcome={shell.outcome} rows={24} />
+          </div>
+        ) : (
+          <div
+            ref={historyRef}
+            className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4 [overflow-anchor:none]"
+            data-testid="agent-view-said"
+            data-can-load-older={hasOlder}
+            onScroll={(event) => {
+              if (event.currentTarget.scrollTop <= 32) void loadOlder();
+            }}
+          >
+            {loadingOlder && <div className="text-center text-[11px] text-muted-foreground" data-testid="agent-view-older-loading">Loading older messages…</div>}
+            {historyError && <div className="text-center text-[11px] text-red-500" data-testid="agent-view-history-error">{historyError}</div>}
+            {said.map((item) => (
+              <TranscriptRow key={item.id} item={item} sessionId={sessionId} mentions={mentions} onLook={() => {}} />
+            ))}
+          </div>
+        )}
 
         {/* Words the reader typed FOR it, and where they actually went. Drawn
             as relayed, never as said to it: it never heard them. */}
@@ -331,11 +346,15 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
           </div>
         )}
 
-        {!isOver(row.state) && controls.includes('say') && <RelayBox row={row} sessionId={sessionId} />}
+        {/* Not for a shell. Nothing this app could send would reach a running
+            command's stdin, and a box captioned "Message subagent" under a
+            terminal is an offer it cannot keep. Stopping it still can, and
+            that control is in the header where it always was. */}
+        {!isShell && !isOver(row.state) && controls.includes('say') && <RelayBox row={row} sessionId={sessionId} />}
 
         {/* Its answer, kept where a reader who opened this to find it looks:
             at the end of what it said, not scrolled back into the chat. */}
-        {row.result && (
+        {row.result && !shell?.run.output.includes(row.result.trim()) && (
           <div className="border-t border-border/60 px-4 py-3">
             <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Result</h3>
             <p className="mt-1 whitespace-pre-wrap text-xs text-foreground" data-testid="agent-view-result">
