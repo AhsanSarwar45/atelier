@@ -109,6 +109,13 @@ pub struct AcpNormalizer {
     active_thinking: HashMap<String, String>,
     started_messages: HashSet<String>,
     open_tools: HashSet<String>,
+    /// The chat's own calls, newest last, so the state can name the one in
+    /// flight. `open_tools` answers whether a call is open and is a set, which
+    /// cannot say which of two is the one the reader is watching.
+    running_calls: Vec<String>,
+    /// The last standing published for the chat itself, so an unchanged one is
+    /// not written again on every ping.
+    said_standing: Option<(String, Option<String>)>,
     /// How many of a call's pictures have already been sent on.
     ///
     /// A tool's content arrives whole on every ping, not as a delta, so a call
@@ -152,6 +159,8 @@ impl Default for AcpNormalizer {
             active_thinking: HashMap::new(),
             started_messages: HashSet::new(),
             open_tools: HashSet::new(),
+            running_calls: Vec::new(),
+            said_standing: None,
             tool_pictures: HashMap::new(),
             terminals: HashMap::new(),
             tool_starts: HashMap::new(),
@@ -1059,6 +1068,91 @@ impl AcpNormalizer {
      * to the row in the panel beside it, because two accounts of one helper
      * that disagree are worse than one.
      */
+    /// What the chat itself is doing this second, in the words of its own call.
+    ///
+    /// A command in flight is named by the command; anything else by the title
+    /// the row already draws. Capped, because this is a line on a screen and a
+    /// heredoc pasted into a shell call is a page of one.
+    fn call_says(started: &Value) -> Option<String> {
+        let said = started["input"]["command"]
+            .as_str()
+            .or_else(|| started["title"].as_str())
+            .or_else(|| started["name"].as_str())?
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        if said.is_empty() {
+            return None;
+        }
+        Some(match said.char_indices().nth(200) {
+            Some((cut, _)) => format!("{}…", &said[..cut]),
+            None => said,
+        })
+    }
+
+    /// Which of our own standings the chat is in, read off what is open.
+    ///
+    /// A call in flight outranks the words around it: an agent that says "let
+    /// me check" and then runs a two-minute build is running the build, and
+    /// that is the fact the reader is waiting on. Thinking outranks answering
+    /// for the same reason — the words have stopped arriving.
+    ///
+    /// `None` is this declining to claim anything, which is what every moment
+    /// outside a turn is. The turn's own beginning and end are published by the
+    /// driver and are not this reading's to overrule.
+    fn standing_now(&self) -> Option<(&'static str, Option<String>)> {
+        if let Some(started) = self
+            .running_calls
+            .iter()
+            .rev()
+            .find_map(|id| self.tool_starts.get(id))
+        {
+            return Some(("running_tool", Self::call_says(started)));
+        }
+        if !self.active_thinking.is_empty() {
+            return Some(("thinking", None));
+        }
+        if !self.root_assistant_messages.is_empty() {
+            return Some(("streaming", None));
+        }
+        None
+    }
+
+    /// The chat saying what it is doing, whenever that changes.
+    ///
+    /// Before this, one `session.state` was written when the prompt was sent —
+    /// `streaming`, labelled "Working" — and the next one came when the turn
+    /// ENDED. Everything in between arrived as its own event and touched the
+    /// standing not at all, so a chat reading a file, running a build and
+    /// thinking about the result drew one word for all three, for as long as
+    /// the turn lasted. The manager, of the ported build: "now it only says
+    /// 'working'. we ned to fix it so it actually says what the agent is
+    /// doing" (bw-xfb4).
+    ///
+    /// No word is published with it. The screen's own vocabulary has one for
+    /// each of these standings already (`chat-state.ts`, OWN_WORD) and four
+    /// screens draw it; a word invented here would be a fifth opinion. What
+    /// this adds is the part the screen cannot know: which call is in flight.
+    fn says_standing(&mut self, session_id: &str, provider: &str, raw: &Value) -> Vec<Event> {
+        let Some((state, detail)) = self.standing_now() else {
+            return Vec::new();
+        };
+        let standing = (state.to_string(), detail.clone());
+        if self.said_standing.as_ref() == Some(&standing) {
+            return Vec::new();
+        }
+        self.said_standing = Some(standing);
+        vec![self.envelope(
+            session_id,
+            provider,
+            raw,
+            json!({
+                "type":"session.state","state":state,"label":Value::Null,
+                "detail":detail.map(Value::from).unwrap_or(Value::Null)
+            }),
+        )]
+    }
+
     fn doing_now(
         &mut self,
         session_id: &str,
@@ -1330,6 +1424,8 @@ impl AcpNormalizer {
                     raw,
                     json!({"type":"message.started","messageId":id,"role":role,"parentToolCallId":parent}),
                 ));
+            let standing = self.says_standing(session_id, provider, raw);
+            events.extend(standing);
         }
         if let Some(text) = Self::content_words(content) {
             if role == "assistant" {
@@ -1426,6 +1522,8 @@ impl AcpNormalizer {
                 "parentToolCallId":parent
             }),
         ));
+        let standing = self.says_standing(session_id, provider, raw);
+        events.extend(standing);
         events
     }
 
@@ -1460,6 +1558,14 @@ impl AcpNormalizer {
                     "acpKind":update["kind"], "locations":Self::locations(update), "acp":update});
                 self.tool_starts.insert(id.clone(), started.clone());
                 let mut events = vec![self.envelope(session_id, provider, raw, started)];
+                // A helper's own call is the helper's business: it is drawn on
+                // the card that stands for it, and naming it here would have
+                // the chat say it is running something it sent away.
+                if parent.is_none() {
+                    self.running_calls.push(id.clone());
+                    let standing = self.says_standing(session_id, provider, raw);
+                    events.extend(standing);
+                }
                 if let Some(under) = parent {
                     let says = title.as_str().unwrap_or_default().to_string();
                     events.extend(self.doing_now(session_id, provider, raw, &under, &says));
@@ -1638,6 +1744,7 @@ impl AcpNormalizer {
                 let left_running = self.work_left_running(&id, update, &started_title);
                 if matches!(status, "completed" | "failed") {
                     self.open_tools.remove(&id);
+                    self.running_calls.retain(|call| call != &id);
                     self.tool_starts.remove(&id);
                     self.tool_pictures.remove(&id);
                     self.terminals.remove(&id);
@@ -1676,6 +1783,10 @@ impl AcpNormalizer {
                     if let Some(left) = left_running {
                         events.push(self.envelope(session_id, provider, raw, left));
                     }
+                    // What the chat is doing now the call has moved on —
+                    // thinking, answering, or the call underneath this one.
+                    let standing = self.says_standing(session_id, provider, raw);
+                    events.extend(standing);
                     let asynchronous = update.pointer("/_meta/claudeCode/toolResponse/isAsync")
                         .and_then(Value::as_bool).unwrap_or(false)
                         || update.pointer("/rawInput/async").and_then(Value::as_bool).unwrap_or(false)
@@ -1744,6 +1855,10 @@ impl AcpNormalizer {
                     if let Some(left) = left_running {
                         events.push(self.envelope(session_id, provider, raw, left));
                     }
+                    // What the chat is doing now the call has moved on —
+                    // thinking, answering, or the call underneath this one.
+                    let standing = self.says_standing(session_id, provider, raw);
+                    events.extend(standing);
                     events
                 }
             }
@@ -1996,6 +2111,7 @@ impl AcpNormalizer {
                     // too, carrying what it answered. Only when this stream
                     // opened one: a helper launched as an asynchronous call had
                     // its row closed the moment the kit acknowledged the launch.
+                    self.running_calls.retain(|call| call != child);
                     if self.open_tools.remove(child) {
                         events.push(self.envelope(
                             session_id,
@@ -2046,6 +2162,7 @@ impl AcpNormalizer {
 
     pub fn finish_turn(&mut self, session_id: &str, provider: &str, raw: &Value) -> Vec<Event> {
         self.suppress_local_user = false;
+        self.said_standing = None;
         let failure = Self::typed_failure(provider, raw);
         let mut events = Vec::new();
         for (agent, chunks) in std::mem::take(&mut self.deferred_agents) {
@@ -2268,8 +2385,8 @@ mod tests {
         let a = claude.update("local", "claude", &raw);
         let b = codex.update("local", "codex", &raw);
         assert_eq!(kinds(&a), kinds(&b));
-        assert_eq!(kinds(&a), vec!["message.started", "text.delta"]);
-        assert_eq!(serde_json::to_value(&a[1]).unwrap()["text"], "hello");
+        assert_eq!(kinds(&a), vec!["message.started", "session.state", "text.delta"]);
+        assert_eq!(serde_json::to_value(&a[2]).unwrap()["text"], "hello");
     }
 
     /// A turn the provider ends by refusing to run says so once, and says when
@@ -2752,8 +2869,8 @@ mod tests {
                 "uri":"file:///work/shot.png","mimeType":"image/png","blob":"aGVsbG8="
             }}
         }}));
-        assert_eq!(kinds(&drawn), vec!["message.started", "image"]);
-        let image = serde_json::to_value(&drawn[1]).unwrap();
+        assert_eq!(kinds(&drawn), vec!["message.started", "session.state", "image"]);
+        let image = serde_json::to_value(&drawn[2]).unwrap();
         assert_eq!(image["image"]["mime"], "image/png");
         assert_eq!(image["image"]["dataUrl"], "data:image/png;base64,aGVsbG8=");
 
@@ -2771,8 +2888,8 @@ mod tests {
             "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done\n```atelier-widget\n{\"type\":\"metrics\",\"items\":[{\"label\":\"Checks\",\"value\":1}]}\n```"}
         }}));
         // Drawn when the block closed, which is here.
-        assert_eq!(kinds(&said), vec!["message.started", "text.delta", "widget"]);
-        let widget = serde_json::to_value(&said[2]).unwrap();
+        assert_eq!(kinds(&said), vec!["message.started", "session.state", "text.delta", "widget"]);
+        let widget = serde_json::to_value(&said[3]).unwrap();
         assert_eq!(widget["messageId"], "acp-message-1");
         assert_eq!(widget["widget"]["type"], "metrics");
 
@@ -2796,7 +2913,7 @@ mod tests {
 
         let opened = normalizer.update("local", "codex", &chunk("Here it is.\n\n```atelier-widget\n{\"type\":\"table\",\"columns\":[\"a\"],"));
         // Half a block is not a block: nothing to draw yet.
-        assert_eq!(kinds(&opened), vec!["message.started", "text.delta"]);
+        assert_eq!(kinds(&opened), vec!["message.started", "session.state", "text.delta"]);
 
         let closed = normalizer.update("local", "codex", &chunk("\"rows\":[[\"1\"]]}\n```\n"));
         assert_eq!(kinds(&closed), vec!["text.delta", "widget"]);
@@ -2834,7 +2951,7 @@ mod tests {
         }}));
         assert_eq!(
             kinds(&answer),
-            vec!["message.completed", "message.started", "text.delta"]
+            vec!["message.completed", "message.started", "session.state", "text.delta"]
         );
         assert_eq!(
             serde_json::to_value(&answer[0]).unwrap()["messageId"],
@@ -3033,7 +3150,7 @@ mod tests {
         let user = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"hello"}}}));
         assert!(user.is_empty());
         let agent = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}}}));
-        assert_eq!(kinds(&agent), vec!["message.started", "text.delta"]);
+        assert_eq!(kinds(&agent), vec!["message.started", "session.state", "text.delta"]);
         let delayed = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"hello"}}}));
         assert!(delayed.is_empty());
         normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
@@ -3241,7 +3358,7 @@ mod tests {
                 "content":{"type":"image","mimeType":"image/png","data":"aGVsbG8="}}
             }),
         );
-        let image = serde_json::to_value(&image[1]).unwrap();
+        let image = serde_json::to_value(&image[2]).unwrap();
         assert_eq!(image["type"], "image");
         assert!(image["image"]["dataUrl"]
             .as_str()
@@ -3309,8 +3426,8 @@ mod tests {
                 },"_meta":{"goose":{"toolCall":{"toolName":"delegate"}}}}
             }),
         );
-        assert_eq!(kinds(&started), vec!["tool.started", "agent.started"]);
-        let agent = serde_json::to_value(&started[1]).unwrap();
+        assert_eq!(kinds(&started), vec!["tool.started", "session.state", "agent.started"]);
+        let agent = serde_json::to_value(&started[2]).unwrap();
         assert_eq!(agent["what"], "Review the patch");
         assert_eq!(agent["agentType"], "reviewer");
         assert_eq!(agent["model"], "qwen3");
@@ -3658,7 +3775,7 @@ mod tests {
                 "messageId":"parent-message","content":{"type":"text","text":"PARENT DONE"}}
             }),
         );
-        assert_eq!(kinds(&parent), vec!["message.started", "text.delta"]);
+        assert_eq!(kinds(&parent), vec!["message.started", "session.state", "text.delta"]);
         let settled = normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
         let finished = settled
             .iter()
@@ -3772,7 +3889,7 @@ mod tests {
             "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
             "messageId":"m-2","content":{"type":"text","text":"Done."}}
         }));
-        assert_eq!(kinds(&root), vec!["message.started", "text.delta"]);
+        assert_eq!(kinds(&root), vec!["message.started", "session.state", "text.delta"]);
         assert_eq!(serde_json::to_value(&root[0]).unwrap()["parentToolCallId"], Value::Null);
     }
 
@@ -3786,6 +3903,90 @@ mod tests {
      * adapter, 2026-09-03). The helper's work does arrive, stamped with the
      * call that sent it, and that is what the line is made of.
      */
+    /**
+     * A chat of ours says which of the things it is doing, and names the call.
+     *
+     * One `session.state` was written when the prompt was sent — `streaming`,
+     * labelled "Working" — and the next one came when the turn ENDED. A turn
+     * that thought, read three files and ran a build drew one word for all of
+     * it, for however long it lasted. The manager, of the ported build: "now it
+     * only says 'working'. we ned to fix it so it actually says what the agent
+     * is doing" (bw-xfb4).
+     *
+     * No word is asserted here because none is published: the screen has one
+     * per standing already and four screens draw it. What the driver owes is
+     * the standing and the call, which is the half the screen cannot know.
+     */
+    #[test]
+    fn a_working_chat_says_which_of_its_calls_is_running() {
+        let mut normalizer = AcpNormalizer::default();
+        let standing = |events: &[Event]| -> Vec<(String, String)> {
+            events
+                .iter()
+                .map(|event| serde_json::to_value(event).unwrap())
+                .filter(|event| event["type"] == "session.state")
+                .map(|event| {
+                    (
+                        event["state"].as_str().unwrap_or_default().to_string(),
+                        event["detail"].as_str().unwrap_or_default().to_string(),
+                    )
+                })
+                .collect()
+        };
+
+        let thought = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"Which build is it"}
+        }}));
+        assert_eq!(standing(&thought), vec![("thinking".into(), String::new())]);
+
+        // A command in flight is named by the command, not by the tool. The
+        // reader is waiting on the build, and "Bash" tells them nothing.
+        let ran = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call","toolCallId":"call-1","title":"Run the tests",
+            "kind":"execute","rawInput":{"command":"cargo test --lib"},
+            "_meta":{"claudeCode":{"toolName":"Bash"}}
+        }}));
+        assert_eq!(
+            standing(&ran),
+            vec![("running_tool".into(), "cargo test --lib".into())],
+            "a chat running a command does not say which one"
+        );
+
+        // Said again is not news: the same call pinging keeps its own row
+        // current and owes the chat's standing nothing.
+        let again = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"in_progress"
+        }}));
+        assert_eq!(standing(&again), Vec::new());
+
+        // The call is over, and the words that follow it are what the chat is
+        // doing now — never the command it has finished running.
+        let done = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed",
+            "content":[{"type":"content","content":{"type":"text","text":"ok"}}]
+        }}));
+        let answered = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"agent_message_chunk","messageId":"m-1","content":{"type":"text","text":"They pass."}
+        }}));
+        // Thinking again the moment the command is off, answering when the
+        // words arrive: what it is never again is running the command it has
+        // just finished running.
+        assert_eq!(
+            [standing(&done), standing(&answered)].concat(),
+            vec![
+                ("thinking".into(), String::new()),
+                ("streaming".into(), String::new())
+            ],
+            "the chat went on saying it was running a command that had finished"
+        );
+
+        // And a turn that is over hands nothing to the next one: the driver
+        // publishes the ending itself, and a remembered standing would keep the
+        // next turn's first identical reading silent.
+        normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
+        assert!(normalizer.said_standing.is_none());
+    }
+
     #[test]
     fn the_row_that_sent_a_helper_says_what_the_helper_is_doing() {
         let mut normalizer = AcpNormalizer::default();
@@ -3846,7 +4047,7 @@ mod tests {
             "toolCallId":"call-mine","title":"Read notes.md","kind":"read",
             "_meta":{"claudeCode":{"toolName":"Read"}}}
         }));
-        assert_eq!(kinds(&mine), vec!["tool.started"]);
+        assert_eq!(kinds(&mine), vec!["tool.started", "session.state"]);
     }
 
     /**

@@ -312,7 +312,7 @@ const OWN_WORD: Record<SessionState, string> = {
   idle: 'Ready',
   thinking: 'Thinking',
   streaming: 'Answering',
-  running_tool: 'Working',
+  running_tool: 'Running',
   waiting_permission: 'Waiting for you',
   stopped: 'Stopped',
   errored: 'Failed',

@@ -78,7 +78,7 @@ describe('a chat of ours', () => {
   it('prefers the driver’s own words to the table behind them', () => {
     expect(chatState({ state: 'running_tool', label: 'Asking about Edit' }).word).toBe('Asking about Edit');
     // The floor, for a label a dead process left behind or never wrote.
-    expect(chatState({ state: 'running_tool', label: '' }).word).toBe('Working');
+    expect(chatState({ state: 'running_tool', label: '' }).word).toBe('Running');
     expect(chatState({ state: 'dormant', label: null }).word).toBe('Asleep');
   });
 

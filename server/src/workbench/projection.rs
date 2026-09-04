@@ -235,6 +235,12 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                 let state = value(event, "state");
                 view.insert("state".into(), state.clone());
                 view.insert("stateLabel".into(), value(event, "label"));
+                // What it is doing, in the words of its own call. Kept beside
+                // the standing rather than folded into the label: the screen
+                // draws its own word for the standing and this beside it, and
+                // a label carrying both would leave it nothing to separate
+                // (bw-xfb4).
+                view.insert("stateDetail".into(), value(event, "detail"));
                 if state != "errored" {
                     view.insert("error".into(), Value::Null);
                 }

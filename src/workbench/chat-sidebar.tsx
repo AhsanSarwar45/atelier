@@ -283,6 +283,7 @@ export function withLive(
         // The mark's own two halves, so the row says what the bar above it says
         // (protocol.ts, RestoreRow.activity; bw-96is.31).
         activity: session.activity,
+        activityDetail: session.activityDetail ?? null,
         busySince: session.busySince,
       };
       continue;
@@ -303,6 +304,7 @@ export function withLive(
       branch: null,
       beads: session.beads,
       activity: session.activity,
+      activityDetail: session.activityDetail ?? null,
       busySince: session.busySince,
     });
   }
@@ -710,6 +712,7 @@ export function ChatSidebar({
               const state = chatState({
                 state: row.state,
                 label: row.activity,
+                detail: row.activityDetail || null,
                 since: row.busySince ? Date.parse(row.busySince) : null,
                 held: row.held ?? (ownership.kind === 'elsewhere' ? {
                   id: row.externalId ?? '',

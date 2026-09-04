@@ -1023,6 +1023,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const state = chatState({
     state: view.state,
     label: view.stateLabel,
+    detail: view.stateDetail,
     since: busySince,
     turnSince,
     held: held

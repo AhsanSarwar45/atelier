@@ -250,7 +250,7 @@ describe('the panel', () => {
     // own line and the row in the list wear — rather than a line of italics
     // this panel drew for itself (bw-pukk.2).
     const mark = helper.querySelector('[data-testid="sent-away-state"]')!;
-    expect(mark).toHaveAttribute('data-word', 'Working');
+    expect(mark).toHaveAttribute('data-word', 'Running');
     expect(mark).toHaveTextContent('Reading the router');
   });
 
@@ -315,7 +315,7 @@ describe('the panel', () => {
   it('says which of them are waiting on you', () => {
     const rows = drawn();
     expect(rows['bash-1']!.querySelector('[data-testid="sent-away-state"]')).toHaveAttribute('data-word', 'In background');
-    expect(rows['task-1']!.querySelector('[data-testid="sent-away-state"]')).toHaveAttribute('data-word', 'Working');
+    expect(rows['task-1']!.querySelector('[data-testid="sent-away-state"]')).toHaveAttribute('data-word', 'Running');
   });
 
   /**

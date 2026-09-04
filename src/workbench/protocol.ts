@@ -325,7 +325,22 @@ export interface TerminalRun {
 export type WbpEvent = EventBase &
   (
     | { type: 'session.started'; brand: Brand; externalId: string | null; model: string | null; cwd: string; permissionMode: string; effort?: string | null; collaborationMode?: string | null }
-    | { type: 'session.state'; state: SessionState; label: string }
+    | {
+        type: 'session.state';
+        state: SessionState;
+        /**
+         * The driver's own word, or null to be drawn in the screen's. Null on
+         * everything the driver publishes as a turn runs: four screens share
+         * one word per standing (chat-state.ts, OWN_WORD) and a word invented
+         * at the boundary would be a fifth opinion (bw-xfb4).
+         */
+        label: string | null;
+        /**
+         * What it is doing, in the words of its own call — the command in
+         * flight. Drawn beside the word, never in place of it.
+         */
+        detail?: string | null;
+      }
     /**
      * Everything this session can offer: the commands and skills the install
      * has, the models it could switch to, the permission modes it accepts, and
@@ -903,6 +918,12 @@ export interface RestoreRow {
    * chat is.
    */
   activity?: string | null;
+  /**
+   * What it is doing, in the words of its own call — the command in flight.
+   * Absent when its standing carries nothing beyond itself, which is how every
+   * row written before there was anything to add reads (bw-xfb4).
+   */
+  activityDetail?: string | null;
   /** When that began, ISO, for the count beside the word. */
   busySince?: string | null;
 }
@@ -959,9 +980,9 @@ export interface SessionFacts {
  * handler (docs/agent-workbench.md §8.6).
  */
 export type WatchFrame =
-  | { kind: 'snapshot'; sessions: (SessionSummary & { activity: string; beads: string[] })[] }
+  | { kind: 'snapshot'; sessions: (SessionSummary & { activity: string; activityDetail?: string; beads: string[] })[] }
   /** A chat that has just come into existence, before it has said anything. */
-  | { kind: 'opened'; session: SessionSummary & { activity: string; beads: string[] } }
+  | { kind: 'opened'; session: SessionSummary & { activity: string; activityDetail?: string; beads: string[] } }
   /**
    * Every conversation a live process is holding right now, by the tool's own
    * id for it, each with what that process says it is doing — sent once when

@@ -40,6 +40,12 @@ export interface LiveSession {
   state: SessionState;
   /** The agent's own words for what it is doing — "Asking about Edit", "Answering". */
   activity: string;
+  /**
+   * What it is doing, in the words of its own call — the command in flight.
+   * Absent or empty when its standing carries nothing beyond itself, which is
+   * how every row written before there was anything to add reads (bw-xfb4).
+   */
+  activityDetail?: string;
   /** What it is waiting for, when it is waiting on the owner. */
   waitingFor: string | null;
   lastActiveAt: string;
@@ -79,6 +85,7 @@ export function liveState(s: LiveSession): ChatState {
   return chatState({
     state: s.state,
     label: s.activity,
+    detail: s.activityDetail || null,
     since: s.busySince === null ? null : Date.parse(s.busySince),
   });
 }
@@ -109,7 +116,7 @@ export function isLive(s: LiveSession): boolean {
 const listeners = new Set<() => void>();
 let sessions: LiveSession[] = [];
 const providerConditions = new Map<string, Map<string, ProviderMessageSignal>>();
-const providerBase = new Map<string, Pick<LiveSession, 'state' | 'activity' | 'busySince'>>();
+const providerBase = new Map<string, Pick<LiveSession, 'state' | 'activity' | 'busySince'> & { activityDetail?: string }>();
 const providerTimers = new Map<string, ReturnType<typeof setTimeout>>();
 /** How to stop reading the helper's feed off the window's one connection. */
 let stop: (() => void) | null = null;
@@ -280,7 +287,9 @@ function announce(): void {
   listeners.forEach((fn) => fn());
 }
 
-function fromSummary(s: SessionSummary & { activity: string; beads: string[] }): LiveSession {
+function fromSummary(
+  s: SessionSummary & { activity: string; activityDetail?: string; beads: string[] },
+): LiveSession {
   return {
     id: s.id,
     brand: s.brand,
@@ -291,6 +300,7 @@ function fromSummary(s: SessionSummary & { activity: string; beads: string[] }):
     title: s.title,
     state: s.state,
     activity: s.activity,
+    activityDetail: s.activityDetail ?? '',
     waitingFor: null,
     lastActiveAt: s.lastActiveAt,
     // Nothing in the list says when the turn began, so a chat found already
@@ -322,7 +332,9 @@ function applyProviderCondition(id: string): void {
   const active = activeProviderCondition(id);
   if (active) {
     const status = providerMessageStatus(active);
-    patch(id, { state: status.state, activity: status.label, busySince: null });
+    // A condition is the whole of what the chat is doing; the call it was in
+    // the middle of is not what the reader is waiting on now.
+    patch(id, { state: status.state, activity: status.label, activityDetail: '', busySince: null });
     const expiries = [...(providerConditions.get(id)?.values() ?? [])]
       .filter((signal) => providerMessageIsCurrent(signal) && signal.retryAt)
       .map((signal) => new Date(signal.retryAt!).getTime())
@@ -514,8 +526,9 @@ function absorb(frame: WatchFrame): void {
       const had = sessions.find((s) => s.id === e.sessionId);
       const base = {
         state: e.state,
-        activity: e.label,
-        busySince: countingFrom(had, { state: e.state, label: e.label, at: e.at }),
+        activity: e.label ?? '',
+        activityDetail: e.detail ?? '',
+        busySince: countingFrom(had, { state: e.state, label: e.label ?? '', at: e.at }),
       };
       if (activeProviderCondition(e.sessionId)) {
         providerBase.set(e.sessionId, base);

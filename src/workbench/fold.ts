@@ -350,6 +350,11 @@ export interface SessionView {
   items: TranscriptItem[];
   state: SessionState;
   stateLabel: string;
+  /**
+   * What the chat is doing, in the words of its own call — the command in
+   * flight. Null when its standing carries nothing beyond itself (bw-xfb4).
+   */
+  stateDetail: string | null;
   cost: Cost | null;
   /**
    * How full the conversation is, as the model last reported it, against the
@@ -400,6 +405,7 @@ export const EMPTY: SessionView = {
   items: [],
   state: 'starting',
   stateLabel: 'Starting',
+  stateDetail: null,
   cost: null,
   context: null,
   todos: [],
@@ -516,7 +522,8 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
 
     case 'session.state':
       next.state = e.state;
-      next.stateLabel = e.label;
+      next.stateLabel = e.label ?? '';
+      next.stateDetail = e.detail ?? null;
       if (e.state !== 'errored') next.error = null;
       // A turn that is over owes no thinking count to the next one.
       if (e.state === 'idle' || e.state === 'errored' || e.state === 'stopped') next.thinkingTokens = 0;
@@ -1030,7 +1037,8 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
 
       case 'session.state':
         view.state = e.state;
-        view.stateLabel = e.label;
+        view.stateLabel = e.label ?? '';
+        view.stateDetail = e.detail ?? null;
         if (e.state !== 'errored') view.error = null;
         if (e.state === 'idle' || e.state === 'errored' || e.state === 'stopped') view.thinkingTokens = 0;
         view.agents = nothingIsDriving(view.agents, e.state);

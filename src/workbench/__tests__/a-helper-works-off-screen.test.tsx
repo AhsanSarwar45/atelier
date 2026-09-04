@@ -274,7 +274,7 @@ describe('what the helper’s card says it is doing', () => {
   it('names the command the helper is running right now', () => {
     // The Grep has started and has not come back.
     const chip = cardFor(asOf(startedRunning('cmd-ok')));
-    expect(chip.getAttribute('data-word')).toBe('Working');
+    expect(chip.getAttribute('data-word')).toBe('Running');
     expect(chip.textContent).toContain('Searched for RailRow');
   });
 

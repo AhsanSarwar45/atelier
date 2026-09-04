@@ -97,7 +97,7 @@ describe('a chat of ours, nobody else in it', () => {
     ['starting', 'Coming back', true, true],
     ['thinking', 'Thinking', true, true],
     ['streaming', 'Answering', true, true],
-    ['running_tool', 'Working', true, true],
+    ['running_tool', 'Running', true, true],
     ['waiting_permission', 'Waiting for you', false, true],
     ['idle', 'Ready', false, false],
     ['stopped', 'Stopped', false, false],
