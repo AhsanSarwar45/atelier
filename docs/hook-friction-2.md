@@ -408,6 +408,45 @@ Filed as bw-xksa.
 `BEADS_ACTOR` restored by hand for the close. The reason given each time was
 that a worktree cannot remove itself.
 
+## 9. A path the shell would have expanded is resolved against the repository
+
+**Attempted.** Deleting one scratch directory in Atelier's own data dir, from a
+session whose shell stood in the main checkout:
+
+```bash
+rm -rf ~/.local/share/atelier/projects/0739b8c7…
+rm -rf "$HOME/.local/share/atelier/projects/0739b8c7…"
+```
+
+**Refusal.** Both times, and the second names the problem exactly:
+
+```
+Changes require an owned Beads work item in its isolated worktree
+(target `$HOME/.local/share/atelier/projects/0739b8c7…` resolved from
+/home/ahsan/dev/beads-web → /home/ahsan/dev/beads-web/$HOME/.local/share/…)
+```
+
+**Why it did not serve the rule.** The rule is that repository files need an
+owned card in its worktree, and a path in no repository is not gated at all.
+The target was in no repository — it is Atelier's data dir under the home
+directory. The gate reads the command as written, before the shell expands it,
+so `~` and `$HOME` are neither absolute nor relative but literal; it joins the
+literal to the working directory and gets a path that exists nowhere, then
+gates the session on it. The refusal is not about the file being protected. It
+is about the gate not knowing where the file is.
+
+**Should have happened.** A leading `~/` or `$HOME/` should expand before the
+target is resolved — those two are not ambiguous, and every other shell in the
+session expands them. Failing that, a target that resolves to a path which does
+not exist and lies in no repository should not be refused as a repository
+change; the refusal should say the gate could not locate the target, which is
+the true thing.
+
+**Cost.** Two refusals and a third command, on a delete that was undoing this
+session's own test litter. The literal absolute path went through first time.
+
+**Worked around.** Wrote the path out in full: `/home/ahsan/.local/share/…`.
+
 ## How to add to this file
 
 As in the first book: what was attempted, the refusal text, why the refusal did

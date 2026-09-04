@@ -39,11 +39,37 @@ const CLAUDE: &[(&str, &str, &[&str])] = &[
     ("Notification", "", &["doing"]),
 ];
 
+/// Codex carries the same gates as Claude, on the events Codex actually fires.
+///
+/// The two providers share one hook contract — a command fed the event as
+/// snake_case JSON on standard input, answering on standard output — so the
+/// gates below are the same binary and the same words. Only the tool names in
+/// the matchers differ, because only the tool names differ.
+///
+/// The three session events used to be missing here, and the gap was not a
+/// judgement: a Codex session started without being told what it was standing
+/// in, ended without pushing the board it had moved, and could finish a turn
+/// the board says is not finished. Codex fires `SessionStart`, `SessionEnd`
+/// and `Stop`, and honours the same answers — `hookSpecificOutput` with
+/// `additionalContext` for the first, and `{"decision":"block","reason":…}`
+/// for the last (bw-3tkl.4).
+///
+/// `doing` is not here, and that is the judgement. It writes a marker into the
+/// reader's `~/.claude/sessions`, and the only thing that reads that marker is
+/// the screen for Claude chats this program does not drive
+/// (`workbench::external`). Registering it for Codex would leave files named
+/// after Codex sessions in Claude's directory for nothing to read.
 const CODEX: &[(&str, &str, &[&str])] = &[
     ("PreToolUse", "Bash|apply_patch|Edit|Write", &["workflow-gate"]),
     ("PreToolUse", "Bash", &["board-actor", "board-merge-gate", "board-status-gate"]),
     ("PostToolUse", "Bash|apply_patch|Edit|Write", &["board-touch"]),
     ("SubagentStop", "", &["board-touch"]),
+    ("SessionStart", "", &["board-prime"]),
+    // Codex allows this one a second, where every other event gets ten
+    // minutes, which is why the push detaches and answers immediately rather
+    // than waiting on a remote (`board_push::start`).
+    ("SessionEnd", "", &["board-push"]),
+    ("Stop", "", &["board-gate"]),
 ];
 
 const GUARD_MARK: &str = "# Atelier landing guard";
@@ -239,6 +265,60 @@ mod tests {
             assert!(pretool(&claude).contains(&command), "Claude lacks {command}");
             assert!(pretool(&codex).contains(&command), "Codex lacks {command}");
         }
+    }
+
+    fn on(value: &Value, event: &str) -> Vec<String> {
+        value["hooks"][event].as_array().into_iter().flatten()
+            .flat_map(|block| block["hooks"].as_array().into_iter().flatten())
+            .filter_map(|hook| hook["command"].as_str().map(str::to_string)).collect()
+    }
+
+    /// Both providers fire these three, and both honour the answers, so a gap
+    /// on one of them is a gap and not a judgement. A Codex session used to
+    /// start without being told what it stood in, end without pushing the
+    /// board it had moved, and finish a turn the board says is unfinished
+    /// (bw-3tkl.4).
+    #[test]
+    fn native_machinery_both_providers_carry_the_session_gates() {
+        let mut claude = json!({});
+        let mut codex = json!({});
+        wire_value(&mut claude, CLAUDE, true);
+        wire_value(&mut codex, CODEX, false);
+        for (event, gate) in [
+            ("SessionStart", "atelier hook board-prime"),
+            ("SessionEnd", "atelier hook board-push"),
+            ("Stop", "atelier hook board-gate"),
+        ] {
+            assert!(on(&claude, event).contains(&gate.to_string()), "Claude {event}");
+            assert!(on(&codex, event).contains(&gate.to_string()), "Codex {event}");
+        }
+    }
+
+    /// Every gate Claude is given is given to Codex too, except the one whose
+    /// output only a Claude screen reads. Keeping this as a difference of
+    /// events rather than of gates is what stops the two tables drifting.
+    #[test]
+    fn native_machinery_codex_lacks_only_the_gate_that_writes_for_a_claude_screen() {
+        let claude: std::collections::BTreeSet<&str> =
+            CLAUDE.iter().flat_map(|(_, _, gates)| gates.iter().copied()).collect();
+        let codex: std::collections::BTreeSet<&str> =
+            CODEX.iter().flat_map(|(_, _, gates)| gates.iter().copied()).collect();
+        assert_eq!(
+            claude.difference(&codex).copied().collect::<Vec<_>>(),
+            vec![crate::doing::GATE],
+        );
+        assert!(codex.difference(&claude).next().is_none(), "Codex has a gate Claude has not");
+    }
+
+    /// Codex allows a second for this one where every other event gets ten
+    /// minutes, so the gate on it must be one that answers without waiting.
+    #[test]
+    fn native_machinery_the_codex_second_is_only_spent_on_a_gate_that_detaches() {
+        let on_end: Vec<&str> = CODEX.iter()
+            .filter(|(event, _, _)| *event == "SessionEnd")
+            .flat_map(|(_, _, gates)| gates.iter().copied())
+            .collect();
+        assert_eq!(on_end, vec![crate::board_push::GATE]);
     }
 
     #[test]

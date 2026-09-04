@@ -1,8 +1,14 @@
 # Hooks: what they enforce, and how to get past one
 
-Every gate Atelier installs is native: `atelier hook <name>`, wired from
-`.claude/settings.json`. There is no interpreter and no script under
-`machinery/` to run — a hook name the binary does not know stands down.
+Every gate Atelier installs is native: `atelier hook <name>`, wired from the
+project's own `.claude/settings.json` and `.codex/hooks.json`. There is no
+interpreter and no script under `machinery/` to run — a hook name the binary
+does not know stands down.
+
+The two providers share one contract — the event as snake_case JSON on standard
+input, the answer on standard output — so the gates are the binary's, not the
+provider's, and both files name the same commands. The one gate Claude has and
+Codex does not is `doing`, whose marker only a Claude screen reads.
 
 This file exists because a rule an agent meets only by being refused is a rule
 that costs a round trip to learn. `docs/hook-friction.md` §5 is the standing

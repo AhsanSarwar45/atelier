@@ -195,13 +195,25 @@ Rules discovered only by being refused:
 deliberately does not, and the bypass. `machinery/skills/beads/SKILL.md` now
 carries a *Rules the gates enforce* section stating each gate's rule up front —
 the write boundary and both directions it was wrong in, the landing invariants,
-the status moves, and the two Stop gates — so the hook is the safeguard rather
+the status moves, and the Stop gate — so the hook is the safeguard rather
 than the way an agent finds out. Both files apply to Codex as well as Claude:
 `server/src/join.rs` wires `.codex/hooks.json` to the same `atelier hook`
-commands, so the gates and the bypass are the binary's, not the provider's. The
-one difference is that Codex wires no Stop event, so `board-gate` and
-`completion-gate` — and the reply-line form of the bypass, which exists only to
-excuse them — are Claude's alone.
+commands, so the gates and the bypass are the binary's, not the provider's.
+
+That was once true of the tool events only. Codex was wired for `PreToolUse`,
+`PostToolUse` and `SubagentStop` and nothing else, so a Codex session started
+without being told what it stood in, ended without pushing the board it had
+moved, and could finish a turn the board says is unfinished. Codex fires
+`SessionStart`, `SessionEnd` and `Stop` and honours the same answers, so it now
+carries `board-prime`, `board-push` and `board-gate` beside Claude, and the two
+tables are held equal by a test. The one gate Claude has and Codex does not is
+`doing`, which is not a difference of provider: it writes a marker that only
+the screen for externally-driven *Claude* chats reads, so there would be
+nothing on the other end of it (bw-3tkl.4).
+
+`completion-gate` is wired for neither provider. It is a native port kept for
+projects whose own settings still name `machinery/hooks/completion-gate.py`,
+not a gate joining a project installs.
 
 ## 6. Every gate now has a documented way past it
 
