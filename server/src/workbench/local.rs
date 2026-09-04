@@ -23,6 +23,18 @@ pub struct LocalModel {
     pub publisher: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// The runtime already has this model in memory, so starting on it costs
+    /// nothing. On a card that fits one model at a time this is the whole
+    /// difference between typing straight away and waiting out a swap.
+    pub resident: bool,
+}
+
+/// One model as a runtime described it, before it is given Atelier's shape.
+struct Candidate {
+    value: String,
+    family: Option<String>,
+    publisher: Option<String>,
+    resident: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -107,35 +119,63 @@ async fn get_json(runtime: Runtime, url: String) -> Option<Value> {
 
 fn unique_models(
     runtime: Runtime,
-    values: impl IntoIterator<Item = (String, Option<String>, Option<String>)>,
+    values: impl IntoIterator<Item = Candidate>,
 ) -> Vec<LocalModel> {
     let mut values = values
         .into_iter()
-        .filter(|(value, _, _)| !value.trim().is_empty())
+        .filter(|candidate| !candidate.value.trim().is_empty())
         .collect::<Vec<_>>();
-    values.sort_by_key(|(value, _, _)| value.to_lowercase());
-    values.dedup_by(|left, right| left.0 == right.0);
+    values.sort_by_key(|candidate| candidate.value.to_lowercase());
+    values.dedup_by(|left, right| left.value == right.value);
     values
         .into_iter()
-        .map(|(value, family, publisher)| LocalModel {
-            display_name: value.clone(),
-            value: encode_model(runtime, &value),
+        .map(|candidate| LocalModel {
+            display_name: candidate.value.clone(),
+            value: encode_model(runtime, &candidate.value),
             runtime: runtime.id(),
-            family,
-            publisher,
+            family: candidate.family,
+            publisher: candidate.publisher,
             description: None,
+            resident: candidate.resident,
         })
         .collect()
+}
+
+/// Which model a chat should start on when nobody named one.
+///
+/// The order is the order of what starting costs the person. A model the
+/// runtime is already holding starts instantly; anything else makes a
+/// one-model-at-a-time runtime unload what it has and read a new file off
+/// disk first. So residency wins, and only when nothing is resident does the
+/// question become which model they meant — the last one they used here, and
+/// failing that the first one offered. A remembered model the runtime no
+/// longer serves is not an answer, so it is skipped rather than returned.
+pub fn preferred_model(models: &[LocalModel], remembered: Option<&str>) -> Option<String> {
+    if let Some(model) = models.iter().find(|model| model.resident) {
+        return Some(model.value.clone());
+    }
+    if let Some(value) = remembered {
+        if models.iter().any(|model| model.value == value) {
+            return Some(value.to_string());
+        }
+    }
+    models.first().map(|model| model.value.clone())
 }
 
 pub async fn models(runtime: Runtime) -> Vec<LocalModel> {
     match runtime {
         Runtime::Ollama => {
-            let Some(value) = get_json(runtime, format!("{}/api/tags", runtime.endpoint())).await
-            else {
+            // `/api/ps` is what Ollama has loaded right now; asking for it
+            // alongside the catalog costs no extra wall clock and is the only
+            // way to know which model is free to start on.
+            let (value, running) = tokio::join!(
+                get_json(runtime, format!("{}/api/tags", runtime.endpoint())),
+                get_json(runtime, format!("{}/api/ps", runtime.endpoint()))
+            );
+            let Some(value) = value else {
                 return Vec::new();
             };
-            ollama_catalog(&value)
+            ollama_catalog(&value, running.as_ref())
         }
         Runtime::OpenAiCompatible => {
             let base = runtime.endpoint();
@@ -152,7 +192,18 @@ pub async fn models(runtime: Runtime) -> Vec<LocalModel> {
     }
 }
 
-fn ollama_catalog(value: &Value) -> Vec<LocalModel> {
+fn ollama_catalog(value: &Value, running: Option<&Value>) -> Vec<LocalModel> {
+    let loaded = running
+        .map(|running| {
+            running["models"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|model| model["name"].as_str().or_else(|| model["model"].as_str()))
+                .map(str::to_string)
+                .collect::<std::collections::HashSet<_>>()
+        })
+        .unwrap_or_default();
     unique_models(
         Runtime::Ollama,
         value["models"]
@@ -171,7 +222,12 @@ fn ollama_catalog(value: &Value) -> Vec<LocalModel> {
                             .and_then(Value::as_str)
                             .map(str::to_string)
                     });
-                Some((id.to_string(), family, None))
+                Some(Candidate {
+                    resident: loaded.contains(id),
+                    value: id.to_string(),
+                    family,
+                    publisher: None,
+                })
             }),
     )
 }
@@ -184,11 +240,19 @@ fn openai_catalog(value: &Value) -> Vec<LocalModel> {
             .into_iter()
             .flatten()
             .filter_map(|model| {
-                Some((
-                    model["id"].as_str()?.to_string(),
-                    None,
-                    model["owned_by"].as_str().map(str::to_string),
-                ))
+                Some(Candidate {
+                    value: model["id"].as_str()?.to_string(),
+                    family: None,
+                    publisher: model["owned_by"].as_str().map(str::to_string),
+                    // A router that serves one model at a time reports each
+                    // model's state here. `loaded` and `sleeping` are both in
+                    // memory, and `loading` is on its way with no second
+                    // unload to pay for; every other state means a swap.
+                    resident: matches!(
+                        model["status"]["value"].as_str(),
+                        Some("loaded" | "loading" | "sleeping")
+                    ),
+                })
             }),
     )
 }
@@ -245,6 +309,27 @@ pub async fn providers() -> Vec<Value> {
 mod tests {
     use super::*;
 
+    fn candidate(value: &str, family: Option<&str>) -> Candidate {
+        Candidate {
+            value: value.into(),
+            family: family.map(str::to_string),
+            publisher: None,
+            resident: false,
+        }
+    }
+
+    fn model(value: &str, resident: bool) -> LocalModel {
+        LocalModel {
+            value: value.into(),
+            display_name: value.into(),
+            runtime: "ollama",
+            family: None,
+            publisher: None,
+            description: None,
+            resident,
+        }
+    }
+
     #[test]
     fn local_provider_names_are_transport_not_model_names() {
         assert_eq!(runtime("ollama"), Some(Runtime::Ollama));
@@ -264,10 +349,10 @@ mod tests {
         let models = unique_models(
             Runtime::Ollama,
             [
-                ("Qwen".into(), Some("qwen".into()), None),
-                ("".into(), None, None),
-                ("Gemma".into(), Some("gemma".into()), None),
-                ("Qwen".into(), None, None),
+                candidate("Qwen", Some("qwen")),
+                candidate("", None),
+                candidate("Gemma", Some("gemma")),
+                candidate("Qwen", None),
             ],
         );
         assert_eq!(
@@ -281,10 +366,13 @@ mod tests {
 
     #[test]
     fn ollama_metadata_reaches_the_visible_model_contract() {
-        let models = ollama_catalog(&serde_json::json!({"models":[
-            {"name":"Qwen3.8 IQ3","details":{"family":"qwen3"}},
-            {"model":"gemma-26B","details":{"families":["gemma3"]}}
-        ]}));
+        let models = ollama_catalog(
+            &serde_json::json!({"models":[
+                {"name":"Qwen3.8 IQ3","details":{"family":"qwen3"}},
+                {"model":"gemma-26B","details":{"families":["gemma3"]}}
+            ]}),
+            None,
+        );
         assert_eq!(models[0].display_name, "gemma-26B");
         assert_eq!(models[0].family.as_deref(), Some("gemma3"));
         assert_eq!(models[1].value, "ollama::Qwen3.8 IQ3");
@@ -299,5 +387,74 @@ mod tests {
         assert_eq!(models[0].value, "openai-compatible::private-alias");
         assert_eq!(models[0].publisher.as_deref(), Some("deepseek"));
         assert_eq!(models[0].runtime, "openai-compatible");
+    }
+
+    #[test]
+    fn a_chat_starts_on_the_model_the_runtime_is_already_holding() {
+        // The remembered model and the first of the list both lose to the one
+        // that costs nothing to start: that is the whole point of the order.
+        let models = [
+            model("openai-compatible::gemma", false),
+            model("openai-compatible::qwen", true),
+        ];
+        assert_eq!(
+            preferred_model(&models, Some("openai-compatible::gemma")).as_deref(),
+            Some("openai-compatible::qwen")
+        );
+    }
+
+    #[test]
+    fn with_nothing_resident_a_chat_starts_on_the_model_last_used_here() {
+        let models = [model("ollama::gemma", false), model("ollama::qwen", false)];
+        assert_eq!(
+            preferred_model(&models, Some("ollama::qwen")).as_deref(),
+            Some("ollama::qwen")
+        );
+        // A model the runtime has stopped serving is not an answer.
+        assert_eq!(
+            preferred_model(&models, Some("ollama::deleted")).as_deref(),
+            Some("ollama::gemma")
+        );
+    }
+
+    #[test]
+    fn a_first_run_with_no_memory_and_nothing_resident_starts_on_the_first_offered() {
+        let models = [model("ollama::gemma", false), model("ollama::qwen", false)];
+        assert_eq!(
+            preferred_model(&models, None).as_deref(),
+            Some("ollama::gemma")
+        );
+        assert_eq!(preferred_model(&[], None), None);
+    }
+
+    #[test]
+    fn a_router_that_holds_one_model_says_which_one_and_it_is_read() {
+        let models = openai_catalog(&serde_json::json!({"data":[
+            {"id":"gemma-26B","status":{"value":"unloaded"}},
+            {"id":"qwen-27B","status":{"value":"loaded"}},
+            {"id":"waking-27B","status":{"value":"sleeping"}},
+            {"id":"absent-27B"}
+        ]}));
+        let resident = models
+            .iter()
+            .filter(|model| model.resident)
+            .map(|model| model.display_name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(resident, ["qwen-27B", "waking-27B"]);
+    }
+
+    #[test]
+    fn ollama_residency_comes_from_what_is_running_not_what_is_installed() {
+        let models = ollama_catalog(
+            &serde_json::json!({"models":[{"name":"qwen:7b"},{"name":"gemma:9b"}]}),
+            Some(&serde_json::json!({"models":[{"name":"qwen:7b"}]})),
+        );
+        assert_eq!(
+            models
+                .iter()
+                .map(|model| (model.display_name.as_str(), model.resident))
+                .collect::<Vec<_>>(),
+            [("gemma:9b", false), ("qwen:7b", true)]
+        );
     }
 }

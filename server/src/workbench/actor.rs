@@ -52,6 +52,7 @@ enum Command {
     UpdateSession(String, SessionPatch, Option<String>, Reply<()>),
     MarkSpoke(String, String, Reply<()>),
     ListSessions(Option<String>, Reply<Vec<Session>>),
+    LastModelForBrand(String, Reply<Option<String>>),
     ListRestoreSessions(Option<String>, bool, Reply<Vec<Session>>),
     MarkAllDormant(Reply<usize>),
     BeadsForSessions(Vec<String>, Reply<HashMap<String, Vec<String>>>),
@@ -198,6 +199,11 @@ impl ChatDb {
 
     pub async fn list_sessions(&self, project_id: Option<String>) -> Result<Vec<Session>, String> {
         self.request(|reply| Command::ListSessions(project_id, reply))
+            .await
+    }
+
+    pub async fn last_model_for_brand(&self, brand: String) -> Result<Option<String>, String> {
+        self.request(|reply| Command::LastModelForBrand(brand, reply))
             .await
     }
 
@@ -632,6 +638,9 @@ fn run(
                 respond(reply, store.update_session(&id, patch, touch_at.as_deref()))
             }
             Command::MarkSpoke(id, at, reply) => respond(reply, store.mark_spoke(&id, &at)),
+            Command::LastModelForBrand(brand, reply) => {
+                respond(reply, store.last_model_for_brand(&brand))
+            }
             Command::ListSessions(project_id, reply) => {
                 respond(reply, store.list_sessions(project_id.as_deref()))
             }

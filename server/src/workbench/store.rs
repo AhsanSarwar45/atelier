@@ -349,6 +349,23 @@ impl Store {
             .optional()
     }
 
+    /// The model this brand was last started on anywhere in this app.
+    ///
+    /// Not scoped to a project on purpose: the thing being remembered is which
+    /// model the person likes to work with on this machine, and a runtime that
+    /// holds one model at a time makes that a property of the machine rather
+    /// than of any one repository.
+    pub fn last_model_for_brand(&self, brand: &str) -> rusqlite::Result<Option<String>> {
+        self.connection
+            .query_row(
+                "SELECT model FROM session WHERE brand = ?1 AND model IS NOT NULL \
+                 ORDER BY COALESCE(last_spoke_at, last_active_at) DESC LIMIT 1",
+                [brand],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+    }
+
     pub fn list_sessions(&self, project_id: Option<&str>) -> rusqlite::Result<Vec<Session>> {
         let (sql, parameter): (&str, Option<&str>) = match project_id {
             Some(project_id) => (
@@ -2579,6 +2596,33 @@ mod tests {
             offered,
             std::collections::HashSet::from(["local-new".to_string()])
         );
+    }
+
+    #[test]
+    fn the_model_a_local_chat_was_last_started_on_is_remembered_across_projects() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+
+        let mut older = session("local-old", "local", None, "2026-09-01T00:00:00Z");
+        older.model = Some("ollama::gemma".into());
+        store.create_session(&older).unwrap();
+
+        // A newer chat in another project still speaks for this machine.
+        let mut newer = session("local-new", "local", None, "2026-09-03T00:00:00Z");
+        newer.model = Some("ollama::qwen".into());
+        newer.project_id = "project-2".into();
+        store.create_session(&newer).unwrap();
+
+        // A chat that never chose one cannot be the answer, however recent.
+        let mut unanswered = session("local-blank", "local", None, "2026-09-04T00:00:00Z");
+        unanswered.model = None;
+        store.create_session(&unanswered).unwrap();
+
+        assert_eq!(
+            store.last_model_for_brand("local").unwrap().as_deref(),
+            Some("ollama::qwen")
+        );
+        assert_eq!(store.last_model_for_brand("goose").unwrap(), None);
     }
 
     #[test]

@@ -575,7 +575,7 @@ impl SessionFactory for NativeProviderFactory {
                 });
             }
 
-            let (session, create) = match found {
+            let (mut session, create) = match found {
                 Some(mut session) => {
                     session.state = "starting".into();
                     (session, false)
@@ -598,11 +598,28 @@ impl SessionFactory for NativeProviderFactory {
             if !create {
                 self.finish_import(&session.id).await;
             }
+            // A new local chat that names no model is not a chat waiting on a
+            // question we have to ask. We can see what the runtime is holding
+            // and what this person last used, and one of those is nearly always
+            // the answer — so pick it, and keep the menu for the case where the
+            // runtime offers nothing at all (bw-u6cl.7).
+            let offered = if create
+                && session.brand == super::local::BRAND
+                && session.model.is_none()
+            {
+                let models = super::local::catalog().await;
+                let remembered = database
+                    .last_model_for_brand(super::local::BRAND.to_string())
+                    .await?;
+                session.model = super::local::preferred_model(&models, remembered.as_deref());
+                Some(models)
+            } else {
+                None
+            };
             let brand = session.brand.clone();
-            if create && brand == super::local::BRAND && session.model.is_none() {
+            if let Some(models) = offered.filter(|_| session.model.is_none()) {
                 database.create_session(session.clone()).await?;
                 append_started(&database, &session, false).await?;
-                let models = super::local::catalog().await;
                 let menu: Event = serde_json::from_value(json!({
                     "type":"session.menu", "sessionId":session.id, "seq":0, "at":now(),
                     "commands":[], "skills":[], "agentDefinitions":[], "agentControls":[],
