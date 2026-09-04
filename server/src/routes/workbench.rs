@@ -987,6 +987,36 @@ async fn provider_sessions_shared(
     rows
 }
 
+/// The same answer, but only if it is already in hand.
+///
+/// A chat's own facts are asked for the moment it is opened, and everything in
+/// them except the branch is already in this app's own records. Waiting for
+/// both providers to list every saved chat before saying any of it put the
+/// whole discovery on the reader's path: measured against the owner's data,
+/// the chat-facts request was the slowest thing on a chat open, and a provider
+/// that has to start an adapter to answer can hold it for the whole eight
+/// seconds discovery is allowed. So the reader is given what is known and the
+/// listing is fetched behind them, for whoever opens next. The folder and the
+/// provider's own name for the chat correct themselves on the next open, which
+/// is within the same page load: the sidebar's own restore asks for the very
+/// same listing at the very same moment (bw-550g.1).
+async fn provider_sessions_in_hand(
+    state: &WorkbenchState,
+    project: Option<&str>,
+    everything: bool,
+) -> Vec<Value> {
+    let key = format!("{}\u{0}{everything}", project.unwrap_or_default());
+    if let Some(rows) = fresh_discovery(&state.discovery_cache, &key).await {
+        return rows;
+    }
+    let behind = state.clone();
+    let project = project.map(str::to_string);
+    tokio::spawn(async move {
+        provider_sessions_shared(&behind, project.as_deref(), everything).await;
+    });
+    Vec::new()
+}
+
 async fn fresh_discovery(
     cache: &tokio::sync::Mutex<HashMap<String, (std::time::Instant, Vec<Value>)>>,
     key: &str,
@@ -1371,8 +1401,9 @@ async fn session(
         .await?
         .ok_or_else(|| ApiError::not_found(format!("no session {id}")))?;
     // Asked on every open, and it used to start an adapter per provider each
-    // time: the shared answer is the one the sidebar just drew from.
-    let known = provider_sessions_shared(&state, Some(&found.project_path), false)
+    // time: the shared answer is the one the sidebar just drew from, and it is
+    // only taken if it is already there (bw-550g.1).
+    let known = provider_sessions_in_hand(&state, Some(&found.project_path), false)
         .await
         .into_iter()
         .find(|known| {
@@ -2393,6 +2424,54 @@ mod tests {
             fresh_discovery(&state.discovery_cache, "/somewhere/else\u{0}false")
                 .await
                 .is_none()
+        );
+    }
+
+    /**
+     * Opening a chat is not held up by a listing that has not come back.
+     *
+     * Everything a chat is opened with is this app's own record of it, save
+     * for the branch, and waiting on two adapters to say what they have saved
+     * put the whole discovery in front of the reader. Held here by taking the
+     * lock the discovery itself takes: what is in hand is used, and what is
+     * still on its way is not waited for (bw-550g.1).
+     */
+    #[tokio::test]
+    async fn native_workbench_chat_facts_do_not_wait_for_a_listing_still_on_its_way() {
+        let (_directory, state) = fixture();
+        let key = "/work/project\u{0}false".to_string();
+        let listed = vec![json!({"brand":"codex","externalId":"thread-1"})];
+        state
+            .discovery_cache
+            .lock()
+            .await
+            .insert(key.clone(), (std::time::Instant::now(), listed.clone()));
+        assert_eq!(
+            provider_sessions_in_hand(&state, Some("/work/project"), false).await,
+            listed,
+            "an answer already in hand is the one used"
+        );
+
+        // Past its window, and with the discovery that would refresh it
+        // already running: the reader must not join that queue.
+        state.discovery_cache.lock().await.insert(
+            key.clone(),
+            (
+                std::time::Instant::now() - DISCOVERY_FRESH - Duration::from_secs(1),
+                listed,
+            ),
+        );
+        let running = state.discovery(&key).await;
+        let _held = running.lock().await;
+        let answered = tokio::time::timeout(
+            Duration::from_secs(2),
+            provider_sessions_in_hand(&state, Some("/work/project"), false),
+        )
+        .await
+        .expect("the chat's facts waited for a listing that had not come back");
+        assert!(
+            answered.is_empty(),
+            "what has not come back is not waited for"
         );
     }
 
