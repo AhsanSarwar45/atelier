@@ -344,6 +344,70 @@ copy is replaced.
 **Worked around.** `ATELIER_BYPASS` with the reason, on a card whose green run
 is recorded on the card itself.
 
+## 8. A land card cannot finish, because finishing means removing the floor it stands on
+
+**Attempted.** `bw-d516.6` and `bw-gao7.3`, the land steps of two finished
+jobs. Their acceptance is one sentence — "The branch and worktree are gone and
+the merge slot is free" — and every branch under both jobs was already an
+ancestor of `ours`. The removals were run from the land card's own worktree,
+which is where the workflow gate says repository changes belong.
+
+**Refused with.** Three times, on three different lines of the same tidying.
+
+```
+Changes require an owned Beads work item in its isolated worktree (resolved target: /home/ahsan/dev/beads-web).
+```
+
+for `git worktree remove worktrees/bw-d516.1` run from the main checkout — the
+natural place, because the paths are the main checkout's. Removing a worktree
+writes to the shared admin directory, so the target resolves there whatever the
+cwd; `../bw-d516.1` from inside the land worktree passes, and the same removal
+of the same directory is refused when spelled from above it.
+
+```
+cannot close bw-gao7.3: assignee is "s-31a18b5b", actor is "AhsanSarwar45"; reclaim or use --force to override
+```
+
+after the land card removed its own worktree. The actor is read from the
+environment the worktree carries; delete the worktree and the same session
+becomes a different person to the board, holding a claim it can no longer act
+on.
+
+```
+Changes require an owned Beads work item in its isolated worktree (resolved target: /home/ahsan/dev/beads-web).
+```
+
+again, for the `bd close` that would have ended it — there was by then no owned
+worktree anywhere to close it from, because closing it required removing the
+last one.
+
+**Why it does not serve the rule.** The rule is that repository changes are
+made from the worktree of the card that owns them. A land card owns exactly
+this change, and it did make it from there. What the gate cannot express is
+that the last removal is reflexive: the card's acceptance is the absence of its
+own workspace, so the state in which it is allowed to act and the state its
+acceptance describes cannot both hold. Every land card on this board meets it,
+which is why finished worktrees pile up — twenty-three of them stood in
+`worktrees/` when this was written, most belonging to jobs long closed.
+
+**Should have happened.** The land step should be able to say what it is: the
+tool that removes a job's workspaces, itself included. Either `board/land` (or
+a `board/tidy` beside it) should do the last removal from outside on the card's
+behalf, so no session has to stand where it is deleting; or the gate should
+recognise a card labelled `step:land` acting on its own job's worktrees and let
+it through from the main checkout, which is the only place the whole set is
+addressable. The actor should also outlive the worktree — a claim that becomes
+unusable the moment its workspace goes is a claim that cannot be released
+truthfully.
+
+**Cost.** Two jobs' land steps, three bypasses, and a close that had to be
+written as `ATELIER_BYPASS=... BEADS_ACTOR=... bd close` to say a true thing.
+Filed as bw-xksa.
+
+**Worked around.** `ATELIER_BYPASS` with the reason on each of the three, and
+`BEADS_ACTOR` restored by hand for the close. The reason given each time was
+that a worktree cannot remove itself.
+
 ## How to add to this file
 
 As in the first book: what was attempted, the refusal text, why the refusal did
