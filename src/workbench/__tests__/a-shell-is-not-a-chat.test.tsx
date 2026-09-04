@@ -22,7 +22,7 @@ import type { Mentions } from '@/components/markdown-body';
 import { AgentView } from '@/workbench/agent-view';
 import { commandRun } from '@/workbench/command-run';
 import { EMPTY, foldAll, reduce, type SessionView } from '@/workbench/fold';
-import type { TerminalRun, WbpEvent } from '@/workbench/protocol';
+import { isOver, type TerminalRun, type WbpEvent } from '@/workbench/protocol';
 
 const AT = '2026-09-04T09:00:00.000Z';
 const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null };
@@ -128,6 +128,26 @@ describe('what a command is read from', () => {
     // The call printed `running 3 tests`; the row's result begins with the
     // same line. One reading, the fuller one, reaches the grid.
     expect(run.output).toBe('running 3 tests\ntest result: ok.');
+  });
+
+  it('does not put the launcher’s exit code under a command still running', () => {
+    // A backgrounded command: the call that launched it returned at once,
+    // exit 0, and the work it started is still going. Read off the pane on
+    // 2026-09-04 — the header said `running` and the terminal in it said
+    // `✓ exit 0`, about the same `sleep 300`.
+    const events = ranACommand(ourTerminal({ command: 'sleep 300', output: '', seconds: 0 })).slice(0, 3);
+    const { agents, items } = view(events);
+    expect(isOver(agents[0]!.state)).toBe(false);
+
+    const { run, outcome } = commandRun(agents[0]!, items, 41);
+
+    expect(run.command).toBe('sleep 300');
+    expect(run.running).toBe(true);
+    // The 0 belongs to whatever put it in the background, not to `sleep 300`.
+    expect(run.exitCode).toBeNull();
+    expect(outcome).toBeNull();
+    // And the clock the row has been keeping, since the call's own is spent.
+    expect(run.seconds).toBe(41);
   });
 
   it('says how a chat that went to sleep left a terminal of ours still running', () => {

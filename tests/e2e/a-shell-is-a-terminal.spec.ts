@@ -149,7 +149,15 @@ test.describe('a shell is a terminal', () => {
       await expect(pane.getByTestId('ran-terminal-command')).toContainText('sleep 300');
       await expect(pane.getByTestId('agent-view-said')).toHaveCount(0);
       await expect(pane.getByTestId('agent-view-relay')).toHaveCount(0);
-      await pane.screenshot({ path: `${SHOTS}/a-shell-is-a-terminal-pane.png` });
+      // Still running, and saying so once. The call that backgrounded it
+      // returned `exit 0` the instant it was made; that code is the
+      // launcher's, and a terminal wearing it under `sleep 300` would
+      // contradict the `running` in its own header.
+      await expect(pane.getByTestId('ran-terminal-running')).toBeVisible();
+      await expect(pane.getByTestId('ran-terminal-exit')).toHaveCount(0);
+      // `animations: 'disabled'` because the pane fades in over the chat, and a
+      // shot taken through it shows the transcript behind the terminal.
+      await pane.screenshot({ path: `${SHOTS}/a-shell-is-a-terminal-pane.png`, animations: 'disabled' });
       await page.getByTestId('agent-view-close').click();
 
       // The row is working, and nothing in the chat will ever say otherwise:
@@ -162,9 +170,14 @@ test.describe('a shell is a terminal', () => {
       const closed = await request.post('/api/workbench/command', { data: { type: 'session.close', sessionId } });
       expect(closed.ok(), await closed.text()).toBe(true);
       await expect(row).toHaveAttribute('data-state', 'stopped', { timeout: SETTLE_MS });
-      await page.getByTestId('sent-away-panel').screenshot({
-        path: `${SHOTS}/a-shell-is-a-terminal-settled.png`,
-      });
+      // Nothing is left in the working list. This is the manager's own screen
+      // in one attribute: eight rows reading "Working" for fifteen hours were
+      // eight rows this count never came down for.
+      const panel = page.getByTestId('sent-away-panel');
+      await expect(panel).toHaveAttribute('data-running', '0');
+      await panel.getByTestId('toggle-stopped-agents').click();
+      await expect(row).toBeVisible();
+      await panel.screenshot({ path: `${SHOTS}/a-shell-is-a-terminal-settled.png` });
 
       // And it stays settled when the chat is read back from the record, which
       // is where the fifteen-hour rows on the manager's own board came from.

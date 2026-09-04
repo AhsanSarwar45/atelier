@@ -108,7 +108,15 @@ export function commandRun(
     // A terminal of ours that still says "running" in a chat that has stopped
     // is a terminal nobody is left to close — the chat that owned it went away
     // (see `nothingIsDriving`). The row knows that; the terminal cannot.
-    return { run: ours, outcome: ours.running && over ? (ended ?? null) : undefined };
+    if (ours.running || over) return { run: ours, outcome: ours.running && over ? (ended ?? null) : undefined };
+    // And the other way round: a finished terminal under a row that is still
+    // working. That is a command sent to the background — the call that
+    // launched it returned at once, and `sleep 300` did not. The code that
+    // call exited with is the launcher's, so putting `exit 0` under a command
+    // that is still running would be the screen telling the reader two
+    // different things at once (measured against Claude, 2026-09-04: the pane
+    // read `running` in its header and `✓ exit 0` on the same terminal).
+    return { run: { ...ours, exitCode: null, signal: null, running: true }, outcome: null };
   }
 
   const command = said(call, 'command') || row.what || call?.title || '';
