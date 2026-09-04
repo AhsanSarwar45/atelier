@@ -679,7 +679,19 @@ impl Store {
             self.connection
                 .query_row(sql, [session_id], |row| row.get::<_, i64>(0))
         };
-        let turns = number("SELECT COUNT(*) FROM event c WHERE session_id=?1 AND type='message.completed' AND EXISTS(SELECT 1 FROM event s WHERE s.session_id=c.session_id AND s.type='message.started' AND json_extract(s.json,'$.messageId')=json_extract(c.json,'$.messageId') AND json_extract(s.json,'$.role')='assistant')")?;
+        // The assistant's message ids are gathered once and the completions
+        // matched against that set. Asking `EXISTS` per completion instead
+        // re-read every started message of the chat for each one, so a chat
+        // with eight thousand turns paid sixty million json reads and held
+        // the one database thread for fifteen seconds — every other read and
+        // every incoming event queued behind it (bw-oion.1).
+        let turns = number(
+            "SELECT COUNT(*) FROM event c WHERE c.session_id=?1 AND c.type='message.completed' \
+             AND json_extract(c.json,'$.messageId') IN ( \
+               SELECT json_extract(json,'$.messageId') FROM event \
+               WHERE session_id=?1 AND type='message.started' \
+                 AND json_extract(json,'$.role')='assistant')",
+        )?;
         let tool_calls =
             number("SELECT COUNT(*) FROM event WHERE session_id=?1 AND type='tool.started'")?;
         let helper_count =
@@ -3145,6 +3157,68 @@ mod tests {
         assert!(store
             .create_session(&session("again", "claude", Some("term-1"), "2026-09-04T00:00:00.000Z"))
             .is_err());
+    }
+
+    /// A turn is counted when a completion answers a started assistant
+    /// message, and counting them reads the started messages once.
+    ///
+    /// The count used to be asked per completion, which re-read the chat's
+    /// whole message history each time; on the owner's heaviest chat that was
+    /// fifteen seconds with the single database thread held shut (bw-oion.1).
+    #[test]
+    fn workbench_core_turns_are_counted_in_one_pass_over_the_started_messages() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        store
+            .create_session(&session("chat", "claude", None, "2026-08-20T00:00:00Z"))
+            .unwrap();
+        let message = |seq: i64, kind: &str, id: &str, role: &str| -> Event {
+            serde_json::from_value(json!({
+                "type": kind, "sessionId": "chat", "seq": seq,
+                "at": "2026-08-20T00:00:00Z", "messageId": id, "role": role
+            }))
+            .unwrap()
+        };
+        for event in [
+            // Two answered turns, each started by the assistant.
+            message(1, "message.started", "m1", "assistant"),
+            message(2, "message.completed", "m1", "assistant"),
+            message(3, "message.started", "m2", "assistant"),
+            message(4, "message.completed", "m2", "assistant"),
+            // What the person said is not a turn of the agent's.
+            message(5, "message.started", "m3", "user"),
+            message(6, "message.completed", "m3", "user"),
+            // A completion whose start never arrived is not counted either.
+            message(7, "message.completed", "m4", "assistant"),
+        ] {
+            assert!(store.append_event(&event).unwrap());
+        }
+
+        assert_eq!(store.token_stats("chat").unwrap().turns, 2);
+
+        // And it is found through the type index rather than by rereading the
+        // chat once per completion.
+        let plan: Vec<String> = store
+            .connection
+            .prepare(
+                "EXPLAIN QUERY PLAN SELECT COUNT(*) FROM event c WHERE c.session_id=?1 \
+                 AND c.type='message.completed' AND json_extract(c.json,'$.messageId') IN ( \
+                   SELECT json_extract(json,'$.messageId') FROM event WHERE session_id=?1 \
+                     AND type='message.started' AND json_extract(json,'$.role')='assistant')",
+            )
+            .unwrap()
+            .query_map(["chat"], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(
+            plan.iter().all(|step| !step.contains("CORRELATED")),
+            "the started messages are read once, not once per completion: {plan:?}"
+        );
+        assert!(
+            plan.iter().any(|step| step.contains("event_by_type")),
+            "both halves are found through the type index: {plan:?}"
+        );
     }
 
     /// The chat list's activity column is read through the type index, from
