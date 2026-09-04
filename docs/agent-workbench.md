@@ -831,6 +831,21 @@ app drives the chat and the chat worked on elsewhere is the one that matters
 most here (bw-dmxj.4). Both halves sort — the sidecar when it builds the list,
 the screen again after the stream has added to it.
 
+**And the order is held still while he is looking at it.** The rows at the top
+are the chats agents are working in, and on this machine that order moves every
+few seconds on its own: measured on 2026-08-20, the top six rows re-ordered
+inside six seconds with nothing clicked, so he aimed at the third row and opened
+the second (bw-khe.5). A row the list has already drawn therefore keeps its
+place while the tab stays open; only what is IN it changes, and a chat the list
+has never shown joins where the fresh order puts it. **The freeze stops at the
+heading over the row.** A row whose block has changed — his own message carried
+it out of yesterday into today, or another program took the chat up — is not
+where it was any more, and holding it there drew TODAY under YESTERDAY on the
+manager's own rail (bw-hgd2); such a row takes the place the fresh order gives
+it, exactly as a row nobody has seen does. This costs the freeze nothing it was
+bought for: the rows that moved under his hand were rows an AGENT was writing
+in, and those keep one heading all day.
+
 **It keeps up without a reload.** The set of held conversations is its own frame
 on the watch stream, sent when the stream opens and again whenever it changes,
 the whole set each time: it is one entry per running chat on the machine, and a

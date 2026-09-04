@@ -96,6 +96,20 @@ export function clockTime(iso: string): string {
 export const OPEN_ELSEWHERE = 'Open elsewhere';
 
 /**
+ * The block a row is drawn under: who has it, or else the day he last spoke in
+ * it.
+ *
+ * One answer, read by the two things that must agree about it — the blocks the
+ * list is drawn in, and the freeze that decides where a row sits (holdStill).
+ * They disagreed, and a row he spoke in this morning stayed at yesterday's
+ * place while its heading turned into today's, so the rail read YESTERDAY over
+ * seven rows and TODAY over one below them (bw-hgd2).
+ */
+export function headingOf(row: RestoreRow, now = new Date()): string {
+  return row.runningElsewhere ? OPEN_ELSEWHERE : dayHeading(whenHeSpoke(row), now);
+}
+
+/**
  * Rows in the order given, split into the blocks they are drawn under, without
  * reordering them.
  *
@@ -119,7 +133,7 @@ export const OPEN_ELSEWHERE = 'Open elsewhere';
 export function groupRows(rows: RestoreRow[], now = new Date()): { heading: string; rows: RestoreRow[] }[] {
   const groups: { heading: string; rows: RestoreRow[] }[] = [];
   for (const row of rows) {
-    const heading = row.runningElsewhere ? OPEN_ELSEWHERE : dayHeading(whenHeSpoke(row), now);
+    const heading = headingOf(row, now);
     const already = groups.find((g) => g.heading === heading);
     if (already) already.rows.push(row);
     else groups.push({ heading, rows: [row] });
@@ -129,6 +143,17 @@ export function groupRows(rows: RestoreRow[], now = new Date()): { heading: stri
 
 function rowKey(row: RestoreRow): string {
   return row.sessionId ?? `ext:${row.externalId}`;
+}
+
+/** A row as the list last drew it: which row, and which block it was in. */
+export interface SettledRow {
+  key: string;
+  heading: string;
+}
+
+/** What the list drew, in the form the next render holds it to. */
+export function asSettled(rows: RestoreRow[], now = new Date()): SettledRow[] {
+  return rows.map((row) => ({ key: rowKey(row), heading: headingOf(row, now) }));
 }
 
 /**
@@ -147,10 +172,25 @@ function rowKey(row: RestoreRow): string {
  * gives it, just below whichever row it now follows, so a chat begun elsewhere
  * still arrives on its own. The order settles again the next time the list is
  * opened, which is the one moment he is not pointing at it.
+ *
+ * A row is held still under the heading it was drawn under, and no further. A
+ * chat he last spoke in yesterday and speaks in again this morning has left
+ * that block: its day is today, and holding its place kept it among yesterday's
+ * rows while the heading over it read today, so the rail drew TODAY below
+ * YESTERDAY (bw-hgd2). Such a row is not where it was any more, so it takes the
+ * place the fresh order gives it, exactly as a row the list has never shown
+ * does — and the same for a chat somebody has taken up in a terminal, which
+ * belongs in the block at the top and cannot open a second one halfway down.
+ *
+ * This costs the freeze nothing it was bought for. The rows that moved under
+ * his hand were rows an AGENT was writing in, and those keep one heading all
+ * day; the move let out here is the one he made himself, in the chat he is
+ * looking at, one row at a time.
  */
-export function holdStill(fresh: RestoreRow[], settled: readonly string[]): RestoreRow[] {
+export function holdStill(fresh: RestoreRow[], settled: readonly SettledRow[], now = new Date()): RestoreRow[] {
   if (settled.length === 0) return fresh;
-  const rank = new Map(settled.map((key, i) => [key, i]));
+  const rank = new Map(settled.map((row, i) => [row.key, i]));
+  const drawnUnder = new Map(settled.map((row) => [row.key, row.heading]));
 
   // Each newcomer remembers which known row it arrived behind, so its place is
   // the fresh order's answer expressed in rows rather than in positions.
@@ -159,7 +199,7 @@ export function holdStill(fresh: RestoreRow[], settled: readonly string[]): Rest
   let behind: string | null = null;
   for (const row of fresh) {
     const key = rowKey(row);
-    if (rank.has(key)) {
+    if (rank.has(key) && drawnUnder.get(key) === headingOf(row, now)) {
       held.push(row);
       behind = key;
       continue;
@@ -349,13 +389,13 @@ export function ChatSidebar({
   const outOfStep = useHelperMismatch();
   // The order as it was last drawn. Read while rendering and written after, so
   // what he is pointing at is what decides where the rows go (holdStill).
-  const settled = useRef<string[]>([]);
+  const settled = useRef<SettledRow[]>([]);
   const rows = useMemo(
     () => holdStill(withLive(fetched, live, projectId, running, holds, heldFactsAreOld), settled.current),
     [fetched, live, projectId, running, holds, heldFactsAreOld],
   );
   useEffect(() => {
-    settled.current = rows.map(rowKey);
+    settled.current = asSettled(rows);
   }, [rows]);
   const [busy, setBusy] = useState<string | null>(null);
   const [ending, setEnding] = useState<string | null>(null);

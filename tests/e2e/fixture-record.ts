@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -511,6 +511,111 @@ export function writeChatWithHelper(opts: {
     calls,
     spend: { own, helpers: sentAway, total: own + sentAway },
     sendsOff,
+    remove: () => {
+      rmSync(path, { force: true });
+      rmSync(join(dir, sessionId), { recursive: true, force: true });
+    },
+  };
+}
+
+/**
+ * One chat on disk, dated when it happened, and a way to speak into it again
+ * while somebody is looking at the list.
+ *
+ * What a case about the DAYS over the list needs: a conversation whose clock is
+ * yesterday's — both clocks, what he said in it and the file's own, because a
+ * row is dated by whichever of the two the sidecar can read — and then one
+ * message said into it this morning, from outside the app, exactly as a chat
+ * resumed in a terminal is (bw-hgd2).
+ */
+export interface DatedChat {
+  /** The conversation's own id, which is what a row is found by. */
+  sessionId: string;
+  /** The chat's own file. */
+  path: string;
+  /** What the row is named, so a case can read it off the screen. */
+  name: string;
+  /** He speaks in it again, now. The record grows; nothing is reloaded. */
+  saysAgain(text?: string): void;
+  /** And the agent answers him, which is the next thing to reach the record. */
+  agentAnswers(text?: string): void;
+  /** Everything written, so a run can take it away again. */
+  remove: () => void;
+}
+
+export function writeChatSpokenAt(opts: {
+  cwd: string;
+  sessionId: string;
+  /** When he last spoke in it, which is the clock the list runs on. */
+  at: Date;
+  /** What the row is called. Written as the kit writes a chat's own name. */
+  name: string;
+  branch?: string;
+}): DatedChat {
+  const { cwd, sessionId, at, name } = opts;
+  const branch = opts.branch ?? 'main';
+  const dir = join(configDir(), 'projects', projectSlug(cwd));
+  const path = join(dir, `${sessionId}.jsonl`);
+  mkdirSync(dir, { recursive: true });
+
+  const said = (n: number, when: Date, extra: Record<string, unknown>): Record<string, unknown> => ({
+    sessionId,
+    cwd,
+    gitBranch: branch,
+    version: '2.1.237',
+    userType: 'external',
+    timestamp: when.toISOString(),
+    parentUuid: n === 1 ? null : `dated-${sessionId}-u${n - 1}`,
+    uuid: `dated-${sessionId}-u${n}`,
+    ...extra,
+  });
+
+  const rows = [
+    { type: 'ai-title', aiTitle: name },
+    said(1, at, { type: 'user', message: { role: 'user', content: `${name}, said out loud so the row has words in it.` } }),
+    said(2, new Date(at.getTime() + 2000), {
+      type: 'assistant',
+      message: {
+        id: `msg_dated_${sessionId}`,
+        model: 'claude-opus-5',
+        role: 'assistant',
+        usage: SPENT,
+        content: [{ type: 'text', text: 'Noted.' }],
+      },
+    }),
+  ];
+  writeFileSync(path, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  // The file's own clock too: a row is dated by what he said in it where that
+  // can be read, and by when the record last moved where it cannot.
+  utimesSync(path, at, at);
+
+  let more = 2;
+  return {
+    sessionId,
+    path,
+    name,
+    saysAgain: (text = 'And one more thing this morning.'): void => {
+      more += 1;
+      appendFileSync(path, JSON.stringify(said(more, new Date(), { type: 'user', message: { role: 'user', content: text } })) + '\n');
+    },
+    agentAnswers: (text = 'On it.'): void => {
+      more += 1;
+      appendFileSync(
+        path,
+        JSON.stringify(
+          said(more, new Date(), {
+            type: 'assistant',
+            message: {
+              id: `msg_dated_${sessionId}_${more}`,
+              model: 'claude-opus-5',
+              role: 'assistant',
+              usage: SPENT,
+              content: [{ type: 'text', text }],
+            },
+          }),
+        ) + '\n',
+      );
+    },
     remove: () => {
       rmSync(path, { force: true });
       rmSync(join(dir, sessionId), { recursive: true, force: true });
