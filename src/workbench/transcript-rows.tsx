@@ -35,7 +35,6 @@ import { diffLines } from '@/workbench/line-diff';
 import { opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
 import { lookOf, markOf } from '@/workbench/machine-look';
 import { PictureGrid } from '@/workbench/picture-grid';
-import { RanTerminal } from '@/workbench/ran-terminal';
 import { withoutProposedPlans } from '@/workbench/proposed-plan';
 import { ImageComparisonView } from '@/workbench/image-comparison';
 import { comparisonSpecs } from '@/workbench/chat-media';
@@ -603,29 +602,10 @@ export const ToolRow = memo(function ToolRow({
         {open && (
           <>
             <Body label={shell ? 'ran' : 'asked'} text={asked} testId="tool-input" language={tongue.asked} />
-            {/* A command's own output belongs in a terminal and not in a
-                paragraph: it is bytes with escape sequences in them, and a
-                `<pre>` draws a build's colours as `[0;31m` and a test
-                runner's rewritten progress line as forty stacked copies of
-                itself. Only when this app ran the command itself — an ACP
-                terminal — is there anything to draw; anything else still has
-                only the words the provider sent (bw-t26l.20). */}
-            {item.terminal ? null : (
-              <Body label="printed" text={shown.output ?? ''} testId="tool-output" language={tongue.printed} />
-            )}
+            <Body label="printed" text={shown.output ?? ''} testId="tool-output" language={tongue.printed} />
           </>
         )}
       </Panel>
-      {/* The command this call IS, when the call is a command this app ran.
-          Under the row rather than behind its click, and drawn whether or not
-          the row is open: what a command printed is the answer, in the way a
-          file's diff is, and it was the thing hardest to reach on the whole
-          screen (bw-t26l.20). */}
-      {item.terminal && (
-        <div className="pt-1">
-          <RanTerminal run={item.terminal} rows={open ? 20 : 10} />
-        </div>
-      )}
       {/* Where the call touched, in the agent's own words rather than guessed
           out of its arguments. A search that looked in six files said nothing
           about any of them; the chips are clickable, the same as everywhere

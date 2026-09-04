@@ -1,6 +1,13 @@
 /**
- * A command a real agent ran, drawn as the terminal that ran it, and work a
- * real chat left behind, settled when that chat goes to sleep (bw-t26l.20).
+ * A command a real agent ran, drawn as the terminal that ran it when it is
+ * OPENED, and work a real chat left behind, settled when that chat goes to
+ * sleep (bw-t26l.20, bw-sb5g.3).
+ *
+ * The conversation itself is not where this lives. A terminal under every
+ * command row turned a transcript of a day's work into a wall of black
+ * rectangles, and the manager asked for it back the way it was: the shell's
+ * own screen is the panel its row opens, and the transcript draws a command
+ * the way it draws every other call.
  *
  * Against a live provider, because both promises are about what a provider
  * actually sends. The exit code on the row is one this side never invented:
@@ -68,55 +75,6 @@ test.describe('a shell is a terminal', () => {
       url.searchParams.set('include_test', 'true');
       await route.continue({ url: url.toString() });
     });
-  });
-
-  test('a command in the transcript is drawn with its output and its exit code', async ({ page, request }) => {
-    let project: Project | undefined;
-    try {
-      project = await createProject(request, 'inline');
-      const sessionId = await startSession(request, project);
-      await page.goto(`/project?id=${project.id}&tab=chat&chat=${sessionId}`);
-      await page.getByTestId('chat-tab').waitFor({ timeout: 120_000 });
-
-      // A command that paints and then fails. Both halves matter: the escapes
-      // prove the output reached a terminal parser rather than a paragraph,
-      // and the code proves the row can say how a command ended.
-      await say(
-        request,
-        sessionId,
-        'Run exactly one Bash command, verbatim: printf \'\\033[31mFAIL\\033[0m one case\\n\'; exit 3\n' +
-          'It is supposed to fail. Do not try to fix it, do not run any other command, and do not read any file. ' +
-          'Then reply exactly SHELL DONE.',
-      );
-      await expect(page.getByTestId('assistant-message').last()).toContainText('SHELL DONE', { timeout: SETTLE_MS });
-
-      const terminal = page.getByTestId('ran-terminal').first();
-      await expect(terminal).toBeVisible({ timeout: SETTLE_MS });
-      await expect(terminal.getByTestId('ran-terminal-command')).toContainText('printf');
-      // A number, and a failing one. Not `exit 3` exactly: the code on the row
-      // is the one the PROVIDER reported for the call, and Claude's shell
-      // wrapper reports its own (it answered 1 for this command on 2026-09-04,
-      // while printing `Exit code 3` in the output). Which number it reports
-      // is its business; that a number reaches the row at all is this app's,
-      // and before this none ever did.
-      await expect(terminal.getByTestId('ran-terminal-exit')).toHaveText(/exit [1-9][0-9]*/);
-      // The escapes were parsed rather than printed: the grid holds the word
-      // and not the `[31m` in front of it.
-      await expect(terminal.getByTestId('ran-terminal-grid')).toContainText('FAIL');
-      await expect(terminal.getByTestId('ran-terminal-grid')).not.toContainText('[31m');
-
-      await terminal.screenshot({ path: `${SHOTS}/a-shell-is-a-terminal-row.png` });
-
-      // And it is still a terminal after a reload: it is read from the record,
-      // not held in a browser that happened to watch it run.
-      await page.reload();
-      await page.getByTestId('chat-tab').waitFor({ timeout: 120_000 });
-      const back = page.getByTestId('ran-terminal').first();
-      await expect(back.getByTestId('ran-terminal-exit')).toHaveText(/exit [1-9][0-9]*/, { timeout: SETTLE_MS });
-      await expect(back.getByTestId('ran-terminal-grid')).toContainText('FAIL');
-    } finally {
-      if (project) await request.delete(`/api/projects/${project.id}`);
-    }
   });
 
   test('a background command opens as a terminal, and stops when its chat sleeps', async ({ page, request }) => {
