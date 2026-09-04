@@ -162,6 +162,57 @@ pub fn needs_signing_in(detail: &str) -> Value {
     })
 }
 
+/// What a chat is doing, in the words of the condition standing over it.
+///
+/// Twin of `providerMessageStatus` (`src/workbench/provider-messages.ts`), and
+/// it has to be a twin: the live screen reads the condition and says this for
+/// itself, but a chat opened fresh is read off the state the driver wrote down,
+/// and the two must not disagree about the same chat.
+///
+/// They did. Every failed turn published `errored` / `Failed` whatever had gone
+/// wrong, so a chat stopped by its own session limit — with the limit notice on
+/// the page saying so, and the time it lifts beside it — sat in the list as
+/// `Failed`, which reads as a chat that broke rather than one that is waiting
+/// (bw-d516). A failure nothing can name still says `Failed`, because there
+/// that is the truth.
+pub fn standing(signal: &Value) -> (&'static str, &'static str) {
+    let state = match signal["severity"].as_str() {
+        Some("blocking") => "stopped",
+        Some("info") | Some("warning") => "running_tool",
+        _ => "errored",
+    };
+    let word = match signal["kind"].as_str().unwrap_or_default() {
+        "usage_limit" => "Limit reached",
+        "rate_limit" => "Rate limited",
+        "authentication" => "Sign-in required",
+        "authorization" => "Not allowed",
+        "service_unavailable" => "Provider unavailable",
+        "network" => "Connection lost",
+        "provider_error" => "Provider failed",
+        "retrying" => "Retrying",
+        "interrupted" => "Interrupted",
+        "model_unavailable" => "Model unavailable",
+        "context_limit" => "Context full",
+        "refusal" => "Declined",
+        "turn_limit" => "Stopped short",
+        _ => "Provider problem",
+    };
+    (state, word)
+}
+
+/// Which of two conditions standing at once the chat wears.
+///
+/// The same order the screen sorts by: what stops the chat outranks what only
+/// spoiled the turn.
+pub fn loudness(signal: &Value) -> u8 {
+    match signal["severity"].as_str() {
+        Some("blocking") => 4,
+        Some("error") => 3,
+        Some("warning") => 2,
+        _ => 1,
+    }
+}
+
 pub fn resolved(kind: &str) -> Value {
     json!({"id":format!("condition:{kind}"),"kind":kind,"phase":"resolved","severity":"info","scope":"turn"})
 }

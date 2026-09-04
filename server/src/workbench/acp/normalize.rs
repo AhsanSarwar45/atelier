@@ -1957,11 +1957,24 @@ impl AcpNormalizer {
                 json!({"type":"error","message":said,"fatal":false,"source":"acp"}),
             ));
         }
+        // The word the chat wears is the condition's, not a blanket `Failed`:
+        // a turn stopped by a session limit reads as one waiting, with the
+        // notice on the page saying when it lifts. Written here as well as
+        // read live, because a chat opened fresh is read off what was written
+        // (bw-d516).
+        let (state, label) = events
+            .iter()
+            .filter(|event| matches!(event.kind, EventKind::ProviderMessage))
+            .filter_map(|event| event.fields.get("signal"))
+            .filter(|signal| signal["phase"] == "active")
+            .max_by_key(|signal| crate::workbench::provider_messages::loudness(signal))
+            .map(crate::workbench::provider_messages::standing)
+            .unwrap_or(("errored", "Failed"));
         events.push(self.envelope(
             session_id,
             provider,
             &raw,
-            json!({"type":"session.state","state":"errored","label":"Failed"}),
+            json!({"type":"session.state","state":state,"label":label}),
         ));
         events
     }
@@ -2036,6 +2049,12 @@ mod tests {
         // The message the notice stands in for, so the projection can take the
         // provider's own sentence off the page.
         assert!(signal["signal"]["sourceMessageId"].is_string());
+
+        // And the chat wears the limit's own word, so the list agrees with the
+        // notice on the page instead of calling it a chat that broke.
+        let state = serde_json::to_value(&events[2]).unwrap();
+        assert_eq!(state["state"], "stopped");
+        assert_eq!(state["label"], "Limit reached");
     }
 
     /// A failure the app cannot name is still the reader's only account of it.
@@ -2052,6 +2071,10 @@ mod tests {
             serde_json::to_value(&events[0]).unwrap()["message"],
             "the pipe closed"
         );
+        // Nothing named it, so `Failed` is the honest word and it stands.
+        let state = serde_json::to_value(&events[1]).unwrap();
+        assert_eq!(state["state"], "errored");
+        assert_eq!(state["label"], "Failed");
     }
 
     /// A provider that wants signing in says so in its code, and is read there.
@@ -2077,6 +2100,9 @@ mod tests {
         let signal = serde_json::to_value(&events[0]).unwrap();
         assert_eq!(signal["signal"]["kind"], "authentication");
         assert_eq!(signal["signal"]["severity"], "blocking");
+        let state = serde_json::to_value(&events[1]).unwrap();
+        assert_eq!(state["state"], "stopped");
+        assert_eq!(state["label"], "Sign-in required");
 
         // And with nothing said beside the code, the reader is still told what
         // to do rather than shown an empty box.
