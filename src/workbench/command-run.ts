@@ -100,7 +100,10 @@ export function commandRun(
   const over = isOver(row.state);
   const ended = ENDED[row.state];
 
-  const ours = call?.terminal;
+  const told = call?.terminal;
+  // A terminal reported by an agent that ran the shell itself carries no
+  // clock, and this row has one. Ours carries its own and keeps it.
+  const ours = told && told.seconds <= 0 ? { ...told, seconds } : told;
   if (ours) {
     // A terminal of ours that still says "running" in a chat that has stopped
     // is a terminal nobody is left to close — the chat that owned it went away

@@ -163,7 +163,14 @@ fn initialize_request(live: bool) -> Result<UntypedMessage, agent_client_protoco
     // so it is stated in both places: under `_meta` where the protocol says an
     // extension lives, and beside the real capabilities where the shipped
     // adapter looks for it (bw-t26l.20).
-    let mut meta = json!({"subagent-transcript": true, "subagents": {}});
+    // `terminal_output` is the other half of ACP's own terminals, for a
+    // provider that runs the shell itself rather than asking this client to.
+    // Said, a command's tool call arrives as `{"type":"terminal"}` with the
+    // bytes and the exit code beside it under `_meta`; unsaid, it arrives as a
+    // paragraph of text with no exit code in it, which is what the screen used
+    // to draw a shell from (bw-t26l.20).
+    let mut meta =
+        json!({"subagent-transcript": true, "subagents": {}, "terminal_output": true});
     if live {
         meta["jetbrains"] =
             json!({"air": {"version":1,"capabilities":["nativeSubagentSessions"]}});

@@ -403,6 +403,49 @@ async fn copy_output(mut reader: impl AsyncRead + Unpin, output: Arc<Mutex<Outpu
     }
 }
 
+/// A terminal the AGENT is holding, as it told us about it in the same update.
+///
+/// ACP's terminals are the client's: the agent asks us to run the command, so
+/// we can read it back whenever the screen needs it. A provider that runs its
+/// own shell cannot be asked — only the process holding it can read it — so it
+/// sends the bytes and the exit status beside the tool call instead, under
+/// `_meta`, which is where ACP puts an extension. The bundled Claude adapter
+/// does exactly that, and only once the client has said it can read a terminal
+/// block at all.
+///
+/// It is second-hand, and the difference shows: no working directory, and no
+/// clock we trust, because both would be this side guessing about a process it
+/// never started. What it does carry is the two things that matter most — what
+/// the command printed, bytes and escapes intact, and the code it exited with
+/// (bw-t26l.20).
+fn told_terminal(update: &Value, id: &str) -> Option<TerminalRun> {
+    let meta = &update["_meta"];
+    let printed = &meta["terminal_output"];
+    let exit = &meta["terminal_exit"];
+    let named = |row: &Value| row["terminal_id"].as_str() == Some(id);
+    if !named(printed) && !named(exit) {
+        return None;
+    }
+    let ended = named(exit);
+    Some(TerminalRun {
+        command: update["rawInput"]["command"]
+            .as_str()
+            .or_else(|| update["title"].as_str())
+            .unwrap_or_default()
+            .to_string(),
+        cwd: String::new(),
+        output: printed["data"].as_str().unwrap_or_default().to_string(),
+        truncated: false,
+        exit_code: exit["exit_code"]
+            .as_i64()
+            .and_then(|code| u32::try_from(code).ok()),
+        signal: exit["signal"].as_str().map(str::to_string),
+        // Not ours to count: this side never saw it start.
+        seconds: 0.0,
+        running: !ended,
+    })
+}
+
 /// A `session/update` with every terminal it points at read into it.
 ///
 /// ACP lets a tool call carry `{"type":"terminal","terminalId":…}` in place of
@@ -423,7 +466,13 @@ pub async fn with_terminal_output(io: &ClientIo, raw: &Value) -> Value {
     let mut filled = Vec::with_capacity(rows.len());
     for row in rows {
         let read = match (row["type"].as_str(), row["terminalId"].as_str()) {
-            (Some("terminal"), Some(id)) => io.terminal_snapshot(id).await,
+            // Ours first, because ours is first-hand. A terminal we did not
+            // open is one the agent is holding, and the only account of it is
+            // the one it sent with the update.
+            (Some("terminal"), Some(id)) => match io.terminal_snapshot(id).await {
+                Some(run) => Some(run),
+                None => told_terminal(&raw["update"], id),
+            },
             _ => None,
         };
         match read {
@@ -603,5 +652,56 @@ mod tests {
             .as_str()
             .expect("a closed terminal is a sentence, not a silence");
         assert!(text.contains("terminal is closed"), "{text}");
+    }
+
+    /// A provider that runs the shell itself still draws as a terminal.
+    ///
+    /// It cannot be asked to read its terminal back — the process is its, not
+    /// this one's — so it sends what the command printed and the code it
+    /// exited with beside the tool call, under `_meta`, which is where ACP
+    /// puts an extension. Read from there, a Claude command has an exit code
+    /// on its row for the first time; unread, the whole block was a terminal
+    /// nobody could open and the row said "this command's terminal is closed"
+    /// about a command that had just finished in front of the reader
+    /// (bw-t26l.20).
+    #[tokio::test]
+    async fn a_terminal_the_agent_is_holding_is_read_from_what_it_sent() {
+        let workspace = tempfile::tempdir().unwrap();
+        let io = ClientIo::new(workspace.path().to_path_buf()).unwrap();
+        io.set_session("session-1").await;
+
+        let update = json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed",
+            "title":"npm test","rawInput":{"command":"npm test -- --run"},
+            "content":[{"type":"terminal","terminalId":"call-1"}],
+            "_meta":{
+                "terminal_info":{"terminal_id":"call-1"},
+                "terminal_output":{"terminal_id":"call-1","data":"\u{1b}[31mFAIL\u{1b}[0m one case\n"},
+                "terminal_exit":{"terminal_id":"call-1","exit_code":1,"signal":null}
+            }
+        }});
+        let block = &with_terminal_output(&io, &update).await["update"]["content"][0];
+        assert_eq!(block["type"], "terminal");
+        assert_eq!(block["command"], "npm test -- --run");
+        assert_eq!(block["exitCode"], 1);
+        assert_eq!(block["running"], false);
+        // The escapes survive: a red FAIL is drawn red by the same parser that
+        // draws it red in a terminal, and is not `[31m` sprayed through a
+        // paragraph.
+        assert!(block["output"].as_str().unwrap().contains("\u{1b}[31m"));
+        // Two things this side would only be guessing at, left unsaid rather
+        // than made up: where it ran, and how long it took.
+        assert_eq!(block["cwd"], "");
+        assert_eq!(block["seconds"], 0.0);
+
+        // While it is still going there is no exit yet, and the row says so.
+        let mut running = update.clone();
+        running["update"]["_meta"]
+            .as_object_mut()
+            .unwrap()
+            .remove("terminal_exit");
+        let block = &with_terminal_output(&io, &running).await["update"]["content"][0];
+        assert_eq!(block["running"], true);
+        assert_eq!(block["exitCode"], Value::Null);
     }
 }

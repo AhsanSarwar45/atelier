@@ -1430,6 +1430,17 @@ impl AcpNormalizer {
                     self.tool_pictures.remove(&id);
                     let output = Self::display_text(&update["rawOutput"]);
                     let output = if output.is_empty() { summary.clone() } else { output };
+                    // A command whose answer is its terminal has no words of
+                    // its own left over: the screen reads the terminal, but
+                    // everything else that ever asks what this call printed --
+                    // search, a summary, a reader who folds the row open --
+                    // asks for `output`, and would have been told nothing
+                    // (bw-t26l.20).
+                    let output = if output.is_empty() {
+                        terminal["output"].as_str().unwrap_or_default().to_string()
+                    } else {
+                        output
+                    };
                     let mut events = refinements;
                     events.extend(diffs);
                     events.extend(pictures);

@@ -191,10 +191,15 @@ export function RanTerminal({
             <span className="truncate">{run.cwd}</span>
           </span>
         )}
-        <span className="flex shrink-0 items-center gap-1">
-          <Clock className="h-3 w-3" aria-hidden="true" />
-          {forHowLong(run.seconds)}
-        </span>
+        {/* Only when somebody counted. A provider that ran the shell itself
+            never said how long it took, and `0s` under a build that took four
+            minutes is worse than no clock at all. */}
+        {run.seconds > 0 && (
+          <span className="flex shrink-0 items-center gap-1" data-testid="ran-terminal-for">
+            <Clock className="h-3 w-3" aria-hidden="true" />
+            {forHowLong(run.seconds)}
+          </span>
+        )}
         {ended ? (
           <span
             data-testid="ran-terminal-exit"
