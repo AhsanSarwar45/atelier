@@ -128,6 +128,22 @@ pub struct Command {
     pub fields: Map<String, Value>,
 }
 
+impl Command {
+    /// One field of a command, or null when the browser did not send it.
+    ///
+    /// `fields["takeover"]` reads well and panics: `serde_json::Map` indexing
+    /// is defined to panic on a key that is not there, unlike `Value` indexing,
+    /// which answers null. Every field here comes off the wire, so an omitted
+    /// optional field — an older tab, a command written by hand — killed the
+    /// worker thread handling it and hung up the socket mid-request. The
+    /// browser saw a dropped connection where the answer should have been
+    /// (bw-t26l.22).
+    pub fn at(&self, field: &str) -> &Value {
+        const NOTHING: &Value = &Value::Null;
+        self.fields.get(field).unwrap_or(NOTHING)
+    }
+}
+
 /// One durable event in a chat's append-only event stream.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Event {

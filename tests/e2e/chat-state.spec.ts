@@ -435,7 +435,18 @@ test.describe('a chat another program is in', () => {
       const below = onRow.box.y + onRow.box.height - onRow.word.bottom;
       expect(above, 'the word on the row chip touches its top edge').toBeGreaterThan(0);
       expect(below, 'the word on the row chip touches its bottom edge').toBeGreaterThan(0);
-      expect(Math.abs(above - below), `the row word sits ${above}px from the top and ${below}px from the bottom`).toBeLessThanOrEqual(1);
+      // What is measured here is the LINE box, and a chip nudges its label one
+      // pixel down inside that box on purpose: a font's ascent and descent are
+      // not symmetric about the cap height and the baseline, so letters whose
+      // line box is centred are drawn a pixel high (badge.tsx, bw-s5op.1). So
+      // the line box is expected to sit off-centre by exactly that pixel, and
+      // to sit off-centre DOWNWARDS. Asking for symmetry here asks the chip to
+      // undo the correction and put the letters back above the middle.
+      const nudged = above - below;
+      expect(nudged, `the row word sits ${above}px from the top and ${below}px from the bottom`)
+        .toBeGreaterThan(0);
+      expect(nudged, `the row word is nudged ${nudged / 2}px down, not the one pixel the chip means`)
+        .toBeLessThanOrEqual(3);
 
       // The mark beside the name is the other half of what he compared, and it
       // sits on the name's line rather than the chip's, so what is asked of it

@@ -2461,7 +2461,7 @@ impl AcpDriver {
                 validate_offered_command(
                     &self.database,
                     &self.session.id,
-                    command.fields["text"].as_str().unwrap_or_default(),
+                    command.at("text").as_str().unwrap_or_default(),
                 )
                 .await?;
                 let content = prompt_content(command, self.takes_pictures.load(Ordering::SeqCst))?;
@@ -2472,15 +2472,15 @@ impl AcpDriver {
                     .map(Vec::as_slice)
                     .unwrap_or(&[]);
                 self.submit_user_turn(
-                    command.fields["text"].as_str().unwrap_or_default(),
+                    command.at("text").as_str().unwrap_or_default(),
                     images,
                     content,
                 )
                 .await
             }
             CommandKind::AskAnswer => {
-                let id = command.fields["askId"].as_str().unwrap_or_default();
-                let option = command.fields["optionId"].as_str().unwrap_or_default();
+                let id = command.at("askId").as_str().unwrap_or_default();
+                let option = command.at("optionId").as_str().unwrap_or_default();
                 if self.permissions.is_pending(id).await {
                     self.permissions.answer(id, option).await?;
                 } else if self.elicitations.is_pending(id).await {
@@ -2496,7 +2496,7 @@ impl AcpDriver {
                 Ok(json!({"ok":true}))
             }
             CommandKind::QuestionAnswer => {
-                let id = command.fields["requestId"].as_str().unwrap_or_default();
+                let id = command.at("requestId").as_str().unwrap_or_default();
                 let (custom_fields, native_questions) =
                     self.elicitations.question_shape(id).await?;
                 let answers = command
@@ -2515,7 +2515,7 @@ impl AcpDriver {
                 Ok(json!({"ok":true}))
             }
             CommandKind::PlanRespond => {
-                let id = command.fields["proposalId"].as_str().unwrap_or_default();
+                let id = command.at("proposalId").as_str().unwrap_or_default();
                 let response = command.fields.get("response").unwrap_or(&Value::Null);
                 let action = response["actionId"]
                     .as_str()
@@ -2573,12 +2573,12 @@ impl AcpDriver {
             CommandKind::SessionMode => {
                 let value = mode_to_acp(
                     self.brand,
-                    command.fields["mode"].as_str().unwrap_or_default(),
+                    command.at("mode").as_str().unwrap_or_default(),
                 );
                 self.control(|reply| Control::Mode { value, reply }).await
             }
             CommandKind::SessionModel => {
-                let value = command.fields["model"].clone();
+                let value = command.at("model").clone();
                 self.control(|reply| Control::Config {
                     target: ConfigTarget::Model,
                     value,
@@ -2587,7 +2587,7 @@ impl AcpDriver {
                 .await
             }
             CommandKind::SessionEffort => {
-                let value = command.fields["effort"].clone();
+                let value = command.at("effort").clone();
                 self.control(|reply| Control::Config {
                     target: ConfigTarget::Effort,
                     value,
@@ -2596,7 +2596,7 @@ impl AcpDriver {
                 .await
             }
             CommandKind::SessionCollaborationMode => {
-                let value = command.fields["mode"].clone();
+                let value = command.at("mode").clone();
                 self.control(|reply| Control::Config {
                     target: ConfigTarget::Collaboration,
                     value,
@@ -2605,7 +2605,7 @@ impl AcpDriver {
                 .await
             }
             CommandKind::SessionConfigOption => {
-                let key = command.fields["configId"]
+                let key = command.at("configId")
                     .as_str()
                     .filter(|key| !key.is_empty())
                     .ok_or_else(|| "configId is required".to_string())?
@@ -2623,7 +2623,7 @@ impl AcpDriver {
                 .await
             }
             CommandKind::AgentStop | CommandKind::AgentPark => {
-                let agent_id = command.fields["agentId"].as_str().unwrap_or_default();
+                let agent_id = command.at("agentId").as_str().unwrap_or_default();
                 if agent_id.is_empty() {
                     return Err("agentId is required".into());
                 }
@@ -2655,8 +2655,8 @@ impl AcpDriver {
                 Ok(result)
             }
             CommandKind::AgentSay => {
-                let agent_id = command.fields["agentId"].as_str().unwrap_or_default();
-                let text = command.fields["text"].as_str().unwrap_or_default();
+                let agent_id = command.at("agentId").as_str().unwrap_or_default();
+                let text = command.at("text").as_str().unwrap_or_default();
                 if agent_id.is_empty() || text.trim().is_empty() {
                     return Err("agentId and text are required".into());
                 }

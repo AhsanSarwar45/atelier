@@ -709,7 +709,7 @@ impl WorkbenchRegistry {
             CommandKind::PromptSend
                 if !self.has_driver(Self::field(command, "sessionId")?).await =>
             {
-                if command.fields["takeover"] == true {
+                if command.at("takeover") == &json!(true) {
                     self.take_over(command).await?;
                 } else {
                     self.refuse_external_owner(command).await?;
@@ -779,7 +779,7 @@ mod tests {
         fn launch<'a>(&'a self, _: ChatDb, command: &'a Command) -> LaunchFuture<'a> {
             let calls = self.calls.clone();
             Box::pin(async move {
-                let brand = command.fields["brand"].as_str().unwrap_or("claude");
+                let brand = command.at("brand").as_str().unwrap_or("claude");
                 if brand == "broken" {
                     return Err("provider did not initialize".into());
                 }
