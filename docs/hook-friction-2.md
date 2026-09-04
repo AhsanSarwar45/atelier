@@ -294,6 +294,56 @@ this change, and two cards opened for failures outside this work.
 **Worked around.** `ATELIER_BYPASS` with the reason, after recording the two
 failures and their new cards on bw-oion.2.
 
+## 7. The evidence a green run records is not the evidence the gate reads
+
+**Attempted.** `bd close bw-hgd2.2`, the checks step of a card whose change is
+the chat list's day headings. `atelier tool checks bw-hgd2.2` had just run the
+project's whole declared suite on that tree and printed
+`checks: tree a5f9b4a5… Project checks=719/0` — 719 green, nothing red — and
+written that same line onto the card. The tool then tried to close the card
+itself and could not, so the close was tried by hand.
+
+**Refused with.**
+
+```
+bw-hgd2.2 is the checks step and has no fresh passing evidence for the current Git tree.
+```
+
+**Why it does not serve the rule.** The rule is that a checks card may not
+claim evidence it does not have. It has it, on the card, for that tree, from a
+run of the declared suite finished a minute earlier. The two halves simply did
+not speak the same language. `atelier tool checks` files the run under
+`git write-tree` and writes counts — `Project checks=719/0`; `fresh_checks`
+looked the evidence up under `git rev-parse HEAD` and wanted the word
+`=PASSED`. Neither the hash nor the token could ever match, so no checks card
+could be closed at all: the last one to close on this board did so on 30 August,
+before the rule arrived. Entry 6 above hit the same refusal from the other side
+and read it as a rule about red suites; it is not, and a green suite fares no
+better.
+
+**And the fix cannot let the card that carries it through.** The gates run
+`atelier` from the path, which is the copy the reader installed — the one in
+`/home/linuxbrew/.linuxbrew/bin`, not the one built from the tree the change is
+in. A repository whose own gates are enforced by a release of themselves cannot
+mend a gate and land the mending in one turn: the refusal outlives the commit
+that fixes it until somebody reinstalls.
+
+**Should have happened.** The two halves should be held to each other by a test
+that runs both — now `what_a_run_records_is_what_this_gate_accepts` in
+`lifecycle.rs`, which builds the line the way a run builds it and hands it to
+the gate. And a gate whose fix has landed but is not yet installed should say
+so, rather than repeating a refusal the tree no longer earns.
+
+**Cost.** Two cards opened for suites red before this work began
+(`check-agent-workflow.test.ts` and `a_first_start_wires_the_chats_up`, both
+proved independent of the change and both fixed), a third card for the mismatch
+itself, four full runs of a suite that takes both a `cargo build` and a
+`next build`, and a bypass on every checks card on the board until the reader's
+copy is replaced.
+
+**Worked around.** `ATELIER_BYPASS` with the reason, on a card whose green run
+is recorded on the card itself.
+
 ## How to add to this file
 
 As in the first book: what was attempted, the refusal text, why the refusal did
