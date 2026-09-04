@@ -536,8 +536,56 @@ impl Store {
             ])?;
         if changed == 1 {
             self.remove_superseded_progress(event, session_id, seq)?;
+            self.note_the_person_spoke(event, session_id, at)?;
         }
         Ok(changed == 1)
+    }
+
+    /// The list's own clock, kept by the one event that moves it.
+    ///
+    /// `last_spoke_at` is when the PERSON last spoke, which is what the chat
+    /// list is ordered and dated by (bw-zhs9). Until now only a message sent
+    /// from this app wrote it, so a chat worked in elsewhere had its clock
+    /// carried by the live stream alone: the row showed the right minute until
+    /// anything re-read the database, and then went back to the turn before —
+    /// the manager, watching a chat he was typing in from a terminal, saw its
+    /// time jump backwards the moment he opened it.
+    ///
+    /// Forwards only. A chat is replayed from its record on every cold open,
+    /// and its whole past goes through here; the last thing he said is the
+    /// latest of them, never the earliest (bw-t26l.22).
+    fn note_the_person_spoke(
+        &self,
+        event: &Event,
+        session_id: &str,
+        at: &str,
+    ) -> rusqlite::Result<()> {
+        if event.kind != EventKind::MessageStarted
+            || event.fields.get("role").and_then(Value::as_str) != Some("user")
+        {
+            return Ok(());
+        }
+        // Replay is not speech. A chat read back from its record — or from an
+        // ACP `session/load`, whose updates carry no timestamp at all and are
+        // stamped with the record's file clock — would otherwise report that
+        // every old message in it was spoken at the moment it was read, which
+        // is the very fault this exists to fix, pointing the other way.
+        if event
+            .fields
+            .get("providerEvent")
+            .and_then(|provider| provider.get("delivery"))
+            .and_then(Value::as_str)
+            == Some("replay")
+        {
+            return Ok(());
+        }
+        self.connection
+            .prepare_cached(
+                "UPDATE session SET last_spoke_at = ?1
+                   WHERE id = ?2 AND (last_spoke_at IS NULL OR last_spoke_at < ?1)",
+            )?
+            .execute(params![at, session_id])?;
+        Ok(())
     }
 
     /// Progress is a replaceable live snapshot, not permanent transcript

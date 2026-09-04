@@ -135,6 +135,14 @@ test('an external chat that grows while another is on screen is caught up when i
     expect(Date.now() - openedAt, 'catching up on an external chat that grew').toBeLessThan(1_000);
     await expect(page.getByTestId('assistant-message').filter({ hasText: WATCHED.answer })).toHaveCount(1);
     await expect(page.getByTestId('user-message').filter({ hasText: WATCHED.asked })).toHaveCount(1);
+    // And it stays said. Reading a chat is not a thing that happened in it, so
+    // nothing about opening one may put its clock back to the turn before the
+    // one on screen.
+    await expect(rowOf(WATCHED.thread).locator('span.font-mono').first()).toHaveText('10:01 AM');
+    if (process.env.WORKBENCH_E2E_SHOT) {
+      await page.locator('[data-testid="chat-sidebar"], aside').first()
+        .screenshot({ path: process.env.WORKBENCH_E2E_SHOT });
+    }
   } finally {
     if (project) await request.delete(`/api/projects/${project.id}`);
     rmSync(FIXTURE, { recursive: true, force: true });
