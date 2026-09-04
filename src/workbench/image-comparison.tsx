@@ -8,6 +8,19 @@ import { Panel } from '@/components/ui/panel';
 import type { ImageComparison } from '@/workbench/protocol';
 import { INLINE_MEDIA_BOUNDS } from '@/workbench/media-bounds';
 
+/**
+ * The line between the two pictures, drawn so it can be found on either.
+ *
+ * A single-coloured line is only ever visible on half the pictures it could be
+ * drawn over: the theme's own line vanished into the dark chip strip the
+ * manager was comparing, and a white one vanishes just as completely into a
+ * screenshot of a white page (bw-kcri). Two tones, taken from the same pair the
+ * theme already uses for a surface and the ink on it, means one of them always
+ * contrasts — the core carries it on a pale picture and the outline on a dark
+ * one, in either theme.
+ */
+const DIVIDER = 'w-0.5 bg-background ring-1 ring-foreground';
+
 export function ImageComparisonView({ comparison, onLook }: {
   comparison: ImageComparison;
   onLook?: (comparison: ImageComparison) => void;
@@ -85,7 +98,7 @@ export function ImageComparisonView({ comparison, onLook }: {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={comparison.before.dataUrl} alt={comparison.before.alt} className="absolute left-0 top-0 h-full w-auto max-w-none" draggable={false} />
       </div>
-      <div className="absolute inset-y-0 w-0.5 cursor-ew-resize bg-background" style={{ left: `${pct}%` }} />
+      <div data-testid="comparison-divider" className={`absolute inset-y-0 cursor-ew-resize ${DIVIDER}`} style={{ left: `${pct}%` }} />
     </div>
     <div className="flex items-start gap-3 border-t border-border/60 px-2 py-1.5">
       <p data-testid="comparison-before-label" className="min-w-0 flex-1 text-xs text-muted-foreground">

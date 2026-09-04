@@ -127,6 +127,9 @@ function SideBySide({ comparison, transform, onChange }: { comparison: ImageComp
  * the line and could not tell what the circle was (bw-kcri). The line is the
  * control now, which is where the hand goes anyway.
  *
+ * Its two tones are the theme's surface and ink, so the line can be found over
+ * a pale picture and a dark one alike (bw-kcri.2).
+ *
  * The visible line is two pixels wide, so the strip that takes the pointer is
  * widened around it and the knob marks where to grab. `stopPropagation` on the
  * way down is what settles it against the viewport behind, which pans the
@@ -160,8 +163,8 @@ function Split({ pct, onChange }: { pct: number; onChange: (value: number) => vo
         if (event.key === 'ArrowRight') { event.preventDefault(); onChange(Math.min(100, pct + 2)); }
       }}
     >
-      <span aria-hidden className="h-full w-0.5 bg-white shadow" />
-      <span aria-hidden className="absolute top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-full bg-white text-black shadow">
+      <span aria-hidden data-testid="comparison-divider" className="h-full w-0.5 bg-background ring-1 ring-foreground" />
+      <span aria-hidden className="absolute top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-full bg-background text-foreground ring-1 ring-foreground shadow">
         <GripVertical className="size-4" />
       </span>
     </div>
