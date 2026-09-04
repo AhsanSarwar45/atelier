@@ -686,11 +686,6 @@ impl AcpNormalizer {
         }
     }
 
-    /// The same words, however the kit spaced them.
-    fn flattened(text: &str) -> String {
-        text.split_whitespace().collect::<Vec<_>>().join(" ")
-    }
-
     /// The condition a kit reports in prose, read off the error it failed with.
     ///
     /// ACP has one code that names a condition and no vocabulary at all for a
