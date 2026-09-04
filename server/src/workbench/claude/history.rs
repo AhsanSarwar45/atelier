@@ -1243,6 +1243,7 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
     }
     let mut events = Vec::new();
     for (index, row) in rows.iter().enumerate() {
+        let from = events.len();
         let nested = parent.is_some()
             && matches!(row["type"].as_str(), Some("user" | "assistant"))
             && row["isMeta"] != true
@@ -1339,6 +1340,17 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
                     .and_then(|answer| handed_off(answer, call_id, &said))
                 {
                     events.push(row);
+                }
+            }
+        }
+        // Every row of a Claude record says when it happened. Say it, or the
+        // events read out of a record are dated by the moment this app got
+        // round to reading them, and a chat worked in this morning and noticed
+        // this afternoon reads as if the person had just spoken (bw-t26l.22).
+        if let Some(at) = row["timestamp"].as_str() {
+            for event in &mut events[from..] {
+                if let Some(object) = event.as_object_mut() {
+                    object.entry("at").or_insert_with(|| json!(at));
                 }
             }
         }
@@ -2308,6 +2320,35 @@ mod tests {
         assert_eq!(opened["kind"], "run");
         assert_eq!(opened["agentId"], "wepek3i68");
         assert_eq!(opened["what"], "Two agents each reply with the single word ONE");
+    }
+
+    /// What a record says about when it happened outlives the reading of it.
+    ///
+    /// A chat followed in the background is read minutes or hours after the
+    /// work in it was done. Stamping those events with the reading time makes
+    /// the list say the person just spoke in a chat they left this morning
+    /// (bw-t26l.22).
+    #[test]
+    fn replayed_claude_rows_keep_the_moment_the_record_says_they_happened() {
+        let lines = vec![
+            json!({"type":"user","uuid":"u1","timestamp":"2026-09-02T05:00:01.100Z",
+                "message":{"role":"user","content":[{"type":"text","text":"Carry on in the terminal."}]}})
+            .to_string(),
+            json!({"type":"assistant","uuid":"a1","timestamp":"2026-09-02T05:00:02.000Z",
+                "message":{"role":"assistant","content":[{"type":"text","text":"Carrying on."}]}})
+            .to_string(),
+        ];
+        let events = replay_lines(&lines);
+        let spoke = events
+            .iter()
+            .find(|event| event["type"] == "message.started" && event["role"] == "user")
+            .expect("the person's turn never made it out of the record");
+        assert_eq!(spoke["at"], "2026-09-02T05:00:01.100Z");
+        let answered = events
+            .iter()
+            .find(|event| event["type"] == "message.started" && event["role"] == "assistant")
+            .expect("the answer never made it out of the record");
+        assert_eq!(answered["at"], "2026-09-02T05:00:02.000Z");
     }
 
     #[test]
