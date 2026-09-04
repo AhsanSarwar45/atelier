@@ -1,0 +1,94 @@
+#!/usr/bin/env node
+/**
+ * An ACP agent that answers `session/list` and `session/load` and nothing else.
+ *
+ * The point of it is that it is not Claude. This app's claim is that external
+ * chats are discovered and replayed over ACP, so the case that proves the claim
+ * must be able to put a chat on screen with no provider record anywhere on the
+ * disk — a chat that exists only because an agent said so on the wire
+ * (bw-t26l.22).
+ *
+ * Two pages, so the cursor is followed rather than assumed.
+ */
+const readline = require('node:readline');
+
+const PAGES = (cwd) => ({
+  first: {
+    sessions: [
+      {
+        sessionId: 'acp-session-one',
+        cwd,
+        title: 'A chat only ACP knows about',
+        updatedAt: '2026-09-02T05:00:02.000Z',
+      },
+    ],
+    nextCursor: 'page-two',
+  },
+  'page-two': {
+    sessions: [
+      {
+        sessionId: 'acp-session-two',
+        cwd,
+        title: 'The chat on the second page',
+        updatedAt: '2026-09-02T04:00:02.000Z',
+      },
+    ],
+  },
+});
+
+const REPLAY = {
+  'acp-session-one': [
+    ['user_message_chunk', 'What did the second page say?'],
+    ['agent_message_chunk', 'The first chat answered over ACP.'],
+  ],
+  'acp-session-two': [
+    ['user_message_chunk', 'And this one?'],
+    ['agent_message_chunk', 'The second chat answered over ACP.'],
+  ],
+};
+
+function say(message) {
+  process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
+}
+
+readline.createInterface({ input: process.stdin }).on('line', (line) => {
+  let message;
+  try {
+    message = JSON.parse(line);
+  } catch {
+    return;
+  }
+  const { id, method, params } = message;
+  if (id === undefined) return;
+  if (method === 'initialize') {
+    say({
+      id,
+      result: {
+        protocolVersion: 1,
+        agentCapabilities: {
+          loadSession: true,
+          promptCapabilities: {},
+          sessionCapabilities: { list: {} },
+        },
+        authMethods: [],
+      },
+    });
+    return;
+  }
+  if (method === 'session/list') {
+    const pages = PAGES(params?.cwd ?? process.cwd());
+    say({ id, result: pages[params?.cursor ?? 'first'] ?? { sessions: [] } });
+    return;
+  }
+  if (method === 'session/load') {
+    for (const [sessionUpdate, text] of REPLAY[params?.sessionId] ?? []) {
+      say({
+        method: 'session/update',
+        params: { sessionId: params.sessionId, update: { sessionUpdate, content: { type: 'text', text } } },
+      });
+    }
+    say({ id, result: {} });
+    return;
+  }
+  say({ id, error: { code: -32601, message: `no ${method} here` } });
+});
