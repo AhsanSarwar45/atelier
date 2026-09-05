@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { heldElsewhere, parseMarker, procStartFromStat, runningChats } from '@/workbench/running';
+import { heldElsewhere, parseMarker, procStartFromStat, runningChats, streamStillAnswers } from '@/workbench/running';
 import type { IsAlive, SessionMarker } from '@/workbench/running';
 
 /** A marker exactly as Claude Code wrote it, extra fields and all. */
@@ -277,5 +277,38 @@ describe('when the writing box is not the reader’s to type in', () => {
   it('claims nothing about a chat the brand has no id for', () => {
     expect(heldElsewhere('dormant', null, new Set([OURS]))).toBe(false);
     expect(heldElsewhere('dormant', undefined, new Set([OURS]))).toBe(false);
+  });
+});
+
+/**
+ * The flash this closes (bw-cwap): a chat started from the app was in the
+ * running set as somebody else's for the beat before the server wrote down
+ * that the process was its own, and the box drew the held-elsewhere line
+ * over the new chat until the next beat. The chat's facts, read after the
+ * reply, said nobody else was in it — and were the later reading.
+ */
+describe('streamStillAnswers', () => {
+  const OURS = 'ef56704b-d82d-4c52-aa84-940c056a1006';
+
+  it('lets the stream answer while nobody has read the facts', () => {
+    expect(streamStillAnswers(1_000, null)).toBe(true);
+  });
+
+  it('lets the facts answer while the stream has not spoken', () => {
+    expect(streamStillAnswers(null, 1_000)).toBe(true);
+    expect(streamStillAnswers(null, null)).toBe(true);
+  });
+
+  it('lets the later reading answer', () => {
+    expect(streamStillAnswers(1_000, 999)).toBe(true);
+    expect(streamStillAnswers(1_000, 1_000)).toBe(true);
+    expect(streamStillAnswers(999, 1_000)).toBe(false);
+  });
+
+  it('closes the flash: a stale beat naming the new chat yields to facts read after it', () => {
+    const beatBeforeTheReply = new Set([OURS]);
+    expect(heldElsewhere('idle', OURS, streamStillAnswers(1_000, 1_500) ? beatBeforeTheReply : null, false)).toBe(false);
+    // And a real terminal chat, whose facts and stream agree, is still held.
+    expect(heldElsewhere('dormant', OURS, streamStillAnswers(2_000, 1_500) ? beatBeforeTheReply : null, true)).toBe(true);
   });
 });

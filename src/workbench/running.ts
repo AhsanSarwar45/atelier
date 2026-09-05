@@ -277,3 +277,27 @@ export function heldElsewhere(
   const held = !!externalId && (running === null ? saidAtOpen : running.has(externalId));
   return sessionOwnership(state, externalId, held).kind === 'elsewhere';
 }
+
+/**
+ * Whether the stream's running set is still the newer of the two answers.
+ *
+ * `heldElsewhere` lets the stream overrule what the chat said of itself when
+ * it was opened, because the other program may have stopped since. That is
+ * the right order only while the stream spoke LAST. The running set is read
+ * on a two-second beat, and starting a chat takes longer than a beat: the
+ * provider process this app spawns writes its own marker as it starts, and a
+ * beat that lands before the server has written down that the process is ours
+ * publishes it as somebody else's. The chat is then opened, its facts read
+ * (and they say nobody else is in it, because by then the server knows), and
+ * the box drew the held-elsewhere line over it anyway until the next beat —
+ * a blue flash on every chat started from the app (bw-cwap).
+ *
+ * So the two are dated, and the later reading answers. The server takes a
+ * fresh reading before it replies to the command that starts a chat, which
+ * closes the gap on its side; this closes it on the side that draws, for the
+ * beat between a frame already in flight and the reply.
+ */
+export function streamStillAnswers(runningAt: number | null, factsAt: number | null): boolean {
+  if (runningAt === null || factsAt === null) return true;
+  return runningAt >= factsAt;
+}

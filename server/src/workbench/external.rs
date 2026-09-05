@@ -481,6 +481,72 @@ fn marker_alive(marker: &ClaudeMarker, proc_root: &Path) -> bool {
     }
 }
 
+/// Whether `pid` runs in a process group this very process started.
+///
+/// The provider drivers this app attaches go through the ACP adapters, and
+/// the adapter crate makes each adapter the leader of its own process group so
+/// the whole tree can be torn down together (agent-client-protocol,
+/// `spawn_process`). The provider process under it — the one that writes the
+/// marker — is therefore in a group whose leader is our own child, and no
+/// process anybody else started is: a chat typed at in this app's own terminal
+/// pane sits in a job-control group of its own, whose leader is the `claude`
+/// itself and whose parent is the shell, not us.
+///
+/// This is what tells our own freshly spawned process from a stranger's in the
+/// seconds before the driver is registered and the chat's id written down —
+/// the seconds a chat opened while it was still starting used to spend drawn as
+/// somebody else's (bw-cwap). Read straight off the process table, because the
+/// table is the only thing that is true from the first instant the process
+/// exists.
+///
+/// The group leader's own pid is never "ours" by this rule — a direct child is
+/// a plain child, and the takeover path counts on a plain child being a holder
+/// (registry.rs, the takeover test). Only the members under a leader we own.
+pub fn in_a_group_this_process_started(pid: u32, proc_root: &Path) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        // After the executable's name, the fields resume at 3: state, ppid, pgrp.
+        fn fields(proc_root: &Path, pid: u32) -> Option<(u32, u32)> {
+            let stat = fs::read_to_string(proc_root.join(pid.to_string()).join("stat")).ok()?;
+            let close = stat.rfind(')')?;
+            let mut after = stat[close + 1..].split_whitespace().skip(1);
+            let ppid = after.next()?.parse::<u32>().ok()?;
+            let pgrp = after.next()?.parse::<u32>().ok()?;
+            Some((ppid, pgrp))
+        }
+        let Some((_, group)) = fields(proc_root, pid) else {
+            return false;
+        };
+        if group == pid {
+            return false;
+        }
+        fields(proc_root, group).is_some_and(|(leader_parent, _)| leader_parent == std::process::id())
+    }
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        let _ = proc_root;
+        fn ask(pid: u32, column: &str) -> Option<u32> {
+            let out = std::process::Command::new("ps")
+                .args(["-o", &format!("{column}="), "-p", &pid.to_string()])
+                .output()
+                .ok()?;
+            String::from_utf8_lossy(&out.stdout).trim().parse::<u32>().ok()
+        }
+        let Some(group) = ask(pid, "pgid") else {
+            return false;
+        };
+        if group == pid {
+            return false;
+        }
+        ask(group, "ppid").is_some_and(|leader_parent| leader_parent == std::process::id())
+    }
+    #[cfg(windows)]
+    {
+        let _ = (pid, proc_root);
+        false
+    }
+}
+
 /// Whether an exact provider-holder PID still exists. This is intentionally
 /// separate from discovery: callers may only use PIDs already attributed to
 /// the requested conversation by `provider_holds`.
@@ -1839,5 +1905,37 @@ mod tests {
     #[test]
     fn native_workbench_services_external_proc_stat_uses_the_last_parenthesis() {
         assert_eq!(proc_start(&stat("12345")), Some("12345"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn native_workbench_services_external_a_member_of_a_group_we_lead_is_ours() {
+        use std::io::BufRead as _;
+        use std::os::unix::process::CommandExt as _;
+        // A leader we started, with a member under it: the shape the ACP
+        // adapter and its provider process have.
+        let mut leader = std::process::Command::new("sh")
+            .args(["-c", "sleep 60 & echo $!; wait"])
+            .process_group(0)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        std::io::BufReader::new(leader.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let member: u32 = line.trim().parse().unwrap();
+        let proc_root = Path::new("/proc");
+        assert!(in_a_group_this_process_started(member, proc_root), "the member under our leader");
+        assert!(!in_a_group_this_process_started(leader.id(), proc_root), "the leader itself is a plain child");
+        // A plain child in our own group is not ours by this rule either.
+        let mut plain = std::process::Command::new("sleep").arg("60").spawn().unwrap();
+        assert!(!in_a_group_this_process_started(plain.id(), proc_root), "a plain child");
+        assert!(!in_a_group_this_process_started(std::process::id(), proc_root), "ourselves");
+        let _ = std::process::Command::new("kill").args(["-9", &member.to_string()]).status();
+        let _ = leader.kill();
+        let _ = leader.wait();
+        let _ = plain.kill();
+        let _ = plain.wait();
     }
 }

@@ -74,11 +74,11 @@ import { PathChip, openPathClicked } from '@/workbench/path-chip';
 import { askableIn, pathsIn, type Rooted } from '@/workbench/paths';
 import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
-import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere } from '@/workbench/live';
+import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, sentAway, showing as stillShowing, type KindId } from '@/workbench/message-filter';
 import type { Brand, CommandInfo, Cost, ImageComparison, ImagePayload, LookableImage, SessionConfigOption, TodoItem } from '@/workbench/protocol';
 import { BRAND_DEFAULT_MODEL } from '@/workbench/protocol';
-import { heldElsewhere, sessionOwnership } from '@/workbench/running';
+import { heldElsewhere, sessionOwnership, streamStillAnswers } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
 import { AgentView } from '@/workbench/agent-view';
 import { DrawnTranscript } from '@/workbench/drawn-transcript';
@@ -86,7 +86,7 @@ import { WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
 import { CHIP_GAP, ModeMark, modelName, modelWords, modeWords, WhatItRuns } from '@/workbench/what-it-runs';
-import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type TranscriptItem } from '@/workbench/use-session';
+import { isBusy, readImage, sendCommand, useSession, useSessionFactsRead, type TranscriptItem } from '@/workbench/use-session';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import { BrandIcon, ProviderBadge, brandName } from '@/workbench/brand-icon';
 import { workingLine } from '@/workbench/working-line';
@@ -652,7 +652,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     }
   }, [projectId, projectPath, open, newBrand, providers]);
   const view = useSession(sessionId);
-  const facts = useSessionFacts(sessionId);
+  const factsRead = useSessionFactsRead(sessionId);
+  const facts = factsRead?.facts ?? null;
   const checklist = useEpicChecklist(view.todos, projectPath);
   // What the board knows plus what this chat has been seen doing since.
   const cards = Array.from(new Set([...(facts?.beads ?? []), ...view.beads]));
@@ -948,6 +949,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    * rule is in running.ts with the rest of the reasoning about live chats.
    */
   const elsewhere = useRunningElsewhere();
+  const elsewhereAt = useRunningSaidAt();
   // The stream first: it is already connected when a chat is opened, while the
   // chat's own facts are a board query away and the box must refuse from the
   // first frame it draws (live.ts, LiveSession.externalId).
@@ -978,7 +980,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   /** The selected provider account's allowance, never the other provider's. */
   const plan = usePlanUsage(sessionBrand);
   const externalId = live?.externalId ?? facts?.externalId ?? null;
-  const held = heldElsewhere(view.state, externalId, elsewhere, facts?.runningElsewhere);
+  // The stream answers while it spoke last. A running set read on the beat
+  // before this chat was opened can name it as somebody else's when the chat
+  // was started from here — the process was ours before the server had it
+  // written down — and the facts, read after, know that (bw-cwap).
+  const held = heldElsewhere(
+    view.state,
+    externalId,
+    streamStillAnswers(elsewhereAt, factsRead?.at ?? null) ? elsewhere : null,
+    facts?.runningElsewhere,
+  );
   const ownership = sessionOwnership(view.state, externalId, held);
   // What that program is doing, from the stream while it is connected and from
   // the chat's own facts until it has spoken (bw-96is).

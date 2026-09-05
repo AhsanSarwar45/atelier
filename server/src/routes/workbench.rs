@@ -57,6 +57,10 @@ pub struct WorkbenchState {
     watch_pollers: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
     watch_poll_subscribers: Arc<AtomicUsize>,
     watch_poll_wake: Arc<tokio::sync::Notify>,
+    /// The hold set as the browsers last heard it, so a reading taken outside
+    /// the beat — see `publish_holds` — is measured against the same last word
+    /// the beat measures its own against.
+    published_holds: Arc<tokio::sync::Mutex<Value>>,
     chat_followers: Arc<tokio::sync::Mutex<HashMap<String, Arc<ChatFollowControl>>>>,
     /// The last reading of who is working in what, and when it was taken.
     ///
@@ -131,6 +135,7 @@ impl WorkbenchState {
             watch_pollers: Arc::new(tokio::sync::Mutex::new(None)),
             watch_poll_subscribers: Arc::new(AtomicUsize::new(0)),
             watch_poll_wake: Arc::new(tokio::sync::Notify::new()),
+            published_holds: Arc::new(tokio::sync::Mutex::new(Value::Null)),
             chat_followers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
@@ -408,7 +413,10 @@ impl WorkbenchState {
     }
 
     async fn run_watch_poller(self) {
-        let mut last_holds = serde_json::to_value(self.provider_holds().await).unwrap_or_default();
+        // The snapshot every subscriber is sent on joining carries this same
+        // reading, so it is the last word without being sent again here.
+        *self.published_holds.lock().await =
+            serde_json::to_value(self.provider_holds().await).unwrap_or_default();
         let mut hold_tick = tokio::time::interval_at(
             tokio::time::Instant::now() + Duration::from_secs(2),
             Duration::from_secs(2),
@@ -463,13 +471,8 @@ impl WorkbenchState {
                     }
                 },
                 _ = hold_tick.tick() => {
-                    let holds = self.provider_holds().await;
+                    let holds = self.publish_holds().await;
                     self.keep_following_the_worked_in(&holds, &mut followed).await;
-                    let current = serde_json::to_value(holds).unwrap_or_default();
-                    if current != last_holds {
-                        last_holds = current.clone();
-                        let _ = self.watch_polls.send(json!({"kind":"running","holds":current}));
-                    }
                 },
                 _ = usage_tick.tick() => {
                     let readings = async {
@@ -574,6 +577,22 @@ impl WorkbenchState {
             }
         }
         holds.retain(|hold| !attached.contains(&hold.id.to_lowercase()));
+        // And the ones the registry has not written down YET: a provider process
+        // this app spawned seconds ago, still connecting, whose driver is not
+        // registered and whose id is not on any row. The process table already
+        // knows it is ours (external.rs, in_a_group_this_process_started), and
+        // a chat opened while it was starting was drawn as somebody else's for
+        // want of asking it (bw-cwap). A hold is somebody else's only while a
+        // process that is not ours is in it.
+        for hold in &mut holds {
+            hold.pids.retain(|pid| {
+                !crate::workbench::external::in_a_group_this_process_started(
+                    *pid,
+                    std::path::Path::new("/proc"),
+                )
+            });
+        }
+        holds.retain(|hold| !hold.pids.is_empty());
         let by_external: HashMap<_, _> = sessions
             .iter()
             .filter_map(|s| s.external_id.as_ref().map(|id| (id.to_lowercase(), s)))
@@ -639,6 +658,31 @@ impl WorkbenchState {
             }
         }
         *self.last_holds.write().await = Some((std::time::Instant::now(), holds.clone()));
+        holds
+    }
+
+    /// Take the reading now and tell every browser if it changed.
+    ///
+    /// The beat takes it every two seconds, and two seconds is longer than
+    /// starting a chat: the provider process this app spawns writes its own
+    /// marker as it starts, and a beat that lands before its driver is
+    /// registered and its id is written down publishes it as a chat somebody
+    /// ELSE is in. The browser then opens the new chat, learns its id, and
+    /// draws the held-elsewhere line over it until the next beat — a blue
+    /// flash where the writing box should be, on every chat started from the
+    /// app (bw-cwap). So the command that attaches a driver takes the reading
+    /// itself before it replies, and the reading that says the chat is ours
+    /// is on the stream before the browser has a chat to draw.
+    pub(crate) async fn publish_holds(&self) -> Vec<crate::workbench::external::ProviderHold> {
+        let holds = self.provider_holds().await;
+        let current = serde_json::to_value(&holds).unwrap_or_default();
+        let mut published = self.published_holds.lock().await;
+        if current != *published {
+            *published = current.clone();
+            let _ = self
+                .watch_polls
+                .send(json!({"kind":"running","holds":current}));
+        }
         holds
     }
 
@@ -1880,7 +1924,24 @@ async fn command(
     State(state): State<WorkbenchState>,
     Json(command): Json<Command>,
 ) -> Result<Json<Value>, ApiError> {
-    Ok(Json(state.registry.execute(&command).await?))
+    use crate::workbench::protocol::CommandKind;
+    // A prompt to a saved chat attaches a driver on the way; one to a chat
+    // already driven does not, and need not pay for a reading.
+    let attaches = match command.kind {
+        CommandKind::SessionStart | CommandKind::SessionResume => true,
+        CommandKind::PromptSend => match command.fields.get("sessionId").and_then(Value::as_str) {
+            Some(id) => !state.registry.has_driver(id).await,
+            None => false,
+        },
+        _ => false,
+    };
+    let reply = state.registry.execute(&command).await?;
+    if attaches {
+        // Before the reply: the browser opens the chat on the reply, and the
+        // hold set it opens it against must already say the chat is ours.
+        state.publish_holds().await;
+    }
+    Ok(Json(reply))
 }
 
 #[derive(Deserialize)]

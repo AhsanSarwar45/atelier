@@ -82,11 +82,26 @@ export async function sendCommand<T = unknown>(cmd: WbpCommand): Promise<T> {
  * begun in a terminal carries them the first time it is opened, not only after
  * this app has watched it work.
  */
-const sessionFactsCache = new Map<string, SessionFacts>();
+/** What a chat said about itself, and when it was asked (ms since the epoch). */
+export interface SessionFactsRead {
+  facts: SessionFacts;
+  at: number;
+}
+
+const sessionFactsCache = new Map<string, SessionFactsRead>();
 
 export function useSessionFacts(sessionId: string | null): SessionFacts | null {
+  return useSessionFactsRead(sessionId)?.facts ?? null;
+}
+
+/**
+ * The same facts, with the moment they were read. The moment matters to one
+ * reader: the writing box, which weighs them against a running set the stream
+ * may have taken before them (running.ts, streamStillAnswers).
+ */
+export function useSessionFactsRead(sessionId: string | null): SessionFactsRead | null {
   const factsCache = sessionFactsCache;
-  const [facts, setFacts] = useState<SessionFacts | null>(() => sessionId ? factsCache.get(sessionId) ?? null : null);
+  const [facts, setFacts] = useState<SessionFactsRead | null>(() => sessionId ? factsCache.get(sessionId) ?? null : null);
 
   useEffect(() => {
     // Cleared first, so the line never names the chat before this one.
@@ -98,7 +113,7 @@ export function useSessionFacts(sessionId: string | null): SessionFacts | null {
       try {
         const res = await request(`/api/workbench/session/${encodeURIComponent(sessionId)}`);
         if (live && res.ok) {
-          const found = (await res.json()) as SessionFacts;
+          const found = { facts: (await res.json()) as SessionFacts, at: Date.now() };
           factsCache.set(sessionId, found);
           setFacts(found);
         }

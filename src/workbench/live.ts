@@ -157,6 +157,8 @@ let holds: Map<string, HeldChat> | null = null;
  * spinning again and count its seconds from a moment long gone (bw-96is.22).
  */
 let saidWhoHolds = false;
+/** When the stream last said who holds what, ms since the epoch, or null. */
+let runningAt: number | null = null;
 /**
  * The helper on the other end of the stream is not saying what this page reads.
  *
@@ -437,6 +439,7 @@ function absorb(frame: WatchFrame): void {
     if (!Array.isArray(frame.holds)) {
       running = null;
       holds = null;
+      runningAt = null;
       mismatched = true;
       announce();
       return;
@@ -444,6 +447,7 @@ function absorb(frame: WatchFrame): void {
     noteMismatch(false);
     running = new Set(frame.holds.map((h) => h.id));
     holds = new Map(frame.holds.map((h) => [h.id, h]));
+    runningAt = Date.now();
     saidWhoHolds = true;
     announce();
     return;
@@ -615,6 +619,7 @@ function dropped(): void {
   if (running !== null || holds !== null) {
     running = null;
     holds = null;
+    runningAt = null;
     announce();
   }
   // The plan figure goes the same way, and for the same reason. It is the one
@@ -711,6 +716,21 @@ export function useRunningElsewhere(): Set<string> | null {
   return useSyncExternalStore(
     subscribe,
     () => running,
+    () => null,
+  );
+}
+
+/**
+ * When the stream last said it, ms since the epoch, or `null` while it has not.
+ *
+ * The running set is a reading taken on a beat, and a beat is not now: a chat
+ * this app started can be in it as somebody else's until the next one, and the
+ * chat's own facts, read after, know better (running.ts, streamStillAnswers).
+ */
+export function useRunningSaidAt(): number | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => runningAt,
     () => null,
   );
 }
