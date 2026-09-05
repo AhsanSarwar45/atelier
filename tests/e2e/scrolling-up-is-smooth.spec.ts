@@ -5,7 +5,13 @@ import { join } from 'node:path';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { discardFixture, makeFixtureProject } from './fixture-board';
-import { raggedChatSaidWithPictures, writeLongChat, type LongChat } from './fixture-record';
+import {
+  raggedChatSaid,
+  raggedChatSaidWithPictures,
+  writeLongChat,
+  type LongChat,
+  type Spoken,
+} from './fixture-record';
 
 /**
  * Scrolling up through a long chat, and what it does to the words being read.
@@ -16,11 +22,17 @@ import { raggedChatSaidWithPictures, writeLongChat, type LongChat } from './fixt
  * drawn and measured, everything below it moves by the difference. If nobody
  * puts the pane back, the reader's own line jumps.
  *
- * Every case here holds the same one line: WHILE THE READER IS NOT SCROLLING,
- * THE ROW HE IS READING DOES NOT MOVE. It is checked against the pane rather
- * than the page, and only in the frames the pane's own offset is standing
- * still — a pane put back by the app moves under a row that does not, and that
- * is the fix working rather than the fault.
+ * Every case here holds the same one line: THE ROW THE READER IS HOLDING ON TO
+ * MOVES BY WHAT HE ASKED THE WHEEL FOR AND NOT A PIXEL MORE — while he is
+ * turning it, and not at all once he has stopped. It is read against the pane
+ * rather than the page, because a pane put back by the app moves under a row
+ * that does not, and that is the fix working rather than the fault.
+ *
+ * "Once he has stopped" is counted from the frame the last turn was delivered
+ * in, not from the first still frame. Turns arrive 40ms apart and a frame is
+ * 16ms, so the gap between two turns is three still frames — and a watch that
+ * calls that rest reports the whole rest of the reader's own gesture as a jump
+ * of a hundred pixels and more, on a chat that is behaving perfectly (bw-cdav.2).
  *
  * The conversation is deliberately ragged: a one-line answer above a forty-line
  * one, the way a real chat reads. Every earlier scrolling case is built on
@@ -51,8 +63,12 @@ interface Ground {
   away: () => Promise<void>;
 }
 
-async function makeGround(request: APIRequestContext): Promise<Ground> {
-  const where = join(RUN, 'ragged');
+async function makeGround(
+  request: APIRequestContext,
+  called: string,
+  said: (n: number) => Spoken,
+): Promise<Ground> {
+  const where = join(RUN, called);
   const project = join(where, 'project');
   discardFixture(where);
   mkdirSync(where, { recursive: true });
@@ -63,11 +79,11 @@ async function makeGround(request: APIRequestContext): Promise<Ground> {
   // to one can do nothing at all (bw-1cqk). It is deleted below, and the run's
   // whole data directory is thrown away before the next one.
   const made = await request.post('/api/projects', {
-    data: { name: 'workbench-smooth', path: project },
+    data: { name: `workbench-smooth-${called}`, path: project },
   });
   expect(made.status(), await made.text()).toBe(201);
   const listed = (await made.json()) as { id: string };
-  const chat = writeLongChat({ cwd: project, sessionId: randomUUID(), held: HELD, said: raggedChatSaidWithPictures });
+  const chat = writeLongChat({ cwd: project, sessionId: randomUUID(), held: HELD, said });
   return {
     projectId: listed.id,
     chat,
@@ -146,10 +162,17 @@ async function watch(page: Page): Promise<void> {
     const rows = [...box.querySelectorAll<HTMLElement>('[data-transcript-key]')];
     const found = rows.find((r) => r.getBoundingClientRect().top > seen().top + 8) ?? rows[0];
     const key = found?.dataset.transcriptKey ?? '';
-    const state: { key: string; frames: { top: number; row: number | null }[]; raf: number } = {
+    const state: {
+      key: string;
+      frames: { top: number; row: number | null }[];
+      raf: number;
+      /** The frame the last wheel turn was delivered in; -1 until it is. */
+      spent: number;
+    } = {
       key,
       frames: [],
       raf: 0,
+      spent: -1,
     };
     (window as unknown as { __smooth?: typeof state }).__smooth = state;
     const look = () => {
@@ -168,7 +191,7 @@ async function watch(page: Page): Promise<void> {
 async function stopWatch(page: Page): Promise<Watched> {
   return page.evaluate(() => {
     const state = (window as unknown as {
-      __smooth?: { key: string; frames: { top: number; row: number | null }[]; raf: number };
+      __smooth?: { key: string; frames: Frame[]; raf: number; spent: number };
     }).__smooth;
     if (!state) throw new Error('nothing was being watched');
     cancelAnimationFrame(state.raf);
@@ -177,12 +200,12 @@ async function stopWatch(page: Page): Promise<Watched> {
     for (let i = 1; i < frames.length; i += 1) {
       travelled += Math.abs(frames[i]!.top - frames[i - 1]!.top);
     }
-    // Where the row came to rest once the wheel was spent: the first frame with
-    // three still ones behind it. Everything before that is the reader's own
-    // scrolling and the app putting the pane back under him as rows above are
-    // measured for the first time — both of which move the pane on purpose.
+    // Where the row came to rest once the wheel was spent: the first still frame
+    // after the last turn was delivered. Counting from the start instead finds
+    // the 40ms gap BETWEEN two turns — three frames at 60Hz, every one of them
+    // still — and calls the rest of the reader's own gesture a jump.
     let rest = -1;
-    for (let i = 3; i < frames.length; i += 1) {
+    for (let i = Math.max(3, state.spent); i < frames.length; i += 1) {
       const still =
         Math.abs(frames[i]!.top - frames[i - 1]!.top) <= 0.5 &&
         Math.abs(frames[i - 1]!.top - frames[i - 2]!.top) <= 0.5 &&
@@ -228,13 +251,22 @@ async function stopWatch(page: Page): Promise<Watched> {
  * turning it — and a pane put back underneath a scroll that is still running is
  * a different thing from one put back under a pane standing still.
  */
-async function wheelsUpAndReads(page: Page, steps = 1, quiet = 1500): Promise<Watched> {
+async function wheelsUpAndReads(
+  page: Page,
+  steps = 1,
+  quiet = 1500,
+  far = WHEEL,
+): Promise<Watched> {
   await page.getByTestId('transcript').hover();
   await watch(page);
   for (let i = 0; i < steps; i += 1) {
-    await page.mouse.wheel(0, -WHEEL / steps);
+    await page.mouse.wheel(0, -far / steps);
     if (i + 1 < steps) await page.waitForTimeout(40);
   }
+  await page.evaluate(() => {
+    const state = (window as unknown as { __smooth?: { frames: unknown[]; spent: number } }).__smooth;
+    if (state) state.spent = state.frames.length;
+  });
   await page.waitForTimeout(quiet);
   return stopWatch(page);
 }
@@ -263,70 +295,183 @@ test.describe('scrolling up through a long chat', () => {
   test.describe.configure({ mode: 'serial' });
 
   // Every step of the walk below is a wheel and then a stretch of reading with
-  // nothing touched, and there are two dozen of them.
-  test.setTimeout(300_000);
+  // nothing touched, and there are two dozen of them, twice over.
+  test.setTimeout(600_000);
+
+  interface Step {
+    step: number;
+    drift: number;
+    loaded: number;
+    travelled: number;
+    top: number;
+    rest: number;
+    moved: number | null;
+    turns: number;
+  }
+
+  /**
+   * Walks the reader up the chat until three older pages have been loaded,
+   * reading what moved at every step.
+   *
+   * The wheel is delivered in eight turns on one step and one shove on the next,
+   * because the two are different cases: a page that arrives while the wheel is
+   * still turning, and a page that arrives with the pane standing still.
+   */
+  async function walksUp(page: Page, ground: Ground): Promise<Step[]> {
+    await readChat(page, ground);
+    const opened = await place(page);
+    expect(opened.loaded, 'the chat did not open on a bounded window of its history').toBeGreaterThan(0);
+    expect(opened.loaded, 'the chat opened on the whole conversation, so there is nothing to load').toBeLessThan(HELD);
+
+    const worst: Step[] = [];
+    let loaded = opened.loaded;
+    let loads = 0;
+    for (let step = 0; step < 12 && loads < 3; step += 1) {
+      await justAboveTheMark(page);
+      const turns = step % 2 === 0 ? 8 : 1;
+      const saw = await wheelsUpAndReads(page, turns);
+      const now = await place(page);
+      if (now.loaded !== loaded) loads += 1;
+      worst.push({
+        step,
+        drift: Math.round(saw.drift),
+        loaded: now.loaded,
+        travelled: Math.round(saw.travelled),
+        top: Math.round(now.top),
+        rest: saw.rest,
+        moved: saw.moved === null ? null : Math.round(saw.moved),
+        turns,
+      });
+      loaded = now.loaded;
+    }
+    expect(loads, 'no older page ever loaded, so nothing about loading was proved').toBeGreaterThanOrEqual(1);
+    expect(
+      worst.every((w) => w.rest >= 0),
+      `the pane never came to rest, so nothing could be measured: ${JSON.stringify(worst)}`,
+    ).toBe(true);
+    return worst;
+  }
 
   test('the row being read stays where it is while older messages arrive above it', async ({ page, request }) => {
-    const ground = await makeGround(request);
+    const ground = await makeGround(request, 'pictures', raggedChatSaidWithPictures);
     try {
-      await readChat(page, ground);
-      const opened = await place(page);
-      expect(opened.loaded, 'the chat did not open on a bounded window of its history').toBeGreaterThan(0);
-      expect(opened.loaded, 'the chat opened on the whole conversation, so there is nothing to load').toBeLessThan(HELD);
-
-      const worst: {
-        step: number;
-        drift: number;
-        loaded: number;
-        travelled: number;
-        top: number;
-        rest: number;
-        moved: number | null;
-        turns: number;
-      }[] = [];
-      let loaded = opened.loaded;
-      let loads = 0;
-      for (let step = 0; step < 12 && loads < 3; step += 1) {
-        await justAboveTheMark(page);
-        const saw = await wheelsUpAndReads(page, step % 2 === 0 ? 8 : 1);
-        const now = await place(page);
-        if (now.loaded !== loaded) loads += 1;
-        worst.push({
-          step,
-          drift: Math.round(saw.drift),
-          loaded: now.loaded,
-          travelled: Math.round(saw.travelled),
-          top: Math.round(now.top),
-          rest: saw.rest,
-          moved: saw.moved === null ? null : Math.round(saw.moved),
-          turns: step % 2 === 0 ? 8 : 1,
-        });
-        loaded = now.loaded;
-      }
+      const worst = await walksUp(page, ground);
       // eslint-disable-next-line no-console
-      console.log('drift per step', JSON.stringify(worst));
-      expect(loads, 'no older page ever loaded, so nothing about loading was proved').toBeGreaterThanOrEqual(1);
-      expect(
-        worst.every((w) => w.rest >= 0),
-        `the pane never came to rest, so nothing could be measured: ${JSON.stringify(worst)}`,
-      ).toBe(true);
-      const jumped = worst.filter(
-        (w) => w.moved === null || Math.abs(w.moved - WHEEL) > STILL,
-      );
+      console.log('with pictures', JSON.stringify(worst));
+      const jumped = worst.filter((w) => w.moved === null || Math.abs(w.moved - WHEEL) > STILL);
       expect(
         jumped,
         `the reader wheeled ${WHEEL}px and the words did not follow: ${JSON.stringify(worst)}`,
       ).toEqual([]);
-      // A row measured for the first time can still shove him after the pane has
-      // come to rest; that is a second fault, and bw-cdav.2 is the card that
-      // takes the `drift > STILL` reading below out of a comment and into a
-      // failure.
       const shoved = worst.filter((w) => w.drift > STILL);
-      if (shoved.length > 0) {
-        // eslint-disable-next-line no-console
-        console.log('shoved after resting (bw-cdav.2)', JSON.stringify(shoved));
-      }
+      expect(
+        shoved,
+        `the reader stopped and the words kept moving: ${JSON.stringify(worst)}`,
+      ).toEqual([]);
       await page.screenshot({ path: join(SHOTS, 'bw-cdav-scrolled-up.png') });
+    } finally {
+      await ground.away();
+    }
+  });
+
+  /**
+   * The same walk with nothing in the chat but words.
+   *
+   * Every pixel of every row is therefore known the moment the row is drawn, so
+   * anything that moves the reader here is the chat measuring a row it had only
+   * guessed at — not a picture arriving late, which is a different fault on a
+   * different card (bw-cdav.3). The rows are as ragged as before: a one-line
+   * answer above a forty-line one, so the guesses are wrong by hundreds of
+   * pixels and the correction has something to correct.
+   */
+  test('a row measured for the first time does not shove the reader', async ({ page, request }) => {
+    const ground = await makeGround(request, 'words', raggedChatSaid);
+    try {
+      const worst = await walksUp(page, ground);
+      // eslint-disable-next-line no-console
+      console.log('words only', JSON.stringify(worst));
+      const shoved = worst.filter((w) => w.drift > STILL);
+      expect(
+        shoved,
+        `the reader was not scrolling and the words moved anyway: ${JSON.stringify(worst)}`,
+      ).toEqual([]);
+      const jumped = worst.filter((w) => w.moved === null || Math.abs(w.moved - WHEEL) > STILL);
+      expect(
+        jumped,
+        `the reader wheeled ${WHEEL}px and the words did not follow: ${JSON.stringify(worst)}`,
+      ).toEqual([]);
+      await page.screenshot({ path: join(SHOTS, 'bw-cdav-words-only.png') });
+    } finally {
+      await ground.away();
+    }
+  });
+
+  /**
+   * A long turn of the wheel through rows the chat has never measured.
+   *
+   * The walk above teleports the pane to the edge of the load and then wheels a
+   * screenful, so it says what happens AROUND a page arriving. This says what
+   * happens without one: the chat opens on its last page, so every row above the
+   * fold is a guess, and the reader wheels up through a thousand pixels of them.
+   * Each is measured for the first time as it is drawn, most of them far from
+   * the 112px the chat guessed — a forty-line answer is off by five hundred. If
+   * the pane is not put back by exactly what the row gained, the words the
+   * reader is holding on to slide, and the sum of every one of those slides is
+   * the difference between what he asked the wheel for and what he got.
+   */
+  test('a long wheel through rows never measured gives back exactly what was asked', async ({ page, request }) => {
+    const ground = await makeGround(request, 'virgin', raggedChatSaid);
+    try {
+      await readChat(page, ground);
+      const opened = await place(page);
+      // Straight up from where the chat opened, with nothing moved by hand.
+      // Putting the pane anywhere first draws the rows there and so measures
+      // them, and a measured row is exactly what this case must not have: the
+      // walk has to be the first time each of these rows is seen.
+
+      // Kept under a paneful. A row wheeled further than the pane is tall
+      // leaves it, and a row that is gone cannot be watched — so the walk is
+      // made of turns the row survives, each one taking a fresh row at the top.
+      const FAR = 400;
+      const seen: {
+        turn: number;
+        drift: number;
+        travelled: number;
+        rest: number;
+        moved: number | null;
+        loaded: number;
+      }[] = [];
+      for (let turn = 0; turn < 6; turn += 1) {
+        const saw = await wheelsUpAndReads(page, 10, 900, FAR);
+        const now = await place(page);
+        seen.push({
+          turn,
+          drift: Math.round(saw.drift),
+          travelled: Math.round(saw.travelled),
+          rest: saw.rest,
+          moved: saw.moved === null ? null : Math.round(saw.moved),
+          loaded: now.loaded,
+        });
+      }
+      // eslint-disable-next-line no-console
+      console.log('long wheel through virgin rows', JSON.stringify(seen));
+      expect(
+        seen.filter((t) => t.loaded !== opened.loaded),
+        `an older page arrived, so this is not only about measuring: ${JSON.stringify(seen)}`,
+      ).toEqual([]);
+      expect(
+        seen.filter((t) => t.rest < 0),
+        `the pane never came to rest: ${JSON.stringify(seen)}`,
+      ).toEqual([]);
+      expect(
+        seen.filter((t) => t.moved === null || Math.abs(t.moved - FAR) > STILL),
+        `the reader wheeled ${FAR}px through rows the chat had only guessed at and the words did not follow: ${JSON.stringify(seen)}`,
+      ).toEqual([]);
+      expect(
+        seen.filter((t) => t.drift > STILL),
+        `the reader stopped and the words kept moving: ${JSON.stringify(seen)}`,
+      ).toEqual([]);
+      await page.screenshot({ path: join(SHOTS, 'bw-cdav-virgin-rows.png') });
     } finally {
       await ground.away();
     }
