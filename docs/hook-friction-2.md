@@ -408,6 +408,18 @@ Filed as bw-xksa.
 `BEADS_ACTOR` restored by hand for the close. The reason given each time was
 that a worktree cannot remove itself.
 
+**Met again**, unchanged, on `bw-qrgl.3` — a third job's land step. The same
+`git worktree remove` refusal from the main checkout, then the same one for the
+`git branch -d` that follows it, which is not a worktree operation at all: a
+branch already merged into `ours` has no working tree left to be isolated in,
+and the landing checkout is the only place its name is addressable. Then the
+actor half of it, from the other side: this land card was claimed from the
+landing checkout, where the session actor is not carried, so the board recorded
+the claim under the git user and afterwards refused this session every verb on
+its own card — including the `bd show` that would have told it why. Four more
+bypasses on the one reason, which is the shape section 8 describes and bw-xksa
+still holds.
+
 ## 9. A path the shell would have expanded is resolved against the repository
 
 **Attempted.** Deleting one scratch directory in Atelier's own data dir, from a
