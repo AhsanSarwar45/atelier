@@ -30,6 +30,7 @@ import { Plus, X } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Button } from '@/components/ui/button';
+import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 import { TerminalPane } from './terminal-pane';
@@ -83,20 +84,21 @@ function TabStrip() {
                 place (`scripts/one-library.py`). What is left here is which of
                 the two it is, which is the only thing a tab knows that a button
                 does not. */}
-            <Button
-              variant="ghost"
-              size="xs"
-              role="tab"
-              aria-selected={showing}
-              title={tabWhere(tab.folder)}
-              onClick={() => select(tab.id)}
-              className={cn(
-                'h-6 max-w-40 truncate px-2 font-normal',
-                showing ? 'text-t-primary' : 'text-t-tertiary hover:text-t-primary',
-              )}
-            >
-              {tabName(tab.folder)}
-            </Button>
+            <Tooltip label={tabWhere(tab.folder)}>
+              <Button
+                variant="ghost"
+                size="xs"
+                role="tab"
+                aria-selected={showing}
+                onClick={() => select(tab.id)}
+                className={cn(
+                  'h-6 max-w-40 truncate px-2 font-normal',
+                  showing ? 'text-t-primary' : 'text-t-tertiary hover:text-t-primary',
+                )}
+              >
+                {tabName(tab.folder)}
+              </Button>
+            </Tooltip>
             <ToolButton
               icon={<X />}
               // Named by the folder rather than by the short name on the tab:

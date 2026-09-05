@@ -38,6 +38,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Tooltip } from '@/components/ui/tooltip';
 import { request } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { chatState, holderOnly, HOLDER_WORD, type HeldChat } from '@/workbench/chat-state';
@@ -631,14 +632,18 @@ export function ChatSidebar({
                 <DropdownMenuContent align="end" className="w-56">
                   <DropdownMenuLabel>Start with</DropdownMenuLabel>
                   {providers.map((provider) => (
-                    <DropdownMenuItem
+                    <Tooltip
                       key={provider.brand}
-                      disabled={!provider.available}
-                      title={provider.available ? undefined : whyUnavailable(provider)}
-                      onSelect={() => onNewChat(provider.brand)}
+                      side="left"
+                      label={provider.available ? undefined : whyUnavailable(provider)}
                     >
-                      <BrandIcon brand={provider.brand} /> New {brandName(provider.brand)} chat
-                    </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={!provider.available}
+                        onSelect={() => onNewChat(provider.brand)}
+                      >
+                        <BrandIcon brand={provider.brand} /> New {brandName(provider.brand)} chat
+                      </DropdownMenuItem>
+                    </Tooltip>
                   ))}
                   {onNewChatDefault && (
                     <>
@@ -795,15 +800,16 @@ export function ChatSidebar({
                         types in and a program driving the kit are not the same
                         thing to whoever is deciding whether to take the chat. */}
                     {state.external && (
-                      <span
-                        data-testid="external-origin"
-                        data-holder={state.external.holder}
-                        aria-label={`${HOLDER_WORD[state.external.holder]}.`}
-                        title={`${HOLDER_WORD[state.external.holder]}.`}
-                        className="flex size-3.5 shrink-0 items-center text-muted-foreground"
-                      >
-                        <ExternalLink aria-hidden="true" className="size-3.5" />
-                      </span>
+                      <Tooltip label={`${HOLDER_WORD[state.external.holder]}.`}>
+                        <span
+                          data-testid="external-origin"
+                          data-holder={state.external.holder}
+                          aria-label={`${HOLDER_WORD[state.external.holder]}.`}
+                          className="flex size-3.5 shrink-0 items-center text-muted-foreground"
+                        >
+                          <ExternalLink aria-hidden="true" className="size-3.5" />
+                        </span>
+                      </Tooltip>
                     )}
                     {/*
                       The control is drawn OVER the clock, not beside it. Beside
@@ -850,23 +856,24 @@ export function ChatSidebar({
                         {clockTime(row.lastActiveAt)}
                       </span>
                       {closable && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          mode="icon"
-                          size="xs"
-                          data-testid="row-close"
-                          aria-label={`Close ${row.title ?? 'Untitled chat'}`}
-                          title="Close chat"
-                          disabled={ending === key}
-                          className="absolute -right-1.5 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            end(row);
-                          }}
-                        >
-                          <Power className="size-3.5" aria-hidden="true" />
-                        </Button>
+                        <Tooltip label="Close chat">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            mode="icon"
+                            size="xs"
+                            data-testid="row-close"
+                            aria-label={`Close ${row.title ?? 'Untitled chat'}`}
+                            disabled={ending === key}
+                            className="absolute -right-1.5 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              end(row);
+                            }}
+                          >
+                            <Power className="size-3.5" aria-hidden="true" />
+                          </Button>
+                        </Tooltip>
                       )}
                     </span>
                   </div>

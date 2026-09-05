@@ -7,6 +7,7 @@ import { ArrowDownRight, ArrowRight, ArrowUpRight, Check, ChevronRight, Circle, 
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { Progress } from '@/components/ui/progress';
+import { Tooltip } from '@/components/ui/tooltip';
 import { apiUrl } from '@/lib/api-base';
 import { cn } from '@/lib/utils';
 import type { ChartWidget, ChatWidget, ExplainerWidget } from '@/workbench/chat-widgets';
@@ -228,12 +229,14 @@ export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
   if (widget.type === 'image') return (
     <WidgetFrame kind="image" title={widget.title}>
       <figure>
-        <Button type="button" variant="foreground" aria-label={`Open ${widget.alt} to zoom`} title="Click to see it full size"
+        <Tooltip label="Click to see it full size">
+        <Button type="button" variant="foreground" aria-label={`Open ${widget.alt} to zoom`}
           className="group relative block h-auto w-full whitespace-normal p-0" onClick={() => setLooking({ mime: 'image/*', dataUrl: presentationAssetUrl(widget.asset), alt: widget.alt })}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={presentationAssetUrl(widget.asset)} alt={widget.alt} className="max-h-[38rem] w-full cursor-zoom-in rounded-md object-contain transition-opacity group-hover:opacity-90" />
           <span aria-hidden className="absolute right-2 top-2 rounded-full bg-background/90 p-2 shadow"><ZoomIn className="size-4" /></span>
         </Button>
+        </Tooltip>
         {widget.caption && <figcaption className="mt-2 text-xs text-muted-foreground">{widget.caption}</figcaption>}
       </figure>
       {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}

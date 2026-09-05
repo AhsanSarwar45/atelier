@@ -35,6 +35,7 @@ import { Bot, ChevronDown, ChevronRight, Clock, Coins, Eye, SendToBack, Square, 
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { Row } from '@/components/ui/row';
+import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { helperState } from '@/workbench/chat-state';
 import { ChatStateChip } from '@/workbench/chat-state-chip';
@@ -223,30 +224,32 @@ export function AgentSteering({
     <div className="border-t border-border/60">
       <div data-testid="sent-away-steer" className="flex items-center gap-1 px-2 py-1">
         {canBackground && (
-          <Button
-            size="xs"
-            variant="ghost"
-            data-testid="sent-away-park"
-            disabled={busy !== null}
-            title="Run in background"
-            onClick={() => act('park')}
-          >
-            <SendToBack className="h-3 w-3" aria-hidden="true" />
-            Background
-          </Button>
+          <Tooltip label="Run in background">
+            <Button
+              size="xs"
+              variant="ghost"
+              data-testid="sent-away-park"
+              disabled={busy !== null}
+              onClick={() => act('park')}
+            >
+              <SendToBack className="h-3 w-3" aria-hidden="true" />
+              Background
+            </Button>
+          </Tooltip>
         )}
         {canStop && (
-          <Button
-            size="xs"
-            variant="ghost"
-            data-testid="sent-away-stop"
-            disabled={busy !== null}
-            title="Stop subagent"
-            onClick={() => act('stop')}
-          >
-            <Square className="h-3 w-3" aria-hidden="true" />
-            Stop
-          </Button>
+          <Tooltip label="Stop subagent">
+            <Button
+              size="xs"
+              variant="ghost"
+              data-testid="sent-away-stop"
+              disabled={busy !== null}
+              onClick={() => act('stop')}
+            >
+              <Square className="h-3 w-3" aria-hidden="true" />
+              Stop
+            </Button>
+          </Tooltip>
         )}
       </div>
       {refused && (
@@ -299,100 +302,106 @@ function AgentRow({
           and a target the size of one word beside it is a target the reader
           misses. The padding lives here rather than on the box for the same
           reason — a click anywhere in the row is a click on the row. */}
-      <Row
-        inset="sm"
-        data-testid="sent-away-open"
-        title={row.what ? `Open ${row.what}` : `Open this ${kind}`}
-        onClick={onOpen ? () => onOpen(row.id) : undefined}
-        className="flex flex-col gap-1"
-      >
-      <div className="flex items-center gap-1.5">
-        <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        {/* What kind of thing this is, said in words rather than left to the
-            icon alone — a lucide glyph names nothing to a sighted reader who
-            has not learned the four of them by heart. */}
-        <span
-          data-testid="sent-away-kind"
-          className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+      <Tooltip label={row.what ? `Open ${row.what}` : `Open this ${kind}`}>
+        <Row
+          inset="sm"
+          data-testid="sent-away-open"
+          onClick={onOpen ? () => onOpen(row.id) : undefined}
+          className="flex flex-col gap-1"
         >
-          {kind}
-        </span>
-        {/* Which agent definition the kit was asked for, when it said one —
-            null for a command or a watch, and for a helper the kit never
-            named, and drawn as nothing then rather than as a placeholder that
-            claims to know. Capped and truncated, its full name on the title,
-            the same bargain the model further down makes: this column is
-            narrow and a name like general-purpose does not fit it whole. */}
-        {row.agentType && (
+        <div className="flex items-center gap-1.5">
+          <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          {/* What kind of thing this is, said in words rather than left to the
+              icon alone — a lucide glyph names nothing to a sighted reader who
+              has not learned the four of them by heart. */}
           <span
-            data-testid="sent-away-agent-type"
-            className="max-w-16 shrink-0 truncate text-[10px] font-medium text-foreground/80"
-            title={row.agentType}
+            data-testid="sent-away-kind"
+            className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
           >
-            {row.agentType}
+            {kind}
           </span>
-        )}
-        <span data-testid="sent-away-what" className="min-w-0 flex-1 truncate" title={row.what}>
-          {row.what || kind}
-        </span>
-      </div>
+          {/* Which agent definition the kit was asked for, when it said one —
+              null for a command or a watch, and for a helper the kit never
+              named, and drawn as nothing then rather than as a placeholder that
+              claims to know. Capped and truncated, its full name on the title,
+              the same bargain the model further down makes: this column is
+              narrow and a name like general-purpose does not fit it whole. */}
+          {row.agentType && (
+            <Tooltip label={row.agentType}>
+              <span
+                data-testid="sent-away-agent-type"
+                className="max-w-16 shrink-0 truncate text-[10px] font-medium text-foreground/80"
+              >
+                {row.agentType}
+              </span>
+            </Tooltip>
+          )}
+          <Tooltip label={row.what}>
+            <span data-testid="sent-away-what" className="min-w-0 flex-1 truncate">
+              {row.what || kind}
+            </span>
+          </Tooltip>
+        </div>
 
-      {/* The three numbers, in the order they are asked for: which model, how
-          long, what it has spent. Each wears its own mark — three bare numbers
-          in a row read as one (bw-7ks.22.13). */}
-      <div className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
-        {model && (
-          <span data-testid="sent-away-model" className="max-w-24 shrink truncate" title={row.model ?? undefined}>
-            {model}
+        {/* The three numbers, in the order they are asked for: which model, how
+            long, what it has spent. Each wears its own mark — three bare numbers
+            in a row read as one (bw-7ks.22.13). */}
+        <div className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
+          {model && (
+            <Tooltip label={row.model ?? undefined}>
+              <span data-testid="sent-away-model" className="max-w-24 shrink truncate">
+                {model}
+              </span>
+            </Tooltip>
+          )}
+          <span data-testid="sent-away-for" className="flex shrink-0 items-center gap-1">
+            <Clock className="h-3 w-3" aria-hidden="true" />
+            {forHowLong(liveSeconds(row, now))}
           </span>
-        )}
-        <span data-testid="sent-away-for" className="flex shrink-0 items-center gap-1">
-          <Clock className="h-3 w-3" aria-hidden="true" />
-          {forHowLong(liveSeconds(row, now))}
-        </span>
-        {/* Nothing was billed for a shell. A command is run by this machine,
-            not by a model, so its coins were always `0` — a price tag on a
-            thing that has no price (bw-sb5g.2). */}
-        {!shell && (
-          <span
-            data-testid="sent-away-spend"
-            className="flex shrink-0 items-center gap-1"
-            title={`${row.tokens.toLocaleString()} tokens over ${row.calls} call${row.calls === 1 ? '' : 's'}`}
-          >
-            <Coins className="h-3 w-3" aria-hidden="true" />
-            {spend(row.tokens)}
-          </span>
-        )}
-        {row.calls > 0 && (
-          <span data-testid="sent-away-calls" className="shrink-0">
-            {row.calls} call{row.calls === 1 ? '' : 's'}
-          </span>
-        )}
-      </div>
+          {/* Nothing was billed for a shell. A command is run by this machine,
+              not by a model, so its coins were always `0` — a price tag on a
+              thing that has no price (bw-sb5g.2). */}
+          {!shell && (
+            <Tooltip label={`${row.tokens.toLocaleString()} tokens over ${row.calls} call${row.calls === 1 ? '' : 's'}`}>
+              <span data-testid="sent-away-spend" className="flex shrink-0 items-center gap-1">
+                <Coins className="h-3 w-3" aria-hidden="true" />
+                {spend(row.tokens)}
+              </span>
+            </Tooltip>
+          )}
+          {row.calls > 0 && (
+            <span data-testid="sent-away-calls" className="shrink-0">
+              {row.calls} call{row.calls === 1 ? '' : 's'}
+            </span>
+          )}
+        </div>
 
-      {/* Where it stands and what it is on, in the one mark the reader already
-          knows from the chat's own line and from the row in the list. It is the
-          whole of what this card says about the helper's own work now that the
-          transcript no longer draws that work inline — so it settles rather
-          than vanishing when the helper finishes, and it reads its own rows
-          rather than the kit's half-minute progress (bw-pukk.2). */}
-      <ChatStateChip
-        state={helperState(row, items)}
-        size="inline"
-        testId="sent-away-state"
-        className="text-[11px]"
-      />
-      {/* Its answer once it is done. Never beside the present tense of a thing
-          that has finished, which is why the mark above settles first. A shell
-          has no answer to quote: what it "said" is the last two lines of its
-          own output, and two lines of a build torn out of the middle of it say
-          less than nothing. Its output is in the panel it opens (bw-sb5g.2). */}
-      {over && row.result && !shell && (
-        <p data-testid="sent-away-result" className="line-clamp-2 text-[11px] text-muted-foreground" title={row.result}>
-          {row.result}
-        </p>
-      )}
-      </Row>
+        {/* Where it stands and what it is on, in the one mark the reader already
+            knows from the chat's own line and from the row in the list. It is the
+            whole of what this card says about the helper's own work now that the
+            transcript no longer draws that work inline — so it settles rather
+            than vanishing when the helper finishes, and it reads its own rows
+            rather than the kit's half-minute progress (bw-pukk.2). */}
+        <ChatStateChip
+          state={helperState(row, items)}
+          size="inline"
+          testId="sent-away-state"
+          className="text-[11px]"
+        />
+        {/* Its answer once it is done. Never beside the present tense of a thing
+            that has finished, which is why the mark above settles first. A shell
+            has no answer to quote: what it "said" is the last two lines of its
+            own output, and two lines of a build torn out of the middle of it say
+            less than nothing. Its output is in the panel it opens (bw-sb5g.2). */}
+        {over && row.result && !shell && (
+          <Tooltip label={row.result}>
+            <p data-testid="sent-away-result" className="line-clamp-2 text-[11px] text-muted-foreground">
+              {row.result}
+            </p>
+          </Tooltip>
+        )}
+        </Row>
+      </Tooltip>
       <AgentSteering row={row} sessionId={sessionId} controls={controls} />
     </Panel>
   );

@@ -36,6 +36,7 @@ import { Terminal } from '@xterm/xterm';
 import { Check, Clock, Folder, X } from 'lucide-react';
 
 import { Panel } from '@/components/ui/panel';
+import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { Outcome } from '@/workbench/command-run';
 import { forHowLong } from '@/workbench/elapsed';
@@ -186,10 +187,12 @@ export function RanTerminal({
             the command and the output and nothing else, and an empty folder
             icon is a claim that it ran in no directory. */}
         {run.cwd && (
-          <span data-testid="ran-terminal-cwd" className="flex min-w-0 items-center gap-1" title={run.cwd}>
-            <Folder className="h-3 w-3 shrink-0" aria-hidden="true" />
-            <span className="truncate">{run.cwd}</span>
-          </span>
+          <Tooltip label={run.cwd}>
+            <span data-testid="ran-terminal-cwd" className="flex min-w-0 items-center gap-1">
+              <Folder className="h-3 w-3 shrink-0" aria-hidden="true" />
+              <span className="truncate">{run.cwd}</span>
+            </span>
+          </Tooltip>
         )}
         {/* Only when somebody counted. A provider that ran the shell itself
             never said how long it took, and `0s` under a build that took four

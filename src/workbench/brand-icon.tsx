@@ -1,9 +1,11 @@
 'use client';
 
-import type { Brand } from '@/workbench/protocol';
 import type { ReactNode } from 'react';
-import { cn } from '@/lib/utils';
+
 import { Badge } from '@/components/ui/badge';
+import { Tooltip } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
+import type { Brand } from '@/workbench/protocol';
 
 export function brandName(brand: Brand): string {
   if (brand === 'codex') return 'Codex';
@@ -32,25 +34,26 @@ export function BrandIcon({ brand, label, className }: { brand: Brand; label?: s
 
 export function ProviderBadge({ brand, model, icon, className }: { brand: Brand; model?: string | null; icon?: ReactNode; className?: string }) {
   return (
-    <Badge
-      appearance="light"
-      size="sm"
-      shape="circle"
-      className={cn(
-        'shrink-0 gap-1',
-        brand === 'codex'
-          ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-          : brand === 'claude'
-            ? 'border-orange-500/35 bg-orange-500/10 text-orange-700 dark:text-orange-300'
-            : 'border-violet-500/35 bg-violet-500/10 text-violet-700 dark:text-violet-300',
-        className,
-      )}
-      data-testid="session-brand"
-      data-brand={brand}
-      title={`Coding agent — ${brandName(brand)}`}
-    >
-      {icon ?? <BrandIcon brand={brand} className="size-3" />}
-      <span>{brand === 'local' && model ? model.split('::').at(-1) : brandName(brand)}</span>
-    </Badge>
+    <Tooltip label={`Coding agent — ${brandName(brand)}`}>
+      <Badge
+        appearance="light"
+        size="sm"
+        shape="circle"
+        className={cn(
+          'shrink-0 gap-1',
+          brand === 'codex'
+            ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+            : brand === 'claude'
+              ? 'border-orange-500/35 bg-orange-500/10 text-orange-700 dark:text-orange-300'
+              : 'border-violet-500/35 bg-violet-500/10 text-violet-700 dark:text-violet-300',
+          className,
+        )}
+        data-testid="session-brand"
+        data-brand={brand}
+      >
+        {icon ?? <BrandIcon brand={brand} className="size-3" />}
+        <span>{brand === 'local' && model ? model.split('::').at(-1) : brandName(brand)}</span>
+      </Badge>
+    </Tooltip>
   );
 }

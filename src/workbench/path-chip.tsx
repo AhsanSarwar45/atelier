@@ -11,6 +11,7 @@
  */
 'use client';
 
+import { Tooltip } from '@/components/ui/tooltip';
 import { openLocalPath } from '@/workbench/open-local-path';
 import { CHIP_CLASS, TITLE } from '@/workbench/paths-in-html';
 
@@ -27,20 +28,23 @@ export function PathChip({
   target?: 'default' | 'editor';
 }) {
   return (
-    <span
-      data-path-mention={absolute}
-      {...(line === null ? {} : { 'data-path-line': String(line) })}
-      {...(target === 'editor' ? { 'data-path-target': 'editor' } : {})}
-      data-testid="path-chip"
-      className={CHIP_CLASS}
-      title={
+    <Tooltip
+      label={
         target === 'editor' && line !== null
           ? `Click to open this file in your editor at line ${line}`
           : TITLE(line)
       }
     >
-      {raw}
-    </span>
+      <span
+        data-path-mention={absolute}
+        {...(line === null ? {} : { 'data-path-line': String(line) })}
+        {...(target === 'editor' ? { 'data-path-target': 'editor' } : {})}
+        data-testid="path-chip"
+        className={CHIP_CLASS}
+      >
+        {raw}
+      </span>
+    </Tooltip>
   );
 }
 

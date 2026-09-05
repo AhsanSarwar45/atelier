@@ -29,6 +29,7 @@ import { Gauge, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
+import { Tooltip } from '@/components/ui/tooltip';
 import { request } from '@/lib/api';
 import { reads, TIGHT } from '@/workbench/context-window';
 import type { Split, TaskSpend } from '@/workbench/token-picture';
@@ -190,9 +191,9 @@ function Weights({ title, rows, of }: { title: string; rows: Weight[]; of: numbe
       <ul className="mt-1 space-y-0.5">
         {rows.slice(0, 6).map((r) => (
           <li key={r.name} className="flex gap-2 text-xs" data-testid="token-weight">
-            <span className="truncate text-foreground" title={r.name}>
-              {r.name}
-            </span>
+            <Tooltip label={r.name}>
+              <span className="truncate text-foreground">{r.name}</span>
+            </Tooltip>
             <span className="ml-auto shrink-0 font-mono text-muted-foreground">
               {big(r.tokens)} · {pct(r.tokens, of)}
             </span>
@@ -248,12 +249,9 @@ function Window({ window: w }: { window: WindowNow }) {
       <div className="relative mt-2" data-testid="token-bar" data-pieces={bar.length}>
         <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted">
           {bar.map((s, i) => (
-            <div
-              key={s.name}
-              className={bandColour(i, s.room)}
-              style={{ width: `${s.width}%` }}
-              title={`${s.name} · ${s.tokens.toLocaleString()} tokens`}
-            />
+            <Tooltip key={s.name} label={`${s.name} · ${s.tokens.toLocaleString()} tokens`}>
+              <div className={bandColour(i, s.room)} style={{ width: `${s.width}%` }} />
+            </Tooltip>
           ))}
         </div>
         {mark !== null && (
@@ -261,12 +259,13 @@ function Window({ window: w }: { window: WindowNow }) {
           // summary. It is the one moment on this bar that changes what the
           // reader should do next, so it is drawn ON the bar rather than left
           // as a number in a sentence underneath.
-          <div
-            className="absolute -top-0.5 h-4 w-px bg-foreground"
-            style={{ left: `${mark}%` }}
-            data-testid="token-forgets-mark"
-            title={`Compacts at ${w.forgetsAt?.toLocaleString()} tokens`}
-          />
+          <Tooltip label={`Compacts at ${w.forgetsAt?.toLocaleString()} tokens`}>
+            <div
+              className="absolute -top-0.5 h-4 w-px bg-foreground"
+              style={{ left: `${mark}%` }}
+              data-testid="token-forgets-mark"
+            />
+          </Tooltip>
         )}
       </div>
 
@@ -442,30 +441,31 @@ export function ContextChip({
     // reports a box a padding narrower than the one that is actually painted —
     // which would hide the very overlap that check exists to catch (bw-3ug7.9).
     // The button carries its own hook, as the plan chips do.
-    <Badge
-      variant={used / room >= TIGHT ? 'warning' : 'secondary'}
-      appearance="light"
-      size="sm"
-      data-testid="context-chip"
-      data-used={used}
-      data-window={room}
-      title={`${used.toLocaleString()} of ${room.toLocaleString()} tokens of this conversation are in use\nClick for the whole token picture`}
-      className="font-mono"
-    >
-      <Button
-        type="button"
-        variant="foreground"
-        size="inherit"
-        data-testid="context-chip-open"
-        aria-label={`Context — ${used.toLocaleString()} of ${room.toLocaleString()} tokens in use. Opens the whole token picture.`}
-        className="gap-1 p-0"
-        onClick={onOpen}
+    <Tooltip label={`${used.toLocaleString()} of ${room.toLocaleString()} tokens of this conversation are in use — click for the whole token picture`}>
+      <Badge
+        variant={used / room >= TIGHT ? 'warning' : 'secondary'}
+        appearance="light"
+        size="sm"
+        data-testid="context-chip"
+        data-used={used}
+        data-window={room}
+        className="font-mono"
       >
-        {/* Its own mark, like the coins on the cost chip beside it: three bare
-            numbers in a row on one line read as one number. */}
-        <Gauge />
-        {reads(used, room)}
-      </Button>
-    </Badge>
+        <Button
+          type="button"
+          variant="foreground"
+          size="inherit"
+          data-testid="context-chip-open"
+          aria-label={`Context — ${used.toLocaleString()} of ${room.toLocaleString()} tokens in use. Opens the whole token picture.`}
+          className="gap-1 p-0"
+          onClick={onOpen}
+        >
+          {/* Its own mark, like the coins on the cost chip beside it: three bare
+              numbers in a row on one line read as one number. */}
+          <Gauge />
+          {reads(used, room)}
+        </Button>
+      </Badge>
+    </Tooltip>
   );
 }

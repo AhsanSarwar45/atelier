@@ -20,6 +20,7 @@ import { X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
+import { Tooltip } from '@/components/ui/tooltip';
 import { usePlanUsage } from '@/workbench/live';
 import { CHIP_GAP } from '@/workbench/what-it-runs';
 import type { Brand } from '@/workbench/protocol';
@@ -229,40 +230,42 @@ export function PlanChip({ usage, onOpen }: { usage: PlanUsage; onOpen: () => vo
   return (
     <span className={cn('flex items-center', CHIP_GAP)} data-testid="plan-chips">
       {five && (
-        <Badge variant={severityVariant(five.severity)} appearance="light" size="sm" className="font-mono">
-          <Button
-            type="button"
-            variant="foreground"
-            size="inherit"
-            className="p-0"
-            data-testid="plan-chip"
-            data-percent={five.percent ?? ''}
-            data-severity={five.severity}
-            title={title}
-            aria-label={`Plan usage — this session: ${windowReads(five, now)}. Opens the whole usage picture.`}
-            onClick={onOpen}
-          >
-            {sessionChipReads(five)}
-          </Button>
-        </Badge>
+        <Tooltip label={title}>
+          <Badge variant={severityVariant(five.severity)} appearance="light" size="sm" className="font-mono">
+            <Button
+              type="button"
+              variant="foreground"
+              size="inherit"
+              className="p-0"
+              data-testid="plan-chip"
+              data-percent={five.percent ?? ''}
+              data-severity={five.severity}
+              aria-label={`Plan usage — this session: ${windowReads(five, now)}. Opens the whole usage picture.`}
+              onClick={onOpen}
+            >
+              {sessionChipReads(five)}
+            </Button>
+          </Badge>
+        </Tooltip>
       )}
       {week && (
-        <Badge variant={severityVariant(week.severity)} appearance="light" size="sm" className="font-mono">
-          <Button
-            type="button"
-            variant="foreground"
-            size="inherit"
-            className="p-0"
-            data-testid="plan-chip-week"
-            data-percent={week.percent ?? ''}
-            data-severity={week.severity}
-            title={title}
-            aria-label={`Plan usage — this week: ${windowReads(week, now)}. Opens the whole usage picture.`}
-            onClick={onOpen}
-          >
-            {weekChipReads(week)}
-          </Button>
-        </Badge>
+        <Tooltip label={title}>
+          <Badge variant={severityVariant(week.severity)} appearance="light" size="sm" className="font-mono">
+            <Button
+              type="button"
+              variant="foreground"
+              size="inherit"
+              className="p-0"
+              data-testid="plan-chip-week"
+              data-percent={week.percent ?? ''}
+              data-severity={week.severity}
+              aria-label={`Plan usage — this week: ${windowReads(week, now)}. Opens the whole usage picture.`}
+              onClick={onOpen}
+            >
+              {weekChipReads(week)}
+            </Button>
+          </Badge>
+        </Tooltip>
       )}
     </span>
   );

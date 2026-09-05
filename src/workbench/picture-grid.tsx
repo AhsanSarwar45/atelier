@@ -11,6 +11,7 @@
  * The block is a thumbnail and nothing more. Clicking any picture in it opens
  * that picture whole, which is what makes cropping a cell safe.
  */
+import { Tooltip } from '@/components/ui/tooltip';
 import { inlineMediaBounds } from '@/workbench/media-bounds';
 import type { ImagePayload } from '@/workbench/protocol';
 
@@ -65,25 +66,25 @@ export function PictureGrid({ images, onLook }: PictureGridProps): JSX.Element |
     >
       {images.map((img, i) => (
         // eslint-disable-next-line @next/next/no-img-element
-        <img
-          key={i}
-          data-testid="message-image"
-          src={img.dataUrl}
-          alt={img.alt}
-          title="Click to see it full size"
-          onClick={() => onLook(img)}
-          // A picture on its own keeps its own shape — there is no neighbour for
-          // it to line up with, and a screenshot cropped for nothing is a
-          // screenshot half lost. Two or more crop to a common shape, because a
-          // row of mixed heights reads as a mess and the whole picture is one
-          // click away regardless.
-          className={
-            alone
-              ? `${THUMB} justify-self-start object-contain`
-              : `${THUMB} aspect-[4/3] w-full object-cover`
-          }
-          style={alone ? inlineMediaBounds(img.dataUrl) : undefined}
-        />
+        <Tooltip key={i} label="Click to see it full size">
+          <img
+            data-testid="message-image"
+            src={img.dataUrl}
+            alt={img.alt}
+            onClick={() => onLook(img)}
+            // A picture on its own keeps its own shape — there is no neighbour for
+            // it to line up with, and a screenshot cropped for nothing is a
+            // screenshot half lost. Two or more crop to a common shape, because a
+            // row of mixed heights reads as a mess and the whole picture is one
+            // click away regardless.
+            className={
+              alone
+                ? `${THUMB} justify-self-start object-contain`
+                : `${THUMB} aspect-[4/3] w-full object-cover`
+            }
+            style={alone ? inlineMediaBounds(img.dataUrl) : undefined}
+          />
+        </Tooltip>
       ))}
     </div>
   );

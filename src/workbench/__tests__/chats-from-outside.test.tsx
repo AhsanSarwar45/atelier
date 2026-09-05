@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { RestoreRow } from '@/workbench/protocol';
 
+import { hoverSays } from './hovering';
 import { tagged } from './tagged';
 
 const PROJECT = 'p1';
@@ -198,8 +199,7 @@ describe('a chat begun in another tool', () => {
     // "external" under the name is gone (the manager, 2026-09-03).
     expect(screen.queryByTestId('chat-external')).toBeNull();
     expect(screen.getByTestId('external-origin')).toHaveAttribute('data-holder', 'terminal');
-    expect(screen.getByTestId('external-origin')).toHaveAttribute(
-      'title',
+    expect(await hoverSays(screen.getByTestId('external-origin'))).toBe(
       'Somebody has this chat open in a terminal.',
     );
     expect(screen.getByTestId('row-pill')).toHaveTextContent('Idle');

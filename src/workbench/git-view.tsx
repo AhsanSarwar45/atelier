@@ -42,6 +42,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip } from '@/components/ui/tooltip';
 import { ApiError, git, type GitChange, type GitCommit, type GitStatus } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -211,27 +212,27 @@ function FileLine({
           (src/lib/__tests__/one-set-of-parts.test.ts). `light` paints the
           letter in the state's accent on that accent at 18%, so the tint is a
           second signal beside the letter and both come from the live theme. */}
-      <Badge
-        size="xs"
-        variant={tone}
-        appearance="light"
-        aria-hidden="true"
-        title={said}
-        className="shrink-0 font-mono"
-      >
-        {word}
-      </Badge>
-      <span
-        className="flex min-w-0 flex-1 items-baseline gap-1"
-        title={from ? `${from} → ${path}` : path}
-      >
-        <span className="min-w-0 truncate text-xs text-t-secondary">{name}</span>
-        {folder && (
-          // Gives way first: a folder cut short still says roughly where the
-          // file lives, a name cut short says nothing at all.
-          <span className="min-w-0 shrink-[10] truncate text-[10px] text-t-faint">{folder}</span>
-        )}
-      </span>
+      <Tooltip label={said}>
+        <Badge
+          size="xs"
+          variant={tone}
+          appearance="light"
+          aria-hidden="true"
+          className="shrink-0 font-mono"
+        >
+          {word}
+        </Badge>
+      </Tooltip>
+      <Tooltip label={from ? `${from} → ${path}` : path}>
+        <span className="flex min-w-0 flex-1 items-baseline gap-1">
+          <span className="min-w-0 truncate text-xs text-t-secondary">{name}</span>
+          {folder && (
+            // Gives way first: a folder cut short still says roughly where the
+            // file lives, a name cut short says nothing at all.
+            <span className="min-w-0 shrink-[10] truncate text-[10px] text-t-faint">{folder}</span>
+          )}
+        </span>
+      </Tooltip>
       <Button
         size="xs"
         mode="icon"
@@ -656,9 +657,11 @@ export function GitView({ path }: GitViewProps) {
               <li key={made.sha} className="flex flex-col gap-0.5" data-testid="git-log-row" data-sha={made.sha}>
                 <div className="flex items-baseline gap-1.5">
                   <span className="shrink-0 font-mono text-[10px] text-t-tertiary">{made.shortSha}</span>
-                  <span className="min-w-0 flex-1 truncate text-xs text-t-secondary" title={made.subject}>
-                    {made.subject}
-                  </span>
+                  <Tooltip label={made.subject}>
+                    <span className="min-w-0 flex-1 truncate text-xs text-t-secondary">
+                      {made.subject}
+                    </span>
+                  </Tooltip>
                 </div>
                 <span className="text-[10px] text-t-faint">
                   {made.author} · {whenMade(made.date)}

@@ -271,19 +271,20 @@ export function Picker({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          data-testid={testid}
-          data-current={current ?? ''}
-          data-asleep={asleep}
-          aria-label={label}
-          title={label}
-          className="h-7 gap-1.5 rounded-full px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
-        >
-          {icon}
-          <span className="max-w-[18ch] truncate">{shown}</span>
-        </Button>
+        <Tooltip label={label}>
+          <Button
+            variant="ghost"
+            size="sm"
+            data-testid={testid}
+            data-current={current ?? ''}
+            data-asleep={asleep}
+            aria-label={label}
+            className="h-7 gap-1.5 rounded-full px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+          >
+            {icon}
+            <span className="max-w-[18ch] truncate">{shown}</span>
+          </Button>
+        </Tooltip>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-h-80 w-72 overflow-y-auto" data-testid={`${testid}-menu`}>
         <DropdownMenuLabel>{label}</DropdownMenuLabel>
@@ -312,24 +313,25 @@ export function Picker({
                 )}
               </DropdownMenuItem>
               {onDefault && (
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  className="mt-1 h-5 w-5 shrink-0 rounded-sm p-0"
-                  data-testid={`${testid}-default-${o.value}`}
-                  data-default={defaultValue === o.value}
-                  aria-pressed={defaultValue === o.value}
-                  disabled={Boolean(o.unavailable) || Boolean(cannotDefault?.(o.value))}
-                  aria-label={cannotDefault?.(o.value) ?? (defaultValue === o.value ? `${o.label} is the default` : `Make ${o.label} the default`)}
-                  title={cannotDefault?.(o.value) ?? (defaultValue === o.value ? 'Default' : 'Make default')}
-                  onPointerDown={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (!cannotDefault?.(o.value)) onDefault(o.value);
-                  }}
-                >
-                  <Star className={cn('h-3 w-3', defaultValue === o.value && 'fill-current text-primary')} aria-hidden="true" />
-                </Button>
+                <Tooltip label={cannotDefault?.(o.value) ?? (defaultValue === o.value ? 'Default' : 'Make default')}>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    className="mt-1 h-5 w-5 shrink-0 rounded-sm p-0"
+                    data-testid={`${testid}-default-${o.value}`}
+                    data-default={defaultValue === o.value}
+                    aria-pressed={defaultValue === o.value}
+                    disabled={Boolean(o.unavailable) || Boolean(cannotDefault?.(o.value))}
+                    aria-label={cannotDefault?.(o.value) ?? (defaultValue === o.value ? `${o.label} is the default` : `Make ${o.label} the default`)}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (!cannotDefault?.(o.value)) onDefault(o.value);
+                    }}
+                  >
+                    <Star className={cn('h-3 w-3', defaultValue === o.value && 'fill-current text-primary')} aria-hidden="true" />
+                  </Button>
+                </Tooltip>
               )}
             </div>
             </div>
@@ -468,29 +470,30 @@ function CommandMenu({
  */
 function BackToNow({ missed, shown, onClick }: { missed: number; shown: boolean; onClick: () => void }) {
   return (
-    <Button
-      variant="outline"
-      size="sm"
-      radius="full"
-      data-testid="back-to-now"
-      data-shown={shown ? 'yes' : 'no'}
-      data-missed={missed}
-      aria-hidden={!shown}
-      tabIndex={shown ? 0 : -1}
-      onClick={onClick}
-      title={missed > 0 ? `${missed} more since you scrolled up — back to now` : 'Back to the newest message'}
-      className={cn(
-        'absolute bottom-4 right-4 z-10 shadow-lg transition-all',
-        shown ? 'pointer-events-auto opacity-100' : 'pointer-events-none translate-y-2 opacity-0',
-      )}
-    >
-      <ArrowDown className="h-4 w-4" />
-      {missed > 0 && (
-        <span data-testid="back-to-now-count" className="text-xs font-medium tabular-nums">
-          {missed}
-        </span>
-      )}
-    </Button>
+    <Tooltip label={missed > 0 ? `${missed} more since you scrolled up — back to now` : 'Back to the newest message'}>
+      <Button
+        variant="outline"
+        size="sm"
+        radius="full"
+        data-testid="back-to-now"
+        data-shown={shown ? 'yes' : 'no'}
+        data-missed={missed}
+        aria-hidden={!shown}
+        tabIndex={shown ? 0 : -1}
+        onClick={onClick}
+        className={cn(
+          'absolute bottom-4 right-4 z-10 shadow-lg transition-all',
+          shown ? 'pointer-events-auto opacity-100' : 'pointer-events-none translate-y-2 opacity-0',
+        )}
+      >
+        <ArrowDown className="h-4 w-4" />
+        {missed > 0 && (
+          <span data-testid="back-to-now-count" className="text-xs font-medium tabular-nums">
+            {missed}
+          </span>
+        )}
+      </Button>
+    </Tooltip>
   );
 }
 
@@ -1463,16 +1466,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         <p className="text-muted-foreground">No chat selected</p>
         <div className="flex items-center gap-2" role="group" aria-label="Coding agent">
           {providers.map((provider) => (
-            <Button
-              key={provider.brand}
-              variant={newBrand === provider.brand ? 'primary' : 'secondary'}
-              onClick={() => setNewBrand(provider.brand)}
-              disabled={starting || !provider.available}
-              title={provider.available ? undefined : whyUnavailable(provider)}
-              data-testid={`agent-${provider.brand}`}
-            >
-              {brandName(provider.brand)}
-            </Button>
+            <Tooltip key={provider.brand} label={provider.available ? undefined : whyUnavailable(provider)}>
+              <Button
+                variant={newBrand === provider.brand ? 'primary' : 'secondary'}
+                onClick={() => setNewBrand(provider.brand)}
+                disabled={starting || !provider.available}
+                data-testid={`agent-${provider.brand}`}
+              >
+                {brandName(provider.brand)}
+              </Button>
+            </Tooltip>
           ))}
         </div>
         {/* Standing text here, unlike the dialog above: this screen is what a
@@ -1546,32 +1549,33 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           className="hidden sm:flex"
         />
         {facts?.folder && (
-          <Badge
-            hue={hueFor(facts.folder)}
-            appearance="light"
-            size="sm"
-            shape="circle"
-            data-testid="chat-folder-chip"
-            data-folder={facts.folder}
-            data-branch={facts.branch ?? ''}
-            // The whole path and the branch in the tooltip: the chip has room
-            // for the one word that tells two copies of a project apart.
-            title={[facts.cwd, facts.branch].filter(Boolean).join(' · ')}
-            // Never squeezed by the line, and never wider than a name: a chip
-            // that shrinks under its own text spills it over its neighbour
-            // (bw-7ks.22.15).
-            className="hidden max-w-40 shrink-0 gap-1 truncate sm:inline-flex"
-          >
-            {/* A folder that is a checkout says so: the branch is already in
-                this chip's tooltip, and the mark is what says there is one to
-                hover for (bw-ja9l.12). */}
-            {facts.branch ? (
-              <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
-            ) : (
-              <Folder className="size-3 shrink-0" aria-hidden="true" />
-            )}
-            <span className="min-w-0 truncate">{facts.folder}</span>
-          </Badge>
+          <Tooltip label={[facts.cwd, facts.branch].filter(Boolean).join(' · ')}>
+            <Badge
+              hue={hueFor(facts.folder)}
+              appearance="light"
+              size="sm"
+              shape="circle"
+              data-testid="chat-folder-chip"
+              data-folder={facts.folder}
+              data-branch={facts.branch ?? ''}
+              // The whole path and the branch in the tooltip: the chip has room
+              // for the one word that tells two copies of a project apart.
+              // Never squeezed by the line, and never wider than a name: a chip
+              // that shrinks under its own text spills it over its neighbour
+              // (bw-7ks.22.15).
+              className="hidden max-w-40 shrink-0 gap-1 truncate sm:inline-flex"
+            >
+              {/* A folder that is a checkout says so: the branch is already in
+                  this chip's tooltip, and the mark is what says there is one to
+                  hover for (bw-ja9l.12). */}
+              {facts.branch ? (
+                <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
+              ) : (
+                <Folder className="size-3 shrink-0" aria-hidden="true" />
+              )}
+              <span className="min-w-0 truncate">{facts.folder}</span>
+            </Badge>
+          </Tooltip>
         )}
         {/* What this chat is using and what it has spent, then how much of the
             account's own five-hour allowance is gone. All three are numbers a
@@ -1588,19 +1592,20 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             />
           )}
           {view.cost && (
-            <Badge
-              variant="secondary"
-              appearance="light"
-              size="sm"
-              data-testid="cost-chip"
-              data-kind={view.cost.kind}
-              data-total={view.cost.kind === 'usd' ? view.cost.usd : view.cost.total}
-              title="Total usage including subagents"
-              className="hidden font-mono sm:inline-flex"
-            >
-              <Coins />
-              {costLabel(view.cost)}
-            </Badge>
+            <Tooltip label="Total usage including subagents">
+              <Badge
+                variant="secondary"
+                appearance="light"
+                size="sm"
+                data-testid="cost-chip"
+                data-kind={view.cost.kind}
+                data-total={view.cost.kind === 'usd' ? view.cost.usd : view.cost.total}
+                className="hidden font-mono sm:inline-flex"
+              >
+                <Coins />
+                {costLabel(view.cost)}
+              </Badge>
+            </Tooltip>
           )}
           <PlanChip usage={plan} onOpen={() => setShowing('usage')} />
         </div>
@@ -1727,14 +1732,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               {attached.map((img, i) => (
                 <span key={i} className="relative">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    data-testid="attachment-thumb"
-                    src={img.dataUrl}
-                    alt={img.alt}
-                    title={`${img.alt} — click to see it full size`}
-                    onClick={() => setLooking(img)}
-                    className="h-12 w-12 cursor-zoom-in rounded border border-border/60 object-cover"
-                  />
+                  <Tooltip label={`${img.alt} — click to see it full size`}>
+                    <img
+                      data-testid="attachment-thumb"
+                      src={img.dataUrl}
+                      alt={img.alt}
+                      onClick={() => setLooking(img)}
+                      className="h-12 w-12 cursor-zoom-in rounded border border-border/60 object-cover"
+                    />
+                  </Tooltip>
                   <Button
                     variant="outline"
                     mode="icon"
@@ -1832,18 +1838,19 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           <div className="mt-1.5 flex items-center gap-1">
             {/* A plain button, not the toolbar's: that one speaks through a
                 tooltip and only works inside the bar that hosts one. */}
-            <Button
-              variant="ghost"
-              mode="icon"
-              size="sm"
-              aria-label="Attach a picture"
-              title="Attach a picture"
-              data-testid="attach-picture"
-              className="rounded-full text-muted-foreground"
-              onClick={() => picker.current?.click()}
-            >
-              <Paperclip className="h-4 w-4" />
-            </Button>
+            <Tooltip label="Attach a picture">
+              <Button
+                variant="ghost"
+                mode="icon"
+                size="sm"
+                aria-label="Attach a picture"
+                data-testid="attach-picture"
+                className="rounded-full text-muted-foreground"
+                onClick={() => picker.current?.click()}
+              >
+                <Paperclip className="h-4 w-4" />
+              </Button>
+            </Tooltip>
             {/* Both act on THIS chat, and are kept in his own settings so the
                 next one opens on them too (§8.2.3). */}
             <div className="hidden items-center gap-1 sm:flex" data-testid="desktop-composer-settings">
@@ -1949,29 +1956,31 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               onError={setSteerError}
             />
             </div>
-            <Button
-              variant="ghost"
-              mode="icon"
-              size="sm"
-              aria-label="Chat settings"
-              title="Chat settings"
-              data-testid="mobile-composer-settings"
-              className="rounded-full text-muted-foreground sm:hidden"
-              onClick={() => setComposerSettingsOpen(true)}
-            >
-              <SlidersHorizontal className="h-4 w-4" />
-            </Button>
-            {view.menu.agentDefinitions.length > 0 && (
-              <Badge
-                variant="secondary"
-                appearance="light"
+            <Tooltip label="Chat settings">
+              <Button
+                variant="ghost"
+                mode="icon"
                 size="sm"
-                title={view.menu.agentDefinitions.map((agent) => `${agent.name}${agent.description ? ` — ${agent.description}` : ''}`).join('\n')}
-                data-testid="agent-definitions"
-                className="hidden sm:inline-flex"
+                aria-label="Chat settings"
+                data-testid="mobile-composer-settings"
+                className="rounded-full text-muted-foreground sm:hidden"
+                onClick={() => setComposerSettingsOpen(true)}
               >
-                {view.menu.agentDefinitions.length} agent{view.menu.agentDefinitions.length === 1 ? '' : 's'}
-              </Badge>
+                <SlidersHorizontal className="h-4 w-4" />
+              </Button>
+            </Tooltip>
+            {view.menu.agentDefinitions.length > 0 && (
+              <Tooltip label={view.menu.agentDefinitions.map((agent) => `${agent.name}${agent.description ? ` — ${agent.description}` : ''}`).join('\n')}>
+                <Badge
+                  variant="secondary"
+                  appearance="light"
+                  size="sm"
+                  data-testid="agent-definitions"
+                  className="hidden sm:inline-flex"
+                >
+                  {view.menu.agentDefinitions.length} agent{view.menu.agentDefinitions.length === 1 ? '' : 's'}
+                </Badge>
+              </Tooltip>
             )}
             <span className="ml-auto" />
             {busy ? (

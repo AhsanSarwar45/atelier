@@ -23,6 +23,7 @@
 import { Cloud, Cpu, Gauge, Shield, ShieldAlert, ShieldCheck, ShieldHalf, ShieldOff, Workflow } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
+import { Tooltip } from '@/components/ui/tooltip';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { effortInWords, inWords, PERMISSION_MODE, UNKNOWN_MODE_TONE } from '@/workbench/machine-words';
@@ -291,92 +292,95 @@ export function WhatItRuns({
       className={cn('flex min-w-0 shrink items-center truncate whitespace-nowrap', CHIP_GAP, className)}
     >
       {modelLabel && (
-        <Badge
-          // Hashed off the model's family and never off the words: the words
-          // are the picker's where there is a picker and `inWords` where there
-          // is not, so hashing them gave one model two colours across the
-          // driven and the followed case (bw-ja9l.6).
-          hue={hueFor(model ? modelKey(model) : modelLabel)}
-          appearance="light"
-          size="sm"
-          shape="circle"
-          data-testid="chat-model-chip"
-          data-model={model ?? ''}
-          // The wire id in the tooltip: the chip has room for the name, and the
-          // id is what a reader needs when two builds of one model are about.
-          title={model ? `Model — ${model}` : 'Model — the brand’s own default'}
-          className="min-w-0 shrink gap-1 truncate"
-        >
-          {/* The same mark the model picker under the writing box wears, so the
-              two are read as one setting seen twice (bw-ja9l.12). */}
-          <Cpu className="size-3 shrink-0" aria-hidden="true" />
-          <span className="min-w-0 truncate">{modelLabel}</span>
-        </Badge>
+        <Tooltip label={model ? `Model — ${model}` : 'Model — the brand’s own default'}>
+          <Badge
+            // Hashed off the model's family and never off the words: the words
+            // are the picker's where there is a picker and `inWords` where there
+            // is not, so hashing them gave one model two colours across the
+            // driven and the followed case (bw-ja9l.6).
+            hue={hueFor(model ? modelKey(model) : modelLabel)}
+            appearance="light"
+            size="sm"
+            shape="circle"
+            data-testid="chat-model-chip"
+            data-model={model ?? ''}
+            className="min-w-0 shrink gap-1 truncate"
+          >
+            {/* The same mark the model picker under the writing box wears, so the
+                two are read as one setting seen twice (bw-ja9l.12). */}
+            <Cpu className="size-3 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 truncate">{modelLabel}</span>
+          </Badge>
+        </Tooltip>
       )}
       {mode && (
-        <Badge
-          variant={mode.tone}
-          // Ringed, not merely tinted. Every other chip on this line carries a
-          // colour the DATA hashed to, and a hashed chip is forced to `outline`
-          // and drawn with a ring (badge.tsx). A tint alone left this one as a
-          // run of coloured text between two pills — the odd thing out on the
-          // one line whose whole job is that the mode is read.
-          appearance="outline"
-          size="sm"
-          shape="circle"
-          data-testid="chat-mode-chip"
-          data-mode={permissionMode ?? ''}
-          data-tone={mode.tone}
-          title={`Permission mode — ${mode.label}`}
-          className="min-w-0 shrink gap-1 truncate"
-        >
-          <mode.Mark className="size-3 shrink-0" aria-hidden="true" />
-          <span className="min-w-0 truncate">{mode.label}</span>
-        </Badge>
+        <Tooltip label={`Permission mode — ${mode.label}`}>
+          <Badge
+            variant={mode.tone}
+            // Ringed, not merely tinted. Every other chip on this line carries a
+            // colour the DATA hashed to, and a hashed chip is forced to `outline`
+            // and drawn with a ring (badge.tsx). A tint alone left this one as a
+            // run of coloured text between two pills — the odd thing out on the
+            // one line whose whole job is that the mode is read.
+            appearance="outline"
+            size="sm"
+            shape="circle"
+            data-testid="chat-mode-chip"
+            data-mode={permissionMode ?? ''}
+            data-tone={mode.tone}
+            className="min-w-0 shrink gap-1 truncate"
+          >
+            <mode.Mark className="size-3 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 truncate">{mode.label}</span>
+          </Badge>
+        </Tooltip>
       )}
       {effortLabel && (
-        <Badge
-          variant="secondary"
-          appearance="outline"
-          size="sm"
-          shape="circle"
-          data-testid="chat-effort-chip"
-          data-effort={effort ?? ''}
-          title={`Reasoning effort — ${effortLabel}`}
-          className="min-w-0 shrink gap-1 truncate"
-        >
-          <Gauge className="size-3 shrink-0" aria-hidden="true" />
-          <span className="min-w-0 truncate">{effortLabel}</span>
-        </Badge>
+        <Tooltip label={`Reasoning effort — ${effortLabel}`}>
+          <Badge
+            variant="secondary"
+            appearance="outline"
+            size="sm"
+            shape="circle"
+            data-testid="chat-effort-chip"
+            data-effort={effort ?? ''}
+            className="min-w-0 shrink gap-1 truncate"
+          >
+            <Gauge className="size-3 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 truncate">{effortLabel}</span>
+          </Badge>
+        </Tooltip>
       )}
       {collaborationLabel && (
-        <Badge
-          variant="secondary"
-          appearance="outline"
-          size="sm"
-          shape="circle"
-          data-testid="chat-collaboration-mode-chip"
-          data-collaboration-mode={collaborationMode ?? ''}
-          title={`Collaboration mode — ${collaborationLabel}`}
-          className="min-w-0 shrink gap-1 truncate"
-        >
-          <Workflow className="size-3 shrink-0" aria-hidden="true" />
-          <span className="min-w-0 truncate">{collaborationLabel}</span>
-        </Badge>
+        <Tooltip label={`Collaboration mode — ${collaborationLabel}`}>
+          <Badge
+            variant="secondary"
+            appearance="outline"
+            size="sm"
+            shape="circle"
+            data-testid="chat-collaboration-mode-chip"
+            data-collaboration-mode={collaborationMode ?? ''}
+            className="min-w-0 shrink gap-1 truncate"
+          >
+            <Workflow className="size-3 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 truncate">{collaborationLabel}</span>
+          </Badge>
+        </Tooltip>
       )}
       {endpoint && (
-        <Badge
-          variant="warning"
-          appearance="outline"
-          size="sm"
-          shape="circle"
-          data-testid="chat-endpoint-chip"
-          title={endpoint.title}
-          className="min-w-0 shrink gap-1 truncate"
-        >
-          <Cloud className="size-3 shrink-0" aria-hidden="true" />
-          <span className="min-w-0 truncate">{endpoint.label}</span>
-        </Badge>
+        <Tooltip label={endpoint.title}>
+          <Badge
+            variant="warning"
+            appearance="outline"
+            size="sm"
+            shape="circle"
+            data-testid="chat-endpoint-chip"
+            className="min-w-0 shrink gap-1 truncate"
+          >
+            <Cloud className="size-3 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 truncate">{endpoint.label}</span>
+          </Badge>
+        </Tooltip>
       )}
     </span>
   );

@@ -29,6 +29,7 @@ import { Button } from '@/components/ui/button';
 import { Overlay, overlayPanel } from '@/components/ui/overlay';
 import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip } from '@/components/ui/tooltip';
 import { request } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { commandRun } from '@/workbench/command-run';
@@ -287,22 +288,20 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
             {!isShell && (
               <div className="mt-0.5 flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
                 {model && (
-                  <span data-testid="agent-view-model" title={row.model ?? undefined}>
-                    {model}
-                  </span>
+                  <Tooltip label={row.model ?? undefined}>
+                    <span data-testid="agent-view-model">{model}</span>
+                  </Tooltip>
                 )}
                 <span className="flex items-center gap-1" data-testid="agent-view-for">
                   <Clock className="h-3 w-3" aria-hidden="true" />
                   {forHowLong(liveSeconds(row, now))}
                 </span>
-                <span
-                  className="flex items-center gap-1"
-                  data-testid="agent-view-spend"
-                  title={`${row.tokens.toLocaleString()} tokens over ${row.calls} call${row.calls === 1 ? '' : 's'}`}
-                >
-                  <Coins className="h-3 w-3" aria-hidden="true" />
-                  {spend(row.tokens)}
-                </span>
+                <Tooltip label={`${row.tokens.toLocaleString()} tokens over ${row.calls} call${row.calls === 1 ? '' : 's'}`}>
+                  <span className="flex items-center gap-1" data-testid="agent-view-spend">
+                    <Coins className="h-3 w-3" aria-hidden="true" />
+                    {spend(row.tokens)}
+                  </span>
+                </Tooltip>
               </div>
             )}
           </div>

@@ -22,11 +22,13 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import type { ModelChoice } from '@/workbench/protocol';
 import { CHIP_GAP, modelKey, modelName, WhatItRuns } from '@/workbench/what-it-runs';
+
+import { hoverSays } from './hovering';
 
 /** The picker's own list, as a chat this app drives announces it. */
 const MENU: ModelChoice[] = [
@@ -49,19 +51,23 @@ const modelChip = () => screen.queryByTestId('chat-model-chip');
  * hover produces. The `data-` attributes are how the screen tests name a mode
  * without reading English at it, and nobody sees them.
  */
-function readable(): string {
+async function readable(): Promise<string> {
   const group = screen.getByTestId('session-meta');
-  const titles = Array.from(group.querySelectorAll('[title]'), (el) => el.getAttribute('title') ?? '');
-  return [group.textContent ?? '', ...titles].join(' | ');
+  const said: string[] = [];
+  for (const chip of group.querySelectorAll('[data-testid$="-chip"]')) {
+    said.push(await hoverSays(chip));
+    fireEvent.pointerLeave(chip);
+  }
+  return [group.textContent ?? '', ...said].join(' | ');
 }
 
 describe('what the chat is running, on its own line', () => {
-  it('names the mode in the picker’s words and never in the setting’s', () => {
+  it('names the mode in the picker’s words and never in the setting’s', async () => {
     draw('opus', 'bypassPermissions');
 
     expect(modeChip()?.textContent).toBe('Skip all checks');
     // The whole point: the wire word is nowhere a reader can see it.
-    expect(readable()).not.toContain('bypassPermissions');
+    expect(await readable()).not.toContain('bypassPermissions');
   });
 
   it('draws every mode the kit ships today in words', () => {
@@ -79,13 +85,13 @@ describe('what the chat is running, on its own line', () => {
     }
   });
 
-  it('draws a mode invented after this release in English rather than in camel case', () => {
+  it('draws a mode invented after this release in English rather than in camel case', async () => {
     // The kit adds modes between our releases. The choice is the wire word, or
     // nothing, or the same word with its seams opened up (machine-words.ts).
     draw('opus', 'askAboutEverythingTwice');
 
     expect(modeChip()?.textContent).toBe('Ask about everything twice');
-    expect(readable()).not.toContain('askAboutEverythingTwice');
+    expect(await readable()).not.toContain('askAboutEverythingTwice');
   });
 
   it('says loudly that a chat has stopped asking, and quietly that it still does', () => {
@@ -112,7 +118,7 @@ describe('what the chat is running, on its own line', () => {
     expect(modeChip()?.textContent).toBe('Skip all checks');
   });
 
-  it('names the long-context build the way the terminal names it', () => {
+  it('names the long-context build the way the terminal names it', async () => {
     // The chip said `Claude opus 5[1m]` and the picker an inch below it said
     // `claude-opus-5[1m]`: two spellings of one build, neither of them the name
     // the reader's own terminal prints (bw-ja9l.11).
@@ -120,7 +126,7 @@ describe('what the chat is running, on its own line', () => {
 
     expect(modelChip()?.textContent).toBe('Opus 5 (1M context)');
     // The id is still one hover away, which is where it belongs.
-    expect(modelChip()?.getAttribute('title')).toContain('claude-opus-5[1m]');
+    expect(await hoverSays(modelChip()!)).toContain('claude-opus-5[1m]');
   });
 
   it('names every model the kit hands it, and defers where it cannot', () => {

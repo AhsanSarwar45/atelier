@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { Button } from '@/components/ui/button';
+import { Tooltip } from '@/components/ui/tooltip';
 import type { Bead } from '@/types';
 import { sendCommand } from '@/workbench/use-session';
 import type { Brand } from '@/workbench/protocol';
@@ -60,16 +61,19 @@ export function StartFromCard({ bead, projectId, projectPath }: StartFromCardPro
     <div className="mt-6">
       <div className="mb-2 flex gap-2" role="group" aria-label="Coding agent">
         {providers.map((provider) => (
-          <Button
+          <Tooltip
             key={provider.brand}
-            size="sm"
-            variant={brand === provider.brand ? 'primary' : 'secondary'}
-            disabled={!provider.available}
-            title={provider.available ? undefined : whyUnavailable(provider)}
-            onClick={() => setBrand(provider.brand)}
+            label={provider.available ? undefined : whyUnavailable(provider)}
           >
-            {brandName(provider.brand)}
-          </Button>
+            <Button
+              size="sm"
+              variant={brand === provider.brand ? 'primary' : 'secondary'}
+              disabled={!provider.available}
+              onClick={() => setBrand(provider.brand)}
+            >
+              {brandName(provider.brand)}
+            </Button>
+          </Tooltip>
         ))}
       </div>
       <Button

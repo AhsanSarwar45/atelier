@@ -2,6 +2,7 @@
 
 import * as React from "react"
 
+import { Slot } from "@radix-ui/react-slot"
 import * as TooltipPrimitive from "@radix-ui/react-tooltip"
 
 import { cn } from "@/lib/utils"
@@ -59,12 +60,32 @@ export type TooltipProps = {
   align?: React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>['align'];
   /** On the label, never on the trigger. */
   className?: string;
+  /**
+   * On the wrapper a disabled trigger gets, for the cases where the control
+   * fills its row: the wrapper is shrink-to-fit, so a `w-full` child inside a
+   * block would otherwise collapse to its own width.
+   */
+  wrapperClassName?: string;
   delayDuration?: number;
 };
 
-export function Tooltip({ label, children, side = 'top', align = 'center', className, delayDuration }: TooltipProps) {
+/**
+ * A label is often asked for on a control that is already the child of
+ * something else that wants to be that control — a menu's trigger, a dialog's.
+ * Those parents hand their child props and a ref through `asChild`, so this
+ * component has to be see-through: whatever it is given it passes on to the
+ * control below it, rather than swallowing it and leaving a menu that cannot
+ * find the button it opens from (bw-6wq6.2).
+ */
+export const Tooltip = React.forwardRef<HTMLElement, TooltipProps>(function Tooltip(
+  { label, children, side = 'top', align = 'center', className, wrapperClassName, delayDuration, ...rest },
+  ref,
+) {
   const mounted = React.useContext(Mounted);
-  if (label === undefined || label === null || label === '') return children;
+  const passed = rest as React.ComponentPropsWithoutRef<typeof Slot>;
+  if (label === undefined || label === null || label === '') {
+    return <Slot ref={ref} {...passed}>{children}</Slot>;
+  }
 
   // A disabled control takes no pointer events, so it is never hovered and can
   // never be the thing the reader is pointing at. Hovering it is exactly when
@@ -72,8 +93,14 @@ export function Tooltip({ label, children, side = 'top', align = 'center', class
   // carries the label, and it takes focus so a keyboard reaches the same
   // sentence (bw-uyk2.1).
   const props = children.props as { disabled?: boolean };
-  const trigger = props?.disabled ? (
-    <span tabIndex={0} className="inline-flex rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+  const inner = props?.disabled ? (
+    <span
+      tabIndex={0}
+      className={cn(
+        'inline-flex rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+        wrapperClassName,
+      )}
+    >
       {children}
     </span>
   ) : (
@@ -82,7 +109,9 @@ export function Tooltip({ label, children, side = 'top', align = 'center', class
 
   const tooltip = (
     <TooltipPrimitive.Root delayDuration={delayDuration}>
-      <TooltipPrimitive.Trigger asChild>{trigger}</TooltipPrimitive.Trigger>
+      <TooltipPrimitive.Trigger asChild>
+        <Slot ref={ref} {...passed}>{inner}</Slot>
+      </TooltipPrimitive.Trigger>
       <TooltipContent side={side} align={align} className={className}>
         {label}
       </TooltipContent>
@@ -93,7 +122,7 @@ export function Tooltip({ label, children, side = 'top', align = 'center', class
   // gets its labels: Radix refuses a tooltip with no provider above it, so one
   // is supplied here when there is none.
   return mounted ? tooltip : <TooltipProvider>{tooltip}</TooltipProvider>;
-}
+});
 
 const TooltipContent = React.forwardRef<
   React.ElementRef<typeof TooltipPrimitive.Content>,
@@ -112,13 +141,17 @@ const TooltipContent = React.forwardRef<
       sideOffset={sideOffset}
       collisionPadding={8}
       className={cn(
+        // Line breaks in a label are kept, because the browser's own label
+        // kept them and several of the app's longest labels are written as two
+        // or three lines rather than one long one (bw-6wq6.2).
+        //
         // The face of every other floating thing in the app: the overlay
         // surface, the app's own border, its primary text. Which is dark with
         // near-white writing in this skin, and follows the skin where a reader
         // has chosen a light one — a tooltip that named its own colours was
         // white-on-dark in a dark app, the one panel that did not belong to it
         // (bw-6wq6.1).
-        "z-50 max-w-xs overflow-hidden rounded-md border border-border/60 bg-surface-overlay px-3 py-1.5 text-xs text-t-primary shadow-lg animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        "z-50 max-w-xs overflow-hidden whitespace-pre-line rounded-md border border-border/60 bg-surface-overlay px-3 py-1.5 text-xs text-t-primary shadow-lg animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
         className
       )}
       {...props}

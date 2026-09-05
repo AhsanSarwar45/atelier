@@ -26,6 +26,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { Doing } from '@/workbench/chat-state';
 import { forHowLong } from '@/workbench/elapsed';
@@ -142,9 +143,11 @@ export const PermissionCard = memo(function PermissionCard({
       data-sent-by={sentBy ?? undefined}
     >
       {raisedBy && (
-        <div data-testid="permission-asked-by" className="mb-1 truncate text-xs text-muted-foreground" title={raisedBy}>
-          Asked by {raisedBy}
-        </div>
+        <Tooltip label={raisedBy}>
+          <div data-testid="permission-asked-by" className="mb-1 truncate text-xs text-muted-foreground">
+            Asked by {raisedBy}
+          </div>
+        </Tooltip>
       )}
       <div className="text-sm font-medium text-foreground">{question ? toolName : `Allow ${toolName}?`}</div>
       {/* Only when it says something the line above did not. An ACP permission
@@ -695,35 +698,36 @@ export const MachineLine = memo(
         data-open={open}
       >
         <Panel inset="none" className={cn('px-2.5 py-1 font-mono text-xs md:py-1.5', look.row)}>
-          <Button
-            type="button"
-            variant="foreground"
-            size="inherit"
-            data-testid="note-toggle"
-            disabled={!opens}
-            onClick={() => setOpen(!open)}
-            title={row.kind}
-            className="w-full justify-start gap-2 rounded-none p-0 text-left enabled:hover:brightness-125"
-          >
-            <Mark className="h-3 w-3 shrink-0" />
-            {opens && (
-              <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} />
-            )}
-            <span className="truncate">{saidBy(row)}</span>
-            {row.lines.length > 1 && (
-              <Badge
-                size="xs"
-                shape="circle"
-                data-testid="note-times"
-                className={cn('shrink-0 tabular-nums', look.count)}
-              >
-                {row.lines.length}
-              </Badge>
-            )}
-            {/* Where a command says OK or FAILED, this says which of the six it
-                is — so the colour is never the only thing carrying it. */}
-            <span className="ml-auto shrink-0 uppercase tracking-wide">{row.family}</span>
-          </Button>
+          <Tooltip label={row.kind} wrapperClassName="w-full">
+            <Button
+              type="button"
+              variant="foreground"
+              size="inherit"
+              data-testid="note-toggle"
+              disabled={!opens}
+              onClick={() => setOpen(!open)}
+              className="w-full justify-start gap-2 rounded-none p-0 text-left enabled:hover:brightness-125"
+            >
+              <Mark className="h-3 w-3 shrink-0" />
+              {opens && (
+                <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} />
+              )}
+              <span className="truncate">{saidBy(row)}</span>
+              {row.lines.length > 1 && (
+                <Badge
+                  size="xs"
+                  shape="circle"
+                  data-testid="note-times"
+                  className={cn('shrink-0 tabular-nums', look.count)}
+                >
+                  {row.lines.length}
+                </Badge>
+              )}
+              {/* Where a command says OK or FAILED, this says which of the six it
+                  is — so the colour is never the only thing carrying it. */}
+              <span className="ml-auto shrink-0 uppercase tracking-wide">{row.family}</span>
+            </Button>
+          </Tooltip>
           {open &&
             row.lines.map((line, i) => (
               <Body
@@ -896,13 +900,14 @@ export function WorkingLine({
       {/* Half the weight of the step beside it, because it answers the second
           question and not the one the spinner is watched for. */}
       {turnSeconds > 0 && (
-        <span
-          data-testid="working-turn"
-          title="Turn duration"
-          className="shrink-0 font-mono text-xs tabular-nums opacity-40"
-        >
-          {forHowLong(turnSeconds)} turn
-        </span>
+        <Tooltip label="Turn duration">
+          <span
+            data-testid="working-turn"
+            className="shrink-0 font-mono text-xs tabular-nums opacity-40"
+          >
+            {forHowLong(turnSeconds)} turn
+          </span>
+        </Tooltip>
       )}
     </div>
   );
