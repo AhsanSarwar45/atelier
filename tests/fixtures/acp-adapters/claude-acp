@@ -32,9 +32,38 @@ const PAGES = (cwd) => ({
         title: 'The chat on the second page',
         updatedAt: '2026-09-02T04:00:02.000Z',
       },
+      {
+        sessionId: 'acp-session-long',
+        cwd,
+        title: 'A very long chat over ACP',
+        updatedAt: '2026-09-02T03:00:02.000Z',
+      },
     ],
   },
 });
+
+/**
+ * A chat with a thousand turns in it, said the way an agent says one: as a
+ * stream of `session/update` notifications during the load.
+ *
+ * Nothing about the wire changes with length, which is the point — what a long
+ * one is for is the reading end. A cost that is quadratic in the number of
+ * updates is invisible on the two-line chats above and is the whole of "they
+ * take ages to load" on a real one.
+ */
+const LONG_TURNS = 1_000;
+const LAST_LONG = `and that is the last answer over ACP, ${LONG_TURNS}`;
+function longReplay() {
+  const said = [];
+  for (let turn = 1; turn <= LONG_TURNS; turn += 1) {
+    said.push(['user_message_chunk', `question number ${turn}`]);
+    said.push([
+      'agent_message_chunk',
+      turn === LONG_TURNS ? LAST_LONG : `answer number ${turn}, with enough words in it to be a real reply`,
+    ]);
+  }
+  return said;
+}
 
 const REPLAY = {
   'acp-session-one': [
@@ -89,7 +118,8 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
         params: { sessionId: params.sessionId, update: { sessionUpdate: 'session_info_update', updatedAt: '2026-09-02T05:31:00.000Z' } },
       });
     }
-    for (const [sessionUpdate, text] of REPLAY[params?.sessionId] ?? []) {
+    const said = params?.sessionId === 'acp-session-long' ? longReplay() : (REPLAY[params?.sessionId] ?? []);
+    for (const [sessionUpdate, text] of said) {
       say({
         method: 'session/update',
         params: { sessionId: params.sessionId, update: { sessionUpdate, content: { type: 'text', text } } },
