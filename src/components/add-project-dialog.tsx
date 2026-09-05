@@ -19,6 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Panel, panelVariants } from "@/components/ui/panel";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import type { DoltDatabase, DoltServer, ManifestStorage, ProjectManifest } from "@/lib/api";
@@ -331,15 +332,16 @@ export function AddProjectDialog({
                       autoFocus
                     />
                   </div>
-                  <Button
-                    variant="outline"
-                    size="md"
-                    onClick={() => setBrowsing(true)}
-                    title="Browse folders"
-                  >
-                    <FolderSearch className="size-4" />
-                    Browse
-                  </Button>
+                  <Tooltip label="Browse folders">
+                    <Button
+                      variant="outline"
+                      size="md"
+                      onClick={() => setBrowsing(true)}
+                    >
+                      <FolderSearch className="size-4" />
+                      Browse
+                    </Button>
+                  </Tooltip>
                 </div>
                 {pathError && (
                   <p className="text-sm text-danger">{pathError}</p>

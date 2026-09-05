@@ -30,8 +30,9 @@ import {
 
 import "highlight.js/styles/github-dark.css";
 
-import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { rehypeMentions, type Piece } from "@/workbench/mentions";
 import { openLocalPath } from "@/workbench/open-local-path";
 
@@ -129,13 +130,15 @@ function FileLinkBadge({ href, target, children, onClick }: {
   const kind = fileKind(target.path);
   const Icon = FILE_KINDS[kind].icon;
   return (
-    <Badge asChild variant="primary" appearance="outline" size="sm" shape="circle" className={cn('mx-0.5 align-middle font-mono no-underline', FILE_KINDS[kind].color)}>
-      <a href={href} onClick={onClick} data-testid="markdown-file-link" data-file-kind={kind} title={`Open ${target.path}${target.line === null ? '' : ` at line ${target.line}`}`}>
-        <Icon className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-        <span>{children}</span>
-        {target.line === null ? null : <span className="text-muted-foreground">:{target.line}</span>}
-      </a>
-    </Badge>
+    <Tooltip label={`Open ${target.path}${target.line === null ? '' : ` at line ${target.line}`}`}>
+      <Badge asChild variant="primary" appearance="outline" size="sm" shape="circle" className={cn('mx-0.5 align-middle font-mono no-underline', FILE_KINDS[kind].color)}>
+        <a href={href} onClick={onClick} data-testid="markdown-file-link" data-file-kind={kind}>
+          <Icon className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+          <span>{children}</span>
+          {target.line === null ? null : <span className="text-muted-foreground">:{target.line}</span>}
+        </a>
+      </Badge>
+    </Tooltip>
   );
 }
 
@@ -261,12 +264,14 @@ function WebLinkBadge({ href, target, children }: { href: string; target: WebTar
   const label = wroteItOut(href, written) ? target.label : children;
   const definition = WEB_KINDS[target.kind];
   return (
-    <Badge asChild variant="primary" appearance="outline" size="sm" shape="circle" className={cn('mx-0.5 align-middle font-mono no-underline', definition.color)}>
-      <a href={href} target="_blank" rel="noopener noreferrer" data-testid="markdown-web-badge" data-web-kind={target.kind} title={`Open ${definition.title.toLowerCase()} on ${target.host}`}>
-        <SiteIcon target={target} />
-        <span>{label}</span>
-      </a>
-    </Badge>
+    <Tooltip label={`Open ${definition.title.toLowerCase()} on ${target.host}`}>
+      <Badge asChild variant="primary" appearance="outline" size="sm" shape="circle" className={cn('mx-0.5 align-middle font-mono no-underline', definition.color)}>
+        <a href={href} target="_blank" rel="noopener noreferrer" data-testid="markdown-web-badge" data-web-kind={target.kind}>
+          <SiteIcon target={target} />
+          <span>{label}</span>
+        </a>
+      </Badge>
+    </Tooltip>
   );
 }
 

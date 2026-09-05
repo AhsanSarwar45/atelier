@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 
 import { Check } from "lucide-react";
 
+import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 interface CopyableTextProps {
@@ -42,12 +43,13 @@ export function CopyableText({ children, copyText, className }: CopyableTextProp
   }
 
   return (
-    <span
-      onClick={handleCopy}
-      className={cn("cursor-copy hover:text-t-secondary transition-colors", className)}
-      title={`Click to copy: ${copyText}`}
-    >
-      {children}
-    </span>
+    <Tooltip label={`Click to copy: ${copyText}`}>
+      <span
+        onClick={handleCopy}
+        className={cn("cursor-copy hover:text-t-secondary transition-colors", className)}
+      >
+        {children}
+      </span>
+    </Tooltip>
   );
 }

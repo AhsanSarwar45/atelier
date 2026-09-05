@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { updateProject } from "@/lib/db";
 import * as api from "@/lib/api";
@@ -213,18 +214,19 @@ export function ProjectSettingsDialog({
                 className="pl-10"
               />
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="md"
-              onClick={() => {
-                setBrowserPath(value || "");
-                setBrowsing(browsingKey);
-              }}
-              title="Browse folders"
-            >
-              <FolderSearch className="size-4" />
-            </Button>
+            <Tooltip label="Browse folders">
+              <Button
+                type="button"
+                variant="outline"
+                size="md"
+                onClick={() => {
+                  setBrowserPath(value || "");
+                  setBrowsing(browsingKey);
+                }}
+              >
+                <FolderSearch className="size-4" />
+              </Button>
+            </Tooltip>
           </div>
           {pathError && browsingKey === "path" && (
             <p className="text-sm text-danger">{pathError}</p>

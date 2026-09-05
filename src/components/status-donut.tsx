@@ -70,10 +70,9 @@ export function StatusDonut({ beadCounts, size = 40, className, countsLoaded = t
         aria-label={label}
         aria-busy={!countsLoaded}
       >
-        <div
-          className="rounded-full border-2 border-dashed border-b-strong w-full h-full"
-          title={label}
-        />
+        <Tooltip label={label}>
+          <div className="rounded-full border-2 border-dashed border-b-strong w-full h-full" />
+        </Tooltip>
       </div>
     );
   }

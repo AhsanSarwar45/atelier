@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Panel, panelVariants } from "@/components/ui/panel";
 import { ReadFailed } from "@/components/ui/read-failed";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip } from "@/components/ui/tooltip";
 import * as api from "@/lib/api";
 import type { FsEntry } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -262,16 +263,17 @@ export function FolderBrowser({
                   appearance="light"
                   className="font-mono"
                 >
-                  <Button
-                    type="button"
-                    variant="foreground"
-                    size="inherit"
-                    className="p-0"
-                    onClick={() => navigateToDirectory(root)}
-                    title={root}
-                  >
-                    {root.charAt(0)}:
-                  </Button>
+                  <Tooltip label={root}>
+                    <Button
+                      type="button"
+                      variant="foreground"
+                      size="inherit"
+                      className="p-0"
+                      onClick={() => navigateToDirectory(root)}
+                    >
+                      {root.charAt(0)}:
+                    </Button>
+                  </Tooltip>
                 </Badge>
               ))}
             </div>

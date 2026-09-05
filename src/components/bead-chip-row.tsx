@@ -20,6 +20,7 @@ import { CircleDot } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Tooltip } from '@/components/ui/tooltip';
 import { addressWith, cardWasPushed } from '@/lib/address';
 import { classesFor } from '@/lib/state-styles';
 import { cn } from '@/lib/utils';
@@ -58,36 +59,37 @@ export function BeadChip({
        with no room between it and its own border (bw-s5op.2). The button is
        here for what it does — the pointer, the focus ring, the disabled state
        — not for a box of its own. */
-    <Badge
-      asChild
-      variant="primary"
-      appearance="outline"
-      size={size}
-      shape="circle"
-      className={cn('shrink-0 font-mono', status && classesFor(status).badge, className)}
-    >
-      <Button
-        type="button"
-        variant="foreground"
-        size="none"
-        className="relative font-inherit before:absolute before:-inset-2.5 before:content-['']"
-        data-testid={testId}
-        data-bead-id={id}
-        data-bead-status={status}
-        title={title ?? `Open ${id}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          // Pushed, and the rest of the address kept: the card opens over what he
-          // was reading, and Back closes it again.
-          cardWasPushed();
-          router.push(addressWith(params, { id: projectId, card: id }));
-        }}
+    <Tooltip label={title ?? `Open ${id}`}>
+      <Badge
+        asChild
+        variant="primary"
+        appearance="outline"
+        size={size}
+        shape="circle"
+        className={cn('shrink-0 font-mono', status && classesFor(status).badge, className)}
       >
-        {/* A card wears a picture the way a report does, so a line carrying both
-            says which is which before either is read (bw-4wcd.7). */}
-        <CircleDot className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-        {id}
-      </Button>
-    </Badge>
+        <Button
+          type="button"
+          variant="foreground"
+          size="none"
+          className="relative font-inherit before:absolute before:-inset-2.5 before:content-['']"
+          data-testid={testId}
+          data-bead-id={id}
+          data-bead-status={status}
+          onClick={(e) => {
+            e.stopPropagation();
+            // Pushed, and the rest of the address kept: the card opens over what he
+            // was reading, and Back closes it again.
+            cardWasPushed();
+            router.push(addressWith(params, { id: projectId, card: id }));
+          }}
+        >
+          {/* A card wears a picture the way a report does, so a line carrying both
+              says which is which before either is read (bw-4wcd.7). */}
+          <CircleDot className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+          {id}
+        </Button>
+      </Badge>
+    </Tooltip>
   );
 }

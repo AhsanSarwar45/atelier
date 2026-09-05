@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
 import { ReadFailed } from "@/components/ui/read-failed";
 import { Slider } from "@/components/ui/slider";
+import { Tooltip } from "@/components/ui/tooltip";
 import { getTags, createTag, deleteTag, type Tag } from "@/lib/db";
 import {
   applyFontSize,
@@ -216,16 +217,17 @@ export default function SettingsPage() {
                       />
                       <span className="text-sm font-medium text-t-secondary">{tag.name}</span>
                     </div>
-                    <Button
-                      variant="ghost"
-                      mode="icon"
-                      size="sm"
-                      onClick={() => handleDeleteTag(tag.id)}
-                      title="Delete tag"
-                      aria-label={`Delete tag ${tag.name}`}
-                    >
-                      <Trash2 className="size-4" aria-hidden="true" />
-                    </Button>
+                    <Tooltip label="Delete tag">
+                      <Button
+                        variant="ghost"
+                        mode="icon"
+                        size="sm"
+                        onClick={() => handleDeleteTag(tag.id)}
+                        aria-label={`Delete tag ${tag.name}`}
+                      >
+                        <Trash2 className="size-4" aria-hidden="true" />
+                      </Button>
+                    </Tooltip>
                   </Panel>
                 ))
               )}

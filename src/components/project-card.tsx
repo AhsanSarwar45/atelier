@@ -196,9 +196,11 @@ export function ProjectCard({
             a path trimmed to "/.." is not a path. Below `sm` the path keeps
             the line to itself and the badges drop underneath it. */}
         <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
-          <p className="text-sm text-t-muted truncate min-w-0 basis-full sm:basis-auto" title={path}>
-            {path}
-          </p>
+          <Tooltip label={path}>
+            <p className="text-sm text-t-muted truncate min-w-0 basis-full sm:basis-auto" data-testid="project-path">
+              {path}
+            </p>
+          </Tooltip>
           {archivedAt && (
             <Badge variant="secondary" appearance="light" size="sm" shape="circle" className="shrink-0 gap-1">
               <Archive className="h-3 w-3" aria-hidden="true" />

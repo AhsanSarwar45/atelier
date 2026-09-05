@@ -3,6 +3,7 @@
 import { Bug, Sparkles, Wrench, Tag as TagIcon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Tooltip } from "@/components/ui/tooltip";
 import { beadTags, tagFor, tagHue } from "@/lib/bead-labels";
 import { cn } from "@/lib/utils";
 import type { Bead } from "@/types";
@@ -19,16 +20,17 @@ export function BeadSystemTag({ bead, className }: { bead: Pick<Bead, "labels">;
   if (!tag) return null;
 
   return (
-    <Badge
-      size="xs"
-      appearance="light"
-      hue={tagHue(tag)}
-      className={cn("theme-badge font-semibold", className)}
-      title={tag.raw}
-      data-bead-tag={tag.raw}
-    >
-      {tag.value}
-    </Badge>
+    <Tooltip label={tag.raw}>
+      <Badge
+        size="xs"
+        appearance="light"
+        hue={tagHue(tag)}
+        className={cn("theme-badge font-semibold", className)}
+        data-bead-tag={tag.raw}
+      >
+        {tag.value}
+      </Badge>
+    </Tooltip>
   );
 }
 
@@ -40,16 +42,17 @@ export function BeadKindTag({ bead, className }: { bead: Pick<Bead, "labels">; c
 
   return (
     // The kind of work reads first, so it carries the stronger fill.
-    <Badge
-      size="xs"
-      hue={tagHue(tag)}
-      className={cn("theme-badge gap-1 font-semibold", className)}
-      title={tag.raw}
-      data-bead-tag={tag.raw}
-    >
-      <Icon className="size-3 shrink-0" aria-hidden="true" />
-      {tag.value}
-    </Badge>
+    <Tooltip label={tag.raw}>
+      <Badge
+        size="xs"
+        hue={tagHue(tag)}
+        className={cn("theme-badge gap-1 font-semibold", className)}
+        data-bead-tag={tag.raw}
+      >
+        <Icon className="size-3 shrink-0" aria-hidden="true" />
+        {tag.value}
+      </Badge>
+    </Tooltip>
   );
 }
 
