@@ -36,6 +36,7 @@ vi.mock('@/workbench/use-session', async (real) => {
       menu: { ...EMPTY.menu, efforts: [{ value: 'high', displayName: 'High' }] },
     }),
     useSessionFacts: () => null,
+    useSessionFactsRead: () => null,
   };
 });
 
@@ -46,6 +47,7 @@ vi.mock('@/workbench/live', () => ({
   useLiveSessions: () => [],
   usePlanUsage: () => ({ available: false, plan: null, session: null, week: null, opus: null, at: null }),
   useRunningElsewhere: () => new Set<string>(),
+  useRunningSaidAt: () => null,
 }));
 
 vi.mock('@/workbench/chat-sidebar', () => ({ ChatSidebar: () => null }));

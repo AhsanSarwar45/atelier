@@ -555,3 +555,19 @@ gate at all.
 warning about, and — because writing this section is itself a repository change
 — a card and a worktree raised for the sole purpose of being allowed to describe
 the refusal.
+
+## 12. A closed card's worktree cannot throw away its own ignored scratch
+
+**What happened.** bw-cwap.1's e2e runs left three git-ignored scratch
+directories under `tests/.e2e-run-bw-cwap.1*` in its worktree. After the card
+closed, `rm -rf` of those directories from inside that worktree was refused by
+`workflow-gate`: the worktree's card is no longer owned, so any write there is
+a write without a card.
+
+**Should have happened.** Deleting something git ignores changes no tracked
+file and can never reach a commit. The gate already treats untracked scratch
+as never blocking a close; the same reasoning says removing ignored paths is
+not a repository change and should pass regardless of the card's state.
+
+**Cost.** One refusal, one `ATELIER_BYPASS`, and this section written from a
+different card's worktree because the one that owns the mess may not touch it.
