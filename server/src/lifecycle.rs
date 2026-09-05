@@ -144,11 +144,25 @@ pub fn run(name: &str, data: &Value) -> i32 {
     0
 }
 
+/// The directory a provider says its session stands in.
+///
+/// Claude and Codex call it `cwd`. Goose calls it `working_dir`. Reading both
+/// here is what lets every gate stay ignorant of which agent ran it — the
+/// alternative is each gate growing its own two-name lookup, and one of them
+/// forgetting (bw-lbkg.2).
+pub fn said_cwd(data: &Value) -> Option<PathBuf> {
+    data.get("cwd")
+        .or_else(|| data.get("working_dir"))
+        .and_then(Value::as_str)
+        .filter(|said| !said.is_empty())
+        .map(PathBuf::from)
+}
+
 fn cwd(data: &Value) -> PathBuf {
     tool_input(data)["workdir"]
         .as_str()
         .map(PathBuf::from)
-        .or_else(|| data["cwd"].as_str().map(PathBuf::from))
+        .or_else(|| said_cwd(data))
         .or_else(|| std::env::var_os("CLAUDE_PROJECT_DIR").map(PathBuf::from))
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."))
@@ -229,13 +243,30 @@ fn rows(value: Value) -> Vec<Value> {
     }
 }
 
+/// One answer, in every shape a provider reads it in.
+///
+/// Claude and Codex read the refusal out of `hookSpecificOutput`. Goose reads
+/// only a top-level `decision` of exactly `block`, and treats anything it does
+/// not recognise as no decision at all — which fails open, so a gate that
+/// spoke only Claude's shape would be a gate a local model walks straight
+/// through.
+///
+/// The two live in one object because they never disagree: the top-level pair
+/// is written only for a refusal, so a permitted call — including one
+/// `board-actor` rewrites rather than refuses — carries exactly what it
+/// carried before (bw-lbkg.2).
 fn pretool(decision: &str, reason: &str, updated: Option<Value>) -> Value {
     let mut output = json!({"hookEventName":"PreToolUse","permissionDecision":decision,
         "permissionDecisionReason":reason});
     if let Some(updated) = updated {
         output["updatedInput"] = updated;
     }
-    json!({"hookSpecificOutput":output})
+    let mut answer = json!({"hookSpecificOutput":output});
+    if decision == "deny" {
+        answer["decision"] = json!("block");
+        answer["reason"] = json!(reason);
+    }
+    answer
 }
 
 fn deny(reason: impl Into<String>) -> Option<Value> {
@@ -2267,6 +2298,46 @@ mod tests {
         let mixed = json!({"tool_name":"Bash", "cwd":"/repo/worktrees/bw-1",
             "tool_input":{"command":"rm file && bd update bw-1 --claim"}});
         assert!(claim_transition(&mixed).is_none());
+    }
+
+    /// Goose names the working directory `working_dir` where the other two
+    /// name it `cwd`. A gate that read only `cwd` would fall through to the
+    /// process's own directory — which, for a session Atelier drives, is
+    /// Atelier's, not the project's (bw-lbkg.2).
+    #[test]
+    fn native_machinery_reads_the_working_directory_every_provider_names() {
+        let claude = json!({"cwd":"/repo"});
+        let goose = json!({"working_dir":"/repo"});
+        assert_eq!(said_cwd(&claude), Some(PathBuf::from("/repo")));
+        assert_eq!(said_cwd(&goose), Some(PathBuf::from("/repo")));
+        assert_eq!(cwd(&goose), PathBuf::from("/repo"));
+
+        // An explicit workdir still wins, and an empty string is not an answer.
+        let both = json!({"working_dir":"/wrong", "tool_input":{"workdir":"/right"}});
+        assert_eq!(cwd(&both), PathBuf::from("/right"));
+        assert_eq!(said_cwd(&json!({"cwd":""})), None);
+    }
+
+    /// Goose reads a refusal from a top-level `decision` of exactly `block`
+    /// and calls anything else no decision, which fails open. The refusal
+    /// carries both shapes so no provider walks through it, and carries the
+    /// top-level pair only when it is actually refusing (bw-lbkg.2).
+    #[test]
+    fn native_machinery_a_refusal_is_written_in_every_shape_a_provider_reads() {
+        let refusal = deny("no card").expect("a denial");
+        assert_eq!(refusal["hookSpecificOutput"]["permissionDecision"], "deny");
+        assert_eq!(refusal["decision"], "block");
+        assert_eq!(refusal["reason"], "no card");
+
+        let allowed = pretool("allow", "fine", None);
+        assert_eq!(allowed["hookSpecificOutput"]["permissionDecision"], "allow");
+        assert!(allowed.get("decision").is_none(), "an allowed call must not block: {allowed}");
+
+        // A rewrite is a permission, not a refusal: board-actor rewrites `bd`
+        // rather than refusing it, and Goose must not read that as a block.
+        let rewritten = pretool("allow", "renamed", Some(json!({"command":"bd --actor s-1 ready"})));
+        assert_eq!(rewritten["hookSpecificOutput"]["updatedInput"]["command"], "bd --actor s-1 ready");
+        assert!(rewritten.get("decision").is_none(), "a rewrite must not block: {rewritten}");
     }
 
     /// A repository change with no owned card is refused; a write with no

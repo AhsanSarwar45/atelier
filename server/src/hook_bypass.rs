@@ -161,7 +161,7 @@ fn working_dir(event: &Value) -> PathBuf {
         .and_then(|input| input.get("workdir"))
         .and_then(Value::as_str)
         .map(PathBuf::from)
-        .or_else(|| event.get("cwd").and_then(Value::as_str).map(PathBuf::from))
+        .or_else(|| crate::lifecycle::said_cwd(event))
         .or_else(|| std::env::var_os("CLAUDE_PROJECT_DIR").map(PathBuf::from))
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."))

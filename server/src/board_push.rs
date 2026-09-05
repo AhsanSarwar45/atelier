@@ -19,10 +19,7 @@ pub fn run(data: &Value) -> i32 {
 }
 
 fn act(data: &Value, bd: Option<PathBuf>) -> i32 {
-    let cwd = data
-        .get("cwd")
-        .and_then(Value::as_str)
-        .map(PathBuf::from)
+    let cwd = crate::lifecycle::said_cwd(data)
         .or_else(|| std::env::var_os("CLAUDE_PROJECT_DIR").map(PathBuf::from))
         .or_else(|| std::env::current_dir().ok());
     if let (Some(cwd), Some(bd)) = (cwd, bd) {
