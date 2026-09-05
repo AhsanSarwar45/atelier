@@ -10,6 +10,25 @@ input, the answer on standard output — so the gates are the binary's, not the
 provider's, and both files name the same commands. The one gate Claude has and
 Codex does not is `doing`, whose marker only a Claude screen reads.
 
+A local-model session is gated too, from somewhere else. Goose reads project
+plugins from `<project>/.agents/plugins`, but resolves `<project>` from its own
+process's working directory — which, for a session Atelier starts, is Atelier's
+and not the person's repository — so a file written beside `.claude` and
+`.codex` would never be read. Its user-scope plugins come from its home
+instead, and Atelier already tells it that home is `<data_dir>/goose`. The
+plugin goes there, written at every launch: read by every Goose session Atelier
+drives, and invisible to a `goose` the person runs themselves.
+
+Goose differs from the other two in three ways the gates absorb, so that no
+gate has to know which agent ran it. It names the working directory
+`working_dir` rather than `cwd`. It names tools after the extension that owns
+them, so its shell is `developer__shell` and its writes are `developer__write`
+and `developer__edit`. And it reads a refusal only from a top-level `decision`
+of exactly `block`, treating anything else as no decision at all — which fails
+open, so every refusal is written in both shapes at once. It lets only
+`PreToolUse` and `Stop` change what happens; `SubagentStop` it accepts and
+never fires, so nothing is registered there.
+
 This file exists because a rule an agent meets only by being refused is a rule
 that costs a round trip to learn. `docs/hook-friction.md` §5 is the standing
 complaint; this is the answer to it.

@@ -72,6 +72,69 @@ const CODEX: &[(&str, &str, &[&str])] = &[
     ("Stop", "", &["board-gate"]),
 ];
 
+/// The gates a local-model session carries, on the events Goose fires.
+///
+/// Goose names its tools after the extension that owns them, so the matchers
+/// are `developer__*` where Claude's are `Bash|Edit|Write`. `lifecycle` maps
+/// those three names onto the ones every gate already reasons about, so the
+/// gates themselves do not know which agent ran them.
+///
+/// What is deliberately absent:
+///
+///   * `SessionStart`. Goose lets only `PreToolUse` and `Stop` change what
+///     happens; every other event is observation. Whether it reads back
+///     `additionalContext` is not settled by its documentation, and Atelier
+///     already hands a Goose session its policy over the wire
+///     (`_goose/unstable/session/system-prompt/set`), so `board-prime` would
+///     be claiming to do something unproven. The actor still reaches the
+///     session, because `board-actor` rewrites the `bd` line itself.
+///   * `SubagentStop`. Goose accepts a registration for it and never emits
+///     it, so `board-touch` would sit on an event that does not arrive.
+const GOOSE: &[(&str, &str, &[&str])] = &[
+    ("PreToolUse", "developer__shell|developer__write|developer__edit", &["workflow-gate"]),
+    ("PreToolUse", "developer__shell", &["board-actor", "board-merge-gate", "board-status-gate"]),
+    ("PostToolUse", "developer__shell|developer__write|developer__edit", &["board-touch"]),
+    ("SessionEnd", "", &["board-push"]),
+    ("Stop", "", &["board-gate"]),
+];
+
+/// Where Goose looks for a plugin of its own, given the home Atelier gives it.
+///
+/// Goose reads project plugins from `<project>/.agents/plugins`, but resolves
+/// `<project>` from the working directory of its own process — captured once,
+/// when the agent is built — and the ACP session's `cwd` never reaches that
+/// lookup. A session Atelier drives is spawned from Atelier's directory, not
+/// the person's repository, so a hooks file written into the repository beside
+/// `.claude` and `.codex` would never be read.
+///
+/// Its user-scope plugins are read from its home, and Atelier already tells it
+/// that home is `<data_dir>/goose` (`acp::adapter`). So the plugin goes there:
+/// loaded by every Goose session this program starts, and invisible to a
+/// `goose` the person runs themselves (bw-lbkg.1).
+pub fn goose_plugin_dir(path_root: &Path) -> PathBuf {
+    path_root.join(".agents").join("plugins").join("atelier")
+}
+
+/// Put the plugin in place, or say why it could not be.
+///
+/// Goose loads a plugin's hooks only when a `plugin.json` sits beside them,
+/// so both files are written. `wire` leaves anything it did not put there
+/// alone and takes its own entries out first, so running this at every launch
+/// converges rather than accumulating.
+pub fn goose_plugin(path_root: &Path) -> Result<(), String> {
+    let plugin = goose_plugin_dir(path_root);
+    let hooks = plugin.join("hooks");
+    std::fs::create_dir_all(&hooks)
+        .map_err(|error| format!("could not create {}: {error}", hooks.display()))?;
+    let manifest = json!({
+        "name": "atelier",
+        "version": env!("CARGO_PKG_VERSION"),
+        "description": "Atelier's board lifecycle gates.",
+    });
+    write(&plugin.join("plugin.json"), &manifest)?;
+    wire(&hooks.join("hooks.json"), GOOSE)
+}
+
 const GUARD_MARK: &str = "# Atelier landing guard";
 
 pub fn install(root: &Path, manifest: &ProjectManifest) -> Result<(), String> {
@@ -319,6 +382,65 @@ mod tests {
             .flat_map(|(_, _, gates)| gates.iter().copied())
             .collect();
         assert_eq!(on_end, vec![crate::board_push::GATE]);
+    }
+
+    /// The plugin goes where a Goose session Atelier drives will look, and
+    /// nowhere a Goose the person runs themselves would (bw-lbkg.1).
+    #[test]
+    fn native_machinery_the_goose_plugin_lands_under_the_home_atelier_gives_it() {
+        let root = tempfile::tempdir().unwrap();
+        goose_plugin(root.path()).unwrap();
+
+        let plugin = root.path().join(".agents/plugins/atelier");
+        let manifest: Value =
+            serde_json::from_str(&std::fs::read_to_string(plugin.join("plugin.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest["name"], "atelier");
+        assert!(manifest["version"].as_str().is_some_and(|v| !v.is_empty()));
+
+        let hooks: Value =
+            serde_json::from_str(&std::fs::read_to_string(plugin.join("hooks/hooks.json")).unwrap())
+                .unwrap();
+        for (event, gate) in [
+            ("PreToolUse", "atelier hook workflow-gate"),
+            ("PostToolUse", "atelier hook board-touch"),
+            ("SessionEnd", "atelier hook board-push"),
+            ("Stop", "atelier hook board-gate"),
+        ] {
+            assert!(on(&hooks, event).contains(&gate.to_string()), "{event}: {hooks}");
+        }
+        // Goose accepts a SubagentStop registration and never fires it, so
+        // nothing may be parked there.
+        assert!(on(&hooks, "SubagentStop").is_empty(), "{hooks}");
+    }
+
+    /// Running it twice is running it once. A session is launched often, and
+    /// the plugin is written at every launch.
+    #[test]
+    fn native_machinery_installing_the_goose_plugin_twice_changes_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        goose_plugin(root.path()).unwrap();
+        let once = std::fs::read_to_string(
+            root.path().join(".agents/plugins/atelier/hooks/hooks.json")).unwrap();
+        goose_plugin(root.path()).unwrap();
+        let twice = std::fs::read_to_string(
+            root.path().join(".agents/plugins/atelier/hooks/hooks.json")).unwrap();
+        assert_eq!(once, twice);
+    }
+
+    /// Every matcher names tools Goose actually has. A matcher naming Claude's
+    /// `Bash` would match nothing, and a gate that matches nothing is a gate
+    /// that is not there.
+    #[test]
+    fn native_machinery_the_goose_matchers_name_goose_tools() {
+        for (event, matcher, gates) in GOOSE {
+            for name in matcher.split('|').filter(|name| !name.is_empty()) {
+                assert!(
+                    matches!(name, "developer__shell" | "developer__write" | "developer__edit"),
+                    "{event} matches {name}, which Goose does not have: {gates:?}"
+                );
+            }
+        }
     }
 
     #[test]

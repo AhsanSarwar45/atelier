@@ -182,11 +182,25 @@ fn tool_input(data: &Value) -> &Value {
         .unwrap_or(&Value::Null)
 }
 
+/// What the tool is called, in the words every gate here reasons about.
+///
+/// Goose names a tool after the extension that owns it, so the shell it runs
+/// is `developer__shell` and not `Bash`. Answering with the name the gates
+/// already know is what keeps the mapping in one place: without it
+/// `mutation_targets` matches nothing for a Goose session, and a gate that
+/// finds no target refuses nothing (bw-lbkg.1).
 fn tool_name(data: &Value) -> &str {
-    data.get("tool_name")
+    let said = data
+        .get("tool_name")
         .or_else(|| data.get("toolName"))
         .and_then(Value::as_str)
-        .unwrap_or("")
+        .unwrap_or("");
+    match said {
+        "developer__shell" => "Bash",
+        "developer__edit" => "Edit",
+        "developer__write" => "Write",
+        said => said,
+    }
 }
 
 fn shell(data: &Value) -> &str {
@@ -2298,6 +2312,36 @@ mod tests {
         let mixed = json!({"tool_name":"Bash", "cwd":"/repo/worktrees/bw-1",
             "tool_input":{"command":"rm file && bd update bw-1 --claim"}});
         assert!(claim_transition(&mixed).is_none());
+    }
+
+    /// The point of the whole exercise: a local model editing a repository
+    /// file with no owned card is refused, exactly as Claude would be. Before
+    /// the tool names were mapped, `mutation_targets` matched none of Goose's
+    /// names, found no target, and so refused nothing (bw-lbkg.1).
+    #[test]
+    fn native_machinery_a_goose_edit_with_no_card_is_refused_like_any_other() {
+        let repo = tempfile::tempdir().unwrap();
+        let git = crate::routes::find_git().unwrap();
+        assert!(Command::new(git)
+            .args(["init", "-q", "-b", "ours"])
+            .current_dir(repo.path())
+            .status()
+            .unwrap()
+            .success());
+
+        let edit = json!({"tool_name":"developer__edit", "working_dir": repo.path(),
+            "tool_input":{"path": repo.path().join("src/lib.rs")}});
+        let refusal = workflow(&edit).expect("a denial");
+        assert_eq!(refusal["hookSpecificOutput"]["permissionDecision"], "deny");
+        assert_eq!(refusal["decision"], "block", "Goose reads only this: {refusal}");
+
+        let shell = json!({"tool_name":"developer__shell", "working_dir": repo.path(),
+            "tool_input":{"command":"echo hi > notes.txt"}});
+        assert_eq!(
+            workflow(&shell).expect("a denial")["decision"],
+            "block",
+            "a redirect into the repository is a write"
+        );
     }
 
     /// Goose names the working directory `working_dir` where the other two
