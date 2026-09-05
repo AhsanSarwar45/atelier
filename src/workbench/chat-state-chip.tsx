@@ -218,7 +218,13 @@ export function ChatStateChip({
           shrinks, and cutting the word first drew "Helper wo…", which is the
           one part of the chip that has to be read whole — what it is on can be
           cut short and still leave a true line (bw-jaoz.14.14). */}
-      <span className="shrink-0">{state.word}</span>
+      {/* Unless the word is not a word. Since the line says the call in the
+          card's own words, the head can be a whole clause — "Made a worktree
+          at bw-gci9.1" — and a clause that cannot give way is a width the rail
+          has to find, which it did by pushing the counter off its own edge. A
+          long head gives way like the clause beside it; a one-word standing
+          never does (bw-gci9). */}
+      <span className={cn(state.word.length > 24 ? 'min-w-0 shrink truncate' : 'shrink-0')}>{state.word}</span>
       {/* What this particular one is — the time a limit lifts, how many helpers
           are out, the path being searched. Quieter than the word, and cut short
           rather than wrapping: "Retrying" alone leaves the reader watching a

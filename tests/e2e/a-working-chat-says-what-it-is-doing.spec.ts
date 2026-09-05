@@ -39,8 +39,29 @@ const SETTLE_MS = 120_000;
  * so and stopped rather than run anything at all.
  */
 const RAN = "python3 -c 'import time; time.sleep(45)'";
+/**
+ * The same call in the app's own words — the sentence its card draws in the
+ * transcript, which is what the line under that card must say too (bw-gci9).
+ */
+const SAID = 'Running Python: import time; time.sleep(45)';
+/**
+ * The same sentence as the line and the row draw it: broken where the card
+ * breaks it, into the head that never gives way and the clause that is cut
+ * short on a narrow rail (chat-state-chip.tsx).
+ */
+const HEAD = 'Running Python';
+const CLAUSE = 'import time; time.sleep(45)';
 /** The build that only ever said Working, which is the picture of the complaint. */
 const ONLY_WORKING = Boolean(process.env.THE_TURN_ONLY_SAID_WORKING);
+/**
+ * The build in between: the call named, but in the wire's words while the card
+ * an inch above it said the app's. The manager's second reading of the same
+ * line — "the status message doesn't use the same classifer that the cards
+ * use" (bw-gci9).
+ */
+const WIRE_WORDS = Boolean(process.env.THE_STATUS_SAID_THE_WIRES_WORDS);
+/** Which of the three builds this run is photographing. */
+const SHOT = ONLY_WORKING ? 'bw-xfb4-before' : WIRE_WORDS ? 'bw-gci9-before' : 'bw-gci9-after';
 
 test.describe('a working chat says what it is doing', () => {
   test.describe.configure({ mode: 'serial', timeout: TURN_MS });
@@ -118,7 +139,7 @@ test.describe('a working chat says what it is doing', () => {
       // Taken before the readings below, so a build that draws this wrong
       // leaves the picture of what it drew and not only the sentence that
       // failed.
-      await page.screenshot({ path: `${SHOTS}/${ONLY_WORKING ? 'bw-xfb4-before.png' : 'bw-xfb4-after.png'}` });
+      await page.screenshot({ path: `${SHOTS}/${SHOT}.png` });
 
       if (ONLY_WORKING) {
         // The complaint itself: a chat that has been running one command for
@@ -130,13 +151,27 @@ test.describe('a working chat says what it is doing', () => {
         return;
       }
 
-      // And the whole of the fix: the call in flight, named, where the word
-      // alone used to stand — at the foot of the transcript and on the row in
-      // the rail, in the same words, because both are drawn from the one
-      // reading (chat-state.ts).
-      await expect(line, 'the chat says it is working without saying what at').toContainText(RAN);
-      await expect(pill).toHaveAttribute('data-word', 'Running');
-      await expect(row.getByTestId('chat-state-detail')).toContainText(RAN);
+      // The card, which has said the call in the app's own words all along.
+      const card = page.getByTestId('tool-toggle').filter({ hasText: 'time.sleep' });
+      await expect(card).toContainText(SAID);
+
+      if (WIRE_WORDS) {
+        // The second complaint: the call IS named now, and named in the wire's
+        // words, a line under a card naming the same call in the app's.
+        await expect(line).toContainText(RAN);
+        await expect(line).not.toContainText(SAID);
+        return;
+      }
+
+      // And the whole of the fix: the call in flight, named where the word
+      // alone used to stand, in the words its own card uses — at the foot of
+      // the transcript and on the row in the rail alike, because both are
+      // drawn from the one reading (chat-state.ts).
+      await expect(line, 'the chat says it is working without saying what at').toContainText(HEAD);
+      await expect(line).toContainText(CLAUSE);
+      await expect(pill).toHaveAttribute('data-word', HEAD);
+      await expect(row.getByTestId('chat-state-detail')).toContainText(CLAUSE);
+      await expect(line).not.toContainText('python3 -c');
 
       // And it gives the command up when the call is over, rather than standing
       // there naming something that finished a minute ago.

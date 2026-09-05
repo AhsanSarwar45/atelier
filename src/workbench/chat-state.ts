@@ -425,11 +425,20 @@ export interface ChatStateInput {
  * call the classifier does not place falls through to the driver's `detail`,
  * which says something true either way.
  */
-function saidOfCall(input: ChatStateInput): string | null {
+function saidOfCall(input: ChatStateInput): [string, string | null] | null {
   const call = input.call ?? null;
   if (!call) return null;
   const said = whatItRan(call.name, call.input)?.said;
-  return said ? whileItRuns(said) : null;
+  if (!said) return null;
+  const now = whileItRuns(said);
+  // Where the card's own sentence already breaks: "Running Python: import
+  // time; time.sleep(45)" is a name and then the thing it was given, and the
+  // chip is built out of exactly those two halves — a head that never gives
+  // way and a clause that is cut short on a narrow rail. Split anywhere else
+  // and the head is a path; not split at all and the rail loses its counter to
+  // a sentence that cannot shrink (chat-state-chip.tsx).
+  const at = now.indexOf(': ');
+  return at > 0 ? [now.slice(0, at), now.slice(at + 2)] : [now, null];
 }
 
 /**
@@ -489,14 +498,20 @@ export function chatState(input: ChatStateInput): ChatState {
   }
 
   const state = standing(input);
-  const word = input.label && input.label.length > 0 ? input.label : OWN_WORD[state];
+  // The call's own sentence stands IN PLACE OF the word, not beside it: it is
+  // already a verb phrase in the present — "Running Python: import time;
+  // time.sleep(45)" — and drawn as a clause after the standing's word the line
+  // read "Running · Running Python: …", the same verb twice in eight
+  // characters (bw-gci9).
+  const said = saidOfCall(input);
+  const word = said?.[0] ?? (input.label && input.label.length > 0 ? input.label : OWN_WORD[state]);
   const working = OWN_WORKING.has(state);
   return {
     working,
     waiting: state === 'waiting_permission',
     doing: OWN_DOING[state],
     word: word ?? '',
-    detail: saidOfCall(input) ?? input.detail ?? null,
+    detail: said ? said[1] : input.detail ?? null,
     // Our own driver publishes its state every second; nothing here is inferred.
     told: true,
     // Off the state and never off the word: the driver names its own states, so

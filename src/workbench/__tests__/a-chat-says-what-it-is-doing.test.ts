@@ -69,7 +69,12 @@ describe('a chat of ours says what it is doing', () => {
       detail: running.stateDetail,
       call: running.stateCall,
     });
-    expect(read.detail).toBe('Running Python: import time; time.sleep(45)');
+    // In place of the word and not beside it: the sentence is already a verb
+    // phrase, and drawn as a clause after "Running" the line said the verb
+    // twice — "Running · Running Python: …". It is drawn as the chip is built,
+    // the card's own sentence broken where the card breaks it: the head that
+    // never gives way, then the clause that does.
+    expect(`${read.word} · ${read.detail}`).toBe('Running Python · import time; time.sleep(45)');
   });
 
   it('falls back to the driver’s own words for a call it cannot place', () => {
