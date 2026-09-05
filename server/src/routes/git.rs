@@ -160,11 +160,41 @@ async fn check_dirty(repo: &Path) -> bool {
 /// carry it out of a helper without hauling a whole `Response` through every
 /// `Result` on the way.
 #[derive(Debug)]
-pub struct Refused(StatusCode, String);
+pub struct Refused {
+    code: StatusCode,
+    said: String,
+    /// Set only on the one refusal an SSH key passphrase could clear. The
+    /// panel reads it to know that asking is worth offering; nothing else in
+    /// the answer changes, and git's own words still lead.
+    a_key_could_fix_it: bool,
+}
+
+impl Refused {
+    /// The ordinary refusal: a code and git's own words.
+    fn new(code: StatusCode, said: impl Into<String>) -> Self {
+        Refused { code, said: said.into(), a_key_could_fix_it: false }
+    }
+
+    /// The refusal a locked SSH key could clear, told apart so the panel can
+    /// offer to ask for the passphrase instead of leaving a dead end.
+    fn wants_a_key(said: impl Into<String>) -> Self {
+        Refused {
+            code: StatusCode::UNAUTHORIZED,
+            said: said.into(),
+            a_key_could_fix_it: true,
+        }
+    }
+}
 
 impl IntoResponse for Refused {
     fn into_response(self) -> Response {
-        (self.0, Json(serde_json::json!({ "error": self.1 }))).into_response()
+        let mut body = serde_json::json!({ "error": self.said });
+        if self.a_key_could_fix_it {
+            // Only ever present when true, so a reader of the answer cannot
+            // mistake its absence for a considered "no".
+            body["needsPassphrase"] = serde_json::Value::Bool(true);
+        }
+        (self.code, Json(body)).into_response()
     }
 }
 
@@ -202,7 +232,7 @@ where
             // axum's own words for what was wrong with the request, kept as it
             // wrote them for the same reason git's are kept: they are the
             // reason, and the status it chose is the right one to answer with.
-            .map_err(|turned_away| Refused(turned_away.status(), turned_away.body_text()))
+            .map_err(|turned_away| Refused::new(turned_away.status(), turned_away.body_text()))
     }
 }
 
@@ -222,7 +252,7 @@ where
         Query::<T>::from_request_parts(parts, state)
             .await
             .map(|Query(params)| GitQuery(params))
-            .map_err(|turned_away| Refused(turned_away.status(), turned_away.body_text()))
+            .map_err(|turned_away| Refused::new(turned_away.status(), turned_away.body_text()))
     }
 }
 
@@ -262,18 +292,18 @@ fn checked_repo(path: &str) -> Result<PathBuf, Refused> {
     let repo = Path::new(path);
 
     if let Err(e) = validate_path_security(repo) {
-        return Err(Refused(StatusCode::FORBIDDEN, e));
+        return Err(Refused::new(StatusCode::FORBIDDEN, e));
     }
 
     if !repo.exists() {
-        return Err(Refused(
+        return Err(Refused::new(
             StatusCode::BAD_REQUEST,
             format!("Repository path does not exist: {}", path),
         ));
     }
 
     if !repo.is_dir() {
-        return Err(Refused(
+        return Err(Refused::new(
             StatusCode::BAD_REQUEST,
             format!("Path is not a directory: {}", path),
         ));
@@ -352,7 +382,7 @@ async fn run_git_remote(repo: &Path, args: &[&str]) -> Result<Output, Refused> {
 
 /// git could not be started at all — a missing binary, not a git refusal.
 fn could_not_run(e: std::io::Error) -> Refused {
-    Refused(
+    Refused::new(
         StatusCode::INTERNAL_SERVER_ERROR,
         format!("Could not run git: {}", e),
     )
@@ -372,7 +402,28 @@ fn git_said_no(output: &Output) -> Refused {
     if said.is_empty() {
         said = format!("git exited with {}", output.status);
     }
-    Refused(StatusCode::UNPROCESSABLE_ENTITY, said)
+    if a_key_could_fix_it(&said) {
+        return Refused::wants_a_key(said);
+    }
+    Refused::new(StatusCode::UNPROCESSABLE_ENTITY, said)
+}
+
+/// Whether a passphrase is worth offering for what ssh just said.
+///
+/// ssh turns a call away with the same sentence whether the key is locked,
+/// missing, or simply not one the other end accepts: `Permission denied
+/// (publickey)`, with nothing in its output separating the three. So this is
+/// not a claim that a passphrase is what is wanted — it is the one refusal a
+/// passphrase *could* clear, which is why the panel offers to ask rather than
+/// announcing why the call failed. The second sentence is ssh's own answer to
+/// a passphrase that was wrong, which is the same offer a second time.
+///
+/// Deliberately narrow. An HTTPS remote that answers `Authentication failed`
+/// is not an SSH key and no passphrase will help it, so it is left to be shown
+/// as the plain refusal it is.
+fn a_key_could_fix_it(said: &str) -> bool {
+    said.contains("Permission denied (publickey")
+        || said.contains("incorrect passphrase supplied to decrypt private key")
 }
 
 /// Pass the output on, or turn a nonzero exit into git's own refusal.
@@ -670,7 +721,7 @@ async fn change_the_index(body: FilesRequest, verb: &[&str]) -> Answer {
     // `git add --` with nothing after it succeeds and does nothing, which
     // would read back as a stage that worked. Say what happened instead.
     if body.files.is_empty() {
-        return Err(Refused(
+        return Err(Refused::new(
             StatusCode::BAD_REQUEST,
             "No files were named".to_string(),
         ));
@@ -1162,6 +1213,91 @@ mod tests {
             "ssh -i /keys/real -o BatchMode=yes"
         );
         assert_eq!(with_batch_mode(Some(String::new()), None), "ssh -o BatchMode=yes");
+    }
+
+    /// What a refusal put on the wire, so a test can read the answer the panel
+    /// will read rather than the struct behind it.
+    async fn answered(refused: Refused) -> (StatusCode, serde_json::Value) {
+        let response = refused.into_response();
+        let code = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        (code, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    /// The one refusal a passphrase could clear, in every wording ssh gives
+    /// it. The parenthesis is left open on purpose: ssh lists the methods it
+    /// tried, so the tail differs from setup to setup.
+    #[test]
+    fn a_key_refusal_is_recognised_however_ssh_lists_its_methods() {
+        assert!(a_key_could_fix_it(
+            "git@github.com: Permission denied (publickey)."
+        ));
+        assert!(a_key_could_fix_it(
+            "git@example.com: Permission denied (publickey,gssapi-keyex,gssapi-with-mic)."
+        ));
+        assert!(a_key_could_fix_it(
+            "Load key \"/home/someone/.ssh/id_ed25519\": incorrect passphrase supplied to decrypt private key"
+        ));
+    }
+
+    /// Everything else keeps the refusal it had. Offering to unlock a key for
+    /// a rejected push or an HTTPS password would send the reader looking for
+    /// a passphrase that was never the trouble.
+    #[test]
+    fn the_offer_is_not_made_for_refusals_a_key_cannot_clear() {
+        assert!(!a_key_could_fix_it(
+            "remote: Support for password authentication was removed.\nfatal: Authentication failed for 'https://github.com/o/r.git/'"
+        ));
+        assert!(!a_key_could_fix_it(
+            " ! [rejected]        main -> main (non-fast-forward)"
+        ));
+        assert!(!a_key_could_fix_it("CONFLICT (content): Merge conflict in kept"));
+        assert!(!a_key_could_fix_it("nothing to commit, working tree clean"));
+    }
+
+    /// The answer the panel reads: its own status, the flag, and git's words
+    /// still leading.
+    #[tokio::test]
+    async fn a_key_refusal_is_answered_apart_from_every_other_one() {
+        let denied = "git@github.com: Permission denied (publickey).";
+        let output = std::process::Output {
+            status: failed_status(),
+            stdout: Vec::new(),
+            stderr: denied.as_bytes().to_vec(),
+        };
+
+        let (code, body) = answered(git_said_no(&output)).await;
+        assert_eq!(code, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["needsPassphrase"], serde_json::json!(true));
+        assert_eq!(body["error"], serde_json::json!(denied));
+    }
+
+    /// An ordinary refusal is untouched: the status it always had, and no flag
+    /// at all rather than a `false` a reader could take for a considered no.
+    #[tokio::test]
+    async fn an_ordinary_refusal_carries_no_offer_of_a_passphrase() {
+        let output = std::process::Output {
+            status: failed_status(),
+            stdout: Vec::new(),
+            stderr: b" ! [rejected] main -> main (fetch first)".to_vec(),
+        };
+
+        let (code, body) = answered(git_said_no(&output)).await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(body.get("needsPassphrase").is_none());
+    }
+
+    /// A nonzero exit to build the two refusals above out of.
+    fn failed_status() -> std::process::ExitStatus {
+        let found = crate::routes::find_git().expect("git on the computer running these tests");
+        std::process::Command::new(found)
+            .args(["rev-parse", "--verify", "definitely-not-a-revision"])
+            .current_dir(std::env::temp_dir())
+            .output()
+            .unwrap()
+            .status
     }
 
     /// The point of the switch: a remote call against a copy whose ssh cannot
