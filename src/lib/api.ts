@@ -634,26 +634,37 @@ export const git = {
       body: JSON.stringify({ path, message, ...(amend === undefined ? {} : { amend }) }),
     }),
 
+  // The three calls that talk to the shared copy each take an optional
+  // `passphrase`, for the second go at one that came back wanting an unlocked
+  // SSH key (bw-k778). It is sent only when there is one to send, so an
+  // ordinary call carries exactly the body it always did; the server uses it
+  // for that one call and keeps nothing.
+
   /** Ask the shared copy where it is, without touching the working tree. */
-  fetch: (path: string) => fetchApi<GitFetchResponse>('/api/git/fetch', {
+  fetch: (path: string, passphrase?: string) => fetchApi<GitFetchResponse>('/api/git/fetch', {
     method: 'POST',
-    body: JSON.stringify({ path }),
+    body: JSON.stringify({ path, ...(passphrase === undefined ? {} : { passphrase }) }),
     deadlineMs: REMOTE_DEADLINE_MS,
   }),
 
   /** Bring in what the shared copy has. */
-  pull: (path: string) => fetchApi<GitRemoteResponse>('/api/git/pull', {
+  pull: (path: string, passphrase?: string) => fetchApi<GitRemoteResponse>('/api/git/pull', {
     method: 'POST',
-    body: JSON.stringify({ path }),
+    body: JSON.stringify({ path, ...(passphrase === undefined ? {} : { passphrase }) }),
     deadlineMs: REMOTE_DEADLINE_MS,
   }),
 
   /** Send saved changes back. `setUpstream` is for a branch that tracks nothing yet. */
-  push: (path: string, setUpstream?: boolean) => fetchApi<GitRemoteResponse>('/api/git/push', {
-    method: 'POST',
-    body: JSON.stringify({ path, ...(setUpstream === undefined ? {} : { setUpstream }) }),
-    deadlineMs: REMOTE_DEADLINE_MS,
-  }),
+  push: (path: string, setUpstream?: boolean, passphrase?: string) =>
+    fetchApi<GitRemoteResponse>('/api/git/push', {
+      method: 'POST',
+      body: JSON.stringify({
+        path,
+        ...(setUpstream === undefined ? {} : { setUpstream }),
+        ...(passphrase === undefined ? {} : { passphrase }),
+      }),
+      deadlineMs: REMOTE_DEADLINE_MS,
+    }),
 
   /** Every line of work the repository holds, and the one it is on. */
   branches: (path: string, signal?: AbortSignal) => fetchApi<GitBranchesResponse>(

@@ -39,9 +39,10 @@ import {
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
-import { git, type GitChange, type GitCommit, type GitStatus } from '@/lib/api';
+import { ApiError, git, type GitChange, type GitCommit, type GitStatus } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 /**
@@ -61,6 +62,23 @@ const LOG_LIMIT = 20;
 export function gitSaid(trouble: unknown): string {
   const said = trouble instanceof Error ? trouble.message : String(trouble);
   return said.replace(/^API error: \d+ /, '');
+}
+
+/**
+ * Whether the call failed for want of a key nobody has unlocked.
+ *
+ * The server marks the one refusal an SSH passphrase could clear, and says so
+ * in the answer rather than in the sentence — ssh gives the same words whether
+ * a key is locked, missing or simply not accepted, so no amount of reading its
+ * text would tell them apart. Anything else is left alone: a rejected push and
+ * an HTTPS password are not a locked key, and offering to unlock one would
+ * send the reader hunting for a passphrase that was never the trouble.
+ */
+function wantsAKey(trouble: unknown): boolean {
+  return (
+    trouble instanceof ApiError
+    && (trouble.body as { needsPassphrase?: boolean } | undefined)?.needsPassphrase === true
+  );
 }
 
 /** When a commit was made, in the words a reader thinks in. */
@@ -241,6 +259,18 @@ export function GitView({ path }: GitViewProps) {
   const [busy, setBusy] = useState(false);
   const [fault, setFault] = useState<string | null>(null);
   const [message, setMessage] = useState('');
+  /**
+   * The call that came back wanting an unlocked key, kept so that answering
+   * the prompt runs the very thing the reader asked for rather than a guess at
+   * it — a push that was setting an upstream is still setting one on the
+   * second go.
+   */
+  const [locked, setLocked] = useState<((passphrase?: string) => Promise<unknown>) | null>(null);
+  /**
+   * What the reader has typed. Held no longer than the call it is for: every
+   * path out of `act` empties it, so it is gone whether the key opened or not.
+   */
+  const [passphrase, setPassphrase] = useState('');
 
   /**
    * Ask git where things stand. Both questions at once because they are drawn
@@ -283,16 +313,22 @@ export function GitView({ path }: GitViewProps) {
    * knows that.
    */
   const act = useCallback(
-    async (run: () => Promise<unknown>) => {
+    async (run: (passphrase?: string) => Promise<unknown>, unlockWith?: string) => {
       if (!path) return;
       setBusy(true);
       setFault(null);
       try {
-        await run();
+        await run(unlockWith);
+        setLocked(null);
         await read();
       } catch (trouble) {
         setFault(gitSaid(trouble));
+        // `setLocked` is given a function that returns the call, because a
+        // plain one would be taken for an updater and called on the spot.
+        setLocked(wantsAKey(trouble) ? () => run : null);
       } finally {
+        // Never held past the call it was typed for, on either outcome.
+        setPassphrase('');
         setBusy(false);
       }
     },
@@ -401,7 +437,7 @@ export function GitView({ path }: GitViewProps) {
             className="flex-1"
             disabled={busy}
             data-testid="git-fetch"
-            onClick={() => void act(() => git.fetch(path))}
+            onClick={() => void act((key) => git.fetch(path, key))}
           >
             <CloudDownload aria-hidden="true" />
             Fetch
@@ -412,7 +448,7 @@ export function GitView({ path }: GitViewProps) {
             className="flex-1"
             disabled={busy}
             data-testid="git-pull"
-            onClick={() => void act(() => git.pull(path))}
+            onClick={() => void act((key) => git.pull(path, key))}
           >
             <Download aria-hidden="true" />
             Pull
@@ -423,13 +459,77 @@ export function GitView({ path }: GitViewProps) {
             className="flex-1"
             disabled={busy}
             data-testid="git-push"
-            onClick={() => void act(() => git.push(path, status?.upstream === null))}
+            onClick={() => void act((key) => git.push(path, status?.upstream === null, key))}
           >
             <Upload aria-hidden="true" />
             Push
           </Button>
         </div>
       </div>
+
+      {/* The way out of a refusal a key could clear (bw-k778). It sits above
+          git's own words rather than in place of them: what ssh said is still
+          the most useful thing on the screen, and the offer is an offer, not
+          an explanation of why the call failed. Cancelling leaves the words.
+
+          Nothing here is remembered. The field empties on every outcome, the
+          app never writes the passphrase down, and the server keeps it only
+          for the one call it is sent with. */}
+      {locked && (
+        <form
+          className="flex flex-col gap-1.5 px-3 py-2"
+          data-testid="git-passphrase"
+          onSubmit={(sending) => {
+            sending.preventDefault();
+            void act(locked, passphrase);
+          }}
+        >
+          <label
+            htmlFor="git-passphrase-field"
+            className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+          >
+            SSH key passphrase
+          </label>
+          <Input
+            id="git-passphrase-field"
+            type="password"
+            autoFocus
+            autoComplete="off"
+            className="h-8 text-[12px]"
+            placeholder="Passphrase for your key"
+            value={passphrase}
+            disabled={busy}
+            onChange={(typing) => setPassphrase(typing.target.value)}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Used for this one call and not kept.
+          </p>
+          <div className="flex items-center gap-1.5">
+            <Button
+              type="submit"
+              size="sm"
+              className="flex-1"
+              disabled={busy || passphrase.length === 0}
+              data-testid="git-unlock"
+            >
+              Unlock and retry
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              data-testid="git-unlock-cancel"
+              onClick={() => {
+                setLocked(null);
+                setPassphrase('');
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
 
       {fault && (
         <div className="px-3 py-2">
