@@ -1127,9 +1127,15 @@ export function laterOf(mine: string, theirs: string | null | undefined): string
  * second clock existed all fall back to `lastActiveAt` and behave exactly as
  * the whole list behaved before (bw-zhs9).
  *
- * Read it in all three places the list uses a time — the order, the day over a
- * row, and the time on the row itself — because they must be one clock. Order
- * by one and head by another and a row lands in a day it is not dated for.
+ * Read it in the two places that decide where a row SITS — the order and the
+ * day over the row — because they must be one clock. Order by one and head by
+ * another and a row lands in a day it is not dated for.
+ *
+ * The time printed on the row is deliberately not this clock. That one answers
+ * "when did anything last happen here", which is what a reader wants of a chat
+ * whose agent is working while he waits; where the row sits still answers "when
+ * did he last speak", so that work does not shuffle the list under his cursor
+ * (bw-t26l.22).
  */
 export function whenHeSpoke(row: RestoreRow): string {
   return row.lastSpokeAt ?? row.lastActiveAt;

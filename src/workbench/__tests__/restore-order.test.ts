@@ -178,9 +178,10 @@ describe('the blocks the list is drawn in', () => {
  * reply, every line of thinking, every question about a tool moved a row, so
  * three agents at work shuffled the list under the manager's cursor (bw-zhs9).
  *
- * One clock for all three uses of a time — the order, the day over a row, and
- * the time on the row — because ordering by one and heading by another files a
- * row under a day it is not dated for.
+ * One clock for the two things that decide where a row sits — the order and the
+ * day over it — because ordering by one and heading by another files a row
+ * under a day it is not dated for. The time printed on the row is the other
+ * clock, and says when anything last happened in the chat (bw-t26l.22).
  */
 describe('the clock the list runs on', () => {
   const now = new Date(2026, 7, 19, 12, 0, 0);
@@ -206,7 +207,7 @@ describe('the clock the list runs on', () => {
     expect([older, newer].sort(byWhatIsWorking).map((r) => r.sessionId)).toEqual(['newer', 'older']);
   });
 
-  it('the day over a row and the time on it are the same clock as the order', () => {
+  it('the day over a row is the same clock as the order', () => {
     // He spoke yesterday; the agent answered this morning. The row belongs
     // under yesterday, where its own order puts it.
     const row_ = row({ sessionId: 'yesterday', lastActiveAt: at(19, 11), lastSpokeAt: at(18, 16) });
@@ -215,5 +216,15 @@ describe('the clock the list runs on', () => {
     expect(groups.map((g) => g.heading)).toEqual(['Today', 'Yesterday']);
     expect(groups[1]!.rows.map((r) => r.sessionId)).toEqual(['yesterday']);
     expect(clockTime(whenHeSpoke(row_))).toBe(clockTime(at(18, 16)));
+  });
+
+  it('but the time printed on it is when the agent last did something', () => {
+    // He spoke yesterday at four; the agent has been answering since eleven
+    // this morning. The row keeps yesterday's place — his place — and reports
+    // eleven, because a reader asking "is this chat still moving" is asking
+    // about the agent, not about himself (bw-t26l.22).
+    const row_ = row({ sessionId: 'yesterday', lastActiveAt: at(19, 11), lastSpokeAt: at(18, 16) });
+    expect(clockTime(row_.lastActiveAt)).toBe(clockTime(at(19, 11)));
+    expect(clockTime(whenHeSpoke(row_))).not.toBe(clockTime(row_.lastActiveAt));
   });
 });

@@ -839,7 +839,18 @@ export function ChatSidebar({
                             'transition-opacity group-focus-within/row:opacity-0 group-hover/row:opacity-0',
                         )}
                       >
-                        {clockTime(whenHeSpoke(row))}
+                        {/*
+                          When something last happened in the chat, not when he
+                          last spoke in it. The two clocks answer two questions
+                          and the row asks both at once: the list is ordered by
+                          the last message HE sent, so a chat he is waiting on
+                          holds its place while its agent works — and the time
+                          printed on the row says how long ago that work was, so
+                          a chat whose agent has been writing for ten minutes
+                          reads as ten minutes old rather than as an hour
+                          (bw-t26l.22).
+                        */}
+                        {clockTime(row.lastActiveAt)}
                       </span>
                       {closable && (
                         <Button
