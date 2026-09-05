@@ -157,6 +157,11 @@ test.describe('the chat draws everything the agent does', () => {
     const echo = page.getByTestId('user-message').filter({ hasText: text });
     await composer.fill(text);
     await composer.press('Enter');
+    // Waited for rather than assumed. Escaping before the line is on the page
+    // asks nothing of the retraction: `toHaveCount(0)` would then hold because
+    // the line never arrived, and the case would pass with the server telling
+    // the screen nothing about what it had just recorded (bw-2c0x).
+    await expect(echo).toHaveCount(1, { timeout: 60_000 });
     await page.screenshot({ path: 'tests/results/escape-recall-before.png', fullPage: false });
 
     await composer.press('Escape');
