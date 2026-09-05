@@ -171,6 +171,57 @@ test.describe('the chat draws everything the agent does', () => {
     await page.screenshot({ path: 'tests/results/escape-recall-after.png', fullPage: false });
   });
 
+  /**
+   * The line is on the page before the server has heard of it.
+   *
+   * The send is held at the door — the request never reaches the sidecar — so
+   * nothing can have been recorded and no echo can be on its way. Anything
+   * drawn under that hold was drawn by this page. Before bw-2c0x nothing was:
+   * the composer emptied and the transcript stayed as it was for a whole round
+   * trip, which is what made sending feel like it had not happened.
+   */
+  test('a sent line is on the page before the server has it, and only once after', async ({ page, request }) => {
+    const api = backend();
+    const listed = (await (await request.get(`${api}/api/projects`)).json()) as Project[];
+    if (listed.length === 0) {
+      const made = await request.post(`${api}/api/projects`, {
+        data: { name: 'optimistic-echo', path: process.cwd() },
+      });
+      expect(made.ok(), 'the isolated run could not add its worktree').toBe(true);
+    }
+    await freshChat(request, page);
+
+    let releaseRequest = () => {};
+    const held = new Promise<void>((resolve) => { releaseRequest = resolve; });
+    await page.route('**/api/workbench/command', async (route) => {
+      const command = route.request().postDataJSON() as { type?: string } | null;
+      if (command?.type !== 'prompt.send') return route.continue();
+      await held;
+      await route.continue();
+    });
+
+    const text = 'drawn before it is sent';
+    const composer = page.getByTestId('composer');
+    const echo = page.getByTestId('user-message').filter({ hasText: text });
+    await composer.fill(text);
+    await composer.press('Enter');
+
+    // Drawn, with the send still stopped at the door.
+    await expect(echo).toHaveCount(1, { timeout: 10_000 });
+    await expect(composer).toHaveValue('');
+    await page.screenshot({ path: 'tests/results/sent-line-drawn-at-once.png', fullPage: false });
+
+    // And when the server's own copy arrives it takes the place of the drawn
+    // one rather than joining it.
+    releaseRequest();
+    await expect(page.getByTestId('user-message').filter({ hasText: text }))
+      .toHaveCount(1, { timeout: 60_000 });
+    // Held for a moment against the echo arriving late and doubling the line.
+    await page.waitForTimeout(3_000);
+    await expect(echo).toHaveCount(1);
+    await page.screenshot({ path: 'tests/results/sent-line-once-after-echo.png', fullPage: false });
+  });
+
   test('the mode picker takes bypass, and says so in the chat', async ({ page, request }) => {
     await freshChat(request, page);
 

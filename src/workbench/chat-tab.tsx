@@ -82,6 +82,7 @@ import { heldElsewhere, sessionOwnership, streamStillAnswers } from '@/workbench
 import { SearchPanel } from '@/workbench/search-panel';
 import { AgentView } from '@/workbench/agent-view';
 import { DrawnTranscript } from '@/workbench/drawn-transcript';
+import { drawnAsSent, stillPending, userMessageIds, type PendingSend } from '@/workbench/pending-sends';
 import { WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
@@ -100,6 +101,9 @@ export { PictureViewer } from '@/workbench/picture-viewer';
 /** Where the "show me everything" switch is remembered between visits. */
 const EVERY_CHAT = 'workbench.every-chat';
 const NEW_CHAT_DEFAULT = 'workbench.new-chat-default';
+
+/** The starting mark while nothing has been sent — one value, so it never re-renders. */
+const NO_MARK: ReadonlySet<string> = new Set<string>();
 const LEFT_PANEL_WIDTH = 'workbench.left-panel-width';
 const RIGHT_PANEL_WIDTH = 'workbench.right-panel-width';
 const DEFAULT_PANEL_WIDTH = 288;
@@ -629,6 +633,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [steerError, setSteerError] = useState<string | null>(null);
   /** Why the last thing he wrote did not go, if it did not go. */
   const [sendError, setSendError] = useState<string | null>(null);
+  /** Lines sent and drawn, standing until the server sends its own copy back. */
+  const [pendingSends, setPendingSends] = useState<PendingSend[]>([]);
+  /** The user messages the transcript held when the first of those went out. */
+  const [sendMark, setSendMark] = useState<ReadonlySet<string>>(NO_MARK);
   const start = useCallback(async (brand: Brand = newBrand) => {
     if (!projectId || !projectPath) return;
     if (!providerIsAvailable(providers, brand)) {
@@ -829,11 +837,30 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     return () => window.clearTimeout(timer);
   }, [nextProviderExpiry]);
 
+  /**
+   * Those sends the transcript has not spoken for yet, and the pruning that
+   * keeps the list from growing once it has. Held apart from the drawing below
+   * so the swap costs no render of its own: the row that goes and the row that
+   * replaces it both come out of this same `view.items`.
+   */
+  const outstanding = useMemo(
+    () => stillPending(pendingSends, view.items, sendMark),
+    [pendingSends, view.items, sendMark],
+  );
+  useEffect(() => {
+    if (outstanding.length !== pendingSends.length) setPendingSends(outstanding);
+  }, [outstanding, pendingSends.length]);
+
   /** The rows this conversation draws, once the reader's switches and current conditions are obeyed. */
   const rows = useMemo(() => stillShowing(
-    view.items.filter((item) => item.kind !== 'provider_message' || providerMessageIsCurrent(item.signal, providerNow)),
+    [
+      ...view.items.filter((item) => item.kind !== 'provider_message' || providerMessageIsCurrent(item.signal, providerNow)),
+      // At the end, which is where a line just sent belongs and where the
+      // server's copy of it will land.
+      ...outstanding.map(drawnAsSent),
+    ],
     offKinds,
-  ), [view.items, offKinds, providerNow]);
+  ), [view.items, offKinds, providerNow, outstanding]);
 
   /**
    * The same rows as they are drawn: every machine line carrying the family that
@@ -848,6 +875,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const picker = useRef<HTMLInputElement>(null);
   /** The POST being accepted; Escape waits for it before sending Stop. */
   const sending = useRef<Promise<{ messageId: string }> | null>(null);
+  /** Names for drawn-but-unsent rows, which only have to be unique on this page. */
+  const sendKeys = useRef(0);
   const [recallable, setRecallable] = useState<RecallablePrompt | null>(null);
   /** The same prompt for a key pressed before React has committed the next render. */
   const recallableNow = useRef<RecallablePrompt | null>(null);
@@ -1114,6 +1143,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     const pending = { text: draft, images, itemsBeforeSend: new Set(view.items.map((item) => item.id)) };
     recallableNow.current = pending;
     setRecallable(pending);
+    // Drawn before it is sent. The mark is taken only when nothing is already
+    // outstanding: while sends are in flight the earlier mark is the one the
+    // count is against, and moving it would make lines already back look new.
+    const drawnKey = `sending-${sendKeys.current++}`;
+    if (pendingSends.length === 0) setSendMark(userMessageIds(view.items));
+    setPendingSends((prev) => [...prev, { key: drawnKey, text, images }]);
     setDraft('');
     setAttached([]);
     setSendError(null);
@@ -1128,6 +1163,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       // it goes back in the box he wrote it in rather than into the void.
       setDraft(draft);
       setAttached(images);
+      // And the line drawn for it goes with the text: a refused send leaves
+      // nothing standing in the transcript that the server never accepted.
+      setPendingSends((prev) => prev.filter((sent) => sent.key !== drawnKey));
       setRecallable(null);
       recallableNow.current = null;
       sending.current = null;
@@ -1143,6 +1181,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     recallableNow.current = null;
     setDraft(pending.text);
     setAttached(pending.images);
+    // Only the last prompt is ever recallable, so it is the last drawn line
+    // that goes. If the server's copy has already replaced it there is nothing
+    // outstanding here, and `message.retracted` takes the real row instead.
+    setPendingSends((prev) => prev.slice(0, -1));
     setSendError(null);
     typing.current?.focus();
     try {
