@@ -54,6 +54,7 @@ import {
 import { Panel } from '@/components/ui/panel';
 import { Row } from '@/components/ui/row';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useHeldAtTheEnd } from '@/hooks/held-at-the-end';
 import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
@@ -1227,36 +1228,50 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             <DialogTitle>Choose a coding agent</DialogTitle>
             <DialogDescription>This choice applies to this new chat.</DialogDescription>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-2">
-            {providers.map((provider) => (
-              <Button
-                key={provider.brand}
-                variant={newBrand === provider.brand ? 'primary' : 'outline'}
-                data-testid={`new-chat-provider-${provider.brand}`}
-                onClick={() => setNewBrand(provider.brand)}
-                disabled={!provider.available}
-                title={provider.available ? undefined : whyUnavailable(provider)}
-              >
-                <BrandIcon brand={provider.brand} /> {brandName(provider.brand)}
-              </Button>
-            ))}
-          </div>
-          {/* Why, in the dialog rather than only on a tooltip. A greyed button
-              is a dead end for a reader who cannot hover — and the commonest
-              reason local is grey is a runtime they have not started, which is
-              a thing they can go and fix in ten seconds if anybody tells them
-              (bw-u6cl.9). */}
-          {providers.some((provider) => !provider.available) && (
-            <ul data-testid="provider-unavailable-reasons" className="flex flex-col gap-0.5 text-[11px] text-muted-foreground">
-              {providers
-                .filter((provider) => !provider.available)
-                .map((provider) => (
-                  <li key={provider.brand} data-testid={`provider-why-${provider.brand}`}>
-                    <span className="font-medium text-foreground/80">{brandName(provider.brand)}</span>: {whyUnavailable(provider)}
-                  </li>
-                ))}
-            </ul>
-          )}
+          {/* Why a choice is grey, on the choice itself and only while the
+              reader is asking about it. Standing under the buttons it read as
+              an error the chooser had already made — three lines of it, before
+              anybody had touched anything — for a fact that matters to whoever
+              wants that one agent (bw-uyk2.1). The label still reaches a reader
+              who cannot hover: the wrapper takes focus, so the keyboard opens
+              it too, which is what the standing text was there for (bw-u6cl.9).
+              The wrapper is what carries the label, because a disabled button
+              takes no pointer events and so is never hovered at all. */}
+          <TooltipProvider delayDuration={200}>
+            <div className="grid grid-cols-2 gap-2">
+              {providers.map((provider) => {
+                const choice = (
+                  <Button
+                    className="w-full"
+                    variant={newBrand === provider.brand ? 'primary' : 'outline'}
+                    data-testid={`new-chat-provider-${provider.brand}`}
+                    onClick={() => setNewBrand(provider.brand)}
+                    disabled={!provider.available}
+                  >
+                    <BrandIcon brand={provider.brand} /> {brandName(provider.brand)}
+                  </Button>
+                );
+                if (provider.available) return <Fragment key={provider.brand}>{choice}</Fragment>;
+                return (
+                  <Tooltip key={provider.brand}>
+                    <TooltipTrigger asChild>
+                      <span
+                        tabIndex={0}
+                        data-testid={`new-chat-provider-why-${provider.brand}`}
+                        aria-label={`${brandName(provider.brand)} is unavailable: ${whyUnavailable(provider)}`}
+                        className="inline-flex w-full rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                      >
+                        {choice}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs">
+                      <span className="font-medium">{brandName(provider.brand)}</span>: {whyUnavailable(provider)}
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          </TooltipProvider>
           <DialogFooter className="gap-2 sm:space-x-0">
             <div className="flex min-h-9 items-center gap-2 rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground">
               <Checkbox
@@ -1417,8 +1432,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             </Button>
           ))}
         </div>
-        {/* Same reason as in the dialog above: the reader is looking at a grey
-            button and the only useful thing this screen can do is say why. */}
+        {/* Standing text here, unlike the dialog above: this screen is what a
+            reader lands on with no chat at all, and the grey button is most of
+            what it has to say (bw-u6cl.9). */}
         {providers.some((provider) => !provider.available) && (
           <ul data-testid="provider-unavailable-reasons" className="flex max-w-md flex-col gap-0.5 text-center text-[11px] text-muted-foreground">
             {providers
