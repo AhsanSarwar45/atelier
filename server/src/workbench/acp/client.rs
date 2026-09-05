@@ -1224,14 +1224,21 @@ async fn elicitation(
     } else {
         "ask.resolved"
     };
-    database
-        .append(event(json!({
-            "type":resolved_type, "sessionId":local_session_id, "seq":0, "at":now(),
-            "requestId":request_id, "askId":request_id,
-            "answers":response["answers"], "chosen":response["action"]
-        }))?)
-        .await
-        .map_err(acp_error)?;
+    let mut resolution = vec![event(json!({
+        "type":resolved_type, "sessionId":local_session_id, "seq":0, "at":now(),
+        "requestId":request_id, "askId":request_id,
+        "answers":response["answers"], "chosen":response["action"]
+    }))?];
+    if accepted {
+        // The reader has answered, so the waiting line goes now rather than
+        // lingering until the agent's next update happens to carry a state.
+        // A decline leaves the state alone, the way a stopped card does.
+        resolution.push(event(json!({
+            "type":"session.state", "sessionId":local_session_id, "seq":0, "at":now(),
+            "state":"streaming", "label":"Working"
+        }))?);
+    }
+    database.append_many(resolution).await.map_err(acp_error)?;
     let wire = if accepted {
         json!({"action":"accept","content":typed_elicitation_content(&raw["requestedSchema"], &response["content"])})
     } else {

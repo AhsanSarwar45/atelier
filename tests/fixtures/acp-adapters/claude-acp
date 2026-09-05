@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * An ACP agent that answers `session/list` and `session/load` and nothing else.
+ * An ACP agent that answers `session/list`, `session/load` and one asking turn.
  *
  * The point of it is that it is not Claude. This app's claim is that external
  * chats are discovered and replayed over ACP, so the case that proves the claim
@@ -138,6 +138,15 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     void load(id, params);
     return;
   }
+  if (method === 'session/new') {
+    started += 1;
+    say({ id, result: { sessionId: `acp-session-new-${started}` } });
+    return;
+  }
+  if (method === 'session/prompt') {
+    void turn(id, params);
+    return;
+  }
   say({ id, error: { code: -32601, message: `no ${method} here` } });
 });
 
@@ -183,4 +192,56 @@ async function load(id, params) {
       });
     }
     say({ id, result: {} });
+}
+
+/**
+ * The one turn this agent takes: it asks the reader a question, and then it
+ * thinks.
+ *
+ * The silence after the answer is the whole of it. An agent that speaks the
+ * instant it is answered hides the bug, because the update it sends carries a
+ * state of its own and clears the line either way; a real one goes away and
+ * works, and for as long as it does the only state on the record is the one
+ * written when the question was asked (bw-qrgl.1).
+ */
+const QUIET_MS = Number(process.env.BEADS_E2E_ACP_QUIET_MS ?? 20_000);
+let started = 0;
+let asking = 9100;
+
+async function turn(id, params) {
+  asking += 1;
+  const reply = await ask({
+    id: asking,
+    method: 'elicitation/create',
+    params: {
+      mode: 'form',
+      sessionId: params?.sessionId,
+      message: 'Prompt for the passphrase in the UI',
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          direction: {
+            type: 'string',
+            title: 'Direction',
+            enum: ['Prompt for the passphrase in the UI', 'Read it from the environment'],
+          },
+        },
+        required: ['direction'],
+      },
+    },
+  });
+  // Answered, and now away working. Nothing is said for as long as that lasts.
+  await new Promise((settle) => setTimeout(settle, QUIET_MS));
+  const chosen = reply.result?.content?.direction ?? reply.result?.action ?? 'nothing';
+  say({
+    method: 'session/update',
+    params: {
+      sessionId: params?.sessionId,
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: `the reader answered the question with ${chosen}` },
+      },
+    },
+  });
+  say({ id, result: { stopReason: 'end_turn' } });
 }
