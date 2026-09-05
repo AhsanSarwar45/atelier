@@ -3,8 +3,9 @@
  * forty-item page, while the DOM contains only what is on screen plus
  * overscan. History moves only when the reader moves upward near its head.
  */
-import { act, render, waitFor } from '@testing-library/react';
 import { createRef } from 'react';
+
+import { act, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Mentions } from '@/components/markdown-body';
@@ -64,6 +65,24 @@ function chat(given: {
     drawn.rerender(show());
   };
   return { ...drawn, pane, again };
+}
+
+/**
+ * Gives the pane the scroll height the browser would give it: the height of the
+ * one box inside it, which React writes at the moment it commits the added rows
+ * and not a moment before. A height a test moves by hand ahead of the render is
+ * a height the pane could never have had at that point, and code that reads it
+ * before the commit — which is the only place the growth can be measured from —
+ * reads the answer to a question nobody had asked yet.
+ */
+function growsWithTheTranscript(box: HTMLElement): void {
+  Object.defineProperty(box, 'scrollHeight', {
+    configurable: true,
+    get: () => {
+      const drawn = box.querySelector('[data-testid="virtual-transcript"]') as HTMLElement | null;
+      return drawn ? parseFloat(drawn.style.height || '0') : 0;
+    },
+  });
 }
 
 function scroll(box: HTMLElement, top: number): void {
@@ -189,24 +208,56 @@ describe('the virtual transcript window', () => {
   });
 
   it('preserves the visible position when older items are prepended', async () => {
-    let height = 80 * 52;
     let finish!: (page: { added: number; hasOlder: boolean }) => void;
     const older = vi.fn(() => new Promise<{ added: number; hasOlder: boolean }>((resolve) => { finish = resolve; }));
     const initial = rows(80, 'new');
     const { pane, again } = chat({ rows: initial, onOlder: older });
-    Object.defineProperty(pane.current!, 'scrollHeight', { configurable: true, get: () => height });
+    growsWithTheTranscript(pane.current!);
 
     act(() => {
       scroll(pane.current!, 900);
       scroll(pane.current!, 500);
     });
-    height = 120 * 52;
+    const before = pane.current!.scrollHeight;
     await act(async () => {
       again({ rows: [...rows(40, 'old'), ...initial] });
       finish({ added: SCREENFUL, hasOlder: true });
     });
 
-    expect(pane.current!.scrollTop).toBe(500 + 40 * 52);
+    // Down by exactly what was put above him, which is what leaves the words
+    // he was reading where they were.
+    expect(pane.current!.scrollTop).toBe(500 + (pane.current!.scrollHeight - before));
+  });
+
+  /**
+   * The reader does not stop scrolling while he waits.
+   *
+   * A page takes a while to come back, and the wheel goes on turning the whole
+   * time. What is put back afterwards has to be measured from where he is by
+   * then — measured from where he was when he asked, it throws away every pixel
+   * he travelled in between, and that is the jump he sees (bw-cdav.1).
+   */
+  it('keeps the scrolling the reader did while the page was on its way', async () => {
+    let finish!: (page: { added: number; hasOlder: boolean }) => void;
+    const older = vi.fn(() => new Promise<{ added: number; hasOlder: boolean }>((resolve) => { finish = resolve; }));
+    const initial = rows(80, 'new');
+    const { pane, again } = chat({ rows: initial, onOlder: older });
+    growsWithTheTranscript(pane.current!);
+
+    act(() => {
+      scroll(pane.current!, 900);
+      scroll(pane.current!, 500);
+    });
+    // Still travelling: two hundred more pixels of it before the page lands.
+    act(() => scroll(pane.current!, 300));
+    const before = pane.current!.scrollHeight;
+    await act(async () => {
+      again({ rows: [...rows(40, 'old'), ...initial] });
+      finish({ added: SCREENFUL, hasOlder: true });
+    });
+
+    // From 300, where he had got to — not from the 500 he was at when he asked.
+    expect(pane.current!.scrollTop).toBe(300 + (pane.current!.scrollHeight - before));
   });
 
   it('does not apply an exhausted-page anchor to a later live item', async () => {

@@ -2,6 +2,8 @@ import { appendFileSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'no
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+import { quadrantPng } from './fixture-png';
+
 /**
  * A chat's record on disk, written the way the kit writes one, for a chat this
  * app has never run.
@@ -631,6 +633,9 @@ export function writeChatSpokenAt(opts: {
  * number, and a record another program is still appending to — which is how a
  * row arrives under a reader who is looking somewhere else (bw-n6yh).
  */
+/** What one message of a long chat says: a line of prose, or blocks of its own. */
+export type Spoken = string | Record<string, unknown>[];
+
 export interface LongChat {
   /** The conversation's own id, which is what a row is found by. */
   sessionId: string;
@@ -639,7 +644,7 @@ export interface LongChat {
   /** How many messages it opens with. */
   held: number;
   /** Somebody else says one more into it. Hands back what was said, to find it by. */
-  says(text?: string): string;
+  says(text?: string): Spoken;
   /** Everything written, so a run can take it away again. */
   remove: () => void;
 }
@@ -649,9 +654,58 @@ export function longChatSaid(n: number): string {
   return `Message ${n} of a long conversation, said so a scrolling case has something to find.`;
 }
 
-export function writeLongChat(opts: { cwd: string; sessionId: string; held?: number; branch?: string }): LongChat {
+/**
+ * How the nth message reads, when a case needs messages of wildly differing
+ * heights.
+ *
+ * Every message of a plain long chat is one line, so every row is the same
+ * height and a virtualiser's guess at an undrawn row is never wrong by more
+ * than a pixel or two. A real conversation is nothing like that — a one-word
+ * answer sits above a forty-line one — and a case built on uniform rows cannot
+ * see a scroll that jumps by the difference (bw-cdav).
+ */
+export function raggedChatSaid(n: number): string {
+  const head = `Message ${n} of a ragged conversation, said so a scrolling case has something to find.`;
+  // A cycle of four: one line, a short paragraph, a long one, and a very long
+  // one. Nothing random — a case that fails must fail the same way twice.
+  const lines = [0, 3, 14, 45][n % 4];
+  const body = Array.from({ length: lines }, (_, i) => `Line ${i} of message ${n}, long enough to wrap on a wide screen and take a row's height well past any guess made for it.`);
+  return [head, ...body].join('\n\n');
+}
+
+/**
+ * The same, with a picture in every eighth message.
+ *
+ * A picture is the one thing in a chat whose row is one height when it is first
+ * drawn and another once the picture itself has arrived — and a row that is
+ * measured, and then changes, is the case that prose alone cannot make. One
+ * picture per message on purpose: two or more are cropped to a shape agreed in
+ * advance and so already stand their own ground, and it is the LONE picture
+ * that is drawn at whatever height it turns out to want (picture-grid.tsx).
+ */
+export function raggedChatSaidWithPictures(n: number): Spoken {
+  const words = raggedChatSaid(n);
+  if (n % 8 !== 0) return words;
+  // Three sizes in turn, so the height a row gains is a different number each
+  // time and a case cannot pass by correcting for one of them.
+  const size = [160, 340, 620][(n / 8) % 3];
+  return [
+    { type: 'text', text: `${words}\n\n[Image #1]` },
+    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: quadrantPng(size).toString('base64') } },
+  ];
+}
+
+export function writeLongChat(opts: {
+  cwd: string;
+  sessionId: string;
+  held?: number;
+  branch?: string;
+  /** What the nth message says. One numbered line each, unless a case says otherwise. */
+  said?: (n: number) => Spoken;
+}): LongChat {
   const { cwd, sessionId } = opts;
   const held = opts.held ?? 120;
+  const said = opts.said ?? longChatSaid;
   const branch = opts.branch ?? 'main';
   const began = new Date(Date.now() - 60 * 60 * 1000);
 
@@ -660,10 +714,13 @@ export function writeLongChat(opts: { cwd: string; sessionId: string; held?: num
   mkdirSync(dir, { recursive: true });
 
   let last: string | null = null;
-  const line = (n: number, text: string, at: Date): Record<string, unknown> => {
+  const line = (n: number, text: Spoken, at: Date): Record<string, unknown> => {
     const uuid = `long-u${n}`;
     const parentUuid = last;
     last = uuid;
+    // A line of prose is written as one, the way the kit writes the ordinary
+    // case; anything else is already a list of blocks and goes down as it is.
+    const blocks = typeof text === 'string' ? [{ type: 'text', text }] : text;
     const said =
       n % 2 === 0
         ? { type: 'user', message: { role: 'user', content: text } }
@@ -674,7 +731,7 @@ export function writeLongChat(opts: { cwd: string; sessionId: string; held?: num
               model: 'claude-opus-5',
               role: 'assistant',
               usage: SPENT,
-              content: [{ type: 'text', text }],
+              content: blocks,
             },
           };
     return {
@@ -691,7 +748,7 @@ export function writeLongChat(opts: { cwd: string; sessionId: string; held?: num
   };
 
   const rows: Record<string, unknown>[] = [];
-  for (let n = 0; n < held; n += 1) rows.push(line(n, longChatSaid(n), new Date(began.getTime() + n * 1000)));
+  for (let n = 0; n < held; n += 1) rows.push(line(n, said(n), new Date(began.getTime() + n * 1000)));
   writeFileSync(path, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
 
   let more = held;
@@ -701,9 +758,9 @@ export function writeLongChat(opts: { cwd: string; sessionId: string; held?: num
     held,
     says: (text?: string): string => {
       const n = more++;
-      const said = text ?? longChatSaid(n);
-      appendFileSync(path, JSON.stringify(line(n, said, new Date())) + '\n');
-      return said;
+      const spoken = text ?? said(n);
+      appendFileSync(path, JSON.stringify(line(n, spoken, new Date())) + '\n');
+      return spoken;
     },
     remove: () => {
       rmSync(path, { force: true });

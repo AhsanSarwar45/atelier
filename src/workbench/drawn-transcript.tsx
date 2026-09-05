@@ -9,6 +9,7 @@
 'use client';
 
 import { useLayoutEffect, useRef, useState } from 'react';
+
 import { useVirtualizer } from '@tanstack/react-virtual';
 
 import type { Mentions } from '@/components/markdown-body';
@@ -50,8 +51,19 @@ export function DrawnTranscript({
   const historyRequest = useRef(0);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const lastTop = useRef(0);
-  const pendingAnchor = useRef<{ height: number; top: number; key: string | null; viewportTop: number } | null>(null);
-  const correcting = useRef<number | null>(null);
+  /** A page has been asked for and the rows it adds have not arrived yet. */
+  const awaiting = useRef(false);
+  /**
+   * Where the pane stood in the render that first saw the older rows, read
+   * BEFORE the browser was given them.
+   *
+   * Read in the render body rather than when the page was asked for. A page
+   * takes a while to come back and the reader goes on scrolling the whole time;
+   * an anchor taken at the moment of asking says where he WAS, and putting the
+   * pane back to it throws away every pixel he has scrolled since — which is
+   * the jump he sees, and it is as big as the wait was long (bw-cdav.1).
+   */
+  const standing = useRef<{ height: number; top: number } | null>(null);
   const previous = useRef({ sessionId, many: loadedItems });
 
   const virtual = useVirtualizer({
@@ -67,53 +79,44 @@ export function DrawnTranscript({
     overscan: OVERSCAN,
   });
 
-  useLayoutEffect(() => () => {
-    if (correcting.current !== null) cancelAnimationFrame(correcting.current);
-  }, []);
-
   if (previous.current.sessionId !== sessionId) {
     previous.current = { sessionId, many: loadedItems };
     historyRequest.current += 1;
-    pendingAnchor.current = null;
-    if (correcting.current !== null) cancelAnimationFrame(correcting.current);
-    correcting.current = null;
+    awaiting.current = false;
+    standing.current = null;
     lastTop.current = 0;
     loading.current = false;
     setLoadingOlder(false);
   }
 
+  // Read here, in the render body, because this runs BEFORE the browser is
+  // given the added rows: `scrollHeight` is still the height without them and
+  // `scrollTop` is wherever the reader has scrolled to by now, including
+  // everything he did while the page was on its way. The layout effect below
+  // runs after they are in, and the difference between the two heights is
+  // exactly how much was put above him.
+  if (awaiting.current && loadedItems !== previous.current.many && pane.current) {
+    standing.current = { height: pane.current.scrollHeight, top: pane.current.scrollTop };
+  }
+
   useLayoutEffect(() => {
     const box = pane.current;
-    const anchor = pendingAnchor.current;
+    const stood = standing.current;
     // Adding older parents can collapse formerly orphaned helper rows, so the
     // drawn projection may grow or shrink even though storage was prepended.
     const changed = loadedItems !== previous.current.many;
     previous.current = { sessionId, many: loadedItems };
-    if (!box || !anchor || !changed) return;
-    box.scrollTop = anchor.top + (box.scrollHeight - anchor.height);
+    if (!changed) return;
+    awaiting.current = false;
+    standing.current = null;
+    if (!box || !stood) return;
+    // Before paint, so no frame is ever drawn with the conversation shifted.
+    // Nothing else is needed afterwards: rows above the fold are guessed at
+    // until they are drawn, and the virtualiser puts the pane back by itself
+    // the moment one of them is measured for the first time. A second, slower
+    // correction of our own on top of that could only fight it.
+    box.scrollTop = stood.top + (box.scrollHeight - stood.height);
     lastTop.current = box.scrollTop;
-    // The first correction uses the virtual height estimate and happens before
-    // paint. Dynamic rows are measured just after that; keep the exact DOM row
-    // the reader was looking at pinned through those measurements too.
-    let passes = 0;
-    const correct = () => {
-      const key = anchor.key;
-      const row = key === null ? null : Array.from(box.querySelectorAll<HTMLElement>('[data-transcript-key]'))
-        .find((element) => element.dataset.transcriptKey === key) ?? null;
-      if (row) {
-        box.scrollTop += row.getBoundingClientRect().top - anchor.viewportTop;
-        lastTop.current = box.scrollTop;
-      }
-      passes += 1;
-      if (passes < 3 && typeof requestAnimationFrame === 'function') {
-        correcting.current = requestAnimationFrame(correct);
-      } else {
-        correcting.current = null;
-        pendingAnchor.current = null;
-      }
-    };
-    if (typeof requestAnimationFrame === 'function') correcting.current = requestAnimationFrame(correct);
-    else pendingAnchor.current = null;
   }, [loadedItems, sessionId, pane]);
 
   // Loading is caused only by the reader travelling or wheeling upward.
@@ -125,34 +128,24 @@ export function DrawnTranscript({
     if (!box) return;
     lastTop.current = box.scrollTop;
     const requestOlder = (now: number) => {
-      // Keep the gesture consumed until its prepend anchor has settled. A
+      // Keep the gesture consumed until the page it asked for has arrived. A
       // fast local response can finish before the browser emits the scroll
-      // event paired with the same wheel input; without the anchor guard that
-      // one gesture asks for two pages.
-      if (now > box.clientHeight || !onOlder || loading.current || pendingAnchor.current) return;
+      // event paired with the same wheel input; without this guard that one
+      // gesture asks for two pages.
+      if (now > box.clientHeight || !onOlder || loading.current || awaiting.current) return;
       loading.current = true;
       const request = ++historyRequest.current;
       setLoadingOlder(true);
-      const paneTop = box.getBoundingClientRect().top;
-      const anchor = Array.from(box.querySelectorAll<HTMLElement>('[data-transcript-key]')).find((row) => {
-        const rect = row.getBoundingClientRect();
-        return rect.bottom > paneTop;
-      });
-      pendingAnchor.current = {
-        height: box.scrollHeight,
-        top: now,
-        key: anchor?.dataset.transcriptKey ?? null,
-        viewportTop: anchor?.getBoundingClientRect().top ?? paneTop,
-      };
+      awaiting.current = true;
       void onOlder()
         .then(({ added }) => {
-          // A failed or exhausted cursor must not leave an anchor waiting for
-          // an unrelated live row. A successful prepend consumes it in the
-          // layout effect above, after React has committed the added rows.
-          if (request === historyRequest.current && added === 0) pendingAnchor.current = null;
+          // A cursor that failed or is spent must not leave the chat waiting on
+          // an unrelated live row. A page that did arrive releases this in the
+          // layout effect above, once React has committed the rows it added.
+          if (request === historyRequest.current && added === 0) awaiting.current = false;
         })
         .catch(() => {
-          if (request === historyRequest.current) pendingAnchor.current = null;
+          if (request === historyRequest.current) awaiting.current = false;
         })
         .finally(() => {
           if (request !== historyRequest.current) return;
