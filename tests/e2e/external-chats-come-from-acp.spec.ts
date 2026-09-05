@@ -75,6 +75,15 @@ test('external chats are listed and replayed over ACP with no provider record to
       await expect(page.getByTestId('assistant-message').filter({ hasText: other.answered })).toHaveCount(0);
     }
 
+    // The agent reported a later clock as it replayed, with no new name beside
+    // it. That is the only timestamp ACP has for a session, and the row is
+    // dated by it — from the wire, with no provider file to read.
+    await expect(rowOf(FIRST.id).locator('span.font-mono').first()).toHaveText('10:31 AM');
+    if (process.env.WORKBENCH_E2E_SHOT) {
+      await page.locator('[data-testid="chat-sidebar"], aside').first()
+        .screenshot({ path: process.env.WORKBENCH_E2E_SHOT });
+    }
+
     // And again: a chat replayed once is this app's own, so the second open
     // does not go back to the agent for it.
     const openedAt = Date.now();

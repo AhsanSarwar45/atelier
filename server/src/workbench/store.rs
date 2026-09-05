@@ -327,7 +327,19 @@ impl Store {
             values.push(SqlValue::Text(mode));
         }
         if let Some(at) = touch_at {
-            sets.push("last_active_at = ?".to_string());
+            // Forwards only. A chat's activity clock answers "when did anything
+            // last happen here", and every event in a replay carries a time —
+            // an ACP `session/load` stamps its whole batch with the one clock
+            // the listing gave, so the closing "asleep" event of a load would
+            // otherwise drag the clock back over the `SessionInfoUpdate.updatedAt`
+            // the agent had just reported a moment earlier in the same batch,
+            // and a chat worked in at half past would report the hour
+            // (bw-t26l.22).
+            sets.push(
+                "last_active_at = CASE WHEN last_active_at < ?                 THEN ? ELSE last_active_at END"
+                    .to_string(),
+            );
+            values.push(SqlValue::Text(at.to_string()));
             values.push(SqlValue::Text(at.to_string()));
         }
         if sets.is_empty() {

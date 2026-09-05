@@ -422,8 +422,17 @@ fn string(event: &Event, name: &str) -> Option<String> {
 
 fn apply_session_fact(store: &Store, session_id: &str, event: &Event) -> rusqlite::Result<()> {
     let mut patch = SessionPatch::default();
+    let mut said_at: Option<String> = None;
+    // Whether this event is something that HAPPENED in the chat. Most are, and
+    // date it. Two are not: the app writing down that a chat exists, and a chat
+    // going to sleep. Both are stamped with the moment the app got round to
+    // them, so a chat discovered this afternoon and never touched since March
+    // would report this afternoon — which is the whole complaint about opening
+    // a chat making it look newly worked in (bw-t26l.22).
+    let mut happened = true;
     match event.kind {
         EventKind::SessionStarted => {
+            happened = false;
             if event.fields.contains_key("externalId") {
                 patch.external_id = Some(string(event, "externalId"));
             }
@@ -440,8 +449,18 @@ fn apply_session_fact(store: &Store, session_id: &str, event: &Event) -> rusqlit
                 patch.collaboration_mode = Some(string(event, "collaborationMode"));
             }
         }
-        EventKind::SessionState => patch.state = string(event, "state"),
+        EventKind::SessionState => {
+            patch.state = string(event, "state");
+            happened = patch.state.as_deref() != Some("dormant");
+        }
         EventKind::SessionPinned => {
+            // The one clock ACP reports for a session, when the agent sends it.
+            // The event's own `at` is when the notification arrived; this is
+            // when the agent says the chat was last worked in, which is what
+            // the list is dated by (bw-t26l.22).
+            if let Some(updated) = string(event, "updatedAt") {
+                said_at = Some(updated);
+            }
             if let Some(title) = string(event, "title") {
                 patch.title = Some(Some(title));
             }
@@ -465,10 +484,14 @@ fn apply_session_fact(store: &Store, session_id: &str, event: &Event) -> rusqlit
                 patch.collaboration_mode = Some(Some(collaboration_mode));
             }
         }
-        EventKind::SessionEnded => patch.state = Some("dormant".into()),
+        EventKind::SessionEnded => {
+            patch.state = Some("dormant".into());
+            happened = false;
+        }
         _ => return Ok(()),
     }
-    store.update_session(session_id, patch, string(event, "at").as_deref())
+    let touch = said_at.or_else(|| happened.then(|| string(event, "at")).flatten());
+    store.update_session(session_id, patch, touch.as_deref())
 }
 
 fn canonical_event(

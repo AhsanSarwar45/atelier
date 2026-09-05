@@ -628,6 +628,19 @@ fn human_words(text: &str) -> bool {
         .any(|opening| text.starts_with(opening))
 }
 
+/// When something last happened in the chat, as the record itself says.
+///
+/// Not the file's modification time. A record is rewritten for reasons that
+/// are not the conversation — a compaction, a copy, a tool touching it — and a
+/// chat nobody has spoken in since March then reports this afternoon. The rows
+/// carry the truth and this app must read it there, the same way the ACP path
+/// reads `SessionInfoUpdate.updatedAt` off the wire (bw-t26l.22).
+fn last_happened_at(tail: &[Value]) -> Option<String> {
+    tail.iter()
+        .rev()
+        .find_map(|row| row["timestamp"].as_str().map(str::to_string))
+}
+
 fn modified(path: &Path) -> String {
     let time = fs::metadata(path)
         .and_then(|metadata| metadata.modified())
@@ -716,7 +729,7 @@ fn summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
     }
     Some(ClaudeSessionSummary {
         session_id,
-        last_modified: modified(&path),
+        last_modified: last_happened_at(&tail).unwrap_or_else(|| modified(&path)),
         // A name someone set for this chat, then the name the chat made for
         // itself, and only for a chat that has neither, one of ours cut down
         // from what was asked. Claude titles its own conversations now; naming

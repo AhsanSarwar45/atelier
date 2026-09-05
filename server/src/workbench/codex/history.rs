@@ -53,7 +53,26 @@ fn human_message(row: &Value) -> bool {
             .is_some_and(|content| !content.is_empty())
 }
 
+/// When something last happened in the chat, as the rollout itself says.
+///
+/// Not the file's modification time, and not the reader's index. A rollout is
+/// rewritten for reasons that are not the conversation, and a chat nobody has
+/// worked in since March then reports the moment this app happened to look at
+/// it. The rows carry the truth (bw-t26l.22).
+pub fn last_happened_at(path: &Path) -> Option<String> {
+    last_row_timestamp(path, |_| true)
+}
+
 pub fn last_spoke_at(path: &Path) -> Option<String> {
+    last_row_timestamp(path, human_message)
+}
+
+/// The timestamp of the last row the test accepts, read backwards in complete
+/// JSONL rows. Long command output can put that row megabytes behind the
+/// file's end; a fixed tail window silently answers with a later row that does
+/// not match. Blocks are joined across their boundary and reading stops at the
+/// first matching row, so the common case remains one bounded tail read.
+fn last_row_timestamp(path: &Path, accept: impl Fn(&Value) -> bool) -> Option<String> {
     const BLOCK: u64 = 256 * 1024;
     let mut file = File::open(path).ok()?;
     let mut end = file.metadata().ok()?.len();
@@ -81,8 +100,10 @@ pub fn last_spoke_at(path: &Path) -> Option<String> {
             let Ok(row) = serde_json::from_str::<Value>(line.trim()) else {
                 continue;
             };
-            if human_message(&row) {
-                return row["timestamp"].as_str().map(str::to_string);
+            if accept(&row) {
+                if let Some(at) = row["timestamp"].as_str() {
+                    return Some(at.to_string());
+                }
             }
         }
         end = start;

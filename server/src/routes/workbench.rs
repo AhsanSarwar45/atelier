@@ -1207,9 +1207,20 @@ async fn recorded_sessions(
         .into_iter()
         .filter_map(|thread| {
             let id = thread["id"].as_str()?;
-            let updated = thread["updatedAt"]
-                .as_i64()
-                .and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0).map(|at| at.to_rfc3339()));
+            // The record's own last word first, and the reader's index only
+            // for a thread whose file we cannot read. The index dates a thread
+            // by when its file was written, which is not when anything
+            // happened in the chat (bw-t26l.22).
+            let updated = thread["path"]
+                .as_str()
+                .and_then(|path| {
+                    crate::workbench::codex::history::last_happened_at(std::path::Path::new(path))
+                })
+                .or_else(|| {
+                    thread["updatedAt"].as_i64().and_then(|seconds| {
+                        chrono::DateTime::from_timestamp(seconds, 0).map(|at| at.to_rfc3339())
+                    })
+                });
             let preview = thread["preview"].as_str().unwrap_or_default();
             Some(json!({"brand":"codex","externalId":id,"lastActiveAt":updated,
                 "name":thread.get("name").filter(|v|!v.is_null()).cloned().unwrap_or_else(||json!(crate::workbench::metadata::conversation_title(preview))),

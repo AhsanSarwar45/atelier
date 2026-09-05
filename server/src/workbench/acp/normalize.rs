@@ -906,7 +906,14 @@ impl AcpNormalizer {
                 }),
             ));
         }
-        if update["title"].is_string() {
+        // A title or a clock, either alone. ACP's one activity timestamp rides
+        // on this notification (`SessionInfoUpdate.updatedAt`), and an agent
+        // that reports the clock without renaming the chat used to have it
+        // dropped on the floor here — the app then had nowhere left to learn
+        // when a chat was worked in except the provider's own files, which is
+        // exactly the provider-specific reading ACP is meant to replace
+        // (bw-t26l.22).
+        if update["title"].is_string() || update["updatedAt"].is_string() {
             events.push(self.envelope(
                 session_id,
                 provider,
@@ -3156,6 +3163,32 @@ mod tests {
      * The manager saw the other half of it too: "some chats are straight up
      * showing as idle even they are are working" (bw-xfb4).
      */
+    /// The one clock ACP reports about a session, taken from the wire.
+    ///
+    /// `SessionInfoUpdate` carries `title` and `updatedAt`, and either may
+    /// arrive alone. A chat whose agent says only "this was worked in at
+    /// 10:01" used to have that dropped, leaving the app to date the row from
+    /// the provider's own file — which is the provider-specific reading the
+    /// protocol exists to replace (bw-t26l.22).
+    #[test]
+    fn an_agents_own_activity_clock_is_taken_from_the_wire_without_a_title() {
+        let mut normalizer = AcpNormalizer::default();
+        let events = normalizer.update(
+            "local",
+            "any-brand",
+            &json!({"sessionId":"remote","update":{
+                "sessionUpdate":"session_info_update","updatedAt":"2026-09-02T05:01:00.100Z"
+            }}),
+        );
+        let pinned = events
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "session.pinned")
+            .expect("the agent's clock was dropped for want of a title beside it");
+        assert_eq!(pinned["updatedAt"], "2026-09-02T05:01:00.100Z");
+        assert!(pinned["title"].is_null(), "a chat with no new name was renamed");
+    }
+
     #[test]
     fn a_turn_in_flight_is_never_written_ready_over_the_top_of() {
         let states = |events: &[Event]| -> Vec<String> {
