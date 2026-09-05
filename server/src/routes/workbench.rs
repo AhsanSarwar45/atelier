@@ -58,6 +58,15 @@ pub struct WorkbenchState {
     watch_poll_subscribers: Arc<AtomicUsize>,
     watch_poll_wake: Arc<tokio::sync::Notify>,
     chat_followers: Arc<tokio::sync::Mutex<HashMap<String, Arc<ChatFollowControl>>>>,
+    /// The last reading of who is working in what, and when it was taken.
+    ///
+    /// The fast half of the restore is drawn before provider discovery and may
+    /// not go to the process table for this; it used to answer "nobody" for
+    /// every row instead, which is not "we have not looked" but a positive no,
+    /// and it is the first thing a reader sees on every reload and project
+    /// switch. The hold beat already takes this reading every two seconds, so
+    /// the fast path can have the last one for free (bw-t26l.22).
+    last_holds: Arc<tokio::sync::RwLock<Option<(std::time::Instant, Vec<crate::workbench::external::ProviderHold>)>>>,
 }
 
 #[derive(Default)]
@@ -118,6 +127,7 @@ impl WorkbenchState {
             codex_records: Arc::new(std::sync::Mutex::new(HashMap::new())),
             claim_sweeps: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             watch_polls,
+            last_holds: Arc::new(tokio::sync::RwLock::new(None)),
             watch_pollers: Arc::new(tokio::sync::Mutex::new(None)),
             watch_poll_subscribers: Arc::new(AtomicUsize::new(0)),
             watch_poll_wake: Arc::new(tokio::sync::Notify::new()),
@@ -628,7 +638,21 @@ impl WorkbenchState {
                     .await;
             }
         }
+        *self.last_holds.write().await = Some((std::time::Instant::now(), holds.clone()));
         holds
+    }
+
+    /// The last reading, if one was taken recently enough to still be true.
+    ///
+    /// Stale is worse than absent here: a hold that has been sitting in this
+    /// cache since the poller stopped would draw "somebody is working in it"
+    /// over a chat nobody has touched for an hour, and that word has to mean
+    /// something. Nothing older than three beats.
+    async fn holds_lately(&self) -> Vec<crate::workbench::external::ProviderHold> {
+        match self.last_holds.read().await.as_ref() {
+            Some((taken, holds)) if taken.elapsed() < Duration::from_secs(6) => holds.clone(),
+            _ => Vec::new(),
+        }
     }
 
     pub(crate) async fn account_usage(&self, brand: &str) -> Result<Value, String> {
@@ -1242,14 +1266,18 @@ async fn restore(
     let mut beads = state.database().beads_for_sessions(ids).await?;
     // This first response exists solely to put durable rows on screen while
     // provider discovery continues in the concurrent full request. Do not put
-    // process-table and provider-marker discovery back on its critical path;
-    // the app-wide live feed already overlays ownership as soon as it speaks.
+    // process-table and provider-marker discovery back on its critical path —
+    // but do not answer "nobody is working in any of these" either, which is
+    // what an empty hold set says and is not what we know. The hold beat's
+    // last reading costs nothing and is at most a couple of seconds old
+    // (bw-t26l.22).
     if query.local.is_some() {
+        let lately = state.holds_lately().await;
         let mut rows: Vec<Value> = sessions
             .into_iter()
             .map(|session| {
                 let linked = beads.remove(&session.id).unwrap_or_default();
-                restore_row(session, linked, &[])
+                restore_row(session, linked, &lately)
             })
             .collect();
         rows.sort_by(|a, b| restore_clock(b).cmp(restore_clock(a)));
