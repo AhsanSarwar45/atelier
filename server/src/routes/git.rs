@@ -361,23 +361,126 @@ fn with_batch_mode(from_env: Option<String>, from_config: Option<String>) -> Str
     format!("{} -o BatchMode=yes", carried.as_deref().unwrap_or("ssh").trim())
 }
 
+/// The name the passphrase travels under, from this server to the helper ssh
+/// runs. An environment variable and never an argument: on Linux a process's
+/// command line is readable by anyone on the machine through `/proc`, while
+/// its environment is readable only by its own user.
+const PASSPHRASE_VARIABLE: &str = "ATELIER_SSH_PASSPHRASE";
+
+/// The helper ssh runs to be told the passphrase.
+///
+/// It holds no secret itself — it reads the one in its environment and writes
+/// it out — so the passphrase is never on disk. ssh calls it with the prompt
+/// it would have shown as an argument, which is of no interest here.
+const ASKPASS_HELPER: &str = r#"#!/bin/sh
+# Written by Atelier for one git call and removed when that call ends. The
+# passphrase is in this program's environment, never in the file itself.
+printf '%s\n' "$ATELIER_SSH_PASSPHRASE"
+"#;
+
+/// The askpass helper for a single call, on disk only while it is held.
+///
+/// Dropping it takes the directory and the program inside it away, which is
+/// why the call keeps hold of it until git has finished rather than letting it
+/// go at the end of the branch that made it.
+#[cfg(unix)]
+struct AskpassForOneCall {
+    /// Removed on drop, taking the program with it.
+    _dir: tempfile::TempDir,
+    /// What `SSH_ASKPASS` is pointed at.
+    program: std::path::PathBuf,
+}
+
+/// Write the helper into a directory of its own, readable by nobody else.
+#[cfg(unix)]
+fn askpass_for_one_call() -> std::io::Result<AskpassForOneCall> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::Builder::new().prefix("atelier-askpass-").tempdir()?;
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700))?;
+
+    let program = dir.path().join("askpass");
+    std::fs::write(&program, ASKPASS_HELPER)?;
+    // Owner only, and executable because ssh runs it as a program.
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700))?;
+
+    Ok(AskpassForOneCall { _dir: dir, program })
+}
+
 /// Run a git command that talks to the shared copy.
 ///
-/// Two things are added to the environment, both of them to stop a prompt this
-/// server has no terminal to answer: `GIT_TERMINAL_PROMPT=0` for git's own
-/// asking, and an ssh that cannot ask for the rest. Everything else — the SSH
-/// keys, ssh-agent, `credential.helper`, the whole gitconfig — is inherited
-/// untouched, which is the entire reason this shells out to git.
-async fn run_git_remote(repo: &Path, args: &[&str]) -> Result<Output, Refused> {
-    super::git_command()
-        .map_err(could_not_run)?
+/// Everything added to the environment is there to keep the call from stopping
+/// at a prompt this server has no terminal to answer. `GIT_TERMINAL_PROMPT=0`
+/// covers git's own asking either way; what happens to ssh's asking depends on
+/// whether a passphrase came with the request, and the two are exclusive:
+///
+/// * With no passphrase, ssh is run so it cannot ask at all
+///   (`BatchMode=yes`), and a locked key comes back as a refusal.
+/// * With one, ssh is given a helper to ask instead of a terminal, forced with
+///   `SSH_ASKPASS_REQUIRE=force` so that a terminal is never preferred to it.
+///   `BatchMode` must *not* be set here: it turns off the asking altogether,
+///   helper included, and the passphrase would never be reached for.
+///
+/// Neither can hang. The helper answers the moment it is asked, and a wrong
+/// passphrase ends in ssh giving up rather than asking a human again.
+///
+/// Everything else — the SSH keys, ssh-agent, `credential.helper`, the whole
+/// gitconfig — is inherited untouched, which is the entire reason this shells
+/// out to git. Nothing about the passphrase outlives the call: it is never
+/// written down, never logged, and the helper it was read by is gone as soon
+/// as git returns.
+async fn run_git_remote(
+    repo: &Path,
+    args: &[&str],
+    passphrase: Option<&str>,
+) -> Result<Output, Refused> {
+    let mut running = super::git_command().map_err(could_not_run)?;
+    running
         .args(args)
         .current_dir(repo)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_SSH_COMMAND", ssh_that_cannot_ask(repo).await)
-        .output()
-        .await
-        .map_err(could_not_run)
+        .env("GIT_TERMINAL_PROMPT", "0");
+
+    // Held until git has finished; dropping it takes the helper off disk.
+    let _helper = match passphrase {
+        None => {
+            running.env("GIT_SSH_COMMAND", ssh_that_cannot_ask(repo).await);
+            None
+        }
+        Some(secret) => {
+            let helper = askpass_when_one_is_supplied()?;
+            // The ssh command itself is left alone in this branch, so a
+            // `GIT_SSH_COMMAND` or `core.sshCommand` the setup carries is the
+            // one git runs, exactly as it would be outside the app.
+            running
+                .env("SSH_ASKPASS", &helper.program)
+                .env("SSH_ASKPASS_REQUIRE", "force")
+                .env(PASSPHRASE_VARIABLE, secret);
+            Some(helper)
+        }
+    };
+
+    running.output().await.map_err(could_not_run)
+}
+
+/// The helper, or a refusal saying plainly that this platform has no way to
+/// hand ssh a passphrase — better than accepting one and quietly ignoring it.
+#[cfg(unix)]
+fn askpass_when_one_is_supplied() -> Result<AskpassForOneCall, Refused> {
+    askpass_for_one_call().map_err(|e| {
+        Refused::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Could not make somewhere for ssh to ask for the passphrase: {}", e),
+        )
+    })
+}
+
+#[cfg(not(unix))]
+fn askpass_when_one_is_supplied() -> Result<(), Refused> {
+    Err(Refused::new(
+        StatusCode::NOT_IMPLEMENTED,
+        "Unlocking an SSH key from the app is not supported on this platform yet. \
+         Load the key into ssh-agent and try again.",
+    ))
 }
 
 /// git could not be started at all — a missing binary, not a git refusal.
@@ -788,6 +891,11 @@ pub async fn commit(GitJson(body): GitJson<CommitRequest>) -> Answer {
 pub struct PathRequest {
     /// Absolute working directory of the repository.
     pub path: String,
+    /// The passphrase for the SSH key, when the reader has just been asked for
+    /// one. Used for this call and this call only — never stored, never
+    /// logged, and gone with the helper that read it.
+    #[serde(default)]
+    pub passphrase: Option<String>,
 }
 
 /// How far the current branch sits from its upstream, or zeroes if it has none.
@@ -819,7 +927,7 @@ pub async fn fetch(GitJson(body): GitJson<PathRequest>) -> Answer {
     let turn = repo_lock(&repo);
     let _holding = turn.lock().await;
 
-    spoke_or_refused(run_git_remote(&repo, &["fetch"]).await?)?;
+    spoke_or_refused(run_git_remote(&repo, &["fetch"], body.passphrase.as_deref()).await?)?;
     let (ahead, behind) = distance_from_upstream(&repo).await;
     Ok(Json(serde_json::json!({ "ahead": ahead, "behind": behind })).into_response())
 }
@@ -835,7 +943,8 @@ pub async fn pull(GitJson(body): GitJson<PathRequest>) -> Answer {
     let turn = repo_lock(&repo);
     let _holding = turn.lock().await;
 
-    let output = spoke_or_refused(run_git_remote(&repo, &["pull"]).await?)?;
+    let output =
+        spoke_or_refused(run_git_remote(&repo, &["pull"], body.passphrase.as_deref()).await?)?;
     Ok(Json(serde_json::json!({
         "ok": true,
         "output": everything_git_printed(&output),
@@ -852,6 +961,11 @@ pub struct PushRequest {
     /// Give this branch a shared copy to follow, on `origin`.
     #[serde(default)]
     pub set_upstream: bool,
+    /// The passphrase for the SSH key, when the reader has just been asked for
+    /// one. Used for this call and this call only — never stored, never
+    /// logged, and gone with the helper that read it.
+    #[serde(default)]
+    pub passphrase: Option<String>,
 }
 
 /// Send saved changes to the shared copy.
@@ -874,7 +988,8 @@ pub async fn push(GitJson(body): GitJson<PushRequest>) -> Answer {
         vec!["push"]
     };
 
-    let output = spoke_or_refused(run_git_remote(&repo, &args).await?)?;
+    let output =
+        spoke_or_refused(run_git_remote(&repo, &args, body.passphrase.as_deref()).await?)?;
     Ok(Json(serde_json::json!({
         "ok": true,
         "output": everything_git_printed(&output),
@@ -1300,6 +1415,150 @@ mod tests {
             .status
     }
 
+    /// The helper carries no secret of its own: it reads the one name the
+    /// server puts the passphrase under. Were the two to drift apart, ssh
+    /// would be handed an empty line and the unlock would fail for no visible
+    /// reason.
+    #[test]
+    fn the_helper_reads_the_name_the_passphrase_is_sent_under() {
+        assert!(ASKPASS_HELPER.contains(PASSPHRASE_VARIABLE));
+    }
+
+    /// What ssh gets when it runs the helper: the passphrase, and only the
+    /// passphrase. Run as a program, the way ssh runs it, with the prompt it
+    /// would have shown passed along as ssh passes it.
+    #[cfg(unix)]
+    #[test]
+    fn the_helper_hands_ssh_the_passphrase_it_was_given() {
+        let helper = askpass_for_one_call().unwrap();
+
+        let said = std::process::Command::new(&helper.program)
+            .arg("Enter passphrase for key '/home/someone/.ssh/id_ed25519': ")
+            .env(PASSPHRASE_VARIABLE, "open sesame")
+            .output()
+            .unwrap();
+
+        assert!(said.status.success());
+        assert_eq!(String::from_utf8_lossy(&said.stdout), "open sesame\n");
+    }
+
+    /// The passphrase is never written down. The program on disk is the same
+    /// bytes whatever the secret is, and it is readable by nobody but its
+    /// owner — as is the directory it sits in, so no one else can put a
+    /// different program there for ssh to run instead.
+    #[cfg(unix)]
+    #[test]
+    fn nothing_of_the_passphrase_is_left_on_disk_and_nobody_else_may_look() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let helper = askpass_for_one_call().unwrap();
+        let written = std::fs::read_to_string(&helper.program).unwrap();
+        assert_eq!(written, ASKPASS_HELPER);
+        assert!(!written.contains("open sesame"));
+
+        let mode = |at: &Path| std::fs::metadata(at).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&helper.program), 0o700);
+        assert_eq!(mode(helper.program.parent().unwrap()), 0o700);
+    }
+
+    /// Letting go of the helper takes it off disk, which is what makes it last
+    /// exactly one call.
+    #[cfg(unix)]
+    #[test]
+    fn the_helper_goes_away_when_it_is_let_go() {
+        let helper = askpass_for_one_call().unwrap();
+        let was_at = helper.program.clone();
+        assert!(was_at.exists());
+
+        drop(helper);
+        assert!(!was_at.exists());
+    }
+
+    /// The whole chain, through git and the ssh git runs: a passphrase handed
+    /// to the route reaches ssh, and the helper it came through is gone by the
+    /// time the call answers — even though this call fails, which is the way
+    /// round that would leave it behind if it were only removed on success.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_passphrase_reaches_ssh_and_the_helper_is_gone_afterwards() {
+        use std::os::unix::fs::PermissionsExt;
+
+        if std::env::var("GIT_SSH_COMMAND").is_ok_and(|carried| !carried.trim().is_empty()) {
+            eprintln!("skipped: GIT_SSH_COMMAND is set, so this test cannot choose the ssh");
+            return;
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        git(repo, &["init", "-q"]);
+
+        // Stands in for ssh meeting a locked key: it asks the way ssh asks —
+        // by running whatever `SSH_ASKPASS` names — writes down both the
+        // answer and where it had to go for it, then refuses like ssh does.
+        let told = repo.join("what-ssh-was-told");
+        let fake_ssh = repo.join("ssh-that-asks");
+        std::fs::write(
+            &fake_ssh,
+            format!(
+                "#!/bin/sh\n\
+                 echo \"$SSH_ASKPASS\" > {told}\n\
+                 \"$SSH_ASKPASS\" 'Enter passphrase: ' >> {told}\n\
+                 echo 'git@example.invalid: Permission denied (publickey).' >&2\n\
+                 exit 255\n",
+                told = told.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake_ssh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        git(repo, &["config", "core.sshCommand", fake_ssh.to_str().unwrap()]);
+        git(repo, &["remote", "add", "origin", "git@example.invalid:some/repo.git"]);
+
+        let answered = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            run_git_remote(repo, &["fetch", "origin"], Some("open sesame")),
+        )
+        .await
+        .expect("the call answered rather than waiting on a prompt")
+        .expect("git ran");
+        assert!(!answered.status.success());
+
+        let told = std::fs::read_to_string(&told).expect("ssh was asked to authenticate");
+        let (helper_was_at, given) = told.split_once('\n').unwrap();
+        assert_eq!(
+            given.trim(),
+            "open sesame",
+            "ssh should be handed the passphrase the request carried"
+        );
+        assert!(
+            !Path::new(helper_was_at).exists(),
+            "the helper should be gone once the call is over, and this one failed"
+        );
+    }
+
+    /// The two ways of running ssh are exclusive, and this is why: `BatchMode`
+    /// turns off the asking altogether, the helper included, so a call that
+    /// means to answer a passphrase must not carry it. The no-passphrase call
+    /// sets it; the passphrase call leaves the ssh command alone.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_call_carrying_a_passphrase_does_not_also_forbid_the_asking() {
+        if std::env::var("GIT_SSH_COMMAND").is_ok_and(|carried| !carried.trim().is_empty()) {
+            eprintln!("skipped: GIT_SSH_COMMAND is set, so this test cannot choose the ssh");
+            return;
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        git(repo, &["init", "-q"]);
+        git(repo, &["config", "core.sshCommand", "ssh -i /keys/theirs"]);
+
+        // What the no-passphrase call runs.
+        assert_eq!(
+            ssh_that_cannot_ask(repo).await,
+            "ssh -i /keys/theirs -o BatchMode=yes"
+        );
+    }
+
     /// The point of the switch: a remote call against a copy whose ssh cannot
     /// let anyone in comes back and says so, rather than sitting on a
     /// passphrase prompt that no one in front of the app can answer.
@@ -1339,7 +1598,7 @@ mod tests {
 
         let answered = tokio::time::timeout(
             std::time::Duration::from_secs(30),
-            run_git_remote(repo, &["fetch", "origin"]),
+            run_git_remote(repo, &["fetch", "origin"], None),
         )
         .await
         .expect("the call answered rather than waiting on a prompt")
