@@ -1685,7 +1685,12 @@ impl AcpDriver {
             .get_session(self.session.id.clone())
             .await?
             .is_some_and(|session| turn_is_active(&session.state));
-        super::super::provider::record_user_for_transport(
+        // The id of the line just written is the only handle anyone has on it
+        // afterwards. Dropping it here is what left the screen unable to say
+        // which message to take back when the reader recalls a prompt, and
+        // unable to match its own drawn copy against the one the server sends
+        // (bw-2c0x). It is carried out with the answer instead.
+        let message_id = super::super::provider::record_user_for_transport(
             &self.database,
             &self.session,
             text,
@@ -1701,17 +1706,24 @@ impl AcpDriver {
                 .map_err(|error| error.to_string())?,
             )
             .await?;
-        if active {
+        let mut accepted = if active {
             self.control(|reply| Control::Steer {
                 content,
                 suppress_echo: true,
                 reply,
             })
-            .await
+            .await?
         } else {
             self.control(|reply| Control::Prompt { content, reply })
-                .await
+                .await?
+        };
+        // Both routes answer with an object; a driver that ever answered with
+        // something else keeps its answer whole rather than having it replaced
+        // by a bare id.
+        if let Some(fields) = accepted.as_object_mut() {
+            fields.insert("messageId".into(), json!(message_id));
         }
+        Ok(accepted)
     }
 
     /**
@@ -3014,12 +3026,79 @@ mod tests {
             }
             _ => panic!("an active turn must be steered, not queued as another prompt"),
         }
-        assert_eq!(sent.await.unwrap().unwrap(), json!({"ok":true}));
+        let answer = sent.await.unwrap().unwrap();
+        assert_eq!(answer["ok"], true);
         let events = database.events_since("chat-1".into(), 0).await.unwrap();
         assert!(events.iter().any(|event| {
             event.kind == crate::workbench::protocol::EventKind::TextDelta
                 && event.fields["text"] == "Use the safer route"
         }));
+        // The steered line is a message like any other, and the answer names it.
+        assert_eq!(answer["messageId"], recorded_message(&events));
+    }
+
+    /// The id of the recorded user message, from the events it was written as.
+    fn recorded_message(events: &[crate::workbench::protocol::Event]) -> Value {
+        events
+            .iter()
+            .find(|event| {
+                event.kind == crate::workbench::protocol::EventKind::MessageStarted
+                    && event.fields["role"] == "user"
+            })
+            .expect("the user's line is recorded")
+            .fields["messageId"]
+            .clone()
+    }
+
+    /// The answer to a prompt names the line the prompt was written as.
+    ///
+    /// Without it the screen holds no handle on what it just sent: recalling a
+    /// prompt sent `session.stop` with no `retractMessageId`, so the server's
+    /// retraction never ran and the line the reader had taken back stayed in
+    /// the transcript (bw-2c0x).
+    #[tokio::test]
+    async fn a_sent_prompt_is_answered_with_the_id_of_the_line_it_became() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let session = test_session("idle");
+        database.create_session(session.clone()).await.unwrap();
+        let (controls, mut requests) = mpsc::unbounded_channel();
+        let (_, ended) = mpsc::unbounded_channel();
+        let driver = AcpDriver {
+            brand: "codex",
+            database: database.clone(),
+            session,
+            controls,
+            ended,
+            permissions: Arc::new(PermissionBroker::default()),
+            elicitations: Arc::new(ElicitationBroker::default()),
+            takes_pictures: Arc::new(AtomicBool::new(true)),
+        };
+        let sent = tokio::spawn(async move {
+            driver
+                .submit_user_turn(
+                    "Start here",
+                    &[],
+                    vec![ContentBlock::Text(TextContent::new("Start here"))],
+                )
+                .await
+        });
+        match requests.recv().await.unwrap() {
+            // An idle chat is prompted rather than steered, and the adapter's
+            // own answer says nothing about any message.
+            Control::Prompt { reply, .. } => {
+                reply.send(Ok(json!({"ok":true,"accepted":true}))).unwrap()
+            }
+            _ => panic!("an idle turn must be prompted, not steered"),
+        }
+        let answer = sent.await.unwrap().unwrap();
+        // What the adapter said is kept whole ...
+        assert_eq!(answer["accepted"], true);
+        // ... and the id is carried out beside it.
+        let events = database.events_since("chat-1".into(), 0).await.unwrap();
+        let recorded = recorded_message(&events);
+        assert!(recorded.is_string(), "a line was written for the prompt");
+        assert_eq!(answer["messageId"], recorded);
     }
 
     #[tokio::test]
