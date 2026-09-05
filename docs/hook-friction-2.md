@@ -451,3 +451,95 @@ session's own test litter. The literal absolute path went through first time.
 
 As in the first book: what was attempted, the refusal text, why the refusal did
 not serve the rule it enforces, what should have happened, what it cost.
+
+## 10. The checks tool still has the actor bug the lander had fixed
+
+**Attempted.** The documented last step of a checks card, from its own
+worktree, with the card claimed by this session:
+
+```
+atelier tool checks bw-cdav.4 --all
+```
+
+**Refused with**, after every suite had run and passed:
+
+```
+checks: tree 934bedb… Project checks=PASSED (767 passed, 0 failed)
+bd close failed: cannot close bw-cdav.4: assignee is "s-817c0fab",
+actor is "AhsanSarwar45"; reclaim or use --force to override
+```
+
+**Why it does not serve the rule.** This is §4 above, in a second tool. The
+assignee check exists so one agent does not close another agent's work, and
+here there is only one agent: `s-817c0fab` is this session's board actor, named
+as such in its own start-up brief, and `AhsanSarwar45` is the human whose git
+identity the same session commits under. The card was claimed by this session
+four commands earlier. §4's fix taught `board/land` to act as the card's own
+assignee; `atelier tool checks` closes through a different path and never
+learnt it.
+
+The cost is worse here than in a land, because the refusal arrives *after* the
+expensive part. Every suite had been run — vitest, the Rust tests, the build —
+and the comment recording the tree and the result had already been written. The
+only thing left was a status flip, and it is the only thing that failed, so the
+card sits in progress with its own evidence attached saying it passed.
+
+**Should have happened.** The same fix as §4, in the same place: whatever
+resolves the actor for a `bd close` issued by an Atelier tool should treat the
+invoking session's assignee as its own. Failing that, `atelier tool checks`
+should reclaim the card before closing it, exactly as it already claims the
+right to append the checks comment to it.
+
+**Cost.** One full re-run of the project's checks — several minutes of Rust
+compilation and 767 tests — was not itself wasted, but the manual
+`bd update --claim && bd close` that followed it is two commands the documented
+workflow says nothing about, and an agent that stopped reading at
+`checks=PASSED` would leave the card open.
+
+## 11. A finished epic's status move has nowhere it is allowed to be made from
+
+**Attempted.** The handoff at the end of an epic: every child closed, every
+commit landed, the parent moved to the manager's queue.
+
+```
+bd update bw-cdav --status manager_review
+```
+
+**Refused**, from all three directories there are:
+
+```
+Beads issue bw-cdav.4 must be claimed and in_progress before this worktree is
+  changed. The resolved target: /home/ahsan/dev/beads-web/worktrees/bw-cdav.4.
+Beads issue bw-cdav.1 must be claimed and in_progress before this worktree is
+  changed. The resolved target: /home/ahsan/dev/beads-web/worktrees/bw-cdav.1.
+Changes require an owned Beads work item in its isolated worktree
+  (resolved target: /home/ahsan/dev/beads-web).
+```
+
+**Why it does not serve the rule.** The rule is that repository changes need an
+owned card in its own worktree. A `bd update --status` is not a repository
+change — it writes the Beads database, and the files in every one of those
+three directories are untouched by it. The gate judges it by where it was run
+from, and by the end of an epic there is no directory left that satisfies the
+test: each child's worktree fails because that child is now closed rather than
+in progress, and the main checkout fails because it is not a worktree at all.
+The state the gate demands is one the successful completion of the work has
+just destroyed.
+
+It is §3's shape at the other end of the card's life. §3 was the first thing a
+session cannot do because it has not started yet; this is the last thing it
+cannot do because it has finished. Both are the gate refusing the workflow's own
+punctuation.
+
+**Should have happened.** A `bd` status verb on a card the actor is entitled to
+move should not be judged as a write to whatever directory it was typed in. The
+narrow form, matching §3's claim carve-out: `bd update <ID> --status …` passes
+when the line changes nothing else, leaving every `bd` write that does touch
+files gated exactly as it is. The wider and truer form is that `bd` writes to
+its own database and only the commands that reach tracked files belong to this
+gate at all.
+
+**Cost.** Three refusals, one `ATELIER_BYPASS` recording a reason nobody needed
+warning about, and — because writing this section is itself a repository change
+— a card and a worktree raised for the sole purpose of being allowed to describe
+the refusal.
