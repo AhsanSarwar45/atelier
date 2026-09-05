@@ -20,7 +20,7 @@ import { onWorkbench } from '@/workbench/live-wire';
 import { cacheSessionEvent } from '@/workbench/use-session';
 import { NOTHING_KNOWN, type PlanUsage } from '@/workbench/plan-usage';
 import { providerMessageIsCurrent, providerMessageStatus, type ProviderMessageSignal } from '@/workbench/provider-messages';
-import type { Brand, SessionState, SessionSummary, WatchFrame } from '@/workbench/protocol';
+import type { Brand, RanCall, SessionState, SessionSummary, WatchFrame } from '@/workbench/protocol';
 
 /** What one chat is doing, as every global view needs it. */
 export interface LiveSession {
@@ -46,6 +46,8 @@ export interface LiveSession {
    * how every row written before there was anything to add reads (bw-xfb4).
    */
   activityDetail?: string;
+  /** The call in flight, for the row to say in the words its card says it. */
+  activityCall?: RanCall | null;
   /** What it is waiting for, when it is waiting on the owner. */
   waitingFor: string | null;
   lastActiveAt: string;
@@ -86,6 +88,7 @@ export function liveState(s: LiveSession): ChatState {
     state: s.state,
     label: s.activity,
     detail: s.activityDetail || null,
+    call: s.activityCall ?? null,
     since: s.busySince === null ? null : Date.parse(s.busySince),
   });
 }
@@ -116,7 +119,7 @@ export function isLive(s: LiveSession): boolean {
 const listeners = new Set<() => void>();
 let sessions: LiveSession[] = [];
 const providerConditions = new Map<string, Map<string, ProviderMessageSignal>>();
-const providerBase = new Map<string, Pick<LiveSession, 'state' | 'activity' | 'busySince'> & { activityDetail?: string }>();
+const providerBase = new Map<string, Pick<LiveSession, 'state' | 'activity' | 'busySince'> & { activityDetail?: string; activityCall?: RanCall | null }>();
 const providerTimers = new Map<string, ReturnType<typeof setTimeout>>();
 /** How to stop reading the helper's feed off the window's one connection. */
 let stop: (() => void) | null = null;
@@ -288,7 +291,7 @@ function announce(): void {
 }
 
 function fromSummary(
-  s: SessionSummary & { activity: string; activityDetail?: string; beads: string[] },
+  s: SessionSummary & { activity: string; activityDetail?: string; activityCall?: RanCall | null; beads: string[] },
 ): LiveSession {
   return {
     id: s.id,
@@ -301,6 +304,7 @@ function fromSummary(
     state: s.state,
     activity: s.activity,
     activityDetail: s.activityDetail ?? '',
+    activityCall: s.activityCall ?? null,
     waitingFor: null,
     lastActiveAt: s.lastActiveAt,
     // Nothing in the list says when the turn began, so a chat found already
@@ -334,7 +338,7 @@ function applyProviderCondition(id: string): void {
     const status = providerMessageStatus(active);
     // A condition is the whole of what the chat is doing; the call it was in
     // the middle of is not what the reader is waiting on now.
-    patch(id, { state: status.state, activity: status.label, activityDetail: '', busySince: null });
+    patch(id, { state: status.state, activity: status.label, activityDetail: '', activityCall: null, busySince: null });
     const expiries = [...(providerConditions.get(id)?.values() ?? [])]
       .filter((signal) => providerMessageIsCurrent(signal) && signal.retryAt)
       .map((signal) => new Date(signal.retryAt!).getTime())
@@ -528,6 +532,7 @@ function absorb(frame: WatchFrame): void {
         state: e.state,
         activity: e.label ?? '',
         activityDetail: e.detail ?? '',
+        activityCall: e.call ?? null,
         busySince: countingFrom(had, { state: e.state, label: e.label ?? '', at: e.at }),
       };
       if (activeProviderCondition(e.sessionId)) {

@@ -895,6 +895,7 @@ pub(crate) async fn session_summaries(
                 .unwrap_or(crate::workbench::store::SessionActivity {
                     label: String::new(),
                     detail: String::new(),
+                    call: Value::Null,
                     busy_since: None,
                 });
         let mut value = serde_json::to_value(session).map_err(|error| error.to_string())?;
@@ -906,6 +907,9 @@ pub(crate) async fn session_summaries(
         // activity rather than inside it: the row draws its own word for
         // the standing and this after it (bw-xfb4).
         object.insert("activityDetail".into(), json!(activity.detail));
+        // The call itself, so the rail draws the sentence the call's own card
+        // draws rather than the wire's words for it (bw-gci9).
+        object.insert("activityCall".into(), activity.call.clone());
         object.insert("busySince".into(), json!(activity.busy_since));
         object.insert("beads".into(), json!(linked));
         values.push(value);
@@ -1812,7 +1816,7 @@ async fn watch(State(state): State<WorkbenchState>) -> Result<Sse<EventStream>, 
                         if update.event.kind==crate::workbench::protocol::EventKind::SessionStarted{
                             if let Ok(Some(session))=state.database().get_session(update.session_id.clone()).await{
                                 let beads=state.database().beads_for_session(update.session_id.clone()).await.unwrap_or_default();
-                                if tx.send(Ok(watch_frame(json!({"kind":"opened","session":{"id":session.id,"brand":session.brand,"externalId":session.external_id,"projectId":session.project_id,"projectPath":session.project_path,"cwd":session.cwd,"model":session.model,"permissionMode":session.permission_mode,"effort":session.effort,"collaborationMode":session.collaboration_mode,"title":session.title,"state":session.state,"origin":session.origin,"createdAt":session.created_at,"lastActiveAt":session.last_active_at,"lastSpokeAt":session.last_spoke_at,"activity":"","activityDetail":"","busySince":Value::Null,"beads":beads}})))).await.is_err(){return}
+                                if tx.send(Ok(watch_frame(json!({"kind":"opened","session":{"id":session.id,"brand":session.brand,"externalId":session.external_id,"projectId":session.project_id,"projectPath":session.project_path,"cwd":session.cwd,"model":session.model,"permissionMode":session.permission_mode,"effort":session.effort,"collaborationMode":session.collaboration_mode,"title":session.title,"state":session.state,"origin":session.origin,"createdAt":session.created_at,"lastActiveAt":session.last_active_at,"lastSpokeAt":session.last_spoke_at,"activity":"","activityDetail":"","activityCall":Value::Null,"busySince":Value::Null,"beads":beads}})))).await.is_err(){return}
                             }
                         }
                         if tx.send(Ok(watch_frame(json!({"kind":"event","event":update.event})))).await.is_err(){return}

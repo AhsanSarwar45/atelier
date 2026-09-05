@@ -27,7 +27,8 @@
  * the whole point is that they cannot disagree.
  */
 import type { SentAway, TranscriptItem } from '@/workbench/fold';
-import type { AgentState, SessionState } from '@/workbench/protocol';
+import type { AgentState, RanCall, SessionState } from '@/workbench/protocol';
+import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 // Spelled the long way on purpose: this file is one the chat's own server
 // reads, and Node has no aliases (bw-jaoz.5). A type import beside it may keep
 // the short spelling — it is erased before Node ever sees it.
@@ -401,6 +402,34 @@ export interface ChatStateInput {
    * retry is waiting. Drawn beside the word, never in place of it.
    */
   detail?: string | null;
+  /**
+   * The call in flight, when the driver named one, said here in the app's own
+   * words rather than the wire's.
+   *
+   * The transcript draws every call as a card, and the card's sentence comes
+   * from one classifier (`said-what-it-ran.ts`): "Running Python: import time;
+   * time.sleep(45)". The status under that card was drawn from the command
+   * itself, so the two said the same call in two vocabularies an inch apart —
+   * the manager: "the status message doesn't use the same classifer that the
+   * cards use" (bw-gci9). It is read here, once, so the foot of a chat and its
+   * row in the rail cannot disagree either.
+   */
+  call?: RanCall | null;
+}
+
+/**
+ * The call in flight in the app's own words, or nothing to say about it.
+ *
+ * The same sentence the call's own card in the transcript draws, put in the
+ * present because this is read while the call is still running (bw-gci9). A
+ * call the classifier does not place falls through to the driver's `detail`,
+ * which says something true either way.
+ */
+function saidOfCall(input: ChatStateInput): string | null {
+  const call = input.call ?? null;
+  if (!call) return null;
+  const said = whatItRan(call.name, call.input)?.said;
+  return said ? whileItRuns(said) : null;
 }
 
 /**
@@ -467,7 +496,7 @@ export function chatState(input: ChatStateInput): ChatState {
     waiting: state === 'waiting_permission',
     doing: OWN_DOING[state],
     word: word ?? '',
-    detail: input.detail ?? null,
+    detail: saidOfCall(input) ?? input.detail ?? null,
     // Our own driver publishes its state every second; nothing here is inferred.
     told: true,
     // Off the state and never off the word: the driver names its own states, so

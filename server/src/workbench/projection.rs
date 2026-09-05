@@ -39,6 +39,8 @@ pub(crate) fn empty_view() -> Map<String, Value> {
     view.insert("items".into(), json!([]));
     view.insert("state".into(), json!("starting"));
     view.insert("stateLabel".into(), json!("Starting"));
+    view.insert("stateDetail".into(), Value::Null);
+    view.insert("stateCall".into(), Value::Null);
     view.insert("cost".into(), Value::Null);
     view.insert("context".into(), Value::Null);
     view.insert("todos".into(), json!([]));
@@ -241,6 +243,9 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                 // a label carrying both would leave it nothing to separate
                 // (bw-xfb4).
                 view.insert("stateDetail".into(), value(event, "detail"));
+                // And the call itself, for the screen to say in its own words —
+                // the same sentence the call's own card draws (bw-gci9).
+                view.insert("stateCall".into(), value(event, "call"));
                 if state != "errored" {
                     view.insert("error".into(), Value::Null);
                 }

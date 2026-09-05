@@ -284,6 +284,7 @@ export function withLive(
         // (protocol.ts, RestoreRow.activity; bw-96is.31).
         activity: session.activity,
         activityDetail: session.activityDetail ?? null,
+        activityCall: session.activityCall ?? null,
         busySince: session.busySince,
       };
       continue;
@@ -305,6 +306,7 @@ export function withLive(
       beads: session.beads,
       activity: session.activity,
       activityDetail: session.activityDetail ?? null,
+      activityCall: session.activityCall ?? null,
       busySince: session.busySince,
     });
   }
@@ -713,6 +715,7 @@ export function ChatSidebar({
                 state: row.state,
                 label: row.activity,
                 detail: row.activityDetail || null,
+                call: row.activityCall ?? null,
                 since: row.busySince ? Date.parse(row.busySince) : null,
                 held: row.held ?? (ownership.kind === 'elsewhere' ? {
                   id: row.externalId ?? '',

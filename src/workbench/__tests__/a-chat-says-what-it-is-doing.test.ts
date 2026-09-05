@@ -51,6 +51,39 @@ describe('a chat of ours says what it is doing', () => {
     expect(read.working).toBe(true);
   });
 
+  it('says the call in the same words the call’s own card says it', () => {
+    // The card in the transcript reads "Running Python: import time;
+    // time.sleep(45)" and the line under it read "python3 -c 'import time;
+    // time.sleep(45)'" — one call, two vocabularies, an inch apart. The
+    // manager: "the status message doesn't use the same classifer that the
+    // cards use" (bw-gci9). Read here, once, so the foot of the chat and the
+    // row in the rail cannot differ either.
+    const call = { name: 'Bash', input: { command: "python3 -c 'import time; time.sleep(45)'" } };
+    const running = foldAll([
+      { ...standing(1, 'running_tool', "python3 -c 'import time; time.sleep(45)'"), call } as WbpEvent,
+    ]);
+    expect(running.stateCall).toEqual(call);
+    const read = chatState({
+      state: running.state,
+      label: running.stateLabel,
+      detail: running.stateDetail,
+      call: running.stateCall,
+    });
+    expect(read.detail).toBe('Running Python: import time; time.sleep(45)');
+  });
+
+  it('falls back to the driver’s own words for a call it cannot place', () => {
+    // The floor. A tool this build has never heard of still says something
+    // true, which is what `detail` is for.
+    const read = chatState({
+      state: 'running_tool',
+      label: '',
+      detail: 'harvest --everything',
+      call: { name: 'SomeToolFromTomorrow', input: {} },
+    });
+    expect(read.detail).toBe('harvest --everything');
+  });
+
   it('lets a driver that does name its own standing keep the word', () => {
     // Nothing about this is taken away: a permission wait is published with its
     // own sentence and still draws it.

@@ -115,7 +115,7 @@ pub struct AcpNormalizer {
     running_calls: Vec<String>,
     /// The last standing published for the chat itself, so an unchanged one is
     /// not written again on every ping.
-    said_standing: Option<(String, Option<String>)>,
+    said_standing: Option<(String, Option<String>, Option<Value>)>,
     /// How many of a call's pictures have already been sent on.
     ///
     /// A tool's content arrives whole on every ping, not as a delta, so a call
@@ -1103,6 +1103,48 @@ impl AcpNormalizer {
         })
     }
 
+    /// The call itself — its tool and its arguments — for the screen to say in
+    /// its own words.
+    ///
+    /// The screen has one sentence for every call it knows, written for the
+    /// card the call already draws in the transcript ("Running Python: import
+    /// time; time.sleep(45)"). Sent the command instead, the line under that
+    /// card said the wire's words for the same call while the card said the
+    /// app's, an inch apart. The manager: "the status message doesn't use the
+    /// same classifer that the cards use" (bw-gci9).
+    ///
+    /// So what travels is what the call IS, and the words stay where the words
+    /// are written. `detail` beside it is the floor for a screen that cannot
+    /// place this tool — it says something true either way.
+    ///
+    /// Strings are cut short on the way out: this ends up on one line of a
+    /// status, and a `Write` call's argument is a whole file.
+    fn call_named(started: &Value) -> Option<Value> {
+        let name = started["name"].as_str()?;
+        if name.is_empty() {
+            return None;
+        }
+        Some(json!({"name":name,"input":Self::cut_short(&started["input"])}))
+    }
+
+    /// The same arguments with no string in them longer than a line.
+    fn cut_short(value: &Value) -> Value {
+        match value {
+            Value::String(said) => match said.char_indices().nth(200) {
+                Some((cut, _)) => Value::String(format!("{}…", &said[..cut])),
+                None => value.clone(),
+            },
+            Value::Array(rows) => Value::Array(rows.iter().map(Self::cut_short).collect()),
+            Value::Object(fields) => Value::Object(
+                fields
+                    .iter()
+                    .map(|(key, held)| (key.clone(), Self::cut_short(held)))
+                    .collect(),
+            ),
+            _ => value.clone(),
+        }
+    }
+
     /// Which of our own standings the chat is in, read off what is open.
     ///
     /// A call in flight outranks the words around it: an agent that says "let
@@ -1113,20 +1155,24 @@ impl AcpNormalizer {
     /// `None` is this declining to claim anything, which is what every moment
     /// outside a turn is. The turn's own beginning and end are published by the
     /// driver and are not this reading's to overrule.
-    fn standing_now(&self) -> Option<(&'static str, Option<String>)> {
+    fn standing_now(&self) -> Option<(&'static str, Option<String>, Option<Value>)> {
         if let Some(started) = self
             .running_calls
             .iter()
             .rev()
             .find_map(|id| self.tool_starts.get(id))
         {
-            return Some(("running_tool", Self::call_says(started)));
+            return Some((
+                "running_tool",
+                Self::call_says(started),
+                Self::call_named(started),
+            ));
         }
         if !self.active_thinking.is_empty() {
-            return Some(("thinking", None));
+            return Some(("thinking", None, None));
         }
         if !self.root_assistant_messages.is_empty() {
-            return Some(("streaming", None));
+            return Some(("streaming", None, None));
         }
         None
     }
@@ -1158,10 +1204,10 @@ impl AcpNormalizer {
     /// screens draw it; a word invented here would be a fifth opinion. What
     /// this adds is the part the screen cannot know: which call is in flight.
     fn says_standing(&mut self, session_id: &str, provider: &str, raw: &Value) -> Vec<Event> {
-        let Some((state, detail)) = self.standing_now() else {
+        let Some((state, detail, call)) = self.standing_now() else {
             return Vec::new();
         };
-        let standing = (state.to_string(), detail.clone());
+        let standing = (state.to_string(), detail.clone(), call.clone());
         if self.said_standing.as_ref() == Some(&standing) {
             return Vec::new();
         }
@@ -1172,7 +1218,8 @@ impl AcpNormalizer {
             raw,
             json!({
                 "type":"session.state","state":state,"label":Value::Null,
-                "detail":detail.map(Value::from).unwrap_or(Value::Null)
+                "detail":detail.map(Value::from).unwrap_or(Value::Null),
+                "call":call.unwrap_or(Value::Null)
             }),
         )]
     }
@@ -3489,9 +3536,17 @@ mod tests {
                 "_meta":{"claudeCode":{"toolName":"Agent","subagent":true}}}
             }),
         );
+        // The standing again with it: what this ping refines is the call in
+        // flight, and the chat's own line says that call in the screen's words
+        // (bw-gci9), so arguments arriving late change what it reads.
         assert_eq!(
             kinds(&refined),
-            vec!["tool.started", "agent.identified", "tool.progress"]
+            vec![
+                "tool.started",
+                "agent.identified",
+                "tool.progress",
+                "session.state"
+            ]
         );
         let tool = serde_json::to_value(&refined[0]).unwrap();
         assert_eq!(tool["input"]["subagent_type"], "general-purpose");
@@ -4071,6 +4126,51 @@ mod tests {
         // next turn's first identical reading silent.
         normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
         assert!(normalizer.said_standing.is_none());
+    }
+
+    /// The card the call draws in the transcript says "Running Python: import
+    /// time; time.sleep(45)"; the line under it said the command. One call,
+    /// two vocabularies, an inch apart — the manager: "the status message
+    /// doesn't use the same classifer that the cards use" (bw-gci9). So what
+    /// travels is the call itself, and the words stay where the words are
+    /// written.
+    #[test]
+    fn a_running_call_is_published_as_what_it_is_and_not_only_as_what_it_says() {
+        let mut normalizer = AcpNormalizer::default();
+        let ran = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call","toolCallId":"call-1","title":"Run some Python",
+            "kind":"execute","rawInput":{"command":"python3 -c 'import time; time.sleep(45)'"},
+            "_meta":{"claudeCode":{"toolName":"Bash"}}
+        }}));
+        let standing = ran
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "session.state")
+            .expect("a call in flight is a standing");
+        assert_eq!(
+            standing["call"],
+            json!({"name":"Bash","input":{"command":"python3 -c 'import time; time.sleep(45)'"}}),
+            "the screen cannot say the call in its own words without being told what it is"
+        );
+        // And the command beside it either way: a screen that cannot place this
+        // tool still has something true to draw (`chat-state.ts`, saidOfCall).
+        assert_eq!(standing["detail"], json!("python3 -c 'import time; time.sleep(45)'"));
+
+        // An argument is not a page. This ends up on one line of a status, and
+        // a file being written arrives whole.
+        let wrote = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call","toolCallId":"call-2","title":"Write a file",
+            "kind":"edit","rawInput":{"file_path":"/w/a.rs","content":"x".repeat(9000)},
+            "_meta":{"claudeCode":{"toolName":"Write"}}
+        }}));
+        let standing = wrote
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "session.state")
+            .expect("a second call in flight is a new standing");
+        let content = standing["call"]["input"]["content"].as_str().unwrap();
+        assert!(content.chars().count() <= 201, "a whole file went to a status line");
+        assert_eq!(standing["call"]["input"]["file_path"], json!("/w/a.rs"));
     }
 
     #[test]

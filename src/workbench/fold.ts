@@ -41,6 +41,7 @@ import type {
   PlanStatus,
   QuestionAnswer,
   QuestionField,
+  RanCall,
   SessionConfigOption,
   SessionState,
   TerminalRun,
@@ -355,6 +356,11 @@ export interface SessionView {
    * flight. Null when its standing carries nothing beyond itself (bw-xfb4).
    */
   stateDetail: string | null;
+  /**
+   * The call in flight, for the screen to say in its own words — the same
+   * sentence the call's own card draws (bw-gci9).
+   */
+  stateCall: RanCall | null;
   cost: Cost | null;
   /**
    * How full the conversation is, as the model last reported it, against the
@@ -406,6 +412,7 @@ export const EMPTY: SessionView = {
   state: 'starting',
   stateLabel: 'Starting',
   stateDetail: null,
+  stateCall: null,
   cost: null,
   context: null,
   todos: [],
@@ -524,6 +531,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       next.state = e.state;
       next.stateLabel = e.label ?? '';
       next.stateDetail = e.detail ?? null;
+      next.stateCall = e.call ?? null;
       if (e.state !== 'errored') next.error = null;
       // A turn that is over owes no thinking count to the next one.
       if (e.state === 'idle' || e.state === 'errored' || e.state === 'stopped') next.thinkingTokens = 0;
@@ -1039,6 +1047,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         view.state = e.state;
         view.stateLabel = e.label ?? '';
         view.stateDetail = e.detail ?? null;
+        view.stateCall = e.call ?? null;
         if (e.state !== 'errored') view.error = null;
         if (e.state === 'idle' || e.state === 'errored' || e.state === 'stopped') view.thinkingTokens = 0;
         view.agents = nothingIsDriving(view.agents, e.state);

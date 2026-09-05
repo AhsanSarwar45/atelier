@@ -153,7 +153,7 @@ const RULES: Array<[string, string]> = [
   ['git reset', 'Unstaged the changes'],
   ['git restore src/x.ts', 'Restored src/x.ts'],
   ['git blame src/x.ts', 'Blamed src/x.ts'],
-  ['git worktree add worktrees/bw-7ks.24 -b bw-7ks.24', 'Cut a worktree at bw-7ks.24'],
+  ['git worktree add worktrees/bw-7ks.24 -b bw-7ks.24', 'Made a worktree at bw-7ks.24'],
   ['git worktree list', 'Listed the worktrees'],
   ['git branch -d old', 'Deleted a branch'],
   ['git -C /home/me/project branch -d old', 'Deleted a branch'],

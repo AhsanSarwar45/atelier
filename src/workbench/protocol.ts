@@ -340,6 +340,13 @@ export type WbpEvent = EventBase &
          * flight. Drawn beside the word, never in place of it.
          */
         detail?: string | null;
+        /**
+         * The call in flight, as the tool and arguments it was made with, for
+         * the screen to say in its own words. Sent with `detail` rather than
+         * instead of it: the screen has a sentence for every call it knows and
+         * `detail` is the floor for one it does not (bw-gci9).
+         */
+        call?: RanCall | null;
       }
     /**
      * Everything this session can offer: the commands and skills the install
@@ -924,6 +931,11 @@ export interface RestoreRow {
    * row written before there was anything to add reads (bw-xfb4).
    */
   activityDetail?: string | null;
+  /**
+   * The call in flight, for the row to say in the same words the call's own
+   * card says it (bw-gci9). Absent on a row whose standing named none.
+   */
+  activityCall?: RanCall | null;
   /** When that began, ISO, for the count beside the word. */
   busySince?: string | null;
 }
@@ -980,9 +992,9 @@ export interface SessionFacts {
  * handler (docs/agent-workbench.md §8.6).
  */
 export type WatchFrame =
-  | { kind: 'snapshot'; sessions: (SessionSummary & { activity: string; activityDetail?: string; beads: string[] })[] }
+  | { kind: 'snapshot'; sessions: (SessionSummary & { activity: string; activityDetail?: string; activityCall?: RanCall | null; beads: string[] })[] }
   /** A chat that has just come into existence, before it has said anything. */
-  | { kind: 'opened'; session: SessionSummary & { activity: string; activityDetail?: string; beads: string[] } }
+  | { kind: 'opened'; session: SessionSummary & { activity: string; activityDetail?: string; activityCall?: RanCall | null; beads: string[] } }
   /**
    * Every conversation a live process is holding right now, by the tool's own
    * id for it, each with what that process says it is doing — sent once when
@@ -1033,6 +1045,20 @@ export interface LinkedChat {
 }
 
 /** A row in the chat sidebar / restore list. */
+/**
+ * A call as the wire named it: the tool it was made against and the arguments
+ * it was given.
+ *
+ * Enough for the screen to say the call in its own words — the one classifier
+ * every card in a transcript is drawn through (`said-what-it-ran.ts`). Strings
+ * arrive cut short: this ends up on one line of a status, and a `Write` call's
+ * argument is a whole file.
+ */
+export interface RanCall {
+  name: string;
+  input: Record<string, unknown>;
+}
+
 export interface SessionSummary {
   id: string;
   brand: Brand;

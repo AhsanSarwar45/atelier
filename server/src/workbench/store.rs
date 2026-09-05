@@ -190,6 +190,10 @@ pub struct SessionActivity {
     /// What the chat is doing, in the words of its own call — the command in
     /// flight. Empty when its standing carries nothing beyond itself.
     pub detail: String,
+    /// The call in flight, as the tool and arguments it was made with, for the
+    /// rail to say in the same words the call's own card uses (bw-gci9). Null
+    /// when nothing is running or the standing predates this.
+    pub call: Value,
     pub busy_since: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq)]
@@ -717,6 +721,7 @@ impl Store {
             return Ok(SessionActivity {
                 label: String::new(),
                 detail: String::new(),
+                call: Value::Null,
                 busy_since: None,
             });
         };
@@ -739,6 +744,7 @@ impl Store {
             // walks back over every state the chat has been in, and the detail
             // belongs to the latest of them alone.
             detail: String::new(),
+            call: Value::Null,
             busy_since,
         })
     }
@@ -757,7 +763,7 @@ impl Store {
     pub fn session_activities(&self) -> rusqlite::Result<HashMap<String, SessionActivity>> {
         let mut statement = self.connection.prepare(
             "SELECT e.session_id, json_extract(e.json,'$.state'), COALESCE(json_extract(e.json,'$.label'),''), \
-                    COALESCE(json_extract(e.json,'$.detail'),'') \
+                    COALESCE(json_extract(e.json,'$.detail'),''), COALESCE(json_extract(e.json,'$.call'),'') \
              FROM (SELECT session_id, MAX(seq) seq FROM event WHERE type='session.state' GROUP BY session_id) latest \
              JOIN event e ON e.session_id=latest.session_id AND e.seq=latest.seq",
         )?;
@@ -767,11 +773,12 @@ impl Store {
                 row.get::<_, Option<String>>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
             ))
         })?;
         let latest: Vec<_> = rows.collect::<rusqlite::Result<_>>()?;
         let mut activities = HashMap::with_capacity(latest.len());
-        for (session_id, state, label, detail) in latest {
+        for (session_id, state, label, detail, call) in latest {
             let Some(state) = state else { continue };
             let counting = matches!(
                 state.as_str(),
@@ -780,12 +787,14 @@ impl Store {
             let activity = if counting {
                 SessionActivity {
                     detail,
+                    call: serde_json::from_str(&call).unwrap_or(Value::Null),
                     ..self.session_activity(&session_id)?
                 }
             } else {
                 SessionActivity {
                     label: if state == "dormant" { String::new() } else { label },
                     detail: String::new(),
+                    call: Value::Null,
                     busy_since: None,
                 }
             };

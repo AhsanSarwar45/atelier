@@ -1024,6 +1024,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     state: view.state,
     label: view.stateLabel,
     detail: view.stateDetail,
+    call: view.stateCall,
     since: busySince,
     turnSince,
     held: held

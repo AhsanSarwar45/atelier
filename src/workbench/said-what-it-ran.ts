@@ -760,7 +760,11 @@ const GIT: Record<string, (argv: string[]) => string> = {
   shortlog: () => 'Read the history',
   worktree: (a) => {
     const how = a[2] ?? '';
-    if (how === 'add') return `Cut a worktree${object(a, 3) ? ` at ${leaf(object(a, 3))}` : ''}`;
+    // "Cut a worktree" was the trade's word for it and nobody else's. The
+    // manager, reading it on his own screen: "wtf does cutting a wotkree
+    // mean?" — git's own verb is `add`, and the sentence is for a reader, not
+    // for git (bw-gci9).
+    if (how === 'add') return `Made a worktree${object(a, 3) ? ` at ${leaf(object(a, 3))}` : ''}`;
     if (how === 'remove') return 'Removed a worktree';
     if (how === 'prune') return 'Pruned the worktrees';
     return 'Listed the worktrees';
@@ -2364,7 +2368,7 @@ const UNDER_WAY: Record<string, string> = {
   Aborted: 'Aborting', Added: 'Adding', Asked: 'Asking', Blamed: 'Blaming', Built: 'Building',
   Changed: 'Changing', Checked: 'Checking', Claimed: 'Claiming', Cloned: 'Cloning', Created: 'Creating',
   Closed: 'Closing', Commented: 'Commenting', Committed: 'Committing', Continued: 'Continuing',
-  Compared: 'Comparing', Copied: 'Copying', Counted: 'Counting', Cut: 'Cutting',
+  Compared: 'Comparing', Copied: 'Copying', Counted: 'Counting',
   Deleted: 'Deleting', Diffed: 'Diffing', Downloaded: 'Downloading',
   Fetched: 'Fetching', 'Force-pushed': 'Force-pushing', Formatted: 'Formatting',
   Found: 'Finding', Gave: 'Giving', Installed: 'Installing', Joined: 'Joining', Killed: 'Killing',
