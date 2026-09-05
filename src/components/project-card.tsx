@@ -18,7 +18,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import type { Tag } from "@/lib/db";
@@ -146,18 +146,11 @@ export function ProjectCard({
         {!usesBeads ? (
           <div className="h-9 w-9" aria-hidden="true" />
         ) : beadError ? (
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex items-center gap-1.5 text-warning" style={{ width: 36, height: 36 }}>
-                  <AlertTriangle className="h-5 w-5" aria-hidden="true" />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-xs">
-                <p className="text-xs">{beadError}</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Tooltip side="bottom" label={beadError}>
+            <div className="flex items-center gap-1.5 text-warning" style={{ width: 36, height: 36 }}>
+              <AlertTriangle className="h-5 w-5" aria-hidden="true" />
+            </div>
+          </Tooltip>
         ) : (
           <StatusDonut beadCounts={beadCounts} size={36} countsLoaded={countsLoaded} />
         )}
@@ -213,37 +206,34 @@ export function ProjectCard({
             </Badge>
           )}
           {!archivedAt && dataSource === 'jsonl' && (
-            <TooltipProvider delayDuration={200}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Badge
-                    variant="warning"
-                    appearance="outline"
-                    size="sm"
-                    shape="circle"
-                    className="shrink-0 gap-1"
-                    onClick={(e) => e.stopPropagation()}
-                    onKeyDown={(e) => e.stopPropagation()}
-                    role="note"
-                    tabIndex={0}
-                    aria-label={`Old data format — migrate with bd init --prefix ${deriveBeadPrefix(path, name)}`}
-                  >
-                    <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-                    Old format — migrate
+            <Tooltip
+              label={
+                <div className="space-y-1">
+                  <p className="text-xs">
+                    This project uses the old JSONL data format. Run this in the project directory to migrate to Dolt:
+                  </p>
+                  <Badge asChild variant="secondary" appearance="light" size="sm" className="w-full font-mono">
+                    <code>bd init --prefix {deriveBeadPrefix(path, name)}</code>
                   </Badge>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="max-w-xs">
-                  <div className="space-y-1">
-                    <p className="text-xs">
-                      This project uses the old JSONL data format. Run this in the project directory to migrate to Dolt:
-                    </p>
-                    <Badge asChild variant="secondary" appearance="light" size="sm" className="w-full font-mono">
-                      <code>bd init --prefix {deriveBeadPrefix(path, name)}</code>
-                    </Badge>
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+                </div>
+              }
+            >
+              <Badge
+                variant="warning"
+                appearance="outline"
+                size="sm"
+                shape="circle"
+                className="shrink-0 gap-1"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+                role="note"
+                tabIndex={0}
+                aria-label={`Old data format — migrate with bd init --prefix ${deriveBeadPrefix(path, name)}`}
+              >
+                <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                Old format — migrate
+              </Badge>
+            </Tooltip>
           )}
           {!archivedAt && dataSource && dataSource !== 'jsonl' && (
             <Badge variant="secondary" appearance="light" size="sm" shape="circle" className="shrink-0">
@@ -256,54 +246,38 @@ export function ProjectCard({
         </div>
         <div className="flex items-center gap-1 shrink-0">
           {archivedAt ? (
-            <TooltipProvider delayDuration={300}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    mode="icon"
-                    className="shrink-0"
-                    onClick={(e) => { e.stopPropagation(); onUnarchive?.(); }}
-                    aria-label="Restore project"
-                  >
-                    <ArchiveRestore className="h-4 w-4" aria-hidden="true" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  <p>Restore project</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Tooltip label="Restore project">
+              <Button
+                variant="ghost"
+                size="sm"
+                mode="icon"
+                className="shrink-0"
+                onClick={(e) => { e.stopPropagation(); onUnarchive?.(); }}
+                aria-label="Restore project"
+              >
+                <ArchiveRestore className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </Tooltip>
           ) : (
             <>
-              <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      mode="icon"
-                      className="shrink-0"
-                      aria-label="Project settings"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSettingsOpen(true);
-                      }}
-                    >
-                      <Settings className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">
-                    <p>Project settings</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              <Tooltip label="Project settings">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  mode="icon"
+                  className="shrink-0"
+                  aria-label="Project settings"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSettingsOpen(true);
+                  }}
+                >
+                  <Settings className="h-4 w-4" />
+                </Button>
+              </Tooltip>
               {fsPath && (
-              <TooltipProvider delayDuration={300}>
-                <Tooltip>
                   <DropdownMenu>
-                    <TooltipTrigger asChild>
+                    <Tooltip label="Open in editor or file manager">
                       <DropdownMenuTrigger asChild>
                         <Button
                           variant="ghost"
@@ -316,10 +290,7 @@ export function ProjectCard({
                           <FolderOpen className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      <p>Open in editor or file manager</p>
-                    </TooltipContent>
+                    </Tooltip>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem
                         onClick={(e) => handleOpenExternal('vscode', e)}
@@ -356,8 +327,6 @@ export function ProjectCard({
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                </Tooltip>
-              </TooltipProvider>
             )}
             </>
           )}

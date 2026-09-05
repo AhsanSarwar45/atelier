@@ -18,12 +18,7 @@ import {
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-  TooltipProvider,
-} from '@/components/ui/tooltip';
+import { Tooltip } from '@/components/ui/tooltip';
 import { LABEL_NAMESPACES, LABEL_NAMESPACE_TITLES, parseLabel, tagHue } from '@/lib/bead-labels';
 import type { LabelNamespace } from '@/lib/bead-labels';
 import { ISSUE_TYPES, getIssueTypeMeta } from '@/lib/issue-types';
@@ -299,29 +294,29 @@ export function QuickFilterBar({
 
       {/* Unknown status warning indicator */}
       {unknownStatusCount > 0 && (
-        <TooltipProvider delayDuration={200}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Badge variant="warning" appearance="outline" size="lg" role="status" className="gap-1.5">
-                <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
-                <span className="tabular-nums">{unknownStatusCount}</span>
-                <span className="sr-only">
-                  {unknownStatusCount === 1 ? 'card has an' : 'cards have'} unknown {unknownStatusCount === 1 ? 'status' : 'statuses'}
-                </span>
-              </Badge>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="max-w-xs">
+        <Tooltip
+          side="bottom"
+          label={
+            <>
               <p className="font-medium">
                 {unknownStatusCount} {unknownStatusCount === 1 ? 'card has an' : 'cards have'} unknown {unknownStatusCount === 1 ? 'status' : 'statuses'}
               </p>
-              <p className="text-primary-foreground/70 mt-1">
+              <p className="mt-1 text-t-secondary">
                 {unknownStatusNames.length > 0
                   ? `Unknown: ${unknownStatusNames.join(', ')}`
                   : 'Mapped to Open column'}
               </p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+            </>
+          }
+        >
+          <Badge variant="warning" appearance="outline" size="lg" role="status" className="gap-1.5">
+            <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
+            <span className="tabular-nums">{unknownStatusCount}</span>
+            <span className="sr-only">
+              {unknownStatusCount === 1 ? 'card has an' : 'cards have'} unknown {unknownStatusCount === 1 ? 'status' : 'statuses'}
+            </span>
+          </Badge>
+        </Tooltip>
       )}
 
       {/* Spacer to push sort and filter to the right */}

@@ -57,7 +57,6 @@ import { createPortal } from 'react-dom';
 
 import { ToolButton } from '@/components/shell';
 import { Panel } from '@/components/ui/panel';
-import { TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 /** Where the window is and how big it is, in pixels from the top left of the page. */
@@ -396,92 +395,90 @@ export function TerminalWindow({
       } as const)
     : null;
 
+  // The face is the library's — an overlay panel is exactly this: opaque, and
+  // lifted off what it covers. What is added here is where it sits and how far
+  // off the page it is lifted, and on a phone the corners and the border go,
+  // because there is nothing beside it for them to separate it from. Deeper
+  // shadow than the library's inline panels: this one is over the whole app
+  // rather than inside a pane of it.
   return createPortal(
-    <TooltipProvider delayDuration={250}>
-      {/* The face is the library's — an overlay panel is exactly this: opaque,
-          and lifted off what it covers. What is added here is where it sits and
-          how far off the page it is lifted, and on a phone the corners and the
-          border go, because there is nothing beside it for them to separate it
-          from. Deeper shadow than the library's inline panels: this one is over
-          the whole app rather than inside a pane of it. */}
-      <Panel
-        asChild
-        tone="overlay"
-        inset="none"
-        className={cn(
-          'fixed z-40 flex flex-col shadow-2xl outline-none',
-          // Written apart from `fixed` on purpose: `fixed inset-0` on a painted
-          // box is how the house check spells "a backdrop drawn by hand", and
-          // this is a window, not a backdrop.
-          phone && 'inset-0 rounded-none border-0',
-          className,
-        )}
+    <Panel
+      asChild
+      tone="overlay"
+      inset="none"
+      className={cn(
+        'fixed z-40 flex flex-col shadow-2xl outline-none',
+        // Written apart from `fixed` on purpose: `fixed inset-0` on a painted
+        // box is how the house check spells "a backdrop drawn by hand", and
+        // this is a window, not a backdrop.
+        phone && 'inset-0 rounded-none border-0',
+        className,
+      )}
+    >
+      <div
+        ref={panel}
+        // A window, not a modal: the page behind it stays live and stays
+        // readable, which is the whole point of a terminal you can put beside
+        // your work.
+        role="dialog"
+        aria-modal="false"
+        aria-label={title}
+        data-testid="terminal-window"
+        data-filled={filled ? 'true' : undefined}
+        tabIndex={-1}
+        style={phone ? undefined : { left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
       >
         <div
-          ref={panel}
-          // A window, not a modal: the page behind it stays live and stays
-          // readable, which is the whole point of a terminal you can put beside
-          // your work.
-          role="dialog"
-          aria-modal="false"
-          aria-label={title}
-          data-testid="terminal-window"
-          data-filled={filled ? 'true' : undefined}
-          tabIndex={-1}
-          style={phone ? undefined : { left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
+          className={cn(
+            'flex h-9 shrink-0 select-none items-center gap-1 border-b border-border/40 bg-surface-overlay px-2',
+            phone ? 'rounded-none' : 'rounded-t-md',
+            movable && 'cursor-move touch-none',
+          )}
+          {...handle}
         >
-          <div
-            className={cn(
-              'flex h-9 shrink-0 select-none items-center gap-1 border-b border-border/40 bg-surface-overlay px-2',
-              phone ? 'rounded-none' : 'rounded-t-md',
-              movable && 'cursor-move touch-none',
-            )}
-            {...handle}
-          >
-            <span className="min-w-0 flex-1 truncate text-xs font-medium text-t-secondary">{title}</span>
-            {!phone && (
-              <ToolButton
-                icon={filled ? <Minimize2 /> : <Maximize2 />}
-                label={filled ? `Put ${title} back` : `Fill the screen with ${title}`}
-                onClick={toggleFill}
-                data-testid="terminal-window-fill"
-              />
-            )}
-            <ToolButton icon={<X />} label={`Close ${title}`} onClick={onClose} data-testid="terminal-window-close" />
-          </div>
-          <div data-testid="terminal-window-body" className="min-h-0 flex-1 overflow-hidden rounded-b-md">
-            {children}
-          </div>
-          {movable &&
-            HANDLES.map(({ edge, name, orientation, className: where }) => (
-              <div
-                key={edge}
-                // The four edges are the keyboard's way in; the corners are not.
-                // A corner does nothing an edge cannot do twice, and eight tab
-                // stops around one window is a tab key that never gets past it.
-                {...(isCorner(edge)
-                  ? { 'aria-hidden': true }
-                  : {
-                      role: 'separator',
-                      tabIndex: 0,
-                      'aria-label': `Resize ${title} from the ${name}`,
-                      'aria-orientation': orientation,
-                      'aria-valuemin': orientation === 'vertical' ? MIN_WIDTH : MIN_HEIGHT,
-                      'aria-valuemax': orientation === 'vertical' ? viewportNow().width : viewportNow().height,
-                      'aria-valuenow': Math.round(orientation === 'vertical' ? rect.width : rect.height),
-                      onKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => arrow(event, edge),
-                    })}
-                data-testid={`terminal-window-resize-${edge}`}
-                className={cn('absolute touch-none focus-visible:outline-none', where)}
-                onPointerDown={grab(edge)}
-                onPointerMove={drag}
-                onPointerUp={letGo}
-                onPointerCancel={letGo}
-              />
-            ))}
+          <span className="min-w-0 flex-1 truncate text-xs font-medium text-t-secondary">{title}</span>
+          {!phone && (
+            <ToolButton
+              icon={filled ? <Minimize2 /> : <Maximize2 />}
+              label={filled ? `Put ${title} back` : `Fill the screen with ${title}`}
+              onClick={toggleFill}
+              data-testid="terminal-window-fill"
+            />
+          )}
+          <ToolButton icon={<X />} label={`Close ${title}`} onClick={onClose} data-testid="terminal-window-close" />
         </div>
-      </Panel>
-    </TooltipProvider>,
+        <div data-testid="terminal-window-body" className="min-h-0 flex-1 overflow-hidden rounded-b-md">
+          {children}
+        </div>
+        {movable &&
+          HANDLES.map(({ edge, name, orientation, className: where }) => (
+            <div
+              key={edge}
+              // The four edges are the keyboard's way in; the corners are not.
+              // A corner does nothing an edge cannot do twice, and eight tab
+              // stops around one window is a tab key that never gets past it.
+              {...(isCorner(edge)
+                ? { 'aria-hidden': true }
+                : {
+                    role: 'separator',
+                    tabIndex: 0,
+                    'aria-label': `Resize ${title} from the ${name}`,
+                    'aria-orientation': orientation,
+                    'aria-valuemin': orientation === 'vertical' ? MIN_WIDTH : MIN_HEIGHT,
+                    'aria-valuemax': orientation === 'vertical' ? viewportNow().width : viewportNow().height,
+                    'aria-valuenow': Math.round(orientation === 'vertical' ? rect.width : rect.height),
+                    onKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => arrow(event, edge),
+                  })}
+              data-testid={`terminal-window-resize-${edge}`}
+              className={cn('absolute touch-none focus-visible:outline-none', where)}
+              onPointerDown={grab(edge)}
+              onPointerMove={drag}
+              onPointerUp={letGo}
+              onPointerCancel={letGo}
+            />
+          ))}
+      </div>
+    </Panel>,
     document.body,
   );
 }

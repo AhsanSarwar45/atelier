@@ -4,7 +4,7 @@ import { AlertCircle, Lock } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 export interface DependencyBadgeProps {
@@ -43,80 +43,74 @@ export function DependencyBadge({ deps, blockers, isBlocked, onNavigate }: Depen
   // Show blocked status with priority
   if (isBlocked) {
     return (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Badge
-              variant="destructive"
-              className="text-[10px] px-1.5 py-0 cursor-help"
-            >
-              <Lock className="h-3 w-3 mr-0.5" aria-hidden="true" />
-              BLOCKED
-            </Badge>
-          </TooltipTrigger>
-          <TooltipContent side="top" className="max-w-xs">
-            <div className="space-y-1">
-              <p className="font-semibold">Blocked by:</p>
-              {safeDeps.map((depId) => (
-                <Button
-                  key={depId}
-                  type="button"
-                  variant="foreground"
-                  size="inherit"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onNavigate?.(depId);
-                  }}
-                  aria-label={`Navigate to blocker ${depId}`}
-                  className="h-auto w-full min-h-0 justify-start p-0 text-left font-normal hover:underline"
-                >
-                  {depId}
-                </Button>
-              ))}
-            </div>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    );
-  }
-
-  // Show blocking status
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Badge
-            className={cn(
-              "text-[10px] px-1.5 py-0 cursor-help",
-              "bg-blocked-accent text-white hover:bg-blocked-accent/80 border-transparent"
-            )}
-          >
-            <AlertCircle className="h-3 w-3 mr-0.5" aria-hidden="true" />
-            BLOCKING
-          </Badge>
-        </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-xs">
+      <Tooltip
+        label={
           <div className="space-y-1">
-            <p className="font-semibold">Blocking:</p>
-            {safeBlockers.map((blockerId) => (
+            <p className="font-semibold">Blocked by:</p>
+            {safeDeps.map((depId) => (
               <Button
-                key={blockerId}
+                key={depId}
                 type="button"
                 variant="foreground"
                 size="inherit"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onNavigate?.(blockerId);
+                  onNavigate?.(depId);
                 }}
-                aria-label={`Navigate to blocked task ${blockerId}`}
+                aria-label={`Navigate to blocker ${depId}`}
                 className="h-auto w-full min-h-0 justify-start p-0 text-left font-normal hover:underline"
               >
-                {blockerId}
+                {depId}
               </Button>
             ))}
           </div>
-        </TooltipContent>
+        }
+      >
+        <Badge
+          variant="destructive"
+          className="text-[10px] px-1.5 py-0 cursor-help"
+        >
+          <Lock className="h-3 w-3 mr-0.5" aria-hidden="true" />
+          BLOCKED
+        </Badge>
       </Tooltip>
-    </TooltipProvider>
+    );
+  }
+
+  // Show blocking status
+  return (
+    <Tooltip
+      label={
+        <div className="space-y-1">
+          <p className="font-semibold">Blocking:</p>
+          {safeBlockers.map((blockerId) => (
+            <Button
+              key={blockerId}
+              type="button"
+              variant="foreground"
+              size="inherit"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigate?.(blockerId);
+              }}
+              aria-label={`Navigate to blocked task ${blockerId}`}
+              className="h-auto w-full min-h-0 justify-start p-0 text-left font-normal hover:underline"
+            >
+              {blockerId}
+            </Button>
+          ))}
+        </div>
+      }
+    >
+      <Badge
+        className={cn(
+          "text-[10px] px-1.5 py-0 cursor-help",
+          "bg-blocked-accent text-white hover:bg-blocked-accent/80 border-transparent"
+        )}
+      >
+        <AlertCircle className="h-3 w-3 mr-0.5" aria-hidden="true" />
+        BLOCKING
+      </Badge>
+    </Tooltip>
   );
 }

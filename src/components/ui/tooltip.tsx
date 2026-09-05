@@ -6,16 +6,99 @@ import * as TooltipPrimitive from "@radix-ui/react-tooltip"
 
 import { cn } from "@/lib/utils"
 
-const TooltipProvider = TooltipPrimitive.Provider
+/**
+ * The app's one hover label.
+ *
+ * There were three of these — the browser's own `title`, Radix mounted by hand
+ * at a call site, and a panel the status donut positioned itself — so the same
+ * gesture answered in three looks, at three speeds, and a change to any of it
+ * had no one place to be made (bw-6wq6.1). This is that place: everything that
+ * says something on hover says it through `Tooltip`.
+ *
+ * Every screen passes through here, so the rules live here rather than at each
+ * call site: the delay, the dark overlay face, and the wrapper a disabled
+ * control needs before it can be hovered at all.
+ */
 
-const Tooltip = TooltipPrimitive.Root
+/** Whether an app-level provider is already above us. */
+const Mounted = React.createContext(false);
 
-const TooltipTrigger = TooltipPrimitive.Trigger
+const DELAY = 250;
+
+/**
+ * Mounted once, at the root of the app. Radix uses it to let a second label
+ * open at once when the reader is already reading a first — moving along a
+ * toolbar should not re-serve the delay on every button.
+ */
+export function TooltipProvider({
+  children,
+  delayDuration = DELAY,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Provider>) {
+  return (
+    <Mounted.Provider value={true}>
+      <TooltipPrimitive.Provider delayDuration={delayDuration} {...props}>
+        {children}
+      </TooltipPrimitive.Provider>
+    </Mounted.Provider>
+  );
+}
+
+export type TooltipProps = {
+  /**
+   * What the label says. Rich content is allowed — a list of blockers, a
+   * breakdown of counts — because the alternative is a second mechanism for
+   * the cases a string cannot carry, which is what this component replaced.
+   *
+   * Nothing to say means no tooltip at all: the child is returned untouched,
+   * so a caller may pass a value that is only sometimes there.
+   */
+  label?: React.ReactNode;
+  children: React.ReactElement;
+  side?: React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>['side'];
+  align?: React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>['align'];
+  /** On the label, never on the trigger. */
+  className?: string;
+  delayDuration?: number;
+};
+
+export function Tooltip({ label, children, side = 'top', align = 'center', className, delayDuration }: TooltipProps) {
+  const mounted = React.useContext(Mounted);
+  if (label === undefined || label === null || label === '') return children;
+
+  // A disabled control takes no pointer events, so it is never hovered and can
+  // never be the thing the reader is pointing at. Hovering it is exactly when
+  // the label matters most — why the button is grey — so the wrapper is what
+  // carries the label, and it takes focus so a keyboard reaches the same
+  // sentence (bw-uyk2.1).
+  const props = children.props as { disabled?: boolean };
+  const trigger = props?.disabled ? (
+    <span tabIndex={0} className="inline-flex rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+      {children}
+    </span>
+  ) : (
+    children
+  );
+
+  const tooltip = (
+    <TooltipPrimitive.Root delayDuration={delayDuration}>
+      <TooltipPrimitive.Trigger asChild>{trigger}</TooltipPrimitive.Trigger>
+      <TooltipContent side={side} align={align} className={className}>
+        {label}
+      </TooltipContent>
+    </TooltipPrimitive.Root>
+  );
+
+  // A screen under test, or a panel drawn before the root has mounted, still
+  // gets its labels: Radix refuses a tooltip with no provider above it, so one
+  // is supplied here when there is none.
+  return mounted ? tooltip : <TooltipProvider>{tooltip}</TooltipProvider>;
+}
 
 const TooltipContent = React.forwardRef<
   React.ElementRef<typeof TooltipPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
->(({ className, sideOffset = 4, ...props }, ref) => (
+>(({ className, sideOffset = 6, ...props }, ref) => (
   // Drawn on the document, not beside the button it belongs to. A label
   // rendered in place is inside whatever the button is inside, so every pane
   // that scrolls or clips its contents — a bar, a toolbar, the chat list —
@@ -29,7 +112,13 @@ const TooltipContent = React.forwardRef<
       sideOffset={sideOffset}
       collisionPadding={8}
       className={cn(
-        "z-50 overflow-hidden rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        // The face of every other floating thing in the app: the overlay
+        // surface, the app's own border, its primary text. Which is dark with
+        // near-white writing in this skin, and follows the skin where a reader
+        // has chosen a light one — a tooltip that named its own colours was
+        // white-on-dark in a dark app, the one panel that did not belong to it
+        // (bw-6wq6.1).
+        "z-50 max-w-xs overflow-hidden rounded-md border border-border/60 bg-surface-overlay px-3 py-1.5 text-xs text-t-primary shadow-lg animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
         className
       )}
       {...props}
@@ -37,5 +126,3 @@ const TooltipContent = React.forwardRef<
   </TooltipPrimitive.Portal>
 ))
 TooltipContent.displayName = TooltipPrimitive.Content.displayName
-
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider }

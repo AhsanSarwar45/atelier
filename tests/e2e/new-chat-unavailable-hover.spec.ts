@@ -47,7 +47,9 @@ test('the new-chat chooser explains a grey agent on hover, not in standing text'
     const name = process.env.BW_UYK2_SHOT ?? 'shot';
     await page.screenshot({ path: `tests/results/bw-uyk2-${name}-resting.png`, clip: shot, animations: 'disabled' });
 
-    await page.getByTestId(`new-chat-provider-why-${grey!.brand}`).hover();
+    // The wrapper, not the button: a disabled control takes no pointer events,
+    // so the one tooltip component puts the label on the span it wraps it in.
+    await page.getByTestId(`new-chat-provider-${grey!.brand}`).locator('xpath=..').hover();
     await expect(page.getByRole('tooltip')).toContainText(grey!.availabilityReason ?? 'Install');
     await page.waitForTimeout(400);
     await page.screenshot({ path: `tests/results/bw-uyk2-${name}-hover.png`, clip: shot, animations: 'disabled' });

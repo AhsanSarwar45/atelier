@@ -54,7 +54,7 @@ import {
 import { Panel } from '@/components/ui/panel';
 import { Row } from '@/components/ui/row';
 import { Textarea } from '@/components/ui/textarea';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip } from '@/components/ui/tooltip';
 import { useHeldAtTheEnd } from '@/hooks/held-at-the-end';
 import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
@@ -1290,41 +1290,31 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               it too, which is what the standing text was there for (bw-u6cl.9).
               The wrapper is what carries the label, because a disabled button
               takes no pointer events and so is never hovered at all. */}
-          <TooltipProvider delayDuration={200}>
-            <div className="grid grid-cols-2 gap-2">
-              {providers.map((provider) => {
-                const choice = (
-                  <Button
-                    className="w-full"
-                    variant={newBrand === provider.brand ? 'primary' : 'outline'}
-                    data-testid={`new-chat-provider-${provider.brand}`}
-                    onClick={() => setNewBrand(provider.brand)}
-                    disabled={!provider.available}
-                  >
-                    <BrandIcon brand={provider.brand} /> {brandName(provider.brand)}
-                  </Button>
-                );
-                if (provider.available) return <Fragment key={provider.brand}>{choice}</Fragment>;
-                return (
-                  <Tooltip key={provider.brand}>
-                    <TooltipTrigger asChild>
-                      <span
-                        tabIndex={0}
-                        data-testid={`new-chat-provider-why-${provider.brand}`}
-                        aria-label={`${brandName(provider.brand)} is unavailable: ${whyUnavailable(provider)}`}
-                        className="inline-flex w-full rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                      >
-                        {choice}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="max-w-xs">
+          <div className="grid grid-cols-2 gap-2">
+            {providers.map((provider) => (
+              <Tooltip
+                key={provider.brand}
+                side="bottom"
+                label={
+                  provider.available ? null : (
+                    <>
                       <span className="font-medium">{brandName(provider.brand)}</span>: {whyUnavailable(provider)}
-                    </TooltipContent>
-                  </Tooltip>
-                );
-              })}
-            </div>
-          </TooltipProvider>
+                    </>
+                  )
+                }
+              >
+                <Button
+                  className="w-full"
+                  variant={newBrand === provider.brand ? 'primary' : 'outline'}
+                  data-testid={`new-chat-provider-${provider.brand}`}
+                  onClick={() => setNewBrand(provider.brand)}
+                  disabled={!provider.available}
+                >
+                  <BrandIcon brand={provider.brand} /> {brandName(provider.brand)}
+                </Button>
+              </Tooltip>
+            ))}
+          </div>
           <DialogFooter className="gap-2 sm:space-x-0">
             <div className="flex min-h-9 items-center gap-2 rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground">
               <Checkbox

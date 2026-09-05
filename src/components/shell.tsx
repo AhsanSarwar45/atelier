@@ -18,7 +18,7 @@ import { createPortal } from 'react-dom';
 
 import { GlobalSettingsButton } from '@/components/global-settings-button';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useTerminalShells } from '@/workbench/terminal-shells';
 
@@ -51,17 +51,10 @@ const BAR = 'flex h-12 shrink-0 items-center gap-2 border-b border-border/40 bg-
  * Written here rather than in a file of its own because a `ToolButton` is the
  * one-control idiom of these bars and it is declared in this file; a button
  * next door that reached back for it would put a circle in the imports.
- *
- * It carries its own `TooltipProvider` for the same reason `TabLead` does: a
- * `ToolButton` asks for one on its own account, and the first bar has none.
  */
 function TerminalButton() {
   const { show } = useTerminalShells();
-  return (
-    <TooltipProvider delayDuration={250}>
-      <ToolButton icon={<SquareTerminal />} label="Terminal" onClick={show} data-testid="open-terminal" />
-    </TooltipProvider>
-  );
+  return <ToolButton icon={<SquareTerminal />} label="Terminal" onClick={show} data-testid="open-terminal" />;
 }
 
 export function Shell({
@@ -161,14 +154,14 @@ export function TabTools({ tab, children }: { tab: string; children: ReactNode }
 /**
  * A tab's own lead control, drawn ahead of the tab selector rather than after
  * it. Plain children, not a `<Toolbar>`: this slot holds one or two buttons,
- * never a row that needs its own overflow scroll. Still wrapped in its own
- * `TooltipProvider` — a `ToolButton` reaches for one on its own account, and
- * this slot sits outside the one `Toolbar` wraps around `TabTools`.
+ * never a row that needs its own overflow scroll. The hover labels its buttons
+ * carry need nothing here: there is one `TooltipProvider`, at the root of the
+ * app, and React context reaches a portal wherever it is drawn (bw-6wq6.1).
  */
 export function TabLead({ tab, children }: { tab: string; children: ReactNode }) {
   const { lead, activeTab } = useContext(ToolSlot);
   if (!lead || activeTab !== tab) return null;
-  return createPortal(<TooltipProvider delayDuration={250}>{children}</TooltipProvider>, lead);
+  return createPortal(children, lead);
 }
 
 /**
@@ -180,7 +173,7 @@ export function TabLead({ tab, children }: { tab: string; children: ReactNode })
 export function TabTrail({ tab, children }: { tab: string; children: ReactNode }) {
   const { trail, activeTab } = useContext(ToolSlot);
   if (!trail || activeTab !== tab) return null;
-  return createPortal(<TooltipProvider delayDuration={250}>{children}</TooltipProvider>, trail);
+  return createPortal(children, trail);
 }
 
 /**
@@ -190,11 +183,9 @@ export function TabTrail({ tab, children }: { tab: string; children: ReactNode }
  */
 export function Toolbar({ label = 'Tools', className, children }: { label?: string; className?: string; children: ReactNode }) {
   return (
-    <TooltipProvider delayDuration={250}>
-      <div role="toolbar" aria-label={label} className={cn('flex min-w-0 flex-1 items-center gap-2 overflow-x-auto', className)}>
-        {children}
-      </div>
-    </TooltipProvider>
+    <div role="toolbar" aria-label={label} className={cn('flex min-w-0 flex-1 items-center gap-2 overflow-x-auto', className)}>
+      {children}
+    </div>
   );
 }
 
@@ -221,9 +212,8 @@ export const ToolButton = forwardRef<
   // through a component that keeps its own element to itself.
 >(function ToolButton({ icon, label, onClick, disabled, busy, emphasis = 'quiet', className, ...rest }, ref) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
+    <Tooltip label={label}>
+      <Button
           ref={ref}
           size="sm"
           mode="icon"
@@ -241,11 +231,9 @@ export const ToolButton = forwardRef<
             className,
           )}
           {...rest}
-        >
-          {busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : icon}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
+      >
+        {busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : icon}
+      </Button>
     </Tooltip>
   );
 });

@@ -38,7 +38,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { TooltipProvider } from '@/components/ui/tooltip';
 import { request } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { chatState, holderOnly, HOLDER_WORD, type HeldChat } from '@/workbench/chat-state';
@@ -588,91 +587,89 @@ export function ChatSidebar({
         prop that was not handed in (bw-81wt.5).
       */}
       {(onSearch || onToggleEverything || onNewChat || onClose) && (
-        <TooltipProvider delayDuration={250}>
-          <div data-testid="chat-sidebar-header" className="flex shrink-0 items-center gap-1 border-b border-border/60 p-2">
-            {onSearch && <ToolButton icon={<Search />} label="Search chats" data-testid="open-search" onClick={onSearch} />}
-            {onToggleEverything && (
-              <ToolButton
-                icon={<Bot />}
-                label={everything ? "Hide the agents' own chats" : "Show the agents' own chats"}
-                emphasis={everything ? 'loud' : 'quiet'}
-                data-testid="toggle-everything"
-                data-showing-everything={everything}
-                onClick={onToggleEverything}
-              />
-            )}
-            {onNewChat && (
-              <div className="ml-auto flex shrink-0">
-                <Button
-                  size="sm"
-                  variant="primary"
-                  radius="md"
-                  className="rounded-r-none border-r border-primary-foreground/20"
-                  data-testid="new-chat-tool"
-                  aria-label="New Chat"
-                  disabled={startingNewChat || !anyProviderAvailable}
-                  onClick={() => onNewChat()}
-                >
-                  {startingNewChat ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Plus data-testid="new-chat-plus" aria-hidden="true" />}
-                  {startingNewChat ? 'Starting…' : 'New Chat'}
-                </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      radius="md"
-                      className="rounded-l-none px-2"
-                      aria-label="New chat options"
-                      data-testid="new-chat-menu"
-                      disabled={startingNewChat || !anyProviderAvailable}
+        <div data-testid="chat-sidebar-header" className="flex shrink-0 items-center gap-1 border-b border-border/60 p-2">
+          {onSearch && <ToolButton icon={<Search />} label="Search chats" data-testid="open-search" onClick={onSearch} />}
+          {onToggleEverything && (
+            <ToolButton
+              icon={<Bot />}
+              label={everything ? "Hide the agents' own chats" : "Show the agents' own chats"}
+              emphasis={everything ? 'loud' : 'quiet'}
+              data-testid="toggle-everything"
+              data-showing-everything={everything}
+              onClick={onToggleEverything}
+            />
+          )}
+          {onNewChat && (
+            <div className="ml-auto flex shrink-0">
+              <Button
+                size="sm"
+                variant="primary"
+                radius="md"
+                className="rounded-r-none border-r border-primary-foreground/20"
+                data-testid="new-chat-tool"
+                aria-label="New Chat"
+                disabled={startingNewChat || !anyProviderAvailable}
+                onClick={() => onNewChat()}
+              >
+                {startingNewChat ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Plus data-testid="new-chat-plus" aria-hidden="true" />}
+                {startingNewChat ? 'Starting…' : 'New Chat'}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    radius="md"
+                    className="rounded-l-none px-2"
+                    aria-label="New chat options"
+                    data-testid="new-chat-menu"
+                    disabled={startingNewChat || !anyProviderAvailable}
+                  >
+                    <ChevronDown aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>Start with</DropdownMenuLabel>
+                  {providers.map((provider) => (
+                    <DropdownMenuItem
+                      key={provider.brand}
+                      disabled={!provider.available}
+                      title={provider.available ? undefined : whyUnavailable(provider)}
+                      onSelect={() => onNewChat(provider.brand)}
                     >
-                      <ChevronDown aria-hidden="true" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56">
-                    <DropdownMenuLabel>Start with</DropdownMenuLabel>
-                    {providers.map((provider) => (
-                      <DropdownMenuItem
-                        key={provider.brand}
-                        disabled={!provider.available}
-                        title={provider.available ? undefined : whyUnavailable(provider)}
-                        onSelect={() => onNewChat(provider.brand)}
-                      >
-                        <BrandIcon brand={provider.brand} /> New {brandName(provider.brand)} chat
-                      </DropdownMenuItem>
-                    ))}
-                    {onNewChatDefault && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuLabel>Main button</DropdownMenuLabel>
-                        <DropdownMenuRadioGroup value={newChatDefault} onValueChange={(value) => onNewChatDefault(value as Brand | 'ask')}>
-                          <DropdownMenuRadioItem value="ask">Ask every time</DropdownMenuRadioItem>
-                          {providers.map(({ brand, available }) => (
-                            <DropdownMenuRadioItem key={brand} value={brand} disabled={!available}>
-                              Use {brandName(brand)} by default
-                            </DropdownMenuRadioItem>
-                          ))}
-                        </DropdownMenuRadioGroup>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            )}
-            {/* Last on the row and only on a phone: on a wide screen the list
-                is part of the shell and has nothing to close (bw-81wt.30). */}
-            {onClose && (
-              <ToolButton
-                icon={<X />}
-                label="Close the chat list"
-                className={cn('shrink-0 md:hidden', onNewChat ? undefined : 'ml-auto')}
-                data-testid="chat-rail-close"
-                onClick={onClose}
-              />
-            )}
-          </div>
-        </TooltipProvider>
+                      <BrandIcon brand={provider.brand} /> New {brandName(provider.brand)} chat
+                    </DropdownMenuItem>
+                  ))}
+                  {onNewChatDefault && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel>Main button</DropdownMenuLabel>
+                      <DropdownMenuRadioGroup value={newChatDefault} onValueChange={(value) => onNewChatDefault(value as Brand | 'ask')}>
+                        <DropdownMenuRadioItem value="ask">Ask every time</DropdownMenuRadioItem>
+                        {providers.map(({ brand, available }) => (
+                          <DropdownMenuRadioItem key={brand} value={brand} disabled={!available}>
+                            Use {brandName(brand)} by default
+                          </DropdownMenuRadioItem>
+                        ))}
+                      </DropdownMenuRadioGroup>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
+          {/* Last on the row and only on a phone: on a wide screen the list
+              is part of the shell and has nothing to close (bw-81wt.30). */}
+          {onClose && (
+            <ToolButton
+              icon={<X />}
+              label="Close the chat list"
+              className={cn('shrink-0 md:hidden', onNewChat ? undefined : 'ml-auto')}
+              data-testid="chat-rail-close"
+              onClick={onClose}
+            />
+          )}
+        </div>
       )}
 
       {failed && (
