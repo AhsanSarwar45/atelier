@@ -65,6 +65,25 @@ function longReplay() {
   return said;
 }
 
+/**
+ * What the client answered when this agent asked it something mid-load.
+ *
+ * A replay connection is still a connection: the handshake promises `fs`,
+ * `terminal` and `elicitation`, and an agent that takes the client at its word
+ * may ask any of them at any point — an agent that needs to be signed in asks
+ * exactly here, before it can hand over a single line of history. What it must
+ * never get is `method_not_found` for a capability it was just promised
+ * (bw-t26l.22).
+ */
+const answers = new Map();
+const waiting = new Map();
+function ask(message) {
+  return new Promise((resolve) => {
+    waiting.set(message.id, resolve);
+    say(message);
+  });
+}
+
 const REPLAY = {
   'acp-session-one': [
     ['user_message_chunk', 'What did the second page say?'],
@@ -88,6 +107,12 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     return;
   }
   const { id, method, params } = message;
+  if (method === undefined && id !== undefined && waiting.has(id)) {
+    const settle = waiting.get(id);
+    waiting.delete(id);
+    settle(message);
+    return;
+  }
   if (id === undefined) return;
   if (method === 'initialize') {
     say({
@@ -110,6 +135,13 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     return;
   }
   if (method === 'session/load') {
+    void load(id, params);
+    return;
+  }
+  say({ id, error: { code: -32601, message: `no ${method} here` } });
+});
+
+async function load(id, params) {
     // The one clock ACP has for a session, sent the way an agent reports it:
     // on its own, with no rename beside it.
     if (params?.sessionId === 'acp-session-one') {
@@ -118,7 +150,32 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
         params: { sessionId: params.sessionId, update: { sessionUpdate: 'session_info_update', updatedAt: '2026-09-02T05:31:00.000Z' } },
       });
     }
+    // The second chat is the one that asks. Whatever comes back is said out
+    // loud in the transcript, so the screen shows what the client answered.
+    if (params?.sessionId === 'acp-session-two' && !answers.has(params.sessionId)) {
+      const reply = await ask({
+        id: 9001, method: 'elicitation/create',
+        params: {
+          mode: 'form',
+          sessionId: params.sessionId,
+          message: 'Sign in before this history can be read',
+          requestedSchema: {
+            type: 'object',
+            properties: { ok: { type: 'boolean', description: 'Signed in' } },
+            required: ['ok'],
+          },
+        },
+      });
+      answers.set(params.sessionId, reply.error ? `error ${reply.error.code}` : `action ${reply.result?.action}`);
+    }
     const said = params?.sessionId === 'acp-session-long' ? longReplay() : (REPLAY[params?.sessionId] ?? []);
+    const answered = answers.get(params?.sessionId);
+    if (answered) {
+      say({
+        method: 'session/update',
+        params: { sessionId: params.sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `the client answered the mid-load question with ${answered}` } } },
+      });
+    }
     for (const [sessionUpdate, text] of said) {
       say({
         method: 'session/update',
@@ -126,7 +183,4 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
       });
     }
     say({ id, result: {} });
-    return;
-  }
-  say({ id, error: { code: -32601, message: `no ${method} here` } });
-});
+}

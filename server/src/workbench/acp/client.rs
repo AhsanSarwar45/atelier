@@ -129,6 +129,48 @@ macro_rules! serving_client_io {
     }};
 }
 
+/// Answer the two questions an agent can ask, on a connection where nobody is
+/// there to answer them.
+///
+/// A listing and a history replay are connections like any other: the handshake
+/// promises `fs`, `terminal` and `elicitation`, and an agent that takes the
+/// client at its word may ask any of them at any point. An agent that needs to
+/// be signed in asks exactly there — before it can hand over a single line of
+/// history.
+///
+/// Unserved, that request got no reply at all. Not a refusal: nothing. The
+/// agent waited on an answer that was never coming, the load never finished,
+/// and the chat sat blank on screen forever — an external chat that is
+/// "completely broken" with no error anywhere to say why.
+///
+/// Neither of these connections has a person on the other end of it: a replay
+/// is not a place anyone can be asked anything, and there is no live chat to
+/// draw the question in. So say so, in the words ACP has for it — `decline` for
+/// an elicitation, `cancelled` for a permission — and let the agent do whatever
+/// it does when the answer is no. Whatever that is, it is an answer, and the
+/// chat either loads or fails out loud (bw-t26l.22).
+macro_rules! declining_prompts {
+    ($builder:expr) => {{
+        $builder
+            .on_receive_request(
+                async move |_request: CreateElicitationRequest, responder, _connection| {
+                    responder.respond(
+                        serde_json::from_value(json!({"action":"decline"})).map_err(acp_error)?,
+                    )
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |_request: RequestPermissionRequest, responder, _connection| {
+                    responder.respond(RequestPermissionResponse::new(
+                        RequestPermissionOutcome::Cancelled,
+                    ))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+    }};
+}
+
 /// The one version of ACP this client speaks.
 ///
 /// Sent on every handshake and checked against what comes back: the agent
@@ -203,7 +245,7 @@ pub async fn list_sessions(brand: &str, cwd: Option<&Path>) -> Result<Vec<Listed
     let config = adapter::launch_config(brand, None)
         .ok_or_else(|| format!("bundled {brand} ACP adapter is incomplete or unavailable"))?;
     let filter = cwd.map(Path::to_path_buf);
-    let client = agent_client_protocol::Client.builder();
+    let client = declining_prompts!(agent_client_protocol::Client.builder());
     client
         .connect_with(
             AcpAgent::new(config),
@@ -418,7 +460,7 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
             },
             agent_client_protocol::on_receive_notification!(),
         );
-    let client = serving_client_io!(client, io);
+    let client = declining_prompts!(serving_client_io!(client, io));
     let finish_normalizer = normalizer.clone();
     let finish_events = collected.clone();
     let finish_session = local_id.clone();

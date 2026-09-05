@@ -75,6 +75,16 @@ test('external chats are listed and replayed over ACP with no provider record to
       await expect(page.getByTestId('assistant-message').filter({ hasText: other.answered })).toHaveCount(0);
     }
 
+    // A replay connection is still a connection. The handshake promises the
+    // agent `fs`, `terminal` and `elicitation`; an agent that needs to be
+    // signed in asks before it can hand over a line of history, and what it
+    // must not get back is `method_not_found` for a capability it was just
+    // promised. The scripted agent asks mid-load and says out loud what it
+    // got (bw-t26l.22).
+    await rowOf(SECOND.id).getByTestId('row-name').click();
+    await expect(page.getByTestId('assistant-message').filter({ hasText: 'the client answered the mid-load question' }))
+      .toHaveText(/the client answered the mid-load question with action \w+/);
+
     // The agent reported a later clock as it replayed, with no new name beside
     // it. That is the only timestamp ACP has for a session, and the row is
     // dated by it — from the wire, with no provider file to read.
