@@ -287,12 +287,56 @@ async fn run_git(repo: &Path, args: &[&str]) -> Result<Output, Refused> {
     super::git_output(repo, args).await.map_err(could_not_run)
 }
 
+/// The ssh a remote call is made through, with its asking turned off.
+///
+/// `GIT_TERMINAL_PROMPT=0` covers the asking git does itself — an HTTPS
+/// username and password — and nothing else. The passphrase for an SSH key is
+/// asked for by `ssh`, a separate program that never sees that variable. Left
+/// alone, an `ssh` that wants a passphrase reads it from whatever terminal the
+/// server was started under, and the request waits for an answer nobody in
+/// front of the app can give: the very hang `GIT_TERMINAL_PROMPT` was set to
+/// prevent, arriving by the door it does not cover. `BatchMode=yes` is ssh's
+/// own switch for this — "user interaction such as password prompts and host
+/// key confirmation requests will be disabled" — so ssh gives up and says so
+/// instead of waiting.
+///
+/// The user's own ssh command is kept underneath it. `GIT_SSH_COMMAND` beats
+/// `core.sshCommand` in git's own order of precedence, so setting the variable
+/// blind would quietly throw away a `core.sshCommand` somebody is relying on;
+/// whichever of the two the setup already carries becomes the thing
+/// `BatchMode` is added to, and plain `ssh` only when it carries neither.
+async fn ssh_that_cannot_ask(repo: &Path) -> String {
+    let from_env = std::env::var("GIT_SSH_COMMAND").ok();
+    let from_config = match from_env {
+        // Only worth asking the repository when the environment is silent,
+        // since the environment would win anyway.
+        Some(ref carried) if !carried.trim().is_empty() => None,
+        _ => run_git(repo, &["config", "--get", "core.sshCommand"])
+            .await
+            .ok()
+            .filter(|out| out.status.success())
+            .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string()),
+    };
+    with_batch_mode(from_env, from_config)
+}
+
+/// The ssh command to run, given whatever the environment and the repository
+/// carry. Split out from the asking so the order of precedence can be read —
+/// and tested — without a process-wide environment variable in the way.
+fn with_batch_mode(from_env: Option<String>, from_config: Option<String>) -> String {
+    let carried = [from_env, from_config]
+        .into_iter()
+        .flatten()
+        .find(|carried| !carried.trim().is_empty());
+    format!("{} -o BatchMode=yes", carried.as_deref().unwrap_or("ssh").trim())
+}
+
 /// Run a git command that talks to the shared copy.
 ///
-/// `GIT_TERMINAL_PROMPT=0` is the one thing added to the environment: this
-/// server has no terminal, so a credential prompt would leave the request
-/// hanging for ever instead of answering. Everything else — the SSH keys,
-/// ssh-agent, `credential.helper`, the whole gitconfig — is inherited
+/// Two things are added to the environment, both of them to stop a prompt this
+/// server has no terminal to answer: `GIT_TERMINAL_PROMPT=0` for git's own
+/// asking, and an ssh that cannot ask for the rest. Everything else — the SSH
+/// keys, ssh-agent, `credential.helper`, the whole gitconfig — is inherited
 /// untouched, which is the entire reason this shells out to git.
 async fn run_git_remote(repo: &Path, args: &[&str]) -> Result<Output, Refused> {
     super::git_command()
@@ -300,6 +344,7 @@ async fn run_git_remote(repo: &Path, args: &[&str]) -> Result<Output, Refused> {
         .args(args)
         .current_dir(repo)
         .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_SSH_COMMAND", ssh_that_cannot_ask(repo).await)
         .output()
         .await
         .map_err(could_not_run)
@@ -1071,6 +1116,105 @@ mod tests {
         assert!(check_branch_exists(repo, "real-work").await);
         assert!(!check_branch_exists(repo, "release-name").await);
         assert!(!check_branch_exists(repo, &revision).await);
+    }
+
+    /// With nothing carried, the remote call still goes through ssh — the
+    /// plain one — and it is the added switch that keeps it from asking.
+    #[test]
+    fn a_setup_that_carries_no_ssh_command_gets_a_plain_one_that_cannot_ask() {
+        assert_eq!(with_batch_mode(None, None), "ssh -o BatchMode=yes");
+    }
+
+    /// A user who has told git which key to use, or which ssh to run, keeps
+    /// it. Turning off the asking must not turn off their setup with it.
+    #[test]
+    fn an_ssh_command_the_setup_carries_is_kept_underneath_the_switch() {
+        assert_eq!(
+            with_batch_mode(None, Some("ssh -i /keys/deploy".to_string())),
+            "ssh -i /keys/deploy -o BatchMode=yes"
+        );
+        assert_eq!(
+            with_batch_mode(Some("ssh -F /etc/ssh_conf".to_string()), None),
+            "ssh -F /etc/ssh_conf -o BatchMode=yes"
+        );
+    }
+
+    /// git reads `GIT_SSH_COMMAND` ahead of `core.sshCommand`, and so does
+    /// this: were it the other way round, a remote call would run an ssh git
+    /// itself would not have run.
+    #[test]
+    fn the_environment_is_read_ahead_of_the_repositorys_own_config() {
+        assert_eq!(
+            with_batch_mode(
+                Some("ssh -i /keys/from-env".to_string()),
+                Some("ssh -i /keys/from-config".to_string()),
+            ),
+            "ssh -i /keys/from-env -o BatchMode=yes"
+        );
+    }
+
+    /// An empty variable is not a command. Left in front, it would put a bare
+    /// `-o BatchMode=yes` where the program name belongs.
+    #[test]
+    fn an_empty_ssh_command_is_not_mistaken_for_one() {
+        assert_eq!(
+            with_batch_mode(Some("   ".to_string()), Some("ssh -i /keys/real".to_string())),
+            "ssh -i /keys/real -o BatchMode=yes"
+        );
+        assert_eq!(with_batch_mode(Some(String::new()), None), "ssh -o BatchMode=yes");
+    }
+
+    /// The point of the switch: a remote call against a copy whose ssh cannot
+    /// let anyone in comes back and says so, rather than sitting on a
+    /// passphrase prompt that no one in front of the app can answer.
+    ///
+    /// The fake ssh here is the test's stand-in for a locked key: it is what
+    /// `ssh` would be if it could never authenticate. Were the switch missing,
+    /// a real locked key would stop at a prompt on the server's own terminal
+    /// and this call would never return; the deadline is what fails the test.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_remote_call_that_cannot_get_in_answers_instead_of_waiting() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // The test picks its ssh through `core.sshCommand`, which a
+        // `GIT_SSH_COMMAND` in the environment running the tests would beat —
+        // correctly, and the precedence tests above cover that. There is then
+        // no way to say which ssh git runs, so there is nothing here to prove.
+        if std::env::var("GIT_SSH_COMMAND").is_ok_and(|carried| !carried.trim().is_empty()) {
+            eprintln!("skipped: GIT_SSH_COMMAND is set, so this test cannot choose the ssh");
+            return;
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        git(repo, &["init", "-q"]);
+
+        // Refuses exactly as ssh does when no key it can offer is accepted.
+        let fake_ssh = repo.join("ssh-that-never-gets-in");
+        std::fs::write(
+            &fake_ssh,
+            "#!/bin/sh\necho 'git@example.invalid: Permission denied (publickey).' >&2\nexit 255\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake_ssh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        git(repo, &["config", "core.sshCommand", fake_ssh.to_str().unwrap()]);
+        git(repo, &["remote", "add", "origin", "git@example.invalid:some/repo.git"]);
+
+        let answered = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            run_git_remote(repo, &["fetch", "origin"]),
+        )
+        .await
+        .expect("the call answered rather than waiting on a prompt")
+        .expect("git ran");
+
+        assert!(!answered.status.success());
+        assert!(
+            String::from_utf8_lossy(&answered.stderr).contains("Permission denied (publickey)"),
+            "the reader should get ssh's own words back: {}",
+            String::from_utf8_lossy(&answered.stderr)
+        );
     }
 }
 
