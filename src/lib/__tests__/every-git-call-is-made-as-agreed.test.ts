@@ -233,4 +233,52 @@ describe('what was said when the request never reached git', () => {
     expect(String(refused)).toContain('Failed to parse the request body as JSON');
     expect(String(refused)).not.toContain('Bad Request');
   });
+
+  /**
+   * A refusal reaches the caller whole (bw-k778.4). The sentence is what most
+   * of the app reads and it must not move; the status and the body underneath
+   * it are what let one screen tell a locked SSH key apart from every other
+   * way a push can fail.
+   */
+  describe('what a refusal carries', () => {
+    it('still reads exactly as it always has', async () => {
+      mockFetch.mockResolvedValue(mockResponse({ error: 'it went wrong' }, 500, 'Server Error'));
+
+      const refused = await api.git.push(REPO).catch((e: Error) => e);
+
+      expect((refused as Error).message).toBe('API error: 500 it went wrong');
+    });
+
+    it('carries the status and the body the server answered with', async () => {
+      const denied = 'git@github.com: Permission denied (publickey).';
+      mockFetch.mockResolvedValue(
+        mockResponse({ error: denied, needsPassphrase: true }, 401, 'Unauthorized'),
+      );
+
+      const refused = await api.git.push(REPO).catch((e: unknown) => e);
+
+      expect(refused).toBeInstanceOf(api.ApiError);
+      expect((refused as api.ApiError).status).toBe(401);
+      expect((refused as api.ApiError).body).toEqual({ error: denied, needsPassphrase: true });
+      // The sentence is still git's own, and still leads.
+      expect((refused as Error).message).toBe(`API error: 401 ${denied}`);
+    });
+
+    it('is still thrown when the server said nothing a caller can parse', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 502,
+        statusText: 'Bad Gateway',
+        headers: new Headers(),
+        json: () => Promise.reject(new Error('not JSON')),
+      } as unknown as Response);
+
+      const refused = await api.git.push(REPO).catch((e: unknown) => e);
+
+      expect(refused).toBeInstanceOf(api.ApiError);
+      expect((refused as api.ApiError).status).toBe(502);
+      expect((refused as api.ApiError).body).toBeUndefined();
+      expect((refused as Error).message).toBe('API error: 502 Bad Gateway');
+    });
+  });
 });

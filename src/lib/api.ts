@@ -242,6 +242,32 @@ function fetchApi<T>(path: string, options?: ReadOptions): Promise<T> {
   return journey;
 }
 
+/**
+ * A call the server turned away, with everything it said about it.
+ *
+ * The message is the whole of what most callers want and is left exactly as it
+ * has always read — `API error: <status> <what the server said>` — because
+ * several screens strip that prefix off to put the server's own sentence in
+ * front of a reader, and one of them is the Git panel.
+ *
+ * What is new is underneath it. Some refusals carry more than a sentence: a
+ * remote git call that failed for want of an unlocked SSH key answers 401 and
+ * says so in its body, and a caller can only offer to help if that reaches it.
+ * Flattening the answer to a string is what used to lose it.
+ */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    /** The status the server answered with. */
+    readonly status: number,
+    /** The parsed body, when there was one to parse. */
+    readonly body?: unknown,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 async function readApi<T>(path: string, options?: ReadOptions): Promise<T> {
   const res = await request(path, {
     ...options,
@@ -252,11 +278,12 @@ async function readApi<T>(path: string, options?: ReadOptions): Promise<T> {
   });
   if (!res.ok) {
     let detail = res.statusText;
+    let said: unknown;
     try {
-      const body = await res.json();
-      if (body?.error) detail = body.error;
+      said = await res.json();
+      if ((said as { error?: string })?.error) detail = (said as { error: string }).error;
     } catch { /* no JSON body */ }
-    throw new Error(`API error: ${res.status} ${detail}`);
+    throw new ApiError(`API error: ${res.status} ${detail}`, res.status, said);
   }
   // Handle 204 No Content (archive/unarchive/delete endpoints)
   if (res.status === 204 || res.headers.get('content-length') === '0') {
