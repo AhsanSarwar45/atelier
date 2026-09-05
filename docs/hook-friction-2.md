@@ -571,3 +571,33 @@ not a repository change and should pass regardless of the card's state.
 
 **Cost.** One refusal, one `ATELIER_BYPASS`, and this section written from a
 different card's worktree because the one that owns the mess may not touch it.
+
+## 13. The land step cannot remove the worktree it exists to remove
+
+**What happened.** bw-2c0x.5 was the epic's land card: its whole content is
+"remove the finished worktree and branch after every commit has reached the
+landing branch". Closing it is the act that finishes it — and closing it is
+what makes the removal impossible. Owned, the card cannot be closed while the
+worktree it is meant to delete is still the one the session is standing in;
+closed, `git worktree remove worktrees/bw-2c0x.5` and `git branch -D
+bw-2c0x.5` from the main checkout are refused by `workflow-gate` as changes
+without an owned card in an isolated worktree. There is no order that works.
+The earlier siblings were removable only because a still-open card — this one —
+was there to own the removal; the last one has nobody left to be owned by.
+
+This is §12's shape one level out. §12 is a closed card's worktree unable to
+throw away scratch *inside* itself; this is the removal of the worktree
+itself, refused for the same reason: the card that would authorise it is the
+card whose completion is the removal.
+
+**Should have happened.** Removing a worktree whose card is closed, and
+deleting a branch whose commits are already on the landing branch, throws away
+nothing that is not already landed — the gate can check exactly that rather
+than looking for an owner. Narrowly: `git worktree remove` and `git branch -D`
+pass when the branch is an ancestor of the landing branch and its card is
+closed. That is the same test `board/land` already makes before it closes a
+card, so the information is on hand.
+
+**Cost.** One refusal, one `ATELIER_BYPASS`, and — as in §11 — a card and a
+worktree raised for the sole purpose of being allowed to write this section,
+which will itself end in a land step with the same problem.
