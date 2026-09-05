@@ -64,7 +64,25 @@ export function DrawnTranscript({
    * the jump he sees, and it is as big as the wait was long (bw-cdav.1).
    */
   const standing = useRef<{ height: number; top: number } | null>(null);
+  /**
+   * The row the reader's eyes are on, and how far down the pane it was, read in
+   * the same render as `standing` and for the same reason.
+   *
+   * Putting the pane back by how much taller the conversation got is only right
+   * while the rows above are the height they will end up. They are not: a row
+   * arrives as a 112px guess and is measured a frame or two later at whatever
+   * it really is. The virtualiser makes that good for every row that ends up
+   * ABOVE the top of the pane, and deliberately does not for the row that
+   * straddles it — but the reader is not reading the top of the pane, he is
+   * reading a line some way down it, and everything the straddling row gains
+   * pushes that line down. So the row itself is held, not the offset (bw-cdav.5).
+   */
+  const held = useRef<{ key: string; at: number } | null>(null);
+  const settling = useRef(0);
   const previous = useRef({ sessionId, many: loadedItems });
+  /** The newest row list, for the settling below to find its anchor in. */
+  const latest = useRef(rows);
+  latest.current = rows;
 
   const virtual = useVirtualizer({
     count: rows.length,
@@ -84,6 +102,7 @@ export function DrawnTranscript({
     historyRequest.current += 1;
     awaiting.current = false;
     standing.current = null;
+    held.current = null;
     lastTop.current = 0;
     loading.current = false;
     setLoadingOlder(false);
@@ -96,7 +115,21 @@ export function DrawnTranscript({
   // runs after they are in, and the difference between the two heights is
   // exactly how much was put above him.
   if (awaiting.current && loadedItems !== previous.current.many && pane.current) {
-    standing.current = { height: pane.current.scrollHeight, top: pane.current.scrollTop };
+    const box = pane.current;
+    standing.current = { height: box.scrollHeight, top: box.scrollTop };
+    const top = box.getBoundingClientRect().top;
+    held.current = null;
+    // The topmost row that begins at or below the fold: the first one he can
+    // read a whole line of, and so the one he is holding on to. Chosen by where
+    // it is and not by where it comes in the document — the virtualiser reuses
+    // its rows, so the order they are written in is not the order they are read
+    // in, and taking the first one the document offers picks a row at random.
+    for (const row of box.querySelectorAll<HTMLElement>('[data-transcript-key]')) {
+      const at = row.getBoundingClientRect().top - top;
+      const key = row.dataset.transcriptKey;
+      if (at < -0.5 || !key) continue;
+      if (!held.current || at < held.current.at) held.current = { key, at };
+    }
   }
 
   useLayoutEffect(() => {
@@ -109,15 +142,86 @@ export function DrawnTranscript({
     if (!changed) return;
     awaiting.current = false;
     standing.current = null;
+    const anchor = held.current;
+    held.current = null;
     if (!box || !stood) return;
     // Before paint, so no frame is ever drawn with the conversation shifted.
-    // Nothing else is needed afterwards: rows above the fold are guessed at
-    // until they are drawn, and the virtualiser puts the pane back by itself
-    // the moment one of them is measured for the first time. A second, slower
-    // correction of our own on top of that could only fight it.
     box.scrollTop = stood.top + (box.scrollHeight - stood.height);
     lastTop.current = box.scrollTop;
-  }, [loadedItems, sessionId, pane]);
+    if (!anchor) return;
+
+    // And then again for a few frames, because the rows just put above him are
+    // still guesses: each is measured shortly after it is drawn, and until the
+    // one straddling the top of the pane has been, the line he is reading is
+    // not yet where it belongs. Held to a handful of frames, and given up the
+    // moment he touches the wheel himself — putting him back where he was is
+    // only right for as long as he has not asked to be somewhere else.
+    // And then again until the measuring is over. The rows just put above him
+    // arrive as guesses — a message is guessed at 112px and a forty-line answer
+    // is five hundred — and each is measured only once it has been drawn. Until
+    // that has run its course the conversation above him is the wrong height,
+    // and how much of that the virtualiser makes good depends on where each row
+    // happens to fall relative to the fold at the moment it is measured.
+    //
+    // So the row he is reading is held instead, and it is held by the
+    // virtualiser's own arithmetic rather than by finding it on the page: at the
+    // moment the page lands he is not drawn at all — the window still being
+    // shown is the one the pane was at before — and a row that is not there
+    // cannot be put back.
+    const until = performance.now() + 2000;
+    let still = 0;
+    let tall = -1;
+    const done = () => {
+      cancelAnimationFrame(settling.current);
+      settling.current = 0;
+      box.removeEventListener('wheel', done);
+      box.removeEventListener('touchstart', done);
+      box.removeEventListener('keydown', done);
+    };
+    const pin = () => {
+      // Still growing means rows are still being measured, and a row measured
+      // after he has been put back moves him again.
+      const now = virtual.getTotalSize();
+      if (now !== tall) still = 0;
+      tall = now;
+      const index = latest.current.findIndex((row) => rowKey(row) === anchor.key);
+      // The row's own place in the conversation, straight out of the
+      // virtualiser's measurements — `getOffsetForIndex` answers a different
+      // question, rounding its answer to somewhere the pane could sensibly be
+      // put. `getTotalSize` above is what brings those measurements up to date.
+      const start = index < 0 ? undefined : virtual.measurementsCache[index]?.start;
+      const drawn = box.querySelector<HTMLElement>('[data-testid="virtual-transcript"]');
+      if (start === undefined || !drawn) {
+        still = 0;
+      } else {
+        // Where that place currently falls in the pane. Measured against the
+        // conversation's own box rather than worked out from the pane's offset,
+        // so whatever sits between the two — padding, a header — is counted
+        // once, by the browser, instead of being left out of the arithmetic.
+        const is = drawn.getBoundingClientRect().top - box.getBoundingClientRect().top + start;
+        const want = box.scrollTop + (is - anchor.at);
+        if (Math.abs(box.scrollTop - want) > 0.5) {
+          box.scrollTop = want;
+          // So the scroll this causes is not read as the reader travelling
+          // upward, which would ask for another page.
+          lastTop.current = box.scrollTop;
+          still = 0;
+        } else {
+          still += 1;
+        }
+      }
+      // Finished once he has been in the right place three frames running,
+      // which is the measuring being over rather than merely not started.
+      if (still >= 3 || performance.now() > until) done();
+      else settling.current = requestAnimationFrame(pin);
+    };
+    cancelAnimationFrame(settling.current);
+    box.addEventListener('wheel', done, { passive: true });
+    box.addEventListener('touchstart', done, { passive: true });
+    box.addEventListener('keydown', done);
+    settling.current = requestAnimationFrame(pin);
+    return done;
+  }, [loadedItems, sessionId, pane, virtual]);
 
   // Loading is caused only by the reader travelling or wheeling upward.
   // A page already at scrollTop 0 cannot emit upward scroll movement, so its
