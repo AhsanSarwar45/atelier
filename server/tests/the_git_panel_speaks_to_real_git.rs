@@ -188,6 +188,7 @@ async fn push(dir: &TempDir, set_upstream: bool) -> (StatusCode, Value) {
         git::push(GitJson(git::PushRequest {
             path: here(dir),
             set_upstream,
+            passphrase: None,
         }))
         .await,
     )
@@ -605,6 +606,7 @@ async fn fetch_counts_the_gap_and_pull_closes_it() {
     let (code, gap) = answered(
         git::fetch(GitJson(git::PathRequest {
             path: here(&theirs),
+            passphrase: None,
         }))
         .await,
     )
@@ -621,6 +623,7 @@ async fn fetch_counts_the_gap_and_pull_closes_it() {
     let (code, pulled) = answered(
         git::pull(GitJson(git::PathRequest {
             path: here(&theirs),
+            passphrase: None,
         }))
         .await,
     )
