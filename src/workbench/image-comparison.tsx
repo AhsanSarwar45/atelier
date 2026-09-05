@@ -6,7 +6,7 @@ import { ZoomIn } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import type { ImageComparison } from '@/workbench/protocol';
-import { INLINE_MEDIA_BOUNDS } from '@/workbench/media-bounds';
+import { inlineMediaBounds } from '@/workbench/media-bounds';
 
 /**
  * The line between the two pictures, drawn so it can be found on either.
@@ -41,8 +41,8 @@ export function ImageComparisonView({ comparison, onLook }: {
             {onLook ? <Button type="button" variant="foreground" aria-label={`Open ${image.alt} comparison to zoom`}
               className="block h-auto w-full whitespace-normal p-0" onClick={() => onLook(comparison)}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={image.dataUrl} alt={image.alt} className="cursor-zoom-in rounded border border-border/60 object-contain transition-opacity hover:opacity-90" style={INLINE_MEDIA_BOUNDS} />
-            </Button> : <img src={image.dataUrl} alt={image.alt} className="rounded border border-border/60 object-contain" style={INLINE_MEDIA_BOUNDS} />}
+              <img src={image.dataUrl} alt={image.alt} className="cursor-zoom-in rounded border border-border/60 object-contain transition-opacity hover:opacity-90" style={inlineMediaBounds(image.dataUrl)} />
+            </Button> : <img src={image.dataUrl} alt={image.alt} className="rounded border border-border/60 object-contain" style={inlineMediaBounds(image.dataUrl)} />}
             <figcaption className="mt-1 text-xs text-muted-foreground">{image.alt}</figcaption>
           </figure>
         ))}
@@ -91,7 +91,7 @@ export function ImageComparisonView({ comparison, onLook }: {
         src={comparison.after.dataUrl}
         alt={comparison.after.alt}
         className="block object-contain"
-        style={INLINE_MEDIA_BOUNDS}
+        style={inlineMediaBounds(comparison.after.dataUrl)}
         draggable={false}
       />
       <div className="absolute inset-y-0 left-0 overflow-hidden" style={{ width: `${pct}%` }}>

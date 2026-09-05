@@ -11,8 +11,8 @@
  * The block is a thumbnail and nothing more. Clicking any picture in it opens
  * that picture whole, which is what makes cropping a cell safe.
  */
+import { inlineMediaBounds } from '@/workbench/media-bounds';
 import type { ImagePayload } from '@/workbench/protocol';
-import { INLINE_MEDIA_BOUNDS } from '@/workbench/media-bounds';
 
 /**
  * How many pictures stand side by side, given how many the message holds.
@@ -82,7 +82,7 @@ export function PictureGrid({ images, onLook }: PictureGridProps): JSX.Element |
               ? `${THUMB} justify-self-start object-contain`
               : `${THUMB} aspect-[4/3] w-full object-cover`
           }
-          style={alone ? INLINE_MEDIA_BOUNDS : undefined}
+          style={alone ? inlineMediaBounds(img.dataUrl) : undefined}
         />
       ))}
     </div>

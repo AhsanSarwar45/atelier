@@ -686,9 +686,13 @@ export function raggedChatSaid(n: number): string {
 export function raggedChatSaidWithPictures(n: number): Spoken {
   const words = raggedChatSaid(n);
   if (n % 8 !== 0) return words;
-  // Three sizes in turn, so the height a row gains is a different number each
-  // time and a case cannot pass by correcting for one of them.
-  const size = [160, 340, 620][(n / 8) % 3];
+  // Three shapes in turn, so the height a row gains is a different number each
+  // time and a case cannot pass by correcting for one of them — and every one a
+  // picture the browser has never seen, because a repeated data URL is decoded
+  // once and every later copy of it is laid out at its full size the instant it
+  // is put on the page. Real screenshots are all different, and a case built on
+  // three that are not cannot see what a picture does on its way in (bw-cdav.3).
+  const size = [160, 340, 620][(n / 8) % 3]! + n;
   return [
     { type: 'text', text: `${words}\n\n[Image #1]` },
     { type: 'image', source: { type: 'base64', media_type: 'image/png', data: quadrantPng(size).toString('base64') } },

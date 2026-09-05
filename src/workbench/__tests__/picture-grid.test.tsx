@@ -17,7 +17,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ImagePayload } from '@/workbench/protocol';
 
 import { PictureGrid, acrossFor } from '../picture-grid';
-import { INLINE_MEDIA_BOUNDS } from '../media-bounds';
+import { inlineMediaBounds } from '../media-bounds';
 
 /** A one-pixel PNG, small enough to write out here in full. */
 const PIXEL =
@@ -95,7 +95,16 @@ describe('a message’s pictures on the page', () => {
     const picture = drawn(1).thumbs[0]!;
     expect(picture.className).toContain('object-contain');
     expect(picture.className).not.toContain('aspect-');
-    expect(picture).toHaveStyle(INLINE_MEDIA_BOUNDS);
+    expect(picture).toHaveStyle({ ...inlineMediaBounds(PIXEL) });
+  });
+
+  it('gives a lone picture its shape before the browser has decoded it', () => {
+    // The one-pixel PNG above is square, and its header says so — so the style
+    // holds a square open, and the row is the height it will still be once the
+    // picture is drawn rather than flat until then (bw-cdav.3).
+    const picture = drawn(1).thumbs[0]!;
+    expect(picture).toHaveStyle({ aspectRatio: '1 / 1' });
+    expect(picture).toHaveStyle({ width: '1px', maxWidth: '100%' });
   });
 
   it('crops two or more to a common shape, because a ragged row reads as a mess', () => {
