@@ -1,0 +1,2952 @@
+{
+  "note": "One corpus for the presentation contract. The presenter (server/src/workbench/media.rs) and the reader (src/workbench/chat-widgets.ts) both answer every case here, and both must return the verdict recorded against it. Add a case here before changing either validator.",
+  "widgets": [
+    {
+      "name": "no type at all",
+      "verdict": "refuse",
+      "why": "type is required",
+      "payload": {
+        "columns": [
+          "a"
+        ],
+        "rows": [
+          [
+            "x"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "type is not a string",
+      "verdict": "refuse",
+      "why": "type must be a string",
+      "payload": {
+        "type": 7
+      }
+    },
+    {
+      "name": "type is unknown",
+      "verdict": "refuse",
+      "why": "unknown widget type",
+      "payload": {
+        "type": "piechart",
+        "items": [
+          {
+            "label": "a",
+            "value": "b"
+          }
+        ]
+      }
+    },
+    {
+      "name": "title is an empty string",
+      "verdict": "refuse",
+      "why": "a title, when given, must not be blank",
+      "payload": {
+        "type": "table",
+        "title": "",
+        "columns": [
+          "a"
+        ],
+        "rows": [
+          [
+            "x"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "title is longer than 200 characters",
+      "verdict": "refuse",
+      "why": "displayed strings stop at 200 characters",
+      "payload": {
+        "type": "table",
+        "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "columns": [
+          "a"
+        ],
+        "rows": [
+          [
+            "x"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "title of exactly 200 characters",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "table",
+        "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "columns": [
+          "a"
+        ],
+        "rows": [
+          [
+            "x"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "an unknown top-level field",
+      "verdict": "refuse",
+      "why": "unknown fields are refused",
+      "payload": {
+        "type": "table",
+        "columns": [
+          "a"
+        ],
+        "rows": [
+          [
+            "x"
+          ]
+        ],
+        "footnote": "hi"
+      }
+    },
+    {
+      "name": "metrics, one item",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "metrics",
+        "items": [
+          {
+            "label": "Latency",
+            "value": "42 ms"
+          }
+        ]
+      }
+    },
+    {
+      "name": "metrics, every optional field",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "metrics",
+        "title": "Health",
+        "items": [
+          {
+            "label": "Latency",
+            "value": "42 ms",
+            "detail": "down 8 ms",
+            "trend": "down"
+          }
+        ]
+      }
+    },
+    {
+      "name": "metrics, six items",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "metrics",
+        "items": [
+          {
+            "label": "l0",
+            "value": "v"
+          },
+          {
+            "label": "l1",
+            "value": "v"
+          },
+          {
+            "label": "l2",
+            "value": "v"
+          },
+          {
+            "label": "l3",
+            "value": "v"
+          },
+          {
+            "label": "l4",
+            "value": "v"
+          },
+          {
+            "label": "l5",
+            "value": "v"
+          }
+        ]
+      }
+    },
+    {
+      "name": "metrics, seven items",
+      "verdict": "refuse",
+      "why": "at most six",
+      "payload": {
+        "type": "metrics",
+        "items": [
+          {
+            "label": "l0",
+            "value": "v"
+          },
+          {
+            "label": "l1",
+            "value": "v"
+          },
+          {
+            "label": "l2",
+            "value": "v"
+          },
+          {
+            "label": "l3",
+            "value": "v"
+          },
+          {
+            "label": "l4",
+            "value": "v"
+          },
+          {
+            "label": "l5",
+            "value": "v"
+          },
+          {
+            "label": "l6",
+            "value": "v"
+          }
+        ]
+      }
+    },
+    {
+      "name": "metrics, no items",
+      "verdict": "refuse",
+      "why": "at least one",
+      "payload": {
+        "type": "metrics",
+        "items": []
+      }
+    },
+    {
+      "name": "metrics, items is not an array",
+      "verdict": "refuse",
+      "why": "items must be a list",
+      "payload": {
+        "type": "metrics",
+        "items": {
+          "label": "a",
+          "value": "b"
+        }
+      }
+    },
+    {
+      "name": "metrics, item has no value",
+      "verdict": "refuse",
+      "why": "value is required",
+      "payload": {
+        "type": "metrics",
+        "items": [
+          {
+            "label": "a"
+          }
+        ]
+      }
+    },
+    {
+      "name": "metrics, item value is a number",
+      "verdict": "refuse",
+      "why": "value is a string, not a number",
+      "payload": {
+        "type": "metrics",
+        "items": [
+          {
+            "label": "Checks",
+            "value": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "metrics, item label is blank",
+      "verdict": "refuse",
+      "why": "labels must not be blank",
+      "payload": {
+        "type": "metrics",
+        "items": [
+          {
+            "label": "  ",
+            "value": "b"
+          }
+        ]
+      }
+    },
+    {
+      "name": "metrics, trend is not one of the three",
+      "verdict": "refuse",
+      "why": "trend is up, down or flat",
+      "payload": {
+        "type": "metrics",
+        "items": [
+          {
+            "label": "a",
+            "value": "b",
+            "trend": "sideways"
+          }
+        ]
+      }
+    },
+    {
+      "name": "metrics, item carries an unknown field",
+      "verdict": "refuse",
+      "why": "unknown fields are refused",
+      "payload": {
+        "type": "metrics",
+        "items": [
+          {
+            "label": "a",
+            "value": "b",
+            "colour": "red"
+          }
+        ]
+      }
+    },
+    {
+      "name": "chart, bar",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "chart",
+        "chart": "bar",
+        "series": [
+          {
+            "name": "Web"
+          }
+        ],
+        "data": [
+          {
+            "label": "Mon",
+            "values": [
+              12
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "chart, line with colours and two series",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "chart",
+        "chart": "line",
+        "title": "Requests",
+        "series": [
+          {
+            "name": "Web",
+            "color": "#38bdf8"
+          },
+          {
+            "name": "API",
+            "color": "#f59e0b"
+          }
+        ],
+        "data": [
+          {
+            "label": "Mon",
+            "values": [
+              12,
+              8
+            ]
+          },
+          {
+            "label": "Tue",
+            "values": [
+              18,
+              11
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "chart, four series",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "chart",
+        "chart": "bar",
+        "series": [
+          {
+            "name": "s0"
+          },
+          {
+            "name": "s1"
+          },
+          {
+            "name": "s2"
+          },
+          {
+            "name": "s3"
+          }
+        ],
+        "data": [
+          {
+            "label": "Mon",
+            "values": [
+              1,
+              2,
+              3,
+              4
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "chart, five series",
+      "verdict": "refuse",
+      "why": "at most four series",
+      "payload": {
+        "type": "chart",
+        "chart": "bar",
+        "series": [
+          {
+            "name": "s0"
+          },
+          {
+            "name": "s1"
+          },
+          {
+            "name": "s2"
+          },
+          {
+            "name": "s3"
+          },
+          {
+            "name": "s4"
+          }
+        ],
+        "data": [
+          {
+            "label": "Mon",
+            "values": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "chart, kind is neither bar nor line",
+      "verdict": "refuse",
+      "why": "bar or line",
+      "payload": {
+        "type": "chart",
+        "chart": "pie",
+        "series": [
+          {
+            "name": "x"
+          }
+        ],
+        "data": [
+          {
+            "label": "a",
+            "values": [
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "chart, no chart kind",
+      "verdict": "refuse",
+      "why": "chart kind is required",
+      "payload": {
+        "type": "chart",
+        "series": [
+          {
+            "name": "x"
+          }
+        ],
+        "data": [
+          {
+            "label": "a",
+            "values": [
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "chart, no series",
+      "verdict": "refuse",
+      "why": "at least one series",
+      "payload": {
+        "type": "chart",
+        "chart": "bar",
+        "series": [],
+        "data": [
+          {
+            "label": "a",
+            "values": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "chart, no data",
+      "verdict": "refuse",
+      "why": "at least one row of data",
+      "payload": {
+        "type": "chart",
+        "chart": "bar",
+        "series": [
+          {
+            "name": "x"
+          }
+        ],
+        "data": []
+      }
+    },
+    {
+      "name": "chart, data is missing entirely",
+      "verdict": "refuse",
+      "why": "data is required",
+      "payload": {
+        "type": "chart",
+        "chart": "bar",
+        "series": [
+          {
+            "name": "x"
+          }
+        ]
+      }
+    },
+    {
+      "name": "chart, fewer values than series",
+      "verdict": "refuse",
+      "why": "one value per series",
+      "payload": {
+        "type": "chart",
+        "chart": "bar",
+        "series": [
+          {
+            "name": "a"
+          },
+          {
+            "name": "b"
+          }
+        ],
+        "data": [
+          {
+            "label": "Mon",
+            "values": [
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "chart, more values than series",
+      "verdict": "refuse",
+      "why": "one value per series",
+      "payload": {
+        "type": "chart",
+        "chart": "bar",
+        "series": [
+          {
+            "name": "a"
+          }
+        ],
+        "data": [
+          {
+            "label": "Mon",
+            "values": [
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "chart, a value is a string",
+      "verdict": "refuse",
+      "why": "values are numbers",
+      "payload": {
+        "type": "chart",
+        "chart": "bar",
+        "series": [
+          {
+            "name": "a"
+          }
+        ],
+        "data": [
+          {
+            "label": "Mon",
+            "values": [
+              "1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "chart, a value is null",
+      "verdict": "refuse",
+      "why": "values are numbers",
+      "payload": {
+        "type": "chart",
+        "chart": "bar",
+        "series": [
+          {
+            "name": "a"
+          }
+        ],
+        "data": [
+          {
+            "label": "Mon",
+            "values": [
+              null
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "chart, thirty-one rows",
+      "verdict": "refuse",
+      "why": "at most thirty rows",
+      "payload": {
+        "type": "chart",
+        "chart": "bar",
+        "series": [
+          {
+            "name": "a"
+          }
+        ],
+        "data": [
+          {
+            "label": "d0",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d1",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d2",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d3",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d4",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d5",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d6",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d7",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d8",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d9",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d10",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d11",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d12",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d13",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d14",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d15",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d16",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d17",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d18",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d19",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d20",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d21",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d22",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d23",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d24",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d25",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d26",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d27",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d28",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d29",
+            "values": [
+              1
+            ]
+          },
+          {
+            "label": "d30",
+            "values": [
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "chart, series entry has an unknown field",
+      "verdict": "refuse",
+      "why": "unknown fields are refused",
+      "payload": {
+        "type": "chart",
+        "chart": "bar",
+        "series": [
+          {
+            "name": "a",
+            "width": 2
+          }
+        ],
+        "data": [
+          {
+            "label": "Mon",
+            "values": [
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "progress, one item",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "progress",
+        "items": [
+          {
+            "label": "Tests",
+            "value": 8,
+            "max": 10,
+            "detail": "8 of 10"
+          }
+        ]
+      }
+    },
+    {
+      "name": "progress, twelve items",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "progress",
+        "items": [
+          {
+            "label": "l0",
+            "value": 1
+          },
+          {
+            "label": "l1",
+            "value": 1
+          },
+          {
+            "label": "l2",
+            "value": 1
+          },
+          {
+            "label": "l3",
+            "value": 1
+          },
+          {
+            "label": "l4",
+            "value": 1
+          },
+          {
+            "label": "l5",
+            "value": 1
+          },
+          {
+            "label": "l6",
+            "value": 1
+          },
+          {
+            "label": "l7",
+            "value": 1
+          },
+          {
+            "label": "l8",
+            "value": 1
+          },
+          {
+            "label": "l9",
+            "value": 1
+          },
+          {
+            "label": "l10",
+            "value": 1
+          },
+          {
+            "label": "l11",
+            "value": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "progress, thirteen items",
+      "verdict": "refuse",
+      "why": "at most twelve",
+      "payload": {
+        "type": "progress",
+        "items": [
+          {
+            "label": "l0",
+            "value": 1
+          },
+          {
+            "label": "l1",
+            "value": 1
+          },
+          {
+            "label": "l2",
+            "value": 1
+          },
+          {
+            "label": "l3",
+            "value": 1
+          },
+          {
+            "label": "l4",
+            "value": 1
+          },
+          {
+            "label": "l5",
+            "value": 1
+          },
+          {
+            "label": "l6",
+            "value": 1
+          },
+          {
+            "label": "l7",
+            "value": 1
+          },
+          {
+            "label": "l8",
+            "value": 1
+          },
+          {
+            "label": "l9",
+            "value": 1
+          },
+          {
+            "label": "l10",
+            "value": 1
+          },
+          {
+            "label": "l11",
+            "value": 1
+          },
+          {
+            "label": "l12",
+            "value": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "progress, value is a string",
+      "verdict": "refuse",
+      "why": "value is a number",
+      "payload": {
+        "type": "progress",
+        "items": [
+          {
+            "label": "a",
+            "value": "8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "progress, max is zero",
+      "verdict": "refuse",
+      "why": "max must be above zero",
+      "payload": {
+        "type": "progress",
+        "items": [
+          {
+            "label": "a",
+            "value": 1,
+            "max": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "progress, max is negative",
+      "verdict": "refuse",
+      "why": "max must be above zero",
+      "payload": {
+        "type": "progress",
+        "items": [
+          {
+            "label": "a",
+            "value": 1,
+            "max": -5
+          }
+        ]
+      }
+    },
+    {
+      "name": "progress, no items",
+      "verdict": "refuse",
+      "why": "at least one",
+      "payload": {
+        "type": "progress",
+        "items": []
+      }
+    },
+    {
+      "name": "timeline, three states",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "timeline",
+        "items": [
+          {
+            "label": "Built",
+            "status": "done"
+          },
+          {
+            "label": "Review",
+            "status": "current"
+          },
+          {
+            "label": "Release",
+            "status": "next"
+          }
+        ]
+      }
+    },
+    {
+      "name": "timeline, twenty items",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "timeline",
+        "items": [
+          {
+            "label": "l0"
+          },
+          {
+            "label": "l1"
+          },
+          {
+            "label": "l2"
+          },
+          {
+            "label": "l3"
+          },
+          {
+            "label": "l4"
+          },
+          {
+            "label": "l5"
+          },
+          {
+            "label": "l6"
+          },
+          {
+            "label": "l7"
+          },
+          {
+            "label": "l8"
+          },
+          {
+            "label": "l9"
+          },
+          {
+            "label": "l10"
+          },
+          {
+            "label": "l11"
+          },
+          {
+            "label": "l12"
+          },
+          {
+            "label": "l13"
+          },
+          {
+            "label": "l14"
+          },
+          {
+            "label": "l15"
+          },
+          {
+            "label": "l16"
+          },
+          {
+            "label": "l17"
+          },
+          {
+            "label": "l18"
+          },
+          {
+            "label": "l19"
+          }
+        ]
+      }
+    },
+    {
+      "name": "timeline, twenty-one items",
+      "verdict": "refuse",
+      "why": "at most twenty",
+      "payload": {
+        "type": "timeline",
+        "items": [
+          {
+            "label": "l0"
+          },
+          {
+            "label": "l1"
+          },
+          {
+            "label": "l2"
+          },
+          {
+            "label": "l3"
+          },
+          {
+            "label": "l4"
+          },
+          {
+            "label": "l5"
+          },
+          {
+            "label": "l6"
+          },
+          {
+            "label": "l7"
+          },
+          {
+            "label": "l8"
+          },
+          {
+            "label": "l9"
+          },
+          {
+            "label": "l10"
+          },
+          {
+            "label": "l11"
+          },
+          {
+            "label": "l12"
+          },
+          {
+            "label": "l13"
+          },
+          {
+            "label": "l14"
+          },
+          {
+            "label": "l15"
+          },
+          {
+            "label": "l16"
+          },
+          {
+            "label": "l17"
+          },
+          {
+            "label": "l18"
+          },
+          {
+            "label": "l19"
+          },
+          {
+            "label": "l20"
+          }
+        ]
+      }
+    },
+    {
+      "name": "timeline, status is not one of the three",
+      "verdict": "refuse",
+      "why": "done, current or next",
+      "payload": {
+        "type": "timeline",
+        "items": [
+          {
+            "label": "a",
+            "status": "blocked"
+          }
+        ]
+      }
+    },
+    {
+      "name": "timeline, no items",
+      "verdict": "refuse",
+      "why": "at least one",
+      "payload": {
+        "type": "timeline",
+        "items": []
+      }
+    },
+    {
+      "name": "table, two columns",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "table",
+        "columns": [
+          "Choice",
+          "Cost"
+        ],
+        "rows": [
+          [
+            "A",
+            "$2"
+          ],
+          [
+            "B",
+            "$3"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "table, header only",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "table",
+        "columns": [
+          "Choice"
+        ],
+        "rows": []
+      }
+    },
+    {
+      "name": "table, eight columns",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "table",
+        "columns": [
+          "c0",
+          "c1",
+          "c2",
+          "c3",
+          "c4",
+          "c5",
+          "c6",
+          "c7"
+        ],
+        "rows": [
+          [
+            "v0",
+            "v1",
+            "v2",
+            "v3",
+            "v4",
+            "v5",
+            "v6",
+            "v7"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "table, thirty rows",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "table",
+        "columns": [
+          "a"
+        ],
+        "rows": [
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "table, nine columns",
+      "verdict": "refuse",
+      "why": "at most eight columns",
+      "payload": {
+        "type": "table",
+        "columns": [
+          "c0",
+          "c1",
+          "c2",
+          "c3",
+          "c4",
+          "c5",
+          "c6",
+          "c7",
+          "c8"
+        ],
+        "rows": []
+      }
+    },
+    {
+      "name": "table, thirty-one rows",
+      "verdict": "refuse",
+      "why": "at most thirty rows",
+      "payload": {
+        "type": "table",
+        "columns": [
+          "a"
+        ],
+        "rows": [
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ],
+          [
+            "x"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "table, no columns",
+      "verdict": "refuse",
+      "why": "at least one column",
+      "payload": {
+        "type": "table",
+        "columns": [],
+        "rows": []
+      }
+    },
+    {
+      "name": "table, a row is short",
+      "verdict": "refuse",
+      "why": "every row matches the columns",
+      "payload": {
+        "type": "table",
+        "columns": [
+          "a",
+          "b"
+        ],
+        "rows": [
+          [
+            "only one"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "table, a row is long",
+      "verdict": "refuse",
+      "why": "every row matches the columns",
+      "payload": {
+        "type": "table",
+        "columns": [
+          "a"
+        ],
+        "rows": [
+          [
+            "one",
+            "two"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "table, a cell is empty",
+      "verdict": "refuse",
+      "why": "cells must not be blank",
+      "payload": {
+        "type": "table",
+        "columns": [
+          "a"
+        ],
+        "rows": [
+          [
+            ""
+          ]
+        ]
+      }
+    },
+    {
+      "name": "table, a cell is a number",
+      "verdict": "refuse",
+      "why": "cells are strings",
+      "payload": {
+        "type": "table",
+        "columns": [
+          "a"
+        ],
+        "rows": [
+          [
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "name": "table, rows is not an array",
+      "verdict": "refuse",
+      "why": "rows must be a list",
+      "payload": {
+        "type": "table",
+        "columns": [
+          "a"
+        ],
+        "rows": "x"
+      }
+    },
+    {
+      "name": "video, https",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "video",
+        "src": "https://example.test/proof.mp4"
+      }
+    },
+    {
+      "name": "video, absolute path",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "video",
+        "title": "Proof",
+        "src": "/home/me/proof.webm"
+      }
+    },
+    {
+      "name": "video, file url with a poster",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "video",
+        "src": "file:///home/me/proof.webm",
+        "poster": "/home/me/poster.png"
+      }
+    },
+    {
+      "name": "video, no src",
+      "verdict": "refuse",
+      "why": "src is required",
+      "payload": {
+        "type": "video"
+      }
+    },
+    {
+      "name": "video, javascript scheme",
+      "verdict": "refuse",
+      "why": "src must name a media location",
+      "payload": {
+        "type": "video",
+        "src": "javascript:alert(1)"
+      }
+    },
+    {
+      "name": "video, relative path",
+      "verdict": "refuse",
+      "why": "src must be absolute or a permitted scheme",
+      "payload": {
+        "type": "video",
+        "src": "proof.webm"
+      }
+    },
+    {
+      "name": "video, a data url that is not video",
+      "verdict": "refuse",
+      "why": "only data:video is permitted",
+      "payload": {
+        "type": "video",
+        "src": "data:text/html,<script>"
+      }
+    },
+    {
+      "name": "video, poster with a bad scheme",
+      "verdict": "refuse",
+      "why": "poster must name a media location",
+      "payload": {
+        "type": "video",
+        "src": "/home/me/proof.webm",
+        "poster": "javascript:alert(1)"
+      }
+    },
+    {
+      "name": "image, asset and alt",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "image",
+        "asset": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png",
+        "alt": "Architecture"
+      }
+    },
+    {
+      "name": "image, with a caption",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "image",
+        "asset": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.webp",
+        "alt": "Architecture",
+        "caption": "After the change"
+      }
+    },
+    {
+      "name": "image, traversal in the asset name",
+      "verdict": "refuse",
+      "why": "asset must be a stored digest",
+      "payload": {
+        "type": "image",
+        "asset": "../secret.png",
+        "alt": "Secret"
+      }
+    },
+    {
+      "name": "image, asset digest is too short",
+      "verdict": "refuse",
+      "why": "asset must be a stored digest",
+      "payload": {
+        "type": "image",
+        "asset": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png",
+        "alt": "x"
+      }
+    },
+    {
+      "name": "image, asset digest is upper case",
+      "verdict": "refuse",
+      "why": "digests are lower case",
+      "payload": {
+        "type": "image",
+        "asset": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.png",
+        "alt": "x"
+      }
+    },
+    {
+      "name": "image, asset extension is not an image",
+      "verdict": "refuse",
+      "why": "png, jpg, gif or webp",
+      "payload": {
+        "type": "image",
+        "asset": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.svg",
+        "alt": "x"
+      }
+    },
+    {
+      "name": "image, no alt",
+      "verdict": "refuse",
+      "why": "alt is required",
+      "payload": {
+        "type": "image",
+        "asset": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png"
+      }
+    },
+    {
+      "name": "image, alt is blank",
+      "verdict": "refuse",
+      "why": "alt must not be blank",
+      "payload": {
+        "type": "image",
+        "asset": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png",
+        "alt": "   "
+      }
+    },
+    {
+      "name": "image, caption is longer than 200",
+      "verdict": "refuse",
+      "why": "displayed strings stop at 200 characters",
+      "payload": {
+        "type": "image",
+        "asset": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png",
+        "alt": "x",
+        "caption": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+      }
+    },
+    {
+      "name": "image compare, side by side",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "image_compare",
+        "mode": "side_by_side",
+        "before": {
+          "asset": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.jpg",
+          "alt": "Before"
+        },
+        "after": {
+          "asset": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.webp",
+          "alt": "After"
+        }
+      }
+    },
+    {
+      "name": "image compare, wipe",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "image_compare",
+        "mode": "wipe",
+        "before": {
+          "asset": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png",
+          "alt": "Before"
+        },
+        "after": {
+          "asset": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.png",
+          "alt": "After"
+        }
+      }
+    },
+    {
+      "name": "image compare, no mode",
+      "verdict": "refuse",
+      "why": "mode is required",
+      "payload": {
+        "type": "image_compare",
+        "before": {
+          "asset": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png",
+          "alt": "Before"
+        },
+        "after": {
+          "asset": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.png",
+          "alt": "After"
+        }
+      }
+    },
+    {
+      "name": "image compare, unknown mode",
+      "verdict": "refuse",
+      "why": "side_by_side or wipe",
+      "payload": {
+        "type": "image_compare",
+        "mode": "fade",
+        "before": {
+          "asset": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png",
+          "alt": "Before"
+        },
+        "after": {
+          "asset": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.png",
+          "alt": "After"
+        }
+      }
+    },
+    {
+      "name": "image compare, one side is not a stored asset",
+      "verdict": "refuse",
+      "why": "asset must be a stored digest",
+      "payload": {
+        "type": "image_compare",
+        "mode": "side_by_side",
+        "before": {
+          "asset": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.jpg",
+          "alt": "Before"
+        },
+        "after": {
+          "asset": "missing.png",
+          "alt": "After"
+        }
+      }
+    },
+    {
+      "name": "image compare, a side has no alt",
+      "verdict": "refuse",
+      "why": "both sides need alt text",
+      "payload": {
+        "type": "image_compare",
+        "mode": "side_by_side",
+        "before": {
+          "asset": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png"
+        },
+        "after": {
+          "asset": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.png",
+          "alt": "After"
+        }
+      }
+    },
+    {
+      "name": "image compare, a side carries an unknown field",
+      "verdict": "refuse",
+      "why": "unknown fields are refused",
+      "payload": {
+        "type": "image_compare",
+        "mode": "side_by_side",
+        "before": {
+          "asset": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png",
+          "alt": "Before",
+          "caption": "x"
+        },
+        "after": {
+          "asset": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.png",
+          "alt": "After"
+        }
+      }
+    },
+    {
+      "name": "artifact, mermaid",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "artifact",
+        "title": "Request lifecycle",
+        "kind": "mermaid",
+        "asset": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.artifact.json"
+      }
+    },
+    {
+      "name": "artifact, mockup",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "artifact",
+        "title": "Invite flow",
+        "kind": "mockup",
+        "asset": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.artifact.json"
+      }
+    },
+    {
+      "name": "artifact, kind is unknown",
+      "verdict": "refuse",
+      "why": "mermaid, flow, scene or mockup",
+      "payload": {
+        "type": "artifact",
+        "title": "T",
+        "kind": "chart",
+        "asset": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.artifact.json"
+      }
+    },
+    {
+      "name": "artifact, asset is an image",
+      "verdict": "refuse",
+      "why": "artifacts are stored as artifact.json",
+      "payload": {
+        "type": "artifact",
+        "title": "T",
+        "kind": "flow",
+        "asset": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png"
+      }
+    },
+    {
+      "name": "explainer, the documented example",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "explainer",
+        "layout": "sequence",
+        "title": "Session recovery",
+        "summary": "Only missed events are replayed.",
+        "nodes": [
+          {
+            "id": "drop",
+            "label": "Connection drops"
+          },
+          {
+            "id": "replay",
+            "label": "Replay"
+          },
+          {
+            "id": "live",
+            "label": "Live again"
+          }
+        ],
+        "edges": [
+          {
+            "from": "drop",
+            "to": "replay",
+            "label": "reconnect"
+          },
+          {
+            "from": "replay",
+            "to": "live",
+            "label": "caught up"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Browser disconnects",
+            "active": [
+              "drop"
+            ]
+          },
+          {
+            "label": "Missed events replay",
+            "active": [
+              "replay"
+            ]
+          },
+          {
+            "label": "Streaming resumes",
+            "active": [
+              "live"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, with evidence",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "explainer",
+        "nodes": [
+          {
+            "id": "web",
+            "label": "Web"
+          },
+          {
+            "id": "api",
+            "label": "API"
+          }
+        ],
+        "edges": [
+          {
+            "from": "web",
+            "to": "api"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Call",
+            "active": [
+              "web",
+              "api"
+            ]
+          }
+        ],
+        "evidence": [
+          {
+            "label": "Route",
+            "path": "/repo/api.ts",
+            "line": 42
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, flow layout",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "explainer",
+        "layout": "flow",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "edges": [
+          {
+            "from": "a",
+            "to": "b"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "a"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, sequence layout",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "explainer",
+        "layout": "sequence",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "edges": [
+          {
+            "from": "a",
+            "to": "b"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "a"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, cycle layout",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "explainer",
+        "layout": "cycle",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "edges": [
+          {
+            "from": "a",
+            "to": "b"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "a"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, layers layout",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "explainer",
+        "layout": "layers",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "edges": [
+          {
+            "from": "a",
+            "to": "b"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "a"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, twelve nodes",
+      "verdict": "accept",
+      "why": "",
+      "payload": {
+        "type": "explainer",
+        "nodes": [
+          {
+            "id": "n0",
+            "label": "N0"
+          },
+          {
+            "id": "n1",
+            "label": "N1"
+          },
+          {
+            "id": "n2",
+            "label": "N2"
+          },
+          {
+            "id": "n3",
+            "label": "N3"
+          },
+          {
+            "id": "n4",
+            "label": "N4"
+          },
+          {
+            "id": "n5",
+            "label": "N5"
+          },
+          {
+            "id": "n6",
+            "label": "N6"
+          },
+          {
+            "id": "n7",
+            "label": "N7"
+          },
+          {
+            "id": "n8",
+            "label": "N8"
+          },
+          {
+            "id": "n9",
+            "label": "N9"
+          },
+          {
+            "id": "n10",
+            "label": "N10"
+          },
+          {
+            "id": "n11",
+            "label": "N11"
+          }
+        ],
+        "edges": [
+          {
+            "from": "n0",
+            "to": "n1"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "n0"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, thirteen nodes",
+      "verdict": "refuse",
+      "why": "at most twelve nodes",
+      "payload": {
+        "type": "explainer",
+        "nodes": [
+          {
+            "id": "n0",
+            "label": "N0"
+          },
+          {
+            "id": "n1",
+            "label": "N1"
+          },
+          {
+            "id": "n2",
+            "label": "N2"
+          },
+          {
+            "id": "n3",
+            "label": "N3"
+          },
+          {
+            "id": "n4",
+            "label": "N4"
+          },
+          {
+            "id": "n5",
+            "label": "N5"
+          },
+          {
+            "id": "n6",
+            "label": "N6"
+          },
+          {
+            "id": "n7",
+            "label": "N7"
+          },
+          {
+            "id": "n8",
+            "label": "N8"
+          },
+          {
+            "id": "n9",
+            "label": "N9"
+          },
+          {
+            "id": "n10",
+            "label": "N10"
+          },
+          {
+            "id": "n11",
+            "label": "N11"
+          },
+          {
+            "id": "n12",
+            "label": "N12"
+          }
+        ],
+        "edges": [
+          {
+            "from": "n0",
+            "to": "n1"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "n0"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, one node",
+      "verdict": "refuse",
+      "why": "at least two nodes",
+      "payload": {
+        "type": "explainer",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          }
+        ],
+        "edges": [
+          {
+            "from": "a",
+            "to": "a"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "a"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, duplicate node ids",
+      "verdict": "refuse",
+      "why": "node ids are unique",
+      "payload": {
+        "type": "explainer",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "a",
+            "label": "B"
+          }
+        ],
+        "edges": [
+          {
+            "from": "a",
+            "to": "a"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "a"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, edge leaves from nowhere",
+      "verdict": "refuse",
+      "why": "edge ends must name nodes",
+      "payload": {
+        "type": "explainer",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "edges": [
+          {
+            "from": "ghost",
+            "to": "b"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "a"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, edge arrives nowhere",
+      "verdict": "refuse",
+      "why": "edge ends must name nodes",
+      "payload": {
+        "type": "explainer",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "edges": [
+          {
+            "from": "a",
+            "to": "ghost"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "a"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, no edges",
+      "verdict": "refuse",
+      "why": "at least one edge",
+      "payload": {
+        "type": "explainer",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "edges": [],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "a"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, twenty-one edges",
+      "verdict": "refuse",
+      "why": "at most twenty edges",
+      "payload": {
+        "type": "explainer",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "edges": [
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          },
+          {
+            "from": "a",
+            "to": "b"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "a"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, unknown layout",
+      "verdict": "refuse",
+      "why": "flow, sequence, cycle or layers",
+      "payload": {
+        "type": "explainer",
+        "layout": "orbit",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "edges": [
+          {
+            "from": "a",
+            "to": "b"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "a"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, no steps",
+      "verdict": "refuse",
+      "why": "at least one step",
+      "payload": {
+        "type": "explainer",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "edges": [
+          {
+            "from": "a",
+            "to": "b"
+          }
+        ],
+        "steps": []
+      }
+    },
+    {
+      "name": "explainer, thirteen steps",
+      "verdict": "refuse",
+      "why": "at most twelve steps",
+      "payload": {
+        "type": "explainer",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "edges": [
+          {
+            "from": "a",
+            "to": "b"
+          }
+        ],
+        "steps": [
+          {
+            "label": "s0",
+            "active": [
+              "a"
+            ]
+          },
+          {
+            "label": "s1",
+            "active": [
+              "a"
+            ]
+          },
+          {
+            "label": "s2",
+            "active": [
+              "a"
+            ]
+          },
+          {
+            "label": "s3",
+            "active": [
+              "a"
+            ]
+          },
+          {
+            "label": "s4",
+            "active": [
+              "a"
+            ]
+          },
+          {
+            "label": "s5",
+            "active": [
+              "a"
+            ]
+          },
+          {
+            "label": "s6",
+            "active": [
+              "a"
+            ]
+          },
+          {
+            "label": "s7",
+            "active": [
+              "a"
+            ]
+          },
+          {
+            "label": "s8",
+            "active": [
+              "a"
+            ]
+          },
+          {
+            "label": "s9",
+            "active": [
+              "a"
+            ]
+          },
+          {
+            "label": "s10",
+            "active": [
+              "a"
+            ]
+          },
+          {
+            "label": "s11",
+            "active": [
+              "a"
+            ]
+          },
+          {
+            "label": "s12",
+            "active": [
+              "a"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, a step lights nothing",
+      "verdict": "refuse",
+      "why": "a step must light at least one node",
+      "payload": {
+        "type": "explainer",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "edges": [
+          {
+            "from": "a",
+            "to": "b"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, a step lights a node that is not there",
+      "verdict": "refuse",
+      "why": "a step lights nodes that exist",
+      "payload": {
+        "type": "explainer",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "edges": [
+          {
+            "from": "a",
+            "to": "b"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "ghost"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, evidence path is relative",
+      "verdict": "refuse",
+      "why": "evidence paths are absolute",
+      "payload": {
+        "type": "explainer",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "edges": [
+          {
+            "from": "a",
+            "to": "b"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "a"
+            ]
+          }
+        ],
+        "evidence": [
+          {
+            "label": "Route",
+            "path": "src/api.ts"
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, evidence line is zero",
+      "verdict": "refuse",
+      "why": "line numbers start at one",
+      "payload": {
+        "type": "explainer",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "edges": [
+          {
+            "from": "a",
+            "to": "b"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "a"
+            ]
+          }
+        ],
+        "evidence": [
+          {
+            "label": "Route",
+            "path": "/repo/api.ts",
+            "line": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "explainer, thirteen pieces of evidence",
+      "verdict": "refuse",
+      "why": "at most twelve pieces of evidence",
+      "payload": {
+        "type": "explainer",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "edges": [
+          {
+            "from": "a",
+            "to": "b"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "a"
+            ]
+          }
+        ],
+        "evidence": [
+          {
+            "label": "e0",
+            "path": "/repo/api.ts"
+          },
+          {
+            "label": "e1",
+            "path": "/repo/api.ts"
+          },
+          {
+            "label": "e2",
+            "path": "/repo/api.ts"
+          },
+          {
+            "label": "e3",
+            "path": "/repo/api.ts"
+          },
+          {
+            "label": "e4",
+            "path": "/repo/api.ts"
+          },
+          {
+            "label": "e5",
+            "path": "/repo/api.ts"
+          },
+          {
+            "label": "e6",
+            "path": "/repo/api.ts"
+          },
+          {
+            "label": "e7",
+            "path": "/repo/api.ts"
+          },
+          {
+            "label": "e8",
+            "path": "/repo/api.ts"
+          },
+          {
+            "label": "e9",
+            "path": "/repo/api.ts"
+          },
+          {
+            "label": "e10",
+            "path": "/repo/api.ts"
+          },
+          {
+            "label": "e11",
+            "path": "/repo/api.ts"
+          },
+          {
+            "label": "e12",
+            "path": "/repo/api.ts"
+          }
+        ]
+      }
+    }
+  ]
+}
