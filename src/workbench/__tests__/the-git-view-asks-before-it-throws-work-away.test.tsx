@@ -41,6 +41,9 @@ const calls = vi.hoisted(() => ({
   push: vi.fn(),
   branches: vi.fn(),
   checkout: vi.fn(),
+  // The view subscribes to the repository while it is mounted (bw-8nwh.2);
+  // hand back a no-op unsubscribe so mounting it is not a crash here.
+  watch: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/lib/api', async (whatItReallyIs) => ({
