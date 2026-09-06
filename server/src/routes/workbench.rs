@@ -159,6 +159,10 @@ impl WorkbenchState {
     pub(crate) async fn has_driver(&self, session_id: &str) -> bool {
         self.registry.has_driver(session_id).await
     }
+    #[cfg(test)]
+    pub(crate) async fn pretend_driver(&self, session_id: &str) {
+        self.registry.pretend_driver(session_id).await
+    }
     pub(crate) async fn looked_at(&self, session_id: &str) {
         self.registry.looked_at(session_id).await
     }

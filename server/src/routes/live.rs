@@ -337,15 +337,42 @@ pub(crate) async fn follow_native_record(
         tokio::select! {
         _ = control.stopped() => break,
         _ = record_tick.tick() => {
-            // A native driver is the sole live source while Atelier owns the
-            // provider. Advance the durable byte cursor once and retire this
+            // A native driver is the sole live source for the conversation
+            // while Atelier owns the provider. For Codex that is the whole
+            // story: advance the durable byte cursor once and retire this
             // outside follower instead of polling beside the driver.
+            //
+            // A Claude record has one thing to say that the wire never does:
+            // when a shell or a watch the chat left running ended. The kit
+            // tells itself, in a queue row, and ACP carries no word of it. So
+            // beside a driver this follower keeps reading the record for those
+            // rows alone — a driven chat's shells stayed Running for eleven
+            // hours after they finished, and reopening did not help (bw-3cmk.1).
+            // Helpers are the driver's: ACP ends them with their own answer.
             if state.has_driver(&session.id).await {
-                if let Some(tail) = claude_tail.as_mut() { tail.to_end(); }
-                if let Some(tail) = codex_tail.as_mut() { tail.to_end(); }
-                let at=if session.brand=="claude"{claude_tail.as_ref().map(|tail|tail.through_line())}else{codex_tail.as_ref().map(|tail|tail.through_line())};
-                if let Some(at)=at{let _=state.database().remember_followed(session.id.clone(),at as i64).await;}
-                break;
+                if session.brand != "claude" {
+                    if let Some(tail) = codex_tail.as_mut() { tail.to_end(); }
+                    if let Some(at)=codex_tail.as_ref().map(|tail|tail.through_line()){let _=state.database().remember_followed(session.id.clone(),at as i64).await;}
+                    break;
+                }
+                let growth=claude_tail.as_mut().and_then(|tail|tail.grown().ok());
+                let Some(growth)=growth else { continue; };
+                if growth.rewritten { claude_lines.clear(); continue; }
+                let rows: Vec<serde_json::Value> = growth.lines.iter().filter_map(|line| serde_json::from_str(line).ok()).collect();
+                for mut value in crate::workbench::claude::history::record_notices(&rows) {
+                    if crate::workbench::claude::history::about_a_helper(&value) { continue; }
+                    let event_id=crate::workbench::protocol::provider_record_event_id(&session.brand,&value);
+                    let Some(object) = value.as_object_mut() else { continue; };
+                    object.insert("providerEvent".into(),serde_json::json!({"provider":session.brand,"threadId":session.external_id,"eventId":event_id,"delivery":"live"}));
+                    object.insert("sessionId".into(), serde_json::json!(session.id));
+                    object.insert("seq".into(), serde_json::json!(0));
+                    object.entry("at").or_insert_with(|| serde_json::json!(chrono::Utc::now().to_rfc3339()));
+                    if let Ok(event) = serde_json::from_value(value) {
+                        let _ = state.database().append(event).await;
+                    }
+                }
+                if let Some(at)=claude_tail.as_ref().map(|tail|tail.through_line()){let _=state.database().remember_followed(session.id.clone(),at as i64).await;}
+                continue;
             }
             let mut fresh = if session.brand=="claude" {
                 let growth=claude_tail.as_mut().and_then(|tail|tail.grown().ok());
@@ -795,6 +822,117 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn a_driven_chats_shell_is_closed_by_the_note_in_its_record() {
+        let (directory, state) = workbench_fixture();
+        let external = "22222222-2222-4222-8222-222222222222";
+        let project = directory.path().join("claude/projects/project");
+        fs::create_dir_all(&project).unwrap();
+        let record = project.join(format!("{external}.jsonl"));
+        fs::write(&record, "{\"type\":\"meta\",\"cwd\":\"/work/project\"}\n").unwrap();
+        let at = "2026-09-06T04:45:00Z";
+        state
+            .database()
+            .create_session(Session {
+                id: "chat-1".into(),
+                brand: "claude".into(),
+                external_id: Some(external.into()),
+                project_id: "project-1".into(),
+                project_path: "/work/project".into(),
+                cwd: "/work/project".into(),
+                model: Some("sonnet".into()),
+                permission_mode: "default".into(),
+                effort: None,
+                collaboration_mode: None,
+                title: Some("Driven".into()),
+                state: "streaming".into(),
+                origin: "app".into(),
+                created_at: at.into(),
+                last_active_at: at.into(),
+                last_spoke_at: None,
+            })
+            .await
+            .unwrap();
+        state.pretend_driver("chat-1").await;
+        // The driver already said the shell was handed off, off the tool's
+        // own answer over ACP; only its ending is missing from the wire.
+        state
+            .database()
+            .append(
+                serde_json::from_value(serde_json::json!({
+                    "type":"agent.started","sessionId":"chat-1","seq":0,"at":at,
+                    "agentId":"b3ovdktbe","toolCallId":"call-bg","kind":"command",
+                    "what":"cargo test","agentType":"shell","model":null
+                }))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (_lease, start) = state.chat_follow_subscription("chat-1").await;
+        let control = start.unwrap();
+        let follow_state = state.clone();
+        tokio::spawn(async move {
+            follow_native_record(follow_state, "chat-1".into(), control).await;
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let note = |id: &str, summary: &str| {
+            serde_json::json!({
+                "type":"queue-operation","operation":"enqueue","timestamp":"2026-09-06T04:46:29Z",
+                "content":format!("<task-notification>\n<task-id>{id}</task-id>\n<status>completed</status>\n<summary>{summary}</summary>\n</task-notification>")
+            })
+        };
+        let mut file = fs::OpenOptions::new().append(true).open(&record).unwrap();
+        writeln!(file, "{}", note("b3ovdktbe", "Background command \"Full cargo test\" completed (exit code 0)")).unwrap();
+        writeln!(file, "{}", note("a94ba500064fc0b02", "Agent \"SSH prompt\" finished")).unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type":"assistant","uuid":"answer-1","timestamp":at,
+                "message":{"id":"turn-1","role":"assistant","content":"words the driver already carried"}
+            })
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let closed = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let events = state.database().events_since("chat-1".into(), 0).await.unwrap();
+                if events.iter().any(|event| {
+                    event.kind == crate::workbench::protocol::EventKind::AgentFinished
+                        && event.fields.get("agentId").and_then(serde_json::Value::as_str) == Some("b3ovdktbe")
+                }) {
+                    break events;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("beside a driver, the record's note about a finished shell was never read");
+        let shell = closed
+            .iter()
+            .find(|event| {
+                event.kind == crate::workbench::protocol::EventKind::AgentFinished
+                    && event.fields.get("agentId").and_then(serde_json::Value::as_str) == Some("b3ovdktbe")
+            })
+            .unwrap();
+        assert_eq!(shell.fields.get("state").and_then(serde_json::Value::as_str), Some("done"));
+        assert_eq!(shell.fields.get("at").and_then(serde_json::Value::as_str), Some("2026-09-06T04:46:29Z"));
+
+        tokio::time::sleep(Duration::from_millis(350)).await;
+        let events = state.database().events_since("chat-1".into(), 0).await.unwrap();
+        assert!(
+            !events.iter().any(|event| event.fields.get("agentId").and_then(serde_json::Value::as_str) == Some("a94ba500064fc0b02")),
+            "a helper's ending is the driver's to report, with its own last words"
+        );
+        assert!(
+            !events.iter().any(|event| event.fields.get("text").and_then(serde_json::Value::as_str) == Some("words the driver already carried")),
+            "the conversation itself stays the driver's alone"
+        );
+        assert!(state.has_chat_follower("chat-1").await, "the follower stays on beside the driver");
     }
 
     #[tokio::test]

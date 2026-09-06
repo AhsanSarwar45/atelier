@@ -1176,16 +1176,63 @@ fn task_notification(text: &str) -> Option<Value> {
         Some(text[from..to].trim().to_string())
     };
     let task = field("task-id").filter(|task| !task.is_empty())?;
-    let status = field("status").unwrap_or_default();
-    // Anything but a clean finish is a failure the reader wants to see said as
-    // one. The kit writes `completed` for the good case and names the fault in
-    // the summary for the rest.
-    let state = if status == "completed" { "done" } else { "failed" };
+    // No `<status>` is not an ending. A watch (the kit's Monitor) writes a
+    // notification for every event it relays, with a `<summary>` and an
+    // `<event>` and no status at all; read as a finish, a monitor was marked
+    // failed the first time it had something to say (measured 2026-09-06 on
+    // a record with seven such rows, bw-3cmk.1).
+    let status = field("status")?;
+    // The kit writes `completed` for the good case, `killed` for one the owner
+    // stopped, and names the fault in the summary for the rest (bw-3cmk.1).
+    let state = match status.as_str() {
+        "completed" => "done",
+        "killed" => "stopped",
+        _ => "failed",
+    };
     Some(json!({
         "type":"agent.finished", "agentId":task, "state":state,
         "result":field("summary").unwrap_or_default(),
         "seconds":0, "tokens":0, "calls":0, "model":Value::Null
     }))
+}
+
+/**
+ * Every ending the kit wrote down for work it had in the background, read off
+ * the record's queue rows.
+ *
+ * Read on the enqueue alone: the same block is written again when the prompt
+ * is delivered and again when it is removed, and a row cannot finish three
+ * times (measured 2026-09-03, bw-t26l.20). Dated by the row, so an ending
+ * read back later is not dated by the moment it was read.
+ */
+pub fn record_notices(rows: &[Value]) -> Vec<Value> {
+    rows.iter()
+        .filter(|row| row["type"] == "queue-operation" && row["operation"] == "enqueue")
+        .filter_map(|row| {
+            let mut finished = task_notification(row["content"].as_str()?)?;
+            if let Some(at) = as_nonempty(&row["timestamp"]) {
+                finished["at"] = json!(at);
+            }
+            Some(finished)
+        })
+        .collect()
+}
+
+/**
+ * Whether a notice is about a helper rather than a shell or a watch.
+ *
+ * A helper's ending reaches the panel with its own last words — over ACP as
+ * `subagent_state_update`, on import from the helper's own record — and the
+ * kit's one-line notice for it (`Agent "…" finished`) landing afterwards would
+ * overwrite that answer with a receipt. Told apart by the summary the kit
+ * writes, the only place the notice says what kind of work it was: shells say
+ * `Background command "…"`, watches `Monitor …` (measured 2026-09-06 across
+ * 55 notices, bw-3cmk.1).
+ */
+pub fn about_a_helper(notice: &Value) -> bool {
+    notice["result"]
+        .as_str()
+        .is_some_and(|summary| summary.starts_with("Agent \""))
 }
 
 pub fn handed_off(answer: &Value, tool_call_id: &str, title: &str) -> Option<Value> {
@@ -1764,6 +1811,15 @@ pub fn read_history(record: &Path) -> ClaudeHistory {
     let mut events = transcript_events(&conversation, None);
     let (helpers, delegated) = helper_events(facts, &tool_outcomes(&rows));
     events.extend(helpers);
+    // The endings of shells and watches, which live in queue rows that are not
+    // part of the conversation and were read by nobody here: a chat reopened
+    // after its build finished showed the build still running (bw-3cmk.1).
+    // Helpers already ended above, with their own last words.
+    events.extend(
+        record_notices(&rows)
+            .into_iter()
+            .filter(|notice| !about_a_helper(notice)),
+    );
     if let Some(used) = spent.context {
         events.push(json!({"type":"context", "used":used, "window":spent.window}));
     }
@@ -1840,21 +1896,8 @@ pub fn replay_lines(lines: &[String]) -> Vec<Value> {
     // And the other end of backgrounded work: nothing on the wire ever says a
     // command left running has ended, because the kit tells ITSELF — it drops a
     // `<task-notification>` into its own prompt queue, and that queue is
-    // written down here. Read on the enqueue alone: the same block is written
-    // again when the prompt is delivered and again when it is removed, and a
-    // row cannot finish three times (measured 2026-09-03, bw-t26l.20).
-    for row in &rows {
-        if row["type"] != "queue-operation" || row["operation"] != "enqueue" {
-            continue;
-        }
-        let Some(text) = row["content"].as_str() else {
-            continue;
-        };
-        let Some(finished) = task_notification(text) else {
-            continue;
-        };
-        events.push(finished);
-    }
+    // written down here.
+    events.extend(record_notices(&rows));
     for row in &rows {
         if row["type"] != "system" {
             continue;
@@ -2308,6 +2351,77 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("exit code 0"));
+    }
+
+    #[test]
+    fn a_reopened_chat_reads_the_endings_of_its_shells_off_the_record() {
+        let home = tempdir().unwrap();
+        let dir = home.path().join("projects/project");
+        create_dir_all(&dir).unwrap();
+        let record = dir.join(format!("{CHAT}.jsonl"));
+        let call = json!({
+            "type":"assistant","uuid":"a1","timestamp":"2026-09-06T04:45:00Z",
+            "message":{"role":"assistant","content":[{"type":"tool_use","id":"call-bg","name":"Bash",
+                "input":{"command":"cargo test","run_in_background":true}}]}
+        });
+        let answer = json!({
+            "type":"user","uuid":"u1","parentUuid":"a1","timestamp":"2026-09-06T04:45:01Z",
+            "message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-bg",
+                "content":"Command running in background with ID: b3ovdktbe"}]},
+            "toolUseResult":{"stdout":"","stderr":"","interrupted":false,"backgroundTaskId":"b3ovdktbe"}
+        });
+        let note = |operation: &str, id: &str, status: &str, summary: &str| {
+            json!({
+                "type":"queue-operation","operation":operation,"timestamp":"2026-09-06T04:46:29Z",
+                "content":format!("<task-notification>\n<task-id>{id}</task-id>\n<status>{status}</status>\n<summary>{summary}</summary>\n</task-notification>")
+            })
+        };
+        let shell = note("enqueue", "b3ovdktbe", "completed", "Background command \"Full cargo test\" completed (exit code 0)");
+        let delivered = note("remove", "b3ovdktbe", "completed", "Background command \"Full cargo test\" completed (exit code 0)");
+        let helper = note("enqueue", "a94ba500064fc0b02", "completed", "Agent \"SSH prompt\" finished");
+        let watch = json!({
+            "type":"queue-operation","operation":"enqueue","timestamp":"2026-09-06T04:47:00Z",
+            "content":"<task-notification>\n<task-id>b8amj484z</task-id>\n<summary>Monitor event: \"landing\"</summary>\n<event>LANDED</event>\n</task-notification>"
+        });
+        write(
+            &record,
+            format!("{call}\n{answer}\n{shell}\n{helper}\n{watch}\n{delivered}\n"),
+        )
+        .unwrap();
+
+        let events = read_history(&record).events;
+        assert!(
+            events.iter().any(|event| event["type"] == "agent.started" && event["agentId"] == "b3ovdktbe"),
+            "the shell never reached the panel"
+        );
+        let finished: Vec<_> = events
+            .iter()
+            .filter(|event| event["type"] == "agent.finished")
+            .collect();
+        assert_eq!(
+            finished.len(),
+            1,
+            "one shell ended once; the helper's notice and the watch's event are not endings: {finished:?}"
+        );
+        assert_eq!(finished[0]["agentId"], "b3ovdktbe");
+        assert_eq!(finished[0]["state"], "done");
+        assert_eq!(finished[0]["at"], "2026-09-06T04:46:29Z");
+    }
+
+    #[test]
+    fn a_stopped_shell_is_stopped_and_a_watchs_event_is_not_an_ending() {
+        let killed = task_notification(
+            "<task-notification>\n<task-id>b1</task-id>\n<status>killed</status>\n<summary>Background command \"x\" was stopped</summary>\n</task-notification>",
+        )
+        .unwrap();
+        assert_eq!(killed["state"], "stopped");
+        assert!(task_notification(
+            "<task-notification>\n<task-id>b8amj484z</task-id>\n<summary>Monitor event: \"landing\"</summary>\n<event>LANDED</event>\n</task-notification>"
+        )
+        .is_none());
+        assert!(about_a_helper(&json!({"result":"Agent \"SSH prompt\" finished"})));
+        assert!(!about_a_helper(&json!({"result":"Background command \"x\" completed (exit code 0)"})));
+        assert!(!about_a_helper(&json!({"result":"Monitor \"landing\" stream ended"})));
     }
 
     /// A workflow says what it is for in its own answer. The script that

@@ -258,6 +258,17 @@ impl WorkbenchRegistry {
         self.drivers.read().await.contains_key(session_id)
     }
 
+    /// A test's stand-in for a live provider: the entry alone is what
+    /// `has_driver` reads, and nothing is ever sent down it.
+    #[cfg(test)]
+    pub(crate) async fn pretend_driver(&self, session_id: &str) {
+        let (requests, _receiver) = mpsc::unbounded_channel();
+        self.drivers
+            .write()
+            .await
+            .insert(session_id.to_string(), requests);
+    }
+
     /// Reading by URL is the same operation as clicking a stored row. It does
     /// not attach a provider, but it heals stale state and starts the durable
     /// history import/follower needed by both entry paths.
