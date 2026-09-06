@@ -154,6 +154,7 @@ async fn stage(dir: &TempDir, files: &[&str]) -> (StatusCode, Value) {
         git::stage(GitJson(git::FilesRequest {
             path: here(dir),
             files: files.iter().map(|f| (*f).to_string()).collect(),
+            all: false,
         }))
         .await,
     )
@@ -165,10 +166,77 @@ async fn unstage(dir: &TempDir, files: &[&str]) -> (StatusCode, Value) {
         git::unstage(GitJson(git::FilesRequest {
             path: here(dir),
             files: files.iter().map(|f| (*f).to_string()).collect(),
+            all: false,
         }))
         .await,
     )
     .await
+}
+
+/// The bulk form of the same two: everything, rather than the files named.
+async fn stage_all(dir: &TempDir) -> (StatusCode, Value) {
+    answered(
+        git::stage(GitJson(git::FilesRequest {
+            path: here(dir),
+            files: vec![],
+            all: true,
+        }))
+        .await,
+    )
+    .await
+}
+
+async fn unstage_all(dir: &TempDir) -> (StatusCode, Value) {
+    answered(
+        git::unstage(GitJson(git::FilesRequest {
+            path: here(dir),
+            files: vec![],
+            all: true,
+        }))
+        .await,
+    )
+    .await
+}
+
+async fn discard(dir: &TempDir, files: &[&str]) -> (StatusCode, Value) {
+    answered(
+        git::discard(GitJson(git::FilesRequest {
+            path: here(dir),
+            files: files.iter().map(|f| (*f).to_string()).collect(),
+            all: false,
+        }))
+        .await,
+    )
+    .await
+}
+
+async fn discard_all(dir: &TempDir) -> (StatusCode, Value) {
+    answered(
+        git::discard(GitJson(git::FilesRequest {
+            path: here(dir),
+            files: vec![],
+            all: true,
+        }))
+        .await,
+    )
+    .await
+}
+
+async fn remove(dir: &TempDir, files: &[&str]) -> (StatusCode, Value) {
+    answered(
+        git::remove(GitJson(git::FilesRequest {
+            path: here(dir),
+            files: files.iter().map(|f| (*f).to_string()).collect(),
+            all: false,
+        }))
+        .await,
+    )
+    .await
+}
+
+/// What a file says on disk right now.
+fn reads(at: &Path, name: &str) -> String {
+    fs::read_to_string(at.join(name)).expect("the file is there to read")
 }
 
 async fn commit(dir: &TempDir, message: &str, amend: bool) -> (StatusCode, Value) {
@@ -368,6 +436,7 @@ async fn many_mutating_calls_at_one_project_wait_for_each_other_instead_of_colli
         git::stage(GitJson(git::FilesRequest {
             path: here(&repo),
             files: vec![name.clone()],
+            all: false,
         }))
     });
     let answers = futures::future::join_all(calls).await;
@@ -515,6 +584,184 @@ async fn picking_a_file_that_is_not_there_arrives_in_gits_own_words() {
     let said = body["error"].as_str().expect("git's own words");
     assert!(said.contains("never-written.txt"), "{said}");
     assert!(said.contains("did not match any files"), "{said}");
+}
+
+// ============================================================================
+// bw-8nwh.3 — the bulk and destructive actions
+// ============================================================================
+
+#[tokio::test]
+async fn everything_is_picked_up_at_once_and_put_back_at_once() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "kept.txt", "one\n");
+    save_all(at, "seed");
+
+    put(at, "kept.txt", "one\ntwo\n");
+    put(at, "src/new.ts", "export const made = true;\n");
+    fs::remove_file(at.join("kept.txt")).ok();
+    put(at, "kept.txt", "one\ntwo\n");
+
+    let (code, body) = stage_all(&repo).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+
+    // `git add -A`, so the file git had never heard of is picked up too — the
+    // thing per-file staging would have needed two calls for.
+    let (_, seen) = status_of(&repo).await;
+    let mut picked = named(&seen, "staged");
+    picked.sort();
+    assert_eq!(picked, vec!["kept.txt", "src/new.ts"]);
+    assert!(named(&seen, "untracked").is_empty(), "{seen}");
+
+    let (code, body) = unstage_all(&repo).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+
+    let (_, seen) = status_of(&repo).await;
+    assert!(named(&seen, "staged").is_empty(), "nothing is picked now: {seen}");
+    // Putting the index back never touches what the files say on disk.
+    assert_eq!(named(&seen, "unstaged"), vec!["kept.txt"]);
+    assert_eq!(named(&seen, "untracked"), vec!["src/new.ts"]);
+    assert_eq!(reads(at, "kept.txt"), "one\ntwo\n");
+}
+
+#[tokio::test]
+async fn a_project_with_nothing_saved_yet_can_still_put_everything_back() {
+    // `git restore --staged` needs a HEAD to read and dies without one, which
+    // is exactly the repository somebody is most likely to be picking files in
+    // and out of. `git reset` is why this passes.
+    let repo = a_repo();
+    put(repo.path(), "first.txt", "the very first file\n");
+
+    let (code, body) = stage_all(&repo).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(named(&status_of(&repo).await.1, "staged"), vec!["first.txt"]);
+
+    let (code, body) = unstage_all(&repo).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    let (_, seen) = status_of(&repo).await;
+    assert!(named(&seen, "staged").is_empty(), "{seen}");
+    assert_eq!(named(&seen, "untracked"), vec!["first.txt"]);
+}
+
+#[tokio::test]
+async fn discarding_one_file_puts_it_back_to_what_was_saved_and_leaves_the_others() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "spoilt.txt", "the words that were saved\n");
+    put(at, "other.txt", "left alone\n");
+    save_all(at, "seed");
+
+    put(at, "spoilt.txt", "what an agent wrote over them\n");
+    put(at, "other.txt", "left alone, and changed\n");
+
+    let (code, body) = discard(&repo, &["spoilt.txt"]).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+
+    // The crux: the file on disk holds what HEAD holds again.
+    assert_eq!(reads(at, "spoilt.txt"), "the words that were saved\n");
+    // And nothing else was touched, which is the other half of doing what was
+    // asked and no more.
+    assert_eq!(reads(at, "other.txt"), "left alone, and changed\n");
+    assert_eq!(named(&status_of(&repo).await.1, "unstaged"), vec!["other.txt"]);
+}
+
+#[tokio::test]
+async fn discarding_a_files_unstaged_half_leaves_what_was_already_picked() {
+    // A file changed, picked up, and then changed again is in both groups at
+    // once. Discarding the row in "Not staged" has to lose only that half:
+    // `restore --worktree` alone, never `--staged` with it.
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "twice.txt", "one\n");
+    save_all(at, "seed");
+
+    put(at, "twice.txt", "one\ntwo\n");
+    stage(&repo, &["twice.txt"]).await;
+    put(at, "twice.txt", "one\ntwo\nthree\n");
+
+    let (code, body) = discard(&repo, &["twice.txt"]).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+
+    assert_eq!(reads(at, "twice.txt"), "one\ntwo\n", "back to what was picked");
+    let (_, seen) = status_of(&repo).await;
+    assert_eq!(named(&seen, "staged"), vec!["twice.txt"], "{seen}");
+    assert!(named(&seen, "unstaged").is_empty(), "{seen}");
+}
+
+#[tokio::test]
+async fn a_file_git_has_never_heard_of_is_deleted_and_a_tracked_one_is_not() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "kept.txt", "saved and staying\n");
+    save_all(at, "seed");
+    put(at, "scratch/notes.txt", "nobody told git about this\n");
+
+    let (code, body) = remove(&repo, &["scratch/notes.txt"]).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert!(!at.join("scratch/notes.txt").exists(), "the file is still there");
+
+    // `git clean` only ever touches untracked files, so a tracked path sent
+    // here by mistake is left where it is rather than deleted.
+    let (code, body) = remove(&repo, &["kept.txt"]).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(reads(at, "kept.txt"), "saved and staying\n");
+
+    // And naming nothing is refused rather than sweeping the project.
+    let (code, body) = remove(&repo, &[]).await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().expect("a reason").contains("No files"));
+}
+
+#[tokio::test]
+async fn discarding_everything_clears_all_three_groups_and_keeps_what_is_ignored() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, ".gitignore", "*.log\nbuild/\n");
+    put(at, "kept.txt", "the words that were saved\n");
+    save_all(at, "seed");
+
+    // One of each: changed and not picked, changed and picked, brand new, in a
+    // new folder, and two the project has told git to look away from.
+    put(at, "kept.txt", "changed by an agent\n");
+    put(at, "picked.txt", "picked up but never saved\n");
+    stage(&repo, &["picked.txt"]).await;
+    put(at, "loose.txt", "nobody told git about this\n");
+    put(at, "scratch/deeper.txt", "nor this\n");
+    put(at, "noisy.log", "an ignored file\n");
+    put(at, "build/output.bin", "an ignored build\n");
+
+    let (code, body) = discard_all(&repo).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+
+    // Everything tracked is back at HEAD, and everything new is gone.
+    assert_eq!(reads(at, "kept.txt"), "the words that were saved\n");
+    assert!(!at.join("picked.txt").exists(), "a picked-up new file survived");
+    assert!(!at.join("loose.txt").exists(), "an untracked file survived");
+    assert!(!at.join("scratch").exists(), "an untracked folder survived");
+
+    // And what the project ignores is untouched. This is the whole reason the
+    // route runs `git clean -fd` and never `-fdx`: `-x` is what deletes
+    // somebody's .env, their node_modules and their build.
+    assert_eq!(reads(at, "noisy.log"), "an ignored file\n");
+    assert_eq!(reads(at, "build/output.bin"), "an ignored build\n");
+
+    // git's own opinion, which is the only one that counts.
+    assert_eq!(run(at, &["status", "--porcelain", "--untracked-files=all"]), "");
+    let (_, seen) = status_of(&repo).await;
+    assert!(named(&seen, "staged").is_empty(), "{seen}");
+    assert!(named(&seen, "unstaged").is_empty(), "{seen}");
+    assert!(named(&seen, "untracked").is_empty(), "{seen}");
+}
+
+#[tokio::test]
+async fn discarding_nothing_at_all_is_refused_rather_than_quietly_doing_nothing() {
+    let repo = a_repo();
+    put(repo.path(), "kept.txt", "one\n");
+    save_all(repo.path(), "seed");
+
+    let (code, body) = discard(&repo, &[]).await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().expect("a reason").contains("No files"));
 }
 
 // ============================================================================
@@ -842,10 +1089,13 @@ async fn a_project_with_nothing_saved_yet_has_an_empty_history_and_still_answers
 // ============================================================================
 
 /// Every route the contract names, as `main.rs` is expected to register it.
-const CONTRACT: [(&str, &str); 10] = [
+const CONTRACT: [(&str, &str); 12] = [
     ("get", "/api/git/status"),
     ("post", "/api/git/stage"),
     ("post", "/api/git/unstage"),
+    // The two destructive ones the panel asks about first (bw-8nwh.3).
+    ("post", "/api/git/discard"),
+    ("post", "/api/git/remove"),
     ("post", "/api/git/commit"),
     ("post", "/api/git/fetch"),
     ("post", "/api/git/pull"),
@@ -863,8 +1113,8 @@ const OLDER: [(&str, &str); 1] = [("get", "/api/git/branch-status")];
 #[test]
 fn the_server_registers_every_route_the_contract_names() {
     let handlers = [
-        "status", "stage", "unstage", "commit", "fetch", "pull", "push", "branches", "checkout",
-        "log",
+        "status", "stage", "unstage", "discard", "remove", "commit", "fetch", "pull", "push",
+        "branches", "checkout", "log",
     ];
     let main = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -889,6 +1139,8 @@ async fn served() -> (String, tokio::task::JoinHandle<()>) {
         .route("/api/git/status", axum::routing::get(git::status))
         .route("/api/git/stage", axum::routing::post(git::stage))
         .route("/api/git/unstage", axum::routing::post(git::unstage))
+        .route("/api/git/discard", axum::routing::post(git::discard))
+        .route("/api/git/remove", axum::routing::post(git::remove))
         .route("/api/git/commit", axum::routing::post(git::commit))
         .route("/api/git/fetch", axum::routing::post(git::fetch))
         .route("/api/git/pull", axum::routing::post(git::pull))

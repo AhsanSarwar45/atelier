@@ -126,6 +126,70 @@ describe('the writes', () => {
     });
   });
 
+  it('stages everything with a flag, not with every path it happens to hold', async () => {
+    mockFetch.mockResolvedValue(mockResponse({ ok: true }));
+
+    await api.git.stageAll(REPO);
+
+    // The panel's list is as old as its last read and the repository is not:
+    // a stage-all built from stale paths stages the wrong set silently.
+    expect(theCall()).toEqual({
+      url: '/api/git/stage',
+      method: 'POST',
+      body: { path: REPO, all: true },
+    });
+  });
+
+  it('unstages everything the same way', async () => {
+    mockFetch.mockResolvedValue(mockResponse({ ok: true }));
+
+    await api.git.unstageAll(REPO);
+
+    expect(theCall()).toEqual({
+      url: '/api/git/unstage',
+      method: 'POST',
+      body: { path: REPO, all: true },
+    });
+  });
+
+  it('discards named files at the agreed path', async () => {
+    mockFetch.mockResolvedValue(mockResponse({ ok: true }));
+
+    await api.git.discard(REPO, ['src/b.ts']);
+
+    expect(theCall()).toEqual({
+      url: '/api/git/discard',
+      method: 'POST',
+      body: { path: REPO, files: ['src/b.ts'] },
+    });
+  });
+
+  it('discards everything with the same flag the bulk calls use', async () => {
+    mockFetch.mockResolvedValue(mockResponse({ ok: true }));
+
+    await api.git.discardAll(REPO);
+
+    expect(theCall()).toEqual({
+      url: '/api/git/discard',
+      method: 'POST',
+      body: { path: REPO, all: true },
+    });
+  });
+
+  it('removes files git has never been told about, by name and only by name', async () => {
+    mockFetch.mockResolvedValue(mockResponse({ ok: true }));
+
+    await api.git.remove(REPO, ['brand-new.ts']);
+
+    // No `all` here on purpose: deleting every untracked file at once is what
+    // discardAll is for, and it is reached by its own button.
+    expect(theCall()).toEqual({
+      url: '/api/git/remove',
+      method: 'POST',
+      body: { path: REPO, files: ['brand-new.ts'] },
+    });
+  });
+
   it('commits under a message, and says nothing about amending unless asked', async () => {
     mockFetch.mockResolvedValue(mockResponse({ sha: 'deadbeef' }));
 

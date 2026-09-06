@@ -505,6 +505,10 @@ async fn serve(open_browser: bool) {
         .route("/api/git/status", get(routes::git::status))
         .route("/api/git/stage", post(routes::git::stage))
         .route("/api/git/unstage", post(routes::git::unstage))
+        // The two that throw work away. Both are asked about in the panel
+        // before they are called (bw-8nwh.3).
+        .route("/api/git/discard", post(routes::git::discard))
+        .route("/api/git/remove", post(routes::git::remove))
         .route("/api/git/commit", post(routes::git::commit))
         .route("/api/git/fetch", post(routes::git::fetch))
         .route("/api/git/pull", post(routes::git::pull))

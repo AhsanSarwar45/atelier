@@ -797,32 +797,189 @@ pub struct FilesRequest {
     /// Absolute working directory of the repository.
     pub path: String,
     /// Paths relative to the repository root.
+    ///
+    /// Empty is only allowed when `all` is set. Left empty without it, the
+    /// call is refused rather than quietly doing nothing (bw-8dp8.1).
+    #[serde(default)]
     pub files: Vec<String>,
+    /// Everything the repository has, rather than the files named.
+    ///
+    /// The panel's bulk buttons (bw-8nwh.3). A flag rather than the caller
+    /// sending every path it happens to have drawn, because the panel's list
+    /// is as old as its last read and the repository is not: a stage-all built
+    /// from stale paths stages the wrong set and says nothing about it.
+    #[serde(default)]
+    pub all: bool,
 }
 
 /// Pick files to be saved.
 ///
 /// # Endpoint
 ///
-/// `POST /api/git/stage` — `{ path, files }`
+/// `POST /api/git/stage` — `{ path, files?, all? }`
+///
+/// `all` is `git add -A`: everything changed, everything new, and every
+/// deletion, which is what the panel's "Stage all" means.
 pub async fn stage(GitJson(body): GitJson<FilesRequest>) -> Answer {
-    change_the_index(body, &["add", "--"]).await
+    change_the_index(body, &["add", "--"], &["add", "-A"]).await
 }
 
 /// Put picked files back.
 ///
 /// # Endpoint
 ///
-/// `POST /api/git/unstage` — `{ path, files }`
+/// `POST /api/git/unstage` — `{ path, files?, all? }`
+///
+/// `all` is `git reset -q`, not `git restore --staged -- .`, because a
+/// repository with nothing saved in it yet has no HEAD for `restore` to read
+/// and it dies with `fatal: could not resolve HEAD`. `reset` puts the index
+/// back in both repositories, and a project whose first commit has not been
+/// made is exactly the one somebody is most likely to be picking files in and
+/// out of.
 pub async fn unstage(GitJson(body): GitJson<FilesRequest>) -> Answer {
-    change_the_index(body, &["restore", "--staged", "--"]).await
+    change_the_index(body, &["restore", "--staged", "--"], &["reset", "-q"]).await
 }
 
-async fn change_the_index(body: FilesRequest, verb: &[&str]) -> Answer {
+/// Run `verb` over the named files, or `sweep` over the whole repository.
+async fn change_the_index(body: FilesRequest, verb: &[&str], sweep: &[&str]) -> Answer {
     let repo = checked_repo(&body.path)?;
 
-    // `git add --` with nothing after it succeeds and does nothing, which
-    // would read back as a stage that worked. Say what happened instead.
+    let args: Vec<&str> = if body.all {
+        sweep.to_vec()
+    } else {
+        // `git add --` with nothing after it succeeds and does nothing, which
+        // would read back as a stage that worked. Say what happened instead.
+        if body.files.is_empty() {
+            return Err(Refused::new(
+                StatusCode::BAD_REQUEST,
+                "No files were named".to_string(),
+            ));
+        }
+        let mut args: Vec<&str> = verb.to_vec();
+        args.extend(body.files.iter().map(String::as_str));
+        args
+    };
+
+    let turn = repo_lock(&repo);
+    let _holding = turn.lock().await;
+
+    spoke_or_refused(run_git(&repo, &args).await?)?;
+    Ok(did_it())
+}
+
+// ----------------------------------------------------------------------------
+// POST /api/git/discard, POST /api/git/remove
+// ----------------------------------------------------------------------------
+
+/// Which of the named paths git already knows about.
+///
+/// `git ls-files -- <paths>` answers with the ones that are in the index, so
+/// the rest are files git has never been told about. The two halves are undone
+/// by different commands — `restore` puts a tracked file back, and only
+/// `clean` deletes an untracked one — and asking git which is which beats
+/// trusting whichever group the panel happened to draw the row in.
+async fn the_tracked_ones(repo: &Path, files: &[String]) -> Result<Vec<String>, Refused> {
+    let mut args: Vec<&str> = vec!["ls-files", "-z", "--"];
+    args.extend(files.iter().map(String::as_str));
+    let listed = spoke_or_refused(run_git(repo, &args).await?)?;
+    Ok(String::from_utf8_lossy(&listed.stdout)
+        .split('\0')
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
+/// Throw away what has been changed and not saved.
+///
+/// # Endpoint
+///
+/// `POST /api/git/discard` — `{ path, files?, all? }`
+///
+/// The destructive one. What it undoes is gone: git keeps no copy of a working
+/// tree edit that was never staged, so the panel asks before it calls this and
+/// this does exactly what it was asked and no more.
+///
+/// With files named, each is put back the way its own state needs. A tracked
+/// file is restored in the working tree **from the index**, not from HEAD, and
+/// the index is left alone: a file that was changed, picked up, and then
+/// changed again is in both groups at once, and the row being discarded is the
+/// one in "Not staged", so only that half may go. `--source=HEAD` here would
+/// quietly throw away the picked-up half as well. For a file that is not
+/// picked up the index holds HEAD's copy anyway, so the ordinary case is the
+/// same either way. An untracked file is deleted.
+///
+/// With `all`, everything tracked goes back to HEAD — index and working tree
+/// both — and every untracked file is removed. **Ignored files are kept**:
+/// `git clean -fd` without `-x` leaves them, and the difference matters,
+/// because `-x` is what deletes somebody's `.env`, their `node_modules` and
+/// their build. "Discard all" means the changes, never the things git was told
+/// to look away from.
+pub async fn discard(GitJson(body): GitJson<FilesRequest>) -> Answer {
+    let repo = checked_repo(&body.path)?;
+
+    if !body.all && body.files.is_empty() {
+        return Err(Refused::new(
+            StatusCode::BAD_REQUEST,
+            "No files were named".to_string(),
+        ));
+    }
+
+    let turn = repo_lock(&repo);
+    let _holding = turn.lock().await;
+
+    if body.all {
+        // A repository with no commits has no HEAD to go back to; putting the
+        // index back and sweeping up leaves it as empty as it started.
+        if has_commits(&repo).await {
+            spoke_or_refused(
+                run_git(
+                    &repo,
+                    &["restore", "--worktree", "--staged", "--source=HEAD", "--", "."],
+                )
+                .await?,
+            )?;
+        } else {
+            spoke_or_refused(run_git(&repo, &["reset", "-q"]).await?)?;
+        }
+        spoke_or_refused(run_git(&repo, &["clean", "-fdq"]).await?)?;
+        return Ok(did_it());
+    }
+
+    let tracked = the_tracked_ones(&repo, &body.files).await?;
+    let untracked: Vec<&str> = body
+        .files
+        .iter()
+        .map(String::as_str)
+        .filter(|named| !tracked.iter().any(|known| known == named))
+        .collect();
+
+    if !tracked.is_empty() {
+        let mut args: Vec<&str> = vec!["restore", "--worktree", "--"];
+        args.extend(tracked.iter().map(String::as_str));
+        spoke_or_refused(run_git(&repo, &args).await?)?;
+    }
+    if !untracked.is_empty() {
+        spoke_or_refused(clean_away(&repo, &untracked).await?)?;
+    }
+
+    Ok(did_it())
+}
+
+/// Delete files git has never been told about.
+///
+/// # Endpoint
+///
+/// `POST /api/git/remove` — `{ path, files }`
+///
+/// Destructive, and the panel asks first. `git clean` only ever touches
+/// untracked files, so a tracked path sent here by mistake is left exactly
+/// where it is rather than deleted — the safe way round.
+pub async fn remove(GitJson(body): GitJson<FilesRequest>) -> Answer {
+    let repo = checked_repo(&body.path)?;
+
+    // No `all` here on purpose. Deleting every untracked file at once is what
+    // "Discard all" is for, and it is reached by its own button and its own
+    // confirmation.
     if body.files.is_empty() {
         return Err(Refused::new(
             StatusCode::BAD_REQUEST,
@@ -830,14 +987,20 @@ async fn change_the_index(body: FilesRequest, verb: &[&str]) -> Answer {
         ));
     }
 
-    let mut args: Vec<&str> = verb.to_vec();
-    args.extend(body.files.iter().map(String::as_str));
-
     let turn = repo_lock(&repo);
     let _holding = turn.lock().await;
 
-    spoke_or_refused(run_git(&repo, &args).await?)?;
+    let named: Vec<&str> = body.files.iter().map(String::as_str).collect();
+    spoke_or_refused(clean_away(&repo, &named).await?)?;
     Ok(did_it())
+}
+
+/// `git clean` over the named paths — never `-x`, so what the project ignores
+/// stays on disk.
+async fn clean_away(repo: &Path, files: &[&str]) -> Result<Output, Refused> {
+    let mut args: Vec<&str> = vec!["clean", "-fdq", "--"];
+    args.extend(files.iter().copied());
+    run_git(repo, &args).await
 }
 
 // ----------------------------------------------------------------------------

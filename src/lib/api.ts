@@ -627,6 +627,47 @@ export const git = {
     body: JSON.stringify({ path, files }),
   }),
 
+  // The bulk and destructive actions (bw-8nwh.3). The bulk ones send `all`
+  // rather than every path the panel happens to be drawing: that list is as
+  // old as the last read and the repository is not, so a stage-all built from
+  // it would stage the wrong set the moment an agent wrote a file underneath.
+
+  /** Pick up everything changed, new and deleted — `git add -A`. */
+  stageAll: (path: string) => fetchApi<GitOk>('/api/git/stage', {
+    method: 'POST',
+    body: JSON.stringify({ path, all: true }),
+  }),
+
+  /** Put all of it back, leaving the working tree alone. */
+  unstageAll: (path: string) => fetchApi<GitOk>('/api/git/unstage', {
+    method: 'POST',
+    body: JSON.stringify({ path, all: true }),
+  }),
+
+  /**
+   * Throw away what these files have changed and not saved. Destructive: git
+   * keeps no copy of an unstaged edit, so the panel asks before calling this.
+   */
+  discard: (path: string, files: string[]) => fetchApi<GitOk>('/api/git/discard', {
+    method: 'POST',
+    body: JSON.stringify({ path, files }),
+  }),
+
+  /**
+   * Everything tracked back to HEAD and every untracked file gone. What the
+   * project ignores is kept — this never reaches a `.env` or a build.
+   */
+  discardAll: (path: string) => fetchApi<GitOk>('/api/git/discard', {
+    method: 'POST',
+    body: JSON.stringify({ path, all: true }),
+  }),
+
+  /** Delete files git has never been told about. Destructive; asked about. */
+  remove: (path: string, files: string[]) => fetchApi<GitOk>('/api/git/remove', {
+    method: 'POST',
+    body: JSON.stringify({ path, files }),
+  }),
+
   /** Save the picked files under a message. `amend` rewrites the last one instead. */
   commit: (path: string, message: string, amend?: boolean) =>
     fetchApi<GitCommitResponse>('/api/git/commit', {

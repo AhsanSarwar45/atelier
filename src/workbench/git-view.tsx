@@ -34,11 +34,14 @@ import {
   Minus,
   Plus,
   RefreshCw,
+  Trash2,
+  Undo2,
   Upload,
 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
@@ -113,19 +116,28 @@ function Section({
   title,
   count,
   testId,
+  actions,
   children,
 }: {
   title: string;
   count?: number;
   testId?: string;
+  /** What can be done to the whole group, drawn on the heading's own line. */
+  actions?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-1.5 px-3 py-2" data-testid={testId} data-count={count}>
-      <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        {title}
-        {count === undefined ? null : <span className="ml-1 tabular-nums text-t-faint">{count}</span>}
-      </h3>
+      {/* The heading and the group's own buttons share one line: a rail this
+          narrow has no room for a second, and a bulk action belongs against
+          the group it acts on rather than in a menu somewhere above it. */}
+      <div className="flex items-center gap-1">
+        <h3 className="min-w-0 flex-1 truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          {title}
+          {count === undefined ? null : <span className="ml-1 tabular-nums text-t-faint">{count}</span>}
+        </h3>
+        {actions}
+      </div>
       {children}
     </div>
   );
@@ -200,6 +212,7 @@ function FileLine({
   label,
   busy,
   onAct,
+  extra,
 }: {
   path: string;
   state: FileState;
@@ -208,6 +221,12 @@ function FileLine({
   label: string;
   busy: boolean;
   onAct: () => void;
+  /**
+   * The row's other button, when it has one — Discard beside Stage, or Remove
+   * beside it on a file git has never heard of. Built where the row is used,
+   * because what it does is the view's business and not the row's.
+   */
+  extra?: React.ReactNode;
 }) {
   const { word, tone, said } = STATUS_LOOK[state];
   const cut = path.lastIndexOf('/');
@@ -246,6 +265,7 @@ function FileLine({
           )}
         </span>
       </Tooltip>
+      {extra}
       <Button
         size="xs"
         mode="icon"
@@ -273,6 +293,31 @@ export function GitView({ path }: GitViewProps) {
   const [busy, setBusy] = useState(false);
   const [fault, setFault] = useState<string | null>(null);
   const [message, setMessage] = useState('');
+  /**
+   * Whether Commit rewrites the last saved change rather than adding one.
+   * Sticky only until it is used: `save` turns it off again, so an amend is
+   * never the thing that quietly happens to the next commit as well.
+   */
+  const [amend, setAmend] = useState(false);
+  /**
+   * The destructive thing that has been asked for and not yet agreed to.
+   *
+   * There is no `window.confirm` anywhere in here. The browser's box is drawn
+   * outside the app, cannot be styled, cannot be reached by the end-to-end
+   * run without special handling, and — the reason that matters — blocks the
+   * whole page while it is up. This is a strip inside the panel, in the same
+   * place and the same shape as the strip that asks for a key passphrase, and
+   * it names the thing it is about to throw away.
+   *
+   * `run` is held as a function returning a function, because a plain one
+   * handed to `setAsking` would be taken for an updater and called on the spot
+   * — the very call the reader has not agreed to yet.
+   */
+  const [asking, setAsking] = useState<{
+    said: string;
+    verb: string;
+    run: () => Promise<unknown>;
+  } | null>(null);
   /**
    * The call that came back wanting an unlocked key, kept so that answering
    * the prompt runs the very thing the reader asked for rather than a guess at
@@ -454,17 +499,50 @@ export function GitView({ path }: GitViewProps) {
     setBusy(true);
     setFault(null);
     try {
-      await git.commit(path, words);
+      // Said only when it is meant: an ordinary commit is the very call it
+      // always was, amend and all left off the wire.
+      if (amend) await git.commit(path, words, true);
+      else await git.commit(path, words);
       // Emptied only once it is saved: a box cleared on the way out loses what
-      // the writer typed the moment git refuses the commit.
+      // the writer typed the moment git refuses the commit. The amend goes off
+      // with it, so the next commit is an ordinary one unless it is asked for
+      // again.
       setMessage('');
+      setAmend(false);
       await read();
     } catch (trouble) {
       setFault(gitSaid(trouble));
     } finally {
       setBusy(false);
     }
-  }, [path, message, read]);
+  }, [path, message, amend, read]);
+
+  /**
+   * Ask before throwing work away, and only then do it.
+   *
+   * Everything destructive in this panel goes through here, so there is one
+   * place that decides what asking looks like and one shape of answer.
+   */
+  const askFirst = useCallback(
+    (said: string, verb: string, run: () => Promise<unknown>) => {
+      setAsking({ said, verb, run });
+    },
+    [],
+  );
+
+  /**
+   * Turning the amend on with nothing typed borrows the last commit's subject,
+   * so the common case — rewriting what was just saved, keeping its wording —
+   * is a tick and a press rather than retyping a line that is on the screen
+   * already. Anything the writer has typed is left exactly as it is.
+   */
+  const wantAmend = useCallback(
+    (wanted: boolean) => {
+      setAmend(wanted);
+      if (wanted && message.trim() === '' && commits[0]) setMessage(commits[0].subject);
+    },
+    [message, commits],
+  );
 
   if (!path) {
     return (
@@ -656,6 +734,42 @@ export function GitView({ path }: GitViewProps) {
         </form>
       )}
 
+      {/* The one thing that stands between a press and work that cannot be
+          got back. It says what would go, in the words of the thing itself,
+          and the button that agrees is the only red one in the panel. Keep is
+          the way out and does nothing at all. */}
+      {asking && (
+        <div className="px-3 py-2">
+          <Panel tone="danger" className="flex flex-col gap-1.5" data-testid="git-confirm-strip">
+            <p className="break-words text-[11px] text-t-secondary">{asking.said}</p>
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="xs"
+                variant="destructive"
+                disabled={busy}
+                data-testid="git-confirm"
+                onClick={() => {
+                  const { run } = asking;
+                  setAsking(null);
+                  void act(() => run());
+                }}
+              >
+                {asking.verb}
+              </Button>
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={busy}
+                data-testid="git-confirm-cancel"
+                onClick={() => setAsking(null)}
+              >
+                Keep
+              </Button>
+            </div>
+          </Panel>
+        </div>
+      )}
+
       {fault && (
         <div className="px-3 py-2">
           {/* git's sentence, wrapped and whole, in the monospace it was written
@@ -685,7 +799,24 @@ export function GitView({ path }: GitViewProps) {
       )}
 
       {staged.length > 0 && (
-        <Section title="Staged" count={staged.length} testId="git-staged">
+        <Section
+          title="Staged"
+          count={staged.length}
+          testId="git-staged"
+          actions={
+            <Button
+              size="xs"
+              variant="ghost"
+              className="h-5 px-1 text-[10px]"
+              disabled={busy}
+              data-testid="git-unstage-all"
+              onClick={() => void act(() => git.unstageAll(path))}
+            >
+              <Minus aria-hidden="true" />
+              Unstage all
+            </Button>
+          }
+        >
           <div className="flex flex-col">
             {staged.map((file) => (
               <FileLine
@@ -704,7 +835,46 @@ export function GitView({ path }: GitViewProps) {
       )}
 
       {unstaged.length > 0 && (
-        <Section title="Not staged" count={unstaged.length} testId="git-unstaged">
+        <Section
+          title="Not staged"
+          count={unstaged.length}
+          testId="git-unstaged"
+          actions={
+            <>
+              <Button
+                size="xs"
+                variant="ghost"
+                className="h-5 px-1 text-[10px]"
+                disabled={busy}
+                data-testid="git-stage-all"
+                onClick={() => void act(() => git.stageAll(path))}
+              >
+                <Plus aria-hidden="true" />
+                Stage all
+              </Button>
+              {/* Everything back to the last saved change, and every new file
+                  gone with it. What the project ignores is kept — this is not
+                  the button that eats somebody's .env. */}
+              <Button
+                size="xs"
+                variant="ghost"
+                className="h-5 px-1 text-[10px] text-danger"
+                disabled={busy}
+                data-testid="git-discard-all"
+                onClick={() =>
+                  askFirst(
+                    'Discard every change in this project? Files that are new will be deleted; ignored files are kept. This cannot be undone.',
+                    'Discard all',
+                    () => git.discardAll(path),
+                  )
+                }
+              >
+                <Trash2 aria-hidden="true" />
+                Discard all
+              </Button>
+            </>
+          }
+        >
           <div className="flex flex-col">
             {unstaged.map((file) => (
               <FileLine
@@ -716,6 +886,27 @@ export function GitView({ path }: GitViewProps) {
                 label="Stage"
                 busy={busy}
                 onAct={() => void act(() => git.stage(path, [file.path]))}
+                extra={
+                  <Tooltip label={`Discard changes to ${file.path}`}>
+                    <Button
+                      size="xs"
+                      mode="icon"
+                      variant="ghost"
+                      disabled={busy}
+                      aria-label={`Discard changes to ${file.path}`}
+                      data-testid="git-discard"
+                      onClick={() =>
+                        askFirst(
+                          `Discard changes to ${file.path}? This cannot be undone.`,
+                          'Discard',
+                          () => git.discard(path, [file.path]),
+                        )
+                      }
+                    >
+                      <Undo2 aria-hidden="true" />
+                    </Button>
+                  </Tooltip>
+                }
               />
             ))}
           </div>
@@ -723,7 +914,24 @@ export function GitView({ path }: GitViewProps) {
       )}
 
       {untracked.length > 0 && (
-        <Section title="Untracked" count={untracked.length} testId="git-untracked">
+        <Section
+          title="Untracked"
+          count={untracked.length}
+          testId="git-untracked"
+          actions={
+            <Button
+              size="xs"
+              variant="ghost"
+              className="h-5 px-1 text-[10px]"
+              disabled={busy}
+              data-testid="git-stage-all"
+              onClick={() => void act(() => git.stageAll(path))}
+            >
+              <Plus aria-hidden="true" />
+              Stage all
+            </Button>
+          }
+        >
           <div className="flex flex-col">
             {untracked.map((file) => (
               <FileLine
@@ -734,6 +942,27 @@ export function GitView({ path }: GitViewProps) {
                 label="Stage"
                 busy={busy}
                 onAct={() => void act(() => git.stage(path, [file.path]))}
+                extra={
+                  <Tooltip label={`Delete ${file.path}`}>
+                    <Button
+                      size="xs"
+                      mode="icon"
+                      variant="ghost"
+                      disabled={busy}
+                      aria-label={`Delete ${file.path}`}
+                      data-testid="git-remove"
+                      onClick={() =>
+                        askFirst(
+                          `Delete ${file.path}? git has no copy of it, so this cannot be undone.`,
+                          'Delete',
+                          () => git.remove(path, [file.path]),
+                        )
+                      }
+                    >
+                      <Trash2 aria-hidden="true" />
+                    </Button>
+                  </Tooltip>
+                }
               />
             ))}
           </div>
@@ -756,17 +985,36 @@ export function GitView({ path }: GitViewProps) {
           data-testid="git-commit-message"
           className="min-h-16 resize-none text-xs"
         />
+        {/* Rewriting the last saved change rather than adding one. A tick
+            and not a second button, because it changes what Commit does
+            instead of being a different thing to press — and it says so, on
+            the button, before it is pressed. */}
+        <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <Checkbox
+            checked={amend}
+            disabled={busy}
+            data-testid="git-amend"
+            onCheckedChange={(wanted) => wantAmend(wanted === true)}
+          />
+          Amend last commit
+        </label>
         <Button
           size="sm"
           variant="primary"
           // Nothing picked is not a commit git will make, and a button that
           // exists to hand back git's refusal is a button that should not have
-          // been pressed. The count says why it is out.
-          disabled={busy || message.trim() === '' || staged.length === 0}
+          // been pressed. The count says why it is out. An amend is the one
+          // exception: rewording the last saved change picks nothing up, and
+          // git makes that commit perfectly happily.
+          disabled={busy || message.trim() === '' || (!amend && staged.length === 0)}
           data-testid="git-commit"
           onClick={() => void save()}
         >
-          {staged.length > 0 ? `Commit ${staged.length} file${staged.length === 1 ? '' : 's'}` : 'Commit'}
+          {amend
+            ? 'Amend last commit'
+            : staged.length > 0
+              ? `Commit ${staged.length} file${staged.length === 1 ? '' : 's'}`
+              : 'Commit'}
         </Button>
       </Section>
 
