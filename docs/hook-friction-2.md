@@ -601,3 +601,23 @@ card, so the information is on hand.
 **Cost.** One refusal, one `ATELIER_BYPASS`, and — as in §11 — a card and a
 worktree raised for the sole purpose of being allowed to write this section,
 which will itself end in a land step with the same problem.
+
+## 14. Ignored residue of a deleted directory is treated as a repository change
+
+**Happened.** The release run failed at step 4/7 with
+`no_node_runtime_is_started_extracted_or_downloaded_by_the_server`: "the
+former Node backend still exists". `workbench/` did exist — but only because
+`workbench/node_modules`, gitignored, had been left on disk when e823f79
+deleted every tracked file under it. Nothing in git knew the directory was
+there. `rm -rf workbench` from the main checkout was refused by
+`workflow-gate` as a change needing an owned card in an isolated worktree.
+
+**Should have happened.** A path with no tracked file under it and matched by
+`.gitignore` is not a repository change; deleting it cannot lose anything the
+landing branch holds. The gate already resolves the target; consulting
+`git ls-files` and `git check-ignore` on it would let ignored residue be
+removed without a card, exactly as `/dev/null` is already exempt.
+
+**Cost.** One refusal, one `ATELIER_BYPASS`, and a release blocked by a
+directory that the removal commit could not have deleted, because git never
+carried it.
