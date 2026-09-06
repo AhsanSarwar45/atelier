@@ -66,8 +66,12 @@ const SHOT = ONLY_WORKING ? 'bw-xfb4-before' : WIRE_WORDS ? 'bw-gci9-before' : '
 test.describe('a working chat says what it is doing', () => {
   test.describe.configure({ mode: 'serial', timeout: TURN_MS });
 
+  test.skip(
+    process.env.BEADS_E2E_LIVE_PROVIDERS !== '1',
+    'needs a live provider: only a real driver puts what it is doing in the record while the call is in flight',
+  );
+
   test.beforeAll(() => {
-    expect(process.env.BEADS_E2E_LIVE_PROVIDERS, 'set BEADS_E2E_LIVE_PROVIDERS=1').toBe('1');
     rmSync(ROOT, { recursive: true, force: true });
     mkdirSync(ROOT, { recursive: true });
   });

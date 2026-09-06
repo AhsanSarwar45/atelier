@@ -29,8 +29,12 @@ const WIDGET = '{"type":"table","columns":["Case","Result"],"rows":[["mid-turn",
 test.describe('a widget is drawn while the turn runs', () => {
   test.describe.configure({ mode: 'serial', timeout: TURN_MS });
 
+  test.skip(
+    process.env.BEADS_E2E_LIVE_PROVIDERS !== '1',
+    'needs a live provider: when a block closes relative to the end of the turn is a real provider\'s timing',
+  );
+
   test.beforeAll(() => {
-    expect(process.env.BEADS_E2E_LIVE_PROVIDERS, 'set BEADS_E2E_LIVE_PROVIDERS=1').toBe('1');
     rmSync(ROOT, { recursive: true, force: true });
     mkdirSync(ROOT, { recursive: true });
   });

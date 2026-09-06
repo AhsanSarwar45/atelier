@@ -67,8 +67,12 @@ function lifecycleShape(sessionId: string): { count: number; types: string[]; on
 test.describe('native provider child-agent lifecycle', () => {
   test.describe.configure({ mode: 'serial', timeout: TURN_MS });
 
+  test.skip(
+    process.env.BEADS_E2E_LIVE_PROVIDERS !== '1',
+    'needs a live provider: the child start and finish are events a real claude or codex sends for itself',
+  );
+
   test.beforeAll(() => {
-    expect(process.env.BEADS_E2E_LIVE_PROVIDERS, 'set BEADS_E2E_LIVE_PROVIDERS=1').toBe('1');
     rmSync(ROOT, { recursive: true, force: true });
     mkdirSync(ROOT, { recursive: true });
     mkdirSync(SHOTS, { recursive: true });

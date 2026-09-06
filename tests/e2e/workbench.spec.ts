@@ -88,11 +88,12 @@ test.describe('workbench', () => {
    * bearer credentials into the run only when asked to. Without the flag the
    * `claude` this starts is not signed in, so a case dies three seconds in on
    * an empty transcript directory or a blank answer and says nothing about the
-   * app. Say so on the first line instead (bw-t26l.20).
+   * app. Stand them down instead of failing them (bw-t26l.20, bw-4q8r.1).
    */
-  test.beforeAll(() => {
-    expect(process.env.BEADS_E2E_LIVE_PROVIDERS, 'set BEADS_E2E_LIVE_PROVIDERS=1').toBe('1');
-  });
+  test.skip(
+    process.env.BEADS_E2E_LIVE_PROVIDERS !== '1',
+    'needs a live provider: every case here drives a real signed-in turn',
+  );
 
   /**
    * `useProject` and the dashboard both resolve a project by filtering the
