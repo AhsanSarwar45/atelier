@@ -216,8 +216,13 @@ test.describe('a push that needs the key unlocked', () => {
       await expect(asking, 'the panel did not offer to unlock the key').toBeVisible({
         timeout: 60_000,
       });
-      // ssh's own words are still the most useful thing on the screen.
-      await expect(page.getByTestId('git-error')).toContainText('Permission denied (publickey)');
+      // Only the prompt: a locked key is a question, not a failure, so the red
+      // panel of ssh's stderr is not drawn over the box that answers it
+      // (bw-8nwh.1).
+      await expect(
+        page.getByTestId('git-error'),
+        'an error was drawn beside the passphrase prompt',
+      ).toHaveCount(0);
       await page.locator('[data-testid="chat-right-rail"]').screenshot({
         path: `${SHOTS}/a-locked-key-is-asked-about.png`,
       });
@@ -230,6 +235,15 @@ test.describe('a push that needs the key unlocked', () => {
         page.getByLabel('SSH key passphrase'),
         'the panel kept a passphrase that did not work',
       ).toHaveValue('', { timeout: 30_000 });
+      // Said inside the prompt, in one plain sentence — still no red panel.
+      await expect(
+        page.getByTestId('git-passphrase-refused'),
+        'nothing said about the passphrase that did not work',
+      ).toContainText('That passphrase did not unlock the key', { timeout: 30_000 });
+      await expect(
+        page.getByTestId('git-error'),
+        'a refused passphrase drew the red panel instead of saying so in the prompt',
+      ).toHaveCount(0);
       expect(theSharedCopyHas(WAITING), 'a wrong passphrase pushed anyway').toBe(false);
 
       // ---- and the right one ------------------------------------------------

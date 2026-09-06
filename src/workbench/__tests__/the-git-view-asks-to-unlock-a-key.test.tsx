@@ -10,7 +10,10 @@
  *
  * What is asserted here is the panel's half: when the offer is made, when it
  * is not, what is sent when it is answered, and that nothing of the passphrase
- * is left behind afterwards. Whether the passphrase actually opens the key is
+ * is left behind afterwards. The offer is made *instead of* an error and not
+ * beside one (bw-8nwh.1) — a locked key is a question the next keystroke
+ * answers, so the red panel is kept for a passphrase that opened nothing, or
+ * for a failure no key would clear. Whether the passphrase actually opens the key is
  * the server's half, and is proved against a real ssh there.
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -103,7 +106,7 @@ describe('a push that needs a key unlocked', () => {
     calls.log.mockResolvedValue({ commits: [] });
   });
 
-  it('offers to ask for the passphrase, without taking git’s words off the screen', async () => {
+  it('asks for the passphrase and nothing else — no error is drawn', async () => {
     calls.push.mockRejectedValue(lockedKey());
     railOnGit();
     await waitFor(() => expect(calls.status).toHaveBeenCalled());
@@ -111,8 +114,11 @@ describe('a push that needs a key unlocked', () => {
     await push();
 
     await waitFor(() => expect(screen.getByTestId('git-passphrase')).toBeInTheDocument());
-    // The offer is an offer; what ssh said is still the most useful thing here.
-    expect(screen.getByTestId('git-error')).toHaveTextContent('Permission denied (publickey)');
+    // A locked key is a question, not a failure: the way on is the box, and
+    // ssh's three lines of stderr over it would only say the same thing in red
+    // (bw-8nwh.1).
+    expect(screen.queryByTestId('git-error')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('git-passphrase-refused')).not.toBeInTheDocument();
   });
 
   it('sends the passphrase with the very call that was refused', async () => {
@@ -166,9 +172,32 @@ describe('a push that needs a key unlocked', () => {
     // Still asking, and the field is empty rather than holding what failed.
     expect(screen.getByTestId('git-passphrase')).toBeInTheDocument();
     expect(screen.getByLabelText('SSH key passphrase')).toHaveValue('');
+    // The one word about it is said inside the prompt, quietly, because the
+    // reader is still in the middle of the thing rather than done failing at
+    // it (bw-8nwh.1).
+    expect(screen.getByTestId('git-passphrase-refused')).toHaveTextContent(
+      'That passphrase did not unlock the key. Try again.',
+    );
+    expect(screen.queryByTestId('git-error')).not.toBeInTheDocument();
   });
 
-  it('lets the asking be waved away, leaving git’s words behind', async () => {
+  it('drops the asking and shows git’s words when the retry fails for another reason', async () => {
+    calls.push.mockRejectedValueOnce(lockedKey()).mockRejectedValueOnce(rejectedPush());
+    railOnGit();
+    await waitFor(() => expect(calls.status).toHaveBeenCalled());
+    await push();
+    await waitFor(() => expect(screen.getByTestId('git-passphrase')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('SSH key passphrase'), {
+      target: { value: 'open sesame' },
+    });
+    fireEvent.click(screen.getByTestId('git-unlock'));
+
+    await waitFor(() => expect(screen.getByTestId('git-error')).toHaveTextContent('non-fast-forward'));
+    expect(screen.queryByTestId('git-passphrase')).not.toBeInTheDocument();
+  });
+
+  it('lets the asking be waved away, leaving no error behind', async () => {
     calls.push.mockRejectedValue(lockedKey());
     railOnGit();
     await waitFor(() => expect(calls.status).toHaveBeenCalled());
@@ -178,7 +207,8 @@ describe('a push that needs a key unlocked', () => {
     fireEvent.click(screen.getByTestId('git-unlock-cancel'));
 
     expect(screen.queryByTestId('git-passphrase')).not.toBeInTheDocument();
-    expect(screen.getByTestId('git-error')).toHaveTextContent('Permission denied (publickey)');
+    // Saying no leaves the panel as it was: there is nothing to report.
+    expect(screen.queryByTestId('git-error')).not.toBeInTheDocument();
   });
 
   it('does not offer a passphrase for a refusal no key would clear', async () => {

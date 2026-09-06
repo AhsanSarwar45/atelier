@@ -272,6 +272,13 @@ export function GitView({ path }: GitViewProps) {
    * path out of `act` empties it, so it is gone whether the key opened or not.
    */
   const [passphrase, setPassphrase] = useState('');
+  /**
+   * Whether a passphrase was already tried and did not open the key. Kept
+   * apart from `fault` because it is not a failure of the action — the reader
+   * is still in the middle of doing it — so it is said quietly inside the
+   * prompt rather than as the panel's red word on the call (bw-8nwh.1).
+   */
+  const [keyRefused, setKeyRefused] = useState(false);
 
   /**
    * Ask git where things stand. Both questions at once because they are drawn
@@ -321,12 +328,23 @@ export function GitView({ path }: GitViewProps) {
       try {
         await run(unlockWith);
         setLocked(null);
+        setKeyRefused(false);
         await read();
       } catch (trouble) {
-        setFault(gitSaid(trouble));
-        // `setLocked` is given a function that returns the call, because a
-        // plain one would be taken for an updater and called on the spot.
-        setLocked(wantsAKey(trouble) ? () => run : null);
+        if (wantsAKey(trouble)) {
+          // Nothing has gone wrong yet: the call is waiting on a key, and the
+          // way on is the prompt. So no fault is set — see the form below.
+          // `setLocked` is given a function that returns the call, because a
+          // plain one would be taken for an updater and called on the spot.
+          setLocked(() => run);
+          // Only the second and later goes are a refusal of what was typed;
+          // the first is the call finding the key locked in the first place.
+          setKeyRefused(unlockWith !== undefined);
+        } else {
+          setFault(gitSaid(trouble));
+          setLocked(null);
+          setKeyRefused(false);
+        }
       } finally {
         // Never held past the call it was typed for, on either outcome.
         setPassphrase('');
@@ -468,10 +486,17 @@ export function GitView({ path }: GitViewProps) {
         </div>
       </div>
 
-      {/* The way out of a refusal a key could clear (bw-k778). It sits above
-          git's own words rather than in place of them: what ssh said is still
-          the most useful thing on the screen, and the offer is an offer, not
-          an explanation of why the call failed. Cancelling leaves the words.
+      {/* The way out of a refusal a key could clear (bw-k778). It is drawn in
+          place of git's words, not above them (bw-8nwh.1): a locked key is not
+          a failure the reader has to read about, it is a question, and the
+          panel used to answer a press of Push with a red block of ssh's stderr
+          — the same three lines whether the key is locked, missing or refused
+          — sitting over a box asking for a passphrase. Nothing has gone wrong
+          that the next keystroke does not fix, so nothing is put in red. The
+          red panel is kept for what it is for: a passphrase that opened
+          nothing says so quietly below, in the prompt it belongs to, and only
+          a failure no key would clear drops the prompt and shows git's words.
+          Cancelling leaves the view as it was, with no error behind it.
 
           Nothing here is remembered. The field empties on every outcome, the
           app never writes the passphrase down, and the server keeps it only
@@ -502,6 +527,11 @@ export function GitView({ path }: GitViewProps) {
             disabled={busy}
             onChange={(typing) => setPassphrase(typing.target.value)}
           />
+          {keyRefused && (
+            <p className="text-[11px] text-danger" data-testid="git-passphrase-refused">
+              That passphrase did not unlock the key. Try again.
+            </p>
+          )}
           <p className="text-[11px] text-muted-foreground">
             Used for this one call and not kept.
           </p>
@@ -524,6 +554,7 @@ export function GitView({ path }: GitViewProps) {
               onClick={() => {
                 setLocked(null);
                 setPassphrase('');
+                setKeyRefused(false);
               }}
             >
               Cancel
