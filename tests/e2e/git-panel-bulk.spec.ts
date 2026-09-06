@@ -2,9 +2,16 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 import { aChatSomebodyElseIsIn } from './fixture-held';
+
+/** Wait until a dialog has finished fading in, so a picture of it is honest. */
+async function settled(dialog: Locator): Promise<void> {
+  await expect
+    .poll(async () => dialog.evaluate((box) => getComputedStyle(box).opacity), { timeout: 10_000 })
+    .toBe('1');
+}
 
 /**
  * The Git panel's bulk and destructive actions, against a real repository
@@ -217,9 +224,10 @@ test.describe('the Git panel’s bulk and destructive actions', () => {
 
       // ---- discard all, which asks first ------------------------------------
       await page.getByTestId('git-discard-all').click();
-      const asking = page.getByTestId('git-confirm-strip');
+      const asking = page.getByTestId('git-confirm-dialog');
       await expect(asking, 'nothing asked before work was thrown away').toBeVisible();
       await expect(asking).toContainText(/ignored files are kept/i);
+      await settled(asking);
       await page.screenshot({ path: `${SHOTS}/git-panel-bulk-confirming.png` });
 
       // Keeping makes no call at all: the project is still dirty afterwards.
@@ -227,9 +235,20 @@ test.describe('the Git panel’s bulk and destructive actions', () => {
       await expect(asking).toHaveCount(0);
       expect(git(REPO, 'status', '--porcelain', '--untracked-files=all')).not.toBe('');
 
+      // And Escape is the same word as Keep, now that the asking is a modal
+      // dialog and the keyboard has a way out of it (bw-ahf2.1).
+      await page.getByTestId('git-discard-all').click();
+      await expect(asking).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(asking).toHaveCount(0);
+      expect(
+        git(REPO, 'status', '--porcelain', '--untracked-files=all'),
+        'Escape threw the work away instead of leaving it alone',
+      ).not.toBe('');
+
       // And agreeing does it.
       await page.getByTestId('git-discard-all').click();
-      await expect(page.getByTestId('git-confirm-strip')).toBeVisible();
+      await expect(page.getByTestId('git-confirm-dialog')).toBeVisible();
       await page.getByTestId('git-confirm').click();
 
       // ---- read the result off the panel ------------------------------------

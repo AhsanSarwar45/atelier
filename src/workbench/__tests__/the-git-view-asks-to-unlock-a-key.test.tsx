@@ -210,9 +210,47 @@ describe('a push that needs a key unlocked', () => {
 
     fireEvent.click(screen.getByTestId('git-unlock-cancel'));
 
-    expect(screen.queryByTestId('git-passphrase')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId('git-passphrase')).not.toBeInTheDocument());
     // Saying no leaves the panel as it was: there is nothing to report.
     expect(screen.queryByTestId('git-error')).not.toBeInTheDocument();
+  });
+
+  it('takes Escape for the same word as Cancel', async () => {
+    calls.push.mockRejectedValue(lockedKey());
+    railOnGit();
+    await waitFor(() => expect(calls.status).toHaveBeenCalled());
+    await push();
+    const asking = await screen.findByTestId('git-passphrase');
+
+    fireEvent.change(screen.getByLabelText('SSH key passphrase'), {
+      target: { value: 'half a passphrase' },
+    });
+    fireEvent.keyDown(asking, { key: 'Escape', code: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByTestId('git-passphrase')).not.toBeInTheDocument());
+    // Nothing was sent, nothing is reported, and what was half-typed is gone
+    // rather than waiting in the box for the next time it opens.
+    expect(calls.push).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('git-error')).not.toBeInTheDocument();
+
+    calls.push.mockRejectedValue(lockedKey());
+    await push();
+    await waitFor(() =>
+      expect(screen.getByLabelText('SSH key passphrase')).toHaveValue(''),
+    );
+  });
+
+  it('asks in a dialog over the app, not as a strip inside the panel', async () => {
+    calls.push.mockRejectedValue(lockedKey());
+    railOnGit();
+    await waitFor(() => expect(calls.status).toHaveBeenCalled());
+    await push();
+    const asking = await screen.findByTestId('git-passphrase');
+
+    // The whole point of bw-ahf2.1: the ask is the app's own modal, so it is
+    // drawn outside the scrolling panel rather than wedged into it.
+    expect(screen.getByTestId('git-view')).not.toContainElement(asking);
+    expect(asking).toHaveAttribute('role', 'dialog');
   });
 
   it('does not offer a passphrase for a refusal no key would clear', async () => {

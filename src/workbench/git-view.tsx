@@ -42,6 +42,14 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
@@ -305,9 +313,9 @@ export function GitView({ path }: GitViewProps) {
    * There is no `window.confirm` anywhere in here. The browser's box is drawn
    * outside the app, cannot be styled, cannot be reached by the end-to-end
    * run without special handling, and — the reason that matters — blocks the
-   * whole page while it is up. This is a strip inside the panel, in the same
-   * place and the same shape as the strip that asks for a key passphrase, and
-   * it names the thing it is about to throw away.
+   * whole page while it is up. This is the app's own modal dialog, the same
+   * one the passphrase is asked for in, and it names the thing it is about to
+   * throw away.
    *
    * `run` is held as a function returning a function, because a plain one
    * handed to `setAsking` would be taken for an updater and called on the spot
@@ -492,6 +500,20 @@ export function GitView({ path }: GitViewProps) {
     [path, read],
   );
 
+  /**
+   * Saying no to the key, whichever way it is said.
+   *
+   * Cancel, Escape and a press on the dim behind the dialog are one word, so
+   * they are one function: the call is let go of, what was typed is dropped,
+   * and the refusal sentence goes with it. Nothing is reported, because
+   * nothing went wrong — the reader simply decided not to.
+   */
+  const waveOffTheKey = useCallback(() => {
+    setLocked(null);
+    setPassphrase('');
+    setKeyRefused(false);
+  }, []);
+
   const save = useCallback(async () => {
     if (!path) return;
     const words = message.trim();
@@ -657,8 +679,16 @@ export function GitView({ path }: GitViewProps) {
         </div>
       </div>
 
-      {/* The way out of a refusal a key could clear (bw-k778). It is drawn in
-          place of git's words, not above them (bw-8nwh.1): a locked key is not
+      {/* The way out of a refusal a key could clear (bw-k778), asked for in
+          the app's own modal dialog rather than as a strip wedged into the
+          panel (bw-ahf2.1). A rail 320px wide had the box for a passphrase
+          sitting between the Push button and the list of changes, where it
+          could be scrolled out of sight while the call it belongs to waits;
+          asking for something is not a row in a list, and the app already has
+          one way of asking, which every other question in it uses.
+
+          It is still drawn in place of git's words, not above them (bw-8nwh.1):
+          a locked key is not
           a failure the reader has to read about, it is a question, and the
           panel used to answer a press of Push with a red block of ssh's stderr
           — the same three lines whether the key is locked, missing or refused
@@ -672,79 +702,121 @@ export function GitView({ path }: GitViewProps) {
           Nothing here is remembered. The field empties on every outcome, the
           app never writes the passphrase down, and the server keeps it only
           for the one call it is sent with. */}
-      {locked && (
-        <form
-          className="flex flex-col gap-1.5 px-3 py-2"
+      <Dialog
+        open={locked !== null}
+        onOpenChange={(wanted) => {
+          // Escape, the cross and a press on the dim behind all mean Cancel,
+          // and go through the one function that means it.
+          if (!wanted) waveOffTheKey();
+        }}
+      >
+        <DialogContent
+          className="w-[90vw] gap-3 border-b-default bg-surface-raised sm:max-w-md"
           data-testid="git-passphrase"
-          onSubmit={(sending) => {
-            sending.preventDefault();
-            void act(locked, passphrase);
-          }}
         >
-          <label
-            htmlFor="git-passphrase-field"
-            className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+          {/* Not the same words as the field's own label, deliberately: the
+              dialog is named by its title, so a title reading "SSH key
+              passphrase" would give the box and the field inside it the same
+              accessible name and leave "the passphrase field" ambiguous to a
+              screen reader and to anything looking for it by that name. */}
+          <DialogHeader>
+            <DialogTitle className="text-base text-t-primary">Unlock your SSH key</DialogTitle>
+            <DialogDescription>Used for this one call and not kept.</DialogDescription>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-3"
+            onSubmit={(sending) => {
+              sending.preventDefault();
+              if (locked) void act(locked, passphrase);
+            }}
           >
-            SSH key passphrase
-          </label>
-          <Input
-            id="git-passphrase-field"
-            type="password"
-            autoFocus
-            autoComplete="off"
-            className="h-8 text-[12px]"
-            placeholder="Passphrase for your key"
-            value={passphrase}
-            disabled={busy}
-            onChange={(typing) => setPassphrase(typing.target.value)}
-          />
-          {keyRefused && (
-            <p className="text-[11px] text-danger" data-testid="git-passphrase-refused">
-              That passphrase did not unlock the key. Try again.
-            </p>
-          )}
-          <p className="text-[11px] text-muted-foreground">
-            Used for this one call and not kept.
-          </p>
-          <div className="flex items-center gap-1.5">
-            <Button
-              type="submit"
-              size="sm"
-              className="flex-1"
-              disabled={busy || passphrase.length === 0}
-              data-testid="git-unlock"
-            >
-              Unlock and retry
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              disabled={busy}
-              data-testid="git-unlock-cancel"
-              onClick={() => {
-                setLocked(null);
-                setPassphrase('');
-                setKeyRefused(false);
-              }}
-            >
-              Cancel
-            </Button>
-          </div>
-        </form>
-      )}
-
-      {/* The one thing that stands between a press and work that cannot be
-          got back. It says what would go, in the words of the thing itself,
-          and the button that agrees is the only red one in the panel. Keep is
-          the way out and does nothing at all. */}
-      {asking && (
-        <div className="px-3 py-2">
-          <Panel tone="danger" className="flex flex-col gap-1.5" data-testid="git-confirm-strip">
-            <p className="break-words text-[11px] text-t-secondary">{asking.said}</p>
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="git-passphrase-field" className="text-xs font-medium text-t-secondary">
+                SSH key passphrase
+              </label>
+              <Input
+                id="git-passphrase-field"
+                data-testid="git-passphrase-field"
+                type="password"
+                autoFocus
+                autoComplete="off"
+                placeholder="Passphrase for your key"
+                value={passphrase}
+                disabled={busy}
+                onChange={(typing) => setPassphrase(typing.target.value)}
+              />
+              {keyRefused && (
+                <p className="text-[11px] text-danger" data-testid="git-passphrase-refused">
+                  That passphrase did not unlock the key. Try again.
+                </p>
+              )}
+            </div>
+            <DialogFooter className="gap-2">
               <Button
-                size="xs"
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                data-testid="git-unlock-cancel"
+                onClick={waveOffTheKey}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={busy || passphrase.length === 0}
+                data-testid="git-unlock"
+              >
+                Unlock and retry
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* The one thing that stands between a press and work that cannot be got
+          back, and now the app's own modal dialog rather than a red strip in
+          the panel (bw-ahf2.1). A strip could be scrolled past, and sat in the
+          same column as the rows it was about — a question about throwing work
+          away should stop the reader, which is what a modal is for. It says
+          what would go, in the words of the thing itself, and the button that
+          agrees is the only red one in it. Keep is the way out and does nothing
+          at all; so are Escape, the cross and a press on the dim behind. */}
+      <Dialog
+        open={asking !== null}
+        onOpenChange={(wanted) => {
+          if (!wanted) setAsking(null);
+        }}
+      >
+        {asking && (
+          // A decision that has to be answered rather than a form to fill in,
+          // so it is announced as one. The app's dialog is the part it is
+          // built from either way — `alert-dialog.tsx` is reached by nothing
+          // in the app and asks for `--dialog-overlay`, `--dialog-z` and
+          // `--mix-card-5-bg`, none of which any theme defines, so it would
+          // draw its dim in an invalid colour at no stacking order at all.
+          <DialogContent
+            role="alertdialog"
+            className="w-[90vw] gap-3 border-b-default bg-surface-raised sm:max-w-md"
+            data-testid="git-confirm-dialog"
+          >
+            <DialogHeader>
+              <DialogTitle className="text-base text-t-primary">{asking.verb}</DialogTitle>
+              <DialogDescription className="break-words">{asking.said}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                data-testid="git-confirm-cancel"
+                onClick={() => setAsking(null)}
+              >
+                Keep
+              </Button>
+              <Button
+                size="sm"
                 variant="destructive"
                 disabled={busy}
                 data-testid="git-confirm"
@@ -756,19 +828,10 @@ export function GitView({ path }: GitViewProps) {
               >
                 {asking.verb}
               </Button>
-              <Button
-                size="xs"
-                variant="ghost"
-                disabled={busy}
-                data-testid="git-confirm-cancel"
-                onClick={() => setAsking(null)}
-              >
-                Keep
-              </Button>
-            </div>
-          </Panel>
-        </div>
-      )}
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
 
       {fault && (
         <div className="px-3 py-2">

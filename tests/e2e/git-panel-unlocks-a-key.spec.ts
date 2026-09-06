@@ -2,9 +2,16 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Locator } from '@playwright/test';
 
 import { command } from './fixture-held';
+
+/** Wait until a dialog has finished fading in, so a picture of it is honest. */
+async function settled(dialog: Locator): Promise<void> {
+  await expect
+    .poll(async () => dialog.evaluate((box) => getComputedStyle(box).opacity), { timeout: 10_000 })
+    .toBe('1');
+}
 
 /**
  * A push that needs an SSH key unlocked, driven end to end (bw-k778).
@@ -70,9 +77,14 @@ function writeTheSshThatWantsAPassphrase(): string {
 # Walk off ssh's own switches to reach the host and then the command git wants
 # run on the other side.
 host=""
+batch=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    -o|-i|-F|-p) shift 2 ;;
+    -o)
+      case "$2" in BatchMode=yes) batch="yes" ;; esac
+      shift 2
+      ;;
+    -i|-F|-p) shift 2 ;;
     -*) shift ;;
     *)
       if [ -z "$host" ]; then host="$1"; shift; else break; fi
@@ -81,8 +93,15 @@ while [ $# -gt 0 ]; do
 done
 wanted="$*"
 
+# Real ssh under \`BatchMode=yes\` never runs an askpass program, whoever named
+# one. Honouring that here is not a nicety: a desktop session exports
+# SSH_ASKPASS (KDE's ksshaskpass, say) into everything it starts, the server
+# hands its whole environment to git, and without this line the no-passphrase
+# call would put a graphical password box on somebody's screen and wait for a
+# human who is not there — the run hangs rather than getting the refusal it is
+# here to provoke.
 given=""
-if [ -n "$SSH_ASKPASS" ] && [ -x "$SSH_ASKPASS" ]; then
+if [ -z "$batch" ] && [ -n "$SSH_ASKPASS" ] && [ -x "$SSH_ASKPASS" ]; then
   given=$("$SSH_ASKPASS" "Enter passphrase for key '/fixture/id_ed25519': ")
 fi
 
@@ -223,9 +242,27 @@ test.describe('a push that needs the key unlocked', () => {
         page.getByTestId('git-error'),
         'an error was drawn beside the passphrase prompt',
       ).toHaveCount(0);
-      await page.locator('[data-testid="chat-right-rail"]').screenshot({
-        path: `${SHOTS}/a-locked-key-is-asked-about.png`,
-      });
+      // The whole window, not the rail: the asking is the app's own modal
+      // dialog now (bw-ahf2.1) and is drawn over the page rather than inside
+      // the rail, so a crop of the rail would prove nothing about it. Waited
+      // for first — a dialog caught in the middle of its own fade is a picture
+      // of a half-drawn app, not of what a reader sees.
+      await settled(asking);
+      await page.screenshot({ path: `${SHOTS}/a-locked-key-is-asked-about.png` });
+
+      // Escape is the same word as Cancel, now that the asking is the app's
+      // own modal (bw-ahf2.1): the dialog goes, nothing is reported, and what
+      // was half-typed is not waiting in the box next time.
+      await page.getByLabel('SSH key passphrase').fill('half a passphrase');
+      await page.keyboard.press('Escape');
+      await expect(asking, 'Escape did not put the asking away').toHaveCount(0);
+      await expect(page.getByTestId('git-error')).toHaveCount(0);
+      await page.getByTestId('git-push').click();
+      await expect(asking).toBeVisible({ timeout: 60_000 });
+      await expect(
+        page.getByLabel('SSH key passphrase'),
+        'a passphrase escaped out of was kept for the next time',
+      ).toHaveValue('');
 
       // A wrong one is refused, and nothing of it is kept.
       await page.getByLabel('SSH key passphrase').fill('not the passphrase');

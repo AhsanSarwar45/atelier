@@ -4,9 +4,10 @@
  * Discard, Discard all and Delete each throw away work git keeps no copy of:
  * an unstaged edit that is discarded is gone, and a file git has never been
  * told about that is deleted is gone from the disk. So each of them asks
- * first, and the asking is the panel's own strip rather than the browser's
- * `window.confirm` — which is drawn outside the app, blocks the page while it
- * is up, and cannot be reached by the end-to-end run without special handling.
+ * first, and the asking is the app's own modal dialog (bw-ahf2.1) rather than
+ * the browser's `window.confirm` — which is drawn outside the app, blocks the
+ * page while it is up, and cannot be reached by the end-to-end run without
+ * special handling.
  *
  * What is asserted here is the only thing that matters about a confirmation:
  * that pressing the action makes NO call, that agreeing makes exactly the one
@@ -142,7 +143,7 @@ describe('the panel asks before it throws work away', () => {
 
     fireEvent.click(screen.getByTestId('git-discard'));
 
-    const asking = await screen.findByTestId('git-confirm-strip');
+    const asking = await screen.findByTestId('git-confirm-dialog');
     // The strip names the very file, so agreeing is agreeing to something.
     expect(asking).toHaveTextContent(CHANGED);
     for (const write of everyWrite()) expect(write).not.toHaveBeenCalled();
@@ -151,14 +152,14 @@ describe('the panel asks before it throws work away', () => {
   it('discards the file, and only that file, once it is agreed to', async () => {
     await panel();
     fireEvent.click(screen.getByTestId('git-discard'));
-    await screen.findByTestId('git-confirm-strip');
+    await screen.findByTestId('git-confirm-dialog');
 
     fireEvent.click(screen.getByTestId('git-confirm'));
 
     await waitFor(() => expect(calls.discard).toHaveBeenCalledTimes(1));
     expect(calls.discard).toHaveBeenCalledWith(REPO, [CHANGED]);
     // And the asking is put away, so a second press cannot happen by accident.
-    await waitFor(() => expect(screen.queryByTestId('git-confirm-strip')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('git-confirm-dialog')).toBeNull());
     // The panel reads the repository again rather than guessing what changed.
     await waitFor(() => expect(calls.status).toHaveBeenCalledTimes(2));
   });
@@ -166,21 +167,47 @@ describe('the panel asks before it throws work away', () => {
   it('makes no call and leaves the file alone when Keep is pressed', async () => {
     await panel();
     fireEvent.click(screen.getByTestId('git-discard'));
-    await screen.findByTestId('git-confirm-strip');
+    await screen.findByTestId('git-confirm-dialog');
 
     fireEvent.click(screen.getByTestId('git-confirm-cancel'));
 
-    await waitFor(() => expect(screen.queryByTestId('git-confirm-strip')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('git-confirm-dialog')).toBeNull());
     for (const write of everyWrite()) expect(write).not.toHaveBeenCalled();
     // The row is still there, still not staged.
     expect(screen.getByTestId('git-unstaged')).toHaveTextContent('changed.ts');
+  });
+
+  it('makes no call and leaves the file alone when Escape is pressed', async () => {
+    await panel();
+    fireEvent.click(screen.getByTestId('git-discard'));
+    const asking = await screen.findByTestId('git-confirm-dialog');
+
+    fireEvent.keyDown(asking, { key: 'Escape', code: 'Escape' });
+
+    // Escape is the same word as Keep, down to making no call at all.
+    await waitFor(() => expect(screen.queryByTestId('git-confirm-dialog')).toBeNull());
+    for (const write of everyWrite()) expect(write).not.toHaveBeenCalled();
+    expect(screen.getByTestId('git-unstaged')).toHaveTextContent('changed.ts');
+  });
+
+  it('asks in a dialog over the app, not as a strip inside the panel', async () => {
+    await panel();
+    fireEvent.click(screen.getByTestId('git-discard'));
+    const asking = await screen.findByTestId('git-confirm-dialog');
+
+    // bw-ahf2.1: the question is the app's own modal, so it is not drawn
+    // inside the scrolling panel where it could be scrolled past.
+    expect(screen.getByTestId('git-view')).not.toContainElement(asking);
+    expect(screen.queryByTestId('git-confirm-strip')).toBeNull();
+    // Announced as a decision that has to be answered, not as a form.
+    expect(asking).toHaveAttribute('role', 'alertdialog');
   });
 
   it('asks the same way before deleting a file git has never been told about', async () => {
     await panel();
 
     fireEvent.click(screen.getByTestId('git-remove'));
-    const asking = await screen.findByTestId('git-confirm-strip');
+    const asking = await screen.findByTestId('git-confirm-dialog');
     expect(asking).toHaveTextContent(NEW);
     expect(calls.remove).not.toHaveBeenCalled();
 
@@ -192,7 +219,7 @@ describe('the panel asks before it throws work away', () => {
     await panel();
 
     fireEvent.click(screen.getByTestId('git-discard-all'));
-    const asking = await screen.findByTestId('git-confirm-strip');
+    const asking = await screen.findByTestId('git-confirm-dialog');
     // The reader has to know this is not the button that eats their .env.
     expect(asking).toHaveTextContent(/ignored files are kept/i);
     expect(calls.discardAll).not.toHaveBeenCalled();
@@ -221,7 +248,7 @@ describe('the bulk actions, which take nothing back and so ask nothing', () => {
     );
 
     await waitFor(() => expect(calls.stageAll).toHaveBeenCalledWith(REPO));
-    expect(screen.queryByTestId('git-confirm-strip')).toBeNull();
+    expect(screen.queryByTestId('git-confirm-dialog')).toBeNull();
   });
 
   it('puts everything back on the spot', async () => {
@@ -230,7 +257,7 @@ describe('the bulk actions, which take nothing back and so ask nothing', () => {
     fireEvent.click(screen.getByTestId('git-unstage-all'));
 
     await waitFor(() => expect(calls.unstageAll).toHaveBeenCalledWith(REPO));
-    expect(screen.queryByTestId('git-confirm-strip')).toBeNull();
+    expect(screen.queryByTestId('git-confirm-dialog')).toBeNull();
   });
 });
 
