@@ -346,6 +346,17 @@ impl WorkbenchRegistry {
             .ok_or_else(|| format!("{name} is required"))
     }
 
+    /// A field the caller may leave out. Absent and empty read the same, so a
+    /// screen that has nothing to put there can omit it or send "" and get the
+    /// same answer either way.
+    fn maybe<'a>(command: &'a Command, name: &str) -> Option<&'a str> {
+        command
+            .fields
+            .get(name)
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+    }
+
     async fn driver_command(&self, command: &Command) -> Result<Value, String> {
         let session_id = Self::field(command, "sessionId")?;
         let closing = command.kind == CommandKind::SessionClose;
@@ -566,10 +577,15 @@ impl WorkbenchRegistry {
     /// refused by `protocol::Command` before they can reach this registry.
     pub async fn execute(&self, command: &Command) -> Result<Value, String> {
         match command.kind {
+            // A project is what the reader narrows to, never what he needs to
+            // have: the screen opens on "Personal files only", and a machine
+            // with no project registered has nothing else to offer. Requiring
+            // one here answered that opening view with a refusal, so the very
+            // first look at the screen showed no files at all (bw-03gc.1).
             CommandKind::AgentFilesList => {
-                let project = Self::field(command, "projectPath")?;
+                let project = Self::maybe(command, "projectPath");
                 let files = agent_files::discover(
-                    Some(Path::new(project)),
+                    project.map(Path::new),
                     &self.paths.home,
                     Some(&self.paths.claude_config),
                     Some(&self.paths.codex_home),
@@ -577,11 +593,11 @@ impl WorkbenchRegistry {
                 Ok(json!({"files":files}))
             }
             CommandKind::AgentFilesRead => {
-                let project = Self::field(command, "projectPath")?;
+                let project = Self::maybe(command, "projectPath");
                 let path = Self::field(command, "path")?;
                 let (content, truncated) = agent_files::read(
                     Path::new(path),
-                    Some(Path::new(project)),
+                    project.map(Path::new),
                     &self.paths.home,
                     Some(&self.paths.claude_config),
                     Some(&self.paths.codex_home),
@@ -807,6 +823,7 @@ mod tests {
         std::fs::create_dir_all(project.join(".claude")).unwrap();
         std::fs::create_dir_all(home.join(".claude")).unwrap();
         std::fs::write(project.join("CLAUDE.md"), "project rules").unwrap();
+        std::fs::write(home.join(".claude/CLAUDE.md"), "personal rules").unwrap();
         let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
         let calls = Arc::new(AtomicUsize::new(0));
         let registry = WorkbenchRegistry::new(
@@ -832,6 +849,28 @@ mod tests {
         assert!(listed["files"]
             .as_array()
             .is_some_and(|files| !files.is_empty()));
+
+        // Naming no project is the screen's opening view, not a mistake: the
+        // personal files are still there to read, and a machine with nothing
+        // registered has only those.
+        let personal = registry
+            .execute(&command(CommandKind::AgentFilesList, json!({})))
+            .await
+            .unwrap();
+        let own = home.join(".claude/CLAUDE.md");
+        assert!(personal["files"]
+            .as_array()
+            .is_some_and(|files| files.iter().any(|file| file["path"] == json!(own))));
+        assert_eq!(
+            registry
+                .execute(&command(
+                    CommandKind::AgentFilesRead,
+                    json!({"path":own}),
+                ))
+                .await
+                .unwrap()["content"],
+            json!("personal rules")
+        );
 
         registry
             .execute(&command(
