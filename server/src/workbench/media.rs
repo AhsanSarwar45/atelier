@@ -170,10 +170,19 @@ pub fn import_artifact(
     ))
 }
 
+/// The one contract, on the presenter's side. `src/workbench/chat-widgets.ts`
+/// holds the reader's side of it and `tests/fixtures/presentation-corpus.json`
+/// records the verdict both must reach; a rule changed here without changing
+/// the corpus fails `tests/the_presenter_and_the_reader_agree.rs`.
+///
+/// Every refusal names the field at fault, because the agent that wrote the
+/// payload sees only this string and cannot look at what was drawn.
 pub fn widget_block(value: &Value) -> Result<String, String> {
-    let kind = value["type"]
-        .as_str()
-        .ok_or("Widget contract mismatch or unknown fields")?;
+    let object = value.as_object().ok_or("a widget is a JSON object")?;
+    let kind = object
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or("type is required and names the kind of widget")?;
     let allowed = match kind {
         "image" => &["type", "title", "asset", "alt", "caption"][..],
         "image_compare" => &["type", "title", "mode", "before", "after"][..],
@@ -185,67 +194,333 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
         "explainer" => &[
             "type", "layout", "title", "summary", "nodes", "edges", "steps", "evidence",
         ][..],
-        _ => return Err("Widget contract mismatch or unknown fields".into()),
+        other => {
+            return Err(format!(
+                "{other} is not a widget type: use metrics, chart, progress, timeline, table, video, image, image_compare, artifact or explainer"
+            ))
+        }
     };
-    let object = value
-        .as_object()
-        .ok_or("Widget contract mismatch or unknown fields")?;
-    if object.keys().any(|key| !allowed.contains(&key.as_str())) {
-        return Err("Widget contract mismatch or unknown fields".into());
-    }
-    let valid = match kind {
-        "image" => asset_name(&value["asset"], false) && valid_text(&value["alt"], 200),
+    only_fields(object, allowed, kind)?;
+    optional_string(object, "title", 200)?;
+    match kind {
+        "image" => {
+            stored_image(object.get("asset"), "asset")?;
+            required_string(object, "alt", 200)?;
+            optional_string(object, "caption", 200)?;
+        }
         "image_compare" => {
-            matches!(value["mode"].as_str(), Some("side_by_side" | "wipe"))
-                && asset_name(&value["before"]["asset"], false)
-                && valid_text(&value["before"]["alt"], 200)
-                && asset_name(&value["after"]["asset"], false)
-                && valid_text(&value["after"]["alt"], 200)
+            one_of(object, "mode", &["side_by_side", "wipe"], true)?;
+            for side in ["before", "after"] {
+                let shot = object
+                    .get(side)
+                    .and_then(Value::as_object)
+                    .ok_or_else(|| format!("{side} is required and is an object"))?;
+                only_fields(shot, &["asset", "alt"], side)?;
+                stored_image(shot.get("asset"), &format!("{side}.asset"))?;
+                required_string(shot, "alt", 200)?;
+            }
         }
         "artifact" => {
-            asset_name(&value["asset"], true)
-                && matches!(
-                    value["kind"].as_str(),
-                    Some("mermaid" | "flow" | "scene" | "mockup")
-                )
+            if !asset_name(object.get("asset").unwrap_or(&Value::Null), true) {
+                return Err("asset must name a stored artifact, as <64 hex characters>.artifact.json".into());
+            }
+            one_of(object, "kind", &["mermaid", "flow", "scene", "mockup"], true)?;
         }
-        "metrics" | "progress" | "timeline" => value["items"]
-            .as_array()
-            .is_some_and(|items| !items.is_empty()),
+        "metrics" => {
+            for item in list(object, "items", 1, 6)? {
+                let item = row(item, "items")?;
+                only_fields(item, &["label", "value", "detail", "trend"], "items")?;
+                required_string(item, "label", 200)?;
+                required_string(item, "value", 200)?;
+                optional_string(item, "detail", 200)?;
+                one_of(item, "trend", &["up", "down", "flat"], false)?;
+            }
+        }
+        "progress" => {
+            for item in list(object, "items", 1, 12)? {
+                let item = row(item, "items")?;
+                only_fields(item, &["label", "value", "max", "detail"], "items")?;
+                required_string(item, "label", 200)?;
+                number(item.get("value"), "items[].value")?;
+                if let Some(max) = item.get("max") {
+                    if number(Some(max), "items[].max")? <= 0.0 {
+                        return Err("items[].max must be above zero".into());
+                    }
+                }
+                optional_string(item, "detail", 200)?;
+            }
+        }
+        "timeline" => {
+            for item in list(object, "items", 1, 20)? {
+                let item = row(item, "items")?;
+                only_fields(item, &["label", "detail", "status"], "items")?;
+                required_string(item, "label", 200)?;
+                optional_string(item, "detail", 200)?;
+                one_of(item, "status", &["done", "current", "next"], false)?;
+            }
+        }
         "chart" => {
-            value["series"]
-                .as_array()
-                .is_some_and(|items| !items.is_empty())
-                && value["data"]
-                    .as_array()
-                    .is_some_and(|items| !items.is_empty())
+            one_of(object, "chart", &["bar", "line"], true)?;
+            let series = list(object, "series", 1, 4)?;
+            for one in series {
+                let one = row(one, "series")?;
+                only_fields(one, &["name", "color"], "series")?;
+                required_string(one, "name", 200)?;
+                optional_string(one, "color", 200)?;
+            }
+            let width = series.len();
+            for point in list(object, "data", 1, 30)? {
+                let point = row(point, "data")?;
+                only_fields(point, &["label", "values"], "data")?;
+                required_string(point, "label", 200)?;
+                let values = point
+                    .get("values")
+                    .and_then(Value::as_array)
+                    .ok_or("data[].values is required and is a list of numbers")?;
+                if values.len() != width {
+                    return Err(format!(
+                        "data[].values carries {}, but there are {}: give one value per series",
+                        many(values.len(), "number"),
+                        many(width, "series entry")
+                    ));
+                }
+                for one in values {
+                    number(Some(one), "data[].values")?;
+                }
+            }
         }
         "table" => {
-            value["columns"]
-                .as_array()
-                .is_some_and(|items| !items.is_empty())
-                && value["rows"].is_array()
+            let columns = list(object, "columns", 1, 8)?;
+            for column in columns {
+                string(Some(column), "columns[]", 200)?;
+            }
+            let width = columns.len();
+            let rows = object
+                .get("rows")
+                .and_then(Value::as_array)
+                .ok_or("rows is required and is a list of rows")?;
+            if rows.len() > 30 {
+                return Err(format!(
+                    "rows carries {}, and a table shows at most 30",
+                    many(rows.len(), "row")
+                ));
+            }
+            for cells in rows {
+                let cells = cells
+                    .as_array()
+                    .ok_or("every row is a list of cells")?;
+                if cells.len() != width {
+                    return Err(format!(
+                        "a row carries {}, but there are {}: every row matches the columns",
+                        many(cells.len(), "cell"),
+                        many(width, "column")
+                    ));
+                }
+                for cell in cells {
+                    string(Some(cell), "a table cell", 200)?;
+                }
+            }
         }
-        "video" => valid_text(&value["src"], 4096),
+        "video" => {
+            media_source(object.get("src"), "src")?;
+            if object.contains_key("poster") {
+                media_source(object.get("poster"), "poster")?;
+            }
+        }
         "explainer" => {
-            value["nodes"]
-                .as_array()
-                .is_some_and(|items| items.len() >= 2)
-                && value["edges"]
+            one_of(object, "layout", &["flow", "sequence", "cycle", "layers"], false)?;
+            optional_string(object, "summary", 200)?;
+            let nodes = list(object, "nodes", 2, 12)?;
+            let mut ids = std::collections::BTreeSet::new();
+            for node in nodes {
+                let node = row(node, "nodes")?;
+                only_fields(node, &["id", "label", "detail"], "nodes")?;
+                let id = required_string(node, "id", 200)?;
+                required_string(node, "label", 200)?;
+                optional_string(node, "detail", 200)?;
+                if !ids.insert(id.to_string()) {
+                    return Err(format!("two nodes are called {id}: node ids are unique"));
+                }
+            }
+            for edge in list(object, "edges", 1, 20)? {
+                let edge = row(edge, "edges")?;
+                only_fields(edge, &["from", "to", "label"], "edges")?;
+                for end in ["from", "to"] {
+                    let named = required_string(edge, end, 200)?;
+                    if !ids.contains(named) {
+                        return Err(format!("an edge names {named} as its {end}, and no node has that id"));
+                    }
+                }
+                optional_string(edge, "label", 200)?;
+            }
+            for step in list(object, "steps", 1, 12)? {
+                let step = row(step, "steps")?;
+                only_fields(step, &["label", "detail", "active"], "steps")?;
+                required_string(step, "label", 200)?;
+                optional_string(step, "detail", 200)?;
+                let active = step
+                    .get("active")
+                    .and_then(Value::as_array)
+                    .filter(|lit| !lit.is_empty())
+                    .ok_or("steps[].active names at least one node to light")?;
+                for named in active {
+                    let named = string(Some(named), "steps[].active", 200)?;
+                    if !ids.contains(named) {
+                        return Err(format!("a step lights {named}, and no node has that id"));
+                    }
+                }
+            }
+            if let Some(evidence) = object.get("evidence") {
+                let evidence = evidence
                     .as_array()
-                    .is_some_and(|items| !items.is_empty())
-                && value["steps"]
-                    .as_array()
-                    .is_some_and(|items| !items.is_empty())
+                    .filter(|lit| lit.len() <= 12)
+                    .ok_or("evidence is a list of at most 12 entries")?;
+                for one in evidence {
+                    let one = row(one, "evidence")?;
+                    only_fields(one, &["label", "path", "line"], "evidence")?;
+                    required_string(one, "label", 200)?;
+                    let path = required_string(one, "path", 4096)?;
+                    if !absolute(path) {
+                        return Err(format!("evidence[].path is {path}, and evidence paths are absolute"));
+                    }
+                    if let Some(line) = one.get("line") {
+                        if line.as_u64().is_none_or(|at| at == 0) {
+                            return Err("evidence[].line is a whole number from 1 upwards".into());
+                        }
+                    }
+                }
+            }
         }
-        _ => false,
-    };
-    if !valid {
-        return Err("Widget contract mismatch or unknown fields".into());
+        _ => unreachable!("the type was matched against the field allowlist above"),
     }
     Ok(format!(
         "```atelier-widget\n{}\n```\n",
         serde_json::to_string(&ordered(value)).unwrap()
+    ))
+}
+
+type Row = serde_json::Map<String, Value>;
+
+/// Counts in a refusal, so one of something never reads as "1 cells".
+fn many(count: usize, noun: &str) -> String {
+    if count == 1 {
+        return format!("1 {noun}");
+    }
+    match noun.strip_suffix('y') {
+        Some(stem) => format!("{count} {stem}ies"),
+        None => format!("{count} {noun}s"),
+    }
+}
+
+fn only_fields(object: &Row, allowed: &[&str], whose: &str) -> Result<(), String> {
+    match object.keys().find(|key| !allowed.contains(&key.as_str())) {
+        Some(unknown) => Err(format!(
+            "{whose} carries an unknown field {unknown}: it takes only {}",
+            allowed.join(", ")
+        )),
+        None => Ok(()),
+    }
+}
+
+fn row<'a>(value: &'a Value, whose: &str) -> Result<&'a Row, String> {
+    value
+        .as_object()
+        .ok_or_else(|| format!("every entry in {whose} is an object"))
+}
+
+fn string<'a>(value: Option<&'a Value>, whose: &str, max: usize) -> Result<&'a str, String> {
+    let text = value
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("{whose} is required and is text"))?;
+    if text.trim().is_empty() {
+        return Err(format!("{whose} is blank, and displayed text must say something"));
+    }
+    if text.len() > max {
+        return Err(format!(
+            "{whose} is {} characters, and stops at {max}",
+            text.len()
+        ));
+    }
+    Ok(text)
+}
+
+fn required_string<'a>(object: &'a Row, key: &str, max: usize) -> Result<&'a str, String> {
+    string(object.get(key), key, max)
+}
+
+/// Absent is allowed; present-but-null is not, because the reader tells the
+/// two apart and a payload that means "no title" leaves the key out.
+fn optional_string(object: &Row, key: &str, max: usize) -> Result<(), String> {
+    match object.get(key) {
+        None => Ok(()),
+        Some(value) => string(Some(value), key, max).map(|_| ()),
+    }
+}
+
+fn one_of(object: &Row, key: &str, allowed: &[&str], required: bool) -> Result<(), String> {
+    match object.get(key) {
+        None if !required => Ok(()),
+        None => Err(format!("{key} is required and is one of {}", allowed.join(", "))),
+        Some(value) => match value.as_str() {
+            Some(word) if allowed.contains(&word) => Ok(()),
+            _ => Err(format!("{key} is one of {}", allowed.join(", "))),
+        },
+    }
+}
+
+fn number(value: Option<&Value>, whose: &str) -> Result<f64, String> {
+    value
+        .and_then(Value::as_f64)
+        .filter(|one| one.is_finite())
+        .ok_or_else(|| format!("{whose} is required and is a number"))
+}
+
+fn list<'a>(object: &'a Row, key: &str, least: usize, most: usize) -> Result<&'a Vec<Value>, String> {
+    let items = object
+        .get(key)
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("{key} is required and is a list"))?;
+    if items.len() < least {
+        return Err(format!("{key} is empty, and needs at least {least}"));
+    }
+    if items.len() > most {
+        return Err(format!(
+            "{key} carries {}, and takes at most {most}",
+            many(items.len(), "entry")
+        ));
+    }
+    Ok(items)
+}
+
+fn absolute(path: &str) -> bool {
+    path.starts_with('/')
+        || path
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphabetic)
+            && path.as_bytes().get(1) == Some(&b':')
+            && matches!(path.as_bytes().get(2), Some(b'/' | b'\\'))
+}
+
+fn media_source(value: Option<&Value>, whose: &str) -> Result<(), String> {
+    let source = string(value, whose, 4096)?;
+    let scheme = ["http:", "https:", "data:video/", "blob:", "file:"]
+        .iter()
+        .any(|start| source.starts_with(start));
+    if scheme || absolute(source) {
+        return Ok(());
+    }
+    Err(format!(
+        "{whose} is {source}: name an absolute path, or a http, https, data:video, blob or file location"
+    ))
+}
+
+fn stored_image(value: Option<&Value>, whose: &str) -> Result<(), String> {
+    if asset_name(value.unwrap_or(&Value::Null), false) {
+        return Ok(());
+    }
+    Err(format!(
+        "{whose} must name a stored image, as <64 hex characters> and .png, .jpg, .gif or .webp"
     ))
 }
 

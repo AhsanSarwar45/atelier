@@ -2963,7 +2963,7 @@ mod tests {
     fn final_root_text_keeps_atelier_widget_post_processing() {
         let mut normalizer = AcpNormalizer::default();
         let said = normalizer.update("local", "codex", &json!({"sessionId":"remote","update":{
-            "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done\n```atelier-widget\n{\"type\":\"metrics\",\"items\":[{\"label\":\"Checks\",\"value\":1}]}\n```"}
+            "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done\n```atelier-widget\n{\"type\":\"metrics\",\"items\":[{\"label\":\"Checks\",\"value\":\"1\"}]}\n```"}
         }}));
         // Drawn when the block closed, which is here.
         assert_eq!(kinds(&said), vec!["message.started", "session.state", "text.delta", "widget"]);

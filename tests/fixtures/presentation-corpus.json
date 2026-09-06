@@ -2947,6 +2947,71 @@
           }
         ]
       }
+    },
+    {
+      "name": "metrics, an optional field is explicitly null",
+      "verdict": "refuse",
+      "why": "an absent field is not the same as a null one",
+      "payload": {
+        "type": "metrics",
+        "items": [
+          {
+            "label": "a",
+            "value": "b",
+            "detail": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "table, title is explicitly null",
+      "verdict": "refuse",
+      "why": "an absent field is not the same as a null one",
+      "payload": {
+        "type": "table",
+        "title": null,
+        "columns": [
+          "a"
+        ],
+        "rows": [
+          [
+            "x"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "explainer, layout is explicitly null",
+      "verdict": "refuse",
+      "why": "an absent field is not the same as a null one",
+      "payload": {
+        "type": "explainer",
+        "layout": null,
+        "nodes": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "edges": [
+          {
+            "from": "a",
+            "to": "b"
+          }
+        ],
+        "steps": [
+          {
+            "label": "Go",
+            "active": [
+              "a"
+            ]
+          }
+        ]
+      }
     }
   ]
 }
