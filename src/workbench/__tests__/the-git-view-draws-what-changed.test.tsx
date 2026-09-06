@@ -38,6 +38,10 @@ const calls = vi.hoisted(() => ({
   push: vi.fn(),
   branches: vi.fn(),
   checkout: vi.fn(),
+  // The panel watches the repository for changes made outside it while it is
+  // on screen (bw-8nwh.2). Nothing here moves the repository behind its back,
+  // so this only has to be a watch it can let go of.
+  watch: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/lib/api', async (whatItReallyIs) => ({

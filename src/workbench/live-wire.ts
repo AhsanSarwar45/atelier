@@ -41,6 +41,14 @@ export interface WatchEvent {
 /** Told when the project's board moved. */
 type BoardListener = (event: WatchEvent) => void;
 
+/**
+ * Told when the repository moved underneath the Git panel — a commit, a push,
+ * a checkout, whoever made it. It carries nothing: the panel re-reads the
+ * whole of what it draws, so the name of the file that moved inside a git
+ * directory would be of no use to it (bw-8nwh.2).
+ */
+type RepositoryListener = () => void;
+
 /** Told what the helper says about every chat at once. */
 interface WorkbenchListener {
   /** One frame, still as text: the reader of it decides what it can read. */
@@ -66,6 +74,7 @@ interface ChatListener {
 const boards = new Map<string, Set<BoardListener>>();
 const workbenchers = new Set<WorkbenchListener>();
 const chats = new Map<string, Set<ChatListener>>();
+const repositories = new Map<string, Set<RepositoryListener>>();
 const bootstrappers = new Set<(data: string) => void>();
 
 let source: WebSocket | null = null;
@@ -100,12 +109,24 @@ function shape(): string {
   if (boards.size > 0) params.set('board', Array.from(boards.keys()).join('\n'));
   if (workbenchers.size > 0) params.set('workbench', '1');
   if (bootstrappers.size > 0) params.set('bootstrap', '1');
+  const repository = openRepository();
+  if (repository) params.set('git', repository);
   const chat = openChat();
   if (chat) {
     params.set('chat', chat);
     params.set('since', String(furthestSeen(chat)));
   }
   return params.toString();
+}
+
+/**
+ * The repository the Git panel is open on. One at a time, for the same reason
+ * the chat is: the panel is drawn in the rail beside one chat, and that chat
+ * has one project.
+ */
+function openRepository(): string | null {
+  const open = Array.from(repositories.keys());
+  return open.length === 0 ? null : open[open.length - 1];
 }
 
 /**
@@ -217,6 +238,11 @@ function heard(raw: string): void {
     case 'workbench':
       workbenchers.forEach((w) => w.frame(said));
       return;
+    case 'git':
+      // Every reader of this repository, and only this one: a second window
+      // on another project must not be made to re-read git because ours moved.
+      repositories.get(openRepository() ?? '')?.forEach((tell) => tell());
+      return;
     case 'bootstrap':
       bootstrappers.forEach((tell) => tell(said));
       return;
@@ -259,7 +285,13 @@ function dropped(): void {
 }
 
 function nothingWanted(): boolean {
-  return boards.size === 0 && workbenchers.size === 0 && chats.size === 0 && bootstrappers.size === 0;
+  return (
+    boards.size === 0 &&
+    workbenchers.size === 0 &&
+    chats.size === 0 &&
+    bootstrappers.size === 0 &&
+    repositories.size === 0
+  );
 }
 
 /** Opens the one connection, or reopens it in the shape now wanted. */
@@ -361,6 +393,27 @@ export function onBoard(project: string, tell: BoardListener): () => void {
   };
 }
 
+/**
+ * Watch one repository's git directory, for as long as the Git panel is on
+ * screen. Returns the way to stop.
+ *
+ * On this connection rather than one of its own: an event stream opened for
+ * the panel would spend one of the six a browser allows across every window,
+ * and never give it back, which is the fault this whole file exists to end
+ * (bw-zkh4).
+ */
+export function onRepository(repo: string, tell: RepositoryListener): () => void {
+  const listeners = repositories.get(repo) ?? new Set<RepositoryListener>();
+  listeners.add(tell);
+  repositories.set(repo, listeners);
+  reshape();
+  return () => {
+    listeners.delete(tell);
+    if (listeners.size === 0) repositories.delete(repo);
+    reshape();
+  };
+}
+
 /** Watch what the helper says about every chat at once. */
 export function onWorkbench(listener: WorkbenchListener): () => void {
   workbenchers.add(listener);
@@ -411,6 +464,7 @@ export function watching(): string {
 export function forgetEverything(): void {
   boards.clear();
   workbenchers.clear();
+  repositories.clear();
   chats.clear();
   bootstrappers.clear();
   close();

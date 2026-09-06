@@ -4,7 +4,7 @@
  */
 
 import { apiUrl } from '@/lib/api-base';
-import { onBoard, type WatchEvent } from '@/workbench/live-wire';
+import { onBoard, onRepository, type WatchEvent } from '@/workbench/live-wire';
 import { BeadsResponseSchema, WorktreeStatusSchema } from '@/lib/api-schemas';
 import type { Project, Tag, Bead, WorktreeStatus, WorktreeEntry, CachedCounts } from '@/types';
 
@@ -678,6 +678,18 @@ export const git = {
       method: 'POST',
       body: JSON.stringify({ path, branch, ...(create === undefined ? {} : { create }) }),
     }),
+
+  /**
+   * Told whenever the repository itself moves — a commit, a push, a checkout,
+   * whoever made it and wherever from (bw-8nwh.2). Returns the way to stop.
+   *
+   * It says only that something moved; the panel answers by reading `status`
+   * and `log` again, because those are what it draws and only git knows what
+   * they say now. Carried on the window's one connection, tagged `git`, for
+   * the reason `watch.beads` below is: a stream of its own would spend one of
+   * the six a browser allows and never give it back.
+   */
+  watch: (path: string, onChange: () => void) => onRepository(path, onChange),
 
   /** Recent saved changes, newest first. */
   log: (path: string, limit = 50, signal?: AbortSignal) => fetchApi<GitLogResponse>(

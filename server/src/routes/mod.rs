@@ -9,6 +9,7 @@ pub mod dolt;
 pub mod environment;
 pub mod fs;
 pub mod git;
+pub mod git_watch;
 pub mod live;
 pub mod projects;
 pub mod version;

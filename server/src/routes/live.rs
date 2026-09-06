@@ -26,6 +26,7 @@
 //! | `chat.snapshot`  | the open chat's conversation as it stands          |
 //! | `chat.error`     | a readable snapshot failure while retrying          |
 //! | `bootstrap`      | dependency installation progress                   |
+//! | `git`            | this repository's git directory moved              |
 //!
 //! A named upstream event keeps its name after the tag, which is where
 //! `chat.snapshot` comes from: the helper names that frame `snapshot`.
@@ -124,6 +125,10 @@ pub struct LiveParams {
     pub workbench: Option<String>,
     /// Whether this screen is showing dependency installation progress.
     pub bootstrap: Option<String>,
+    /// The repository the Git panel is open on, if it is open. One at a time:
+    /// the panel is drawn beside one chat, and a chat has one project
+    /// (src/workbench/git-view.tsx, bw-8nwh.2).
+    pub git: Option<String>,
 }
 
 /// Whether a query flag was written as a yes.
@@ -553,6 +558,17 @@ pub async fn live(
         tokio::spawn(async move {
             super::watch::watch_board(PathBuf::from(board), tx, Some("board"), dolt_manager, db)
                 .await;
+        });
+    }
+
+    // The Git panel, while it is on screen: its repository's git directory
+    // watched, so a commit or a push made in a terminal reaches the counts the
+    // panel is drawing without anybody pressing refresh (bw-8nwh.2).
+    if let Some(repo) = params.git.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+        let repo = PathBuf::from(repo);
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            super::git_watch::watch_repo(repo, tx, Some("git")).await;
         });
     }
 
