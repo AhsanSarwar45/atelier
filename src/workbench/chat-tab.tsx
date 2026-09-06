@@ -82,7 +82,7 @@ import { heldElsewhere, sessionOwnership, streamStillAnswers } from '@/workbench
 import { SearchPanel } from '@/workbench/search-panel';
 import { AgentView } from '@/workbench/agent-view';
 import { DrawnTranscript } from '@/workbench/drawn-transcript';
-import { drawnAsSent, stillPending, userMessageIds, type PendingSend } from '@/workbench/pending-sends';
+import { drawnAsSent, stillPending, userMessageIds, worthDrawing, type PendingSend } from '@/workbench/pending-sends';
 import { WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
@@ -857,7 +857,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   /** The rows this conversation draws, once the reader's switches and current conditions are obeyed. */
   const rows = useMemo(() => stillShowing(
     [
-      ...view.items.filter((item) => item.kind !== 'provider_message' || providerMessageIsCurrent(item.signal, providerNow)),
+      ...view.items.filter((item) =>
+        worthDrawing(item)
+        && (item.kind !== 'provider_message' || providerMessageIsCurrent(item.signal, providerNow))),
       // At the end, which is where a line just sent belongs and where the
       // server's copy of it will land.
       ...outstanding.map(drawnAsSent),

@@ -43,7 +43,16 @@ export function userMessageIds(items: readonly TranscriptItem[]): Set<string> {
  * Those sends the transcript has not yet accounted for.
  *
  * `baseline` is the mark taken when the first of these sends went out. A user
- * message outside it is one of them come back.
+ * message outside it is one of them come back — but only once it carries what
+ * was written. The sidecar records a line as four rows, `message.started` first
+ * and the words two later, and each reaches the browser on its own frame. A row
+ * that has arrived but is still empty is not yet a copy of anything: standing
+ * the drawn line down for it took the reader's words off the screen until the
+ * `text.delta` landed, which is the blink this rules out (bw-w29l).
+ *
+ * `done` is honoured beside the text so that a line that completes empty — no
+ * words at all, which nothing this composer sends can be, but which a chat
+ * begun elsewhere might — still retires the row rather than stranding it.
  */
 export function stillPending(
   pending: readonly PendingSend[],
@@ -52,7 +61,8 @@ export function stillPending(
 ): PendingSend[] {
   let spokenFor = 0;
   for (const item of items) {
-    if (item.kind === 'message' && item.role === 'user' && !baseline.has(item.id)) spokenFor += 1;
+    if (item.kind !== 'message' || item.role !== 'user' || baseline.has(item.id)) continue;
+    if (item.text !== '' || item.done) spokenFor += 1;
   }
   return pending.slice(spokenFor);
 }
@@ -74,4 +84,23 @@ export function drawnAsSent(pending: PendingSend): TranscriptMessage {
     done: true,
     parentId: null,
   };
+}
+
+/**
+ * Whether a transcript row has anything to show yet.
+ *
+ * A user message is built from `message.started` before the frame carrying its
+ * words arrives, so for a moment the transcript holds a row that says nothing.
+ * Drawn, that is an empty bubble that fills a beat later — the other half of
+ * the blink in bw-w29l, and worth nothing to the reader even where no line was
+ * drawn ahead of it, as in a chat this browser did not send into.
+ *
+ * Only the reader's own rows are held back. An assistant message legitimately
+ * begins empty and fills as it is written, and watching it do that is the point.
+ * A row carrying pictures says something without words, and one that has
+ * finished is as complete as it will ever be.
+ */
+export function worthDrawing(item: TranscriptItem): boolean {
+  if (item.kind !== 'message' || item.role !== 'user') return true;
+  return item.text !== '' || item.images.length > 0 || item.done;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { drawnAsSent, stillPending, userMessageIds, type PendingSend } from '@/workbench/pending-sends';
+import { drawnAsSent, stillPending, userMessageIds, worthDrawing, type PendingSend } from '@/workbench/pending-sends';
 import type { TranscriptItem } from '@/workbench/fold';
 
 function said(id: string, role: 'user' | 'assistant'): TranscriptItem {
@@ -57,5 +57,74 @@ describe('a line drawn before the server has spoken it back', () => {
     // it: anything the drawing keys on must already be here, or the row would
     // change appearance the moment the server's copy took its place.
     expect(row).toEqual({ ...said('sending-0', 'user'), text: 'hello' });
+  });
+});
+
+/**
+ * The swap, frame by frame, in the order the sidecar actually writes.
+ *
+ * `record_user_for_transport` appends `message.started`, then any pictures,
+ * then `text.delta`, then `message.completed`, each its own row in the store
+ * and so each its own frame on the wire. The fold builds the row on the first
+ * of those with `text: ''` and fills it on the third. Retiring the drawn line
+ * on the first left the reader's own words gone from the screen until the
+ * third arrived — read on the running app as a blink (bw-w29l).
+ */
+describe('the swap from the drawn line to the server’s own', () => {
+  const SENT: PendingSend[] = [{ key: 'sending-0', text: 'what the reader wrote', images: [] }];
+  const started: TranscriptItem = {
+    kind: 'message', id: 'from-the-server', role: 'user',
+    text: '', images: [], done: false, parentId: null,
+  };
+  const filled = { ...started, text: 'what the reader wrote' } as TranscriptItem;
+  const completed = { ...filled, done: true } as TranscriptItem;
+
+  /** What the transcript would read, drawn line included, at one moment. */
+  function onScreen(items: TranscriptItem[]): string[] {
+    return [...items.filter(worthDrawing), ...stillPending(SENT, items, new Set()).map(drawnAsSent)]
+      .filter((item): item is typeof filled & { text: string } => item.kind === 'message')
+      .map((item) => item.text);
+  }
+
+  it('never loses the words, on any frame of the sequence', () => {
+    for (const frame of [[], [started], [started], [filled], [completed]]) {
+      expect(onScreen(frame as TranscriptItem[])).toEqual(['what the reader wrote']);
+    }
+  });
+
+  it('keeps exactly one copy once the server’s carries the words', () => {
+    expect(stillPending(SENT, [filled], new Set())).toEqual([]);
+  });
+
+  /** An empty row that completes anyway is still the server speaking. */
+  it('is retired by a completed message even if it says nothing', () => {
+    expect(stillPending(SENT, [{ ...started, done: true }], new Set())).toEqual([]);
+  });
+});
+
+describe('a row with nothing in it yet', () => {
+  const bare = {
+    kind: 'message', id: 'm', role: 'user', text: '', images: [], done: false, parentId: null,
+  } as TranscriptItem;
+
+  it('is held back while it is the reader’s and says nothing', () => {
+    expect(worthDrawing(bare)).toBe(false);
+  });
+
+  it('is drawn once it has words, pictures, or has finished', () => {
+    expect(worthDrawing({ ...bare, text: 'said' } as TranscriptItem)).toBe(true);
+    expect(worthDrawing({
+      ...bare, images: [{ mime: 'image/png', dataUrl: 'data:image/png;base64,x', alt: 'a shot' }],
+    } as TranscriptItem)).toBe(true);
+    expect(worthDrawing({ ...bare, done: true } as TranscriptItem)).toBe(true);
+  });
+
+  /** The agent's own empty opening is the thing the reader watches fill. */
+  it('is drawn anyway when the agent is the one speaking', () => {
+    expect(worthDrawing({ ...bare, role: 'assistant' } as TranscriptItem)).toBe(true);
+  });
+
+  it('leaves every other kind of row alone', () => {
+    expect(worthDrawing({ kind: 'tool', id: 't' } as TranscriptItem)).toBe(true);
   });
 });

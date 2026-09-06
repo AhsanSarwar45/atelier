@@ -79,6 +79,24 @@ async function thoseThatRanSomething(chats: PastChat[], dir: string): Promise<Pa
   return ran;
 }
 
+/**
+ * A project for this run to open a chat in, made once however many cases ask.
+ *
+ * Cases that need one ask for one, and several of them run at the same time.
+ * A `POST /api/projects` that loses that race is not a failure of the case
+ * making it — the project it wanted now exists — so the list is read again
+ * before anything is called wrong.
+ */
+async function ensureProject(request: APIRequestContext, name: string): Promise<void> {
+  const api = backend();
+  const listed = (await (await request.get(`${api}/api/projects`)).json()) as Project[];
+  if (listed.length > 0) return;
+  const made = await request.post(`${api}/api/projects`, { data: { name, path: process.cwd() } });
+  if (made.ok()) return;
+  const now = (await (await request.get(`${api}/api/projects`)).json()) as Project[];
+  expect(now.length, 'the isolated run could not add its worktree').toBeGreaterThan(0);
+}
+
 /** A chat of its own for this case, with nothing said in it. */
 async function freshChat(request: APIRequestContext, page: Page): Promise<{ project: Project; id: string }> {
   const api = backend();
@@ -132,14 +150,7 @@ test.describe('the chat draws everything the agent does', () => {
   test.describe.configure({ timeout: 420_000 });
 
   test('Escape pulls an unprocessed prompt out of the transcript and back into the composer', async ({ page, request }) => {
-    const api = backend();
-    const listed = (await (await request.get(`${api}/api/projects`)).json()) as Project[];
-    if (listed.length === 0) {
-      const made = await request.post(`${api}/api/projects`, {
-        data: { name: 'escape-recall', path: process.cwd() },
-      });
-      expect(made.ok(), 'the isolated run could not add its worktree').toBe(true);
-    }
+    await ensureProject(request, 'escape-recall');
     await freshChat(request, page);
 
     let releaseResponse = () => {};
@@ -181,14 +192,7 @@ test.describe('the chat draws everything the agent does', () => {
    * trip, which is what made sending feel like it had not happened.
    */
   test('a sent line is on the page before the server has it, and only once after', async ({ page, request }) => {
-    const api = backend();
-    const listed = (await (await request.get(`${api}/api/projects`)).json()) as Project[];
-    if (listed.length === 0) {
-      const made = await request.post(`${api}/api/projects`, {
-        data: { name: 'optimistic-echo', path: process.cwd() },
-      });
-      expect(made.ok(), 'the isolated run could not add its worktree').toBe(true);
-    }
+    await ensureProject(request, 'optimistic-echo');
     await freshChat(request, page);
 
     let releaseRequest = () => {};
@@ -220,6 +224,55 @@ test.describe('the chat draws everything the agent does', () => {
     await page.waitForTimeout(3_000);
     await expect(echo).toHaveCount(1);
     await page.screenshot({ path: 'tests/results/sent-line-once-after-echo.png', fullPage: false });
+  });
+
+  /**
+   * The line does not blink as the server's copy takes over.
+   *
+   * Every change to the transcript is recorded while one turn is sent, and the
+   * whole record is read afterwards: an empty user bubble on any single frame
+   * is the failure, and a frame is far too short to catch by sampling. The
+   * sidecar writes a line as `message.started` and its words two rows later, so
+   * before bw-w29l there was always at least one frame with the row present and
+   * empty — read on the running app as the words vanishing and coming back.
+   */
+  test('a sent line never blinks empty while the server takes it over', async ({ page, request }) => {
+    await ensureProject(request, 'no-blink');
+    await freshChat(request, page);
+
+    // Every mutation anywhere in the chat, as the list of what the reader's own
+    // rows said at that moment.
+    await page.evaluate(() => {
+      const seen: string[][] = [];
+      (window as unknown as { seen: string[][] }).seen = seen;
+      const read = () => seen.push(
+        Array.from(document.querySelectorAll('[data-testid="user-message"]'))
+          .map((row) => (row.textContent ?? '').trim()),
+      );
+      read();
+      new MutationObserver(read).observe(document.body, {
+        subtree: true, childList: true, characterData: true,
+      });
+    });
+
+    const text = 'this line must not blink';
+    await page.getByTestId('composer').fill(text);
+    await page.getByTestId('composer').press('Enter');
+    await expect(page.getByTestId('user-message').filter({ hasText: text })).toHaveCount(1, { timeout: 60_000 });
+    // Long enough for every frame of the server's own four rows to have landed.
+    await page.waitForTimeout(5_000);
+
+    const seen = await page.evaluate(() => (window as unknown as { seen: string[][] }).seen);
+    // Once the line is up it is never empty and never doubled, on any frame.
+    const first = seen.findIndex((frame) => frame.some((said) => said.includes(text)));
+    expect(first, 'the line never appeared at all').toBeGreaterThanOrEqual(0);
+    const after = seen.slice(first);
+    const blinks = after.filter((frame) => !frame.some((said) => said.includes(text)));
+    expect(blinks, `the line left the screen on ${blinks.length} frame(s)`).toEqual([]);
+    const empties = after.filter((frame) => frame.some((said) => said === ''));
+    expect(empties, `an empty bubble was drawn on ${empties.length} frame(s)`).toEqual([]);
+    const doubled = after.filter((frame) => frame.filter((said) => said.includes(text)).length > 1);
+    expect(doubled, `the line was drawn twice on ${doubled.length} frame(s)`).toEqual([]);
   });
 
   test('the mode picker takes bypass, and says so in the chat', async ({ page, request }) => {
