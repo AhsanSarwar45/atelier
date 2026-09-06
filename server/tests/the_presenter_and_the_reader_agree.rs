@@ -18,10 +18,14 @@ struct Case {
 }
 
 fn corpus() -> Vec<Case> {
+    section("widgets")
+}
+
+fn section(name: &str) -> Vec<Case> {
     let read: Value = serde_json::from_str(CORPUS).expect("the corpus is valid JSON");
-    read["widgets"]
+    read[name]
         .as_array()
-        .expect("the corpus lists widgets")
+        .unwrap_or_else(|| panic!("the corpus lists {name}"))
         .iter()
         .map(|one| {
             let verdict = one["verdict"].as_str().expect("every case has a verdict");
@@ -82,6 +86,56 @@ fn what_the_presenter_accepts_it_returns_as_a_block_it_can_read_back() {
             atelier::workbench::media::widget_specs(&block).len(),
             1,
             "{}: the presenter cannot read back the block it just wrote",
+            one.name
+        );
+    }
+}
+
+/// An artifact the presenter accepts is written to durable storage before
+/// anything draws it, so a payload it lets through and the reader refuses is
+/// stored evidence that cannot be shown. `src/workbench/visual-artifacts.ts`
+/// answers this same list from the reader's side.
+#[test]
+fn the_presenter_answers_every_artifact_the_way_the_corpus_records_it() {
+    let cases = section("artifacts");
+    assert!(
+        cases.len() > 20,
+        "the artifact corpus is too small to be a contract"
+    );
+    assert!(cases.iter().any(|one| one.accepted), "no case is accepted");
+    assert!(cases.iter().any(|one| !one.accepted), "no case is refused");
+
+    let mut wrong = Vec::new();
+    for one in &cases {
+        let accepted = atelier::workbench::media::artifact(&one.payload).is_ok();
+        if accepted != one.accepted {
+            wrong.push(format!(
+                "  {}: the presenter {} it, the corpus says {} ({})",
+                one.name,
+                if accepted { "accepts" } else { "refuses" },
+                if one.accepted { "accept" } else { "refuse" },
+                one.why
+            ));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} of {} artifact cases are answered against the corpus:\n{}",
+        wrong.len(),
+        cases.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Every refusal is the only thing the agent that wrote the payload will see.
+#[test]
+fn a_refused_artifact_is_told_what_was_wrong_with_it() {
+    for one in section("artifacts").into_iter().filter(|one| !one.accepted) {
+        let error = atelier::workbench::media::artifact(&one.payload)
+            .expect_err(&format!("{}: the presenter accepted it", one.name));
+        assert!(
+            error.len() > 20 && error.chars().next().is_some_and(char::is_lowercase),
+            "{}: the refusal does not read as a sentence: {error}",
             one.name
         );
     }

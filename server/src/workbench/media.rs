@@ -93,41 +93,337 @@ pub fn existing_image(asset: &str, directory: &Path) -> Result<String, String> {
     Ok(asset.to_string())
 }
 
-fn valid_text(value: &Value, max: usize) -> bool {
-    value
-        .as_str()
-        .is_some_and(|text| !text.trim().is_empty() && text.len() <= max)
+const ID_LIMIT: usize = 64;
+
+/// An identifier the reader will accept: a letter, then letters, digits,
+/// underscores or dashes, up to 64 characters in all.
+fn identifier(value: Option<&Value>, whose: &str) -> Result<String, String> {
+    let named = value
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("{whose} is required and is an id"))?;
+    let mut letters = named.chars();
+    let starts = letters.next().is_some_and(|one| one.is_ascii_alphabetic());
+    let rest = letters.all(|one| one.is_ascii_alphanumeric() || one == '_' || one == '-');
+    if !starts || !rest || named.len() > ID_LIMIT {
+        return Err(format!(
+            "{whose} is {named}: an id starts with a letter and carries letters, digits, underscores or dashes, up to {ID_LIMIT} characters"
+        ));
+    }
+    Ok(named.to_string())
 }
 
-fn artifact(value: &Value) -> bool {
-    if value["version"] != 1 || !valid_text(&value["title"], 200) {
-        return false;
+fn boolean(object: &Row, key: &str) -> Result<(), String> {
+    match object.get(key) {
+        None | Some(Value::Bool(_)) => Ok(()),
+        Some(_) => Err(format!("{key} is true or false")),
     }
-    match value["kind"].as_str() {
-        Some("mermaid") => valid_text(&value["source"], 50_000),
-        Some("flow") => {
-            value["nodes"]
-                .as_array()
-                .is_some_and(|v| (2..=100).contains(&v.len()))
-                && value["edges"].as_array().is_some_and(|v| v.len() <= 200)
+}
+
+/// Every field of a scene primitive is either one of the named strings or a
+/// number; the reader draws nothing it cannot read as one of the two.
+fn scene_fields(item: &Row, whose: &str, worded: &[&str]) -> Result<(), String> {
+    for (key, entry) in item {
+        if worded.contains(&key.as_str()) {
+            string(Some(entry), &format!("{whose}.{key}"), 10_000)?;
+        } else {
+            number(Some(entry), &format!("{whose}.{key}"))?;
         }
-        Some("scene") => {
-            value["viewBox"].as_array().is_some_and(|v| v.len() == 4)
-                && value["elements"]
-                    .as_array()
-                    .is_some_and(|v| (1..=200).contains(&v.len()))
-                && value["states"]
-                    .as_array()
-                    .is_some_and(|v| (1..=30).contains(&v.len()))
-        }
-        Some("mockup") => {
-            valid_text(&value["initialScreen"], 64)
-                && value["screens"]
-                    .as_array()
-                    .is_some_and(|v| (1..=20).contains(&v.len()))
-        }
-        _ => false,
     }
+    Ok(())
+}
+
+fn mockup_components(
+    components: &Value,
+    ids: &mut std::collections::BTreeSet<String>,
+    navigations: &mut Vec<String>,
+    toggles: &mut Vec<String>,
+    depth: usize,
+) -> Result<(), String> {
+    if depth > 5 {
+        return Err("components nest deeper than 5 levels".into());
+    }
+    let items = components
+        .as_array()
+        .ok_or("components is required and is a list")?;
+    if items.len() > 60 {
+        return Err(format!(
+            "a screen carries {}, and takes at most 60",
+            many(items.len(), "component")
+        ));
+    }
+    for item in items {
+        let item = row(item, "components")?;
+        only_fields(
+            item,
+            &[
+                "id", "type", "text", "label", "placeholder", "tone", "action", "children",
+            ],
+            "a component",
+        )?;
+        let id = identifier(item.get("id"), "a component id")?;
+        if !ids.insert(id.clone()) {
+            return Err(format!("two components are called {id}: component ids are unique"));
+        }
+        one_of(
+            item,
+            "type",
+            &[
+                "heading", "text", "button", "input", "badge", "card", "stack", "divider",
+            ],
+            true,
+        )?;
+        for worded in ["text", "label", "placeholder"] {
+            optional_string(item, worded, 200)?;
+        }
+        one_of(
+            item,
+            "tone",
+            &["primary", "neutral", "success", "warning"],
+            false,
+        )?;
+        if let Some(action) = item.get("action") {
+            let action = row(action, "action")?;
+            only_fields(action, &["type", "screen", "target"], "an action")?;
+            match action.get("type").and_then(Value::as_str) {
+                Some("navigate") => {
+                    navigations.push(identifier(action.get("screen"), "action.screen")?)
+                }
+                Some("toggle") => toggles.push(identifier(action.get("target"), "action.target")?),
+                _ => {
+                    return Err(
+                        "an action is navigate, naming a screen, or toggle, naming a component"
+                            .into(),
+                    )
+                }
+            }
+        }
+        if let Some(children) = item.get("children") {
+            mockup_components(children, ids, navigations, toggles, depth + 1)?;
+        }
+    }
+    Ok(())
+}
+
+/// The artifact contract, on the presenter's side.
+/// `src/workbench/visual-artifacts.ts` holds the reader's side of it and
+/// `tests/fixtures/presentation-corpus.json` records the verdict both reach.
+/// Until this agreed, the presenter stored an artifact the reader could not
+/// draw, and the reader answered with "Stored artifact failed validation"
+/// after the agent had already said the diagram was there.
+pub fn artifact(value: &Value) -> Result<(), String> {
+    let object = value.as_object().ok_or("an artifact is a JSON object")?;
+    if object.get("version") != Some(&Value::from(1)) {
+        return Err("version is required and is 1".into());
+    }
+    required_string(object, "title", 200)?;
+    optional_string(object, "description", 1000)?;
+    let kind = object
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or("kind is required and is mermaid, flow, scene or mockup")?;
+    let shared = ["version", "kind", "title", "description"];
+    let with = |extra: &[&str]| -> Vec<String> {
+        shared
+            .iter()
+            .chain(extra.iter())
+            .map(|one| (*one).to_string())
+            .collect()
+    };
+    let allowed = match kind {
+        "mermaid" => with(&["source"]),
+        "flow" => with(&["direction", "editable", "nodes", "edges"]),
+        "scene" => with(&["viewBox", "elements", "states"]),
+        "mockup" => with(&["initialScreen", "viewport", "screens"]),
+        other => {
+            return Err(format!(
+                "{other} is not an artifact kind: use mermaid, flow, scene or mockup"
+            ))
+        }
+    };
+    let allowed: Vec<&str> = allowed.iter().map(String::as_str).collect();
+    only_fields(object, &allowed, kind)?;
+
+    match kind {
+        "mermaid" => {
+            required_string(object, "source", 50_000)?;
+        }
+        "flow" => {
+            one_of(object, "direction", &["RIGHT", "DOWN"], false)?;
+            boolean(object, "editable")?;
+            let mut ids = std::collections::BTreeSet::new();
+            for node in list(object, "nodes", 2, 100)? {
+                let node = row(node, "nodes")?;
+                only_fields(node, &["id", "label", "detail", "color"], "a node")?;
+                let id = identifier(node.get("id"), "a node id")?;
+                if !ids.insert(id.clone()) {
+                    return Err(format!("two nodes are called {id}: node ids are unique"));
+                }
+                required_string(node, "label", 200)?;
+                optional_string(node, "detail", 200)?;
+                optional_string(node, "color", 200)?;
+            }
+            let edges = object
+                .get("edges")
+                .and_then(Value::as_array)
+                .ok_or("edges is required and is a list")?;
+            if edges.len() > 200 {
+                return Err(format!(
+                    "edges carries {}, and takes at most 200",
+                    many(edges.len(), "entry")
+                ));
+            }
+            for edge in edges {
+                let edge = row(edge, "edges")?;
+                only_fields(edge, &["id", "from", "to", "label", "animated"], "an edge")?;
+                identifier(edge.get("id"), "an edge id")?;
+                for end in ["from", "to"] {
+                    let named = identifier(edge.get(end), &format!("edge.{end}"))?;
+                    if !ids.contains(&named) {
+                        return Err(format!(
+                            "an edge names {named} as its {end}, and no node has that id"
+                        ));
+                    }
+                }
+                optional_string(edge, "label", 200)?;
+                boolean(edge, "animated")?;
+            }
+        }
+        "scene" => {
+            for (at, side) in list(object, "viewBox", 4, 4)?.iter().enumerate() {
+                if side.as_f64().filter(|one| one.is_finite()).is_none() {
+                    return Err(format!(
+                        "a viewBox is four numbers, and entry {} is not one",
+                        at + 1
+                    ));
+                }
+            }
+            let mut ids = std::collections::BTreeSet::new();
+            for element in list(object, "elements", 1, 200)? {
+                let element = row(element, "elements")?;
+                only_fields(
+                    element,
+                    &[
+                        "id", "type", "x", "y", "x1", "y1", "x2", "y2", "width", "height", "cx",
+                        "cy", "r", "rx", "ry", "d", "points", "text", "fill", "stroke",
+                        "strokeWidth",
+                    ],
+                    "an element",
+                )?;
+                let id = identifier(element.get("id"), "an element id")?;
+                if !ids.insert(id.clone()) {
+                    return Err(format!(
+                        "two elements are called {id}: element ids are unique"
+                    ));
+                }
+                one_of(
+                    element,
+                    "type",
+                    &["rect", "circle", "ellipse", "line", "path", "polygon", "text"],
+                    true,
+                )?;
+                scene_fields(
+                    element,
+                    "an element",
+                    &["id", "type", "d", "points", "text", "fill", "stroke"],
+                )?;
+            }
+            for state in list(object, "states", 1, 30)? {
+                let state = row(state, "states")?;
+                only_fields(state, &["id", "label", "duration", "changes"], "a state")?;
+                identifier(state.get("id"), "a state id")?;
+                required_string(state, "label", 200)?;
+                if let Some(duration) = state.get("duration") {
+                    let seconds = number(Some(duration), "states[].duration")?;
+                    if !(0.0..=30.0).contains(&seconds) {
+                        return Err("states[].duration runs from 0 to 30 seconds".into());
+                    }
+                }
+                let changes = state
+                    .get("changes")
+                    .and_then(Value::as_array)
+                    .ok_or("states[].changes is required and is a list")?;
+                if changes.len() > 200 {
+                    return Err(format!(
+                        "a state carries {}, and takes at most 200",
+                        many(changes.len(), "change")
+                    ));
+                }
+                for change in changes {
+                    let change = row(change, "changes")?;
+                    only_fields(
+                        change,
+                        &["element", "opacity", "x", "y", "scale", "rotate", "pathLength"],
+                        "a change",
+                    )?;
+                    let named = identifier(change.get("element"), "change.element")?;
+                    if !ids.contains(&named) {
+                        return Err(format!(
+                            "a change moves {named}, and no element has that id"
+                        ));
+                    }
+                    scene_fields(change, "a change", &["element"])?;
+                }
+            }
+        }
+        "mockup" => {
+            let opens = identifier(object.get("initialScreen"), "initialScreen")?;
+            if let Some(viewport) = object.get("viewport") {
+                let viewport = row(viewport, "viewport")?;
+                only_fields(viewport, &["width", "height"], "viewport")?;
+                let width = number(viewport.get("width"), "viewport.width")?;
+                let height = number(viewport.get("height"), "viewport.height")?;
+                if !(320.0..=1920.0).contains(&width) {
+                    return Err("viewport.width runs from 320 to 1920".into());
+                }
+                if !(240.0..=1200.0).contains(&height) {
+                    return Err("viewport.height runs from 240 to 1200".into());
+                }
+            }
+            let mut screens = std::collections::BTreeSet::new();
+            let mut components = std::collections::BTreeSet::new();
+            let mut navigations = Vec::new();
+            let mut toggles = Vec::new();
+            for screen in list(object, "screens", 1, 20)? {
+                let screen = row(screen, "screens")?;
+                only_fields(screen, &["id", "title", "components"], "a screen")?;
+                let id = identifier(screen.get("id"), "a screen id")?;
+                if !screens.insert(id.clone()) {
+                    return Err(format!("two screens are called {id}: screen ids are unique"));
+                }
+                required_string(screen, "title", 200)?;
+                mockup_components(
+                    screen
+                        .get("components")
+                        .ok_or("a screen carries components")?,
+                    &mut components,
+                    &mut navigations,
+                    &mut toggles,
+                    0,
+                )?;
+            }
+            if !screens.contains(&opens) {
+                return Err(format!(
+                    "initialScreen is {opens}, and no screen has that id"
+                ));
+            }
+            for named in navigations {
+                if !screens.contains(&named) {
+                    return Err(format!(
+                        "a button navigates to {named}, and no screen has that id"
+                    ));
+                }
+            }
+            for named in toggles {
+                if !components.contains(&named) {
+                    return Err(format!(
+                        "a button toggles {named}, and no component has that id"
+                    ));
+                }
+            }
+        }
+        _ => unreachable!("the kind was matched against the field allowlist above"),
+    }
+    Ok(())
 }
 
 fn ordered(value: &Value) -> Value {
@@ -156,9 +452,7 @@ pub fn import_artifact(
     }
     let value: Value =
         serde_json::from_slice(bytes).map_err(|e| format!("artifact is not valid JSON: {e}"))?;
-    if !artifact(&value) {
-        return Err("Artifact does not match the contract".into());
-    }
+    artifact(&value)?;
     let mut canonical = serde_json::to_vec(&ordered(&value)).map_err(|e| e.to_string())?;
     canonical.push(b'\n');
     let asset = format!("{}.artifact.json", digest(&canonical));
