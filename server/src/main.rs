@@ -387,7 +387,12 @@ async fn serve(open_browser: bool) {
             home,
             claude_config: claude_config.clone(),
             codex_home,
-            media: data_dir.join("presentation-media"),
+            // The one store, read back by `GET /api/presentation-assets/:asset`
+            // through the same function. A copy that wrote its evidence
+            // somewhere of its own would report success and leave the reading
+            // copy a 404 (bw-9px0.13).
+            media: identity::presentation_media_dir()
+                .expect("Failed to resolve the presentation media directory"),
         },
         Arc::new(workbench::provider::NativeProviderFactory::new(
             claude_config.clone(),

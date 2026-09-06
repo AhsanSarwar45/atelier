@@ -24,6 +24,10 @@ export BEADS_WORKBENCH_PORT="${BEADS_WORKBENCH_PORT:-3019}"
 export XDG_DATA_HOME="$RUN/xdg"
 export ATELIER_PORT="$BEADS_WEB_PORT"
 export ATELIER_DATA_DIR="$RUN/data"
+# Presented pictures are shared between every copy of the app on the computer,
+# so that a throwaway copy's evidence is still there for the one that draws it
+# (bw-9px0.13). A run of the cases is the one thing that must not join in.
+export ATELIER_PRESENTATION_MEDIA_DIR="$RUN/presentation-media"
 export BEADS_E2E_URL="http://$BEADS_WEB_HOST:$BEADS_WEB_PORT"
 # The links test builds its own reporting tree; the real one is never written to.
 export REPORTS_DIR="${REPORTS_DIR:-$ROOT/tests/.workbench-run-links/reporting}"
@@ -56,7 +60,7 @@ export fish_history=
 # offered again by the restore list, and a test that resumes one of those is
 # testing last week. The scratch records go the same way, or the chats one run
 # leaves behind are rows the next run counts.
-rm -rf "$XDG_DATA_HOME" "$ATELIER_DATA_DIR" "$RUN/claude" "$RUN/codex"
+rm -rf "$XDG_DATA_HOME" "$ATELIER_DATA_DIR" "$ATELIER_PRESENTATION_MEDIA_DIR" "$RUN/claude" "$RUN/codex"
 mkdir -p "$XDG_DATA_HOME" "$ROOT/tests/results" "$BEADS_E2E_MARKERS" "$CLAUDE_CONFIG_DIR/projects" "$CODEX_HOME"
 
 SERVER_LOG="$RUN/server.log"

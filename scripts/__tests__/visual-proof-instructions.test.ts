@@ -25,7 +25,10 @@ describe('visual proof instructions', () => {
   it('leaves durable persistence entirely to the running Atelier app', () => {
     expect(policy).toMatch(/project or a temporary directory/i);
     expect(policy).toMatch(/uploads its bytes to the running Atelier app/i);
-    expect(policy).toMatch(/app validates them, writes its own durable media directory/i);
+    expect(policy).toMatch(/app validates them, writes them to the one durable media directory/i);
+    // Shared between every copy on the computer, or an agent presenting through
+    // its worktree's throwaway copy leaves the reader a 404 (bw-9px0.13).
+    expect(policy).toMatch(/every copy\s+of Atelier on the computer reads/i);
     expect(policy).toMatch(/must never create or write\s+`ATELIER_DATA_DIR` or `presentation-media`/i);
     expect(policy).toMatch(/never.+request provider-specific filesystem permission/is);
   });

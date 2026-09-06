@@ -121,9 +121,41 @@ pub fn rules_dir() -> Option<PathBuf> {
     resolve_dir(std::env::var("RULES_DIR").ok(), data_dir(), "rules")
 }
 
-/// Content-addressed pictures imported by the presentation command.
+/// Content-addressed pictures and artifacts imported by the presentation
+/// command.
+///
+/// This one does not follow `ATELIER_DATA_DIR`, and that is the point. A
+/// presented picture is not this copy's own data: it is evidence that some
+/// other copy has to draw, because the fence naming it is pasted into a
+/// transcript read somewhere else. Every agent working in a worktree is told
+/// to run a throwaway copy of the app on a port of its own, so a store that
+/// followed the data directory put the bytes where the reading copy would
+/// never look — and the presenter still said it had succeeded, leaving the
+/// reader a widget that says only "could not be loaded (404)".
+///
+/// Sharing one store between every copy on the computer is safe because the
+/// names are the contents' own digests: two copies that store the same
+/// picture write the same bytes to the same name, and nothing here is ever
+/// rewritten or removed. `ATELIER_PRESENTATION_MEDIA_DIR` overrides it, for a
+/// check that must not write into the reader's store.
 pub fn presentation_media_dir() -> Option<PathBuf> {
-    data_dir().map(|dir| dir.join("presentation-media"))
+    resolve_presentation_media_dir(
+        std::env::var("ATELIER_PRESENTATION_MEDIA_DIR").ok(),
+        directories::ProjectDirs::from(QUALIFIER, ORGANISATION, APPLICATION)
+            .map(|dirs| dirs.data_dir().to_path_buf()),
+    )
+}
+
+/// The rule behind it, kept apart from the environment so it can be tested
+/// without one test's variable reaching another running beside it.
+fn resolve_presentation_media_dir(
+    override_dir: Option<String>,
+    shared: Option<PathBuf>,
+) -> Option<PathBuf> {
+    match override_dir.filter(|dir| !dir.trim().is_empty()) {
+        Some(dir) => Some(PathBuf::from(dir)),
+        None => shared.map(|dir| dir.join("presentation-media")),
+    }
 }
 
 /// The rule behind them, kept apart from the environment so it can be tested
@@ -155,6 +187,57 @@ mod tests {
         // drift apart in a rename that only reached one of them.
         assert_eq!(APPLICATION, NAME);
         assert_eq!(DISPLAY.to_lowercase(), NAME);
+    }
+
+    #[test]
+    fn a_copy_with_its_own_data_directory_still_presents_into_the_shared_store() {
+        // The bug this is here for: an agent is told to run a throwaway copy of
+        // the app in its worktree, that copy stored the picture under its own
+        // data directory, the presenter printed a fence and exit 0, and the
+        // manager's copy — the one actually drawing the transcript — answered
+        // the fence with "could not be loaded (404)".
+        let shared = PathBuf::from("/home/reader/.local/share/atelier");
+        assert_eq!(
+            resolve_presentation_media_dir(None, Some(shared.clone())),
+            Some(shared.join("presentation-media")),
+            "the shared store is where a presentation goes"
+        );
+        assert_eq!(
+            resolve_data_dir(Some("/tmp/throwaway".into())),
+            Some(PathBuf::from("/tmp/throwaway")),
+            "a throwaway copy still keeps its own settings and chats apart"
+        );
+    }
+
+    #[test]
+    fn a_check_can_be_told_to_keep_its_pictures_out_of_the_readers_store() {
+        assert_eq!(
+            resolve_presentation_media_dir(Some("/tmp/case/media".into()), None),
+            Some(PathBuf::from("/tmp/case/media"))
+        );
+        // A variable set to nothing is not an answer, or a run that exported it
+        // empty would write its pictures to a relative path.
+        assert_eq!(
+            resolve_presentation_media_dir(Some("   ".into()), Some("/shared".into())),
+            Some(PathBuf::from("/shared/presentation-media"))
+        );
+    }
+
+    #[test]
+    fn the_copy_that_stores_a_presentation_and_the_copy_that_serves_it_ask_one_question() {
+        // `GET /api/presentation-assets/:asset` reads the store through
+        // `presentation_media_dir`. The start-up that hands the writer its
+        // folder has to ask the same function, or the two drift apart again
+        // and the drift shows up only as a 404 in somebody else's transcript.
+        let start_up = include_str!("main.rs");
+        assert!(
+            start_up.contains("media: identity::presentation_media_dir()"),
+            "start-up builds the presentation store some other way"
+        );
+        assert!(
+            !start_up.contains("data_dir.join(\"presentation-media\")"),
+            "start-up puts presented pictures back under this copy's own data"
+        );
     }
 
     fn an_install(at: &Path, projects: &str) {

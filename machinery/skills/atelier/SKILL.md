@@ -40,8 +40,11 @@ a temporary path in widget JSON.
 Create source images and artifact JSON in the project or a temporary directory
 the agent can already write, then give that path to the presenter. The command
 reads the temporary file and uploads its bytes to the running Atelier app; the
-app validates them, writes its own durable media directory, and returns the
-canonical transcript block. The agent must never create or write
+app validates them, writes them to the one durable media directory every copy
+of Atelier on the computer reads, and returns the canonical transcript block.
+That store is shared on purpose: an agent working in a worktree presents
+through its own throwaway copy of the app, and the copy that draws the
+transcript is a different one. The agent must never create or write
 `ATELIER_DATA_DIR` or `presentation-media`, set a media-directory environment
 variable, or request provider-specific filesystem permission for this flow.
 Codex, Claude, and every other shell-capable provider use the same command and
