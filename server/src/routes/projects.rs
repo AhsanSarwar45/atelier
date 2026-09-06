@@ -143,8 +143,10 @@ pub async fn initialize_project(
     State(db): State<AppState>,
     Json(input): Json<InitializeProjectInput>,
 ) -> Result<(StatusCode, Json<ProjectWithTags>), (StatusCode, Json<ErrorResponse>)> {
-    if db.get_project_by_path(&input.path).map_err(db_error_response)?.is_some() {
-        return Err((StatusCode::CONFLICT, Json(ErrorResponse { error: "This project is already on the home screen".into() })));
+    // The path as typed. A path that only collides once canonicalised is
+    // caught by `create_project` below, in the same words (bw-uk0k.2).
+    if let Some(existing) = db.get_project_by_path(&input.path).map_err(db_error_response)? {
+        return Err(db_error_response(DbError::ProjectPathAlreadyAdded(existing.name)));
     }
     let data = data_dir().map_err(manifest_error)?;
     let virtual_project = input.path.starts_with("dolt://");
@@ -268,6 +270,9 @@ impl DbError {
     fn status_code(&self) -> StatusCode {
         match self {
             DbError::ProjectNotFound(_) | DbError::TagNotFound(_) => StatusCode::NOT_FOUND,
+            // A path already on the home screen is a refusal the caller can
+            // read and act on, not a fault in the app (bw-uk0k.2).
+            DbError::ProjectPathAlreadyAdded(_) => StatusCode::CONFLICT,
             DbError::Sqlite(_) | DbError::PathError | DbError::ProjectSettings(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -546,6 +551,19 @@ mod tests {
         let json = serde_json::to_string(&probe).unwrap();
         assert!(json.contains("\"beadsAvailable\":false"), "{json}");
         assert!(!json.contains("beads_available"), "{json}");
+    }
+
+    /// A second registration of the same path is a conflict the caller can
+    /// read, not a fault in the app, and the body carries the sentence a
+    /// person can act on rather than SQLite's (bw-uk0k.2).
+    #[test]
+    fn a_path_already_added_answers_409_in_plain_words() {
+        let (status, Json(body)) =
+            db_error_response(DbError::ProjectPathAlreadyAdded("Atelier".to_string()));
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body.error, "Atelier is already on the home screen");
+        assert!(!body.error.to_lowercase().contains("sqlite"), "{}", body.error);
+        assert!(!body.error.contains("UNIQUE"), "{}", body.error);
     }
 
     #[test]

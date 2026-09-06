@@ -24,6 +24,25 @@ pub enum DbError {
     PathError,
     #[error("Project settings migration failed: {0}")]
     ProjectSettings(String),
+    /// A second registration of a path that is already on the home screen.
+    /// `projects.path` is UNIQUE, so the insert would fail; naming the project
+    /// that already holds the path is an answer a reader can act on, where the
+    /// constraint's own sentence is not (bw-uk0k.2).
+    #[error("{0} is already on the home screen")]
+    ProjectPathAlreadyAdded(String),
+}
+
+/// Whether a rusqlite failure is the UNIQUE constraint on `projects.path`.
+///
+/// The check in `create_project` answers first for every ordinary duplicate;
+/// this is only the backstop for two calls that raced past it.
+fn is_path_taken(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::SqliteFailure(failure, Some(message))
+            if failure.code == rusqlite::ErrorCode::ConstraintViolation
+                && message.contains("projects.path")
+    )
 }
 
 impl Serialize for DbError {
@@ -470,8 +489,18 @@ impl Database {
         Ok(projects)
     }
 
-    /// Creates a new project
+    /// Creates a new project.
+    ///
+    /// A path already on the home screen is refused by name rather than left
+    /// to the UNIQUE constraint on `projects.path`, whose sentence is SQLite's
+    /// and not a reader's (bw-uk0k.2). The check runs before the insert, and
+    /// the constraint is still translated afterwards, so two calls racing for
+    /// the same path answer as a duplicate rather than as a 500.
     pub fn create_project(&self, input: CreateProjectInput) -> Result<Project, DbError> {
+        if let Some(existing) = self.get_project_by_path(&input.path)? {
+            return Err(DbError::ProjectPathAlreadyAdded(existing.name));
+        }
+
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
 
@@ -479,7 +508,12 @@ impl Database {
         conn.execute(
             "INSERT INTO projects (id, name, path, local_path, last_opened, created_at, is_test) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![id, input.name, input.path, input.local_path, now, now, input.is_test],
-        )?;
+        )
+        .map_err(|error| if is_path_taken(&error) {
+            DbError::ProjectPathAlreadyAdded(input.name.clone())
+        } else {
+            DbError::Sqlite(error)
+        })?;
 
         Ok(Project {
             id,
@@ -899,6 +933,44 @@ mod tests {
         let projects = db.get_projects_filtered(false, false).unwrap();
         assert_eq!(projects.len(), 1);
         assert_eq!(projects[0].id, project.id);
+    }
+
+    /// A folder already on the home screen is refused by the name of the
+    /// project that holds it, and nothing SQLite said about its UNIQUE
+    /// constraint reaches the caller (bw-uk0k.2).
+    #[test]
+    fn adding_a_path_already_added_names_the_project_that_holds_it() {
+        let db = Database::new_in_memory().unwrap();
+        let first = db
+            .create_project(CreateProjectInput {
+                name: "Atelier".to_string(),
+                path: "/work/atelier".to_string(),
+                local_path: None,
+                is_test: false,
+            })
+            .unwrap();
+
+        let refused = db
+            .create_project(CreateProjectInput {
+                name: "Atelier again".to_string(),
+                path: "/work/atelier".to_string(),
+                local_path: None,
+                is_test: false,
+            })
+            .unwrap_err();
+
+        assert!(
+            matches!(&refused, DbError::ProjectPathAlreadyAdded(name) if name == "Atelier"),
+            "{refused:?}"
+        );
+        let said = refused.to_string();
+        assert_eq!(said, "Atelier is already on the home screen");
+        assert!(!said.contains("UNIQUE"), "{said}");
+        assert!(!said.to_lowercase().contains("sqlite"), "{said}");
+
+        let projects = db.get_projects_filtered(false, false).unwrap();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].id, first.id);
     }
 
     #[test]

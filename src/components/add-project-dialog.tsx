@@ -26,6 +26,18 @@ import type { DoltDatabase, DoltServer, ManifestStorage, ProjectManifest } from 
 import { cn } from "@/lib/utils";
 
 
+/**
+ * What the server said about a refusal, without the wrapper's own prefix.
+ *
+ * A folder already on the home screen is answered deliberately — the server
+ * names the project that already holds the path — and that sentence is the
+ * whole of what a reader needs. `API error: 409` in front of it reads as a
+ * fault in the app and buries the reason (bw-uk0k.2).
+ */
+function refusal(err: Error): string {
+  return err.message.replace(/^API error: \d+ /, "").trim() || "Please try again.";
+}
+
 interface AddProjectDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -202,7 +214,7 @@ export function AddProjectDialog({
       console.error("Error adding project:", err);
       toast({
         title: "Project could not be added",
-        description: err instanceof Error ? err.message : "Please try again.",
+        description: err instanceof Error ? refusal(err) : "Please try again.",
         variant: "destructive",
       });
     } finally {
