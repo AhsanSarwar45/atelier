@@ -1,5 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import ProjectPage from '@/app/project/page';
+import { whereFrom } from '@/lib/address';
 
 const params = new URLSearchParams('id=p1&tab=reports&report=old-page');
 
@@ -24,9 +26,6 @@ vi.mock('@/workbench/globals', () => ({ WorkbenchStatus: () => null }));
 vi.mock('@/components/shell', () => ({
   Shell: ({ tabs, children }: { tabs: React.ReactNode; children: React.ReactNode }) => <div>{tabs}{children}</div>,
 }));
-
-import ProjectPage from '@/app/project/page';
-import { whereFrom } from '@/lib/address';
 
 describe('retiring reports as a destination', () => {
   it('shows only Chat and Board and sends an old report address to the board', () => {

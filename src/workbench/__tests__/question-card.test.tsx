@@ -1,14 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { QuestionCard } from '@/workbench/transcript-rows';
+import type { TranscriptItem } from '@/workbench/use-session';
 
 const { sendCommand } = vi.hoisted(() => ({ sendCommand: vi.fn().mockResolvedValue({}) }));
 vi.mock('@/workbench/use-session', async (load) => {
   const actual = await load<typeof import('@/workbench/use-session')>();
   return { ...actual, sendCommand };
 });
-
-import { QuestionCard } from '@/workbench/transcript-rows';
-import type { TranscriptItem } from '@/workbench/use-session';
 
 const request = (overrides: Partial<Extract<TranscriptItem, { kind: 'question' }>> = {}): Extract<TranscriptItem, { kind: 'question' }> => ({
   kind: 'question', id: 'request-1', blocking: true, answers: null, parentId: null, askedBy: null,

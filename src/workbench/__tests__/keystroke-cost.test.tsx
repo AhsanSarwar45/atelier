@@ -15,6 +15,7 @@
  */
 import { renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { forgetDisk, usePathsOnDisk } from '@/workbench/paths-on-disk';
 
 vi.mock('@/lib/api', () => ({
   fs: {
@@ -22,8 +23,6 @@ vi.mock('@/lib/api', () => ({
     roots: () => Promise.resolve({ home: '/home/someone', roots: [] }),
   },
 }));
-
-import { forgetDisk, usePathsOnDisk } from '@/workbench/paths-on-disk';
 
 beforeEach(() => {
   forgetDisk();

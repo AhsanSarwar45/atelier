@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import ProjectPage from '@/app/project/page';
 
 const params = new URLSearchParams('id=keystone&tab=board&card=never-read');
 const replace = vi.fn();
@@ -27,8 +28,6 @@ vi.mock('@/workbench/globals', () => ({ WorkbenchStatus: () => null }));
 vi.mock('@/components/shell', () => ({
   Shell: ({ tabs, children }: { tabs?: React.ReactNode; children: React.ReactNode }) => <div>{tabs}{children}</div>,
 }));
-
-import ProjectPage from '@/app/project/page';
 
 describe('a chat-only project', () => {
   it('names the open project in the browser tab', async () => {

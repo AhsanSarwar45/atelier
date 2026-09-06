@@ -3,14 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { WbpEvent } from '@/workbench/protocol';
 import { EMPTY } from '@/workbench/fold';
+import { cacheSessionEvent, useSession } from '@/workbench/use-session';
 
 let listener: { snapshot(data: string): void; event(data: string): void; error?(data: string): void } | null = null;
 vi.mock('@/workbench/live-wire', () => ({
   onChat: (_id: string, next: typeof listener) => { listener = next; return () => {}; },
 }));
 vi.mock('@/lib/api', () => ({ request: vi.fn() }));
-
-import { cacheSessionEvent, useSession } from '@/workbench/use-session';
 
 const opened = {
   ...EMPTY,

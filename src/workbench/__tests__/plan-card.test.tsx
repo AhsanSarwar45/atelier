@@ -1,14 +1,13 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { PlanProposalCard } from '@/workbench/transcript-rows';
+import type { TranscriptItem } from '@/workbench/use-session';
 
 const { sendCommand } = vi.hoisted(() => ({ sendCommand: vi.fn().mockResolvedValue({}) }));
 vi.mock('@/workbench/use-session', async (load) => {
   const actual = await load<typeof import('@/workbench/use-session')>();
   return { ...actual, sendCommand };
 });
-
-import { PlanProposalCard } from '@/workbench/transcript-rows';
-import type { TranscriptItem } from '@/workbench/use-session';
 
 const plan = (overrides: Partial<Extract<TranscriptItem, { kind: 'plan' }>> = {}): Extract<TranscriptItem, { kind: 'plan' }> => ({
   kind: 'plan', id: 'plan-1', markdown: '# Safer rollout\n\n1. Test it',

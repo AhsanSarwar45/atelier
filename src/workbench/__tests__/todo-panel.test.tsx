@@ -1,14 +1,13 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { TodoPanel } from '@/workbench/chat-tab';
+import { checklistForEpic } from '@/workbench/epic-checklist';
+import type { Bead } from '@/types';
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }));
-
-import { TodoPanel } from '@/workbench/chat-tab';
-import { checklistForEpic } from '@/workbench/epic-checklist';
-import type { Bead } from '@/types';
 
 const active = [
   { id: '1', text: 'Find the cause', status: 'completed' as const },
