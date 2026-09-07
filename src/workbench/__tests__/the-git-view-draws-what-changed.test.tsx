@@ -210,3 +210,82 @@ describe('the Git view', () => {
     expect(screen.queryByTestId('git-staged')).not.toBeInTheDocument();
   });
 });
+
+/**
+ * Moving between lines of work (bw-ov7a.8).
+ *
+ * The branch on this panel used to be a word. A person who works in branches
+ * had to leave the app for a terminal to change it, which is the one thing the
+ * panel is otherwise for: seeing where the work is and moving it.
+ */
+describe('moving to another line of work', () => {
+  const LINES = {
+    current: 'a-line-of-work',
+    branches: [
+      { name: 'a-line-of-work', isRemote: false, isCurrent: true },
+      { name: 'main', isRemote: false, isCurrent: false },
+      { name: 'feature/logging', isRemote: false, isCurrent: false },
+      { name: 'origin/main', isRemote: true, isCurrent: false },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    calls.status.mockResolvedValue(CHANGED);
+    calls.log.mockResolvedValue(HISTORY);
+    calls.branches.mockResolvedValue(LINES);
+    calls.checkout.mockResolvedValue({ ok: true });
+  });
+
+  it('offers the branches this copy holds, and not the ones it only knows of', async () => {
+    railOnGit();
+    await waitFor(() => expect(calls.branches).toHaveBeenCalledWith(REPO, expect.anything()));
+
+    fireEvent.click(await screen.findByTestId('git-branch-name'));
+    const offered = screen.getAllByRole('option').map((row) => row.textContent);
+    expect(offered).toEqual(['a-line-of-work', 'main', 'feature/logging']);
+  });
+
+  it('moves the checkout to the one chosen, and reads git again afterwards', async () => {
+    railOnGit();
+    await waitFor(() => expect(calls.branches).toHaveBeenCalled());
+    calls.status.mockClear();
+
+    fireEvent.click(await screen.findByTestId('git-branch-name'));
+    // Typed at rather than scrolled through, which is the point of the picker.
+    fireEvent.change(screen.getByTestId('git-branch-name-search'), { target: { value: 'logg' } });
+    fireEvent.click(screen.getByText('feature/logging'));
+
+    await waitFor(() => expect(calls.checkout).toHaveBeenCalledWith(REPO, 'feature/logging'));
+    // What is on screen afterwards is what git says, never what was asked for.
+    await waitFor(() => expect(calls.status).toHaveBeenCalled());
+  });
+
+  it('asks for nothing when the branch chosen is the one already out', async () => {
+    railOnGit();
+    await waitFor(() => expect(calls.branches).toHaveBeenCalled());
+
+    fireEvent.click(await screen.findByTestId('git-branch-name'));
+    // The trigger says the same words, so the row is taken from the list.
+    const its = screen.getAllByRole('option').find((row) => row.textContent === 'a-line-of-work');
+    fireEvent.click(its!);
+
+    expect(calls.checkout).not.toHaveBeenCalled();
+  });
+
+  it("shows git's own refusal when the move would lose the work in the tree", async () => {
+    calls.checkout.mockRejectedValue(
+      new Error('API error: 422 error: Your local changes to the following files would be overwritten by checkout:\n\tsrc/changed.ts'),
+    );
+    railOnGit();
+    await waitFor(() => expect(calls.branches).toHaveBeenCalled());
+
+    fireEvent.click(await screen.findByTestId('git-branch-name'));
+    fireEvent.click(screen.getByText('main'));
+
+    const said = await screen.findByTestId('git-error');
+    expect(said).toHaveTextContent('would be overwritten by checkout');
+    // The app's own status number is not the reader's business.
+    expect(said).not.toHaveTextContent('API error');
+  });
+});

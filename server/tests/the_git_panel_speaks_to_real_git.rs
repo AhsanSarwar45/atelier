@@ -2196,3 +2196,47 @@ async fn a_directory_that_is_not_there_is_refused_the_way_every_other_read_is() 
     );
     assert!(body["error"].is_string(), "{body}");
 }
+
+/// Switching away from work that has not been saved (bw-ov7a.8).
+///
+/// The panel now moves the checkout itself, so the one refusal that matters is
+/// the one that would cost somebody their afternoon: git will not carry an
+/// unsaved change onto a branch whose copy of that file is different, and what
+/// it says about it is what the reader has to be shown.
+#[tokio::test]
+async fn a_move_that_would_lose_unsaved_work_is_refused_in_gits_own_words() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "kept.txt", "one\n");
+    save_all(at, "first");
+
+    // A branch whose copy of that file says something else.
+    run(at, &["checkout", "-q", "-b", "other-line"]);
+    put(at, "kept.txt", "something else\n");
+    save_all(at, "the other line's own version");
+    run(at, &["checkout", "-q", "main"]);
+
+    // And an unsaved change to it here.
+    put(at, "kept.txt", "one\nand something unsaved\n");
+
+    let (code, refused) = answered(
+        git::checkout(GitJson(git::CheckoutRequest {
+            path: here(&repo),
+            branch: "other-line".to_string(),
+            create: false,
+        }))
+        .await,
+    )
+    .await;
+    assert!(!code.is_success(), "the move must not be made: {refused}");
+    let said = refused["error"].as_str().expect("git's own sentence");
+    assert!(said.contains("would be overwritten"), "{said}");
+    assert!(said.contains("kept.txt"), "the file at risk is named: {said}");
+
+    // And nothing moved: the work is still here, on the branch it was written on.
+    assert_eq!(run(at, &["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+    assert_eq!(
+        std::fs::read_to_string(at.join("kept.txt")).expect("the file"),
+        "one\nand something unsaved\n"
+    );
+}

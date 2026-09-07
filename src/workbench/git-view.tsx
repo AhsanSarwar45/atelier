@@ -52,9 +52,10 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
+import { Picker } from '@/components/ui/picker';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
-import { ApiError, git, type GitChange, type GitCommit, type GitStatus } from '@/lib/api';
+import { ApiError, git, type GitBranch, type GitChange, type GitCommit, type GitStatus } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 /**
@@ -297,6 +298,8 @@ export interface GitViewProps {
 export function GitView({ path }: GitViewProps) {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [commits, setCommits] = useState<GitCommit[]>([]);
+  /** The lines of work this checkout could move to. */
+  const [branches, setBranches] = useState<GitBranch[]>([]);
   const [reading, setReading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [fault, setFault] = useState<string | null>(null);
@@ -384,6 +387,33 @@ export function GitView({ path }: GitViewProps) {
     void read(stop.signal);
     return () => stop.abort();
   }, [read]);
+
+  /**
+   * What this checkout could move to, read again whenever it moves — a branch
+   * made in a terminal a minute ago has to be in the list, and the one just
+   * switched to has to be the one showing (bw-ov7a.8).
+   *
+   * It is asked for on its own rather than beside the status: the panel is
+   * drawn from what git says about the working tree, and a repository whose
+   * branch list cannot be read is still a repository whose changes are worth
+   * showing.
+   */
+  useEffect(() => {
+    if (!path) {
+      setBranches([]);
+      return;
+    }
+    const stop = new AbortController();
+    void (async () => {
+      try {
+        const lines = await git.branches(path, stop.signal);
+        if (!stop.signal.aborted) setBranches(lines.branches);
+      } catch {
+        if (!stop.signal.aborted) setBranches([]);
+      }
+    })();
+    return () => stop.abort();
+  }, [path, status?.branch]);
 
   /**
    * A read the panel asked itself for, never more than one at a time.
@@ -594,9 +624,28 @@ export function GitView({ path }: GitViewProps) {
       <div className="flex flex-col gap-1.5 px-3 py-2" data-testid="git-branch">
         <div className="flex items-center gap-1.5">
           <BranchIcon className="size-3.5 shrink-0 text-t-tertiary" aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate text-xs font-medium text-t-primary" data-testid="git-branch-name">
-            {status?.branch ?? '—'}
-          </span>
+          {/* The branch is where you change it, not just where it is written:
+              a person who works in branches had to leave the app for a
+              terminal to move between them (bw-ov7a.8). It keeps the name's
+              own place and weight on the line — no border, no fill — so the
+              row reads as it always did until it is pressed. */}
+          <Picker
+            label="Branch"
+            data-testid="git-branch-name"
+            className="h-6 min-w-0 flex-1 border-0 px-0 text-xs font-medium text-t-primary shadow-none"
+            placeholder={status?.branch ?? '—'}
+            searchPlaceholder="Search branches"
+            empty="No branch matches"
+            value={status?.branch ?? ''}
+            disabled={busy || reading || !path || branches.length === 0}
+            choices={branches
+              .filter((branch) => !branch.isRemote)
+              .map((branch) => ({ value: branch.name, label: branch.name }))}
+            onChange={(branch) => {
+              if (!path || branch === status?.branch) return;
+              void act(() => git.checkout(path, branch));
+            }}
+          />
           {status?.detached && (
             <Badge size="xs" variant="warning" appearance="light" data-testid="git-detached">
               detached
