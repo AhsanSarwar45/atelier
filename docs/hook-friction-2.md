@@ -621,3 +621,54 @@ removed without a card, exactly as `/dev/null` is already exempt.
 **Cost.** One refusal, one `ATELIER_BYPASS`, and a release blocked by a
 directory that the removal commit could not have deleted, because git never
 carried it.
+
+## 15. A land card can be neither claimed, worked, nor closed from anywhere
+
+**Happened.** `board/land bw-3cmk.1` closed the work item and, after its checks
+passed, opened `bw-3cmk.3 (land)`: "remove the finished worktree and branch".
+From the main checkout, `git worktree remove` and `git branch -D` were refused
+by `workflow-gate` (§13 again). `bd update bw-3cmk.3 --claim` was refused with
+"claim it from its own isolated worktree" — a land card's whole purpose is to
+delete the only worktree it could have. `bd close bw-3cmk.3` was then refused
+by `board-status-gate` for the same want of an owned card in a worktree.
+
+**Should have happened.** A card labelled `step:land` (or `no-code`) is work
+on the main checkout by definition. The gates should accept claim, the two
+git verbs named in §13, and close for such a card without a worktree, on the
+same test `board/land` already makes: the branch is an ancestor of the landing
+branch and its work item is closed.
+
+**Cost.** Three refusals and three `ATELIER_BYPASS` invocations to finish a
+pour the tool itself opened, plus this uncommitted edit to the friction book,
+which no card can own either.
+
+## 2026-09-07 — bd update --append-notes refused in the main checkout
+
+workflow-gate refused `bd update bw-rx1y --append-notes=...` from the main
+checkout ("Changes require an owned Beads work item in its isolated worktree")
+seconds after `atelier tool board/job new` had created that epic from the same
+place. Writing a card's notes is board metadata, the same kind of write job
+new just made; it needs no worktree. Bypassed with a reason.
+
+## 16. Landing cannot clear the main checkout it is required to merge into
+
+**Happened.** `atelier tool board/land bw-rx1y.3` refused with a git merge
+error: two e2e screenshots in the main checkout, `tests/results/edit-card-open
+.png` and `-shut.png`, were uncommitted there and would be overwritten. The
+worktree's own commit replaces both files — one of the two was already
+byte-identical to the parked copy — so the merge's only obstacle was residue
+from an earlier run of the very spec the card had just re-run. Discarding those
+two paths in the main checkout with `git checkout --` was then refused by
+`workflow-gate`: "Changes require an owned Beads work item in its isolated
+worktree".
+
+**Should have happened.** The land step already knows which paths its merge
+carries. Restoring a tracked path in the landing checkout to `HEAD` when the
+incoming commit rewrites that same path loses nothing the landing branch holds,
+and is landing's own work rather than an agent editing outside its worktree —
+so `board/land` should be allowed to do it, or should say plainly which paths
+must be cleared and by whom.
+
+**Cost.** Two refused land attempts, one `ATELIER_BYPASS` to reset two files
+that the landing commit overwrote a second later, and a manual copy to `/tmp`
+in case the gate was right and the worker was not.
