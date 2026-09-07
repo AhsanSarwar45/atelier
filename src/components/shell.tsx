@@ -61,6 +61,7 @@ export function Shell({
   bar,
   barClassName,
   tabs,
+  toolbar,
   activeTab,
   children,
 }: {
@@ -68,8 +69,16 @@ export function Shell({
   bar: ReactNode;
   /** What a theme adds to the project bar, and nothing else. */
   barClassName?: string;
-  /** The tab selector. Omitted on screens that have no tabs — then there is one bar. */
+  /** The tab selector. Omitted on a screen whose project has no board — the bar stays. */
   tabs?: ReactNode;
+  /**
+   * Draw the second bar. A screen with tabs always has one; a screen without
+   * them asks for it when its tools live there anyway. Without this the bar
+   * was tied to the tab selector, so a project with no board lost the chat's
+   * own filter and branch controls along with the two tabs it never had
+   * (bw-1wak).
+   */
+  toolbar?: boolean;
   activeTab?: string | null;
   children: ReactNode;
 }) {
@@ -97,7 +106,7 @@ export function Shell({
           so the row is allowed to grow and the tools drop to a second line of
           their own rather than being squeezed into what is left — still one
           bar, so the count above holds. */}
-      {tabs && (
+      {(tabs || toolbar) && (
         <div
           data-shell-bar
           data-testid="tab-bar"

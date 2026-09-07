@@ -118,6 +118,9 @@ function ProjectTabs() {
   return (
     <Shell
       activeTab={shownTab}
+      // The chat's own controls sit in this bar, so it is drawn whether or not
+      // the project has a board to put tabs in.
+      toolbar
       barClassName={terminal ? 'terminal-header' : undefined}
       bar={
         <>

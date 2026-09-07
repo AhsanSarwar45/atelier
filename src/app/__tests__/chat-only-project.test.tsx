@@ -26,7 +26,9 @@ vi.mock('@/components/card-panel', () => ({ CardPanel: () => <div data-testid="c
 vi.mock('@/components/project-settings-dialog', () => ({ ProjectSettingsDialog: () => null }));
 vi.mock('@/workbench/globals', () => ({ WorkbenchStatus: () => null }));
 vi.mock('@/components/shell', () => ({
-  Shell: ({ tabs, children }: { tabs?: React.ReactNode; children: React.ReactNode }) => <div>{tabs}{children}</div>,
+  Shell: ({ tabs, toolbar, children }: { tabs?: React.ReactNode; toolbar?: boolean; children: React.ReactNode }) => (
+    <div>{toolbar ? <div data-testid="asked-for-toolbar" /> : null}{tabs}{children}</div>
+  ),
 }));
 
 describe('a chat-only project', () => {
@@ -46,5 +48,14 @@ describe('a chat-only project', () => {
     expect(screen.queryByTestId('board')).not.toBeInTheDocument();
     expect(screen.queryByTestId('card-panel')).not.toBeInTheDocument();
     await waitFor(() => expect(replace).toHaveBeenCalledWith('/project?id=keystone&tab=chat'));
+  });
+
+  it('still asks for the bar the chat’s own tools are drawn in', () => {
+    render(<ProjectPage />);
+
+    expect(
+      screen.getByTestId('asked-for-toolbar'),
+      'only the two tabs go with the board; the filter and branch controls stay (bw-1wak)',
+    ).toBeInTheDocument();
   });
 });

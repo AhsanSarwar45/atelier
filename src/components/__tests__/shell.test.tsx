@@ -85,6 +85,36 @@ describe('the app’s bars', () => {
     expect(bars(), 'the project bar, then the tabs and their tools; nothing else').toHaveLength(2);
   });
 
+  it('keeps the tools bar on a screen that asked for one without tabs', () => {
+    render(
+      <Terminals>
+        <Shell bar={<span>corsetta</span>} toolbar>
+          <div>the work</div>
+        </Shell>
+      </Terminals>,
+    );
+
+    expect(
+      screen.getByTestId('tab-bar'),
+      'a project with no board still has the tab’s own tools to draw somewhere',
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('tab-lead')).toBeInTheDocument();
+    expect(screen.getByTestId('tab-tools')).toBeInTheDocument();
+    expect(screen.getByTestId('tab-trail')).toBeInTheDocument();
+  });
+
+  it('draws one bar on a screen with neither tabs nor tools', () => {
+    render(
+      <Terminals>
+        <Shell bar={<span>corsetta</span>}>
+          <div>the work</div>
+        </Shell>
+      </Terminals>,
+    );
+
+    expect(screen.queryByTestId('tab-bar')).toBeNull();
+  });
+
   it('ends the first bar with the way to a shell beside the way out to settings', () => {
     draw();
     const first = screen.getByTestId('project-bar');
