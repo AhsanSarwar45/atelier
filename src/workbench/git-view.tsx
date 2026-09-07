@@ -30,6 +30,7 @@ import {
   ArrowUp,
   CloudDownload,
   Download,
+  FileDiff,
   GitBranch as BranchIcon,
   Minus,
   Plus,
@@ -39,6 +40,7 @@ import {
   Upload,
 } from 'lucide-react';
 
+import { ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -281,9 +283,19 @@ function FileLine({
 export interface GitViewProps {
   /** The project's working directory. Null while no project is open. */
   path: string | null;
+  /**
+   * Whether the chat around this panel is showing the diff instead of the
+   * transcript (bw-rx1y.4). The panel does not draw the diff — that stands in
+   * the conversation's own place, which is wider than this column will ever be
+   * — but the button that asks for it belongs here, on the line that already
+   * says which checkout is being read. Without `onFlipDiff` there is no button,
+   * so a rail drawn outside a chat is unchanged.
+   */
+  diffOpen?: boolean;
+  onFlipDiff?: () => void;
 }
 
-export function GitView({ path }: GitViewProps) {
+export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [commits, setCommits] = useState<GitCommit[]>([]);
   /** The lines of work this checkout could move to. */
@@ -577,6 +589,16 @@ export function GitView({ path }: GitViewProps) {
             <Badge size="xs" variant="warning" appearance="light" data-testid="git-detached">
               detached
             </Badge>
+          )}
+          {onFlipDiff && (
+            <ToolButton
+              icon={<FileDiff />}
+              label={diffOpen ? 'Hide diff' : 'Show diff'}
+              emphasis={diffOpen ? 'loud' : 'quiet'}
+              data-testid="git-diff-toggle"
+              aria-pressed={diffOpen}
+              onClick={onFlipDiff}
+            />
           )}
           <Button
             size="xs"

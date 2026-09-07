@@ -80,6 +80,7 @@ export function useRightRail(): [boolean, () => void] {
 
 /** Where the rail's choice of view is remembered between visits. */
 const GIT_VIEW = 'workbench.git-panel';
+const GIT_DIFF = 'workbench.git-diff';
 
 /**
  * Whether the rail is showing Git rather than what this chat has touched, and
@@ -115,6 +116,37 @@ export function useGitPanel(): [boolean, () => void] {
   }, []);
 
   return [showing, flip];
+}
+
+/**
+ * Whether the Git panel's diff stands in for the transcript, and remembered
+ * (bw-rx1y.4).
+ *
+ * Remembered for the browser and not for one chat, for the same reason the two
+ * switches above it are: a person who reads their agents' work as a diff wants
+ * it that way in the next chat too. Written where it is changed, and read in an
+ * effect, for the same reason as well — an effect that mirrored state back into
+ * storage would overwrite what was remembered before the read had run.
+ *
+ * Off by default. The diff takes the conversation's own place, and a chat that
+ * opens on anything but the conversation is a chat that has answered a question
+ * nobody asked.
+ */
+export function useGitDiff(): { diffOpen: boolean; flipDiff: () => void } {
+  const [diffOpen, setDiffOpen] = useState(false);
+
+  useEffect(() => {
+    setDiffOpen(localStorage.getItem(GIT_DIFF) === '1');
+  }, []);
+
+  const flipDiff = useCallback(() => {
+    setDiffOpen((was) => {
+      localStorage.setItem(GIT_DIFF, was ? '0' : '1');
+      return !was;
+    });
+  }, []);
+
+  return { diffOpen, flipDiff };
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -164,6 +196,15 @@ export interface ChatRightRailProps {
   /** Pointer is moving the desktop divider, so the column must follow it immediately. */
   resizing?: boolean;
   /**
+   * Whether the chat is currently showing the diff instead of the transcript,
+   * and how to flip it. The button that does it belongs in the Git panel's own
+   * branch header rather than on the tab bar: it is a thing you reach for while
+   * already reading what changed, and the bar above is full (bw-rx1y.4). Both
+   * are optional, so a rail drawn without them draws no button at all.
+   */
+  diffOpen?: boolean;
+  onFlipDiff?: () => void;
+  /**
    * Shutting it. The button that opens it is on the bar above (bw-81wt.5), and
    * on a phone that bar is behind this sheet — so the same call is what the
    * cross inside the sheet does (bw-81wt.30).
@@ -185,6 +226,8 @@ export function ChatRightRail({
   workingIn = null,
   desktopWidth,
   resizing = false,
+  diffOpen = false,
+  onFlipDiff,
   onToggle,
 }: ChatRightRailProps) {
   const jobs = useMemo(() => byJob(cards), [cards]);
@@ -254,7 +297,9 @@ export function ChatRightRail({
               move to another tree. Facts arriving late flip this from the
               project to the worktree, and the project's answers must go with
               the old mount rather than sit on screen under the new path. */}
-          {view === 'git' && <GitView key={gitPath ?? ''} path={gitPath} />}
+          {view === 'git' && (
+            <GitView key={gitPath ?? ''} path={gitPath} diffOpen={diffOpen} onFlipDiff={onFlipDiff} />
+          )}
 
           {view === 'chat' && (
             <>

@@ -60,11 +60,12 @@ import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { isPhoneScreen } from '@/lib/screen-width';
-import { ChatRightRail, useGitPanel, useRightRail } from '@/workbench/chat-right-rail';
+import { ChatRightRail, useGitDiff, useGitPanel, useRightRail } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
+import { GitDiffView } from '@/workbench/git-diff-view';
 import { useKnownCards, useKnownCardStatuses } from '@/workbench/known-cards';
 import { drawnRows } from '@/workbench/machine-lines';
 import { inWords, PERMISSION_MODE } from '@/workbench/machine-words';
@@ -784,6 +785,20 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [rightOpen, flipRight] = useRightRail();
   /** Which of the rail's two views it is on, remembered the same way (bw-8dp8.5). */
   const [gitOpen, flipGit] = useGitPanel();
+  /** Whether that view's diff stands in for the transcript (bw-rx1y.4). */
+  const { diffOpen, flipDiff } = useGitDiff();
+  /**
+   * Three switches, all of them on, or the conversation stays where it is.
+   *
+   * The button that asks for the diff lives inside the Git panel, so the panel
+   * has to be the view AND the rail has to be open for the reader to have been
+   * able to press it — and shutting either of those is the reader putting the
+   * whole subject away, which must bring the conversation back without their
+   * having to remember a switch two panels deep. On a phone that is what the
+   * drawer's cross and its scrim already do: both call `flipRight`, `rightOpen`
+   * goes false, and this goes false with it (no code of its own).
+   */
+  const showDiff = Boolean(sessionId) && rightOpen && gitOpen && diffOpen;
   /**
    * The way into the Git view.
    *
@@ -940,6 +955,27 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   useLayoutEffect(() => {
     toTheEnd();
   }, [sessionId, toTheEnd]);
+
+  /**
+   * The reader's place in the conversation, kept across a turn at the diff
+   * (bw-rx1y.4).
+   *
+   * The pane is hidden rather than unmounted for the reason written where it is
+   * hidden — the virtualiser's measurements are worth keeping. But a box with
+   * no layout box of its own is a box whose scroll offset no browser promises
+   * to give back, and being returned to roughly-the-end after reading a diff is
+   * exactly the fault this is meant to avoid. So the number is written down on
+   * the way out and put back on the way in, before the frame that shows the
+   * conversation again is drawn.
+   */
+  const placeBeforeTheDiff = useRef(0);
+  useLayoutEffect(() => {
+    if (showDiff) {
+      placeBeforeTheDiff.current = pane.current?.scrollTop ?? 0;
+      return;
+    }
+    if (pane.current && placeBeforeTheDiff.current > 0) pane.current.scrollTop = placeBeforeTheDiff.current;
+  }, [showDiff]);
 
   /** The newest row present when he last left the end. */
   const marked = useRef<string | null>(null);
@@ -1490,6 +1526,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             workingIn={facts?.cwd ?? projectPath}
             desktopWidth={rightWidth}
             resizing={resizingRight}
+            diffOpen={diffOpen}
+            onFlipDiff={flipDiff}
             onToggle={flipRight}
           />
         </>
@@ -1742,9 +1780,30 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       )}
 
       <SplitPaths.Provider value={splitPaths}>
+      {/* What this chat's own worktree has changed, standing where the
+          conversation stands (bw-rx1y.4). The status line above it and the box
+          below it do not move, so the reader can go on talking to the agent
+          while reading what it wrote. */}
+      {showDiff && (
+        <div data-testid="git-diff-pane" className="flex min-h-0 flex-1 flex-col">
+          {/* One diff per worktree, and never the last chat's: the open-and-shut
+              state inside is kept by file path, which means nothing in another
+              checkout. */}
+          <GitDiffView key={facts?.cwd ?? projectPath ?? ''} path={facts?.cwd ?? projectPath} />
+        </div>
+      )}
       {/* The conversation and the one way back to it, which floats over its
-          bottom corner rather than taking a line of its own. */}
-      <div className="relative flex min-h-0 flex-1 flex-col">
+          bottom corner rather than taking a line of its own.
+
+          Hidden rather than unmounted while the diff stands in for it. The
+          transcript is virtualised: unmounting it throws away every row height
+          the virtualiser measured along with the reader's place in the
+          conversation, so coming back from the diff would land them somewhere
+          near the end instead of on the line they left — the same fault the
+          per-chat `key` on DrawnTranscript was added to stop (bw-t26l.20).
+          `display: none` costs nothing to keep, and the one number a hidden box
+          may not keep — where the reader was — is written down and put back. */}
+      <div className={cn('relative flex min-h-0 flex-1 flex-col', showDiff && 'hidden')}>
       <div
         ref={paneRef}
         // The browser keeps a pane's place for it by moving the pane when

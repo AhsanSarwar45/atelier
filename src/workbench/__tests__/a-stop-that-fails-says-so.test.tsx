@@ -53,6 +53,7 @@ vi.mock('@/workbench/chat-right-rail', () => ({
   ChatRightRail: () => null,
   useRightRail: (): [boolean, () => void] => [false, () => {}],
   useGitPanel: (): [boolean, () => void] => [false, () => {}],
+  useGitDiff: () => ({ diffOpen: false, flipDiff: () => {} }),
 }));
 vi.mock('@/workbench/paths-on-disk', () => ({
   usePathsOnDisk: () => ({ real: () => false, home: '/home/me', ask: () => {} }),
