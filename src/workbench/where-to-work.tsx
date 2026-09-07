@@ -23,13 +23,7 @@ import * as api from '@/lib/api';
 import type { GitBranch as Branch, GitTree } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Picker } from '@/components/ui/picker';
 
 /** The place a chat is to be started in, as the person has said it so far. */
 export type Where =
@@ -202,24 +196,24 @@ export function WhereToWork({
       </div>
 
       {value.kind === 'existing' && (
-        <Select
+        <Picker
+          label="Worktree"
+          data-testid="where-worktree"
+          placeholder="Select a worktree"
+          searchPlaceholder="Search worktrees"
+          empty="No worktree matches"
           value={value.path}
-          onValueChange={(path) => onChange({ kind: 'existing', path })}
+          onChange={(path) => onChange({ kind: 'existing', path })}
           disabled={disabled}
-        >
-          <SelectTrigger aria-label="Worktree" data-testid="where-worktree">
-            <SelectValue placeholder="Select a worktree" />
-          </SelectTrigger>
-          <SelectContent>
-            {worktrees.map((tree) => (
-              <SelectItem key={tree.path} value={tree.path}>
-                {tree.name}
-                {tree.branch ? ` (${tree.branch})` : ''}
-                {tree.dirty ? ' — modified' : ''}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          choices={worktrees.map((tree) => ({
+            value: tree.path,
+            label: tree.name,
+            hint: `${tree.branch ?? 'detached'}${tree.dirty ? ' — modified' : ''}`,
+            // The path is not shown — two worktrees can share a name only by
+            // living in different folders, and that is what tells them apart.
+            keywords: tree.path,
+          }))}
+        />
       )}
 
       {value.kind === 'new' && (
@@ -276,40 +270,31 @@ export function WhereToWork({
                 onChange={(event) => onChange({ ...value, branch: event.target.value })}
               />
               <span className="shrink-0 text-xs text-muted-foreground">Base</span>
-              <Select
+              <Picker
+                label="Base branch"
+                data-testid="where-base"
+                className="sm:w-48"
+                placeholder="Base branch"
+                searchPlaceholder="Search branches"
+                empty="No branch matches"
                 value={value.base}
-                onValueChange={(base) => onChange({ ...value, base })}
+                onChange={(base) => onChange({ ...value, base })}
                 disabled={disabled}
-              >
-                <SelectTrigger aria-label="Base branch" data-testid="where-base" className="sm:w-48">
-                  <SelectValue placeholder="Base branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  {bases.map((branch) => (
-                    <SelectItem key={branch.name} value={branch.name}>
-                      {branch.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                choices={bases.map((branch) => ({ value: branch.name, label: branch.name }))}
+              />
             </div>
           ) : (
-            <Select
+            <Picker
+              label="Branch"
+              data-testid="where-branch"
+              placeholder="Select a branch"
+              searchPlaceholder="Search branches"
+              empty="No branch matches"
               value={value.branch}
-              onValueChange={(branch) => onChange({ ...value, branch })}
+              onChange={(branch) => onChange({ ...value, branch })}
               disabled={disabled}
-            >
-              <SelectTrigger aria-label="Branch" data-testid="where-branch">
-                <SelectValue placeholder="Select a branch" />
-              </SelectTrigger>
-              <SelectContent>
-                {bases.map((branch) => (
-                  <SelectItem key={branch.name} value={branch.name}>
-                    {branch.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              choices={bases.map((branch) => ({ value: branch.name, label: branch.name }))}
+            />
           )}
         </div>
       )}

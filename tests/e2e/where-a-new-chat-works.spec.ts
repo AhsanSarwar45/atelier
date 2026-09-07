@@ -31,6 +31,10 @@ test('a new chat is offered the project, a worktree of it, or one made here', as
   git(FIXTURE, 'add', '-A');
   git(FIXTURE, 'commit', '-qm', 'seed');
   git(FIXTURE, 'worktree', 'add', '-q', join(FIXTURE, 'worktrees', 'reading-room'), '-b', 'reading-room');
+  // Enough branches that hunting through them is the point (bw-ov7a.7).
+  for (const line of ['feature/login', 'feature/logout', 'release/1.0', 'hotfix/typo']) {
+    git(FIXTURE, 'branch', line);
+  }
 
   await page.route(/\/api\/projects(\?[^/]*)?$/, async (route) => {
     if (route.request().method() !== 'GET') return route.continue();
@@ -77,6 +81,19 @@ test('a new chat is offered the project, a worktree of it, or one made here', as
       'A worktree named "reading-room" already exists.',
     );
     await dialog.screenshot({ path: 'tests/results/bw-ov7a3-a-name-already-taken.png' });
+
+    // The base is picked by typing at it rather than by scrolling a list: the
+    // repository has seven branches here and a real one has hundreds
+    // (bw-ov7a.7). The popover is drawn outside the dialog, so the picture is
+    // of the page.
+    await dialog.getByTestId('where-base').click();
+    await page.getByTestId('where-base-search').fill('feature');
+    await expect(page.getByRole('option')).toHaveCount(2);
+    // The popover fades in; a picture taken during that is a picture of
+    // nothing readable, so the animation is held still for it.
+    await page.screenshot({ path: 'tests/results/bw-ov7a7-searching-branches.png', animations: 'disabled' });
+    await page.getByRole('option', { name: 'feature/logout' }).click();
+    await expect(dialog.getByTestId('where-base')).toHaveText('feature/logout');
     expect(existsSync(join(FIXTURE, 'worktrees', 'writing-room'))).toBe(false);
   } finally {
     await request.delete(`/api/projects/${project.id}`);
