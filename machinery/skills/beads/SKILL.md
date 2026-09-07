@@ -10,12 +10,54 @@ under `machinery/`; installed copies do not contain interpreters or executable
 scripts.
 
 Before changing repository files, find an existing ready card with `bd ready`,
-`bd list`, or `bd search`. Claim the ready leaf in its isolated worktree.
+`bd list`, or `bd search`.
+
+A worktree belongs to a job, not to a step. Cut one copy named for the epic and
+reuse it for every child underneath — a long job leaves one checkout on disk
+instead of dozens. Each checkout carries its own `node_modules` and test
+results, so a per-step copy costs gigabytes a step and has run this machine out
+of btrfs metadata.
 
 ```bash
-git -C . worktree add worktrees/WORK-ID -b WORK-ID
-cd worktrees/WORK-ID
-bd update WORK-ID --claim
+git -C . worktree add worktrees/JOB-ID -b JOB-ID
+cd worktrees/JOB-ID
+bd update JOB-ID.1 --claim
+```
+
+For a standalone card with nothing underneath it, the job is the card and the
+two IDs are the same. For a job with children, claim each child in turn in the
+copy you already have; do not cut a second one.
+
+Atelier 0.22.0's `workflow-gate` has not caught up with this rule. It resolves
+one card from the copy's directory name and requires that exact card to be
+claimed and in_progress. A job is an epic and stays `open` while its children
+run, so in a job's copy both the child's claim and every write are refused:
+
+```
+Claim JOB-ID.1 from its own isolated worktree, not …/worktrees/JOB-ID.
+Beads issue JOB-ID must be claimed and in_progress before this worktree is changed.
+```
+
+Until the gate accepts a claimed descendant of the job the directory names,
+carry each refused command through the documented bypass and say why. The
+bypass must prefix the gated command itself — `export ATELIER_BYPASS=…` earlier
+in the line does not carry:
+
+```bash
+ATELIER_BYPASS='a worktree is per job; this child is claimed in its job copy' \
+  bd update JOB-ID.1 --claim
+```
+
+That covers `Edit`, `Write` and every gated shell write in the copy, so set the
+reason once in a shell variable and prefix it to each. Do not answer the
+refusal by cutting a second worktree — that is the cost this rule exists to
+avoid.
+
+Remove the copy when the job closes; nothing else reclaims that disk.
+
+```bash
+cd /path/to/main/checkout
+git worktree remove worktrees/JOB-ID
 ```
 
 Create work with the native command:
@@ -81,6 +123,10 @@ in the main checkout rather than your worktree.
 whether you run it as one line or three. Only that shape: a destination outside
 the project's worktree directory, a branch that is not the card, or any other
 command on the line that writes something, and the line is judged normally.
+The gate reads `<ID>` off the directory name and insists the claimed card match
+it, so a child claimed in its job's copy needs the bypass shown above; that is
+a gate that has not caught up with the rule, not a rule to work around by
+cutting another copy.
 
 **Landing** (`board-merge-gate`). The command above is the protocol: it
 rebases, takes the merge slot, fast-forwards the landing branch and releases the

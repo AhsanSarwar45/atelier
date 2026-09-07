@@ -672,3 +672,35 @@ must be cleared and by whom.
 **Cost.** Two refused land attempts, one `ATELIER_BYPASS` to reset two files
 that the landing commit overwrote a second later, and a manual copy to `/tmp`
 in case the gate was right and the worker was not.
+
+## 18. A worktree belongs to a job, but the gate only knows cards
+
+**Happened.** The manager's rule is that a worktree is cut per job and reused by
+every child under it: one checkout for a whole epic, not one per step. Each
+checkout carries its own `node_modules` and `tests/results`, so a per-step copy
+costs gigabytes a step. Sixty-two of them had accumulated in `worktrees/`,
+271 GiB in total, and btrfs ran out of room for metadata — 33.50 GiB allocated
+against 4.00 GiB left unallocated on the device.
+
+Cutting `worktrees/bw-jsou` for the job and claiming its first child inside it
+was refused: "Claim bw-jsou.1 from its own isolated worktree, not
+/home/ahsan/dev/beads-web/worktrees/bw-jsou." Atelier 0.22.0 reads the card ID
+off the directory name and requires the claimed card to equal it. There is no
+way to hold a job's copy and work its children through it.
+
+Curiously, `machinery/hooks/__pycache__/workflow-gate.cpython-314.pyc` in this
+repo — dated 2026-08-30, older than the 0.22.0 binary — carries the refusal
+"Beads issue %s, or one of its epic children, must be claimed and in_progress
+before this worktree may be changed." The clause the rule needs was written once
+and is not in what runs.
+
+**Should have happened.** The gate should accept a worktree named for a job when
+the card being claimed or written is that job or one of its descendants. The
+directory names the unit of isolation; the card names the unit of work, and
+those are not the same size. Together with §13, which is why the copies are
+never removed either, this is the whole of the disk problem: the gate makes a
+copy per step mandatory and makes removing it impossible.
+
+**Cost.** 271 GiB of worktrees, a btrfs metadata exhaustion on the manager's
+machine, fifty worktrees removed by hand, and one `ATELIER_BYPASS` to claim the
+child of the very card that writes this rule down.

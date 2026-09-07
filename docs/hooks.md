@@ -91,6 +91,13 @@ What it does **not** count, each of which used to cost a round trip:
   on the line that writes something, and the line is judged normally
   (`docs/hook-friction-2.md` §3).
 
+  The carve-out reads `<ID>` off the directory name and requires the claimed
+  card to match it. That is narrower than the rule a worktree is meant to serve:
+  a copy belongs to a job and is reused by every child under it, so claiming
+  `<JOB>.2` inside `worktrees/<JOB>` is refused even though the change belongs
+  there. Claim the child through `ATELIER_BYPASS` until the gate accepts a
+  claimed child of the job the directory names (`docs/hook-friction-2.md` §18).
+
 - **Anything that is not a real file.** `/dev/null`, `/dev/tcp/host/port`,
   `/proc`, `/sys`, `>&2`, and process substitution are not writes. Silencing a
   command and probing a port are ordinary and ungated (§1, §2).
