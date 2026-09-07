@@ -92,6 +92,81 @@ describe('the reads', () => {
     expect(theCall().url).toContain('&limit=20');
   });
 
+  it('asks for the diff at the agreed path, and reads back every field of it', async () => {
+    mockFetch.mockResolvedValue(
+      mockResponse({
+        files: [
+          {
+            path: 'src/edited.ts',
+            oldPath: null,
+            status: 'modified',
+            additions: 1,
+            deletions: 1,
+            binary: false,
+            hunks: [
+              {
+                oldStart: 1,
+                oldLines: 3,
+                newStart: 1,
+                newLines: 3,
+                lines: [
+                  { kind: 'context', text: 'one' },
+                  { kind: 'removed', text: 'two' },
+                  { kind: 'added', text: 'TWO' },
+                ],
+              },
+            ],
+          },
+          {
+            path: 'new/name.ts',
+            oldPath: 'old/name.ts',
+            status: 'renamed',
+            additions: 0,
+            deletions: 0,
+            binary: false,
+            hunks: [],
+          },
+          {
+            path: 'logo.png',
+            oldPath: null,
+            status: 'untracked',
+            additions: 0,
+            deletions: 0,
+            binary: true,
+            hunks: [],
+          },
+        ],
+      }),
+    );
+
+    const diff = await api.git.diff(REPO);
+
+    const call = theCall();
+    expect(call.method).toBe('GET');
+    expect(call.url).toBe(`/api/git/diff?path=${encodeURIComponent(REPO)}`);
+    // The hunk's places are what the panel numbers its gutters from, so a
+    // field renamed on the server would draw the wrong line numbers rather
+    // than draw nothing and say why.
+    expect(diff.files[0].hunks[0]).toEqual({
+      oldStart: 1,
+      oldLines: 3,
+      newStart: 1,
+      newLines: 3,
+      lines: [
+        { kind: 'context', text: 'one' },
+        { kind: 'removed', text: 'two' },
+        { kind: 'added', text: 'TWO' },
+      ],
+    });
+    // A rename is one file that says where it came from, not a delete and an
+    // add the panel would have to pair up itself.
+    expect(diff.files[1].status).toBe('renamed');
+    expect(diff.files[1].oldPath).toBe('old/name.ts');
+    // A file git will not show as text says so and carries nothing to draw.
+    expect(diff.files[2].binary).toBe(true);
+    expect(diff.files[2].hunks).toEqual([]);
+  });
+
   it('asks for the branches at the agreed path', async () => {
     mockFetch.mockResolvedValue(mockResponse({ current: 'main', branches: [] }));
 

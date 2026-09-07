@@ -1395,6 +1395,397 @@ pub async fn log(GitQuery(params): GitQuery<LogParams>) -> Answer {
 }
 
 // ----------------------------------------------------------------------------
+// GET /api/git/diff
+// ----------------------------------------------------------------------------
+
+/// One line of a hunk: what happened to it, and what it says.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffLine {
+    /// `context`, `removed` or `added`.
+    pub kind: String,
+    /// The line without its leading marker and without its newline.
+    pub text: String,
+}
+
+/// One run of changed lines with the few unchanged ones around it.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffHunk {
+    /// First line of the run on the old side, counting from one.
+    pub old_start: u32,
+    /// How many lines the run covers on the old side.
+    pub old_lines: u32,
+    /// First line of the run on the new side, counting from one.
+    pub new_start: u32,
+    /// How many lines the run covers on the new side.
+    pub new_lines: u32,
+    /// The run itself, in the order git printed it.
+    pub lines: Vec<DiffLine>,
+}
+
+/// Everything one file has changed.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffFile {
+    /// Path relative to the repository root, as `status` gives it.
+    pub path: String,
+    /// Where a renamed file came from; `null` for everything else.
+    pub old_path: Option<String>,
+    /// One of `added`, `modified`, `deleted`, `renamed`, `untracked`,
+    /// `typechange`, `conflicted`.
+    pub status: String,
+    /// Lines this file gained.
+    pub additions: u32,
+    /// Lines this file lost.
+    pub deletions: u32,
+    /// A file git will not show as text. It carries no hunks.
+    pub binary: bool,
+    /// The runs of changed lines, in file order. Empty for a binary file and
+    /// for a rename that changed nothing.
+    pub hunks: Vec<DiffHunk>,
+}
+
+/// Every working-tree change against HEAD, one entry per file.
+#[derive(Serialize, Debug, Default, PartialEq, Eq)]
+pub struct DiffResponse {
+    /// Ordered by path, so the same repository always reads the same way.
+    pub files: Vec<DiffFile>,
+}
+
+/// The empty tree's name, which every git repository has whether or not
+/// anything has been saved in it. Diffing against it in a project with no
+/// commits yet says the same thing HEAD would if there were one: everything
+/// in the index is new.
+const THE_EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/// Take git's `a/` or `b/` prefix off a path out of a patch header, and undo
+/// the quoting git puts around a path with an awkward byte in it.
+///
+/// `/dev/null` stands for "there is no file on this side" and comes back as
+/// `None` rather than as a path nothing could open.
+fn path_from_header(field: &str) -> Option<String> {
+    let field = field.trim_end_matches(['\r']);
+    if field == "/dev/null" {
+        return None;
+    }
+    let unquoted = if field.starts_with('"') && field.ends_with('"') && field.len() >= 2 {
+        unquote_git_path(&field[1..field.len() - 1])
+    } else {
+        field.to_string()
+    };
+    let trimmed = unquoted
+        .strip_prefix("a/")
+        .or_else(|| unquoted.strip_prefix("b/"))
+        .map(str::to_string)
+        .unwrap_or(unquoted);
+    if trimmed == "/dev/null" || trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+/// Undo the C-style escaping git wraps an awkward path in.
+fn unquote_git_path(body: &str) -> String {
+    let mut out = String::new();
+    let mut chars = body.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('t') => out.push('\t'),
+            Some('n') => out.push('\n'),
+            Some('"') => out.push('"'),
+            Some('\\') => out.push('\\'),
+            Some(other) => out.push(other),
+            None => break,
+        }
+    }
+    out
+}
+
+/// The two paths out of a `diff --git a/one b/two` line.
+///
+/// The line has no separator a path could not itself contain, so the split is
+/// found by looking for the ` b/` that leaves an `a/` path in front of it. The
+/// first one that does is taken, which is right for every path that does not
+/// itself hold ` b/`.
+fn paths_from_diff_line(line: &str) -> (Option<String>, Option<String>) {
+    let Some(rest) = line.strip_prefix("diff --git ") else {
+        return (None, None);
+    };
+    let mut at = 0;
+    while let Some(found) = rest[at..].find(" b/") {
+        let cut = at + found;
+        let left = &rest[..cut];
+        let right = &rest[cut + 1..];
+        if left.starts_with("a/") || left.starts_with('"') {
+            return (path_from_header(left), path_from_header(right));
+        }
+        at = cut + 1;
+    }
+    (None, None)
+}
+
+/// Read one hunk header, `@@ -oldStart,oldLines +newStart,newLines @@`.
+///
+/// A count left off means one line, which is git's own shorthand.
+fn read_hunk_header(line: &str) -> Option<(u32, u32, u32, u32)> {
+    let body = line.strip_prefix("@@ ")?;
+    let end = body.find(" @@")?;
+    let mut sides = body[..end].split(' ');
+    let old = sides.next()?.strip_prefix('-')?;
+    let new = sides.next()?.strip_prefix('+')?;
+    let read = |side: &str| -> Option<(u32, u32)> {
+        let mut parts = side.splitn(2, ',');
+        let start = parts.next()?.parse().ok()?;
+        let count = match parts.next() {
+            Some(c) => c.parse().ok()?,
+            None => 1,
+        };
+        Some((start, count))
+    };
+    let (old_start, old_lines) = read(old)?;
+    let (new_start, new_lines) = read(new)?;
+    Some((old_start, old_lines, new_start, new_lines))
+}
+
+/// Turn one unified patch — however many files it names — into the shape the
+/// browser draws.
+///
+/// Pure on purpose: everything git had to be asked is asked outside, so the
+/// awkward halves of the format (a rename that changed nothing and so carries
+/// no `---`/`+++` at all, a binary file that carries a sentence instead of a
+/// hunk, the `\ No newline at end of file` marker that belongs to the line
+/// above it rather than being a line of its own) are pinned by unit tests
+/// rather than by a repository somebody has to build first.
+pub fn read_unified_patch(patch: &str) -> Vec<DiffFile> {
+    let mut files: Vec<DiffFile> = Vec::new();
+    let mut in_hunk = false;
+
+    for line in patch.split('\n') {
+        if line.starts_with("diff --git ") {
+            let (old_side, new_side) = paths_from_diff_line(line);
+            files.push(DiffFile {
+                // The `diff --git` line names both sides even when the
+                // `---`/`+++` pair is missing entirely, which is how a rename
+                // that changed nothing and a binary file arrive.
+                path: new_side.or(old_side).unwrap_or_default(),
+                old_path: None,
+                status: "modified".to_string(),
+                additions: 0,
+                deletions: 0,
+                binary: false,
+                hunks: Vec::new(),
+            });
+            in_hunk = false;
+            continue;
+        }
+
+        let Some(file) = files.last_mut() else {
+            // Anything before the first `diff --git` is not part of a patch.
+            continue;
+        };
+
+        if !in_hunk {
+            if line.starts_with("new file mode") {
+                file.status = "added".to_string();
+                continue;
+            }
+            if line.starts_with("deleted file mode") {
+                file.status = "deleted".to_string();
+                continue;
+            }
+            if let Some(from) = line.strip_prefix("rename from ") {
+                file.status = "renamed".to_string();
+                file.old_path = path_from_header(from);
+                continue;
+            }
+            if let Some(to) = line.strip_prefix("rename to ") {
+                file.status = "renamed".to_string();
+                if let Some(named) = path_from_header(to) {
+                    file.path = named;
+                }
+                continue;
+            }
+            if line.starts_with("Binary files ") || line.starts_with("GIT binary patch") {
+                file.binary = true;
+                continue;
+            }
+            if line.starts_with("--- ") {
+                // The old side is only ever the same name or `/dev/null`
+                // here — a rename says where it came from in its own header —
+                // so nothing is taken from it.
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("+++ ") {
+                // `/dev/null` on this side is a deletion, and then the name
+                // off the `diff --git` line is the one to keep.
+                if let Some(named) = path_from_header(rest) {
+                    file.path = named;
+                }
+                continue;
+            }
+        }
+
+        if let Some((old_start, old_lines, new_start, new_lines)) = read_hunk_header(line) {
+            in_hunk = true;
+            file.hunks.push(DiffHunk {
+                old_start,
+                old_lines,
+                new_start,
+                new_lines,
+                lines: Vec::new(),
+            });
+            continue;
+        }
+
+        if !in_hunk {
+            continue;
+        }
+
+        // `\ No newline at end of file` says something about the line above
+        // it, not about a line of its own, and the browser draws lines. It is
+        // dropped rather than shown as a line nobody wrote.
+        if line.starts_with('\\') {
+            continue;
+        }
+
+        let (kind, text) = match line.as_bytes().first() {
+            Some(b'+') => ("added", &line[1..]),
+            Some(b'-') => ("removed", &line[1..]),
+            Some(b' ') => ("context", &line[1..]),
+            // An unchanged empty line is written as a single space, never as
+            // nothing, so a wholly empty line is not part of the hunk — it is
+            // the tail left over from splitting the patch on its last newline.
+            // Anything else that is not a marker has ended the hunk too.
+            _ => {
+                in_hunk = false;
+                continue;
+            }
+        };
+        match kind {
+            "added" => file.additions += 1,
+            "removed" => file.deletions += 1,
+            _ => {}
+        }
+        if let Some(hunk) = file.hunks.last_mut() {
+            hunk.lines.push(DiffLine {
+                kind: kind.to_string(),
+                text: text.to_string(),
+            });
+        }
+    }
+
+    files
+}
+
+/// The switches every patch here is asked for with: no colour codes to strip,
+/// no outside diff program to be surprised by, three lines of context around
+/// each run, and renames found rather than reported as a delete and an add.
+const PATCH_SWITCHES: &[&str] = &["--no-color", "--no-ext-diff", "--find-renames", "-U3"];
+
+/// Every working-tree change against HEAD.
+///
+/// # Endpoint
+///
+/// `GET /api/git/diff?path=...`
+///
+/// Staged and unstaged together, which is what `git diff HEAD` says and what
+/// a person reading "what has this chat changed" means. A file git has never
+/// been told about has nothing in HEAD to be compared with, so each one is
+/// diffed against `/dev/null` separately and comes back as `untracked`.
+pub async fn diff(GitQuery(params): GitQuery<PathParams>) -> Answer {
+    let repo = checked_repo(&params.path)?;
+
+    // A project with no commits yet has no HEAD to compare against. The empty
+    // tree stands in for it, so everything staged reads as added rather than
+    // the whole route dying on `fatal: bad revision 'HEAD'`.
+    let base = if has_commits(&repo).await {
+        "HEAD"
+    } else {
+        THE_EMPTY_TREE
+    };
+
+    let mut args = vec!["diff", base];
+    args.extend_from_slice(PATCH_SWITCHES);
+    let patch = spoke_or_refused(run_git(&repo, &args).await?)?;
+    let mut files = read_unified_patch(&String::from_utf8_lossy(&patch.stdout));
+
+    // Untracked and conflicted files both need `git status` to be found at
+    // all: the first is not in the patch above, and the second is in it as an
+    // ordinary modification with no sign of the conflict.
+    let listed = spoke_or_refused(
+        run_git(
+            &repo,
+            &["status", "--porcelain=v2", "-z", "--untracked-files=all"],
+        )
+        .await?,
+    )?;
+    let listed = read_porcelain_v2(&listed.stdout);
+
+    for new_file in &listed.untracked {
+        if let Some(file) = untracked_diff(&repo, &new_file.path).await? {
+            files.push(file);
+        }
+    }
+
+    for unresolved in &listed.conflicted {
+        if let Some(file) = files.iter_mut().find(|f| f.path == unresolved.path) {
+            file.status = "conflicted".to_string();
+        }
+    }
+
+    // A typechange — a file that became a symlink, or the other way about —
+    // reads in the patch as an ordinary modification, and only status has the
+    // word for it.
+    for changed in listed.staged.iter().chain(listed.unstaged.iter()) {
+        if changed.status != "typechange" {
+            continue;
+        }
+        if let Some(file) = files.iter_mut().find(|f| f.path == changed.path) {
+            if file.status == "modified" {
+                file.status = "typechange".to_string();
+            }
+        }
+    }
+
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(Json(DiffResponse { files }).into_response())
+}
+
+/// One untracked file, diffed against nothing.
+///
+/// `--no-index` compares two paths without asking the repository about either,
+/// which is the only way to see inside a file git has never been told about.
+/// It reports "the two differ" as exit code 1 the way plain `diff` does, so a
+/// nonzero exit is the ordinary answer here and only a failure with nothing on
+/// stdout is a real one. A directory, or a file that vanished between the
+/// status read and this call, comes back as `None` rather than as a refusal.
+async fn untracked_diff(repo: &Path, path: &str) -> Result<Option<DiffFile>, Refused> {
+    let mut args = vec!["diff", "--no-index"];
+    args.extend_from_slice(PATCH_SWITCHES);
+    args.extend_from_slice(&["--", "/dev/null", path]);
+    let patch = run_git(repo, &args).await?;
+    let text = String::from_utf8_lossy(&patch.stdout);
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let Some(mut file) = read_unified_patch(&text).into_iter().next() else {
+        return Ok(None);
+    };
+    // The patch calls it a new file, which it is; the word the panel wants is
+    // the one that says git has never been told about it.
+    file.status = "untracked".to_string();
+    file.path = path.to_string();
+    file.old_path = None;
+    Ok(Some(file))
+}
+
+// ----------------------------------------------------------------------------
 // GET /api/git/trees, POST /api/git/trees, DELETE /api/git/trees
 // ----------------------------------------------------------------------------
 //
@@ -2345,5 +2736,251 @@ mod porcelain_tests {
         assert_eq!(read_drift("behind 9"), (0, 9));
         assert_eq!(read_drift("gone"), (0, 0));
         assert_eq!(read_drift(""), (0, 0));
+    }
+}
+
+/// Reading git's unified patch, which is the format the diff route answers out
+/// of (bw-rx1y.2). Kept apart from the status format above because the awkward
+/// parts are different ones: headers that stand in for a missing hunk, and a
+/// marker that is not a line.
+#[cfg(test)]
+mod patch_tests {
+    use super::*;
+
+
+    /// The plain case: one file, one run of changed lines.
+    #[test]
+    fn one_hunk_carries_its_counts_and_its_lines() {
+        let patch = "\
+diff --git a/src/one.txt b/src/one.txt
+index 1234567..89abcde 100644
+--- a/src/one.txt
++++ b/src/one.txt
+@@ -1,4 +1,4 @@
+ first
+-second
++SECOND
+ third
+ fourth
+";
+        let files = read_unified_patch(patch);
+        assert_eq!(files.len(), 1);
+        let file = &files[0];
+        assert_eq!(file.path, "src/one.txt");
+        assert_eq!(file.old_path, None);
+        assert_eq!(file.status, "modified");
+        assert_eq!(file.additions, 1);
+        assert_eq!(file.deletions, 1);
+        assert!(!file.binary);
+        assert_eq!(file.hunks.len(), 1);
+        let hunk = &file.hunks[0];
+        assert_eq!(
+            (hunk.old_start, hunk.old_lines, hunk.new_start, hunk.new_lines),
+            (1, 4, 1, 4)
+        );
+        assert_eq!(
+            hunk.lines,
+            vec![
+                DiffLine { kind: "context".into(), text: "first".into() },
+                DiffLine { kind: "removed".into(), text: "second".into() },
+                DiffLine { kind: "added".into(), text: "SECOND".into() },
+                DiffLine { kind: "context".into(), text: "third".into() },
+                DiffLine { kind: "context".into(), text: "fourth".into() },
+            ]
+        );
+    }
+
+    /// Two runs far enough apart that git left the middle out: each keeps its
+    /// own place in the file, which is the only way the panel can draw the gap
+    /// between them.
+    #[test]
+    fn several_hunks_each_keep_their_own_place_in_the_file() {
+        let patch = "\
+diff --git a/a.txt b/a.txt
+--- a/a.txt
++++ b/a.txt
+@@ -1,3 +1,3 @@
+ one
+-two
++TWO
+@@ -20,3 +20,4 @@ fn something()
+ twenty
++added here
+ twenty-one
+";
+        let files = read_unified_patch(patch);
+        assert_eq!(files.len(), 1);
+        let hunks = &files[0].hunks;
+        assert_eq!(hunks.len(), 2);
+        assert_eq!((hunks[0].old_start, hunks[0].new_start), (1, 1));
+        assert_eq!(
+            (hunks[1].old_start, hunks[1].old_lines, hunks[1].new_start, hunks[1].new_lines),
+            (20, 3, 20, 4)
+        );
+        assert_eq!(files[0].additions, 2);
+        assert_eq!(files[0].deletions, 1);
+    }
+
+    /// A brand new file: nothing on the old side, and a header that says so.
+    #[test]
+    fn a_pure_add_says_added_and_starts_the_old_side_at_zero() {
+        let patch = "\
+diff --git a/new.txt b/new.txt
+new file mode 100644
+index 0000000..422c2b7
+--- /dev/null
++++ b/new.txt
+@@ -0,0 +1,2 @@
++a
++b
+";
+        let files = read_unified_patch(patch);
+        assert_eq!(files[0].path, "new.txt");
+        assert_eq!(files[0].status, "added");
+        assert_eq!(files[0].additions, 2);
+        assert_eq!(files[0].deletions, 0);
+        assert_eq!(files[0].hunks[0].old_start, 0);
+        assert_eq!(files[0].hunks[0].old_lines, 0);
+    }
+
+    /// A file that is gone. `+++ /dev/null` names nothing, so the name has to
+    /// come off the `diff --git` line above it.
+    #[test]
+    fn a_pure_delete_is_still_named_though_the_new_side_is_nothing() {
+        let patch = "\
+diff --git a/gone.txt b/gone.txt
+deleted file mode 100644
+index 422c2b7..0000000
+--- a/gone.txt
++++ /dev/null
+@@ -1,2 +0,0 @@
+-a
+-b
+";
+        let files = read_unified_patch(patch);
+        assert_eq!(files[0].path, "gone.txt");
+        assert_eq!(files[0].status, "deleted");
+        assert_eq!(files[0].additions, 0);
+        assert_eq!(files[0].deletions, 2);
+    }
+
+    /// A rename that changed nothing at all carries no `---`/`+++` pair and no
+    /// hunk — only the two `rename` headers. Both ends have to be read off
+    /// them or the file arrives nameless.
+    #[test]
+    fn a_rename_that_changed_nothing_still_names_both_ends() {
+        let patch = "\
+diff --git a/old/name.txt b/new/name.txt
+similarity index 100%
+rename from old/name.txt
+rename to new/name.txt
+";
+        let files = read_unified_patch(patch);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "new/name.txt");
+        assert_eq!(files[0].old_path.as_deref(), Some("old/name.txt"));
+        assert_eq!(files[0].status, "renamed");
+        assert!(files[0].hunks.is_empty());
+        assert_eq!((files[0].additions, files[0].deletions), (0, 0));
+    }
+
+    /// A rename that also changed something keeps its hunks.
+    #[test]
+    fn a_rename_that_changed_something_keeps_its_hunks() {
+        let patch = "\
+diff --git a/old.txt b/new.txt
+similarity index 60%
+rename from old.txt
+rename to new.txt
+index 1234567..89abcde 100644
+--- a/old.txt
++++ b/new.txt
+@@ -1,2 +1,2 @@
+ kept
+-was
++is
+";
+        let files = read_unified_patch(patch);
+        assert_eq!(files[0].path, "new.txt");
+        assert_eq!(files[0].old_path.as_deref(), Some("old.txt"));
+        assert_eq!(files[0].status, "renamed");
+        assert_eq!(files[0].hunks.len(), 1);
+    }
+
+    /// git says a sentence instead of a patch for a file it will not show as
+    /// text. There is nothing to draw, and the panel has to be told why.
+    #[test]
+    fn a_binary_file_is_flagged_and_carries_no_hunks() {
+        let patch = "\
+diff --git a/logo.png b/logo.png
+index 1234567..89abcde 100644
+Binary files a/logo.png and b/logo.png differ
+";
+        let files = read_unified_patch(patch);
+        assert_eq!(files[0].path, "logo.png");
+        assert!(files[0].binary);
+        assert!(files[0].hunks.is_empty());
+        assert_eq!((files[0].additions, files[0].deletions), (0, 0));
+    }
+
+    /// `\ No newline at end of file` belongs to the line above it. Drawn as a
+    /// line of its own it would read as content nobody wrote, so it is dropped
+    /// and it counts towards nothing.
+    #[test]
+    fn the_no_newline_marker_is_dropped_rather_than_drawn() {
+        let patch = "\
+diff --git a/tail.txt b/tail.txt
+--- a/tail.txt
++++ b/tail.txt
+@@ -1,2 +1,2 @@
+ kept
+-was
+\\ No newline at end of file
++is
+\\ No newline at end of file
+";
+        let files = read_unified_patch(patch);
+        let lines = &files[0].hunks[0].lines;
+        assert_eq!(lines.len(), 3);
+        assert!(lines.iter().all(|line| !line.text.starts_with("No newline")));
+        assert_eq!((files[0].additions, files[0].deletions), (1, 1));
+    }
+
+    /// One patch naming several files splits into one entry each, and a file
+    /// after a binary one still reads.
+    #[test]
+    fn one_patch_naming_several_files_splits_into_one_entry_each() {
+        let patch = "\
+diff --git a/one.png b/one.png
+Binary files a/one.png and b/one.png differ
+diff --git a/two.txt b/two.txt
+--- a/two.txt
++++ b/two.txt
+@@ -1 +1 @@
+-was
++is
+";
+        let files = read_unified_patch(patch);
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].path, "one.png");
+        assert!(files[0].binary);
+        assert_eq!(files[1].path, "two.txt");
+        assert_eq!(files[1].hunks[0].lines.len(), 2);
+        // A count left off a hunk header means one line, which is git's own
+        // shorthand and not a zero.
+        assert_eq!(files[1].hunks[0].old_lines, 1);
+        assert_eq!(files[1].hunks[0].new_lines, 1);
+    }
+
+    /// A path with a space in it is ordinary, and the `diff --git` line has no
+    /// separator a path could not itself contain.
+    #[test]
+    fn a_path_with_a_space_in_it_is_read_off_the_header() {
+        let patch = "\
+diff --git a/my notes/a b.txt b/my notes/a b.txt
+Binary files a/my notes/a b.txt and b/my notes/a b.txt differ
+";
+        let files = read_unified_patch(patch);
+        assert_eq!(files[0].path, "my notes/a b.txt");
     }
 }

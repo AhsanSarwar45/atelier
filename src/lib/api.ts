@@ -572,6 +572,62 @@ export interface GitLogResponse {
 }
 
 /**
+ * Every working-tree change against HEAD, hunk by hunk (bw-rx1y.2).
+ *
+ * Staged and unstaged together, which is what `git diff HEAD` says and what a
+ * person reading "what has this chat changed" means. The server parses the
+ * hunks out of git's own unified patch, so the browser never re-diffs whole
+ * files — the LCS in `line-diff.ts` is O(n*m) and is meant for the short
+ * fragments a tool call carries, not for a file.
+ */
+export type GitDiffLineKind = 'context' | 'removed' | 'added';
+
+/** One line of a hunk: what happened to it, and what it says. */
+export interface GitDiffLine {
+  kind: GitDiffLineKind;
+  /** The line without its leading marker and without its newline. */
+  text: string;
+}
+
+/** One run of changed lines with the few unchanged ones around it. */
+export interface GitDiffHunk {
+  /** First line of the run on the old side, counting from one. */
+  oldStart: number;
+  oldLines: number;
+  /** First line of the run on the new side, counting from one. */
+  newStart: number;
+  newLines: number;
+  lines: GitDiffLine[];
+}
+
+/**
+ * The words `status` uses, and two more the diff can say that it cannot: a
+ * file git has never been told about, which has nothing in HEAD to compare
+ * with, and one a merge left unresolved.
+ */
+export type GitDiffStatus = GitChangeStatus | 'untracked' | 'conflicted';
+
+/** What a file has changed. */
+export interface GitDiffFile {
+  /** Relative to the repository root, the way `status` gives it. */
+  path: string;
+  /** Where a renamed file came from. Null for every other status. */
+  oldPath: string | null;
+  status: GitDiffStatus;
+  additions: number;
+  deletions: number;
+  /** A file git will not show as text. It carries no hunks. */
+  binary: boolean;
+  /** Empty for a binary file and for a rename that changed nothing. */
+  hunks: GitDiffHunk[];
+}
+
+/** Every changed file, ordered by path. */
+export interface GitDiffResponse {
+  files: GitDiffFile[];
+}
+
+/**
  * How long a call that has to reach the shared copy may take. The 10s a read
  * gets is the wait a person is sitting in front of; a fetch over a slow link,
  * or one that stops to ask an ssh agent for a passphrase, is regularly longer
@@ -780,6 +836,17 @@ export const git = {
         ...(base === undefined ? {} : { base }),
       }),
     }),
+
+  /**
+   * Every working-tree change against HEAD, hunk by hunk — what the chat draws
+   * in place of its transcript (bw-rx1y.2). Takes the cancel the other reads
+   * take, for the same reason: a diff that is closed, or pointed at another
+   * worktree, stops waiting on an answer nobody is asking for any more.
+   */
+  diff: (path: string, signal?: AbortSignal) => fetchApi<GitDiffResponse>(
+    `/api/git/diff?path=${encodeURIComponent(path)}`,
+    signal ? { signal } : undefined,
+  ),
 
   /** Recent saved changes, newest first. */
   log: (path: string, limit = 50, signal?: AbortSignal) => fetchApi<GitLogResponse>(

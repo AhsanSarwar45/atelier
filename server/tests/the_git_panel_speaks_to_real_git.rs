@@ -1089,7 +1089,7 @@ async fn a_project_with_nothing_saved_yet_has_an_empty_history_and_still_answers
 // ============================================================================
 
 /// Every route the contract names, as `main.rs` is expected to register it.
-const CONTRACT: [(&str, &str); 15] = [
+const CONTRACT: [(&str, &str); 16] = [
     ("get", "/api/git/status"),
     ("post", "/api/git/stage"),
     ("post", "/api/git/unstage"),
@@ -1103,6 +1103,9 @@ const CONTRACT: [(&str, &str); 15] = [
     ("get", "/api/git/branches"),
     ("post", "/api/git/checkout"),
     ("get", "/api/git/log"),
+    // Every working-tree change against HEAD, which the chat draws in place
+    // of its transcript (bw-rx1y.2).
+    ("get", "/api/git/diff"),
     // A project's checkouts by name, which the place a chat works in is
     // chosen from (bw-ov7a.1).
     ("get", "/api/git/trees"),
@@ -1119,7 +1122,7 @@ const OLDER: [(&str, &str); 1] = [("get", "/api/git/branch-status")];
 fn the_server_registers_every_route_the_contract_names() {
     let handlers = [
         "status", "stage", "unstage", "discard", "remove", "commit", "fetch", "pull", "push",
-        "branches", "checkout", "log", "trees", "new_tree", "drop_tree",
+        "branches", "checkout", "log", "diff", "trees", "new_tree", "drop_tree",
     ];
     let main = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1153,6 +1156,7 @@ async fn served() -> (String, tokio::task::JoinHandle<()>) {
         .route("/api/git/branches", axum::routing::get(git::branches))
         .route("/api/git/checkout", axum::routing::post(git::checkout))
         .route("/api/git/log", axum::routing::get(git::log))
+        .route("/api/git/diff", axum::routing::get(git::diff))
         .route("/api/git/trees", axum::routing::get(git::trees))
         .route("/api/git/trees", axum::routing::post(git::new_tree))
         .route("/api/git/trees", axum::routing::delete(git::drop_tree))
@@ -1936,4 +1940,259 @@ async fn a_detached_checkout_carries_no_branch_and_a_plain_folder_carries_nothin
     // directory is inside this repository, and git would answer for it.
     let plain = TempDir::new().expect("a folder in no repository");
     assert_eq!(git::checkout_at(plain.path()).await, None);
+}
+
+// ----------------------------------------------------------------------------
+// GET /api/git/diff (bw-rx1y.2)
+// ----------------------------------------------------------------------------
+
+async fn diff_of(dir: &TempDir) -> (StatusCode, Value) {
+    answered(git::diff(GitQuery(git::PathParams { path: here(dir) })).await).await
+}
+
+/// The one file in the answer with this path, or a failure naming what was
+/// there instead — a missing entry is otherwise an index panic with nothing
+/// in it about which file was looked for.
+fn the_file<'a>(body: &'a Value, path: &str) -> &'a Value {
+    let files = body["files"].as_array().expect("a list of files");
+    files
+        .iter()
+        .find(|file| file["path"] == path)
+        .unwrap_or_else(|| {
+            let named: Vec<&str> = files
+                .iter()
+                .filter_map(|file| file["path"].as_str())
+                .collect();
+            panic!("no entry for {path}; the answer named {named:?}")
+        })
+}
+
+/// Every kind of change at once, against a real repository: what the route is
+/// for is the whole picture in one read, so it is asserted as one.
+#[tokio::test]
+async fn every_kind_of_working_tree_change_is_answered_for_with_its_own_hunks() {
+    let repo = a_repo();
+    put(repo.path(), "edited.txt", "one\ntwo\nthree\nfour\n");
+    put(repo.path(), "gone.txt", "deleted line\n");
+    put(repo.path(), "was-here.txt", "moved, unchanged\n");
+    // Bytes no editor would show and git will not diff as text.
+    fs::write(repo.path().join("picture.bin"), [0u8, 1, 2, 0, 255, 0]).expect("the bytes");
+    save_all(repo.path(), "the starting point");
+
+    // Modified, and left unstaged.
+    put(repo.path(), "edited.txt", "one\nTWO\nthree\nfour\n");
+    // Added: a new file that has been picked to be saved, which is not the
+    // same thing as an untracked one and must not read as one.
+    put(repo.path(), "staged-new.txt", "brand new\n");
+    run(repo.path(), &["add", "staged-new.txt"]);
+    // Untracked: git has never been told about it.
+    put(repo.path(), "never-told.txt", "nobody added me\nsecond line\n");
+    // Deleted.
+    run(repo.path(), &["rm", "-q", "gone.txt"]);
+    // Renamed, with the content left alone so git scores it a pure rename.
+    run(repo.path(), &["mv", "was-here.txt", "now-here.txt"]);
+    // Binary, changed.
+    fs::write(repo.path().join("picture.bin"), [0u8, 9, 9, 0, 7, 0]).expect("the bytes");
+
+    let (code, body) = diff_of(&repo).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+
+    let files = body["files"].as_array().expect("a list of files");
+    let named: Vec<&str> = files
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    // Ordered by path, so the same repository always reads the same way.
+    assert_eq!(
+        named,
+        vec![
+            "edited.txt",
+            "gone.txt",
+            "never-told.txt",
+            "now-here.txt",
+            "picture.bin",
+            "staged-new.txt",
+        ]
+    );
+
+    let edited = the_file(&body, "edited.txt");
+    assert_eq!(edited["status"], "modified");
+    assert_eq!(edited["oldPath"], Value::Null);
+    assert_eq!(edited["additions"], 1);
+    assert_eq!(edited["deletions"], 1);
+    assert_eq!(edited["binary"], false);
+    let hunks = edited["hunks"].as_array().expect("hunks");
+    assert_eq!(hunks.len(), 1);
+    assert_eq!(hunks[0]["oldStart"], 1);
+    assert_eq!(hunks[0]["oldLines"], 4);
+    assert_eq!(hunks[0]["newStart"], 1);
+    assert_eq!(hunks[0]["newLines"], 4);
+    let lines = hunks[0]["lines"].as_array().expect("lines");
+    let read: Vec<(&str, &str)> = lines
+        .iter()
+        .map(|line| {
+            (
+                line["kind"].as_str().expect("a kind"),
+                line["text"].as_str().expect("some text"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        read,
+        vec![
+            ("context", "one"),
+            ("removed", "two"),
+            ("added", "TWO"),
+            ("context", "three"),
+            ("context", "four"),
+        ]
+    );
+
+    let staged_new = the_file(&body, "staged-new.txt");
+    assert_eq!(staged_new["status"], "added");
+    assert_eq!(staged_new["oldPath"], Value::Null);
+    assert_eq!(staged_new["additions"], 1);
+    assert_eq!(staged_new["deletions"], 0);
+    assert_eq!(staged_new["binary"], false);
+    assert_eq!(staged_new["hunks"][0]["oldStart"], 0);
+    assert_eq!(staged_new["hunks"][0]["oldLines"], 0);
+    assert_eq!(staged_new["hunks"][0]["newStart"], 1);
+    assert_eq!(staged_new["hunks"][0]["newLines"], 1);
+    assert_eq!(staged_new["hunks"][0]["lines"][0]["kind"], "added");
+    assert_eq!(staged_new["hunks"][0]["lines"][0]["text"], "brand new");
+
+    // A file git has never been told about is not in `git diff HEAD` at all;
+    // it is only here because it was diffed against nothing separately.
+    let untracked = the_file(&body, "never-told.txt");
+    assert_eq!(untracked["status"], "untracked");
+    assert_eq!(untracked["oldPath"], Value::Null);
+    assert_eq!(untracked["additions"], 2);
+    assert_eq!(untracked["deletions"], 0);
+    assert_eq!(untracked["binary"], false);
+    assert_eq!(untracked["hunks"][0]["lines"][1]["text"], "second line");
+
+    let deleted = the_file(&body, "gone.txt");
+    assert_eq!(deleted["status"], "deleted");
+    assert_eq!(deleted["oldPath"], Value::Null);
+    assert_eq!(deleted["additions"], 0);
+    assert_eq!(deleted["deletions"], 1);
+    assert_eq!(deleted["binary"], false);
+    assert_eq!(deleted["hunks"][0]["newStart"], 0);
+    assert_eq!(deleted["hunks"][0]["newLines"], 0);
+    assert_eq!(deleted["hunks"][0]["lines"][0]["kind"], "removed");
+    assert_eq!(deleted["hunks"][0]["lines"][0]["text"], "deleted line");
+
+    // A rename is one entry under its new name, saying where it came from —
+    // not a delete and an add that a reader has to pair up themselves.
+    let renamed = the_file(&body, "now-here.txt");
+    assert_eq!(renamed["status"], "renamed");
+    assert_eq!(renamed["oldPath"], "was-here.txt");
+    assert_eq!(renamed["additions"], 0);
+    assert_eq!(renamed["deletions"], 0);
+    assert_eq!(renamed["binary"], false);
+    assert_eq!(renamed["hunks"].as_array().expect("hunks").len(), 0);
+
+    let binary = the_file(&body, "picture.bin");
+    assert_eq!(binary["status"], "modified");
+    assert_eq!(binary["binary"], true);
+    assert_eq!(binary["additions"], 0);
+    assert_eq!(binary["deletions"], 0);
+    assert_eq!(binary["hunks"].as_array().expect("hunks").len(), 0);
+}
+
+/// A file picked to be saved and then edited again is one file, and the answer
+/// carries both halves of what it is doing — which is what `git diff HEAD`
+/// says and what "everything this chat changed" means.
+#[tokio::test]
+async fn a_file_staged_and_then_edited_again_is_answered_for_once_against_head() {
+    let repo = a_repo();
+    put(repo.path(), "twice.txt", "one\ntwo\n");
+    save_all(repo.path(), "the starting point");
+
+    put(repo.path(), "twice.txt", "one\nTWO\n");
+    run(repo.path(), &["add", "twice.txt"]);
+    put(repo.path(), "twice.txt", "one\nTWO\nthree\n");
+
+    let (code, body) = diff_of(&repo).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(body["files"].as_array().expect("files").len(), 1);
+    let file = the_file(&body, "twice.txt");
+    assert_eq!(file["status"], "modified");
+    assert_eq!(file["additions"], 2);
+    assert_eq!(file["deletions"], 1);
+}
+
+/// A project nobody has saved anything in yet has no HEAD to compare against.
+/// The empty tree stands in for it, so the answer is every file it holds
+/// rather than `fatal: bad revision 'HEAD'`.
+#[tokio::test]
+async fn a_project_with_nothing_saved_in_it_yet_reads_as_all_new() {
+    let repo = a_repo();
+    put(repo.path(), "picked.txt", "picked to be saved\n");
+    run(repo.path(), &["add", "picked.txt"]);
+    put(repo.path(), "loose.txt", "never added\n");
+
+    let (code, body) = diff_of(&repo).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+
+    let picked = the_file(&body, "picked.txt");
+    assert_eq!(picked["status"], "added");
+    assert_eq!(picked["additions"], 1);
+    assert_eq!(picked["hunks"][0]["lines"][0]["text"], "picked to be saved");
+
+    let loose = the_file(&body, "loose.txt");
+    assert_eq!(loose["status"], "untracked");
+    assert_eq!(loose["additions"], 1);
+}
+
+/// A repository with nothing changed at all answers with an empty list, not
+/// with a refusal and not with a null.
+#[tokio::test]
+async fn a_clean_project_answers_with_nothing_changed() {
+    let repo = a_project_with_history();
+
+    let (code, body) = diff_of(&repo).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(body["files"].as_array().expect("a list"), &Vec::<Value>::new());
+}
+
+/// A file a merge left unresolved is named for what it is, so the panel does
+/// not draw the conflict markers as an ordinary modification.
+#[tokio::test]
+async fn a_file_a_merge_left_unresolved_is_called_conflicted() {
+    let repo = a_repo();
+    put(repo.path(), "fought-over.txt", "the original\n");
+    save_all(repo.path(), "the starting point");
+
+    run(repo.path(), &["checkout", "-q", "-b", "theirs"]);
+    put(repo.path(), "fought-over.txt", "their line\n");
+    save_all(repo.path(), "their change");
+
+    run(repo.path(), &["checkout", "-q", "main"]);
+    put(repo.path(), "fought-over.txt", "our line\n");
+    save_all(repo.path(), "our change");
+
+    run_anyway(repo.path(), &["merge", "theirs"]);
+
+    let (code, body) = diff_of(&repo).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(the_file(&body, "fought-over.txt")["status"], "conflicted");
+}
+
+/// The path jail and the refusal shape are the ones every other route in this
+/// file uses; nothing about the diff loosens them.
+#[tokio::test]
+async fn a_directory_that_is_not_there_is_refused_the_way_every_other_read_is() {
+    let (code, body) = answered(
+        git::diff(GitQuery(git::PathParams {
+            path: "/definitely/not/a/place".to_string(),
+        }))
+        .await,
+    )
+    .await;
+    assert!(
+        code == StatusCode::BAD_REQUEST || code == StatusCode::FORBIDDEN,
+        "{code} {body}"
+    );
+    assert!(body["error"].is_string(), "{body}");
 }
