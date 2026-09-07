@@ -45,7 +45,7 @@ in the line does not carry:
 
 ```bash
 ATELIER_BYPASS='a worktree is per job; this child is claimed in its job copy' \
-  bd update JOB-ID.1 --claim
+  bd update JOB-ID.2 --claim
 ```
 
 That covers `Edit`, `Write` and every gated shell write in the copy, so set the
