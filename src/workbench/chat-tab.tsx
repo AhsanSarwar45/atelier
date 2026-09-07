@@ -614,7 +614,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     (id: string) => router.push(addressWith(params, { tab: 'chat', chat: id })),
     [router, params],
   );
-  const [starting, setStarting] = useState(false);
+  /**
+   * The agent a chat is being started for, while the server is still making
+   * it — the brand and not just a flag, because the screen it stands on says
+   * which agent is starting and the sidebar's menu starts one that is not the
+   * one the picker is holding (bw-l9cu.1).
+   */
+  const [startingBrand, setStartingBrand] = useState<Brand | null>(null);
+  const starting = startingBrand !== null;
   const [startError, setStartError] = useState<string | null>(null);
   const [newBrand, setNewBrand] = useState<Brand>('claude');
   const [newChatDefault, setNewChatDefaultState] = useState<Brand | 'ask'>('ask');
@@ -652,7 +659,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       setStartError(`The ${brandName(brand)} provider is not available in this installation.`);
       return;
     }
-    setStarting(true);
+    setStartingBrand(brand);
     setStartError(null);
     try {
       let workingIn: string | null = null;
@@ -673,10 +680,17 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       open(s.id);
     } catch (e) {
       setStartError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setStarting(false);
+      setStartingBrand(null);
     }
   }, [projectId, projectPath, open, newBrand, providers]);
+  // The spinner stands until the address really is the new chat, not until the
+  // server has answered: clearing it on the answer put the old screen back for
+  // the frame or two the router takes to arrive, which is the flicker this card
+  // is about. Any other chat opened underneath it clears it too, because the
+  // list beside the spinner still works and what he picks there wins.
+  useEffect(() => {
+    setStartingBrand(null);
+  }, [sessionId]);
   const view = useSession(sessionId);
   const factsRead = useSessionFactsRead(sessionId);
   const facts = factsRead?.facts ?? null;
@@ -1502,6 +1516,27 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       )}
     </div>
   );
+
+  // A chat that has been asked for but does not yet exist. The click moves the
+  // reader here at once and this stands where the transcript will stand, so the
+  // second the server spends making the chat is spent on the chat's own screen
+  // instead of on the screen he just clicked away from (bw-l9cu.1). It comes
+  // before the empty screen on purpose: the empty screen holds the very buttons
+  // he has just used, and leaving them under him read as a click that did
+  // nothing.
+  if (startingBrand) {
+    return shell(
+      <div
+        data-testid="chat-starting"
+        role="status"
+        aria-live="polite"
+        className="flex flex-1 flex-col items-center justify-center gap-3"
+      >
+        <Loader2 className="size-6 animate-spin text-muted-foreground motion-reduce:animate-none" aria-hidden="true" />
+        <p className="text-sm text-muted-foreground">Starting {brandName(startingBrand)} chat…</p>
+      </div>,
+    );
+  }
 
   if (!sessionId) {
     return shell(
