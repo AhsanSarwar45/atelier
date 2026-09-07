@@ -156,10 +156,12 @@ export function WhereToWork({
   const modes = [
     {
       kind: 'project' as const,
-      label: 'Main',
-      // The folder is the tooltip rather than the label: a project checked out
-      // as `.workbench-run-…` or `app` tells the reader nothing, and truncated
-      // it tells them less. What they are choosing is the main checkout.
+      // Not "Main", which reads as the main branch when the control beneath it
+      // is about branches. This is the folder the project was added as, and
+      // the folder itself is the tooltip: a project checked out as
+      // `.workbench-run-…` or `app` tells the reader nothing as a label, and
+      // truncated it tells them less.
+      label: 'Project root',
       title: project?.path ?? projectPath,
       icon: <FolderGit2 className="size-3.5" />,
     },

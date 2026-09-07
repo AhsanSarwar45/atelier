@@ -113,9 +113,9 @@ describe('the picker on the screen', () => {
     return { onChange, onMissing };
   }
 
-  it('offers the main checkout as one of the three ways in', async () => {
+  it('offers the project root as one of the three ways in', async () => {
     draw();
-    await waitFor(() => expect(screen.getByTestId('where-project')).toHaveTextContent('Main'));
+    await waitFor(() => expect(screen.getByTestId('where-project')).toHaveTextContent('Project root'));
     // The folder is the tooltip, not the label: its basename is often a name
     // the reader has never seen.
     expect(screen.getByTestId('where-project')).toHaveAttribute('title', '/home/dev/app');

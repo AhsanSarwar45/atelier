@@ -50,8 +50,9 @@ test('a new chat is offered the project, a worktree of it, or one made here', as
     const dialog = page.getByTestId('new-chat-provider-dialog');
     await expect(dialog.getByTestId('where-to-work')).toBeVisible();
 
-    // The main checkout is offered by that name; its folder is the tooltip.
-    await expect(dialog.getByTestId('where-project')).toHaveText('Main');
+    // The project's own checkout is offered by that name; the folder is the
+    // tooltip.
+    await expect(dialog.getByTestId('where-project')).toHaveText('Project root');
     await expect(dialog.getByTestId('where-project')).toHaveAttribute('title', FIXTURE);
 
     // The worktree standing beside it was read from git and is offered by
