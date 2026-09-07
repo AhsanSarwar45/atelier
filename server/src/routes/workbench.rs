@@ -1004,12 +1004,36 @@ fn folder_of(path: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// What checkout each of these working directories is in.
+///
+/// A chat's chip names the worktree it is working in, which git has to be
+/// asked for — the folder alone cannot say whether it is a worktree, whose it
+/// is, or what branch it has out (bw-ov7a.4). One question per distinct
+/// directory, all asked at once: a list of thirty chats in the same worktree
+/// asks once.
+async fn checkouts_of<'a>(
+    cwds: impl Iterator<Item = &'a str>,
+) -> HashMap<String, crate::routes::git::Checkout> {
+    let mut asking: Vec<String> = cwds.map(str::to_string).collect();
+    asking.sort();
+    asking.dedup();
+    let answers = futures::future::join_all(asking.into_iter().map(|cwd| async move {
+        let found = crate::routes::git::checkout_at(std::path::Path::new(&cwd)).await;
+        (cwd, found)
+    }))
+    .await;
+    answers.into_iter().filter_map(|(cwd, found)| Some((cwd, found?))).collect()
+}
+
 fn restore_row(
     session: Session,
     beads: Vec<String>,
     holds: &[crate::workbench::external::ProviderHold],
+    checkouts: &HashMap<String, crate::routes::git::Checkout>,
 ) -> Value {
-    let folder = folder_of(&session.cwd);
+    let checkout = checkouts.get(&session.cwd);
+    let folder = checkout.map(|it| it.folder.clone()).or_else(|| folder_of(&session.cwd));
+    let branch = checkout.and_then(|it| it.branch.clone());
     let held = session
         .external_id
         .as_deref()
@@ -1019,7 +1043,7 @@ fn restore_row(
         "title": session.title, "lastActiveAt": session.last_active_at,
         "lastSpokeAt": session.last_spoke_at, "state": session.state, "origin": session.origin,
         "projectId": session.project_id, "cwdHint": session.cwd, "folder": folder,
-        "branch": Value::Null, "beads": beads, "runningElsewhere": held.is_some(), "held": held,
+        "branch": branch, "beads": beads, "runningElsewhere": held.is_some(), "held": held,
     })
 }
 
@@ -1321,11 +1345,12 @@ async fn restore(
     // (bw-t26l.22).
     if query.local.is_some() {
         let lately = state.holds_lately().await;
+        let checkouts = checkouts_of(sessions.iter().map(|session| session.cwd.as_str())).await;
         let mut rows: Vec<Value> = sessions
             .into_iter()
             .map(|session| {
                 let linked = beads.remove(&session.id).unwrap_or_default();
-                restore_row(session, linked, &lately)
+                restore_row(session, linked, &lately, &checkouts)
             })
             .collect();
         rows.sort_by(|a, b| restore_clock(b).cmp(restore_clock(a)));
@@ -1333,11 +1358,12 @@ async fn restore(
     }
 
     let holds = state.provider_holds().await;
+    let checkouts = checkouts_of(sessions.iter().map(|session| session.cwd.as_str())).await;
     let mut rows: Vec<Value> = sessions
         .into_iter()
         .map(|session| {
             let linked = beads.remove(&session.id).unwrap_or_default();
-            restore_row(session, linked, &holds)
+            restore_row(session, linked, &holds, &checkouts)
         })
         .collect();
     let known_sessions = provider_sessions_shared(&state, query.path.as_deref(), everything).await;
@@ -1492,6 +1518,19 @@ async fn restore(
             "folder":known["cwd"].as_str().and_then(folder_of),"branch":known["branch"],"beads":[],
             "runningElsewhere":held.is_some(),"held":held}));
     }
+    // Whatever a row's directory came from — our own record or the provider's
+    // — the worktree it is in is git's answer, not the folder's own name
+    // (bw-ov7a.4). Asked once here for every row, rather than by each of the
+    // three places above that sets a folder.
+    let checkouts =
+        checkouts_of(rows.iter().filter_map(|row| row["cwdHint"].as_str())).await;
+    for row in &mut rows {
+        let Some(checkout) = row["cwdHint"].as_str().and_then(|cwd| checkouts.get(cwd)) else {
+            continue;
+        };
+        row["folder"] = json!(checkout.folder);
+        row["branch"] = json!(checkout.branch);
+    }
     rows.sort_by(|a, b| restore_clock(b).cmp(restore_clock(a)));
     Ok(Json(rows))
 }
@@ -1524,7 +1563,12 @@ async fn session(
         .and_then(|row| row["cwd"].as_str())
         .unwrap_or(&found.cwd)
         .to_string();
-    let folder = folder_of(&cwd);
+    // The worktree the chat is working in, not the folder it happens to sit
+    // in: a chat in `worktrees/bw-1/server` is working in `bw-1`, on `bw-1`'s
+    // branch (bw-ov7a.4). What the provider's own record says is the fallback,
+    // for a directory git cannot answer for.
+    let checkout = crate::routes::git::checkout_at(std::path::Path::new(&cwd)).await;
+    let folder = checkout.as_ref().map(|it| it.folder.clone()).or_else(|| folder_of(&cwd));
     let mut linked = state
         .database()
         .beads_for_sessions(vec![found.id.clone()])
@@ -1588,7 +1632,11 @@ async fn session(
         "sessionId": found.id, "origin": found.origin, "brand": found.brand,
         "externalId": found.external_id, "runningElsewhere": held.is_some(), "held": held,
         "title": known.as_ref().and_then(|row|row["name"].as_str()).map(str::to_string).or(found.title),
-        "cwd": cwd, "folder": folder, "branch": known.as_ref().map(|row|row["branch"].clone()).unwrap_or(Value::Null), "beads": beads,
+        "cwd": cwd, "folder": folder,
+        "branch": checkout.as_ref().and_then(|it| it.branch.clone()).map(Value::from)
+            .or_else(|| known.as_ref().map(|row| row["branch"].clone()))
+            .unwrap_or(Value::Null),
+        "beads": beads,
     })))
 }
 

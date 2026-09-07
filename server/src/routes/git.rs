@@ -1468,6 +1468,51 @@ fn read_worktree_list(said: &str) -> Vec<ListedTree> {
     trees
 }
 
+/// The checkout a directory is inside of, as git sees it from in there.
+///
+/// A chat works in a folder, and the folder's own name is not the answer: a
+/// chat running in `worktrees/bw-1/server/src` is working in the worktree
+/// `bw-1`, on `bw-1`'s branch, and that is what the chip on it has to say
+/// (bw-ov7a.4). Git answers both from wherever it is asked, so a subdirectory
+/// costs nothing extra and a linked worktree names itself rather than the
+/// repository it hangs off.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Checkout {
+    /// The checkout's own folder name — the worktree's, not the project's.
+    pub folder: String,
+    /// The checkout's root.
+    pub root: String,
+    /// The branch it has out, or nothing when its head is detached.
+    pub branch: Option<String>,
+}
+
+/// What checkout `at` sits in, or nothing when it is not in a repository.
+///
+/// One `rev-parse` answers both halves: `--show-toplevel` names the checkout
+/// and `--abbrev-ref HEAD` names its branch, printed in the order they are
+/// asked for. A detached head says `HEAD`, which is not a branch and is
+/// carried as none.
+pub async fn checkout_at(at: &Path) -> Option<Checkout> {
+    let out = super::git_output(at, &["rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD"])
+        .await
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let said = String::from_utf8_lossy(&out.stdout);
+    let mut lines = said.lines();
+    let root = lines.next()?.trim();
+    if root.is_empty() {
+        return None;
+    }
+    let head = lines.next().unwrap_or_default().trim();
+    Some(Checkout {
+        folder: name_of(root),
+        root: root.to_string(),
+        branch: (!head.is_empty() && head != "HEAD").then(|| head.to_string()),
+    })
+}
+
 /// The directory's own name — what the chip on a chat says.
 fn name_of(path: &str) -> String {
     Path::new(path)

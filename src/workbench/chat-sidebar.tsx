@@ -300,8 +300,11 @@ export function withLive(
       state: session.state,
       origin: 'app',
       projectId: session.projectId,
-      cwdHint: session.projectPath,
-      folder: folderOf(session.projectPath),
+      // Where it is really working, which for a chat started in a worktree is
+      // not the project (bw-ov7a.4). The branch waits for the restore row: the
+      // stream carries no git, and a name is better than nothing meanwhile.
+      cwdHint: session.cwd,
+      folder: folderOf(session.cwd),
       branch: null,
       beads: session.beads,
       activity: session.activity,

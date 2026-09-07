@@ -549,6 +549,7 @@ describe('the row and the bar say the same thing', () => {
       externalId: null,
       projectId: PROJECT,
       projectPath: '/home/me/project',
+      cwd: '/home/me/project',
       title: 'A chat of ours',
       state: 'running_tool',
       activity: 'Pulling the branch apart',

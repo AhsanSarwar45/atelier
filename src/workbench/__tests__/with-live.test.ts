@@ -38,7 +38,8 @@ function session(over: Partial<LiveSession> = {}): LiveSession {
     model: null,
     externalId: null,
     projectId: PROJECT,
-    projectPath: '/home/me/project/worktrees/fix-a-thing',
+    projectPath: '/home/me/project',
+    cwd: '/home/me/project/worktrees/fix-a-thing',
     title: 'Just started',
     state: 'starting',
     activity: 'Starting',
@@ -60,9 +61,17 @@ describe('the list keeps up', () => {
   });
 
   it('the new row says where it is working', () => {
+    // The worktree it was started in, not the project it belongs to: the two
+    // are different the moment somebody uses a worktree, and the row that
+    // named the project could never say which one (bw-ov7a.4).
     const [fresh] = withLive([], [session()], PROJECT);
     expect(fresh!.folder).toBe('fix-a-thing');
     expect(fresh!.cwdHint).toBe('/home/me/project/worktrees/fix-a-thing');
+
+    // And a chat working in the project itself still names the project.
+    const [home] = withLive([], [session({ cwd: '/home/me/project' })], PROJECT);
+    expect(home!.folder).toBe('project');
+    expect(home!.cwdHint).toBe('/home/me/project');
   });
 
   it('a chat already listed is not listed twice, and takes the newer state', () => {

@@ -36,6 +36,12 @@ export interface LiveSession {
   externalId: string | null;
   projectId: string;
   projectPath: string;
+  /**
+   * Where the chat is really working, which is the project only when nobody
+   * chose otherwise: a chat started in a worktree works in the worktree, and
+   * the row for it says so (bw-ov7a.4).
+   */
+  cwd: string;
   title: string | null;
   state: SessionState;
   /** The agent's own words for what it is doing — "Asking about Edit", "Answering". */
@@ -302,6 +308,7 @@ function fromSummary(
     externalId: s.externalId,
     projectId: s.projectId,
     projectPath: s.projectPath,
+    cwd: s.cwd,
     title: s.title,
     state: s.state,
     activity: s.activity,
@@ -502,6 +509,7 @@ function absorb(frame: WatchFrame): void {
         externalId: null,
         projectId: '',
         projectPath: e.cwd,
+        cwd: e.cwd,
         title: null,
         state: 'starting',
         activity: '',

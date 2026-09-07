@@ -1887,3 +1887,53 @@ async fn unsaved_work_in_a_worktree_stops_it_being_taken_away_until_that_is_said
     assert_eq!(forced, StatusCode::OK, "{said}");
     assert!(!inside.exists());
 }
+
+// ----------------------------------------------------------------------------
+// What checkout a working directory is in (bw-ov7a.4)
+// ----------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_working_directory_names_the_checkout_it_is_in_and_the_branch_it_has_out() {
+    let repo = a_project_with_history();
+    let at = repo.path();
+    let tree = at.join("worktrees").join("reading-room");
+    run(at, &["worktree", "add", &tree.display().to_string(), "-b", "reading-room"]);
+    fs::create_dir_all(tree.join("server").join("src")).expect("a folder deep in the worktree");
+
+    // The project itself: its own folder, and the branch it was seeded on.
+    let here = git::checkout_at(at).await.expect("the project is a checkout");
+    assert_eq!(here.folder, at.file_name().unwrap().to_string_lossy());
+    assert_eq!(here.branch.as_deref(), Some("main"));
+
+    // A worktree names itself, not the project it hangs off.
+    let there = git::checkout_at(&tree).await.expect("a worktree is a checkout");
+    assert_eq!(there.folder, "reading-room");
+    assert_eq!(there.branch.as_deref(), Some("reading-room"));
+
+    // And a chat working two folders down is still working in that worktree,
+    // which is the whole reason the folder's own name is not the answer.
+    let deep = git::checkout_at(&tree.join("server").join("src"))
+        .await
+        .expect("a folder inside a worktree is inside its checkout");
+    assert_eq!(deep.folder, "reading-room");
+    assert_eq!(deep.branch.as_deref(), Some("reading-room"));
+    assert_eq!(deep.root, there.root);
+}
+
+#[tokio::test]
+async fn a_detached_checkout_carries_no_branch_and_a_plain_folder_carries_nothing() {
+    let repo = a_project_with_history();
+    let at = repo.path();
+    let head = run(at, &["rev-parse", "HEAD"]).trim().to_string();
+    run(at, &["checkout", "--detach", &head]);
+
+    let loose = git::checkout_at(at).await.expect("a detached checkout is still a checkout");
+    assert_eq!(loose.branch, None, "`HEAD` is not a branch name");
+    assert_eq!(loose.folder, at.file_name().unwrap().to_string_lossy());
+
+    // Somewhere that is not a repository at all answers nothing rather than
+    // guessing at the folder's name. Not `scratch()`: the crate's own target
+    // directory is inside this repository, and git would answer for it.
+    let plain = TempDir::new().expect("a folder in no repository");
+    assert_eq!(git::checkout_at(plain.path()).await, None);
+}

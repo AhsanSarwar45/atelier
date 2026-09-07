@@ -1677,6 +1677,30 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             </Badge>
           </Tooltip>
         )}
+        {/* The branch beside the worktree, not folded into its tooltip: the
+            two together are what says which piece of work this chat is in,
+            and a fact that has to be hovered for is a fact nobody reads
+            (bw-ov7a.4). */}
+        {facts?.branch && (
+          <Tooltip label={`On branch ${facts.branch}`}>
+            <Badge
+              // Grey on purpose: a worktree and the branch in it usually share
+              // a name, and two identically coloured pills side by side read
+              // as one thing drawn twice. The mark and the colour together say
+              // which is the folder and which is the line of work.
+              variant="secondary"
+              appearance="light"
+              size="sm"
+              shape="circle"
+              data-testid="chat-branch-chip"
+              data-branch={facts.branch}
+              className="hidden max-w-40 shrink-0 gap-1 truncate sm:inline-flex"
+            >
+              <GitBranch className="size-3 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 truncate">{facts.branch}</span>
+            </Badge>
+          </Tooltip>
+        )}
         {/* What this chat is using and what it has spent, then how much of the
             account's own five-hour allowance is gone. All three are numbers a
             reader watching the work has to see without opening anything, so
