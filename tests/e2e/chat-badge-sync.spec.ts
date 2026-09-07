@@ -19,6 +19,10 @@ const SHOT = process.env.CHAT_BADGE_SYNC_DIR || 'tests/results';
  * helper cannot watch reliably, so the store asks again on a clock the way
  * the board page does. Closing the card from outside the app must recolour
  * both chips with the page left exactly where it was.
+ *
+ * This is the check bw-pq2a.4 asked for. It failed on the store before
+ * bw-pq2a.2 — the piece's chips stayed open for the whole 90 s wait — and
+ * passes after it, in about 35 s: the helper's memo period plus one poll.
  */
 test('a card closed on the board recolours its chip in the message and in the rail without a reload', async ({ page, request }) => {
   test.setTimeout(180_000);
