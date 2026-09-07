@@ -1484,6 +1484,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             open={rightOpen}
             view={gitOpen ? 'git' : 'chat'}
             projectPath={projectPath}
+            // The Git view follows the chat, not the project: a chat started in
+            // a worktree has to show that worktree's branch and its changes,
+            // which are not the checkout's (bw-rx1y.1).
+            workingIn={facts?.cwd ?? projectPath}
             desktopWidth={rightWidth}
             resizing={resizingRight}
             onToggle={flipRight}

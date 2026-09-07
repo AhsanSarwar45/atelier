@@ -149,8 +149,16 @@ export interface ChatRightRailProps {
   open: boolean;
   /** Which view is drawn. What this chat has touched, unless Git was asked for. */
   view?: RailView;
-  /** The project's working directory — what every git call in the Git view runs against. */
+  /** The project's checkout — where its cards are read from. */
   projectPath?: string | null;
+  /**
+   * The folder THIS chat is running in, which for a chat started in a worktree
+   * is not the project's checkout. Every git call in the Git view runs against
+   * it, so the rail says what the agent on this chat is actually changing
+   * (bw-rx1y.1). While the chat's facts are still on their way it is null, and
+   * the project's checkout stands in until they land.
+   */
+  workingIn?: string | null;
   /** Width of the in-row desktop column; the phone sheet stays 288px wide. */
   desktopWidth: number;
   /** Pointer is moving the desktop divider, so the column must follow it immediately. */
@@ -174,12 +182,16 @@ export function ChatRightRail({
   open,
   view = 'chat',
   projectPath = null,
+  workingIn = null,
   desktopWidth,
   resizing = false,
   onToggle,
 }: ChatRightRailProps) {
   const jobs = useMemo(() => byJob(cards), [cards]);
   const cardStatuses = useKnownCardStatuses(projectPath);
+  // Cards belong to the project; what git has to say belongs to this chat's own
+  // folder. They are the same path only for a chat started in the checkout.
+  const gitPath = workingIn ?? projectPath;
   return (
     <div
       data-testid="chat-right-rail"
@@ -237,7 +249,12 @@ export function ChatRightRail({
               <X aria-hidden="true" />
             </Button>
           </div>
-          {view === 'git' && <GitView path={projectPath} />}
+          {/* Keyed on the folder: the view holds a repository's status, its log
+              and a half-written commit message, and none of that survives a
+              move to another tree. Facts arriving late flip this from the
+              project to the worktree, and the project's answers must go with
+              the old mount rather than sit on screen under the new path. */}
+          {view === 'git' && <GitView key={gitPath ?? ''} path={gitPath} />}
 
           {view === 'chat' && (
             <>
