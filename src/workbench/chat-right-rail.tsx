@@ -252,7 +252,14 @@ export function ChatRightRail({
               {/* One chip per JOB, and all of them: the column exists so nothing
                   has to be hidden behind a count (§8.2.1), and a job's pieces
                   are folded into it because a dozen chips reading bw-uiyz.N say
-                  one thing a dozen times (bw-7ks.22.11). */}
+                  one thing a dozen times (bw-7ks.22.11).
+
+                  The fold is kept on purpose, and the chip's colour is the JOB's
+                  own board status — never a piece's. A chip in the transcript
+                  names the piece and wears the piece's own status. So an open
+                  epic's chip here is blue while its closed piece's chip in the
+                  message is green, and both are right: every chip says exactly
+                  what the board page says about the card it names (bw-pq2a.1). */}
               <div className="flex flex-wrap gap-1" data-testid="rail-cards">
                 {jobs.map((job) => (
                   <BeadChip
