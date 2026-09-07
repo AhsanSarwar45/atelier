@@ -32,6 +32,7 @@ import type { Doing } from '@/workbench/chat-state';
 import { forHowLong } from '@/workbench/elapsed';
 import { SUMMARY_HELD_AT, summaryFill } from '@/workbench/summarising';
 import { languageOf, languagesOf, paint, paintLines } from '@/workbench/colouring';
+import { DiffTable } from '@/workbench/diff-table';
 import { diffLines } from '@/workbench/line-diff';
 import { opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
 import { lookOf, markOf } from '@/workbench/machine-look';
@@ -45,7 +46,7 @@ import { colourOfBand, lookOfRan, markOfRan } from '@/workbench/ran-look';
 import { ranOfAcp, whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import { NOBODY_ANSWERED, refuses } from '@/workbench/protocol';
 import type { AskOption, ImagePayload, LookableImage } from '@/workbench/protocol';
-import { Chipped, SplitPaths, withChips } from '@/workbench/split-paths';
+import { Chipped, Line, SplitPaths, withChips } from '@/workbench/split-paths';
 import { PathChip } from '@/workbench/path-chip';
 import { sendCommand, type TranscriptItem } from '@/workbench/use-session';
 
@@ -218,23 +219,6 @@ export const PermissionCard = memo(function PermissionCard({
 });
 
 /**
- * One line of code, coloured, inside a cell that carries its own background.
- *
- * Each line lives in its own table cell, so the colour has to arrive already
- * cut into lines. `html` is that cut piece, painted from the whole file so a
- * comment or a string running over several lines stays itself all the way down
- * (bw-4wcd.16); leave it out and the line is painted alone, which is right for
- * a line that never had a file around it.
- */
-function Line({ text, language, html }: { text: string; language: string | null; html?: string | null }) {
-  const split = useContext(SplitPaths);
-  const found = html === undefined ? paint(text, language) : html;
-  const painted = found === undefined ? null : withChips(found, split);
-  if (painted === null) return <Chipped text={text} />;
-  return <span dangerouslySetInnerHTML={{ __html: painted }} />;
-}
-
-/**
  * Before and after in two columns, with only the lines that differ marked, and
  * the language of the file itself coloured through both of them (bw-4wcd.1).
  */
@@ -248,25 +232,8 @@ function EditPath({ path, raw = path, line }: { path: string; raw?: string; line
 }
 
 function DiffView({ path, before, after, line }: { path: string; before: string; after: string; line?: number }) {
-  const rows = diffLines(before, after);
+  const rows = diffLines(before, after, line ?? 1);
   const language = languageOf(path);
-  // Each side is coloured whole and only then cut into its rows: painting a
-  // row on its own left the inside of every block comment and every long
-  // string read as fresh code (bw-4wcd.16). `diffLines` drops one trailing
-  // newline before it splits, so the same text is painted here.
-  const leftLines = paintLines(before.replace(/\n$/, ''), language);
-  const rightLines = paintLines(after.replace(/\n$/, ''), language);
-  let li = 0;
-  let ri = 0;
-  const painted = rows.map((r) => {
-    const cell = {
-      left: r.left === null || leftLines === null ? null : (leftLines[li] ?? null),
-      right: r.right === null || rightLines === null ? null : (rightLines[ri] ?? null),
-    };
-    if (r.left !== null) li++;
-    if (r.right !== null) ri++;
-    return cell;
-  });
   return (
     <Panel
       tone="frame"
@@ -283,32 +250,7 @@ function DiffView({ path, before, after, line }: { path: string; before: string;
         <span className="shrink-0">before → after</span>
       </div>
       <div className="max-h-64 overflow-auto">
-        <table className="w-full table-fixed border-collapse font-mono text-[11px] leading-relaxed text-foreground/80">
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} data-diff-kind={r.kind}>
-                <td
-                  className={cn(
-                    'w-1/2 whitespace-pre-wrap break-all border-r border-border/40 px-2 py-0.5 align-top',
-                    r.kind === 'removed' || r.kind === 'changed' ? 'bg-red-500/15' : '',
-                    r.left === null && 'bg-muted/20',
-                  )}
-                >
-                  {r.left === null ? '' : <Line text={r.left} language={language} html={painted[i]!.left} />}
-                </td>
-                <td
-                  className={cn(
-                    'w-1/2 whitespace-pre-wrap break-all px-2 py-0.5 align-top',
-                    r.kind === 'added' || r.kind === 'changed' ? 'bg-emerald-500/15' : '',
-                    r.right === null && 'bg-muted/20',
-                  )}
-                >
-                  {r.right === null ? '' : <Line text={r.right} language={language} html={painted[i]!.right} />}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DiffTable rows={rows} language={language} />
       </div>
     </Panel>
   );
