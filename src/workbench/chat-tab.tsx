@@ -77,7 +77,7 @@ import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, sentAway, showing as stillShowing, type KindId } from '@/workbench/message-filter';
 import type { Brand, CommandInfo, Cost, ImageComparison, ImagePayload, LookableImage, SessionConfigOption, TodoItem } from '@/workbench/protocol';
-import { BRAND_DEFAULT_MODEL } from '@/workbench/protocol';
+import { BRAND_DEFAULT_MODEL, startingChat } from '@/workbench/protocol';
 import { heldElsewhere, sessionOwnership, streamStillAnswers } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
 import { AgentView } from '@/workbench/agent-view';
@@ -640,7 +640,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [pendingSends, setPendingSends] = useState<PendingSend[]>([]);
   /** The user messages the transcript held when the first of those went out. */
   const [sendMark, setSendMark] = useState<ReadonlySet<string>>(NO_MARK);
-  const start = useCallback(async (brand: Brand = newBrand) => {
+  // `workingIn` is the worktree the person picked, and nothing at all for a
+  // chat that works in the project itself (bw-ov7a.2).
+  const start = useCallback(async (brand: Brand = newBrand, workingIn?: string | null) => {
     if (!projectId || !projectPath) return;
     if (!providerIsAvailable(providers, brand)) {
       setStartError(`The ${brandName(brand)} provider is not available in this installation.`);
@@ -649,12 +651,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     setStarting(true);
     setStartError(null);
     try {
-      const s = await sendCommand<{ id: string }>({
-        type: 'session.start',
-        projectId,
-        projectPath,
-        brand,
-      });
+      const s = await sendCommand<{ id: string }>(
+        startingChat(projectId, projectPath, brand, workingIn),
+      );
       open(s.id);
     } catch (e) {
       setStartError(e instanceof Error ? e.message : String(e));

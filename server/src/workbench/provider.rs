@@ -146,6 +146,73 @@ fn refreshed_local_menu(mut menu: Value, session_id: &str, models: Value) -> Opt
     serde_json::from_value(menu).ok()
 }
 
+/// Every checkout git knows this project by: the main one and every worktree
+/// standing beside it, each as the real path on disk.
+///
+/// Read from git rather than guessed from a layout, because a project may keep
+/// its worktrees anywhere — inside the checkout, beside it, or somewhere else
+/// entirely — and only git knows which of those directories are really this
+/// project's. A project git cannot answer for still offers its own root, so a
+/// directory that is not a repository at all is not made unusable by this.
+fn checkouts_of(project: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    if let Ok(real) = project.canonicalize() {
+        found.push(real);
+    }
+    let Some(git) = crate::routes::find_git() else {
+        return found;
+    };
+    let Ok(said) = std::process::Command::new(git)
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(project)
+        .output()
+    else {
+        return found;
+    };
+    if !said.status.success() {
+        return found;
+    }
+    for line in String::from_utf8_lossy(&said.stdout).lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            if let Ok(real) = Path::new(path).canonicalize() {
+                if !found.contains(&real) {
+                    found.push(real);
+                }
+            }
+        }
+    }
+    found
+}
+
+/// Where a chat the app starts is allowed to work.
+///
+/// The browser sends the directory the person picked, and it has to be the
+/// project or one of its worktrees — or somewhere inside one of them, since a
+/// chat that opens in a worktree's `server/` is still working in that
+/// worktree. Anything else is refused rather than started: this is the one
+/// field on `session.start` that says where an agent will be able to write,
+/// and it arrives from a browser.
+///
+/// The answer is the real path on disk, so that everything downstream — the
+/// chip that names the worktree most of all — compares one spelling of a
+/// directory rather than three.
+fn a_place_to_work(project_path: &str, asked: &str) -> Result<String, String> {
+    let real = Path::new(asked)
+        .canonicalize()
+        .map_err(|_| format!("there is no folder at {asked}"))?;
+    if !real.is_dir() {
+        return Err(format!("{asked} is not a folder"));
+    }
+    for checkout in checkouts_of(Path::new(project_path)) {
+        if real.starts_with(&checkout) {
+            return Ok(real.display().to_string());
+        }
+    }
+    Err(format!(
+        "{asked} is neither {project_path} nor one of its worktrees"
+    ))
+}
+
 fn new_session(
     command: &Command,
     id: String,
@@ -169,9 +236,19 @@ fn new_session(
         external_id,
         project_id: required(command, "projectId")?.to_string(),
         project_path: project_path.clone(),
-        cwd: field(command, "cwd")
-            .map(str::to_string)
-            .unwrap_or(project_path),
+        // A chat the app starts works where the person said, once that place
+        // has been shown to be this project's (`a_place_to_work`). A chat
+        // being imported carries the directory the tool's own record already
+        // holds — that is a reading of what happened, not a choice anyone is
+        // making now, and holding it to the same rule would drop chats whose
+        // worktree has since been removed.
+        cwd: match field(command, "cwd") {
+            Some(asked) if command.kind == CommandKind::SessionStart => {
+                a_place_to_work(&project_path, asked)?
+            }
+            Some(asked) => asked.to_string(),
+            None => project_path,
+        },
         model: field(command, "model")
             .filter(|model| *model != "default")
             .map(str::to_string)
@@ -901,6 +978,122 @@ mod tests {
         )
         .unwrap();
         assert_eq!(event.fields["models"][0]["value"], "ollama::new");
+    }
+
+    /// A project with one commit and one worktree beside it, as a person who
+    /// works in worktrees really has.
+    fn a_project_with_a_worktree() -> (tempfile::TempDir, PathBuf) {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        let git = |args: &[&str]| {
+            let done = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&project)
+                .output()
+                .expect("git is on the path");
+            assert!(
+                done.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&done.stderr)
+            );
+        };
+        git(&["init", "-q", "-b", "main", "."]);
+        git(&["config", "user.name", "Atelier Tester"]);
+        git(&["config", "user.email", "tester@atelier.test"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        std::fs::write(project.join("kept.txt"), "one\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "seed"]);
+        let tree = project.join("worktrees").join("bw-1");
+        git(&["worktree", "add", "-q", &tree.display().to_string(), "-b", "bw-1"]);
+        (root, project)
+    }
+
+    fn started_at(project: &Path, cwd: &str) -> Result<Session, String> {
+        let command: Command = serde_json::from_value(json!({
+            "type":"session.start", "brand":"claude", "projectId":"p1",
+            "projectPath": project.display().to_string(), "cwd": cwd,
+        }))
+        .unwrap();
+        new_session(&command, "chat-1".into(), None, Path::new("/unused"))
+    }
+
+    /// The whole point of the field: a chat that opens in a worktree, and one
+    /// that opens in a folder inside that worktree, both work there.
+    #[test]
+    fn a_chat_can_be_started_in_a_worktree_of_its_project() {
+        let (_root, project) = a_project_with_a_worktree();
+        let tree = project.join("worktrees").join("bw-1");
+        std::fs::create_dir(tree.join("server")).unwrap();
+
+        let session = started_at(&project, &tree.display().to_string()).unwrap();
+        assert_eq!(session.cwd, tree.canonicalize().unwrap().display().to_string());
+        assert_eq!(
+            session.project_path,
+            project.display().to_string(),
+            "the project it belongs to is unchanged by where it works"
+        );
+
+        let inside = started_at(&project, &tree.join("server").display().to_string()).unwrap();
+        assert_eq!(
+            inside.cwd,
+            tree.join("server").canonicalize().unwrap().display().to_string(),
+        );
+
+        let root = started_at(&project, &project.display().to_string()).unwrap();
+        assert_eq!(root.cwd, project.canonicalize().unwrap().display().to_string());
+    }
+
+    /// The field says where an agent will be able to write and it comes from a
+    /// browser, so anything that is not this project's is refused outright.
+    #[test]
+    fn a_chat_cannot_be_started_somewhere_that_is_not_the_projects() {
+        let (root, project) = a_project_with_a_worktree();
+        let elsewhere = root.path().join("not-the-project");
+        std::fs::create_dir(&elsewhere).unwrap();
+
+        let refused = started_at(&project, &elsewhere.display().to_string()).unwrap_err();
+        assert!(refused.contains("neither"), "{refused}");
+
+        let missing = started_at(&project, &project.join("no-such-tree").display().to_string())
+            .unwrap_err();
+        assert!(missing.contains("no folder"), "{missing}");
+
+        let a_file = started_at(&project, &project.join("kept.txt").display().to_string())
+            .unwrap_err();
+        assert!(a_file.contains("not a folder"), "{a_file}");
+    }
+
+    /// A chat being read back out of a tool's own record is not somebody
+    /// choosing a place now — and its worktree may well be gone.
+    #[test]
+    fn a_chat_being_imported_keeps_the_folder_its_own_record_carries() {
+        let (root, project) = a_project_with_a_worktree();
+        let gone = root.path().join("a-worktree-that-was-removed");
+        let command: Command = serde_json::from_value(json!({
+            "type":"session.open", "brand":"claude", "projectId":"p1",
+            "projectPath": project.display().to_string(),
+            "cwd": gone.display().to_string(),
+        }))
+        .unwrap();
+        let session =
+            new_session(&command, "chat-1".into(), None, Path::new("/unused")).unwrap();
+        assert_eq!(session.cwd, gone.display().to_string());
+    }
+
+    /// Saying nothing still means the project itself, which is every chat
+    /// started before there was anywhere else to start one.
+    #[test]
+    fn a_chat_that_names_no_folder_works_in_the_project() {
+        let command: Command = serde_json::from_value(json!({
+            "type":"session.start", "brand":"claude", "projectId":"p1",
+            "projectPath":"/project",
+        }))
+        .unwrap();
+        let session =
+            new_session(&command, "chat-1".into(), None, Path::new("/unused")).unwrap();
+        assert_eq!(session.cwd, "/project");
     }
 
     #[test]

@@ -784,6 +784,14 @@ export type WbpCommand =
       projectId: string;
       projectPath: string;
       brand: Brand;
+      /**
+       * Where the chat will work: one of the project's worktrees, or a folder
+       * inside one. Left off for a chat that works in the project itself,
+       * which is what every chat did before there was anywhere else to send
+       * one (bw-ov7a.2). The server refuses a directory that is neither the
+       * project nor one of its worktrees.
+       */
+      cwd?: string;
       model?: string;
       permissionMode?: string;
       effort?: string;
@@ -1089,6 +1097,33 @@ export interface SessionSummary {
  * owner's settings rather than writing this word into them.
  */
 export const BRAND_DEFAULT_MODEL = 'default';
+
+/**
+ * The command that starts a chat, given where it is to work.
+ *
+ * A function rather than an object built at the call site because the one
+ * decision in it is worth stating once and proving once: a chat working in the
+ * project itself sends no directory at all, so a project whose worktrees the
+ * app cannot see, or one that is no repository, starts chats exactly as it
+ * always has. Only a chat being sent somewhere else carries a `cwd`, and the
+ * server holds that to being this project's (bw-ov7a.2).
+ */
+export function startingChat(
+  projectId: string,
+  projectPath: string,
+  brand: Brand,
+  workingIn?: string | null,
+): Extract<WbpCommand, { type: 'session.start' }> {
+  const command: Extract<WbpCommand, { type: 'session.start' }> = {
+    type: 'session.start',
+    projectId,
+    projectPath,
+    brand,
+  };
+  const where = workingIn?.replace(/\/+$/, '');
+  if (where && where !== projectPath.replace(/\/+$/, '')) command.cwd = where;
+  return command;
+}
 
 /**
  * The folder a chat ran in, as a chip: the directory's own name, which for a
