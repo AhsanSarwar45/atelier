@@ -1089,7 +1089,7 @@ async fn a_project_with_nothing_saved_yet_has_an_empty_history_and_still_answers
 // ============================================================================
 
 /// Every route the contract names, as `main.rs` is expected to register it.
-const CONTRACT: [(&str, &str); 12] = [
+const CONTRACT: [(&str, &str); 15] = [
     ("get", "/api/git/status"),
     ("post", "/api/git/stage"),
     ("post", "/api/git/unstage"),
@@ -1103,6 +1103,11 @@ const CONTRACT: [(&str, &str); 12] = [
     ("get", "/api/git/branches"),
     ("post", "/api/git/checkout"),
     ("get", "/api/git/log"),
+    // A project's checkouts by name, which the place a chat works in is
+    // chosen from (bw-ov7a.1).
+    ("get", "/api/git/trees"),
+    ("post", "/api/git/trees"),
+    ("delete", "/api/git/trees"),
 ];
 
 /// The eleventh route, older than the ten the contract names and answering a
@@ -1114,7 +1119,7 @@ const OLDER: [(&str, &str); 1] = [("get", "/api/git/branch-status")];
 fn the_server_registers_every_route_the_contract_names() {
     let handlers = [
         "status", "stage", "unstage", "discard", "remove", "commit", "fetch", "pull", "push",
-        "branches", "checkout", "log",
+        "branches", "checkout", "log", "trees", "new_tree", "drop_tree",
     ];
     let main = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1148,6 +1153,9 @@ async fn served() -> (String, tokio::task::JoinHandle<()>) {
         .route("/api/git/branches", axum::routing::get(git::branches))
         .route("/api/git/checkout", axum::routing::post(git::checkout))
         .route("/api/git/log", axum::routing::get(git::log))
+        .route("/api/git/trees", axum::routing::get(git::trees))
+        .route("/api/git/trees", axum::routing::post(git::new_tree))
+        .route("/api/git/trees", axum::routing::delete(git::drop_tree))
         .route(
             "/api/git/branch-status",
             axum::routing::get(git::branch_status),
@@ -1253,6 +1261,51 @@ async fn the_routes_answer_over_http_in_the_shape_the_contract_promises() {
     let refused: Value = answer.json().await.expect("JSON");
     let said = refused["error"].as_str().expect("git's own words");
     assert!(said.contains("origin"), "{said}");
+
+    // A checkout of its own, made and then listed over the wire: the browser
+    // is promised `isMain`, not `is_main`, and the same name it asked for
+    // (bw-ov7a.1).
+    let made: Value = web
+        .post(format!("{base}/api/git/trees"))
+        .json(&serde_json::json!({
+            "path": path, "name": "over-the-wire", "branch": "wired", "create": true
+        }))
+        .send()
+        .await
+        .expect("an answer")
+        .json()
+        .await
+        .expect("JSON");
+    assert_eq!(made["name"], "over-the-wire", "{made}");
+    assert_eq!(made["branch"], "wired");
+    assert_eq!(made["isMain"], false);
+
+    let checkouts: Value = web
+        .get(format!("{base}/api/git/trees"))
+        .query(&[("path", path.as_str())])
+        .send()
+        .await
+        .expect("an answer")
+        .json()
+        .await
+        .expect("JSON");
+    assert_eq!(checkouts["trees"][0]["isMain"], true);
+    assert_eq!(checkouts["trees"][1]["name"], "over-the-wire");
+    assert!(
+        checkouts["place"]
+            .as_str()
+            .expect("where a new one would go")
+            .ends_with("worktrees"),
+        "{checkouts}"
+    );
+
+    let answer = web
+        .delete(format!("{base}/api/git/trees"))
+        .json(&serde_json::json!({ "path": path, "name": "over-the-wire" }))
+        .send()
+        .await
+        .expect("an answer");
+    assert_eq!(answer.status(), 200);
 
     serving.abort();
 }
@@ -1536,4 +1589,301 @@ async fn a_project_whose_only_change_is_a_file_git_has_never_heard_of_reads_as_c
     );
 
     serving.abort();
+}
+
+// ----------------------------------------------------------------------------
+// A project's checkouts, by name: GET/POST/DELETE /api/git/trees
+// ----------------------------------------------------------------------------
+
+async fn trees_of(dir: &TempDir) -> (StatusCode, Value) {
+    answered(git::trees(GitQuery(git::PathParams { path: here(dir) })).await).await
+}
+
+async fn make_tree(
+    dir: &TempDir,
+    name: &str,
+    branch: &str,
+    create: bool,
+    base: Option<&str>,
+) -> (StatusCode, Value) {
+    answered(
+        git::new_tree(GitJson(git::NewTreeRequest {
+            path: here(dir),
+            name: name.to_string(),
+            branch: branch.to_string(),
+            create,
+            base: base.map(str::to_string),
+        }))
+        .await,
+    )
+    .await
+}
+
+async fn drop_tree(dir: &TempDir, name: &str, force: bool) -> (StatusCode, Value) {
+    answered(
+        git::drop_tree(GitJson(git::DropTreeRequest {
+            path: here(dir),
+            name: name.to_string(),
+            force,
+        }))
+        .await,
+    )
+    .await
+}
+
+/// The row for one checkout, by the name it is listed under.
+fn tree_named<'a>(body: &'a Value, name: &str) -> &'a Value {
+    body["trees"]
+        .as_array()
+        .expect("the checkouts are a list")
+        .iter()
+        .find(|tree| tree["name"] == name)
+        .unwrap_or_else(|| panic!("no checkout called {name:?} in {body}"))
+}
+
+/// A project with one commit on `main`, ready to hang worktrees off.
+fn a_project_with_history() -> TempDir {
+    let repo = a_repo();
+    put(repo.path(), "kept.txt", "one\n");
+    save_all(repo.path(), "seed");
+    repo
+}
+
+#[tokio::test]
+async fn every_checkout_of_a_project_is_listed_by_its_own_name_and_branch() {
+    let repo = a_project_with_history();
+    let at = repo.path();
+    run(at, &["branch", "reading"]);
+    run(at, &["branch", "writing"]);
+    let first = at.join("worktrees").join("one");
+    let second = at.join("worktrees").join("two");
+    run(at, &["worktree", "add", &first.display().to_string(), "reading"]);
+    run(at, &["worktree", "add", &second.display().to_string(), "writing"]);
+
+    // One of them is worked in, the other is not, and one of them has a commit
+    // the project does not: the three things a row carries beyond its name.
+    put(&first, "touched.txt", "unsaved\n");
+    put(&second, "added.txt", "saved\n");
+    save_all(&second, "work done in the second tree");
+
+    let (code, body) = trees_of(&repo).await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(body["trees"].as_array().expect("a list").len(), 3);
+
+    let main = &body["trees"][0];
+    assert_eq!(main["isMain"], true, "git lists the project's own checkout first");
+    assert_eq!(main["branch"], "main");
+
+    let one = tree_named(&body, "one");
+    assert_eq!(one["isMain"], false);
+    assert_eq!(one["branch"], "reading");
+    assert_eq!(one["path"], first.canonicalize().unwrap().display().to_string());
+    assert_eq!(one["dirty"], true, "a file was written and never saved there");
+    assert_eq!(one["ahead"], 0);
+
+    let two = tree_named(&body, "two");
+    assert_eq!(two["branch"], "writing");
+    assert_eq!(two["dirty"], false);
+    assert_eq!(
+        two["ahead"], 1,
+        "measured against the branch the project's own checkout is on"
+    );
+    assert_eq!(two["behind"], 0);
+}
+
+#[tokio::test]
+async fn a_worktree_is_made_on_a_branch_that_already_exists() {
+    let repo = a_project_with_history();
+    run(repo.path(), &["branch", "already-here"]);
+
+    let (code, made) = make_tree(&repo, "reading-room", "already-here", false, None).await;
+    assert_eq!(code, StatusCode::OK, "{made}");
+    assert_eq!(made["name"], "reading-room");
+    assert_eq!(made["branch"], "already-here");
+    assert_eq!(made["isMain"], false);
+
+    let where_it_went = repo.path().join("worktrees").join("reading-room");
+    assert!(where_it_went.join("kept.txt").exists(), "the branch is checked out there");
+    assert_eq!(
+        run(&where_it_went, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "already-here"
+    );
+
+    let (_, body) = trees_of(&repo).await;
+    assert_eq!(tree_named(&body, "reading-room")["branch"], "already-here");
+}
+
+#[tokio::test]
+async fn a_worktree_can_start_a_new_branch_off_a_base_that_is_not_the_current_one() {
+    let repo = a_project_with_history();
+    let at = repo.path();
+    // A base with something on it that `main` has never seen.
+    run(at, &["checkout", "-q", "-b", "older"]);
+    put(at, "only-on-older.txt", "here\n");
+    save_all(at, "a commit only the base carries");
+    run(at, &["checkout", "-q", "main"]);
+
+    let (code, made) = make_tree(&repo, "fresh", "brand-new", true, Some("older")).await;
+    assert_eq!(code, StatusCode::OK, "{made}");
+    assert_eq!(made["branch"], "brand-new");
+
+    let where_it_went = repo.path().join("worktrees").join("fresh");
+    assert_eq!(
+        run(&where_it_went, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "brand-new"
+    );
+    assert!(
+        where_it_went.join("only-on-older.txt").exists(),
+        "the new branch starts from the base it was given, not from HEAD"
+    );
+    assert_eq!(
+        made["ahead"], 1,
+        "one commit the project's own checkout has not got"
+    );
+}
+
+#[tokio::test]
+async fn a_name_a_worktree_already_has_is_refused_rather_than_taken_over() {
+    let repo = a_project_with_history();
+    run(repo.path(), &["branch", "first"]);
+    run(repo.path(), &["branch", "second"]);
+    let (code, _) = make_tree(&repo, "taken", "first", false, None).await;
+    assert_eq!(code, StatusCode::OK);
+
+    let (again, said) = make_tree(&repo, "taken", "second", false, None).await;
+    assert_eq!(again, StatusCode::CONFLICT);
+    assert!(
+        said["error"].as_str().expect("git's own words").contains("taken"),
+        "the refusal names the worktree already using it: {said}"
+    );
+    assert_eq!(
+        run(&repo.path().join("worktrees").join("taken"), &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "first",
+        "the one that was there is untouched"
+    );
+}
+
+#[tokio::test]
+async fn a_name_that_climbs_out_of_the_place_worktrees_go_is_refused() {
+    let repo = a_project_with_history();
+    run(repo.path(), &["branch", "work"]);
+
+    for name in ["../escaped", "..", "nested/deeper", "/absolute", ""] {
+        let (code, said) = make_tree(&repo, name, "work", false, None).await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{name:?} was allowed: {said}");
+    }
+    assert!(
+        !repo.path().parent().expect("a parent").join("escaped").exists(),
+        "nothing was made beside the project"
+    );
+
+    let (code, said) = drop_tree(&repo, "../escaped", false).await;
+    assert_eq!(code, StatusCode::BAD_REQUEST, "removing is held to it too: {said}");
+}
+
+#[tokio::test]
+async fn a_project_that_already_keeps_its_worktrees_somewhere_keeps_them_there() {
+    let repo = a_project_with_history();
+    let at = repo.path();
+    run(at, &["branch", "one"]);
+    run(at, &["branch", "two"]);
+    // This project's habit is a hidden directory, and one it keeps beside the
+    // checkout would be followed the same way.
+    let habit = at.join(".worktrees");
+    run(at, &["worktree", "add", &habit.join("one").display().to_string(), "one"]);
+
+    let (code, body) = trees_of(&repo).await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(
+        body["place"],
+        habit.display().to_string(),
+        "where a new one would go is said before anything is made"
+    );
+
+    let (code, made) = make_tree(&repo, "two", "two", false, None).await;
+    assert_eq!(code, StatusCode::OK, "{made}");
+    assert!(
+        habit.join("two").exists(),
+        "the new one joined the others rather than starting a second habit at {made}"
+    );
+    assert!(!at.join("worktrees").exists());
+}
+
+#[tokio::test]
+async fn the_place_worktrees_go_is_kept_out_of_the_project_history() {
+    let repo = a_project_with_history();
+    run(repo.path(), &["branch", "work"]);
+    let (code, _) = make_tree(&repo, "somewhere", "work", false, None).await;
+    assert_eq!(code, StatusCode::OK);
+
+    let ignored = fs::read_to_string(repo.path().join(".gitignore")).expect("a .gitignore");
+    assert!(ignored.lines().any(|line| line.trim() == "/worktrees/"), "{ignored}");
+    let (_, after) = status_of(&repo).await;
+    assert_eq!(
+        after["untracked"].as_array().expect("a list").len(),
+        1,
+        "only the .gitignore itself is new; the worktree's own files are not: {after}"
+    );
+}
+
+#[tokio::test]
+async fn taking_a_worktree_away_leaves_the_branch_it_was_on() {
+    let repo = a_project_with_history();
+    run(repo.path(), &["branch", "still-wanted"]);
+    let (code, _) = make_tree(&repo, "going", "still-wanted", false, None).await;
+    assert_eq!(code, StatusCode::OK);
+
+    let (code, said) = drop_tree(&repo, "going", false).await;
+    assert_eq!(code, StatusCode::OK, "{said}");
+    assert!(!repo.path().join("worktrees").join("going").exists());
+
+    let (_, branches) = branches_of(&repo).await;
+    assert!(
+        branches["branches"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .any(|branch| branch["name"] == "still-wanted"),
+        "the work on it was never spoken about: {branches}"
+    );
+
+    let (missing, said) = drop_tree(&repo, "going", false).await;
+    assert_eq!(missing, StatusCode::NOT_FOUND, "{said}");
+}
+
+#[tokio::test]
+async fn the_projects_own_checkout_is_not_a_worktree_anyone_can_remove() {
+    let repo = a_project_with_history();
+    let its_own_name = repo
+        .path()
+        .canonicalize()
+        .expect("a real path")
+        .file_name()
+        .expect("a name")
+        .to_string_lossy()
+        .into_owned();
+
+    let (code, said) = drop_tree(&repo, &its_own_name, true).await;
+    assert_eq!(code, StatusCode::BAD_REQUEST, "{said}");
+    assert!(repo.path().join("kept.txt").exists(), "the project is still there");
+}
+
+#[tokio::test]
+async fn unsaved_work_in_a_worktree_stops_it_being_taken_away_until_that_is_said() {
+    let repo = a_project_with_history();
+    run(repo.path(), &["branch", "busy"]);
+    let (code, _) = make_tree(&repo, "busy-tree", "busy", false, None).await;
+    assert_eq!(code, StatusCode::OK);
+    let inside = repo.path().join("worktrees").join("busy-tree");
+    put(&inside, "kept.txt", "changed and never saved\n");
+
+    // git's own refusal, with its own words and the code every other route in
+    // this file answers a refusing git with.
+    let (refused, said) = drop_tree(&repo, "busy-tree", false).await;
+    assert_eq!(refused, StatusCode::UNPROCESSABLE_ENTITY, "{said}");
+    assert!(inside.exists(), "the unsaved work is still on disk");
+
+    let (forced, said) = drop_tree(&repo, "busy-tree", true).await;
+    assert_eq!(forced, StatusCode::OK, "{said}");
+    assert!(!inside.exists());
 }

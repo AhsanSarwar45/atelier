@@ -1394,6 +1394,398 @@ pub async fn log(GitQuery(params): GitQuery<LogParams>) -> Answer {
     Ok(Json(LogResponse { commits }).into_response())
 }
 
+// ----------------------------------------------------------------------------
+// GET /api/git/trees, POST /api/git/trees, DELETE /api/git/trees
+// ----------------------------------------------------------------------------
+//
+// A project's checkouts, by name and by nothing else. The older
+// `/api/git/worktree*` routes above answer only about a card — they build
+// `.worktrees/bd-<card>` and take a card id where a name belongs — so a person
+// choosing where a chat will work could not be served by them at all. These
+// take the name the person typed, and the plain word for the thing was already
+// spoken for, which is why they are `trees` (bw-ov7a.1).
+
+/// One checkout of a project: the main one, or a worktree standing beside it.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TreeEntry {
+    /// The directory's own name, which is what a chat working here is called
+    /// after. The main checkout's is the project's own folder name.
+    pub name: String,
+    /// Where it is on disk, absolute, as git says it.
+    pub path: String,
+    /// The branch checked out here; absent when the checkout is detached.
+    pub branch: Option<String>,
+    /// The checkout the repository itself lives in, which cannot be removed.
+    pub is_main: bool,
+    /// Whether anything here is unsaved — staged, unstaged or untracked.
+    pub dirty: bool,
+    /// Commits it has that its measure does not, and the other way about.
+    ///
+    /// Measured against the branch's upstream when it follows one, and
+    /// otherwise against the branch the main checkout is on — which is the
+    /// question a person asks of a worktree that has never been pushed.
+    pub ahead: i32,
+    pub behind: i32,
+}
+
+/// Every checkout a project has, and where a new one would be put.
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct TreesResponse {
+    /// The main checkout first, as git lists it, then the worktrees.
+    pub trees: Vec<TreeEntry>,
+    /// The directory a worktree made through this route would go in, so the
+    /// person can be told where before they agree to it.
+    pub place: String,
+}
+
+/// What `git worktree list --porcelain` says, before anything is measured.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ListedTree {
+    path: String,
+    branch: Option<String>,
+}
+
+/// Read `git worktree list --porcelain`.
+///
+/// One paragraph per checkout: `worktree <path>` opens it, and `branch
+/// <ref>` names its branch when it has one — a detached checkout says
+/// `detached` instead, and a bare repository says `bare`, so neither carries a
+/// branch here.
+fn read_worktree_list(said: &str) -> Vec<ListedTree> {
+    let mut trees: Vec<ListedTree> = Vec::new();
+    for line in said.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            trees.push(ListedTree { path: path.to_string(), branch: None });
+        } else if let Some(reference) = line.strip_prefix("branch ") {
+            if let Some(current) = trees.last_mut() {
+                current.branch =
+                    Some(reference.strip_prefix("refs/heads/").unwrap_or(reference).to_string());
+            }
+        }
+    }
+    trees
+}
+
+/// The directory's own name — what the chip on a chat says.
+fn name_of(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
+}
+
+/// Whether anything in this checkout is unsaved.
+///
+/// A checkout git still lists but whose directory has been deleted answers
+/// nothing rather than failing the whole listing: one worktree somebody moved
+/// out from under git must not cost the person the other nine.
+async fn tree_is_dirty(at: &Path) -> bool {
+    matches!(
+        super::git_output(at, &["status", "--porcelain"]).await,
+        Ok(out) if out.status.success() && !out.stdout.is_empty()
+    )
+}
+
+/// What this checkout's drift is measured against: its upstream when it
+/// follows one, and otherwise the branch the main checkout is on.
+async fn measure_for(at: &Path, landing: Option<&str>) -> Option<String> {
+    if let Ok(out) =
+        super::git_output(at, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
+            .await
+    {
+        if out.status.success() {
+            let upstream = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !upstream.is_empty() {
+                return Some(upstream);
+            }
+        }
+    }
+    landing.map(str::to_string)
+}
+
+/// How far this checkout is ahead of and behind what it is measured against.
+async fn tree_drift(at: &Path, landing: Option<&str>) -> (i32, i32) {
+    let Some(measure) = measure_for(at, landing).await else {
+        return (0, 0);
+    };
+    let range = format!("{measure}...HEAD");
+    let Ok(out) = super::git_output(at, &["rev-list", "--left-right", "--count", &range]).await
+    else {
+        return (0, 0);
+    };
+    if !out.status.success() {
+        return (0, 0);
+    }
+    // `--left-right --count A...B` prints the left side first: what A has and
+    // B does not, which from HEAD's point of view is how far behind it is.
+    let said = String::from_utf8_lossy(&out.stdout);
+    let mut counts = said.split_whitespace();
+    let behind = counts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
+    let ahead = counts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
+    (ahead, behind)
+}
+
+/// Measure one listed checkout. The main one is measured too, so the reader
+/// sees the same three numbers for every row.
+async fn measure_tree(listed: ListedTree, is_main: bool, landing: Option<String>) -> TreeEntry {
+    let at = PathBuf::from(&listed.path);
+    let (dirty, (ahead, behind)) =
+        futures::join!(tree_is_dirty(&at), tree_drift(&at, landing.as_deref()));
+    TreeEntry {
+        name: name_of(&listed.path),
+        path: listed.path,
+        branch: listed.branch,
+        is_main,
+        dirty,
+        ahead,
+        behind,
+    }
+}
+
+/// Where a new worktree goes.
+///
+/// A project that already keeps worktrees somewhere keeps them there — the
+/// directory most of its existing ones share, wherever that is, including a
+/// place beside the checkout rather than inside it. A project with none gets
+/// `worktrees/` under its own root, which is what this product's own trees
+/// use. Never guessed from a name the caller sent.
+fn place_for_trees(repo: &Path, trees: &[ListedTree]) -> PathBuf {
+    let mut seen: Vec<(PathBuf, usize)> = Vec::new();
+    for beside in trees.iter().skip(1) {
+        let Some(parent) = Path::new(&beside.path).parent() else { continue };
+        match seen.iter_mut().find(|(known, _)| known == parent) {
+            Some((_, count)) => *count += 1,
+            None => seen.push((parent.to_path_buf(), 1)),
+        }
+    }
+    seen.into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(where_they_go, _)| where_they_go)
+        .unwrap_or_else(|| repo.join("worktrees"))
+}
+
+/// Every checkout of a project.
+///
+/// # Endpoint
+///
+/// `GET /api/git/trees?path=...` — `{ trees: [...], place }`
+pub async fn trees(GitQuery(params): GitQuery<PathParams>) -> Answer {
+    let repo = checked_repo(&params.path)?;
+    let listed = spoke_or_refused(run_git(&repo, &["worktree", "list", "--porcelain"]).await?)?;
+    let listed = read_worktree_list(&String::from_utf8_lossy(&listed.stdout));
+    let place = place_for_trees(&repo, &listed);
+    // The main checkout's branch is what a worktree nobody has pushed is
+    // measured against, so it is read once and handed to all of them.
+    let landing = listed.first().and_then(|main| main.branch.clone());
+    let measured = futures::future::join_all(
+        listed
+            .into_iter()
+            .enumerate()
+            .map(|(index, one)| measure_tree(one, index == 0, landing.clone())),
+    )
+    .await;
+    Ok(Json(TreesResponse {
+        trees: measured,
+        place: place.display().to_string(),
+    })
+    .into_response())
+}
+
+/// Request body for making a checkout.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewTreeRequest {
+    /// Absolute working directory of the repository.
+    pub path: String,
+    /// What to call the worktree — one plain directory name, which becomes
+    /// both the folder and the name every chat working there is known by.
+    pub name: String,
+    /// The branch to check out in it.
+    pub branch: String,
+    /// Start that branch here rather than expecting it to exist. The same
+    /// word `POST /api/git/checkout` uses for the same thing.
+    #[serde(default)]
+    pub create: bool,
+    /// What a new branch starts from. The checkout's current commit when
+    /// nothing is named; ignored when the branch already exists.
+    #[serde(default)]
+    pub base: Option<String>,
+}
+
+/// A worktree's name is one directory name and nothing else: no separator, no
+/// climbing out of the place worktrees go, and nothing empty.
+fn plain_name(name: &str) -> Result<&str, Refused> {
+    let name = name.trim();
+    let refuse = || {
+        Refused::new(
+            StatusCode::BAD_REQUEST,
+            format!("A worktree's name is one plain folder name: {name:?} is not"),
+        )
+    };
+    if name.is_empty() || name == "." || name == ".." {
+        return Err(refuse());
+    }
+    let mut parts = Path::new(name).components();
+    match (parts.next(), parts.next()) {
+        (Some(std::path::Component::Normal(_)), None) => Ok(name),
+        _ => Err(refuse()),
+    }
+}
+
+/// Keep the place worktrees go out of the project's own history.
+///
+/// Only when it is inside the checkout, only when git does not already ignore
+/// it, and only ever by adding a line — a worktree's build output showing up
+/// as hundreds of thousands of untracked files is what this prevents.
+async fn ignore_the_place(repo: &Path, place: &Path) {
+    let Ok(inside) = place.strip_prefix(repo) else { return };
+    let entry = format!("/{}/", inside.display());
+    if let Ok(out) = super::git_output(repo, &["check-ignore", "-q", &place.display().to_string()]).await
+    {
+        if out.status.success() {
+            return;
+        }
+    }
+    let ignores = repo.join(".gitignore");
+    let carried = std::fs::read_to_string(&ignores).unwrap_or_default();
+    if carried.lines().any(|line| line.trim() == entry.trim()) {
+        return;
+    }
+    let mut writing = carried;
+    if !writing.is_empty() && !writing.ends_with('\n') {
+        writing.push('\n');
+    }
+    writing.push_str(&entry);
+    writing.push('\n');
+    let _ = std::fs::write(&ignores, writing);
+}
+
+/// Make a checkout of a project under a name a person chose.
+///
+/// # Endpoint
+///
+/// `POST /api/git/trees` — `{ path, name, branch, create?, base? }` → the new
+/// [`TreeEntry`]
+pub async fn new_tree(GitJson(body): GitJson<NewTreeRequest>) -> Answer {
+    let repo = checked_repo(&body.path)?;
+    let name = plain_name(&body.name)?;
+    let branch = body.branch.trim();
+    if branch.is_empty() {
+        return Err(Refused::new(
+            StatusCode::BAD_REQUEST,
+            "A worktree is checked out on a branch; none was named",
+        ));
+    }
+
+    let turn = repo_lock(&repo);
+    let _holding = turn.lock().await;
+
+    let listed = spoke_or_refused(run_git(&repo, &["worktree", "list", "--porcelain"]).await?)?;
+    let listed = read_worktree_list(&String::from_utf8_lossy(&listed.stdout));
+    if let Some(taken) = listed.iter().find(|one| name_of(&one.path) == name) {
+        return Err(Refused::new(
+            StatusCode::CONFLICT,
+            format!("There is already a worktree called {name:?}, at {}", taken.path),
+        ));
+    }
+
+    let place = place_for_trees(&repo, &listed);
+    let where_it_goes = place.join(name);
+    if where_it_goes.exists() {
+        return Err(Refused::new(
+            StatusCode::CONFLICT,
+            format!("There is already something at {}", where_it_goes.display()),
+        ));
+    }
+    if let Err(e) = std::fs::create_dir_all(&place) {
+        return Err(Refused::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Cannot make {}: {e}", place.display()),
+        ));
+    }
+    ignore_the_place(&repo, &place).await;
+
+    let made = where_it_goes.display().to_string();
+    let args: Vec<&str> = if body.create {
+        let mut args = vec!["worktree", "add", "-b", branch, made.as_str()];
+        if let Some(base) = body.base.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
+            args.push(base);
+        }
+        args
+    } else {
+        vec!["worktree", "add", made.as_str(), branch]
+    };
+    // git's own words when it refuses — a branch already checked out in
+    // another worktree, a base that is no revision, a branch that exists
+    // already — are better than anything invented here.
+    spoke_or_refused(run_git(&repo, &args).await?)?;
+
+    let landing = listed.first().and_then(|main| main.branch.clone());
+    let entry = measure_tree(
+        ListedTree { path: made, branch: Some(branch.to_string()) },
+        false,
+        landing,
+    )
+    .await;
+    Ok(Json(entry).into_response())
+}
+
+/// Request body for taking a checkout away.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DropTreeRequest {
+    /// Absolute working directory of the repository.
+    pub path: String,
+    /// The worktree's name, as [`trees`] gave it.
+    pub name: String,
+    /// Take it even though there is unsaved work in it.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// Take a worktree away.
+///
+/// The branch it was on is left alone: a person who removes a worktree has
+/// said nothing about the work on its branch, and the older card-keyed route
+/// above deletes both — and closes the card — which is three decisions taken
+/// from one click.
+///
+/// # Endpoint
+///
+/// `DELETE /api/git/trees` — `{ path, name, force? }` → `{ ok }`
+pub async fn drop_tree(GitJson(body): GitJson<DropTreeRequest>) -> Answer {
+    let repo = checked_repo(&body.path)?;
+    let name = plain_name(&body.name)?;
+
+    let turn = repo_lock(&repo);
+    let _holding = turn.lock().await;
+
+    let listed = spoke_or_refused(run_git(&repo, &["worktree", "list", "--porcelain"]).await?)?;
+    let listed = read_worktree_list(&String::from_utf8_lossy(&listed.stdout));
+    let Some(going) = listed.iter().position(|one| name_of(&one.path) == name) else {
+        return Err(Refused::new(
+            StatusCode::NOT_FOUND,
+            format!("This project has no worktree called {name:?}"),
+        ));
+    };
+    if going == 0 {
+        return Err(Refused::new(
+            StatusCode::BAD_REQUEST,
+            format!("{name:?} is the project's own checkout, not a worktree of it"),
+        ));
+    }
+
+    let mut args = vec!["worktree", "remove"];
+    if body.force {
+        args.push("--force");
+    }
+    args.push(listed[going].path.as_str());
+    spoke_or_refused(run_git(&repo, &args).await?)?;
+    Ok(did_it())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

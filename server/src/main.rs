@@ -532,6 +532,11 @@ async fn serve(open_browser: bool) {
             delete(routes::worktree::delete_worktree),
         )
         .route("/api/git/worktrees", get(routes::worktree::list_worktrees))
+        // A project's checkouts by name rather than by card: what the place a
+        // chat will work in is chosen from (routes/git.rs, bw-ov7a.1).
+        .route("/api/git/trees", get(routes::git::trees))
+        .route("/api/git/trees", post(routes::git::new_tree))
+        .route("/api/git/trees", delete(routes::git::drop_tree))
         // PR endpoints
         .route("/api/watch/beads", get(routes::watch_beads))
         // One connection for a whole window: the board, the native chat feed and
