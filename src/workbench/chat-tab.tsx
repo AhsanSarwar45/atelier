@@ -723,7 +723,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           where,
           disk,
         ),
-      path: (absolute, raw, line) => <PathChip absolute={absolute} raw={raw} line={line} />,
+      path: (absolute, raw, line, look) => (
+        <PathChip absolute={absolute} raw={raw} line={line} look={look} />
+      ),
       card,
       //
       // An address that asks for a DIFFERENT project stays a link too, however

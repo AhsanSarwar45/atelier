@@ -12,15 +12,6 @@ import rehypeHighlight from "rehype-highlight";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import {
-  File,
-  FileArchive,
-  FileAudio,
-  FileCode2,
-  FileImage,
-  FileJson,
-  FileSpreadsheet,
-  FileText,
-  FileVideo,
   CircleDot,
   GitCommitHorizontal,
   GitPullRequest,
@@ -31,6 +22,7 @@ import {
 import "highlight.js/styles/github-dark.css";
 
 import { Badge } from "@/components/ui/badge";
+import { FILE_BADGE_CLASS, FILE_KINDS, fileKind } from "@/components/file-kinds";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { rehypeMentions, type Piece } from "@/workbench/mentions";
@@ -44,8 +36,14 @@ export interface Mentions {
   /** The text, split into plain words and the things in it that open. */
   split: (text: string) => Piece[];
   card: (id: string) => ReactNode;
-  /** A file named in the words, drawn as the reader wrote it (bw-khe.13). */
-  path?: (absolute: string, raw: string, line: number | null) => ReactNode;
+  /**
+   * A file named in the words, drawn as the reader wrote it (bw-khe.13).
+   *
+   * `look` is how it should be drawn: `badge` for a file named in a sentence,
+   * `link` for one named inside a command, where a badge would break the line
+   * as something to read across and copy (bw-un8y.1).
+   */
+  path?: (absolute: string, raw: string, line: number | null, look: 'badge' | 'link') => ReactNode;
   /**
    * A whole address, when it names a card or a report of this app's own — drawn
    * as that chip rather than as raw blue text. Nothing, and the address is left
@@ -101,26 +99,6 @@ interface LocalTarget {
   line: number | null;
 }
 
-type FileKind = 'archive' | 'audio' | 'code' | 'data' | 'image' | 'table' | 'text' | 'video' | 'file';
-
-const FILE_KINDS: Record<FileKind, { extensions: Set<string>; icon: LucideIcon; color: string }> = {
-  archive: { extensions: new Set(['7z', 'bz2', 'gz', 'rar', 'tar', 'tgz', 'xz', 'zip']), icon: FileArchive, color: 'border-[#e37933]/40 bg-[#e37933]/10 text-[#e37933] hover:bg-[#e37933]/15' },
-  audio: { extensions: new Set(['aac', 'flac', 'm4a', 'mp3', 'ogg', 'wav']), icon: FileAudio, color: 'border-[#cbcb41]/40 bg-[#cbcb41]/10 text-[#cbcb41] hover:bg-[#cbcb41]/15' },
-  code: { extensions: new Set(['c', 'cc', 'cpp', 'css', 'go', 'h', 'html', 'java', 'js', 'jsx', 'kt', 'php', 'py', 'rb', 'rs', 'sh', 'sql', 'swift', 'ts', 'tsx', 'vue']), icon: FileCode2, color: 'border-[#519aba]/40 bg-[#519aba]/10 text-[#519aba] hover:bg-[#519aba]/15' },
-  data: { extensions: new Set(['json', 'jsonl', 'toml', 'xml', 'yaml', 'yml']), icon: FileJson, color: 'border-[#cbcb41]/40 bg-[#cbcb41]/10 text-[#cbcb41] hover:bg-[#cbcb41]/15' },
-  image: { extensions: new Set(['avif', 'gif', 'jpeg', 'jpg', 'png', 'svg', 'webp']), icon: FileImage, color: 'border-[#a074c4]/40 bg-[#a074c4]/10 text-[#a074c4] hover:bg-[#a074c4]/15' },
-  table: { extensions: new Set(['csv', 'numbers', 'ods', 'tsv', 'xls', 'xlsx']), icon: FileSpreadsheet, color: 'border-[#8dc149]/40 bg-[#8dc149]/10 text-[#8dc149] hover:bg-[#8dc149]/15' },
-  text: { extensions: new Set(['log', 'md', 'pdf', 'rtf', 'txt']), icon: FileText, color: 'border-[#6d8086]/40 bg-[#6d8086]/10 text-[#91a3a8] hover:bg-[#6d8086]/15' },
-  video: { extensions: new Set(['avi', 'm4v', 'mkv', 'mov', 'mp4', 'webm']), icon: FileVideo, color: 'border-[#e06c75]/40 bg-[#e06c75]/10 text-[#e06c75] hover:bg-[#e06c75]/15' },
-  file: { extensions: new Set(), icon: File, color: 'border-muted-foreground/30 bg-muted/30 text-muted-foreground hover:bg-muted/50' },
-};
-
-function fileKind(path: string): FileKind {
-  const extension = path.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
-  return (Object.entries(FILE_KINDS) as [FileKind, (typeof FILE_KINDS)[FileKind]][])
-    .find(([kind, definition]) => kind !== 'file' && definition.extensions.has(extension))?.[0] ?? 'file';
-}
-
 function FileLinkBadge({ href, target, children, onClick }: {
   href: string;
   target: LocalTarget;
@@ -131,7 +109,7 @@ function FileLinkBadge({ href, target, children, onClick }: {
   const Icon = FILE_KINDS[kind].icon;
   return (
     <Tooltip label={`Open ${target.path}${target.line === null ? '' : ` at line ${target.line}`}`}>
-      <Badge asChild variant="primary" appearance="outline" size="sm" shape="circle" className={cn('mx-0.5 align-middle font-mono no-underline', FILE_KINDS[kind].color)}>
+      <Badge asChild variant="primary" appearance="outline" size="sm" shape="circle" className={cn(FILE_BADGE_CLASS, FILE_KINDS[kind].color)}>
         <a href={href} onClick={onClick} data-testid="markdown-file-link" data-file-kind={kind}>
           <Icon className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
           <span>{children}</span>
@@ -383,7 +361,8 @@ export function MarkdownBody({
             if (path && mentions?.path) {
               const line = marks['data-path-line'];
               const written = textOf(props.children);
-              return <>{mentions.path(path, written || path, line ? Number(line) : null)}</>;
+              const look = marks['data-path-plain'] === undefined ? 'badge' : 'link';
+              return <>{mentions.path(path, written || path, line ? Number(line) : null, look)}</>;
             }
             return <span {...props} />;
           },

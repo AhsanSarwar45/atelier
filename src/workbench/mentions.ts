@@ -200,6 +200,15 @@ const NOT_PROSE = new Set(['a']);
 const ONLY_FILES = new Set(['pre']);
 
 /**
+ * Where a file is drawn as a plain link rather than as a badge: anywhere the
+ * words are machinery. A badge in the middle of `gh pr create -F …` breaks the
+ * one thing a command has to stay, which is a command somebody can read across
+ * and copy; the same name written in a sentence is a file, and reads as one
+ * (bw-un8y.1).
+ */
+const AS_LINK = new Set(['pre', 'code']);
+
+/**
  * The rendering step: every run of words in a message is looked at, and the
  * names in it become spans the page then draws as chips.
  *
@@ -208,10 +217,15 @@ const ONLY_FILES = new Set(['pre']);
  * writer gave them: a paragraph, a bullet, a table cell, a heading.
  */
 export function rehypeMentions(split: (text: string) => Piece[]) {
-  return (tree: HastNode): void => rewrite(tree, split, false);
+  return (tree: HastNode): void => rewrite(tree, split, false, false);
 }
 
-function rewrite(node: HastNode, split: (text: string) => Piece[], filesOnly: boolean): void {
+function rewrite(
+  node: HastNode,
+  split: (text: string) => Piece[],
+  filesOnly: boolean,
+  asLink: boolean,
+): void {
   const kids = node.children;
   if (!Array.isArray(kids)) return;
   const out: HastNode[] = [];
@@ -220,14 +234,23 @@ function rewrite(node: HastNode, split: (text: string) => Piece[], filesOnly: bo
   for (const kid of kids) {
     if (kid.type === 'element') {
       const tag = kid.tagName ?? '';
-      if (!NOT_PROSE.has(tag)) rewrite(kid, split, filesOnly || ONLY_FILES.has(tag));
+      if (!NOT_PROSE.has(tag)) {
+        rewrite(kid, split, filesOnly || ONLY_FILES.has(tag), asLink || AS_LINK.has(tag));
+      }
       // Providers often put a lone identifier in inline code. Once that
       // identifier is a real badge, retaining the code element draws a second
       // capsule around it. Fenced code arrives under `pre` with filesOnly set,
       // and is deliberately never unwrapped.
-      if (tag === 'code' && !filesOnly && containsMarker(kid)) {
+      //
+      // Only when the marker is the WHOLE of it. `gh pr create -F /home/…` is
+      // a command that happens to name a file; unwrapping that would strip the
+      // command of the one styling that says it is one (bw-un8y.1).
+      if (tag === 'code' && !filesOnly && onlyMarker(kid)) {
         kid.tagName = 'span';
         kid.properties = { 'data-inline-badges': '' };
+        // No longer inside code, so the name in it is a file named in a
+        // sentence, and draws as one.
+        delete kid.children![0]!.properties!['data-path-plain'];
       }
       out.push(kid);
       continue;
@@ -247,21 +270,24 @@ function rewrite(node: HastNode, split: (text: string) => Piece[], filesOnly: bo
         if (piece.text) out.push({ type: 'text', value: piece.text });
         continue;
       }
-      out.push(marker(piece));
+      out.push(marker(piece, asLink));
     }
   }
 
   if (changed) node.children = out;
 }
 
-function containsMarker(node: HastNode): boolean {
-  return node.children?.some((child) =>
-    child.type === 'element'
-    && Boolean(child.properties?.['data-card-mention'] || child.properties?.['data-path-mention'])) ?? false;
+/** Whether the whole of an element is one chip and nothing else. */
+function onlyMarker(node: HastNode): boolean {
+  const kids = node.children;
+  if (!kids || kids.length !== 1) return false;
+  const only = kids[0]!;
+  return only.type === 'element'
+    && Boolean(only.properties?.['data-card-mention'] || only.properties?.['data-path-mention']);
 }
 
 /** One piece, as the span the page then draws as a chip. */
-function marker(piece: Exclude<Piece, { kind: 'text' }>): HastNode {
+function marker(piece: Exclude<Piece, { kind: 'text' }>, asLink = false): HastNode {
   if (piece.kind === 'path') {
     return {
       type: 'element',
@@ -269,6 +295,7 @@ function marker(piece: Exclude<Piece, { kind: 'text' }>): HastNode {
       properties: {
         'data-path-mention': piece.absolute,
         ...(piece.line === null ? {} : { 'data-path-line': String(piece.line) }),
+        ...(asLink ? { 'data-path-plain': '' } : {}),
       },
       children: [{ type: 'text', value: piece.raw }],
     };
