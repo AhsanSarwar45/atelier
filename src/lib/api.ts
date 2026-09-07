@@ -533,6 +533,28 @@ export interface GitBranchesResponse {
   branches: GitBranch[];
 }
 
+/**
+ * One checkout of a project: the main one, or a worktree standing beside it
+ * (bw-ov7a.1).
+ */
+export interface GitTree {
+  /** The directory's own name — what a chat working here is called after. */
+  name: string;
+  path: string;
+  /** Absent when the checkout is detached rather than on a branch. */
+  branch: string | null;
+  isMain: boolean;
+  dirty: boolean;
+  ahead: number;
+  behind: number;
+}
+
+/** Every checkout of a project, and where a new one would be put. */
+export interface GitTreesResponse {
+  trees: GitTree[];
+  place: string;
+}
+
 /** One saved change, as the list draws it. */
 export interface GitCommit {
   sha: string;
@@ -731,6 +753,33 @@ export const git = {
    * the six a browser allows and never give it back.
    */
   watch: (path: string, onChange: () => void) => onRepository(path, onChange),
+
+  // A project's checkouts, which is what "where will this chat work" is
+  // chosen from (bw-ov7a.3). Keyed by a name a person types, unlike the
+  // card-keyed `listWorktrees` above.
+
+  /** Every checkout of the project, and where a new one would be put. */
+  trees: (path: string, signal?: AbortSignal) => fetchApi<GitTreesResponse>(
+    `/api/git/trees?path=${encodeURIComponent(path)}`,
+    signal ? { signal } : undefined,
+  ),
+
+  /**
+   * Make a worktree called `name`, checked out on `branch`. `create` starts
+   * that branch rather than expecting it, and `base` says where it starts —
+   * the checkout's own commit when nothing is named.
+   */
+  newTree: (path: string, name: string, branch: string, create?: boolean, base?: string) =>
+    fetchApi<GitTree>('/api/git/trees', {
+      method: 'POST',
+      body: JSON.stringify({
+        path,
+        name,
+        branch,
+        ...(create === undefined ? {} : { create }),
+        ...(base === undefined ? {} : { base }),
+      }),
+    }),
 
   /** Recent saved changes, newest first. */
   log: (path: string, limit = 50, signal?: AbortSignal) => fetchApi<GitLogResponse>(

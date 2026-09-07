@@ -95,6 +95,8 @@ import { PictureViewer } from '@/workbench/picture-viewer';
 import { useEpicChecklist } from '@/workbench/epic-checklist';
 import { firstAvailableProvider, providerIsAvailable, useProviders, whyUnavailable } from '@/workbench/providers';
 import { ModelIcon } from '@/workbench/model-icon';
+import * as api from '@/lib/api';
+import { WhereToWork, type Where } from '@/workbench/where-to-work';
 
 export { PictureViewer } from '@/workbench/picture-viewer';
 
@@ -640,9 +642,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [pendingSends, setPendingSends] = useState<PendingSend[]>([]);
   /** The user messages the transcript held when the first of those went out. */
   const [sendMark, setSendMark] = useState<ReadonlySet<string>>(NO_MARK);
-  // `workingIn` is the worktree the person picked, and nothing at all for a
-  // chat that works in the project itself (bw-ov7a.2).
-  const start = useCallback(async (brand: Brand = newBrand, workingIn?: string | null) => {
+  // `where` is the place the person picked. A worktree that does not exist yet
+  // is made first and the chat is started in what git says it made, so the
+  // chat and the directory can never disagree about where the work is
+  // happening (bw-ov7a.3).
+  const start = useCallback(async (brand: Brand = newBrand, where: Where = { kind: 'project' }) => {
     if (!projectId || !projectPath) return;
     if (!providerIsAvailable(providers, brand)) {
       setStartError(`The ${brandName(brand)} provider is not available in this installation.`);
@@ -651,6 +655,18 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     setStarting(true);
     setStartError(null);
     try {
+      let workingIn: string | null = null;
+      if (where.kind === 'existing') workingIn = where.path;
+      if (where.kind === 'new') {
+        const made = await api.git.newTree(
+          projectPath,
+          where.name.trim(),
+          where.branch.trim(),
+          where.create,
+          where.create ? where.base : undefined,
+        );
+        workingIn = made.path;
+      }
       const s = await sendCommand<{ id: string }>(
         startingChat(projectId, projectPath, brand, workingIn),
       );
@@ -770,6 +786,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   }, [rightOpen, gitOpen, flipRight, flipGit]);
   /** The ways in that live in this tab, each a full-screen panel. */
   const [showing, setShowing] = useState<'search' | 'usage' | 'tokens' | 'new-chat' | null>(null);
+  /**
+   * Where the next chat will work. Not remembered between chats: a worktree is
+   * made for a piece of work, so the place the last chat went is the wrong
+   * default for the next one, and the project is the only answer that is right
+   * until somebody says otherwise (bw-ov7a.3).
+   */
+  const [newWhere, setNewWhere] = useState<Where>({ kind: 'project' });
+  /** What that choice still needs, as the picker reads it against real git. */
+  const [whereMissing, setWhereMissing] = useState<string | null>(null);
   const newChat = useCallback((brand?: Brand) => {
     if (brand) {
       if (!providerIsAvailable(providers, brand)) {
@@ -1319,6 +1344,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               </Tooltip>
             ))}
           </div>
+          {projectPath && (
+            <WhereToWork
+              projectPath={projectPath}
+              value={newWhere}
+              onChange={setNewWhere}
+              onMissing={setWhereMissing}
+              disabled={starting}
+            />
+          )}
           <DialogFooter className="gap-2 sm:space-x-0">
             <div className="flex min-h-9 items-center gap-2 rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground">
               <Checkbox
@@ -1330,7 +1364,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               />
               <span>Use {brandName(newBrand)} by default</span>
             </div>
-            <Button variant="primary" disabled={starting || !newBrandAvailable} onClick={() => { setShowing(null); setRailOpen(false); void start(newBrand); }}>
+            <Button
+              variant="primary"
+              // A place that is not yet a place cannot start a chat, and the
+              // picker is already saying why underneath it.
+              disabled={starting || !newBrandAvailable || whereMissing !== null}
+              onClick={() => { setShowing(null); setRailOpen(false); void start(newBrand, newWhere); }}
+            >
               {starting ? 'Starting…' : 'Start chat'}
             </Button>
           </DialogFooter>
@@ -1493,7 +1533,25 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               ))}
           </ul>
         )}
-        <Button variant="primary" onClick={() => void start()} disabled={starting || !newBrandAvailable} data-testid="new-chat">
+        {/* The same choice the dialog offers, because this screen starts a
+            chat without ever opening that dialog (bw-ov7a.3). */}
+        {projectPath && (
+          <div className="w-full max-w-md">
+            <WhereToWork
+              projectPath={projectPath}
+              value={newWhere}
+              onChange={setNewWhere}
+              onMissing={setWhereMissing}
+              disabled={starting}
+            />
+          </div>
+        )}
+        <Button
+          variant="primary"
+          onClick={() => void start(newBrand, newWhere)}
+          disabled={starting || !newBrandAvailable || whereMissing !== null}
+          data-testid="new-chat"
+        >
           {starting ? null : <Plus data-testid="new-chat-empty-plus" aria-hidden="true" />}
           {starting ? 'Starting…' : `New ${brandName(newBrand)} chat`}
         </Button>
