@@ -22,7 +22,7 @@
  */
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { formatDistanceToNow } from 'date-fns';
 import {
@@ -57,6 +57,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
 import { ApiError, git, type GitBranch, type GitChange, type GitCommit, type GitStatus } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { useRepositoryReads } from '@/workbench/use-repository-reads';
 
 /**
  * How many saved changes the list asks for. Enough to recognise where the
@@ -64,19 +65,6 @@ import { cn } from '@/lib/utils';
  * history browser.
  */
 const LOG_LIMIT = 20;
-
-/**
- * How often the panel looks at the working tree of its own accord, in ms.
- *
- * The costly half of "the repository changed" — a commit, a push, a fetch, a
- * checkout — arrives the moment it happens, from the server's watcher on the
- * git directory. This is only for a file edited on disk, which that watcher
- * cannot see. Five seconds is slow enough to cost nothing (one `git status` on
- * a local repository, and only while the panel is drawn and the window is
- * being looked at) and quick enough that a file an agent writes shows up while
- * the reader is still looking at the panel.
- */
-const WORKING_TREE_MS = 5_000;
 
 /**
  * What went wrong, in git's own words.
@@ -187,9 +175,9 @@ function Section({
  * chip for a pointer — a reader who cannot tell green from amber loses
  * nothing.
  */
-type FileState = GitChange['status'] | 'untracked' | 'conflicted';
+export type FileState = GitChange['status'] | 'untracked' | 'conflicted';
 
-const STATUS_LOOK: Record<
+export const STATUS_LOOK: Record<
   FileState,
   { word: string; tone: 'success' | 'warning' | 'info' | 'destructive'; said: string }
 > = {
@@ -416,79 +404,18 @@ export function GitView({ path }: GitViewProps) {
   }, [path, status?.branch]);
 
   /**
-   * A read the panel asked itself for, never more than one at a time.
+   * Staying current: the git directory moving, the window being come back to,
+   * and the slow look for a working-tree edit no watcher can see. The rule for
+   * all three — and the one-read-at-a-time that keeps a burst of events from
+   * racing itself — is `useRepositoryReads`, which the diff that stands in for
+   * the transcript shares with this panel (bw-rx1y.5).
    *
-   * A push writes a burst of refs and a commit writes several files, so the
-   * change arrives as a handful of events in a moment. Reading git once per
-   * event would mean several `git status` runs racing each other over one
-   * repository, and the last one to answer — not the last one to be asked —
-   * deciding what is on screen. So a read that arrives while one is in flight
-   * queues exactly one more behind it, which is enough: the queued read sees
-   * everything the events before it were about, because it asks git afresh.
+   * Quietly: a read nobody asked for does not spin the refresh button.
    */
-  const busyReading = useRef(false);
-  const oneMore = useRef(false);
-  const readAgain = useCallback(async () => {
-    if (busyReading.current) {
-      oneMore.current = true;
-      return;
-    }
-    busyReading.current = true;
-    try {
-      do {
-        oneMore.current = false;
-        await read(undefined, true);
-      } while (oneMore.current);
-    } finally {
-      busyReading.current = false;
-    }
+  const quietly = useCallback(async () => {
+    await read(undefined, true);
   }, [read]);
-
-  /**
-   * The repository changing without the panel: a commit or a push made in a
-   * terminal, or by an agent working in this very checkout (bw-8nwh.2).
-   *
-   * The server watches the repository's git directory and says so on the
-   * window's one connection; this reads git again on hearing it, so the branch
-   * line stops describing a repository that no longer exists. Held only while
-   * the panel is on screen and only for the project it is pointed at.
-   */
-  useEffect(() => {
-    if (!path) return;
-    return git.watch(path, () => void readAgain());
-  }, [path, readAgain]);
-
-  /**
-   * Coming back to the window, and the slow look while it is here.
-   *
-   * The watcher covers the git directory, which is where a commit, a push, a
-   * fetch and a checkout all land. It does not cover a file merely edited on
-   * disk — that is the working tree, which holds `node_modules` and build
-   * output and would report a compile as a change to the repository. So an
-   * edit made outside the app arrives on this instead: a `git status` on a
-   * local repository, asked for while the panel is drawn and the window is
-   * being looked at. A hidden tab asks for nothing at all, and asks once the
-   * moment it is looked at again — which is also when a reader who has been
-   * away in a terminal wants the answer.
-   */
-  useEffect(() => {
-    if (!path) return;
-    const lookAgain = () => {
-      if (document.visibilityState === 'hidden') return;
-      void readAgain();
-    };
-    const woken = () => {
-      if (document.visibilityState === 'visible') void readAgain();
-    };
-    const slowly = setInterval(lookAgain, WORKING_TREE_MS);
-    window.addEventListener('focus', lookAgain);
-    document.addEventListener('visibilitychange', woken);
-    return () => {
-      clearInterval(slowly);
-      window.removeEventListener('focus', lookAgain);
-      document.removeEventListener('visibilitychange', woken);
-    };
-  }, [path, readAgain]);
+  useRepositoryReads(path, quietly);
 
   /**
    * One thing that changes the repository, and then a fresh look at it. The
