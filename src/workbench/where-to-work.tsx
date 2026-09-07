@@ -61,17 +61,17 @@ export function isPlainName(name: string): boolean {
 export function whatIsMissing(where: Where, trees: GitTree[]): string | null {
   if (where.kind === 'project') return null;
   if (where.kind === 'existing') {
-    return trees.some((tree) => tree.path === where.path) ? null : 'Choose a worktree.';
+    return trees.some((tree) => tree.path === where.path) ? null : 'Select a worktree.';
   }
   const name = where.name.trim();
-  if (!name) return 'Name the new worktree.';
-  if (!isPlainName(name)) return "A worktree's name is one plain folder name.";
+  if (!name) return 'Enter a worktree name.';
+  if (!isPlainName(name)) return 'Use a single folder name.';
   if (trees.some((tree) => tree.name === name)) {
-    return `There is already a worktree called ${name}.`;
+    return `A worktree named "${name}" already exists.`;
   }
-  if (!where.branch.trim()) return where.create ? 'Name the new branch.' : 'Choose a branch.';
+  if (!where.branch.trim()) return where.create ? 'Enter a branch name.' : 'Select a branch.';
   if (where.create && !isPlainName(where.branch.replace(/\//g, 'x'))) {
-    return 'That is not a branch name.';
+    return 'Invalid branch name.';
   }
   return null;
 }
@@ -154,9 +154,17 @@ export function WhereToWork({
   // The three ways in. A project with no worktrees yet still offers to make
   // one — that is the whole point — but there is nothing to choose from.
   const modes = [
-    { kind: 'project' as const, label: project?.name ?? 'The project', icon: <FolderGit2 className="size-3.5" /> },
-    { kind: 'existing' as const, label: 'A worktree', icon: <GitBranch className="size-3.5" /> },
-    { kind: 'new' as const, label: 'New worktree', icon: <Plus className="size-3.5" /> },
+    {
+      kind: 'project' as const,
+      label: 'Main',
+      // The folder is the tooltip rather than the label: a project checked out
+      // as `.workbench-run-…` or `app` tells the reader nothing, and truncated
+      // it tells them less. What they are choosing is the main checkout.
+      title: project?.path ?? projectPath,
+      icon: <FolderGit2 className="size-3.5" />,
+    },
+    { kind: 'existing' as const, label: 'Existing', title: 'Use an existing worktree', icon: <GitBranch className="size-3.5" /> },
+    { kind: 'new' as const, label: 'New', title: 'Create a new worktree', icon: <Plus className="size-3.5" /> },
   ];
 
   function pick(kind: Where['kind']) {
@@ -171,9 +179,9 @@ export function WhereToWork({
   return (
     <section className="flex flex-col gap-2" data-testid="where-to-work">
       <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-        Where it works
+        Worktree
       </h3>
-      <div className="grid grid-cols-3 gap-2" role="group" aria-label="Where it works">
+      <div className="grid grid-cols-3 gap-2" role="group" aria-label="Worktree">
         {modes.map((mode) => (
           <Button
             key={mode.kind}
@@ -182,6 +190,7 @@ export function WhereToWork({
             variant={value.kind === mode.kind ? 'primary' : 'outline'}
             disabled={disabled || (mode.kind === 'existing' && worktrees.length === 0)}
             data-testid={`where-${mode.kind}`}
+            title={mode.title}
             onClick={() => pick(mode.kind)}
           >
             {mode.icon}
@@ -197,14 +206,14 @@ export function WhereToWork({
           disabled={disabled}
         >
           <SelectTrigger aria-label="Worktree" data-testid="where-worktree">
-            <SelectValue placeholder="Choose a worktree" />
+            <SelectValue placeholder="Select a worktree" />
           </SelectTrigger>
           <SelectContent>
             {worktrees.map((tree) => (
               <SelectItem key={tree.path} value={tree.path}>
                 {tree.name}
-                {tree.branch ? ` · ${tree.branch}` : ''}
-                {tree.dirty ? ' · changed' : ''}
+                {tree.branch ? ` (${tree.branch})` : ''}
+                {tree.dirty ? ' — modified' : ''}
               </SelectItem>
             ))}
           </SelectContent>
@@ -214,8 +223,8 @@ export function WhereToWork({
       {value.kind === 'new' && (
         <div className="flex flex-col gap-2">
           <Input
-            aria-label="New worktree name"
-            placeholder="What to call it"
+            aria-label="Worktree name"
+            placeholder="Worktree name"
             value={value.name}
             disabled={disabled}
             data-testid="where-new-name"
@@ -232,7 +241,7 @@ export function WhereToWork({
               });
             }}
           />
-          <div className="flex gap-2" role="group" aria-label="Its branch">
+          <div className="flex gap-2" role="group" aria-label="Branch">
             <Button
               type="button"
               size="sm"
@@ -251,31 +260,32 @@ export function WhereToWork({
               data-testid="where-branch-existing"
               onClick={() => onChange({ ...value, create: false, branch: '' })}
             >
-              A branch already there
+              Existing branch
             </Button>
           </div>
           {value.create ? (
-            <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <Input
-                aria-label="New branch name"
+                aria-label="Branch name"
                 placeholder="Branch name"
                 value={value.branch}
                 disabled={disabled}
                 data-testid="where-branch-name"
                 onChange={(event) => onChange({ ...value, branch: event.target.value })}
               />
+              <span className="shrink-0 text-xs text-muted-foreground">Base</span>
               <Select
                 value={value.base}
                 onValueChange={(base) => onChange({ ...value, base })}
                 disabled={disabled}
               >
-                <SelectTrigger aria-label="Starting from" data-testid="where-base" className="sm:w-48">
-                  <SelectValue placeholder="Starting from" />
+                <SelectTrigger aria-label="Base branch" data-testid="where-base" className="sm:w-48">
+                  <SelectValue placeholder="Base branch" />
                 </SelectTrigger>
                 <SelectContent>
                   {bases.map((branch) => (
                     <SelectItem key={branch.name} value={branch.name}>
-                      from {branch.name}
+                      {branch.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -288,7 +298,7 @@ export function WhereToWork({
               disabled={disabled}
             >
               <SelectTrigger aria-label="Branch" data-testid="where-branch">
-                <SelectValue placeholder="Choose a branch" />
+                <SelectValue placeholder="Select a branch" />
               </SelectTrigger>
               <SelectContent>
                 {bases.map((branch) => (
@@ -311,8 +321,7 @@ export function WhereToWork({
       )}
       {unreadable && (
         <p className="text-xs text-muted-foreground" data-testid="where-unreadable">
-          This project&apos;s worktrees could not be read, so a chat here works in the project
-          itself: {unreadable}
+          Could not read worktrees, so this chat will run in the main checkout: {unreadable}
         </p>
       )}
     </section>

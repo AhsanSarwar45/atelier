@@ -50,9 +50,9 @@ test('a new chat is offered the project, a worktree of it, or one made here', as
     const dialog = page.getByTestId('new-chat-provider-dialog');
     await expect(dialog.getByTestId('where-to-work')).toBeVisible();
 
-    // The project itself is named by its own folder, which is what a chat
-    // that works there will be called after.
-    await expect(dialog.getByTestId('where-project')).toHaveText(/where-a-chat-works/);
+    // The main checkout is offered by that name; its folder is the tooltip.
+    await expect(dialog.getByTestId('where-project')).toHaveText('Main');
+    await expect(dialog.getByTestId('where-project')).toHaveAttribute('title', FIXTURE);
 
     // The worktree standing beside it was read from git and is offered by
     // name, with the branch it is on.
@@ -73,7 +73,7 @@ test('a new chat is offered the project, a worktree of it, or one made here', as
     // rather than after the chat has been asked for.
     await dialog.getByTestId('where-new-name').fill('reading-room');
     await expect(dialog.getByTestId('where-missing')).toHaveText(
-      'There is already a worktree called reading-room.',
+      'A worktree named "reading-room" already exists.',
     );
     await dialog.screenshot({ path: 'tests/results/bw-ov7a3-a-name-already-taken.png' });
     expect(existsSync(join(FIXTURE, 'worktrees', 'writing-room'))).toBe(false);

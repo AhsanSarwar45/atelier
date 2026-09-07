@@ -53,29 +53,29 @@ describe('what a choice still needs', () => {
 
   it('holds an existing worktree to being one that is really there', () => {
     expect(whatIsMissing({ kind: 'existing', path: there[1].path }, there)).toBeNull();
-    expect(whatIsMissing({ kind: 'existing', path: '' }, there)).toBe('Choose a worktree.');
-    expect(whatIsMissing({ kind: 'existing', path: '/gone' }, there)).toBe('Choose a worktree.');
+    expect(whatIsMissing({ kind: 'existing', path: '' }, there)).toBe('Select a worktree.');
+    expect(whatIsMissing({ kind: 'existing', path: '/gone' }, there)).toBe('Select a worktree.');
   });
 
   it('wants a name for a new worktree, and one that is a folder name', () => {
     const half = (name: string): Where => ({ kind: 'new', name, branch: 'work', create: true, base: 'main' });
     expect(whatIsMissing(half('bw-3'), there)).toBeNull();
-    expect(whatIsMissing(half(''), there)).toBe('Name the new worktree.');
-    expect(whatIsMissing(half('  '), there)).toBe('Name the new worktree.');
+    expect(whatIsMissing(half(''), there)).toBe('Enter a worktree name.');
+    expect(whatIsMissing(half('  '), there)).toBe('Enter a worktree name.');
     for (const bad of ['../up', 'a/b', '..', '.']) {
-      expect(whatIsMissing(half(bad), there), bad).toBe("A worktree's name is one plain folder name.");
+      expect(whatIsMissing(half(bad), there), bad).toBe('Use a single folder name.');
     }
   });
 
   it('refuses a name another worktree already has, before git has to', () => {
     const same: Where = { kind: 'new', name: 'bw-1', branch: 'work', create: true, base: 'main' };
-    expect(whatIsMissing(same, there)).toBe('There is already a worktree called bw-1.');
+    expect(whatIsMissing(same, there)).toBe('A worktree named "bw-1" already exists.');
   });
 
   it('says which kind of branch is missing, because they are asked for differently', () => {
     const fresh: Where = { kind: 'new', name: 'bw-3', branch: '', create: true, base: 'main' };
-    expect(whatIsMissing(fresh, there)).toBe('Name the new branch.');
-    expect(whatIsMissing({ ...fresh, create: false }, there)).toBe('Choose a branch.');
+    expect(whatIsMissing(fresh, there)).toBe('Enter a branch name.');
+    expect(whatIsMissing({ ...fresh, create: false }, there)).toBe('Select a branch.');
   });
 
   it('lets a branch be named the way branches really are named', () => {
@@ -113,9 +113,12 @@ describe('the picker on the screen', () => {
     return { onChange, onMissing };
   }
 
-  it('names the project itself as one of the three ways in', async () => {
+  it('offers the main checkout as one of the three ways in', async () => {
     draw();
-    await waitFor(() => expect(screen.getByTestId('where-project')).toHaveTextContent('app'));
+    await waitFor(() => expect(screen.getByTestId('where-project')).toHaveTextContent('Main'));
+    // The folder is the tooltip, not the label: its basename is often a name
+    // the reader has never seen.
+    expect(screen.getByTestId('where-project')).toHaveAttribute('title', '/home/dev/app');
     expect(screen.getByTestId('where-existing')).toBeEnabled();
     expect(screen.getByTestId('where-new')).toBeEnabled();
   });
@@ -173,12 +176,12 @@ describe('the picker on the screen', () => {
     await waitFor(() => expect(screen.getByTestId('where-branch')).toBeInTheDocument());
     expect(screen.queryByTestId('where-branch-name')).toBeNull();
     expect(screen.queryByTestId('where-base')).toBeNull();
-    expect(screen.getByTestId('where-missing')).toHaveTextContent('Choose a branch.');
+    expect(screen.getByTestId('where-missing')).toHaveTextContent('Select a branch.');
   });
 
   it('tells the button outside it what the choice still needs', async () => {
     const { onMissing } = draw({ kind: 'new', name: '', branch: '', create: true, base: 'main' });
-    await waitFor(() => expect(onMissing).toHaveBeenCalledWith('Name the new worktree.'));
+    await waitFor(() => expect(onMissing).toHaveBeenCalledWith('Enter a worktree name.'));
   });
 
   it('falls back to the project, and says why, when git cannot be read', async () => {
