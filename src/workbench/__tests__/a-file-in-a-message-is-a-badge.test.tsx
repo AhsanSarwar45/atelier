@@ -1,10 +1,12 @@
 /**
- * A file named in an agent's own words is drawn as a file.
+ * A file named anywhere in an agent's own message is drawn as a file.
  *
- * The two looks are one decision made in two places — `mentions.ts` marks which
- * a name got, `path-chip.tsx` draws it — so both are exercised through the
- * renderer a chat actually uses, from the words in to the markup out
- * (bw-un8y.1).
+ * Where it was written must not change what it is: the same name in a sentence,
+ * quoted in backticks, and shown in a fenced block is the same file, and the
+ * block is where an agent writes most of them (bw-un8y.1, bw-1e2e.1).
+ *
+ * Exercised through the renderer a chat actually uses, so the marking step and
+ * the drawing step are proved as the one decision they are.
  */
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
@@ -22,8 +24,8 @@ const NONE: OnDisk = { real: () => false };
 const mentions = (disk: OnDisk): Mentions => ({
   split: (text) => openableIn(text, { card: () => false }, WHERE, disk),
   card: (id) => <span>{id}</span>,
-  path: (absolute, raw, line, look) => (
-    <PathChip absolute={absolute} raw={raw} line={line} look={look} />
+  path: (absolute, raw, line) => (
+    <PathChip absolute={absolute} raw={raw} line={line} look="badge" />
   ),
 });
 
@@ -52,19 +54,19 @@ describe('a file named in a message', () => {
     expect(screen.getByTestId('path-chip')).toHaveAttribute('data-path-look', 'badge');
   });
 
-  it('is a plain link inside a command, so the command still reads as one', () => {
+  it('is a badge inside a command the message quoted', () => {
     say('Run `gh pr create -F /home/someone/project/notes.md` when ready.');
-    const chip = screen.getByTestId('path-chip');
-    expect(chip).toHaveAttribute('data-path-look', 'link');
-    expect(chip).not.toHaveAttribute('data-file-kind');
-    // The command is still a command: the words around the file keep their code.
+    expect(screen.getByTestId('path-chip')).toHaveAttribute('data-path-look', 'badge');
+    // The words around it keep their code: only the name became a chip.
     expect(document.querySelector('code')?.textContent)
       .toBe('gh pr create -F /home/someone/project/notes.md');
   });
 
-  it('is a plain link inside a fenced block', () => {
+  it('is a badge inside a fenced block', () => {
     say('```\ncat /home/someone/project/notes.md\n```');
-    expect(screen.getByTestId('path-chip')).toHaveAttribute('data-path-look', 'link');
+    const chip = screen.getByTestId('path-chip');
+    expect(chip).toHaveAttribute('data-path-look', 'badge');
+    expect(chip).toHaveAttribute('data-file-kind', 'text');
   });
 
   it('is left as words when there is no such file', () => {

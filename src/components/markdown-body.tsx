@@ -39,11 +39,11 @@ export interface Mentions {
   /**
    * A file named in the words, drawn as the reader wrote it (bw-khe.13).
    *
-   * `look` is how it should be drawn: `badge` for a file named in a sentence,
-   * `link` for one named inside a command, where a badge would break the line
-   * as something to read across and copy (bw-un8y.1).
+   * Everything a message names is a file the same way, fenced blocks and inline
+   * code included; the plain link belongs to the rows built out of painted HTML
+   * and not to anything here (bw-1e2e.1).
    */
-  path?: (absolute: string, raw: string, line: number | null, look: 'badge' | 'link') => ReactNode;
+  path?: (absolute: string, raw: string, line: number | null) => ReactNode;
   /**
    * A whole address, when it names a card or a report of this app's own — drawn
    * as that chip rather than as raw blue text. Nothing, and the address is left
@@ -361,8 +361,7 @@ export function MarkdownBody({
             if (path && mentions?.path) {
               const line = marks['data-path-line'];
               const written = textOf(props.children);
-              const look = marks['data-path-plain'] === undefined ? 'badge' : 'link';
-              return <>{mentions.path(path, written || path, line ? Number(line) : null, look)}</>;
+              return <>{mentions.path(path, written || path, line ? Number(line) : null)}</>;
             }
             return <span {...props} />;
           },

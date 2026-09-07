@@ -200,32 +200,27 @@ const NOT_PROSE = new Set(['a']);
 const ONLY_FILES = new Set(['pre']);
 
 /**
- * Where a file is drawn as a plain link rather than as a badge: anywhere the
- * words are machinery. A badge in the middle of `gh pr create -F …` breaks the
- * one thing a command has to stay, which is a command somebody can read across
- * and copy; the same name written in a sentence is a file, and reads as one
- * (bw-un8y.1).
- */
-const AS_LINK = new Set(['pre', 'code']);
-
-/**
  * The rendering step: every run of words in a message is looked at, and the
  * names in it become spans the page then draws as chips.
  *
  * A step rather than a component because there is no other way in — a message
  * is markdown, and its words are text nodes buried under whatever shape the
  * writer gave them: a paragraph, a bullet, a table cell, a heading.
+ *
+ * A file is a file wherever a message writes one — including inside a fenced
+ * block and inside inline code, which is where an agent writes MOST of them. A
+ * path quoted in backticks or shown in a block is the one being pointed at, and
+ * drawing that one as plain words while badging the same name in the sentence
+ * above it was exactly backwards (bw-1e2e.1). The plain underlined link is
+ * still what a chip looks like elsewhere: the collapsed line of an activity row
+ * and the file line of an edit card are built from painted HTML rather than
+ * from this tree, and they keep it (`paths-in-html.ts`, `split-paths.tsx`).
  */
 export function rehypeMentions(split: (text: string) => Piece[]) {
-  return (tree: HastNode): void => rewrite(tree, split, false, false);
+  return (tree: HastNode): void => rewrite(tree, split, false);
 }
 
-function rewrite(
-  node: HastNode,
-  split: (text: string) => Piece[],
-  filesOnly: boolean,
-  asLink: boolean,
-): void {
+function rewrite(node: HastNode, split: (text: string) => Piece[], filesOnly: boolean): void {
   const kids = node.children;
   if (!Array.isArray(kids)) return;
   const out: HastNode[] = [];
@@ -234,9 +229,7 @@ function rewrite(
   for (const kid of kids) {
     if (kid.type === 'element') {
       const tag = kid.tagName ?? '';
-      if (!NOT_PROSE.has(tag)) {
-        rewrite(kid, split, filesOnly || ONLY_FILES.has(tag), asLink || AS_LINK.has(tag));
-      }
+      if (!NOT_PROSE.has(tag)) rewrite(kid, split, filesOnly || ONLY_FILES.has(tag));
       // Providers often put a lone identifier in inline code. Once that
       // identifier is a real badge, retaining the code element draws a second
       // capsule around it. Fenced code arrives under `pre` with filesOnly set,
@@ -248,9 +241,6 @@ function rewrite(
       if (tag === 'code' && !filesOnly && onlyMarker(kid)) {
         kid.tagName = 'span';
         kid.properties = { 'data-inline-badges': '' };
-        // No longer inside code, so the name in it is a file named in a
-        // sentence, and draws as one.
-        delete kid.children![0]!.properties!['data-path-plain'];
       }
       out.push(kid);
       continue;
@@ -270,7 +260,7 @@ function rewrite(
         if (piece.text) out.push({ type: 'text', value: piece.text });
         continue;
       }
-      out.push(marker(piece, asLink));
+      out.push(marker(piece));
     }
   }
 
@@ -287,7 +277,7 @@ function onlyMarker(node: HastNode): boolean {
 }
 
 /** One piece, as the span the page then draws as a chip. */
-function marker(piece: Exclude<Piece, { kind: 'text' }>, asLink = false): HastNode {
+function marker(piece: Exclude<Piece, { kind: 'text' }>): HastNode {
   if (piece.kind === 'path') {
     return {
       type: 'element',
@@ -295,7 +285,6 @@ function marker(piece: Exclude<Piece, { kind: 'text' }>, asLink = false): HastNo
       properties: {
         'data-path-mention': piece.absolute,
         ...(piece.line === null ? {} : { 'data-path-line': String(piece.line) }),
-        ...(asLink ? { 'data-path-plain': '' } : {}),
       },
       children: [{ type: 'text', value: piece.raw }],
     };

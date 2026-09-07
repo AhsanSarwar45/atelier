@@ -80,7 +80,8 @@ function chipsInRun(run: string, split: (text: string) => PathPiece[]): string {
     const line = piece.line === null ? '' : ` data-path-line="${piece.line}"`;
     out +=
       `<span data-path-mention="${escapeHtml(piece.absolute)}"${line}` +
-      ` data-testid="path-chip" class="${CHIP_CLASS}" title="${escapeHtml(TITLE(piece.line))}">` +
+      ` data-testid="path-chip" data-path-look="link"` +
+      ` class="${CHIP_CLASS}" title="${escapeHtml(TITLE(piece.line))}">` +
       `${escapeHtml(piece.raw)}</span>`;
   }
   return out;

@@ -50,5 +50,18 @@ export function fileKind(path: string): FileKind {
 /**
  * The classes that make a span or an anchor look like a file badge. Shared so
  * the two places that build one cannot drift apart.
+ *
+ * A badge wraps rather than running off the side. An agent's addresses are
+ * long — a worktree under a branch named after a whole sentence is most of a
+ * line by itself — and a badge is a flex box, which by default is one unbroken
+ * run: the first long path drawn as one pushed straight out of the message and
+ * was cut off by its edge (bw-1e2e.1). So the letters are allowed to break and
+ * the box is allowed to grow tall enough to hold them.
+ *
+ * The icon stays in the middle of however tall that turns out to be. Pinned to
+ * the top it read as a bullet against the first line rather than as the mark of
+ * the whole badge, which is what it is.
  */
-export const FILE_BADGE_CLASS = 'mx-0.5 align-middle font-mono no-underline';
+export const FILE_BADGE_CLASS =
+  'mx-0.5 align-middle font-mono no-underline '
+  + 'h-auto max-w-full items-center whitespace-normal break-all py-px';

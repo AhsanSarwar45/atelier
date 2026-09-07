@@ -9,14 +9,19 @@
  * the conversation catches every chip in it, which is also what lets a chip sit
  * inside the button that opens a tool row without opening it (bw-khe.13).
  *
- * ## A badge in a sentence, a link in a command
+ * ## A badge in a message, a link in a row
  *
- * A file named in an agent's own words is a file, and is drawn the way this app
- * draws every other file: a badge with the icon and the colour of its kind, the
- * same one a markdown link to a file gets. Inside a command it is drawn as a
- * plain underlined link instead — a row of coloured capsules through the middle
- * of `gh pr create -F …` destroys the one thing a command has to stay, which is
- * a line somebody can read across and copy (bw-un8y.1).
+ * A file named anywhere in an agent's own message is a file, and is drawn the
+ * way this app draws every other file: a badge with the icon and the colour of
+ * its kind, the same one a markdown link to a file gets. That holds inside a
+ * fenced block and inside inline code too, which is where an agent writes most
+ * of them (bw-un8y.1, bw-1e2e.1).
+ *
+ * The plain underlined link is for the machinery around the message: the
+ * collapsed line of an activity row, the command inside one, and the file line
+ * of an edit card. Those are dense, already coloured, and read as one line
+ * rather than as a sentence — a row of capsules through the middle of them
+ * destroys the line as something to read across and copy.
  */
 'use client';
 
