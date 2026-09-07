@@ -63,9 +63,12 @@ const UNKNOWN: ToneClasses = {
   badge: "bg-t-muted/20 text-t-tertiary border-t-muted/30 hover:bg-t-muted/20",
 };
 
-/** The classes for a state, or the muted set when the board sends one we do not know. */
-export function classesFor(status: BeadStatus): ToneClasses {
-  const tone = STATE_BY_ID[status]?.tone;
+/**
+ * The classes for a state, or the muted set when the board sends one we do not
+ * know — or has not answered yet, which is what `undefined` means (bw-pq2a.3).
+ */
+export function classesFor(status: BeadStatus | undefined): ToneClasses {
+  const tone = status ? STATE_BY_ID[status]?.tone : undefined;
   return tone ? TONES[tone] : UNKNOWN;
 }
 

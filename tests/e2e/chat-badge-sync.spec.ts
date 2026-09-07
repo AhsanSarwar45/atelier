@@ -35,7 +35,10 @@ test('a card closed on the board recolours its chip in the message and in the ra
     { ...base, seq: 5, type: 'session.state', state: 'idle', label: 'Ready' },
   ];
   const snapshot = foldAll(events);
-  const beads = [OPEN_CARD, PARENT_CARD];
+  // A card the chat once touched that the board no longer has: the rail still
+  // lists it, and it must wear the muted set, not a healthy open blue (bw-pq2a.3).
+  const GONE_CARD = 'wl-gone1';
+  const beads = [OPEN_CARD, PARENT_CARD, GONE_CARD];
 
   await page.addInitScript(({ chat, view }) => {
     class FixtureSocket {
@@ -85,7 +88,13 @@ test('a card closed on the board recolours its chip in the message and in the ra
     // Before: the piece and its epic are open, and every chip says so.
     await bothSay(OPEN_CARD, 'open');
     await bothSay(PARENT_CARD, 'open');
+    const gone = chipsFor(GONE_CARD);
+    await expect(gone).toHaveCount(1);
+    await expect(gone).not.toHaveAttribute('data-bead-status', /./);
+    await expect(gone).toHaveClass(/text-t-tertiary/);
+    await expect(gone).not.toHaveClass(/text-status-open/);
     await page.screenshot({ path: `${SHOT}/chat-badge-sync-before.png` });
+    await page.getByTestId('rail-cards').screenshot({ path: `${SHOT}/chat-badge-sync-unknown-muted.png` });
 
     // The board moves under the page: the piece is closed by bd, not by the app.
     bd(['close', OPEN_CARD, '--reason', 'closed from outside the app'], projectPath);

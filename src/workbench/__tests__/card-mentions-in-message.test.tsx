@@ -140,6 +140,14 @@ describe('card names in a rendered message', () => {
     }
   });
 
+  it('draws a card the board has not answered for in the muted set, never the open blue', () => {
+    render(<BeadChip id="wl-none" projectId={HERE} size="sm" testId="unknown-card" />);
+    const chip = screen.getByTestId('unknown-card');
+    expect(chip).not.toHaveAttribute('data-bead-status');
+    expect(chip).toHaveClass('text-t-tertiary');
+    expect(chip).not.toHaveClass('text-status-open');
+  });
+
   it('keeps card ids inside fenced commands copyable as code', () => {
     say('```sh\nbd show bw-1u1\n```');
     expect(screen.queryByTestId('mention-card')).toBeNull();

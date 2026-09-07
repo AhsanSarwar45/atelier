@@ -66,7 +66,10 @@ export function BeadChip({
         appearance="outline"
         size={size}
         shape="circle"
-        className={cn('shrink-0 font-mono', status && classesFor(status).badge, className)}
+        /* A card the board has not answered for, or does not have, wears the
+           muted set: left with no class it wore the primary blue and read as a
+           healthy open card beside chips that were telling the truth (bw-pq2a.3). */
+        className={cn('shrink-0 font-mono', classesFor(status).badge, className)}
       >
         <Button
           type="button"
