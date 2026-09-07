@@ -158,6 +158,27 @@ test('a shell the kit has written an ending for is over on the panel, beside one
     // the standing on the row is the whole of what the screen says about it.
     await expect(over).toBeVisible();
     await expect(still).toBeVisible();
+
+    // And the command is on a line of its own, under the labels rather than
+    // beside them (bw-kl4k.1). Asked of the real layout because that is what
+    // the complaint was about: sharing the line with SHELL and the tool's name
+    // left a dozen characters of the command, which named no command at all.
+    // The width is asked for too — a line of its own that another element
+    // still sits on would pass the first half alone.
+    const laidOut = await over.evaluate((row) => {
+      const kind = row.querySelector('[data-testid="sent-away-kind"]')!.getBoundingClientRect();
+      const what = row.querySelector('[data-testid="sent-away-what"]')!.getBoundingClientRect();
+      return { kindBottom: kind.bottom, whatTop: what.top, whatLeft: what.left, whatWidth: what.width, rowWidth: row.getBoundingClientRect().width };
+    });
+    expect(
+      laidOut.whatTop,
+      `the command starts at ${laidOut.whatTop}px, still on the labels' line ending at ${laidOut.kindBottom}px`,
+    ).toBeGreaterThanOrEqual(laidOut.kindBottom);
+    expect(
+      laidOut.whatWidth,
+      `the command is given ${laidOut.whatWidth}px of a ${laidOut.rowWidth}px row`,
+    ).toBeGreaterThan(laidOut.rowWidth * 0.8);
+
     await page.waitForTimeout(400);
     await page
       .getByTestId('chat-right-rail')

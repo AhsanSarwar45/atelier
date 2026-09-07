@@ -336,12 +336,19 @@ function AgentRow({
               </span>
             </Tooltip>
           )}
-          <Tooltip label={row.what}>
-            <span data-testid="sent-away-what" className="min-w-0 flex-1 truncate">
-              {row.what || kind}
-            </span>
-          </Tooltip>
         </div>
+
+        {/* What the work actually is, on a line of its own. It shared the line
+            above until a shell's command was cut to a dozen characters by the
+            labels beside it — SHELL, shell and a truncated `python3 -c 'import
+            time…'` said nothing about which command was running. The labels
+            are short and fixed; this is the long, variable part, so it takes
+            the width of the card rather than what the labels leave over. */}
+        <Tooltip label={row.what}>
+          <span data-testid="sent-away-what" className="block min-w-0 truncate">
+            {row.what || kind}
+          </span>
+        </Tooltip>
 
         {/* The three numbers, in the order they are asked for: which model, how
             long, what it has spent. Each wears its own mark — three bare numbers
