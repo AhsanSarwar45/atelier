@@ -673,6 +673,31 @@ must be cleared and by whom.
 that the landing commit overwrote a second later, and a manual copy to `/tmp`
 in case the gate was right and the worker was not.
 
+## 17. A step:land card, met for a fourth time, plus a close it could not sign
+
+**Happened.** `bw-ov7a.10`, the land step for the worktree epic. Claiming it
+needed its own worktree, so one was cut; removing the job's worktrees from
+inside one of them is impossible, so the removals were run from the main
+checkout and `workflow-gate` refused them with "Changes require an owned Beads
+work item in its isolated worktree (resolved target: /home/ahsan/dev/beads-web)".
+`git branch -d` for the ten finished branches is the same refusal, since the
+refs live in the common git directory. Then `bd close bw-ov7a.10` refused
+twice over: once for the same want of a worktree, and once because the card's
+assignee is the session actor (`s-c55ec765`) while `bd`'s actor is the git user
+(`AhsanSarwar45`).
+
+This is §13 and §15 again, unchanged, on a fourth job.
+
+**Should have happened.** What §15 asks for: a card labelled `step:land` is
+work on the main checkout by definition, so claim, `git worktree remove`,
+`git branch -d` and close should be accepted there on `board/land`'s own test.
+And a close should be signable by whoever the card says owns it, without
+`BEADS_ACTOR` being restored by hand.
+
+**Cost.** Three `ATELIER_BYPASS` invocations — the removals, the close of the
+land card, and the close of the epic behind it — plus `BEADS_ACTOR` on the last
+two, and this entry, which no card can own either.
+
 ## 18. A worktree belongs to a job, but the gate only knows cards
 
 **Happened.** The manager's rule is that a worktree is cut per job and reused by
@@ -704,3 +729,115 @@ copy per step mandatory and makes removing it impossible.
 **Cost.** 271 GiB of worktrees, a btrfs metadata exhaustion on the manager's
 machine, fifty worktrees removed by hand, and one `ATELIER_BYPASS` to claim the
 child of the very card that writes this rule down.
+
+## 19. A land is blocked by work abandoned in the landing checkout
+
+**Happened.** `bw-g3o3.2`, landing after a rate-limited worker was resumed.
+The rebase onto `ours` went through; the `git merge --ff-only` `board/land`
+runs in the main checkout did not: "Your local changes to the following files
+would be overwritten by merge: server/Cargo.lock, server/Cargo.toml". Those
+changes were not mine and not this session's. They were uncommitted work left
+in the landing checkout thirteen hours earlier by a session that never came
+back — an `ignore = "0.4"` line for a `routes/fs_watch.rs` that does not exist
+in the tree.
+
+Nothing in the toolset gets past that. `git stash` is out, because the stash is
+shared across every worktree and popping it elsewhere would take somebody's
+work. Restoring the two files with `git checkout --` in the main checkout is
+what a land needs, and `workflow-gate` refuses it: "Changes require an owned
+Beads work item in its isolated worktree (resolved target:
+/home/ahsan/dev/beads-web)". The gate is written against development in the
+shared checkout, and cannot tell that apart from the land it is standing in the
+way of — a land is by definition a write to the landing checkout, and
+`board/land`'s own `git merge` is exempt while the one command that unblocks it
+is not.
+
+**Should have happened.** `board/land` should say what is dirty in the landing
+checkout and offer to park it, or the gate should accept a `git checkout --` of
+paths named by the merge it is refusing, from the worktree of a claimed card.
+Failing both, an abandoned session should not leave its scratch in the one
+checkout every other card has to merge through.
+
+**Cost.** One `ATELIER_BYPASS`, the parked diff at
+`~/.cache/atelier-parked/fs-watch-ignore-dep-2026-09-08.patch`, and this entry.
+The discarded content was in fact the same dependency the landing commit adds,
+so nothing was lost — but that had to be read off the diff by hand to know it.
+
+**Seen again, same day.** The same abandoned session had also left
+`src/lib/address.ts` in the landing checkout — the Files-tab address work,
+byte-for-byte the same change as the `bw-g3o3.4` worktree that owns the card
+carries, differing only in the wording of three comments. It would have blocked
+that card's land for the same reason. Parked to
+`~/.cache/atelier-parked/address-ts-stray-2026-09-08.patch` and restored under a
+second `ATELIER_BYPASS`, before the land that would have hit it. The landing
+checkout still carries ninety-odd regenerated `tests/results/*.png` from that
+session, left alone for now because no pending land touches them.
+
+## bw-gr8y.8 — removing a landed worktree is refused from the main checkout
+
+The last step of a job is `git worktree remove worktrees/<job>` run from the
+main checkout, and the gate answers:
+
+> Changes require an owned Beads work item in its isolated worktree (resolved
+> target: /home/ahsan/dev/beads-web).
+
+By then the card is landed and closed and the worktree it names is the thing
+being deleted, so there is no worktree left to be inside. Re-run under
+`ATELIER_BYPASS` with that reason. Appending this note was refused the same way.
+
+## bw-g3o3.12 — the workflow gate follows a `node_modules` symlink out of the worktree
+
+A worktree here borrows the owner's installed packages with
+`node_modules -> /home/ahsan/dev/beads-web/node_modules`, the way
+`worktrees/bw-g3o3.2` does. This card adds a dependency
+(`material-icon-theme`), which cannot go into the borrowed tree without writing
+into the owner's checkout — so the symlink has to be replaced with a
+worktree-local directory of symlinks plus the new package.
+
+`rm node_modules`, run from inside the worktree, was refused:
+
+```
+Changes require an owned Beads work item in its isolated worktree
+(target `node_modules` resolved from
+/home/ahsan/dev/beads-web/worktrees/bw-g3o3.12 →
+/home/ahsan/dev/beads-web/worktrees/bw-g3o3.12/node_modules).
+```
+
+The gate resolves the path through the symlink and lands in the main checkout,
+so a write wholly inside the agent's own worktree — removing a link the agent
+itself had just made — reads to it as a write into the owner's repository. Run
+once with `ATELIER_BYPASS`. A gate that stopped at the first symlink, or that
+treated a gitignored path as not the repository's, would not need one.
+
+Second, smaller: `atelier tool board/land` merges into the main checkout, and
+that checkout had eighty uncommitted lines in THIS file. The merge refused
+("Your local changes to docs/hook-friction-2.md would be overwritten"), so a
+card that records its friction here cannot land until whoever owns those lines
+commits them. The note was moved out of the commit and appended by hand instead.
+
+## bw-g3o3.8 — the workflow's own last step needs a bypass
+
+The card's finishing instructions say, in as many words, to remove the spent
+worktree from the main checkout:
+
+```
+git worktree remove worktrees/bw-g3o3.8
+```
+
+Run there, after the card had landed on `ours` and been closed, it was refused:
+
+```
+Changes require an owned Beads work item in its isolated worktree
+(resolved target: /home/ahsan/dev/beads-web).
+```
+
+There is no worktree left to run it from — that is the whole point of the
+command — and the agent no longer owns an open card, because landing closed it.
+So the last step of the prescribed workflow can only ever be taken with
+`ATELIER_BYPASS`, by every job, every time. `git worktree remove` is git
+bookkeeping about a worktree the agent itself created; it changes no tracked
+file in the owner's tree. A gate that let `git worktree remove worktrees/<own
+job id>` through, or that stayed satisfied for the moments after a land, would
+turn a standing bypass back into a real refusal.
+
+The same refusal then covered appending this note, for the same reason.
