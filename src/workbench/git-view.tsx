@@ -561,20 +561,24 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
           behind" is an answer, and a row that appears only when it is not zero
           is a row the reader cannot find when he goes looking for it. */}
       <div className="flex flex-col gap-1.5 px-3 py-2" data-testid="git-branch">
-        <div className="flex items-center gap-1.5">
+        {/* Tight against the icon on purpose: the picker beside it carries its
+            own room inside, so the eye reads one gap between the two and not
+            two gaps added together (bw-r9vq.1). */}
+        <div className="flex items-center gap-1">
           <BranchIcon className="size-3.5 shrink-0 text-t-tertiary" aria-hidden="true" />
           {/* The branch is where you change it, not just where it is written:
               a person who works in branches had to leave the app for a
               terminal to move between them (bw-ov7a.8). It keeps the name's
               own place and weight on the line — no border, no fill — so the
               row reads as it always did until it is pressed. The room inside
-              it is given back outside it, so the ring drawn when it is focused
-              stands clear of the name while the name itself does not move
-              (bw-nizd.1). */}
+              it is its own — pulling it back out with a negative margin put the
+              ring over the icon (bw-r9vq.1) — so the name sits a little further
+              along the line than it used to and the ring has daylight on both
+              sides. */}
           <Picker
             label="Branch"
             data-testid="git-branch-name"
-            className="-mx-2 h-6 min-w-0 flex-1 rounded border-0 px-2 text-xs font-medium text-t-primary shadow-none"
+            className="h-6 min-w-0 flex-1 rounded border-0 px-2 text-xs font-medium text-t-primary shadow-none"
             placeholder={status?.branch ?? '—'}
             searchPlaceholder="Search branches"
             empty="No branch matches"

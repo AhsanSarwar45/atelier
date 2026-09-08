@@ -151,10 +151,11 @@ test.describe('moving to another line of work from the rail', () => {
 
       // The state nobody chooses and everybody sees: the list has closed and
       // the focus has come back to the trigger, so the ring is drawn around the
-      // name. It has to stand clear of the letters (bw-nizd.1).
+      // name. It has to stand clear of the letters (bw-nizd.1) and of the
+      // branch icon beside it (bw-r9vq.1).
       await expect(name).toBeFocused();
       await page.getByTestId('git-branch').screenshot({
-        path: `${SHOTS}/bw-nizd1-the-focused-branch.png`,
+        path: `${SHOTS}/bw-r9vq1-the-focused-branch.png`,
         animations: 'disabled',
       });
     } finally {
