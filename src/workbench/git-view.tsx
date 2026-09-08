@@ -567,11 +567,14 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
               a person who works in branches had to leave the app for a
               terminal to move between them (bw-ov7a.8). It keeps the name's
               own place and weight on the line — no border, no fill — so the
-              row reads as it always did until it is pressed. */}
+              row reads as it always did until it is pressed. The room inside
+              it is given back outside it, so the ring drawn when it is focused
+              stands clear of the name while the name itself does not move
+              (bw-nizd.1). */}
           <Picker
             label="Branch"
             data-testid="git-branch-name"
-            className="h-6 min-w-0 flex-1 border-0 px-0 text-xs font-medium text-t-primary shadow-none"
+            className="-mx-2 h-6 min-w-0 flex-1 rounded border-0 px-2 text-xs font-medium text-t-primary shadow-none"
             placeholder={status?.branch ?? '—'}
             searchPlaceholder="Search branches"
             empty="No branch matches"
