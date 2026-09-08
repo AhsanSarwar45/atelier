@@ -696,6 +696,7 @@ fn summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
     let mut first_prompt = None;
     let mut has_conversation = false;
     let mut has_primary_conversation = false;
+    let mut started_by_a_person = None;
     for row in &rows {
         cwd = as_nonempty(&row["cwd"]).map(PathBuf::from).or(cwd);
         branch = as_nonempty(&row["gitBranch"]).or(branch);
@@ -708,6 +709,22 @@ fn summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
         {
             has_conversation = true;
             has_primary_conversation |= row["isSidechain"] != true;
+        }
+        // Who sent the chat's first prompt is who started the chat, and Claude
+        // marks it: an ordinary conversation opens `origin.kind: human`, and
+        // one an agent drove opens `promptSource: sdk`. Read once, off the
+        // first prompt that is not a helper's and not the tool talking to
+        // itself; a record too old to carry either field says nothing here and
+        // falls back to the sidechain reading below (bw-p61.16).
+        if started_by_a_person.is_none()
+            && row["type"] == "user"
+            && row["isMeta"] != true
+            && row["isSidechain"] != true
+        {
+            started_by_a_person = row["origin"]["kind"]
+                .as_str()
+                .map(|kind| kind == "human")
+                .or_else(|| row["promptSource"].as_str().map(|source| source != "sdk"));
         }
         if first_prompt.is_none() && visible(row) && row["type"] == "user" {
             let text = message_text(&row["message"]);
@@ -748,10 +765,17 @@ fn summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
         cwd,
         git_branch: branch,
         last_spoke_at: last_spoke_at(&path, &tail),
-        // Agent-SDK child sessions are sidechains throughout. Entrypoint and
-        // API-error fields describe transport/outcome, not authorship: using
-        // either hid ordinary terminal and editor conversations.
-        programmatic: has_conversation && !has_primary_conversation,
+        // Agent-SDK child sessions are sidechains throughout, and that was the
+        // whole rule until it was measured: on the owner's own data it caught
+        // none of the 512 review and harness chats filling Corsetta's list,
+        // because a chat an agent drives is a top-level session with ordinary
+        // primary messages. Authorship is the question, and the first prompt
+        // answers it directly. The sidechain reading stays as the fallback for
+        // a record that does not say (bw-p61.16).
+        programmatic: match started_by_a_person {
+            Some(person) => !person,
+            None => has_conversation && !has_primary_conversation,
+        },
         record: path,
     })
 }
@@ -2161,6 +2185,54 @@ mod tests {
         let sessions = list_sessions(home.path(), None, false);
         assert_eq!(sessions.len(), 1);
         assert!(!sessions[0].programmatic);
+    }
+
+    /**
+     * A chat an agent drove is out of the list until the switch is turned on.
+     *
+     * The sidechain rule was the whole test of authorship, and on the owner's
+     * own data it caught none of the 512 review and harness chats filling
+     * Corsetta's list: a chat Atelier's own review machinery starts is a
+     * top-level session whose messages are all primary, indistinguishable from
+     * his own by that reading. Claude marks the first prompt with who sent it,
+     * and that is the reading now (bw-p61.16).
+     */
+    #[test]
+    fn claude_discovery_hides_a_chat_no_person_typed_in_until_everything_is_requested() {
+        let home = tempdir().unwrap();
+        let dir = home.path().join("projects/project");
+        create_dir_all(&dir).unwrap();
+        let chats = [
+            // What the review machinery leaves behind: primary throughout.
+            (CHAT, json!({"type":"user","isSidechain":false,"promptSource":"sdk",
+                "entrypoint":"sdk-cli","cwd":"/work/repo","timestamp":"2026-08-30T00:00:00Z",
+                "message":{"content":"You are reviewing a change you did not write"}})),
+            // What he starts himself.
+            ("11111111-2222-3333-4444-555555555555",
+                json!({"type":"user","isSidechain":false,"origin":{"kind":"human"},
+                "promptSource":"typed","cwd":"/work/repo","timestamp":"2026-08-30T00:00:00Z",
+                "message":{"content":"Fix both and finish this work"}})),
+            // A record written before Claude marked either field at all.
+            ("99999999-8888-7777-6666-555555555555",
+                json!({"type":"user","isSidechain":false,"cwd":"/work/repo",
+                "timestamp":"2026-08-30T00:00:00Z","message":{"content":"An older conversation"}})),
+        ];
+        for (id, row) in &chats {
+            write(dir.join(format!("{id}.jsonl")), row.to_string()).unwrap();
+        }
+
+        let listed = |everything| {
+            list_sessions(home.path(), None, everything)
+                .into_iter()
+                .map(|session| session.session_id)
+                .collect::<std::collections::HashSet<_>>()
+        };
+        assert_eq!(
+            listed(false),
+            std::collections::HashSet::from([chats[1].0.to_string(), chats[2].0.to_string()]),
+            "a chat nobody typed in is out; one too old to say stays in"
+        );
+        assert_eq!(listed(true).len(), 3, "the switch brings the agent's own back");
     }
 
     #[test]
