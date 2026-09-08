@@ -1,25 +1,22 @@
 'use client';
 
-import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { GripVertical, Minus, Plus, RotateCcw, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Panel } from '@/components/ui/panel';
 import type { ImageComparison, ImagePayload, LookableImage } from '@/workbench/protocol';
+import { NO_TRANSFORM, clampScale, useZoomPan, type ImageTransform } from '@/workbench/zoom-pan';
 
-export interface ImageTransform {
-  scale: number;
-  x: number;
-  y: number;
-}
+export type { ImageTransform };
 
-const RESET: ImageTransform = { scale: 1, x: 0, y: 0 };
+const RESET = NO_TRANSFORM;
 const MIN_SCALE = 1;
 const MAX_SCALE = 5;
 
 export function changedScale(transform: ImageTransform, by: number): ImageTransform {
-  const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, transform.scale + by));
+  const scale = clampScale(transform.scale + by, MIN_SCALE, MAX_SCALE);
   return scale === MIN_SCALE ? RESET : { ...transform, scale };
 }
 
@@ -38,42 +35,39 @@ function TransformLayer({ transform, children, testId }: { transform: ImageTrans
   );
 }
 
+/**
+ * The box a picture is looked at through: the wheel zooms it about the pointer,
+ * the hand moves it, and a double click toggles between fitted and doubled.
+ *
+ * All of that is `useZoomPan`, which the Files tab's preview uses too, so a
+ * reader who learns the gesture on one picture already knows it on the other.
+ */
 function ZoomViewport({ transform, onChange, children, testId }: {
   transform: ImageTransform;
   onChange: (transform: ImageTransform) => void;
   children: ReactNode;
   testId: string;
 }) {
-  const drag = useRef<{ pointerId: number; x: number; y: number; startX: number; startY: number } | null>(null);
-  const move = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!drag.current || drag.current.pointerId !== event.pointerId || transform.scale === 1) return;
-    onChange({
-      ...transform,
-      x: drag.current.startX + event.clientX - drag.current.x,
-      y: drag.current.startY + event.clientY - drag.current.y,
-    });
-  };
-  const zoom = (event: WheelEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    onChange(changedScale(transform, event.deltaY < 0 ? 0.5 : -0.5));
-  };
+  const { viewportRef, handlers, cursor, pannable, dragging, zoomTo } = useZoomPan({
+    transform,
+    onChange,
+    minScale: MIN_SCALE,
+    maxScale: MAX_SCALE,
+  });
   return (
     <div
+      ref={viewportRef}
       data-testid={testId}
+      data-pannable={pannable || undefined}
+      data-dragging={dragging || undefined}
       className="relative min-h-0 min-w-0 w-full flex-1 overflow-hidden rounded bg-black/30 touch-none"
-      onWheel={zoom}
-      onDoubleClick={() => onChange(transform.scale === 1 ? { ...RESET, scale: 2 } : RESET)}
-      onPointerDown={(event) => {
-        if (transform.scale === 1) return;
-        drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, startX: transform.x, startY: transform.y };
-        event.currentTarget.setPointerCapture?.(event.pointerId);
+      style={{ cursor }}
+      onDoubleClick={(event) => {
+        if (transform.scale > MIN_SCALE) return onChange(RESET);
+        const box = event.currentTarget.getBoundingClientRect();
+        zoomTo(2, { x: event.clientX - (box.left + box.width / 2), y: event.clientY - (box.top + box.height / 2) });
       }}
-      onPointerMove={move}
-      onPointerUp={(event) => {
-        if (drag.current?.pointerId === event.pointerId) drag.current = null;
-        event.currentTarget.releasePointerCapture?.(event.pointerId);
-      }}
-      onPointerCancel={() => { drag.current = null; }}
+      {...handlers}
     >
       {children}
     </div>

@@ -31,6 +31,7 @@ import { Button } from '@/components/ui/button';
 import { apiUrl } from '@/lib/api-base';
 import { cn } from '@/lib/utils';
 import { CodeEditor } from '@/workbench/code-editor';
+import { NO_TRANSFORM, clampScale, useZoomPan, type ImageTransform } from '@/workbench/zoom-pan';
 
 /**
  * How a file is shown, which is not quite what kind of file it is. `text` means
@@ -78,6 +79,9 @@ const CHECKERBOARD = {
 };
 
 const ZOOMS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 8];
+/** The wheel is continuous, so it is bounded by the ends of that ladder. */
+const MIN_ZOOM = ZOOMS[0];
+const MAX_ZOOM = ZOOMS[ZOOMS.length - 1];
 
 function Bar({ children }: { children: ReactNode }) {
   return (
@@ -112,21 +116,46 @@ function SourceSwitch({ showing, onChange }: { showing: 'source' | 'preview'; on
   );
 }
 
+/**
+ * A picture at its real pixel size, zoomed and moved the way any image viewer
+ * does it: the wheel scales about the pointer and the hand drags it around.
+ *
+ * It used to be a −/%/+ trio over a scrolling box and nothing else, so a
+ * zoomed-in picture was a picture you could not look around — the reader who
+ * asked for this had just met that in the Files tab (bw-gy6z). The gesture is
+ * `useZoomPan`, the same one the chat's picture viewer uses, so it is one
+ * behaviour rather than two that drift.
+ *
+ * The buttons still step through the ladder of round percentages a person
+ * actually asks for, and the percentage itself is still the button that puts
+ * the picture back — now returning the position along with the scale, because
+ * a reset that leaves the picture off in a corner has not reset anything.
+ */
 function ImagePreview({ path }: { path: string }) {
   const [shape, setShape] = useState<{ width: number; height: number } | null>(null);
-  const [zoom, setZoom] = useState(1);
+  const [transform, setTransform] = useState<ImageTransform>(NO_TRANSFORM);
   // A new file is a new picture: its size is not known again until it loads,
   // and a zoom carried over from the last one is a reader's setting applied to
   // something they never chose it for.
   useEffect(() => {
     setShape(null);
-    setZoom(1);
+    setTransform(NO_TRANSFORM);
   }, [path]);
 
-  const step = (by: number) => setZoom((was) => {
-    const at = ZOOMS.findIndex((one) => one >= was - 0.001);
-    return ZOOMS[Math.min(ZOOMS.length - 1, Math.max(0, (at === -1 ? ZOOMS.length - 1 : at) + by))] ?? was;
+  const zoom = transform.scale;
+  const { viewportRef, handlers, cursor, pannable, dragging, zoomTo } = useZoomPan({
+    transform,
+    onChange: setTransform,
+    minScale: MIN_ZOOM,
+    maxScale: MAX_ZOOM,
+    content: shape,
   });
+
+  const step = (by: number) => {
+    const at = ZOOMS.findIndex((one) => one >= zoom - 0.001);
+    const next = ZOOMS[Math.min(ZOOMS.length - 1, Math.max(0, (at === -1 ? ZOOMS.length - 1 : at) + by))] ?? zoom;
+    zoomTo(clampScale(next, MIN_ZOOM, MAX_ZOOM));
+  };
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -145,8 +174,8 @@ function ImagePreview({ path }: { path: string }) {
             variant="ghost"
             data-testid="file-preview-zoom-level"
             className="h-5 min-w-[3.5rem] px-1 text-[11px] tabular-nums"
-            aria-label="Reset zoom"
-            onClick={() => setZoom(1)}
+            aria-label="Reset zoom and position"
+            onClick={() => setTransform(NO_TRANSFORM)}
           >
             {Math.round(zoom * 100)}%
           </Button>
@@ -156,24 +185,39 @@ function ImagePreview({ path }: { path: string }) {
         </div>
       </Bar>
       <div
+        ref={viewportRef}
         data-testid="file-preview-image-stage"
-        className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto p-6"
-        style={CHECKERBOARD}
+        data-scale={zoom}
+        data-pan-x={transform.x}
+        data-pan-y={transform.y}
+        data-pannable={pannable || undefined}
+        data-dragging={dragging || undefined}
+        className="relative min-h-0 min-w-0 flex-1 touch-none overflow-hidden"
+        style={{ ...CHECKERBOARD, cursor }}
+        {...handlers}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          data-testid="file-preview-image"
-          src={mediaUrl(path)}
-          alt={path}
-          // Its own pixels at 100%, so a 32-pixel icon is not blown up to fill
-          // the room and called a preview.
-          style={shape ? { width: shape.width * zoom, height: shape.height * zoom, maxWidth: 'none' } : undefined}
-          className="shrink-0"
-          onLoad={(event) => {
-            const img = event.currentTarget;
-            setShape({ width: img.naturalWidth, height: img.naturalHeight });
-          }}
-        />
+        <div
+          data-testid="file-preview-image-transform"
+          className="absolute inset-0 flex items-center justify-center"
+          style={{ transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${zoom})` }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            data-testid="file-preview-image"
+            src={mediaUrl(path)}
+            alt={path}
+            // Its own pixels at 100%, so a 32-pixel icon is not blown up to fill
+            // the room and called a preview. The zoom is the layer's transform
+            // rather than a width, so scaling and moving are one gesture.
+            style={shape ? { width: shape.width, height: shape.height, maxWidth: 'none' } : undefined}
+            className="max-w-none shrink-0 select-none"
+            draggable={false}
+            onLoad={(event) => {
+              const img = event.currentTarget;
+              setShape({ width: img.naturalWidth, height: img.naturalHeight });
+            }}
+          />
+        </div>
       </div>
     </div>
   );

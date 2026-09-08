@@ -21,6 +21,20 @@ import { inlineMediaBounds } from '@/workbench/media-bounds';
  */
 const DIVIDER = 'w-0.5 bg-background ring-1 ring-foreground';
 
+/**
+ * Why the wheel does nothing here, while it zooms every other picture surface
+ * (bw-gy6z).
+ *
+ * This is the thumbnail sitting inside a message, not the viewer. Two things
+ * are already spoken for on it: the drag is the wipe's split, which is the only
+ * way to move the line, and the wheel is the transcript's scroll. A picture
+ * that ate the wheel would be a picture the reader could not scroll past — the
+ * transcript would snag every time the pointer crossed one, which is worse than
+ * anything zooming here would buy. So the gesture lives one level up, in
+ * `picture-viewer.tsx`, which this opens through `onLook` — the same route the
+ * picture grid takes, so there is one zoomable surface rather than three.
+ */
+
 export function ImageComparisonView({ comparison, onLook }: {
   comparison: ImageComparison;
   onLook?: (comparison: ImageComparison) => void;

@@ -9,7 +9,10 @@
  * there are.
  *
  * The block is a thumbnail and nothing more. Clicking any picture in it opens
- * that picture whole, which is what makes cropping a cell safe.
+ * that picture whole, which is what makes cropping a cell safe — and it is also
+ * where the wheel zoom and the drag live (bw-gy6z). A cell here is too small to
+ * look around inside and would have to fight the transcript for the wheel, so
+ * the gesture belongs to the viewer that opens, not to the thumbnail.
  */
 import { Tooltip } from '@/components/ui/tooltip';
 import { inlineMediaBounds } from '@/workbench/media-bounds';
