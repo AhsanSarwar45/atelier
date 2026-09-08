@@ -40,12 +40,15 @@ export function PathChip({
   absolute,
   raw,
   line,
+  endLine = null,
   target = 'default',
   look = 'link',
 }: {
   absolute: string;
   raw: string;
   line: number | null;
+  /** The last line of a range, when the writer named one (`@a.ts:3-9`). */
+  endLine?: number | null;
   target?: 'default' | 'editor';
   look?: PathLook;
 }) {
@@ -58,6 +61,10 @@ export function PathChip({
   const marks = {
     'data-path-mention': absolute,
     ...(line === null ? {} : { 'data-path-line': String(line) }),
+    // A range rides alongside the first line rather than replacing it: opening
+    // still lands on line one of the range, and what else the reference asked
+    // for is there for whoever wants it (bw-gr8y.2).
+    ...(line === null || endLine === null ? {} : { 'data-path-range': `${line}-${endLine}` }),
     ...(target === 'editor' ? { 'data-path-target': 'editor' } : {}),
     'data-testid': 'path-chip',
   };

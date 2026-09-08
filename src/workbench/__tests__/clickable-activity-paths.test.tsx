@@ -23,7 +23,7 @@ function draw() {
       const at = text.indexOf(path);
       return at < 0 ? [{ kind: 'text' as const, text }] : [
         { kind: 'text' as const, text: text.slice(0, at) },
-        { kind: 'path' as const, raw: path, absolute: path, line: null },
+        { kind: 'path' as const, raw: path, absolute: path, line: null, endLine: null },
         { kind: 'text' as const, text: text.slice(at + path.length) },
       ];
     }}>

@@ -30,7 +30,8 @@
  * still the reader's own words, so the command still copies as it was written.
  */
 import { OLD_CARD } from '@/lib/address';
-import { pathsIn, type OnDisk, type PathPiece, type Rooted } from '@/workbench/paths';
+import { askableIn, pathsIn, type OnDisk, type PathPiece, type Rooted } from '@/workbench/paths';
+import { findReferences, referenceLabel, resolveReference } from '@/workbench/references';
 
 /** One stretch of a message: plain words, or something that opens. */
 export type Piece =
@@ -90,6 +91,34 @@ export function mentionsIn(text: string, existing: Existing): Piece[] {
  */
 export function openableIn(text: string, existing: Existing, where: Rooted, disk: OnDisk): Piece[] {
   const out: Piece[] = [];
+  let from = 0;
+
+  // A reference goes first and takes its whole span with it. The writer put the
+  // `@` there to say "this file, these lines"; nothing else in the text gets a
+  // say about those characters, and the badge it becomes carries a range no
+  // bare path can (`references.ts`).
+  for (const found of findReferences(text)) {
+    const absolute = resolveReference(found, where);
+    if (!absolute || !disk.real(absolute)) continue;
+    if (found.start > from) pushAll(out, text.slice(from, found.start), existing, where, disk);
+    out.push({
+      kind: 'path',
+      // Drawn in our own form, without the `@`: whatever shape it was written
+      // in, the reader is shown the one shape.
+      raw: referenceLabel(found),
+      absolute,
+      line: found.line,
+      endLine: found.endLine,
+    });
+    from = found.end;
+  }
+  if (from < text.length) pushAll(out, text.slice(from), existing, where, disk);
+
+  return out.length > 0 ? out : [{ kind: 'text', text }];
+}
+
+/** The cards and the bare paths of one run of words, added to what is there. */
+function pushAll(out: Piece[], text: string, existing: Existing, where: Rooted, disk: OnDisk): void {
   for (const piece of mentionsIn(text, existing)) {
     if (piece.kind !== 'text') {
       out.push(piece);
@@ -100,7 +129,20 @@ export function openableIn(text: string, existing: Existing, where: Rooted, disk
       out.push(part);
     }
   }
-  return out.length > 0 ? out : [{ kind: 'text', text }];
+}
+
+/**
+ * Every address a run of text might be naming — the bare ones and the ones
+ * written as references — resolved, whether or not they are real. What to go
+ * and ask disk about, so the answers are back before the reader looks.
+ */
+export function openableAsks(text: string, where: Rooted): string[] {
+  const out = new Set<string>(askableIn(text, where));
+  for (const found of findReferences(text)) {
+    const absolute = resolveReference(found, where);
+    if (absolute) out.add(absolute);
+  }
+  return Array.from(out);
 }
 
 /* ------------------------------------------------------------------ *
@@ -285,6 +327,9 @@ function marker(piece: Exclude<Piece, { kind: 'text' }>): HastNode {
       properties: {
         'data-path-mention': piece.absolute,
         ...(piece.line === null ? {} : { 'data-path-line': String(piece.line) }),
+        ...(piece.line === null || piece.endLine === null
+          ? {}
+          : { 'data-path-range': `${piece.line}-${piece.endLine}` }),
       },
       children: [{ type: 'text', value: piece.raw }],
     };

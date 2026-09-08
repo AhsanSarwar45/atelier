@@ -69,10 +69,10 @@ import { GitDiffView } from '@/workbench/git-diff-view';
 import { useKnownCards, useKnownCardStatuses } from '@/workbench/known-cards';
 import { drawnRows } from '@/workbench/machine-lines';
 import { inWords, PERMISSION_MODE } from '@/workbench/machine-words';
-import { addressedBy, openableIn } from '@/workbench/mentions';
+import { addressedBy, openableAsks, openableIn } from '@/workbench/mentions';
 import { providerMessageIsCurrent } from '@/workbench/provider-messages';
 import { PathChip, openPathClicked } from '@/workbench/path-chip';
-import { askableIn, pathsIn, type Rooted } from '@/workbench/paths';
+import { pathsIn, type Rooted } from '@/workbench/paths';
 import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
@@ -721,7 +721,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   useEffect(() => {
     const asking = new Set<string>();
     for (const item of view.items) {
-      for (const text of textOfItem(item)) for (const p of askableIn(text, where)) asking.add(p);
+      for (const text of textOfItem(item)) for (const p of openableAsks(text, where)) asking.add(p);
     }
     if (asking.size > 0) disk.ask(Array.from(asking));
   }, [view.items, where, disk]);
@@ -738,8 +738,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           where,
           disk,
         ),
-      path: (absolute, raw, line) => (
-        <PathChip absolute={absolute} raw={raw} line={line} look="badge" />
+      path: (absolute, raw, line, endLine) => (
+        <PathChip absolute={absolute} raw={raw} line={line} endLine={endLine} look="badge" />
       ),
       card,
       //

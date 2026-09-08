@@ -37,6 +37,8 @@ export type PathPiece =
       absolute: string;
       /** The line it named, when it named one. */
       line: number | null;
+      /** The last line of a range, when it named one (`@a.ts:3-9`). */
+      endLine: number | null;
     };
 
 /**
@@ -191,6 +193,9 @@ export function pathsIn(text: string, where: Rooted, disk: OnDisk): PathPiece[] 
       raw: text.slice(c.at, c.at + c.length),
       absolute,
       line: c.line,
+      // A bare path never names a range: `src/a.ts:3-9` in prose is a path and
+      // then a dash. Only a reference does, and that is `references.ts`.
+      endLine: null,
     });
     from = c.at + c.length;
   }

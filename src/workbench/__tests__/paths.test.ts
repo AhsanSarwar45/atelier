@@ -122,7 +122,13 @@ describe('what becomes a chip', () => {
   it('splits the words around a file that is really there', () => {
     expect(pathsIn('the fix is in src/lib/api.ts now', WHERE, ALL)).toEqual([
       { kind: 'text', text: 'the fix is in ' },
-      { kind: 'path', raw: 'src/lib/api.ts', absolute: '/home/someone/project/src/lib/api.ts', line: null },
+      {
+        kind: 'path',
+        raw: 'src/lib/api.ts',
+        absolute: '/home/someone/project/src/lib/api.ts',
+        line: null,
+        endLine: null,
+      },
       { kind: 'text', text: ' now' },
     ]);
   });
@@ -140,6 +146,8 @@ describe('what becomes a chip', () => {
       raw: 'src/lib/api.ts:42',
       absolute: '/home/someone/project/src/lib/api.ts',
       line: 42,
+      // A bare path never names a range; only a reference does (`references.ts`).
+      endLine: null,
     });
   });
 

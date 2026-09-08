@@ -43,7 +43,13 @@ export interface Mentions {
    * code included; the plain link belongs to the rows built out of painted HTML
    * and not to anything here (bw-1e2e.1).
    */
-  path?: (absolute: string, raw: string, line: number | null) => ReactNode;
+  path?: (
+    absolute: string,
+    raw: string,
+    line: number | null,
+    /** The last line, when the words named a range — `@src/a.ts:3-9`. */
+    endLine: number | null,
+  ) => ReactNode;
   /**
    * A whole address, when it names a card or a report of this app's own — drawn
    * as that chip rather than as raw blue text. Nothing, and the address is left
@@ -78,6 +84,16 @@ function textOf(children: ReactNode): string {
   if (typeof children === 'string') return children;
   if (Array.isArray(children)) return children.map(textOf).join('');
   return '';
+}
+
+/**
+ * The last line of a marked range — `3-9` is line 9 — or nothing when the span
+ * named a single line or none at all (`references.ts`).
+ */
+function lastLineOf(range: string | undefined): number | null {
+  const last = range?.split('-')[1];
+  const line = last ? Number(last) : NaN;
+  return Number.isFinite(line) ? line : null;
 }
 
 /**
@@ -361,7 +377,16 @@ export function MarkdownBody({
             if (path && mentions?.path) {
               const line = marks['data-path-line'];
               const written = textOf(props.children);
-              return <>{mentions.path(path, written || path, line ? Number(line) : null)}</>;
+              return (
+                <>
+                  {mentions.path(
+                    path,
+                    written || path,
+                    line ? Number(line) : null,
+                    lastLineOf(marks['data-path-range']),
+                  )}
+                </>
+              );
             }
             return <span {...props} />;
           },
