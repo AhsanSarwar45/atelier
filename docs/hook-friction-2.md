@@ -905,3 +905,11 @@ the same reason cannot be removed from inside itself. A gate that let a job's
 close through when all its children are closed, or that treated the land step's
 own worktree as removable by the card that owns it, would leave the standing
 refusals intact and cost this job nothing.
+
+Repeated on `bw-2xjd.3`: the claimed `step:land` card was refused when it ran
+`git worktree remove …/bw-2xjd.1` followed by `git branch -d bw-2xjd.1` against
+its clean, already-landed work item. The refusal again resolved the Git write
+to `/home/ahsan/dev/beads-web` and discarded the ownership of the worktree the
+command was issued from. `board/land bw-2xjd.3` also cannot substitute for the
+cleanup: it requires a commit named after a card the workflow itself marks
+`no-code`.
