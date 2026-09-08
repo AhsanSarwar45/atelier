@@ -26,6 +26,7 @@ import {
 import { PRODUCT_NAME } from '@/lib/identity';
 import { cn, projectDir } from '@/lib/utils';
 import ChatTab from '@/workbench/chat-tab';
+import FilesTab from '@/workbench/files-tab';
 import { WorkbenchStatus } from '@/workbench/globals';
 import { useShowingFolder } from '@/workbench/terminal-shells';
 
@@ -46,7 +47,7 @@ function ProjectTabs() {
   // The address decides which tab is showing, which chat is drawn in it and
   // which card is over the top, so every one of them survives a link, a fresh
   // tab and the Back button (docs/designs/app-shell.md §1.7).
-  const { id: projectId, tab, chat: openChat, card: openCard } = whereFrom(params);
+  const { id: projectId, tab, chat: openChat, card: openCard, file: openFile, line: openLine } = whereFrom(params);
   const { project, error: projectError, refetch } = useProject(projectId);
   // The folder this screen is showing, which is where a shell opened from
   // its bar starts. `projectDir` and not `project.path`, because a
@@ -56,7 +57,10 @@ function ProjectTabs() {
   const terminal = theme.headerVariant === 'terminal';
   const [settingsOpen, setSettingsOpen] = useState(false);
   const usesBeads = project?.usesBeads !== false;
-  const shownTab = usesBeads ? tab : 'chat';
+  // The board is the one tab a project can opt out of. Files are files whether
+  // or not anybody keeps cards here, so opting out of the board sends the board
+  // back to the chat and leaves the other two alone.
+  const shownTab = usesBeads || tab !== 'board' ? tab : 'chat';
   const shownCard = usesBeads ? openCard : null;
 
   useEffect(() => {
@@ -189,26 +193,33 @@ function ProjectTabs() {
           <WorkbenchStatus />
         </>
       }
-      tabs={usesBeads ? (
+      tabs={
         <Tabs
-          value={tab}
+          value={shownTab}
           // Pushed, so the tab he left is a step back. It also keeps the chat or
           // chat it was pointed at: coming back to a tab should be what he was
           // reading, not an empty one.
           onValueChange={(next) =>
-            go({ tab: next === 'chat' ? 'chat' : 'board' })
+            go({ tab: next === 'chat' ? 'chat' : next === 'files' ? 'files' : 'board' })
           }
         >
           <TabsList data-testid="project-tabs">
             <TabsTrigger value="chat" data-testid="tab-chat">
               Chat
             </TabsTrigger>
-            <TabsTrigger value="board" data-testid="tab-board">
-              Board
+            {/* Only the board needs a board. Files stand on the folder itself,
+                so a project that keeps no cards still gets them. */}
+            {usesBeads && (
+              <TabsTrigger value="board" data-testid="tab-board">
+                Board
+              </TabsTrigger>
+            )}
+            <TabsTrigger value="files" data-testid="tab-files">
+              Files
             </TabsTrigger>
           </TabsList>
         </Tabs>
-      ) : undefined}
+      }
     >
       {/* The project itself could not be read, so nothing under the tabs has
           anything to draw: every one of them is mounted only once the project
@@ -232,6 +243,17 @@ function ProjectTabs() {
 
       {shownTab === 'chat' && !projectError && (
         <ChatTab projectId={projectId} projectPath={project?.path ?? null} openSessionId={openChat} />
+      )}
+
+      {/* Only the tab in front is mounted here too: a tree left alive behind the
+          chat keeps watching a folder nobody is looking at. */}
+      {shownTab === 'files' && !projectError && (
+        <FilesTab
+          projectId={projectId}
+          projectPath={project?.path ?? null}
+          file={openFile}
+          line={openLine}
+        />
       )}
 
       {/* The board and card panel read ONE list, held here: an edit in the panel

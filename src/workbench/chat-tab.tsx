@@ -7,7 +7,7 @@
  */
 'use client';
 
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -96,10 +96,16 @@ import { PictureViewer } from '@/workbench/picture-viewer';
 import { useEpicChecklist } from '@/workbench/epic-checklist';
 import { firstAvailableProvider, providerIsAvailable, useProviders, whyUnavailable } from '@/workbench/providers';
 import { ModelIcon } from '@/workbench/model-icon';
+import { DEFAULT_PANEL_WIDTH, ResizeDivider, rememberedPanelWidth } from '@/workbench/resize-divider';
 import * as api from '@/lib/api';
 import { WhereToWork, type Where } from '@/workbench/where-to-work';
 
 export { PictureViewer } from '@/workbench/picture-viewer';
+
+// The handle between the rails and the transcript lives beside the Files tab's
+// copy of the same handle. Re-exported because this is where every caller has
+// always reached for it.
+export { ResizeDivider } from '@/workbench/resize-divider';
 
 /** Where the "show me everything" switch is remembered between visits. */
 const EVERY_CHAT = 'workbench.every-chat';
@@ -109,64 +115,7 @@ const NEW_CHAT_DEFAULT = 'workbench.new-chat-default';
 const NO_MARK: ReadonlySet<string> = new Set<string>();
 const LEFT_PANEL_WIDTH = 'workbench.left-panel-width';
 const RIGHT_PANEL_WIDTH = 'workbench.right-panel-width';
-const DEFAULT_PANEL_WIDTH = 288;
-const MIN_PANEL_WIDTH = 208;
-const MAX_PANEL_WIDTH = 560;
 const MIN_CHAT_WIDTH = 320;
-
-function rememberedPanelWidth(key: string): number {
-  const width = Number(localStorage.getItem(key));
-  return Number.isFinite(width) && width >= MIN_PANEL_WIDTH ? Math.min(width, MAX_PANEL_WIDTH) : DEFAULT_PANEL_WIDTH;
-}
-
-export function ResizeDivider({ side, value, onChange, maximum, onDragging }: {
-  side: 'left' | 'right';
-  value: number;
-  onChange: (width: number) => void;
-  maximum: () => number;
-  onDragging?: (dragging: boolean) => void;
-}) {
-  const drag = useRef<{ x: number; width: number } | null>(null);
-  const resize = (width: number) => onChange(Math.max(MIN_PANEL_WIDTH, Math.min(width, MAX_PANEL_WIDTH, maximum())));
-  const move = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!drag.current) return;
-    const distance = event.clientX - drag.current.x;
-    resize(drag.current.width + (side === 'left' ? distance : -distance));
-  };
-  return (
-    <div
-      role="separator"
-      aria-label={`Resize ${side} panel`}
-      aria-orientation="vertical"
-      aria-valuemin={MIN_PANEL_WIDTH}
-      aria-valuemax={Math.max(MIN_PANEL_WIDTH, maximum())}
-      aria-valuenow={Math.round(value)}
-      tabIndex={0}
-      data-testid={`${side}-panel-resizer`}
-      className="group relative z-40 -mx-1 hidden w-2 shrink-0 cursor-col-resize touch-none md:block"
-      onPointerDown={(event) => {
-        drag.current = { x: event.clientX, width: value };
-        onDragging?.(true);
-        event.currentTarget.setPointerCapture(event.pointerId);
-      }}
-      onPointerMove={move}
-      onPointerUp={(event) => {
-        drag.current = null;
-        onDragging?.(false);
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }}
-      onPointerCancel={() => { drag.current = null; onDragging?.(false); }}
-      onKeyDown={(event) => {
-        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-        event.preventDefault();
-        const direction = event.key === 'ArrowRight' ? 1 : -1;
-        resize(value + direction * (side === 'left' ? 16 : -16));
-      }}
-    >
-      <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/60 transition-colors group-hover:bg-primary group-focus:bg-primary" />
-    </div>
-  );
-}
 
 /**
  * Everything one row of a conversation actually says, for going through once
