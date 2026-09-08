@@ -3,12 +3,11 @@
 /**
  * The Files tab: the project's own files, beside a view of the one being read.
  *
- * This is the room and not yet the furniture (bw-g3o3.4). The tree that fills
- * the rail (`file-tree.tsx`) and the viewer that fills the centre
- * (`file-viewer.tsx`) are separate cards, so the two places they will stand are
- * marked here by name and left quiet until then. What IS settled is everything
- * the two of them have to agree about: which checkout the files are being read
- * out of, how wide the rail is, and that both survive a reload.
+ * This is the room (bw-g3o3.4). What it settles is everything the tree in the
+ * rail and the viewer in the centre have to agree about: which checkout the
+ * files are being read out of, how wide the rail is, and that both survive a
+ * reload. The tree (`file-tree.tsx`) now stands in the rail (bw-g3o3.12); the
+ * viewer's own place is still marked below by name.
  *
  * The root matters more than it looks. A project with worktrees has the same
  * file at several paths at once, on different branches, and a tree that quietly
@@ -19,9 +18,13 @@
 
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 
+import { useRouter, useSearchParams } from 'next/navigation';
+
 import { Picker } from '@/components/ui/picker';
+import { addressWith } from '@/lib/address';
 import * as api from '@/lib/api';
 import type { GitTree } from '@/lib/api';
+import FileTree from '@/workbench/file-tree';
 import { ResizeDivider, DEFAULT_PANEL_WIDTH, rememberedPanelWidth } from '@/workbench/resize-divider';
 
 /** How wide the file rail is, the same key whichever project is open. */
@@ -84,6 +87,8 @@ export function rootShown(roots: GitTree[], remembered: string | null, projectPa
 }
 
 export default function FilesTab({ projectId, projectPath, file, line }: FilesTabProps) {
+  const router = useRouter();
+  const params = useSearchParams();
   const [width, setWidth] = useState(DEFAULT_PANEL_WIDTH);
   const [trees, setTrees] = useState<GitTree[]>([]);
   const [remembered, setRemembered] = useState<string | null>(null);
@@ -127,6 +132,17 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
   );
   const root = projectPath ? rootShown(roots, remembered, projectPath) : null;
 
+  /**
+   * A file picked in the tree goes into the address, never into a state here:
+   * the viewer reads it from there, and so does a link somebody pastes to a
+   * colleague. The line is dropped, because the line that was right for the
+   * file being left is wrong for the one arriving.
+   */
+  const openFile = useCallback(
+    (path: string) => router.push(addressWith(params, { tab: 'files', file: path, line: null })),
+    [router, params],
+  );
+
   const chooseRoot = useCallback(
     (next: string) => {
       setRemembered(next);
@@ -161,8 +177,9 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
             }))}
           />
         </div>
-        {/* The tree itself (bw-g3o3.12) goes here, reading `root`. */}
-        <div className="min-h-0 flex-1 overflow-auto" data-testid="files-tree-slot" />
+        <div className="flex min-h-0 flex-1 flex-col" data-testid="files-tree-slot">
+          <FileTree root={root} selected={file} onOpen={openFile} />
+        </div>
       </div>
       <ResizeDivider
         side="left"

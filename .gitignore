@@ -121,3 +121,8 @@ worktrees/
 
 # The dev server's own log, one machine's running notes.
 /.dev-*.log
+
+# The file tree's icons, copied out of material-icon-theme by
+# scripts/build-file-icons.mjs on every install. Generated, so not kept here;
+# the pruned manifest beside them (src/components/file-icons.ts) IS kept.
+/public/file-icons/
