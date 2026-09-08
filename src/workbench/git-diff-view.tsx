@@ -121,7 +121,10 @@ function FileDiff({
              read by scrolling the page rather than by scrolling a box inside
              a page that also scrolls. */
           <Panel tone="frame" inset="none" className="overflow-hidden">
-            <DiffTable rows={rows} language={languageOf(file.path)} />
+            {/* The path the table copies with is the repository-relative one
+                the chat's own worktree knows this file by, which is the path a
+                reference has to carry for the agent to find it again. */}
+            <DiffTable rows={rows} language={languageOf(file.path)} path={file.path} />
           </Panel>
         )
       )}
