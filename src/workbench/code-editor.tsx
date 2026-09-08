@@ -105,6 +105,13 @@ export interface CodeEditorProps {
    * clipboard, and returning nothing leaves the text alone.
    */
   onSelectionCopy?: (selection: CopiedSelection) => string | null | undefined;
+  /**
+   * Told whenever the selection moves, with what is selected now or null when
+   * nothing is. The text comes from the document rather than from the DOM: only
+   * the lines in view are drawn, so a selection read off the page would stop at
+   * the bottom of the viewport.
+   */
+  onSelection?: (selection: CopiedSelection | null) => void;
   className?: string;
 }
 
@@ -138,6 +145,24 @@ const writable: Extension = [EditorState.readOnly.of(false), EditorView.editable
 const lineAt = (state: EditorState, position: number) => state.doc.lineAt(position).number;
 
 /**
+ * What a range of the document is, said in lines and text.
+ *
+ * The last line is the last one a reader would say they selected, which is not
+ * always the line the end position sits on: dragging to the end of line 14
+ * lands on the start of line 15, and answering `12-15` for three selected lines
+ * would name a line the reader never touched.
+ */
+export function copiedSelection(state: EditorState, range: { from: number; to: number }): CopiedSelection {
+  const end = state.doc.lineAt(range.to);
+  const past = end.from === range.to && range.to > range.from;
+  return {
+    text: state.sliceDoc(range.from, range.to),
+    fromLine: lineAt(state, range.from),
+    toLine: past ? Math.max(1, end.number - 1) : end.number,
+  };
+}
+
+/**
  * Whether a keydown is somebody trying to type, as opposed to moving about.
  *
  * One character or a newline, with no modifier that would make it a command.
@@ -161,6 +186,7 @@ export function CodeEditor({
   onEditIntent,
   onSave,
   onSelectionCopy,
+  onSelection,
   className,
 }: CodeEditorProps) {
   const host = useRef<HTMLDivElement | null>(null);
@@ -173,10 +199,12 @@ export function CodeEditor({
   // every render does not rebuild the editor with them.
   const changed = useRef(onChange);
   const copied = useRef(onSelectionCopy);
+  const moved = useRef(onSelection);
   const asked = useRef(onEditIntent);
   const saved = useRef(onSave);
   changed.current = onChange;
   copied.current = onSelectionCopy;
+  moved.current = onSelection;
   asked.current = onEditIntent;
   saved.current = onSave;
 
@@ -228,14 +256,19 @@ export function CodeEditor({
         // Deliberately no `EditorView.lineWrapping`: a wrapped line breaks the
         // one-line-one-number promise the gutter makes, and code is read by it.
         EditorView.clipboardOutputFilter.of((copiedText, copiedState) => {
+          // The text is the filter's, not the selection's: an empty selection
+          // is a line-wise copy, whose text is a whole line nobody selected.
           const answer = copied.current?.({
+            ...copiedSelection(copiedState, copiedState.selection.main),
             text: copiedText,
-            fromLine: lineAt(copiedState, copiedState.selection.main.from),
-            toLine: lineAt(copiedState, copiedState.selection.main.to),
           });
           return answer ?? copiedText;
         }),
         EditorView.updateListener.of((update) => {
+          if (update.selectionSet || update.docChanged) {
+            const range = update.state.selection.main;
+            moved.current?.(range.empty ? null : copiedSelection(update.state, range));
+          }
           if (!update.docChanged) return;
           if (update.transactions.some((transaction) => transaction.annotation(ExternalChange))) return;
           changed.current?.(update.state.doc.toString());

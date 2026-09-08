@@ -6,17 +6,25 @@
  *
  * It is handed its file rather than fetching one, so the read route, the tab
  * around it and this can be built and tested apart from each other.
+ *
+ * Copying out of it copies a REFERENCE — `@src/a.ts:12-40` — and not the lines,
+ * the same bargain the git diff strikes (bw-gr8y.8): what a reader usually
+ * wants after reading a few lines is to say "these lines" to the agent, and
+ * that is one gesture rather than a retyped path. The code itself is never
+ * further than the "Copy text" button in the header or the one the selection
+ * raises beside it (bw-g3o3.10).
  */
 
-import { useCallback, useEffect, useMemo, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { ExternalLink, FolderOpen, Pencil } from 'lucide-react';
+import { Copy, ExternalLink, FolderOpen, Pencil } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { CodeEditor } from '@/workbench/code-editor';
+import { CodeEditor, type CopiedSelection } from '@/workbench/code-editor';
 import { openLocalPath } from '@/workbench/open-local-path';
+import { referenceUnder, relativeToRoot } from '@/workbench/references';
 import { useFileEdits } from '@/workbench/use-file-edits';
 
 /**
@@ -51,17 +59,6 @@ export function humaneSize(bytes: number): string {
     unit += 1;
   }
   return `${size >= 10 ? Math.round(size) : Math.round(size * 10) / 10} ${units[unit]}`;
-}
-
-/**
- * The path as it reads under the project: the folders that lead to it and the
- * name at the end. A file outside the root keeps its whole path rather than
- * being given a misleading short one.
- */
-export function relativeToRoot(root: string, path: string): string {
-  if (!root) return path;
-  const base = root.endsWith('/') ? root : `${root}/`;
-  return path.startsWith(base) ? path.slice(base.length) : path;
 }
 
 /**
@@ -164,6 +161,46 @@ export function FileViewer({
   );
   const edits = useFileEdits(editableFile ? path : null, read);
 
+  /** What is selected in the editor now, and where the offer beside it sits. */
+  const [selection, setSelection] = useState<{ copied: CopiedSelection; at: { left: number; top: number } } | null>(
+    null,
+  );
+
+  // Where the button goes is the browser's business — the selection CodeMirror
+  // reports is in document positions, and only the page knows where those are
+  // drawn. A selection has no box where there is no layout, which is every
+  // test; the offer still stands, it just has nowhere in particular to sit.
+  const selected = useCallback((copied: CopiedSelection | null) => {
+    if (!copied) return setSelection(null);
+    const range = typeof window === 'undefined' ? null : window.getSelection();
+    const box = (range?.rangeCount ? range.getRangeAt(0).getBoundingClientRect?.() : null) ?? {
+      right: 0,
+      bottom: 0,
+    };
+    setSelection({ copied, at: { left: box.right, top: box.bottom + 6 } });
+  }, []);
+
+  // A different file is a different selection; the one from the last file must
+  // not outlive it and offer up lines this file has never had.
+  useEffect(() => setSelection(null), [path]);
+
+  /**
+   * The reference a copy is answered with. The whole point of the card: what
+   * lands on the clipboard is what the composer draws as a badge, written
+   * through the one grammar, so it cannot drift from the diff's answer.
+   */
+  const reference = useCallback(
+    (copied: CopiedSelection) =>
+      referenceUnder({ root, path, line: copied.fromLine, endLine: copied.toLine }),
+    [root, path],
+  );
+
+  /** The escape hatch: the code itself, the selection's or the whole file's. */
+  const copyText = useCallback(() => {
+    const wanted = selection?.copied.text ?? (file?.kind === 'text' ? file.text : '');
+    if (wanted) void navigator.clipboard?.writeText(wanted);
+  }, [selection, file]);
+
   // A save, and then the folder read again — whether it landed or was refused,
   // since a refusal means the file moved and the tree is out of date either way.
   const asked = edits.save;
@@ -232,6 +269,24 @@ export function FileViewer({
               <Pencil className="h-3.5 w-3.5" />
             </Button>
           ))}
+        {file?.kind === 'text' && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 text-t-muted hover:text-t-primary"
+            title="Copy text"
+            aria-label="Copy text"
+            data-testid="file-viewer-copy-text"
+            // Pressing it must not be what takes the selection away, or the
+            // button would hand over the whole file instead of the lines the
+            // reader had just picked out.
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={copyText}
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </Button>
+        )}
         <Button
           type="button"
           variant="ghost"
@@ -319,9 +374,26 @@ export function FileViewer({
               onChange={edits.change}
               onEditIntent={editableFile ? edits.open : undefined}
               onSave={editableFile ? () => void save() : undefined}
+              onSelection={selected}
+              onSelectionCopy={reference}
               className="h-full"
             />
           </div>
+          {selection && (
+            <div
+              data-testid="file-copy-text"
+              style={{ position: 'fixed', left: selection.at.left, top: selection.at.top, zIndex: 40 }}
+              // Pressing the button must not be what takes the selection away,
+              // or there would be nothing left to copy by the time the click
+              // lands.
+              onMouseDown={(event) => event.preventDefault()}
+              className="-translate-x-full"
+            >
+              <Button type="button" size="xs" variant="outline" className="shadow-md" onClick={copyText}>
+                <Copy /> Copy text
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>

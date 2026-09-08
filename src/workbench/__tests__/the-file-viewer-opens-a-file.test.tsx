@@ -15,7 +15,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { THEMES } from '@/lib/themes';
 import { HIGHLIGHTED_LINE_CLASS } from '@/workbench/code-theme';
-import { FileViewer, PLAIN_ABOVE_LINES, humaneSize, relativeToRoot, tooLargeToParse } from '@/workbench/file-viewer';
+import { FileViewer, PLAIN_ABOVE_LINES, humaneSize, tooLargeToParse } from '@/workbench/file-viewer';
+import { relativeToRoot } from '@/workbench/references';
 
 vi.mock('@/lib/api', () => ({ fs: { openExternal: vi.fn().mockResolvedValue(undefined) } }));
 

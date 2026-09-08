@@ -170,6 +170,42 @@ export function formatReference(ref: Reference): string {
 }
 
 /**
+ * The path as it reads under a checkout: `src/a.ts` rather than the whole
+ * machine path, because that is the path an agent working in that checkout can
+ * open. A path that is not under the root keeps all of itself — a short path
+ * that leads nowhere is worse than a long one.
+ */
+export function relativeToRoot(root: string, path: string): string {
+  if (!root) return path;
+  const base = root.endsWith('/') ? root : `${root}/`;
+  return path.startsWith(base) ? path.slice(base.length) : path;
+}
+
+/** Something on disk, and the lines of it a reference should name. */
+export interface UnderRoot {
+  /** The checkout it is being read out of. The reference is written against it. */
+  root: string;
+  /** Its absolute path on the machine. */
+  path: string;
+  /** A folder is written with a trailing slash and never with lines. */
+  kind?: 'file' | 'folder';
+  line?: number | null;
+  endLine?: number | null;
+}
+
+/**
+ * A reference to a file on the machine, written against the checkout it is in.
+ *
+ * This is the one way the app turns "that thing on disk" into `@src/a.ts:12-40`
+ * — the viewer's copy, the tree's Copy reference and the path badges all come
+ * through here, so none of them can drift from the grammar above or from each
+ * other about what "relative" means.
+ */
+export function referenceUnder({ root, path, kind = 'file', line = null, endLine = null }: UnderRoot): string {
+  return formatReference({ path: relativeToRoot(root, path), line, endLine, kind });
+}
+
+/**
  * What a reference is DRAWN as: our own form with the `@` taken off, because the
  * badge around it already says "this is a file" (bw-gr8y.2).
  */

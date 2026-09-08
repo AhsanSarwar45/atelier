@@ -23,6 +23,10 @@
  * - **The address is the selection.** Clicking a file writes `file=` into the
  *   address, which is what the viewer reads. Nothing about which file is open
  *   lives in this component.
+ * - **A right-click hands the entry to the agent.** Copy reference gives
+ *   `@src/a.ts` for a file and `@src/` for a folder — the same grammar the
+ *   viewer's own copy writes, so a path picked out of the tree and a path
+ *   copied out of the text read as one thing (bw-g3o3.10).
  */
 
 import {
@@ -35,13 +39,20 @@ import {
 } from 'react';
 
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ChevronDown, ChevronRight, Eye, EyeOff } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, Eye, EyeOff } from 'lucide-react';
 
 import { FileIcon } from '@/components/file-icon';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Tooltip } from '@/components/ui/tooltip';
 import { git, fs as fsApi, type FsTreeEntry, type GitStatus } from '@/lib/api';
 import { STATUS_LOOK, type FileState } from '@/workbench/git-view';
+import { referenceUnder } from '@/workbench/references';
 import { useFolderReads } from '@/workbench/use-folder-reads';
 import { useRepositoryReads } from '@/workbench/use-repository-reads';
 
@@ -161,6 +172,8 @@ export default function FileTree({ root, selected, onOpen }: FileTreeProps) {
   const [status, setStatus] = useState<Map<string, FileState>>(new Map());
   /** The row the arrow keys are standing on. Not the same as the open file. */
   const [cursor, setCursor] = useState<string | null>(null);
+  /** The entry a right-click asked about, and where its menu is drawn. */
+  const [menu, setMenu] = useState<{ row: TreeRow; at: { left: number; top: number } } | null>(null);
   const pane = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -296,6 +309,10 @@ export default function FileTree({ root, selected, onOpen }: FileTreeProps) {
   useEffect(() => {
     if (selected) setCursor(selected);
   }, [selected]);
+
+  // A tree of a different checkout has no row for the menu to belong to any
+  // more, and the menu must not stay open over rows it was never opened on.
+  useEffect(() => setMenu(null), [root]);
 
   const virtual = useVirtualizer({
     count: rows.length,
@@ -435,6 +452,11 @@ export default function FileTree({ root, selected, onOpen }: FileTreeProps) {
                 data-status={state ?? undefined}
                 data-cursor={entry.path === cursor ? 'yes' : undefined}
                 onClick={() => choose(row)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setCursor(entry.path);
+                  setMenu({ row, at: { left: event.clientX, top: event.clientY } });
+                }}
                 style={{ height: `${ROW_HEIGHT}px`, transform: `translateY(${item.start}px)` }}
                 className={[
                   'absolute inset-x-0 top-0 flex cursor-pointer select-none items-center pr-2 text-[13px]',
@@ -473,6 +495,51 @@ export default function FileTree({ root, selected, onOpen }: FileTreeProps) {
           </p>
         )}
       </div>
+
+      {/* Radix hangs a menu off its trigger, and the trigger a right-click
+          wants is the pointer itself — so the trigger here is a bodiless anchor
+          left where the press landed, and the library does the placing, the
+          flipping near an edge, the keyboard and the dismissing. */}
+      <DropdownMenu
+        modal={false}
+        open={menu !== null}
+        onOpenChange={(shown) => (shown ? undefined : setMenu(null))}
+      >
+        <DropdownMenuTrigger
+          aria-hidden="true"
+          tabIndex={-1}
+          className="pointer-events-none fixed h-0 w-0"
+          style={{ left: menu?.at.left ?? 0, top: menu?.at.top ?? 0 }}
+        />
+        {menu && (
+          <DropdownMenuContent
+            align="start"
+            sideOffset={0}
+            data-testid="files-tree-menu"
+            data-path={menu.row.entry.path}
+            className="min-w-[10rem]"
+            // Closing must not haul the focus back to the anchor, which is a
+            // bodiless thing sitting where the pointer was.
+            onCloseAutoFocus={(event) => event.preventDefault()}
+          >
+            <DropdownMenuItem
+              data-testid="files-tree-copy-reference"
+              className="text-xs"
+              onSelect={() => {
+                void navigator.clipboard?.writeText(
+                  referenceUnder({
+                    root,
+                    path: menu.row.entry.path,
+                    kind: menu.row.entry.kind === 'dir' ? 'folder' : 'file',
+                  }),
+                );
+              }}
+            >
+              <Copy aria-hidden="true" /> Copy reference
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        )}
+      </DropdownMenu>
     </div>
   );
 }
