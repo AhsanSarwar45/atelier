@@ -8,14 +8,16 @@
  * around it and this can be built and tested apart from each other.
  */
 
-import type { ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, type ReactNode } from 'react';
 
-import { ExternalLink, FolderOpen } from 'lucide-react';
+import { ExternalLink, FolderOpen, Pencil } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { CodeEditor } from '@/workbench/code-editor';
 import { openLocalPath } from '@/workbench/open-local-path';
+import { useFileEdits } from '@/workbench/use-file-edits';
 
 /**
  * What the read route answers with, named structurally so this file does not
@@ -94,6 +96,22 @@ function Breadcrumb({ relative }: { relative: string }) {
   );
 }
 
+/**
+ * The one mark that says a file has work in it that is not on disk. The same
+ * shape the open-files strip draws on its tabs, so the two read as one thing.
+ */
+function UnsavedDot() {
+  return (
+    <Tooltip label="Unsaved changes">
+      <span
+        data-testid="file-viewer-dirty"
+        aria-label="Unsaved changes"
+        className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
+      />
+    </Tooltip>
+  );
+}
+
 function Notice({ testId, children }: { testId: string; children: ReactNode }) {
   return (
     <div data-testid={testId} className="flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-t-muted">
@@ -113,13 +131,60 @@ export interface FileViewerProps {
   file: ViewedFile | null;
   loading?: boolean;
   error?: string | null;
+  /**
+   * Told after a save landed, with the path that was written. The tab uses it
+   * to re-read the folder, so the tree's size and time catch up at once rather
+   * than waiting on the watch (bw-g3o3.8).
+   */
+  onSaved?: (path: string) => void;
   className?: string;
 }
 
-export function FileViewer({ root, path, line = null, file, loading = false, error = null, className }: FileViewerProps) {
+export function FileViewer({
+  root,
+  path,
+  line = null,
+  file,
+  loading = false,
+  error = null,
+  onSaved,
+  className,
+}: FileViewerProps) {
   const relative = relativeToRoot(root, path);
   const size = file ? file.size : null;
   const plain = file && file.kind === 'text' && tooLargeToParse(file.size, file.text);
+
+  // Only a whole text file is editable. A binary one has nothing to type into,
+  // and a truncated one was never shown in full — saving back what is on screen
+  // would cut the rest of the file off, which is why the server refuses it too.
+  const editableFile = file?.kind === 'text' && !file.truncated && !plain;
+  const read = useMemo(
+    () => (editableFile && file?.kind === 'text' ? { text: file.text, sha: file.sha256 ?? null } : null),
+    [editableFile, file],
+  );
+  const edits = useFileEdits(editableFile ? path : null, read);
+
+  // A save, and then the folder read again — whether it landed or was refused,
+  // since a refusal means the file moved and the tree is out of date either way.
+  const asked = edits.save;
+  const save = useCallback(async () => {
+    await asked();
+    onSaved?.(path);
+  }, [asked, onSaved, path]);
+
+  // Ctrl-S from anywhere in the pane, not only from inside the editor: the
+  // reader may have just come back from the Reload/Keep banner or the Save
+  // button, and neither of those gives the focus back.
+  useEffect(() => {
+    if (!editableFile) return () => {};
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 's' || !(event.ctrlKey || event.metaKey) || event.altKey) return;
+      event.preventDefault();
+      void save();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editableFile, save]);
 
   return (
     <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col', className)}>
@@ -128,12 +193,45 @@ export function FileViewer({ root, path, line = null, file, loading = false, err
         className="flex shrink-0 items-center gap-2 border-b border-b-default bg-surface-raised/50 px-3 py-1.5"
       >
         <Breadcrumb relative={relative} />
+        {edits.dirty && <UnsavedDot />}
         {size != null && (
           <span data-testid="file-viewer-size" className="shrink-0 text-[11px] tabular-nums text-t-faint">
             {humaneSize(size)}
           </span>
         )}
         <span className="flex-1" />
+        {edits.error && (
+          <span data-testid="file-viewer-save-error" className="shrink-0 truncate text-[11px] text-danger">
+            {edits.error}
+          </span>
+        )}
+        {editableFile &&
+          (edits.editable ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-[11px] text-t-muted hover:text-t-primary"
+              disabled={!edits.dirty || edits.saving}
+              data-testid="file-viewer-save"
+              onClick={() => void save()}
+            >
+              {edits.saving ? 'Saving…' : 'Save'}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 text-t-muted hover:text-t-primary"
+              title="Edit this file"
+              aria-label="Edit this file"
+              data-testid="file-viewer-edit"
+              onClick={edits.open}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          ))}
         <Button
           type="button"
           variant="ghost"
@@ -184,8 +282,45 @@ export function FileViewer({ root, path, line = null, file, loading = false, err
               Showing the first 2 MiB
             </div>
           )}
-          <div data-testid="file-viewer" className="min-h-0 flex-1">
-            <CodeEditor text={file.text} path={path} line={line} className="h-full" />
+          {edits.outside && (
+            <div
+              data-testid="file-viewer-outside"
+              className="flex shrink-0 items-center gap-2 border-b border-b-default bg-warning/10 px-3 py-1 text-[11px] text-t-secondary"
+            >
+              <span className="flex-1 truncate">This file changed on disk while you were editing it.</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-5 px-2 text-[11px]"
+                data-testid="file-viewer-reload"
+                onClick={edits.reload}
+              >
+                Reload
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-5 px-2 text-[11px]"
+                data-testid="file-viewer-keep"
+                onClick={edits.keep}
+              >
+                Keep mine
+              </Button>
+            </div>
+          )}
+          <div data-testid="file-viewer" className="min-h-0 flex-1" data-dirty={edits.dirty ? '' : undefined}>
+            <CodeEditor
+              text={editableFile ? edits.text : file.text}
+              path={path}
+              line={line}
+              editable={edits.editable}
+              onChange={edits.change}
+              onEditIntent={editableFile ? edits.open : undefined}
+              onSave={editableFile ? () => void save() : undefined}
+              className="h-full"
+            />
           </div>
         </div>
       )}

@@ -359,6 +359,179 @@ pub async fn read_file(Query(params): Query<FsExistsParams>) -> impl IntoRespons
     )
 }
 
+/// What a save is asked to do.
+///
+/// `ifSha` is the digest the reader's copy was read at — the `sha256` the read
+/// route handed over. It is what makes a save a replacement of a known text
+/// rather than a blind overwrite: a file that moved on disk in between no
+/// longer matches, and the save is refused instead of quietly throwing the
+/// other writer's work away.
+#[derive(Debug, Deserialize)]
+pub struct FsWriteBody {
+    /// The absolute path of the file to write.
+    pub path: String,
+    /// The whole new text of the file.
+    pub text: String,
+    /// The digest the text being replaced was read at, or nothing to write
+    /// whatever is there now.
+    #[serde(rename = "ifSha")]
+    pub if_sha: Option<String>,
+}
+
+/// What a save hands back: the digest of what is now on disk, so the next save
+/// can be checked against it with no read in between.
+#[derive(Debug, Serialize)]
+pub struct FileWritten {
+    /// SHA-256 of the bytes that were just written.
+    pub sha256: String,
+    /// The file's size in bytes afterwards.
+    pub size: u64,
+    /// Last modified afterwards, in milliseconds since the epoch.
+    pub mtime: i64,
+}
+
+/// The digest of a path's whole contents, read the same way [`read_file`] reads
+/// them — so what a save is checked against is exactly what the reader was
+/// given.
+fn digest_of(path: &std::path::Path) -> std::io::Result<String> {
+    let bytes = std::fs::read(path)?;
+    Ok(format!("{:x}", Sha256::digest(&bytes)))
+}
+
+/// Write `bytes` where `path` is, without there ever being a half-written file
+/// at that name.
+///
+/// A temp file beside the target, then a rename. Beside it on purpose: a rename
+/// is only atomic within one filesystem, and a temp directory is routinely on
+/// another one, which would turn this back into a copy somebody can read
+/// half of. The mode of what was there is carried over too, or a saved shell
+/// script comes back without its executable bit.
+///
+/// The temp file is removed on every path out that is not the rename, so a
+/// failed save leaves the directory exactly as it found it.
+fn written_atomically(path: &std::path::Path, bytes: &[u8], mode: Option<u32>) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_nanos())
+        .unwrap_or(0);
+    let temp = dir.join(format!(".{name}.atelier-{}-{nonce}.tmp", std::process::id()));
+
+    let put = || -> std::io::Result<()> {
+        let mut file = std::fs::File::create(&temp)?;
+        #[cfg(unix)]
+        if let Some(mode) = mode {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(mode))?;
+        }
+        file.write_all(bytes)?;
+        // Before the rename, not after: the rename is what publishes the name,
+        // and a name published over unflushed bytes is the crash that leaves an
+        // empty file where the reader's work was.
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temp, path)
+    };
+
+    put().inspect_err(|_| {
+        let _ = std::fs::remove_file(&temp);
+    })
+}
+
+/// PUT /api/fs/write
+///
+/// Replaces a file's whole text, refusing when it moved underneath the reader.
+///
+/// Deliberately narrow (bw-g3o3.8). It writes over a file that is already there
+/// and is an ordinary file — never a directory, never a device, and never a
+/// symlink, which is the one shape that could otherwise carry a write out of
+/// the home jail after the path itself had been checked. It will not save a
+/// file bigger than the read route hands over whole, because the reader was
+/// only ever shown the first [`TEXT_READ_LIMIT`] bytes of one and saving that
+/// back would silently cut the rest off.
+pub async fn write_file(Json(body): Json<FsWriteBody>) -> Response {
+    let path = PathBuf::from(&body.path);
+
+    if let Err(e) = validate_path_security(&path) {
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": e }))).into_response();
+    }
+    // `symlink_metadata` rather than `metadata`: this asks what is AT the path,
+    // so a link is seen as a link instead of as whatever it points at.
+    let metadata = match std::fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(_) => {
+            return (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "Path does not exist" })))
+                .into_response()
+        }
+    };
+    if !metadata.is_file() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Path is not a regular file" })),
+        )
+            .into_response();
+    }
+    if metadata.len() > TEXT_READ_LIMIT {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(serde_json::json!({ "error": "File is too large to save from the browser" })),
+        )
+            .into_response();
+    }
+
+    let current = match digest_of(&path) {
+        Ok(digest) => digest,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("Failed to read file: {e}") })),
+            )
+                .into_response()
+        }
+    };
+    if let Some(asked) = body.if_sha.as_deref() {
+        if !asked.eq_ignore_ascii_case(&current) {
+            // The digest of what is actually there goes back with the refusal,
+            // so the reader can be offered the two texts without another call.
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": "The file changed on disk since it was read",
+                    "sha256": current,
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    let bytes = body.text.into_bytes();
+    #[cfg(unix)]
+    let mode = {
+        use std::os::unix::fs::PermissionsExt;
+        Some(metadata.permissions().mode())
+    };
+    #[cfg(not(unix))]
+    let mode: Option<u32> = None;
+
+    if let Err(e) = written_atomically(&path, &bytes, mode) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Failed to write file: {e}") })),
+        )
+            .into_response();
+    }
+
+    let written = FileWritten {
+        sha256: format!("{:x}", Sha256::digest(&bytes)),
+        size: bytes.len() as u64,
+        mtime: std::fs::metadata(&path).as_ref().map(modified_millis).unwrap_or(0),
+    };
+    (StatusCode::OK, Json(written)).into_response()
+}
+
 /// GET /api/presentation-assets/:asset
 pub async fn presentation_asset(headers: HeaderMap, Path(asset): Path<String>) -> Response {
     if !media_origin_allowed(&headers) {
@@ -719,6 +892,7 @@ mod tests {
         axum::Router::new()
             .route("/api/fs/tree", axum::routing::get(tree))
             .route("/api/fs/read", axum::routing::get(read_file))
+            .route("/api/fs/write", axum::routing::put(write_file))
             .route("/api/fs/media", axum::routing::get(media))
     }
 
@@ -926,6 +1100,168 @@ mod tests {
             answer["sha256"],
             format!("{:x}", Sha256::digest(&whole[..TEXT_READ_LIMIT as usize])),
         );
+    }
+    /// The digest a read handed over, sent straight back as a save's `ifSha`.
+    async fn sha_of(file: &std::path::Path) -> String {
+        let (_, answer) = json_of(asked_for("/api/fs/read", "path", file)).await;
+        answer["sha256"].as_str().unwrap().to_string()
+    }
+
+    async fn saved(body: serde_json::Value) -> (StatusCode, serde_json::Value) {
+        let asked = axum::http::Request::builder()
+            .method("PUT")
+            .uri("/api/fs/write")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let (status, _, bytes) = answered(asked).await;
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    /// The whole of a save that went well: the bytes are on disk, the digest
+    /// handed back is theirs, and it is the one the NEXT save can be checked
+    /// against without a read in between.
+    #[tokio::test]
+    async fn a_save_puts_the_text_on_disk_and_hands_back_its_digest() {
+        let root = scratch();
+        let file = root.path().join("notes.md");
+        std::fs::write(&file, "before\n").unwrap();
+        let read_at = sha_of(&file).await;
+
+        let (status, answer) = saved(serde_json::json!({
+            "path": file.to_string_lossy(),
+            "text": "after\n",
+            "ifSha": read_at,
+        }))
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "after\n");
+        assert_eq!(answer["size"], 6);
+        assert_eq!(answer["sha256"], format!("{:x}", Sha256::digest(b"after\n")));
+        assert!(answer["mtime"].as_i64().unwrap() > 0);
+
+        // The second save uses only what the first one answered with.
+        let (status, _) = saved(serde_json::json!({
+            "path": file.to_string_lossy(),
+            "text": "later\n",
+            "ifSha": answer["sha256"],
+        }))
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "later\n");
+    }
+
+    /// Somebody else wrote the file between the read and the save. The save is
+    /// refused rather than throwing their work away, and the refusal carries
+    /// the digest of what is actually there.
+    #[tokio::test]
+    async fn a_save_against_a_digest_that_moved_is_refused() {
+        let root = scratch();
+        let file = root.path().join("shared.txt");
+        std::fs::write(&file, "mine\n").unwrap();
+        let read_at = sha_of(&file).await;
+        std::fs::write(&file, "theirs\n").unwrap();
+
+        let (status, answer) = saved(serde_json::json!({
+            "path": file.to_string_lossy(),
+            "text": "mine, edited\n",
+            "ifSha": read_at,
+        }))
+        .await;
+
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "theirs\n", "the refusal wrote anyway");
+        assert!(answer["error"].as_str().unwrap().contains("changed on disk"));
+        assert_eq!(answer["sha256"], format!("{:x}", Sha256::digest(b"theirs\n")));
+
+        // Told what is there now, the same save goes through.
+        let (status, _) = saved(serde_json::json!({
+            "path": file.to_string_lossy(),
+            "text": "mine, edited\n",
+            "ifSha": answer["sha256"],
+        }))
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "mine, edited\n");
+    }
+
+    /// The rename is what publishes the new text, so the directory must never
+    /// be left holding the half-written copy it was staged in — not after a
+    /// save that worked, and not after one that was refused.
+    #[tokio::test]
+    async fn an_atomic_save_leaves_no_temp_file_behind() {
+        let root = scratch();
+        let file = root.path().join("script.sh");
+        std::fs::write(&file, "echo old\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let read_at = sha_of(&file).await;
+
+        let (status, _) = saved(serde_json::json!({
+            "path": file.to_string_lossy(),
+            "text": "echo new\n",
+            "ifSha": read_at,
+        }))
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        // Refused too — the temp file is staged before the digest is even
+        // looked at on some orderings, so both ways out are worth naming.
+        let (status, _) = saved(serde_json::json!({
+            "path": file.to_string_lossy(),
+            "text": "echo never\n",
+            "ifSha": read_at,
+        }))
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+
+        let left: Vec<String> = std::fs::read_dir(root.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(left, vec!["script.sh".to_string()], "the save left something behind");
+
+        // The mode of what was there is carried over, or a saved script comes
+        // back without its executable bit.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o755);
+        }
+    }
+
+    /// A symlink is the one shape that could carry a write out of the home
+    /// directory after the path itself had been checked, so it is refused at
+    /// the path rather than followed.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_save_through_a_symlink_is_refused() {
+        let root = scratch();
+        let real = root.path().join("real.txt");
+        let link = root.path().join("link.txt");
+        std::fs::write(&real, "real\n").unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let (status, answer) = saved(serde_json::json!({
+            "path": link.to_string_lossy(),
+            "text": "through the link\n",
+        }))
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(answer["error"].as_str().unwrap().contains("regular file"));
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "real\n");
+    }
+
+    #[tokio::test]
+    async fn a_save_outside_the_home_directory_is_refused() {
+        let (status, answer) = saved(serde_json::json!({ "path": "/etc/hosts", "text": "no\n" })).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(answer["error"].as_str().unwrap().contains("home directory"));
     }
 
     /// A `<video>` seeks by asking for a slice, and a source that answers the

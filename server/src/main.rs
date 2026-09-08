@@ -499,6 +499,7 @@ async fn serve(open_browser: bool) {
         .route("/api/fs/media", get(routes::fs::media))
         .route("/api/fs/tree", get(routes::fs::tree))
         .route("/api/fs/read", get(routes::fs::read_file))
+        .route("/api/fs/write", axum::routing::put(routes::fs::write_file))
         .route(
             "/api/presentation-assets/:asset",
             get(routes::fs::presentation_asset),

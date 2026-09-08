@@ -15,12 +15,13 @@
  */
 
 import { useEffect, useRef } from 'react';
+import type { KeyboardEvent } from 'react';
 
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { LanguageDescription, bracketMatching, foldGutter, foldKeymap, indentOnInput } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
-import { Annotation, Compartment, EditorState, StateEffect, StateField } from '@codemirror/state';
+import { Annotation, Compartment, EditorState, Prec, StateEffect, StateField } from '@codemirror/state';
 import type { Extension } from '@codemirror/state';
 import {
   Decoration,
@@ -91,6 +92,15 @@ export interface CodeEditorProps {
   /** Called for every edit the reader makes; never for a reload. */
   onChange?: (text: string) => void;
   /**
+   * Called when somebody types into a file that is not editable yet. The
+   * keystroke is held rather than lost: turn `editable` on in response and it
+   * is applied on the next render, so the flip costs the reader nothing
+   * (bw-g3o3.8).
+   */
+  onEditIntent?: () => void;
+  /** Ctrl-S / Cmd-S, taken off the browser. Nothing bound, nothing taken. */
+  onSave?: () => void;
+  /**
    * Given the selection on a copy; whatever it returns is what lands on the
    * clipboard, and returning nothing leaves the text alone.
    */
@@ -111,12 +121,36 @@ const editableOnly: Extension = [
   keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
 ];
 
-const readOnly: Extension = [EditorState.readOnly.of(true), EditorView.editable.of(false)];
+/**
+ * A file nobody is editing yet. It still takes focus — `contentEditable` is
+ * off, so without a tabindex of its own the content is unreachable by keyboard
+ * and never sees the keystroke that would open the file for editing.
+ */
+const readOnly: Extension = [
+  EditorState.readOnly.of(true),
+  EditorView.editable.of(false),
+  EditorView.contentAttributes.of({ tabindex: '0' }),
+];
 
 const writable: Extension = [EditorState.readOnly.of(false), EditorView.editable.of(true), editableOnly];
 
 /** The line the position sits on, one-based, the way a reader counts them. */
 const lineAt = (state: EditorState, position: number) => state.doc.lineAt(position).number;
+
+/**
+ * Whether a keydown is somebody trying to type, as opposed to moving about.
+ *
+ * One character or a newline, with no modifier that would make it a command.
+ * Backspace and Delete are deliberately not here: on a file that is still
+ * read-only there is no selection to remove and nothing behind the cursor the
+ * reader put there, so opening the file up for them would be a flip with
+ * nothing to show for it.
+ */
+function typedCharacter(event: KeyboardEvent): string | null {
+  if (event.ctrlKey || event.metaKey || event.altKey) return null;
+  if (event.key === 'Enter') return '\n';
+  return event.key.length === 1 ? event.key : null;
+}
 
 export function CodeEditor({
   text,
@@ -124,6 +158,8 @@ export function CodeEditor({
   editable = false,
   line = null,
   onChange,
+  onEditIntent,
+  onSave,
   onSelectionCopy,
   className,
 }: CodeEditorProps) {
@@ -137,8 +173,16 @@ export function CodeEditor({
   // every render does not rebuild the editor with them.
   const changed = useRef(onChange);
   const copied = useRef(onSelectionCopy);
+  const asked = useRef(onEditIntent);
+  const saved = useRef(onSave);
   changed.current = onChange;
   copied.current = onSelectionCopy;
+  asked.current = onEditIntent;
+  saved.current = onSave;
+
+  // The character that opened the file for editing, waiting for the render
+  // that turns `editable` on so it can be applied where the cursor is.
+  const held = useRef<string | null>(null);
 
   // Built once. The props at that moment are the starting state; every later
   // move is an effect below, and none of them may recreate the view.
@@ -164,6 +208,22 @@ export function CodeEditor({
         keymap.of(searchKeymap),
         keymap.of(foldKeymap),
         highlightedLineField,
+        // Above everything, and bound whether or not the file is editable: on a
+        // page the browser would otherwise answer Ctrl-S with its own Save Page
+        // dialog, and a reader who has been told the file is theirs to edit
+        // must not be handed that instead.
+        Prec.highest(
+          keymap.of([
+            {
+              key: 'Mod-s',
+              preventDefault: true,
+              run: () => {
+                saved.current?.();
+                return true;
+              },
+            },
+          ]),
+        ),
         EditorState.allowMultipleSelections.of(true),
         // Deliberately no `EditorView.lineWrapping`: a wrapped line breaks the
         // one-line-one-number promise the gutter makes, and code is read by it.
@@ -209,7 +269,17 @@ export function CodeEditor({
   // sets only one of them either takes keystrokes it will not apply or applies
   // ones it should have refused.
   useEffect(() => {
-    view.current?.dispatch({ effects: writing.current.reconfigure(editable ? writable : readOnly) });
+    const editor = view.current;
+    if (!editor) return;
+    editor.dispatch({ effects: writing.current.reconfigure(editable ? writable : readOnly) });
+    // The keystroke that asked for this, applied now that it can be. Same tick
+    // as the flip, so what the reader sees is a character appearing where they
+    // typed it rather than one being swallowed.
+    const character = held.current;
+    held.current = null;
+    if (!editable || character == null) return;
+    editor.focus();
+    editor.dispatch(editor.state.replaceSelection(character));
   }, [editable]);
 
   // The grammar arrives late by design — each one is its own chunk, fetched on
@@ -249,5 +319,17 @@ export function CodeEditor({
     editor.dispatch({ effects });
   }, [line, text]);
 
-  return <div ref={host} className={cn('min-h-0 overflow-hidden', className)} />;
+  // The intent handler sits on the host rather than inside CodeMirror: a
+  // read-only view has no input handling to hook into, and keydown from the
+  // content reaches here all the same.
+  const intent = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (editable || !asked.current) return;
+    const character = typedCharacter(event);
+    if (character == null) return;
+    event.preventDefault();
+    held.current = character;
+    asked.current();
+  };
+
+  return <div ref={host} onKeyDown={intent} className={cn('min-h-0 overflow-hidden', className)} />;
 }

@@ -112,6 +112,16 @@ export interface FsReadResponse {
 }
 
 /**
+ * What a save answers with: the digest of what is now on disk, so the next
+ * save can be checked against it without a read in between (bw-g3o3.8).
+ */
+export interface FsWriteResponse {
+  sha256: string;
+  size: number;
+  mtime: number;
+}
+
+/**
  * Git branch status information
  */
 export interface BranchStatus {
@@ -931,6 +941,20 @@ export const fs = {
     `/api/fs/read?path=${encodeURIComponent(path)}`,
     signal ? { signal } : undefined,
   ),
+
+  /**
+   * Replace a file's whole text.
+   *
+   * `ifSha` is the `sha256` the read handed over: the server compares it with
+   * what is on disk now and answers 409 when they differ, rather than throwing
+   * away whatever was written in between. The write itself lands through a
+   * temp file and a rename, so the path is never a half-written file.
+   */
+  write: (path: string, text: string, ifSha?: string | null) =>
+    fetchApi<FsWriteResponse>('/api/fs/write', {
+      method: 'PUT',
+      body: JSON.stringify(ifSha ? { path, text, ifSha } : { path, text }),
+    }),
 
   /**
    * Told whenever files move inside `path` — written from a terminal, by an
