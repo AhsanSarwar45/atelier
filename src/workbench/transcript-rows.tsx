@@ -734,10 +734,14 @@ function sameRow(a: MachineRow, b: MachineRow): boolean {
 export const ThinkingBlock = memo(function ThinkingBlock({ item }: { item: Extract<TranscriptItem, { kind: 'thinking' }> }) {
   const [openedByHand, setOpenedByHand] = useState<boolean | null>(null);
   const open = openedByHand ?? !item.done;
-  const firstLine = item.text.trim().split('\n')[0] ?? '';
+  // Provider chunks commonly put blank lines around a reasoning summary. They
+  // are transport separators, not part of the thought: preserving them made
+  // the body begin with a conspicuous empty column (bw-s9e4.1).
+  const text = item.text.trim();
+  const firstLine = text.split('\n')[0] ?? '';
   // Reasoning the brand withheld arrives as frames with no words: a heading with
   // nothing under it says less than nothing (bw-f1q.14).
-  if (!item.text.trim()) return null;
+  if (!text) return null;
 
   return (
     <div
@@ -759,8 +763,10 @@ export const ThinkingBlock = memo(function ThinkingBlock({ item }: { item: Extra
         {!open && <span className="truncate font-normal normal-case opacity-70">{firstLine}</span>}
       </Button>
       {open && (
-        <div className="mt-1 whitespace-pre-wrap border-l-2 border-border/60 pl-3 italic leading-relaxed text-muted-foreground">
-          {item.text}
+        <div className="mt-1 border-l-2 border-border/60 pl-3">
+          <MarkdownBody className="text-sm italic leading-relaxed text-muted-foreground">
+            {text}
+          </MarkdownBody>
         </div>
       )}
     </div>
