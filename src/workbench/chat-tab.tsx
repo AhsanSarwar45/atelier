@@ -53,7 +53,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Panel } from '@/components/ui/panel';
 import { Row } from '@/components/ui/row';
-import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
 import { useHeldAtTheEnd } from '@/hooks/held-at-the-end';
 import { addressWith } from '@/lib/address';
@@ -62,6 +61,7 @@ import { cn } from '@/lib/utils';
 import { isPhoneScreen } from '@/lib/screen-width';
 import { ChatRightRail, useGitDiff, useGitPanel, useRightRail } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
+import { ComposerEditor, type ComposerHandle } from '@/workbench/composer-editor';
 import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
@@ -880,7 +880,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
 
   /** The pane the conversation scrolls in, which the window keeps the place of. */
   const pane = useRef<HTMLDivElement>(null);
-  const typing = useRef<HTMLTextAreaElement>(null);
+  const typing = useRef<ComposerHandle>(null);
   const picker = useRef<HTMLInputElement>(null);
   /** The POST being accepted; Escape waits for it before sending Stop. */
   const sending = useRef<Promise<{ messageId: string }> | null>(null);
@@ -966,15 +966,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     wasAtTheEnd.current = true;
     setMissed(0);
   }, [sessionId]);
-
-  // One line at rest, growing to what is written. Measured from the content,
-  // because a textarea cannot shrink itself back down once it has been sized.
-  useEffect(() => {
-    const box = typing.current;
-    if (!box) return;
-    box.style.height = 'auto';
-    box.style.height = `${box.scrollHeight}px`;
-  }, [draft]);
 
   const busy = isBusy(view.state);
   /** No agent attached: it is drawn, and the first message is what wakes it. */
@@ -1160,6 +1151,44 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     // a command is ordinary prompt text either way (§7).
     setDraft(`/${command.name} `);
     typing.current?.focus();
+  }
+
+  /**
+   * What a keystroke in the writing box means, and whether the chat took it.
+   *
+   * One reading for both surfaces the box has — the drawn line and the form
+   * control underneath it (`composer-editor.tsx`) — because the answer to Enter
+   * cannot depend on which of them the key arrived at. True means the chat has
+   * dealt with it and nothing else may.
+   */
+  function composerKey(e: { key: string; shiftKey: boolean }): boolean {
+    if (matches.length) {
+      if (e.key === 'ArrowDown') {
+        setPick((n) => (n + 1) % matches.length);
+        return true;
+      }
+      if (e.key === 'ArrowUp') {
+        setPick((n) => (n - 1 + matches.length) % matches.length);
+        return true;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        take(matches[pick] ?? matches[0]!);
+        return true;
+      }
+      if (e.key === 'Escape') {
+        setShut(true);
+        return true;
+      }
+    }
+    if (e.key === 'Escape' && recallableNow.current) {
+      void recallLastPrompt();
+      return true;
+    }
+    if (enterSubmits(e)) {
+      void submit();
+      return true;
+    }
+    return false;
   }
 
   async function submit() {
@@ -1910,62 +1939,23 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             className="hidden"
             onChange={(e) => void absorb(e.target.files)}
           />
-          <Textarea
+          <ComposerEditor
             ref={typing}
-            data-testid="composer"
-            rows={1}
             value={draft}
-            onChange={(e) => {
+            onChange={(text) => {
               setShut(false);
-              setDraft(e.target.value);
+              setDraft(text);
             }}
-            onPaste={(e) => void absorb(Array.from(e.clipboardData.files))}
-            onDrop={(e) => {
-              e.preventDefault();
-              void absorb(e.dataTransfer.files);
-            }}
-            onKeyDown={(e) => {
-              if (matches.length) {
-                if (e.key === 'ArrowDown') {
-                  e.preventDefault();
-                  setPick((n) => (n + 1) % matches.length);
-                  return;
-                }
-                if (e.key === 'ArrowUp') {
-                  e.preventDefault();
-                  setPick((n) => (n - 1 + matches.length) % matches.length);
-                  return;
-                }
-                if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
-                  e.preventDefault();
-                  take(matches[pick] ?? matches[0]!);
-                  return;
-                }
-                if (e.key === 'Escape') {
-                  e.preventDefault();
-                  setShut(true);
-                  return;
-                }
-              }
-              if (e.key === 'Escape' && recallableNow.current) {
-                e.preventDefault();
-                void recallLastPrompt();
-                return;
-              }
-              if (enterSubmits(e)) {
-                e.preventDefault();
-                void submit();
-              }
-            }}
+            onFiles={(files) => void absorb(files)}
+            onKey={composerKey}
             // No held case here: a held chat draws no box at all, so a disabled
             // one with a sentence in it is unreachable — and the sentence it
             // still carried claimed the holder was working, which is the whole
             // thing this job took out of the screens (bw-96is.13).
             placeholder="Ask the agent to do something…"
-            // The frame is the box; the typing area inside it carries no second
-            // edge, no shadow and no colour of its own, and it grows with what
-            // is written until it would take the conversation's room.
-            className="max-h-56 w-full resize-none overflow-y-auto border-0 bg-transparent p-0 text-[15px] leading-6 shadow-none focus-visible:ring-0"
+            // The frame is the box; the writing area inside it carries no second
+            // edge, no shadow and no colour of its own.
+            className="w-full leading-6"
           />
           <div className="mt-1.5 flex items-center gap-1">
             {/* A plain button, not the toolbar's: that one speaks through a
