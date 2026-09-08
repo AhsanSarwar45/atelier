@@ -61,6 +61,24 @@ describe('an edit row opens on its diff', () => {
     expect(screen.queryByTestId('tool-output')).toBeNull();
   });
 
+  it('hides both bodies when either side of a large edit was cut', () => {
+    const smallBefore = 'small secret before';
+    render(<ToolRow item={{
+      ...edit,
+      diff: {
+        ...edit.diff!,
+        before: smallBefore,
+        after: `${'a'.repeat(4000)}\n… and 4310 more characters`,
+      },
+    }} nested={false} />);
+
+    expect(screen.getByTestId('diff-summary')).toHaveTextContent(`${smallBefore.length} characters hidden`);
+    expect(screen.getByTestId('diff-summary')).toHaveTextContent('8,310 characters hidden');
+    expect(screen.queryByTestId('diff-table')).toBeNull();
+    expect(screen.queryByText(smallBefore)).toBeNull();
+    expect(screen.queryByText(/aaaaaaaa/)).toBeNull();
+  });
+
   it('still opens a call with no diff on what it was asked and what it printed', () => {
     render(<ToolRow item={{ ...edit, diff: null, ranKind: undefined }} nested={false} />);
     expect(screen.getByTestId('tool-row')).toHaveAttribute('data-open', 'false');

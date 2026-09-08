@@ -231,8 +231,24 @@ function EditPath({ path, raw = path, line }: { path: string; raw?: string; line
   );
 }
 
+const CUT_END = /\n… and (\d+) more characters$/;
+
+/** The full size of a body whose stored value says it was cut. */
+function cutSize(text: string): number | null {
+  const ending = text.match(CUT_END);
+  return ending ? text.length - ending[0].length + Number(ending[1]) : null;
+}
+
 function DiffView({ path, before, after, line }: { path: string; before: string; after: string; line?: number }) {
-  const rows = diffLines(before, after, line ?? 1);
+  const beforeSize = cutSize(before);
+  const afterSize = cutSize(after);
+  // Once either side has been cut, the code left in it is arbitrary context:
+  // it is not the whole change and it is not necessarily the changed part.
+  // Drawing that partial text as a diff made large edits look precise while
+  // saying almost nothing useful. Keep the honest measurement and no code
+  // from either side (bw-2xjd.1).
+  const compact = beforeSize !== null || afterSize !== null;
+  const rows = compact ? [] : diffLines(before, after, line ?? 1);
   const language = languageOf(path);
   return (
     <Panel
@@ -249,9 +265,20 @@ function DiffView({ path, before, after, line }: { path: string; before: string;
         </span>
         <span className="shrink-0">before → after</span>
       </div>
-      <div className="max-h-64 overflow-auto">
-        <DiffTable rows={rows} language={language} />
-      </div>
+      {compact ? (
+        <div data-testid="diff-summary" className="grid grid-cols-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
+          <div className="bg-red-500/15 px-2 py-1.5">
+            {before.length === 0 ? 'No previous content' : `${(beforeSize ?? before.length).toLocaleString('en-US')} characters hidden`}
+          </div>
+          <div className="border-l border-border/40 bg-emerald-500/15 px-2 py-1.5">
+            {after.length === 0 ? 'No new content' : `${(afterSize ?? after.length).toLocaleString('en-US')} characters hidden`}
+          </div>
+        </div>
+      ) : (
+        <div className="max-h-64 overflow-auto">
+          <DiffTable rows={rows} language={language} />
+        </div>
+      )}
     </Panel>
   );
 }
