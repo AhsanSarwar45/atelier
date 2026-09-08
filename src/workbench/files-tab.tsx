@@ -6,8 +6,14 @@
  * This is the room (bw-g3o3.4). What it settles is everything the tree in the
  * rail and the viewer in the centre have to agree about: which checkout the
  * files are being read out of, how wide the rail is, and that both survive a
- * reload. The tree (`file-tree.tsx`) now stands in the rail (bw-g3o3.12); the
- * viewer's own place is still marked below by name.
+ * reload. The tree (`file-tree.tsx`) stands in the rail (bw-g3o3.12).
+ *
+ * The viewer side is the strip of open files and, under it, the file itself:
+ * text in CodeMirror (bw-g3o3.17) and everything else as the thing it is
+ * (`file-preview.tsx`). Which file is shown stays in the address, so a link
+ * still opens exactly what it names; what the strip holds is only which files
+ * are open and which of them are pinned, remembered per project so a reader
+ * comes back to the set they were working in.
  *
  * The root matters more than it looks. A project with worktrees has the same
  * file at several paths at once, on different branches, and a tree that quietly
@@ -24,7 +30,19 @@ import { Picker } from '@/components/ui/picker';
 import { addressWith } from '@/lib/address';
 import * as api from '@/lib/api';
 import type { GitTree } from '@/lib/api';
+import { FilePreview, PREVIEWS_NEEDING_TEXT, previewKind } from '@/workbench/file-preview';
 import FileTree from '@/workbench/file-tree';
+import { FileViewer, type ViewedFile } from '@/workbench/file-viewer';
+import {
+  closing,
+  closingCurrent,
+  openFilesFrom,
+  openFilesKey,
+  pinning,
+  type OpenFile,
+  type OpenFiles,
+} from '@/workbench/open-files';
+import { OpenFilesStrip } from '@/workbench/open-files-strip';
 import { ResizeDivider, DEFAULT_PANEL_WIDTH, rememberedPanelWidth } from '@/workbench/resize-divider';
 
 /** How wide the file rail is, the same key whichever project is open. */
@@ -151,6 +169,92 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
     [projectId],
   );
 
+  // The strip, tagged with the project it was read for: without the tag, the
+  // effect below would write the previous project's open files into the new
+  // project's key on the render where `projectId` changes.
+  const [strip, setStrip] = useState<{ key: string; files: OpenFile[] }>({ key: '', files: [] });
+
+  useEffect(() => {
+    if (!projectId) return;
+    const key = openFilesKey(projectId);
+    setStrip({ key, files: openFilesFrom(localStorage.getItem(key)) });
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId || strip.key !== openFilesKey(projectId)) return;
+    localStorage.setItem(strip.key, JSON.stringify(strip.files));
+  }, [strip, projectId]);
+
+  // The address names the file being read, so a file arriving in it — a pasted
+  // link, a path clicked somewhere else in the app — opens in the preview slot,
+  // exactly as a single click in the tree will.
+  useEffect(() => {
+    if (!file) return;
+    setStrip((was) => {
+      if (was.files.some((open) => open.path === file)) return was;
+      const slot = was.files.findIndex((open) => open.preview);
+      const opened: OpenFile = { path: file, preview: true };
+      return {
+        ...was,
+        files: slot === -1 ? [...was.files, opened] : was.files.map((open, at) => (at === slot ? opened : open)),
+      };
+    });
+  }, [file]);
+
+  const open: OpenFiles = useMemo(() => ({ files: strip.files, current: file }), [strip.files, file]);
+
+  // The strip's own way of naming a file, beside `openFile` above: the tree
+  // pushes, because clicking through a tree is a journey Back should be able
+  // to walk; a tab is where the reader already is, so it replaces.
+  //
+  // `tab` is written every time: dropping the last file from an address that
+  // never spelled the tab out would otherwise send the reader to the board.
+  const show = useCallback(
+    (path: string | null) => router.replace(addressWith(params, { tab: 'files', file: path, line: null })),
+    [router, params],
+  );
+
+  const applied = useCallback((next: OpenFiles) => {
+    setStrip((was) => ({ ...was, files: next.files }));
+    if (next.current !== file) show(next.current);
+  }, [file, show]);
+
+  const preview = useCallback((path: string) => { if (path !== file) show(path); }, [file, show]);
+  const pin = useCallback((path: string) => applied(pinning(open, path)), [applied, open]);
+  const close = useCallback((path: string) => applied(closing(open, path)), [applied, open]);
+  const closeCurrent = useCallback(() => applied(closingCurrent(open)), [applied, open]);
+
+  // Only the views that read as source need the file's text; a video or a PDF
+  // is served straight out of the media route and is never read into the page.
+  const kind = file ? previewKind(file) : null;
+  const wantsText = kind !== null && PREVIEWS_NEEDING_TEXT.includes(kind);
+  const [read, setRead] = useState<{ file: ViewedFile | null; error: string | null }>({ file: null, error: null });
+
+  useEffect(() => {
+    setRead({ file: null, error: null });
+    if (!file || !wantsText) return;
+    const stop = new AbortController();
+    let live = true;
+    api.fs
+      .read(file, stop.signal)
+      .then((answer) => {
+        if (!live) return;
+        setRead({
+          file: answer.kind === 'text'
+            ? { kind: 'text', text: answer.text ?? '', truncated: answer.truncated, size: answer.size, sha256: answer.sha256, mtime: answer.mtime }
+            : { kind: 'binary', size: answer.size },
+          error: null,
+        });
+      })
+      .catch((why: unknown) => {
+        if (live && !stop.signal.aborted) setRead({ file: null, error: why instanceof Error ? why.message : 'This file could not be read.' });
+      });
+    return () => {
+      live = false;
+      stop.abort();
+    };
+  }, [file, wantsText]);
+
   return (
     <div className="flex min-h-0 flex-1" data-testid="files-tab" data-root={root ?? undefined}>
       <div
@@ -187,14 +291,41 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
         onChange={changeWidth}
         maximum={() => (typeof window === 'undefined' ? Infinity : window.innerWidth - MIN_VIEWER_WIDTH)}
       />
-      {/* The viewer (bw-g3o3.17) goes here, reading `root`, `file` and `line`. */}
       <div
-        className="flex min-h-0 min-w-0 flex-1 items-center justify-center"
+        className="flex min-h-0 min-w-0 flex-1 flex-col"
         data-testid="files-viewer"
         data-file={file ?? undefined}
         data-line={line ?? undefined}
       >
-        <p className="text-sm text-muted-foreground">Pick a file</p>
+        <OpenFilesStrip
+          state={open}
+          onPreview={preview}
+          onPin={pin}
+          onClose={close}
+          onCloseCurrent={closeCurrent}
+        />
+        {!file || !kind ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center">
+            <p className="text-sm text-muted-foreground">Pick a file</p>
+          </div>
+        ) : kind === 'text' ? (
+          // Text, binaries with no preview of their own, and files that would
+          // not read all go through the viewer, which already says so for each.
+          <FileViewer
+            root={root ?? ''}
+            path={file}
+            line={line}
+            file={read.file}
+            loading={read.file === null && read.error === null}
+            error={read.error}
+          />
+        ) : (
+          <FilePreview
+            path={file}
+            kind={kind}
+            text={read.file?.kind === 'text' ? read.file.text : ''}
+          />
+        )}
       </div>
     </div>
   );

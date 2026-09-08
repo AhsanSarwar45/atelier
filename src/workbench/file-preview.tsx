@@ -1,0 +1,261 @@
+'use client';
+
+/**
+ * A file that is not text, shown as the thing it is (bw-g3o3.14).
+ *
+ * A picture opened as a wall of bytes, or a video opened as nothing at all, is
+ * the moment a reader gives up on the Files tab and reaches for a file manager.
+ * So the kind decides the view: a picture on a checkerboard with its real pixel
+ * size and a zoom, a video and a sound in the elements the browser already
+ * knows how to scrub, a PDF in a frame, and SVG and Markdown in whichever of
+ * the two ways the reader wants them — because both are files you sometimes
+ * need to read and sometimes need to edit.
+ *
+ * The kinds themselves come from `file-kinds.ts`, the one table the badges and
+ * the tree already share. Only the handful of extensions whose *view* differs
+ * from their badge — an SVG is a picture but also source, a PDF and a Markdown
+ * file are both filed under text — are named here.
+ *
+ * The bytes come from `/api/fs/media`, which answers Range requests with a 206
+ * (bw-g3o3.2). That is not a detail: without it a browser cannot seek, and a
+ * two-hour screen recording can only be watched from the beginning.
+ */
+
+import { useEffect, useState, type ReactNode } from 'react';
+
+import { Minus, Plus } from 'lucide-react';
+
+import { fileKind } from '@/components/file-kinds';
+import { MarkdownBody } from '@/components/markdown-body';
+import { Button } from '@/components/ui/button';
+import { apiUrl } from '@/lib/api-base';
+import { cn } from '@/lib/utils';
+import { CodeEditor } from '@/workbench/code-editor';
+
+/**
+ * How a file is shown, which is not quite what kind of file it is. `text` means
+ * the CodeMirror viewer, and is the answer for everything with no view of its
+ * own — including a binary nobody has a preview for, which the viewer already
+ * reports by name and size.
+ */
+export type PreviewKind = 'image' | 'svg' | 'video' | 'audio' | 'pdf' | 'markdown' | 'text';
+
+/** The kinds that need the file's text as well as its bytes. */
+export const PREVIEWS_NEEDING_TEXT: PreviewKind[] = ['svg', 'markdown', 'text'];
+
+export function previewKind(path: string): PreviewKind {
+  const extension = path.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
+  // The three exceptions to the badge table, each for the same reason: what a
+  // file IS and how it is best read are not always the same answer.
+  if (extension === 'svg') return 'svg';
+  if (extension === 'pdf') return 'pdf';
+  if (extension === 'md' || extension === 'markdown') return 'markdown';
+  switch (fileKind(path)) {
+    case 'image': return 'image';
+    case 'video': return 'video';
+    case 'audio': return 'audio';
+    default: return 'text';
+  }
+}
+
+/** Where the bytes of a file on this machine are served from. */
+export function mediaUrl(path: string): string {
+  return apiUrl(`/api/fs/media?path=${encodeURIComponent(path)}`);
+}
+
+/**
+ * The light and dark squares behind a picture, so a transparent PNG reads as
+ * transparent rather than as whatever colour the app happens to be wearing.
+ */
+const CHECKERBOARD = {
+  backgroundImage:
+    'linear-gradient(45deg, rgba(128,128,128,.22) 25%, transparent 25%),'
+    + 'linear-gradient(-45deg, rgba(128,128,128,.22) 25%, transparent 25%),'
+    + 'linear-gradient(45deg, transparent 75%, rgba(128,128,128,.22) 75%),'
+    + 'linear-gradient(-45deg, transparent 75%, rgba(128,128,128,.22) 75%)',
+  backgroundSize: '16px 16px',
+  backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px',
+};
+
+const ZOOMS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 8];
+
+function Bar({ children }: { children: ReactNode }) {
+  return (
+    <div
+      data-testid="file-preview-bar"
+      className="flex shrink-0 items-center gap-2 border-b border-b-default bg-surface-raised/40 px-3 py-1 text-[11px] text-t-muted"
+    >
+      {children}
+    </div>
+  );
+}
+
+/** The Source / Preview switch, for the kinds that are legibly both. */
+function SourceSwitch({ showing, onChange }: { showing: 'source' | 'preview'; onChange: (next: 'source' | 'preview') => void }) {
+  return (
+    <div data-testid="file-preview-switch" className="flex items-center gap-0.5">
+      {(['preview', 'source'] as const).map((which) => (
+        <Button
+          key={which}
+          type="button"
+          size="xs"
+          variant={showing === which ? 'secondary' : 'ghost'}
+          data-testid={`file-preview-${which}`}
+          aria-pressed={showing === which}
+          className="h-5 px-2 capitalize"
+          onClick={() => onChange(which)}
+        >
+          {which}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+function ImagePreview({ path }: { path: string }) {
+  const [shape, setShape] = useState<{ width: number; height: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
+  // A new file is a new picture: its size is not known again until it loads,
+  // and a zoom carried over from the last one is a reader's setting applied to
+  // something they never chose it for.
+  useEffect(() => {
+    setShape(null);
+    setZoom(1);
+  }, [path]);
+
+  const step = (by: number) => setZoom((was) => {
+    const at = ZOOMS.findIndex((one) => one >= was - 0.001);
+    return ZOOMS[Math.min(ZOOMS.length - 1, Math.max(0, (at === -1 ? ZOOMS.length - 1 : at) + by))] ?? was;
+  });
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <Bar>
+        <span data-testid="file-preview-dimensions" className="tabular-nums">
+          {shape ? `${shape.width} × ${shape.height}` : 'Loading…'}
+        </span>
+        <span className="flex-1" />
+        <div data-testid="file-preview-zoom" className="flex items-center gap-1">
+          <Button type="button" variant="ghost" size="icon" className="h-5 w-5" aria-label="Zoom out" onClick={() => step(-1)}>
+            <Minus className="h-3 w-3" />
+          </Button>
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            data-testid="file-preview-zoom-level"
+            className="h-5 min-w-[3.5rem] px-1 text-[11px] tabular-nums"
+            aria-label="Reset zoom"
+            onClick={() => setZoom(1)}
+          >
+            {Math.round(zoom * 100)}%
+          </Button>
+          <Button type="button" variant="ghost" size="icon" className="h-5 w-5" aria-label="Zoom in" onClick={() => step(1)}>
+            <Plus className="h-3 w-3" />
+          </Button>
+        </div>
+      </Bar>
+      <div
+        data-testid="file-preview-image-stage"
+        className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto p-6"
+        style={CHECKERBOARD}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          data-testid="file-preview-image"
+          src={mediaUrl(path)}
+          alt={path}
+          // Its own pixels at 100%, so a 32-pixel icon is not blown up to fill
+          // the room and called a preview.
+          style={shape ? { width: shape.width * zoom, height: shape.height * zoom, maxWidth: 'none' } : undefined}
+          className="shrink-0"
+          onLoad={(event) => {
+            const img = event.currentTarget;
+            setShape({ width: img.naturalWidth, height: img.naturalHeight });
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function TwoWays({ path, text, preview }: { path: string; text: string; preview: ReactNode }) {
+  const [showing, setShowing] = useState<'source' | 'preview'>('preview');
+  useEffect(() => setShowing('preview'), [path]);
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <Bar>
+        <span className="flex-1" />
+        <SourceSwitch showing={showing} onChange={setShowing} />
+      </Bar>
+      {showing === 'preview' ? preview : (
+        <div data-testid="file-preview-source-view" className="min-h-0 flex-1">
+          <CodeEditor text={text} path={path} className="h-full" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+export interface FilePreviewProps {
+  /** The absolute path of the file on the machine. */
+  path: string;
+  kind: PreviewKind;
+  /** The file's text, for the kinds that read as source too. */
+  text?: string;
+  className?: string;
+}
+
+export function FilePreview({ path, kind, text = '', className }: FilePreviewProps) {
+  const src = mediaUrl(path);
+  return (
+    <div data-testid="file-preview" data-kind={kind} className={cn('flex min-h-0 min-w-0 flex-1 flex-col', className)}>
+      {kind === 'image' ? (
+        <ImagePreview path={path} />
+      ) : kind === 'video' ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center bg-black/40 p-4">
+          {/* Controls, and nothing preloaded past the first frames: the route
+              answers ranges, so the browser fetches what is being watched. */}
+          <video
+            data-testid="file-preview-video"
+            src={src}
+            controls
+            preload="metadata"
+            className="max-h-full max-w-full"
+          />
+        </div>
+      ) : kind === 'audio' ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+          <audio data-testid="file-preview-audio" src={src} controls className="w-full max-w-lg" />
+        </div>
+      ) : kind === 'pdf' ? (
+        <iframe data-testid="file-preview-pdf" src={src} title={path} className="min-h-0 flex-1 border-0 bg-white" />
+      ) : kind === 'svg' ? (
+        <TwoWays
+          path={path}
+          text={text}
+          preview={(
+            <div
+              data-testid="file-preview-image-stage"
+              className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-6"
+              style={CHECKERBOARD}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img data-testid="file-preview-image" src={src} alt={path} className="max-h-full max-w-full" />
+            </div>
+          )}
+        />
+      ) : (
+        <TwoWays
+          path={path}
+          text={text}
+          preview={(
+            <div data-testid="file-preview-markdown" className="min-h-0 flex-1 overflow-auto p-6">
+              <MarkdownBody>{text}</MarkdownBody>
+            </div>
+          )}
+        />
+      )}
+    </div>
+  );
+}
