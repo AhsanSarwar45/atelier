@@ -92,6 +92,20 @@ export interface FsTreeResponse {
   entries: FsTreeEntry[];
 }
 
+/** One thing the `@` menu can offer: where it is, and what it is. */
+export interface FsFoundPath {
+  /** Relative to the root, `/`-separated — exactly what goes after the `@`. */
+  path: string;
+  kind: 'dir' | 'file';
+}
+
+/** What a search of a checkout answers with: the best matches, best first. */
+export interface FsFindResponse {
+  /** The root that was searched, as the server resolved it. */
+  root: string;
+  entries: FsFoundPath[];
+}
+
 /**
  * A file read back for the viewer (bw-g3o3.2).
  *
@@ -933,6 +947,20 @@ export const fs = {
    */
   tree: (dir: string, signal?: AbortSignal) => fetchApi<FsTreeResponse>(
     `/api/fs/tree?dir=${encodeURIComponent(dir)}`,
+    signal ? { signal } : undefined,
+  ),
+
+  /**
+   * The files and folders of a checkout whose names answer what was typed
+   * after an `@`, best first (bw-gr8y.7).
+   *
+   * Unlike `tree`, this one OBEYS git's ignore rules rather than flagging
+   * them: a build artefact is not a file anybody means to point an agent at.
+   * The order is the server's and is not to be re-sorted here — a basename hit
+   * comes before a path hit, and the shorter path settles a tie.
+   */
+  find: (root: string, q: string, limit = 20, signal?: AbortSignal) => fetchApi<FsFindResponse>(
+    `/api/fs/find?root=${encodeURIComponent(root)}&q=${encodeURIComponent(q)}&limit=${limit}`,
     signal ? { signal } : undefined,
   ),
 

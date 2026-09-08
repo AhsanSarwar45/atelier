@@ -33,9 +33,11 @@
  *
  * ## What is deliberately not here
  *
- * The `@` completion menu is bw-gr8y.7's. It hangs a CodeMirror completion
- * source off this view; the seam it needs is `extra`, which is added to the
- * view's extensions once, at build, and never reconfigured.
+ * The `@` completion menu is bw-gr8y.7's, and it arrives through `extra`:
+ * `composer-files.ts` builds a CodeMirror completion source and this view is
+ * handed it once, at build, and never reconfigures it. `extra` sits AHEAD of
+ * the chat's own keymap, because a menu that is open owns Enter and Escape —
+ * see the comment beside it below.
  */
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
@@ -246,8 +248,15 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
         // built here: the icons are React components, and a widget is plain
         // DOM. One drawing of each kind, cloned as often as it is needed.
         referenceBadges((kind) => icons.current?.querySelector(`[data-icon-kind="${kind}"]`)?.cloneNode(true) ?? null),
-        // Ahead of everything, including Enter and Escape: the chat's answer to
-        // a key is the first answer, not a fallback after CodeMirror's own.
+        // Ahead of the chat's own answer to a key, because bw-gr8y.7's `@` menu
+        // lives in here: while that menu is open, Enter picks a file and Escape
+        // shuts the menu, and neither may reach the chat's Enter-sends and
+        // Escape-recalls. Every handler it installs stands down when no menu is
+        // open, so the ordinary keystroke still falls through to the line below.
+        start.extra ?? [],
+        // Ahead of everything else, including Enter and Escape: the chat's
+        // answer to a key is the first answer, not a fallback after
+        // CodeMirror's own.
         Prec.highest(keymap.of([{ any: (_view, event) => keyed.current(event) }])),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         EditorView.domEventHandlers({
@@ -268,7 +277,6 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
           if (update.transactions.some((t) => t.annotation(ExternalChange))) return;
           changed.current(update.state.doc.toString());
         }),
-        start.extra ?? [],
       ],
     });
     view.current = editor;

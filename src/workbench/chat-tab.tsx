@@ -62,6 +62,7 @@ import { isPhoneScreen } from '@/lib/screen-width';
 import { ChatRightRail, useGitDiff, useGitPanel, useRightRail } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { ComposerEditor, type ComposerHandle } from '@/workbench/composer-editor';
+import { fileCompletions } from '@/workbench/composer-files';
 import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
@@ -668,6 +669,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     [facts?.cwd, projectPath, disk.home],
   );
   const splitPaths = useCallback((text: string) => pathsIn(text, where, disk), [where, disk]);
+
+  // Typing `@` completes the files of the folder THIS chat runs in — the
+  // worktree, not the project, the same folder the Git view follows
+  // (bw-gr8y.7). The composer reads its `extra` once when it builds itself and
+  // the facts that say where the chat is arrive after that, so the menu is
+  // handed a way to ask rather than an answer.
+  const searchIn = useRef(where.cwd);
+  searchIn.current = where.cwd;
+  const completeFiles = useMemo(() => fileCompletions(() => searchIn.current), []);
 
   // Everything the conversation says, gone through once for the addresses in
   // it, so the answers are already back by the time the reader looks.
@@ -1957,6 +1967,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             }}
             onFiles={(files) => void absorb(files)}
             onKey={composerKey}
+            extra={completeFiles}
             // No held case here: a held chat draws no box at all, so a disabled
             // one with a sentence in it is unreachable — and the sentence it
             // still carried claimed the holder was working, which is the whole

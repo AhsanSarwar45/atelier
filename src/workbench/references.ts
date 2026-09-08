@@ -70,6 +70,18 @@ const TRAILING = /[.,;:!?)\]}'"`>]+$/;
  */
 const BEFORE = /[\s([{<'"`,;:!?~=]/;
 
+/**
+ * Whether an `@` with `charBefore` in front of it can begin a reference at all.
+ * Pass the empty string for an `@` at the very start of the text.
+ *
+ * The composer's `@` menu asks this before it offers anything (bw-gr8y.7), so
+ * the menu opens in exactly the places `findReferences` would later read a
+ * reference out of — one rule, asked twice, rather than two rules that drift.
+ */
+export function canBeginReference(charBefore: string): boolean {
+  return charBefore === '' || BEFORE.test(charBefore);
+}
+
 /** The first character of a path. Excludes the punctuation a sentence uses. */
 const PATH_STARTS = /[A-Za-z0-9_.~/\\@$%+-]/;
 

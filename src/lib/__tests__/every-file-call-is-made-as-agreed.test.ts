@@ -53,6 +53,38 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('searching a checkout for an @ reference', () => {
+  it('asks at the agreed path, with the root and the query escaped', async () => {
+    mockFetch.mockResolvedValue(mockResponse({ root: DIR, entries: [] }));
+
+    await api.fs.find(DIR, 'git v');
+
+    const call = theCall();
+    expect(call.method).toBe('GET');
+    expect(call.url).toBe(`/api/fs/find?root=${encodeURIComponent(DIR)}&q=${encodeURIComponent('git v')}&limit=20`);
+  });
+
+  it('reads back a path and its kind, in the order they arrived', async () => {
+    mockFetch.mockResolvedValue(
+      mockResponse({
+        root: DIR,
+        entries: [
+          { path: 'src/workbench/git-view.tsx', kind: 'file' },
+          { path: 'docs/designs', kind: 'dir' },
+        ],
+      }),
+    );
+
+    const found = await api.fs.find(DIR, 'git-v', 5);
+
+    expect(found.root).toBe(DIR);
+    expect(found.entries).toEqual([
+      { path: 'src/workbench/git-view.tsx', kind: 'file' },
+      { path: 'docs/designs', kind: 'dir' },
+    ]);
+  });
+});
+
 describe('one level of a directory', () => {
   it('asks at the agreed path, with the directory escaped', async () => {
     mockFetch.mockResolvedValue(mockResponse({ dir: DIR, entries: [] }));
