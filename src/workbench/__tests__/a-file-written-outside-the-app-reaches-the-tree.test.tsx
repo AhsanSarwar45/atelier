@@ -38,6 +38,13 @@ class Stream {
     this.onclose?.();
   }
 
+  /** The connection goes away under the window, rather than being hung up. */
+  breaks(): void {
+    Stream.open = Stream.open.filter((s) => s !== this);
+    this.onerror?.();
+    this.onclose?.();
+  }
+
   /** The server says something on this connection, on the feed named. */
   says(tag: string, data: string): void {
     this.onmessage?.(tagged(tag, data));
@@ -172,6 +179,54 @@ describe('a tree drawn from a folder follows that folder', () => {
     // And only the one directory was read again — not the whole tree, which is
     // the entire reason the frame carries names at all.
     expect(readDirectories).toEqual([[`${ROOT}/src`]]);
+  });
+
+  it('watches the folder again when the connection dies, and reads what it missed', async () => {
+    // The connection carrying the watch is the one thing between the tree and
+    // the truth, and it dies: an overloaded machine, a laptop lid, a server
+    // restarting after an update. Coming back is half of it — a watch that is
+    // armed again while the drawing behind it still describes the moment the
+    // connection died is a tree that has quietly stopped telling the truth,
+    // and nothing on screen says so (bw-d35r.1).
+    render(<Tree root={ROOT} />);
+    await settled();
+    await waitFor(() => expect(readDirectories.length).toBeGreaterThan(0));
+    expect(decodeURIComponent(Stream.open[0].url)).toContain(`fs=${ROOT}`);
+
+    // The short wait before the wire tries again, taken here rather than sat
+    // through: only the clock is pretended, everything else is the real thing.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+    // The connection goes away, and a file is written while it is gone. Nobody
+    // is listening, so nothing is said about it.
+    await act(async () => {
+      Stream.open[0].breaks();
+    });
+    disk.set(ROOT, [`${ROOT}/written-in-the-dark.ts`]);
+    readDirectories = [];
+    expect(screen.queryAllByTestId('row')).toHaveLength(0);
+
+    // The wire waits its short wait and opens another, asking for the same
+    // folder rather than coming back watching nothing.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(Stream.open, 'the connection never came back').toHaveLength(1);
+    expect(decodeURIComponent(Stream.open[0].url), 'the folder watch was left off it').toContain(
+      `fs=${ROOT}`,
+    );
+
+    // And the server says the watch is armed, which after an outage means
+    // "look again at what you draw" — so the file written in the dark appears.
+    await act(async () => {
+      Stream.open[0].says('fs', '{"kind":"watching"}');
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(readDirectories, 'the tree was never asked to look again').toEqual([[ROOT]]);
+    expect(screen.getAllByTestId('row')).toHaveLength(1);
+    expect(screen.getByTestId('row')).toHaveTextContent(`${ROOT}/written-in-the-dark.ts`);
   });
 
   it('does nothing for a frame that names nothing, and survives a garbled one', async () => {

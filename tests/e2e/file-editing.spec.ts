@@ -42,8 +42,21 @@ export function describeJob(job: Job): string {
  * jailed to it and the system temp directory is outside. Taken away again
  * afterwards: these are real files in the owner's home, not a temp tree the
  * machine sweeps up on its own.
+ *
+ * One per worker. The two cases here land in different workers as soon as the
+ * run has more than one, and each worker sweeps this directory away when its
+ * own case finishes — so a shared one meant the first to finish deleting the
+ * file the other was still editing, and the failure that arrived named a
+ * missing path rather than the race that removed it.
+ *
+ * That is what a run at six workers used to fail on, and it looked like a
+ * connection fault from the outside: the server logged its folder watcher
+ * stopping less than a second after starting and never coming back, because
+ * the folder it was watching had been deleted underneath it, and every re-read
+ * after that answered 403 Invalid path until the twenty-second wait ran out
+ * (bw-d35r.1).
  */
-const SCRATCH = join(homedir(), '.atelier-e2e-file-editing');
+const SCRATCH = join(homedir(), `.atelier-e2e-file-editing-${process.env.TEST_WORKER_INDEX ?? '0'}`);
 
 function scratch(): string {
   mkdirSync(SCRATCH, { recursive: true });

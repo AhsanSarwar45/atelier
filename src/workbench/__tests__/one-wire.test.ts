@@ -58,7 +58,15 @@ class Stream {
 vi.stubGlobal('WebSocket', Stream);
 
 // eslint-disable-next-line import/first
-import { forgetEverything, onBoard, onChat, onWorkbench, streamsOpen, watching } from '../live-wire';
+import {
+  forgetEverything,
+  onBoard,
+  onChat,
+  onFolder,
+  onWorkbench,
+  streamsOpen,
+  watching,
+} from '../live-wire';
 // eslint-disable-next-line import/first
 import { tagged } from './tagged';
 
@@ -334,5 +342,60 @@ describe('one wire', () => {
     vi.advanceTimersByTime(2_000);
     expect(streamsOpen()).toBe(1);
     expect(Stream.made).toBe(2);
+  });
+
+  it('asks the connection it opens again for every watch that was live on the one that died', async () => {
+    // A connection that comes back without its subscriptions is as dead to the
+    // reader as one that never came back, and harder to notice: the socket is
+    // up, the Files tab looks ordinary, and the folder behind it is watched by
+    // nobody. This much already held when it was written — the wait reads what
+    // is watched afresh when it fires — and it is here so that it goes on
+    // holding, because it is the whole point of the two cases below (bw-d35r.1).
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onFolder('/work/atelier', () => {});
+    onWorkbench({ frame: () => {}, dropped: () => {} });
+    await settled();
+    expect(decodeURIComponent(Stream.open[0].url)).toContain('fs=/work/atelier');
+
+    Stream.open[0].breaks();
+    expect(streamsOpen()).toBe(0);
+
+    vi.advanceTimersByTime(2_000);
+    expect(streamsOpen(), 'the connection never came back').toBe(1);
+    const back = decodeURIComponent(Stream.open[0].url);
+    expect(back, 'the folder watch was left off the new connection').toContain('fs=/work/atelier');
+    expect(back, 'the helper feed was left off the new connection').toContain('workbench=1');
+  });
+
+  it('carries a watch opened while it is coming back, rather than making it wait out the backing-off', async () => {
+    // The drop and a screen mounting can land in the same turn — which is the
+    // ordinary case, because a dead connection is what makes a reader move
+    // around the app. The wait to the next attempt and the connection itself
+    // used to be able to run at the same time: the reshape queued before the
+    // drop opened a socket, and the wait went on counting over it. `reshape`
+    // hands the shape to a wait that is running rather than re-asking, so
+    // every watch opened after that was left off the live connection until the
+    // wait ran out — and the wait doubles each time it runs out for nothing,
+    // up to thirty seconds (bw-d35r.1).
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onWorkbench({ frame: () => {}, dropped: () => {} });
+    await settled();
+
+    // The Files tab opens, and the connection dies before that reshape lands.
+    onFolder('/work/atelier', () => {});
+    Stream.open[0].breaks();
+    await settled();
+
+    expect(streamsOpen(), 'the connection did not come back at all').toBe(1);
+    expect(
+      decodeURIComponent(watching()),
+      'the folder was left off the connection that was already up',
+    ).toContain('fs=/work/atelier');
+
+    // A second tab opens a moment later, with no wait left running to swallow
+    // it: it is on the connection at once rather than in some seconds' time.
+    onFolder('/work/other', () => {});
+    await settled();
+    expect(decodeURIComponent(watching())).toContain('fs=/work/other');
   });
 });

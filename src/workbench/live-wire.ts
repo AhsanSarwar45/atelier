@@ -108,6 +108,20 @@ let againIn = AGAIN_MS;
 let again: ReturnType<typeof setTimeout> | null = null;
 
 /**
+ * A folder watch was live on the connection that went away, so whatever moved
+ * in that folder while it was gone was said to nobody.
+ *
+ * A watch coming back is not the same as a watch that never stopped: the tree
+ * or the file drawn behind it is describing a moment that has passed, and only
+ * a fresh read makes it true again. So the server saying it is watching once
+ * more is turned into "look again at what you draw" — which is what the git
+ * feed has always done with its own `watching` frame, and what this one could
+ * not do while it had no way to tell the first watch of a connection from the
+ * one that replaced a watch that died.
+ */
+let missed = false;
+
+/**
  * What this window is watching, as the route takes it.
  *
  * More than one board is joined by a newline rather than repeated, because a
@@ -268,14 +282,26 @@ function heard(raw: string): void {
       repositories.get(openRepository() ?? '')?.forEach((tell) => tell());
       return;
     case 'fs': {
-      // `watching` says only that the watcher is really behind the tab; there
-      // is nothing to re-read for it, because the tab has just read. A frame
-      // that names nothing is likewise nothing to do.
+      // `watching` says the watcher is really behind the tab. On the first
+      // connection there is nothing to re-read for it, because the tab has
+      // just read; after one that went away there is everything, which is what
+      // `missed` below is for. A frame that names nothing is nothing to do.
       let moved: { kind?: string; paths?: string[] };
       try {
         moved = JSON.parse(said) as { kind?: string; paths?: string[] };
       } catch {
         // One unreadable folder frame, not the whole connection.
+        return;
+      }
+      if (moved.kind === 'watching') {
+        // The watch is armed again after the connection went away. Nothing
+        // told the tree what moved while it was gone, so it is asked to read
+        // what it draws — an empty list, which is what the slow look and the
+        // window being come back to say too (use-folder-reads.ts).
+        if (missed) {
+          missed = false;
+          watchedFolders.get(openFolder() ?? '')?.forEach((tell) => tell([]));
+        }
         return;
       }
       if (moved.kind !== 'changed') return;
@@ -317,6 +343,9 @@ function heard(raw: string): void {
  */
 function dropped(): void {
   close();
+  // Only a folder that was being watched on the connection that died is owed a
+  // catch-up read; a tab opened afterwards reads for itself as it mounts.
+  missed = missed || watchedFolders.size > 0;
   workbenchers.forEach((w) => w.dropped());
   if (again !== null) return;
   if (nothingWanted()) return;
@@ -348,6 +377,17 @@ function open(): void {
   // test bench. Those simply hear nothing.
   if (typeof WebSocket === 'undefined') return;
 
+  // A wait exists only to bring back a connection that is down, and here is
+  // one. Left running, it would sit over a healthy connection as a wait that
+  // is still counting — and `reshape` hands the shape to whatever wait is
+  // running rather than re-asking, so every watch that opened in the meantime
+  // would be left off the connection until the wait ran out, up to the whole
+  // thirty seconds of the ceiling. That is a reconnection that comes back
+  // without its subscriptions: the socket is up and the folder behind the
+  // Files tab is not being watched (bw-d35r.1). The count itself is left
+  // where it is — this connection has not said anything yet, and only a feed
+  // speaking (`spoke`) earns the short wait back.
+  waitNoLonger();
   asked = want;
   const socket = new WebSocket(wire(want));
   source = socket;
@@ -417,11 +457,24 @@ function reshape(): void {
 
 /** Forgets a wait that was counting down towards opening it again. */
 function stopWaiting(): void {
+  waitNoLonger();
+  againIn = AGAIN_MS;
+}
+
+/**
+ * Forgets the wait alone, leaving the count where it stands.
+ *
+ * For the connection having been made rather than given up on: putting the
+ * count back to its floor here would let a server that accepts a socket and
+ * drops it at once be asked again every two seconds for ever, which is the
+ * hammering the backing-off exists to prevent. A feed actually speaking is
+ * what earns the floor back (`spoke`).
+ */
+function waitNoLonger(): void {
   if (again !== null) {
     clearTimeout(again);
     again = null;
   }
-  againIn = AGAIN_MS;
 }
 
 /** Watch one project's board. Returns the way to stop. */
@@ -532,6 +585,7 @@ export function forgetEverything(): void {
   watchedFolders.clear();
   chats.clear();
   bootstrappers.clear();
+  missed = false;
   close();
   if (again !== null) {
     clearTimeout(again);
