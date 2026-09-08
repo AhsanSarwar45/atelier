@@ -938,32 +938,118 @@ impl AcpNormalizer {
         events
     }
 
-    fn tool_name(update: &Value) -> String {
+    /// The agent's own name for its tool, when it sends one.
+    ///
+    /// Kept apart from the fallback below because the two are not the same
+    /// fact. This is the tool's name as its own kit knows it, and nothing may
+    /// overrule it; what follows is this build reading a call that arrived
+    /// with no name at all.
+    fn provider_tool_name(update: &Value) -> Option<String> {
         if let Some(name) = update
             .pointer("/_meta/claudeCode/toolName")
             .and_then(Value::as_str)
         {
-            return name.to_string();
+            return Some(name.to_string());
         }
         if let Some(name) = update
             .pointer("/_meta/codex/collaboration/tool")
             .and_then(Value::as_str)
         {
-            return match name {
-                "spawn" => "spawn_agent",
-                "wait" => "wait_agent",
-                "sendMessage" | "send_message" => "send_message",
-                other => other,
-            }
-            .to_string();
+            return Some(
+                match name {
+                    "spawn" => "spawn_agent",
+                    "wait" => "wait_agent",
+                    "sendMessage" | "send_message" => "send_message",
+                    other => other,
+                }
+                .to_string(),
+            );
         }
         if let Some(name) = update
             .pointer("/_meta/goose/toolCall/toolName")
             .and_then(Value::as_str)
         {
-            return name.to_string();
+            return Some(name.to_string());
         }
-        update["title"].as_str().unwrap_or("Tool").to_string()
+        None
+    }
+
+    fn tool_name(update: &Value) -> String {
+        Self::provider_tool_name(update)
+            .unwrap_or_else(|| update["title"].as_str().unwrap_or("Tool").to_string())
+    }
+
+    /// What a call is, for an agent that names its tools in prose.
+    ///
+    /// Claude stamps its tool's own name on every call, and every sentence
+    /// rule downstream dispatches on that name. Codex and Goose send a human
+    /// title instead — "Editing files", or the command itself — so the name
+    /// the rules were handed matched nothing, and the row fell all the way to
+    /// the raw form: the arguments as a `key: value` dump under the word
+    /// "asked", with no verb, no mark and no colour, beside a Claude chat that
+    /// said "Read part of provider.rs" for the very same work (bw-rg6p).
+    ///
+    /// ACP already says what a call IS, and the arguments say what it was
+    /// given. Between them a call can be named the way the rules expect,
+    /// without asking the agent to change anything.
+    ///
+    /// Only when the pieces are really there. A name guessed for a call whose
+    /// arguments have not arrived yet would trade the agent's own title — and
+    /// that title carries the search terms, the path, the whole command — for
+    /// a sentence that says less than it did. Where nothing can be read
+    /// honestly the call keeps its title, and `acpKind` still gives the row
+    /// its mark.
+    fn call_named_by_acp(kind: Option<&str>, input: &Value, locations: &Value) -> Option<&'static str> {
+        let said = |key: &str| input[key].as_str().is_some_and(|value| !value.is_empty());
+        let a_place = said("file_path")
+            || said("path")
+            || said("notebook_path")
+            || locations
+                .pointer("/0/path")
+                .and_then(Value::as_str)
+                .is_some_and(|path| !path.is_empty());
+        match kind? {
+            "execute" if said("command") => Some("Bash"),
+            "read" if a_place => Some("Read"),
+            "edit" if a_place => Some("Edit"),
+            "search" if said("query") => Some("WebSearch"),
+            "search" if said("pattern") => Some("Grep"),
+            "fetch" if said("url") => Some("WebFetch"),
+            _ => None,
+        }
+    }
+
+    /// Read a call the agent left in prose as the call it is.
+    ///
+    /// The path is copied to the key the rules read it by. Codex sends a read
+    /// as `path`, and the file a call touched arrives more often in
+    /// `locations` than in the arguments at all, so a row named `Read` with
+    /// neither would say "Read a file" about a file it could name.
+    fn read_as_a_known_call(started: &mut Value, provider_named: bool) {
+        if provider_named {
+            return;
+        }
+        let Some(name) =
+            Self::call_named_by_acp(started["acpKind"].as_str(), &started["input"], &started["locations"])
+        else {
+            return;
+        };
+        started["name"] = json!(name);
+        if !matches!(name, "Read" | "Edit") || started["input"]["file_path"].is_string() {
+            return;
+        }
+        let path = started["input"]["path"]
+            .as_str()
+            .map(str::to_string)
+            .or_else(|| {
+                started["locations"]
+                    .pointer("/0/path")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            });
+        if let (Some(path), Some(input)) = (path, started["input"].as_object_mut()) {
+            input.insert("file_path".into(), json!(path));
+        }
     }
 
     /// The arguments a call was made with, always as an object.
@@ -1622,6 +1708,7 @@ impl AcpNormalizer {
             Some("tool_call") => {
                 let id = update["toolCallId"].as_str().unwrap_or_default().to_string();
                 self.open_tools.insert(id.clone());
+                let provider_named = Self::provider_tool_name(update);
                 let name = Self::tool_name(update);
                 let input = self.tool_input(update);
                 let title = Self::tool_title(update, &name);
@@ -1632,8 +1719,10 @@ impl AcpNormalizer {
                 // not called `Bash` had its command drawn as a `key: value`
                 // form, and a call that named the files it read named them to
                 // nobody (bw-t26l.20).
-                let started = json!({"type":"tool.started","toolCallId":id,"name":name.clone(),"title":title.clone(),"parentToolCallId":parent.clone(),"input":input.clone(),
+                let mut started = json!({"type":"tool.started","toolCallId":id,"name":name.clone(),"title":title.clone(),"parentToolCallId":parent.clone(),"input":input.clone(),
                     "acpKind":update["kind"], "locations":Self::locations(update), "acp":update});
+                Self::read_as_a_known_call(&mut started, provider_named.is_some());
+                let name = started["name"].as_str().unwrap_or(&name).to_string();
                 self.tool_starts.insert(id.clone(), started.clone());
                 let mut events = vec![self.envelope(session_id, provider, raw, started)];
                 // A helper's own call is the helper's business: it is drawn on
@@ -1735,9 +1824,23 @@ impl AcpNormalizer {
                         }
                         if !update["kind"].is_null() { started["acpKind"] = update["kind"].clone(); }
                         if !places.is_null() { started["locations"] = places; }
-                        let name = Self::tool_name(update);
+                        // A refinement says only what has changed, and a name
+                        // is not usually among it. Reading one off the update
+                        // alone gave a call whose second ping carried no title
+                        // the literal word "Tool", overwriting the name the
+                        // opening ping had already settled (bw-rg6p).
+                        let provider_named = Self::provider_tool_name(update);
+                        if let Some(named) = provider_named.as_deref() {
+                            started["name"] = json!(named);
+                        } else if let Some(title) = update["title"].as_str() {
+                            started["name"] = json!(title);
+                        }
+                        let name = started["name"].as_str().unwrap_or("Tool").to_string();
                         if !update["title"].is_null() { started["title"] = Self::tool_title(update, &name); }
-                        started["name"] = json!(name);
+                        // Read again, not once: the arguments and the places a
+                        // call touched are exactly what arrives late, and they
+                        // are what a call is named from.
+                        Self::read_as_a_known_call(&mut started, provider_named.is_some());
                         started["acp"] = update.clone();
                         self.tool_starts.insert(id.clone(), started.clone());
                         // A helper's command arrives twice: once as a bare
@@ -2881,6 +2984,91 @@ mod tests {
             "locations":[{"path":"/work/src/lib.rs","line":42}]
         }}));
         assert_eq!(kinds(&again).iter().filter(|kind| **kind == json!("tool.started")).count(), 0);
+    }
+
+    fn call_started(events: &[Event]) -> Value {
+        events
+            .iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "tool.started")
+            .expect("the call opened")
+    }
+
+    /// An agent that names its tools in prose had every row fall to the raw
+    /// form -- the arguments as a `key: value` dump, with no verb and no mark
+    /// -- beside a Claude chat that said what the very same work was (bw-rg6p).
+    #[test]
+    fn a_call_an_agent_did_not_name_is_read_as_the_call_it_is() {
+        let mut shell = AcpNormalizer::default();
+        let ran = call_started(&shell.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call", "toolCallId":"exec-1", "kind":"execute",
+            "title":"rg -n needle src", "status":"in_progress",
+            "rawInput":{"command":"rg -n needle src","cwd":"/work"}
+        }})));
+        assert_eq!(ran["name"], "Bash", "a shell call the agent called by its command");
+        // The agent's own title is untouched: it is what the row falls back to,
+        // and it is the whole command rather than the sentence made of it.
+        assert_eq!(ran["title"], "rg -n needle src");
+        assert_eq!(ran["input"]["command"], "rg -n needle src");
+
+        // Codex sends a read as `path`; the rules read a file by `file_path`.
+        let mut reading = AcpNormalizer::default();
+        let read = call_started(&reading.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call", "toolCallId":"read-1", "kind":"read",
+            "title":"Read file '/work/src/lib.rs'", "status":"completed",
+            "rawInput":{"path":"/work/src/lib.rs"}
+        }})));
+        assert_eq!(read["name"], "Read");
+        assert_eq!(read["input"]["file_path"], "/work/src/lib.rs");
+        assert_eq!(read["input"]["path"], "/work/src/lib.rs", "what the agent sent is kept");
+
+        // A web search with terms in it, and a fetch.
+        let mut searching = AcpNormalizer::default();
+        let searched = call_started(&searching.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call", "toolCallId":"web-1", "kind":"search",
+            "title":"Web search: rust pin api", "rawInput":{"type":"webSearch","query":"rust pin api"}
+        }})));
+        assert_eq!(searched["name"], "WebSearch");
+        let mut fetching = AcpNormalizer::default();
+        let fetched = call_started(&fetching.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call", "toolCallId":"web-2", "kind":"fetch",
+            "title":"Open page", "rawInput":{"url":"https://example.test/a"}
+        }})));
+        assert_eq!(fetched["name"], "WebFetch");
+    }
+
+    /// The agent's own name for its tool is never overruled, and neither is a
+    /// title this build cannot honestly improve on.
+    #[test]
+    fn a_call_is_only_renamed_when_acp_and_the_arguments_both_say_what_it_is() {
+        let mut named = AcpNormalizer::default();
+        let claude = call_started(&named.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call", "toolCallId":"call-1", "kind":"execute",
+            "title":"Bash", "rawInput":{"command":"cargo test"},
+            "_meta":{"claudeCode":{"toolName":"KillShell"}}
+        }})));
+        assert_eq!(claude["name"], "KillShell", "the kit's own name for its tool stands");
+
+        // Codex announces an edit before it says which file, and its own title
+        // -- "Editing files" -- says more than a sentence about no file at all.
+        let mut bare = AcpNormalizer::default();
+        let opening = call_started(&bare.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call", "toolCallId":"edit-1", "kind":"edit",
+            "title":"Editing files", "status":"in_progress"
+        }})));
+        assert_eq!(opening["name"], "Editing files");
+        assert_eq!(opening["input"], json!({}));
+
+        // The file arrives on the next ping, and the row is read again then.
+        let refined = call_started(&bare.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call_update", "toolCallId":"edit-1", "status":"completed",
+            "locations":[{"path":"/work/src/lib.rs","line":12}]
+        }})));
+        assert_eq!(refined["name"], "Edit");
+        assert_eq!(refined["input"]["file_path"], "/work/src/lib.rs");
+        // A refinement that says nothing about the name does not wipe the one
+        // the opening ping settled.
+        assert_eq!(refined["title"], "Editing files");
     }
 
     /// A thought is words, and `content_words` reads the four kinds that are
