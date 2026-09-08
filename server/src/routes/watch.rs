@@ -51,6 +51,25 @@ enum BoardStore {
     Dolt { root: PathBuf },
 }
 
+type DoltRevision = Vec<(PathBuf, Vec<u8>)>;
+
+fn dolt_manifests(root: &Path, at: &Path, manifests: &mut DoltRevision) {
+    let Ok(entries) = std::fs::read_dir(at) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.components().any(|part| part.as_os_str() == "stats") {
+            continue;
+        }
+        if path.is_dir() {
+            dolt_manifests(root, &path, manifests);
+        } else if path.file_name().is_some_and(|name| name == "manifest") {
+            if let Ok(contents) = std::fs::read(&path) {
+                manifests.push((path.strip_prefix(root).unwrap_or(&path).to_path_buf(), contents));
+            }
+        }
+    }
+}
+
 impl BoardStore {
     /// Decides a project's store from what exists on disk. A Dolt database
     /// takes precedence: when one is present the read path serves the board
@@ -118,6 +137,21 @@ impl BoardStore {
                 under_noms
             }
         }
+    }
+
+    /// The persisted roots of every Dolt database under this board store.
+    ///
+    /// Embedded Dolt rewrites its journal, chunks and manifest while answering
+    /// a query, even in `--readonly` mode, but the final manifest bytes do not
+    /// change. A real transaction advances the root recorded there. Comparing
+    /// this revision lets the watcher tell those two identical-looking bursts
+    /// apart without a timing window (bw-hou2.1).
+    fn revision(&self) -> Option<DoltRevision> {
+        let BoardStore::Dolt { root } = self else { return None };
+        let mut manifests = Vec::new();
+        dolt_manifests(root, root, &mut manifests);
+        manifests.sort_by(|a, b| a.0.cmp(&b.0));
+        Some(manifests)
     }
 }
 
@@ -257,6 +291,7 @@ async fn run_watcher(
     let debounce = Duration::from_millis(DEBOUNCE_MS);
     let mut pending: Option<&'static str> = None;
     let mut read_again = boards_read_again();
+    let mut seen_revision = store.revision();
 
     loop {
         tokio::select! {
@@ -313,6 +348,14 @@ async fn run_watcher(
             _ = tokio::time::sleep(debounce), if pending.is_some() => {
                 let change_type = pending.take().unwrap_or("modified");
 
+                if let Some(revision) = store.revision() {
+                    if seen_revision.as_ref() == Some(&revision) {
+                        tracing::debug!("Ignored an embedded-Dolt rewrite that changed no rows");
+                        continue;
+                    }
+                    seen_revision = Some(revision);
+                }
+
                 info!("Board change detected: {:?}", reported_path);
 
                 // Only the jsonl store has a file to recompute epic status
@@ -357,6 +400,23 @@ async fn run_watcher(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dolt_revision_moves_only_when_its_persisted_root_moves() {
+        let dir = tempfile::tempdir().unwrap();
+        let noms = dir.path().join("quiet/.dolt/noms");
+        std::fs::create_dir_all(&noms).unwrap();
+        std::fs::write(noms.join("manifest"), "root-a").unwrap();
+        let store = BoardStore::Dolt { root: dir.path().to_path_buf() };
+        let before = store.revision();
+
+        // The same bytes written again are the noise an embedded read makes.
+        std::fs::write(noms.join("manifest"), "root-a").unwrap();
+        assert_eq!(store.revision(), before);
+
+        std::fs::write(noms.join("manifest"), "root-b").unwrap();
+        assert_ne!(store.revision(), before);
+    }
 
     #[test]
     fn test_file_change_event_serialization() {

@@ -261,9 +261,13 @@ pub struct Comment {
     pub created_at: String,
 }
 
-/// Runs a `bd` CLI command and returns stdout.
+/// Runs a read-only `bd` CLI command and returns stdout.
 ///
 /// Uses `find_bd()` to locate the binary — searches PATH and common install locations.
+fn readonly_bd_args<'a>(args: &'a [&'a str]) -> impl Iterator<Item = &'a str> {
+    std::iter::once("--readonly").chain(args.iter().copied())
+}
+
 async fn run_bd(args: &[&str], cwd: &Path) -> Result<String, String> {
     let Some(bd_path) = super::find_bd() else {
         super::forget_tools();
@@ -272,7 +276,15 @@ async fn run_bd(args: &[&str], cwd: &Path) -> Result<String, String> {
 
     let result = tokio::time::timeout(
         Duration::from_secs(30),
-        Command::new(bd_path).args(args).current_dir(cwd).output(),
+        // An embedded Dolt opens writable unless bd is told otherwise. Even a
+        // SELECT then rewrites its journal and manifest, which the board file
+        // watcher reads as a real edit and answers by running this read again.
+        // The result was an endless read -> watch -> read loop on an idle board
+        // (bw-hou2.1). Every caller here is a query, so make that contract real.
+        Command::new(bd_path)
+            .args(readonly_bd_args(args))
+            .current_dir(cwd)
+            .output(),
     )
     .await;
 
@@ -1716,6 +1728,14 @@ pub fn recompute_epic_statuses(issues_path: &Path) -> Result<Vec<String>, String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn board_cli_queries_open_embedded_dolt_read_only() {
+        assert_eq!(
+            readonly_bd_args(&["list", "--json", "--all"]).collect::<Vec<_>>(),
+            vec!["--readonly", "list", "--json", "--all"]
+        );
+    }
 
     #[test]
     fn test_is_non_issue_record_memory() {

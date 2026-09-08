@@ -242,3 +242,18 @@ One numbered section per distinct refusal, in the order encountered: what was
 attempted, the refusal text, why the refusal does not serve the rule it is
 enforcing, what should have happened, and what it cost. Append to §5 when a hook
 enforces something the skill never told the agent.
+
+## 7. `apply_patch` resolves an owned worktree as the landing checkout
+
+While `bw-hou2.1` was claimed and the shell's working directory was its
+registered copy at `worktrees/bw-hou2.1`, `apply_patch` named the target first
+by its absolute worktree path and then relative to the landing checkout. Both
+attempts were refused with `resolved target: /home/ahsan/dev/beads-web`.
+
+The target was actually
+`/home/ahsan/dev/beads-web/worktrees/bw-hou2.1/server/src/routes/beads.rs`, and
+`bd show bw-hou2.1` recorded both the current assignee and the matching
+`copy:bw-hou2.1` label. The gate should resolve the patch header's complete path
+and accept it as part of the owned worktree. The false refusal cost two patch
+attempts plus an ownership audit; the documented bypass was used for the one
+patch that records this report and the intended change.
