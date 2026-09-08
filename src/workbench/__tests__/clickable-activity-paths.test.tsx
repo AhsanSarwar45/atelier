@@ -6,8 +6,7 @@ import { SplitPaths } from '@/workbench/split-paths';
 import { ToolRow } from '@/workbench/transcript-rows';
 import type { TranscriptItem } from '@/workbench/use-session';
 
-const { openLocalPath } = vi.hoisted(() => ({ openLocalPath: vi.fn() }));
-vi.mock('@/workbench/open-local-path', () => ({ openLocalPath }));
+vi.mock('@/workbench/open-local-path', () => ({ openLocalPath: vi.fn() }));
 
 const path = '/home/me/project/src/sessions.ts';
 const item: Extract<TranscriptItem, { kind: 'tool' }> = {
@@ -39,18 +38,27 @@ describe('file links in activity', () => {
     expect(chips).toHaveLength(2);
     for (const chip of chips) {
       expect(chip).toHaveAttribute('data-path-line', '73');
-      expect(chip).toHaveAttribute('data-path-target', 'editor');
     }
   });
 
-  it('opens an edit link in the editor at that line without toggling the row', () => {
+  it('opens an edit link in the Files tab at that line without toggling the row', () => {
     draw();
     const chip = screen.getAllByTestId('path-chip')[0]!;
+    const opened = vi.fn();
     const event = { target: chip, altKey: false, stopPropagation: vi.fn(), preventDefault: vi.fn() };
-    expect(openPathClicked(event)).toBe(true);
-    expect(openLocalPath).toHaveBeenCalledWith(path, 'vscode', 73);
+    expect(openPathClicked(event, opened)).toBe(true);
+    expect(opened).toHaveBeenCalledWith({ absolute: path, line: 73, endLine: null }, 'files');
     // An edit row is drawn open, so "the chip did not toggle it" reads as the
     // row still being open rather than still being shut (bw-cso1.1).
     expect(screen.getByTestId('tool-row')).toHaveAttribute('data-open', 'true');
+  });
+
+  it('opens an edit link in the editor when the reader holds Alt', () => {
+    draw();
+    const chip = screen.getAllByTestId('path-chip')[0]!;
+    const opened = vi.fn();
+    const event = { target: chip, altKey: true, stopPropagation: vi.fn(), preventDefault: vi.fn() };
+    expect(openPathClicked(event, opened)).toBe(true);
+    expect(opened).toHaveBeenCalledWith({ absolute: path, line: 73, endLine: null }, 'editor');
   });
 });

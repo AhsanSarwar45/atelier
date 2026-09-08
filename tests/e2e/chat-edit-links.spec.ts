@@ -8,7 +8,17 @@ import { discardFixture, makeFixtureProject } from './fixture-board';
 
 const CHAT = 'chat-edit-links-fixture';
 
-test('edit paths open in the editor at the first changed line', async ({ page, request }) => {
+/**
+ * A file named in a conversation opens in this app, not in another one
+ * (bw-g3o3.9).
+ *
+ * The point of the app is to be a whole coding environment, so the plain click
+ * lands on the Files tab with the named line marked, and the reader never left.
+ * The way out is still there, one modifier away: Alt-click asks the machine to
+ * open the reader's own editor, which is the only program that can be told a
+ * line the app is not showing.
+ */
+test('edit paths open in the Files tab at the first changed line', async ({ page, request }) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 1100, height: 720 });
   const run = join(process.cwd(), 'tests', '.workbench-run-edit-links');
@@ -69,11 +79,49 @@ test('edit paths open in the editor at the first changed line', async ({ page, r
     await page.goto(`/project?id=${project!.id}&tab=chat`);
     await page.getByTestId('restore-row').filter({ hasText: 'Clickable edit links' }).getByTestId('row-name').click();
 
-    const rowLink = page.locator('[data-testid="tool-toggle"] [data-path-target="editor"]').first();
+    const rowLink = page.locator('[data-testid="tool-toggle"] [data-path-mention]').first();
     await expect(rowLink).toHaveAttribute('data-path-line', '73', { timeout: 60_000 });
-    await expect(page.locator('[data-testid="diff-view"] [data-path-target="editor"]')).toHaveAttribute('data-path-line', '73', { timeout: 60_000 });
-    await rowLink.click();
+    await expect(page.locator('[data-testid="diff-view"] [data-path-mention]').first()).toHaveAttribute('data-path-line', '73', { timeout: 60_000 });
+
+    // ---- the menu of everywhere a path can go ------------------------------
+    await rowLink.click({ button: 'right' });
+    const menu = page.getByTestId('path-menu');
+    await expect(menu).toBeVisible({ timeout: 15_000 });
+    for (const what of ['files', 'editor', 'reveal', 'copy-path', 'copy-reference']) {
+      await expect(menu.getByTestId(`path-menu-${what}`)).toBeVisible();
+    }
+    // The menu fades in, so the picture is taken once it has finished arriving.
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: 'tests/results/chat-edit-links-menu.png', fullPage: false });
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    // Nothing was opened by looking at the menu.
+    expect(opened).toHaveLength(0);
+
+    // ---- the way out, kept one modifier away -------------------------------
+    await rowLink.click({ modifiers: ['Alt'] });
     await expect.poll(() => opened).toEqual([{ path: edited, target: 'vscode', line: 73 }]);
+    // And it stayed where it was: the escape hatch does not move the reader.
+    await expect(page).toHaveURL(/tab=chat/);
+
+    // ---- and the plain click, which is where a path goes now ---------------
+    await rowLink.click();
+    // The Files tab is a place in the address, so it is the address that says
+    // the click landed — and the address is one a reader can paste to somebody.
+    await expect.poll(() => page.url()).toContain('tab=files');
+    expect(page.url()).toContain(`file=${encodeURIComponent(edited)}`);
+    expect(page.url()).toContain('line=73');
+    // And the Files tab is standing on that file, at that line: the viewer is
+    // handed both, which is what it draws from (`files-tab.tsx`). Asked off the
+    // tab rather than off the drawn line, because which file and which line the
+    // click delivered is what this case is about.
+    const viewer = page.getByTestId('files-viewer');
+    await expect(viewer).toBeVisible({ timeout: 30_000 });
+    await expect(viewer).toHaveAttribute('data-file', edited);
+    await expect(viewer).toHaveAttribute('data-line', '73');
+    await expect(page.getByTestId('files-tab')).toHaveAttribute('data-root', projectPath);
+    // Nothing else was asked to open it: the app showed the file itself.
+    expect(opened).toHaveLength(1);
     await page.screenshot({ path: 'tests/results/chat-edit-links-after.png', fullPage: false });
   } finally {
     if (project) await request.delete(`/api/projects/${project.id}`);

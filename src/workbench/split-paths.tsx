@@ -36,7 +36,7 @@ export function withChips(html: string | null, split: (text: string) => PathPiec
  * A run of plain, uncoloured text drawn with its addresses chipped. Used where
  * there is no language to paint and so no HTML to inject into.
  */
-export function Chipped({ text, line, target }: { text: string; line?: number; target?: 'default' | 'editor' }) {
+export function Chipped({ text, line }: { text: string; line?: number }) {
   const split = useContext(SplitPaths);
   const pieces = split(text);
   if (pieces.length === 1 && pieces[0]!.kind === 'text') return <>{text}</>;
@@ -46,7 +46,7 @@ export function Chipped({ text, line, target }: { text: string; line?: number; t
         piece.kind === 'text' ? (
           <span key={i}>{piece.text}</span>
         ) : (
-          <PathChip key={i} absolute={piece.absolute} raw={piece.raw} line={line ?? piece.line} target={target} />
+          <PathChip key={i} absolute={piece.absolute} raw={piece.raw} line={line ?? piece.line} />
         ),
       )}
     </>

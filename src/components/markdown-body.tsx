@@ -5,7 +5,7 @@
  * a fenced block or an address looks the same wherever it was written. There is
  * no second renderer; a place that needs different spacing passes `tight`.
  */
-import { useState, type MouseEventHandler, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -26,7 +26,7 @@ import { FILE_BADGE_CLASS, FILE_KINDS, fileKind } from "@/components/file-kinds"
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { rehypeMentions, type Piece } from "@/workbench/mentions";
-import { openLocalPath } from "@/workbench/open-local-path";
+import { usePathActions } from "@/workbench/open-path";
 
 /**
  * What a name written in the words should become. Absent — everywhere but a
@@ -115,18 +115,31 @@ interface LocalTarget {
   line: number | null;
 }
 
-function FileLinkBadge({ href, target, children, onClick }: {
+/**
+ * A markdown link that names a file on disk, drawn as the badge every other
+ * file in this app is drawn as.
+ *
+ * It carries the same marks a `PathChip` carries and no handler of its own, so
+ * the one set of handlers around the body answers it — the Files tab on a
+ * click, the editor on Alt-click, the menu on a right-click (bw-g3o3.9).
+ */
+function FileLinkBadge({ href, target, children }: {
   href: string;
   target: LocalTarget;
   children: ReactNode;
-  onClick: MouseEventHandler<HTMLAnchorElement>;
 }) {
   const kind = fileKind(target.path);
   const Icon = FILE_KINDS[kind].icon;
   return (
     <Tooltip label={`Open ${target.path}${target.line === null ? '' : ` at line ${target.line}`}`}>
       <Badge asChild variant="primary" appearance="outline" size="sm" shape="circle" className={cn(FILE_BADGE_CLASS, FILE_KINDS[kind].color)}>
-        <a href={href} onClick={onClick} data-testid="markdown-file-link" data-file-kind={kind}>
+        <a
+          href={href}
+          data-path-mention={target.path}
+          {...(target.line === null ? {} : { 'data-path-line': String(target.line) })}
+          data-testid="markdown-file-link"
+          data-file-kind={kind}
+        >
           <Icon className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
           <span>{children}</span>
           {target.line === null ? null : <span className="text-muted-foreground">:{target.line}</span>}
@@ -313,8 +326,13 @@ export function MarkdownBody({
   className?: string;
   mentions?: Mentions;
 }) {
+  // Every file named in the words opens the same way, whether the words are a
+  // chat message or a card's own field: one set of handlers on the body, and
+  // not a handler on each badge inside it (bw-g3o3.9).
+  const paths = usePathActions();
   return (
-    <div className={cn(PROSE_CLASSES, className)}>
+    <>
+    <div className={cn(PROSE_CLASSES, className)} {...paths.chips}>
       <ReactMarkdown
         // GitHub's own additions, because that is the dialect agents and card
         // fields are written in: tables, task lists, strikethrough, and a bare
@@ -348,18 +366,7 @@ export function MarkdownBody({
             if (ours) return <>{ours}</>;
             const local = localTarget(href);
             if (local) return (
-              <FileLinkBadge
-                href={href}
-                target={local}
-                onClick={(event) => {
-                  event.preventDefault();
-                  openLocalPath(
-                    local.path,
-                    local.line === null ? 'finder' : 'vscode',
-                    local.line,
-                  );
-                }}
-              >
+              <FileLinkBadge href={href} target={local}>
                 {props.children}
               </FileLinkBadge>
             );
@@ -395,5 +402,8 @@ export function MarkdownBody({
         {children}
       </ReactMarkdown>
     </div>
+    {/* Outside the prose, which styles its own first and last child. */}
+    {paths.menu}
+    </>
   );
 }

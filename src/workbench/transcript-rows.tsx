@@ -225,9 +225,9 @@ export const PermissionCard = memo(function PermissionCard({
 function EditPath({ path, raw = path, line }: { path: string; raw?: string; line?: number }) {
   const absolute = path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path);
   return absolute ? (
-    <PathChip absolute={path} raw={raw} line={line ?? null} target="editor" />
+    <PathChip absolute={path} raw={raw} line={line ?? null} />
   ) : (
-    <Chipped text={raw} line={line} target="editor" />
+    <Chipped text={raw} line={line} />
   );
 }
 

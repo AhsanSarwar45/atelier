@@ -32,9 +32,10 @@ import { git, type GitDiffFile } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { languageOf } from '@/workbench/colouring';
 import { DiffTable } from '@/workbench/diff-table';
-import { gitSaid, STATUS_LOOK } from '@/workbench/git-view';
+import { gitSaid, STATUS_LOOK, under } from '@/workbench/git-view';
 import { hunksToRows } from '@/workbench/line-diff';
-import { openPathClicked, PathChip } from '@/workbench/path-chip';
+import { usePathActions } from '@/workbench/open-path';
+import { PathChip } from '@/workbench/path-chip';
 import { useRepositoryReads } from '@/workbench/use-repository-reads';
 
 /**
@@ -50,11 +51,6 @@ import { useRepositoryReads } from '@/workbench/use-repository-reads';
  */
 const OPEN_AT_MOST = 20;
 const LONG_ENOUGH_TO_WAIT = 2_000;
-
-/** The repository-relative path of a file, made absolute for the editor. */
-function under(root: string, file: string): string {
-  return `${root.replace(/\/+$/, '')}/${file}`;
-}
 
 /** One changed file: its heading line, and its lines behind that line's click. */
 function FileDiff({
@@ -87,7 +83,7 @@ function FileDiff({
       >
         <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} />
         <span className="min-w-0 truncate">
-          <PathChip absolute={under(root, file.path)} raw={file.path} line={1} target="editor" look="badge" />
+          <PathChip absolute={under(root, file.path)} raw={file.path} line={1} look="badge" />
         </span>
         {file.oldPath && (
           <span className="min-w-0 shrink truncate font-mono text-[11px] text-t-faint">← {file.oldPath}</span>
@@ -143,6 +139,9 @@ function firstShape(files: GitDiffFile[]): Record<string, boolean> {
 }
 
 export function GitDiffView({ path }: { path: string | null }) {
+  // Every file name in here is a chip like any other, so the one set of
+  // handlers that answers a chip anywhere in the app answers these too.
+  const { chips, menu } = usePathActions();
   const [files, setFiles] = useState<GitDiffFile[] | null>(null);
   const [fault, setFault] = useState<string | null>(null);
   /**
@@ -200,12 +199,15 @@ export function GitDiffView({ path }: { path: string | null }) {
   return (
     <div
       data-testid="git-diff-view"
-      // One listener for every file badge under it, exactly as the transcript
-      // does it: the chip carries the address and this answers the click, so
-      // no chip anywhere in the app needs a handler of its own.
-      onClickCapture={(event) => openPathClicked(event)}
+      // One set of listeners for every file badge under it, exactly as the
+      // transcript does it: the chip carries the address and these answer the
+      // click and the right-click, so no chip anywhere in the app needs a
+      // handler of its own. A right-click that missed a chip is left alone, so
+      // the table's own copy-on-selection is untouched (bw-gr8y.8).
+      {...chips}
       className="flex min-h-0 flex-1 flex-col overflow-y-auto"
     >
+      {menu}
       {fault && (
         <div className="px-3 py-2">
           {/* git's sentence, wrapped and whole, in the monospace it was written

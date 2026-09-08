@@ -14,15 +14,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { GitDiffFile } from '@/lib/api';
 import { GitDiffView } from '@/workbench/git-diff-view';
+import { PathsOpenProvider } from '@/workbench/open-path';
+
+const went = vi.hoisted(() => ({ to: vi.fn() }));
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: () => {} }),
-  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ push: went.to }),
+  useSearchParams: () => new URLSearchParams('id=p1&tab=chat'),
 }));
 
 const calls = vi.hoisted(() => ({
   diff: vi.fn(),
   watch: vi.fn(),
+  trees: vi.fn(),
 }));
 
 vi.mock('@/lib/api', async (whatItReallyIs) => ({
@@ -62,7 +66,14 @@ function changed(path: string, count: number, over: Partial<GitDiffFile> = {}): 
 
 function draw(files: GitDiffFile[]) {
   calls.diff.mockResolvedValue({ files });
-  return render(<GitDiffView path={REPO} />);
+  // The diff is drawn where every other path in the app is drawn: inside the
+  // project screen, which is what knows the file belongs to a checkout of ours
+  // and so opens in the Files tab (bw-g3o3.9).
+  return render(
+    <PathsOpenProvider projectPath={REPO}>
+      <GitDiffView path={REPO} />
+    </PathsOpenProvider>,
+  );
 }
 
 /** The section drawn for `path`. */
@@ -78,6 +89,7 @@ describe('the diff draws every file the worktree has changed', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     calls.watch.mockReturnValue(() => {});
+    calls.trees.mockResolvedValue({ trees: [{ name: 'a-worktree', path: REPO, branch: 'main', isMain: true, dirty: false, ahead: 0, behind: 0 }], place: REPO });
   });
 
   it('gives each file a section of its own, with its counts and what happened to it', async () => {
@@ -122,23 +134,36 @@ describe('the diff draws every file the worktree has changed', () => {
     expect(screen.getByTestId('diff-table')).toBeInTheDocument();
   });
 
-  it('carries the whole path on the badge, and opens the editor without shutting the file', async () => {
+  it('carries the whole path on the badge, and opens it in Files without shutting the file', async () => {
     draw([changed('src/one.ts', 3)]);
     await waitFor(() => expect(screen.getByTestId('path-chip')).toBeInTheDocument());
 
     const chip = screen.getByTestId('path-chip');
-    expect(chip).toHaveAttribute('data-path-target', 'editor');
     expect(chip).toHaveAttribute('data-path-mention', `${REPO}/src/one.ts`);
     expect(chip).toHaveTextContent('src/one.ts');
 
+    await waitFor(() => expect(calls.trees).toHaveBeenCalled());
     fireEvent.click(chip);
 
-    expect(opened.where).toHaveBeenCalledWith(`${REPO}/src/one.ts`, 'vscode', 1);
-    // The click that opened the editor was not also a click on the disclosure.
+    expect(went.to).toHaveBeenCalledWith(
+      `/project?id=p1&tab=files&file=${encodeURIComponent(`${REPO}/src/one.ts`)}&line=1`,
+    );
+    expect(opened.where).not.toHaveBeenCalled();
+    // The click that opened the file was not also a click on the disclosure.
     expect(
       section('src/one.ts'),
       'clicking the file badge shut the file it was meant to open',
     ).toHaveAttribute('data-open', 'true');
+  });
+
+  it('still leaves for the editor when the reader holds Alt', async () => {
+    draw([changed('src/one.ts', 3)]);
+    await waitFor(() => expect(screen.getByTestId('path-chip')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId('path-chip'), { altKey: true });
+
+    expect(opened.where).toHaveBeenCalledWith(`${REPO}/src/one.ts`, 'vscode', 1);
+    expect(went.to).not.toHaveBeenCalled();
   });
 
   it('says so rather than drawing nothing for a binary file', async () => {

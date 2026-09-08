@@ -28,6 +28,7 @@ import { cn, projectDir } from '@/lib/utils';
 import ChatTab from '@/workbench/chat-tab';
 import FilesTab from '@/workbench/files-tab';
 import { WorkbenchStatus } from '@/workbench/globals';
+import { PathsOpenProvider } from '@/workbench/open-path';
 import { useShowingFolder } from '@/workbench/terminal-shells';
 
 import { BoardCards } from './board-cards';
@@ -119,7 +120,7 @@ function ProjectTabs() {
     cardBefore.current = openCard;
   }, [openCard]);
 
-  return (
+  const screen = (
     <Shell
       activeTab={shownTab}
       // The chat's own controls sit in this bar, so it is drawn whether or not
@@ -300,6 +301,12 @@ function ProjectTabs() {
       )}
     </Shell>
   );
+
+  // Every file path anywhere under here has to know whether it lives in this
+  // project or one of its worktrees, because that is what decides whether it
+  // opens in the Files tab or leaves for the desktop (bw-g3o3.9). It is read
+  // once, here, rather than by each of the hundreds of chips that ask.
+  return <PathsOpenProvider projectPath={projectDir(project)}>{screen}</PathsOpenProvider>;
 }
 
 export default function ProjectPage() {

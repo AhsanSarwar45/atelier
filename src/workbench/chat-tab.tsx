@@ -71,7 +71,8 @@ import { drawnRows } from '@/workbench/machine-lines';
 import { inWords, PERMISSION_MODE } from '@/workbench/machine-words';
 import { addressedBy, openableAsks, openableIn } from '@/workbench/mentions';
 import { providerMessageIsCurrent } from '@/workbench/provider-messages';
-import { PathChip, openPathClicked } from '@/workbench/path-chip';
+import { usePathActions } from '@/workbench/open-path';
+import { PathChip } from '@/workbench/path-chip';
 import { pathsIn, type Rooted } from '@/workbench/paths';
 import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
@@ -535,6 +536,9 @@ export function enterSubmits(
 }
 
 export default function ChatTab({ projectId, projectPath, openSessionId }: ChatTabProps) {
+  // One set of handlers for every file chip in the conversation, wherever it
+  // was drawn: in a message, in a command, or on a tool row's own line.
+  const paths = usePathActions();
   const providers = useProviders();
   const shellRef = useRef<HTMLDivElement | null>(null);
   const [leftWidth, setLeftWidth] = useState(DEFAULT_PANEL_WIDTH);
@@ -1801,8 +1805,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         // and opened the row. Caught on the way down, stopping the click stops
         // everything under it — the row a chip sits on stays as the reader left
         // it, which the browser check proves.
-        onClickCapture={(e) => openPathClicked(e)}
+        //
+        // The right-click and the long press come with it, so the menu of
+        // everywhere a path can go is on every chip in the conversation
+        // (bw-g3o3.9).
+        {...paths.chips}
       >
+        {paths.menu}
         {/* One box around the whole conversation, whose height is what says the
             conversation grew — a picture arriving late or a line still being
             typed moves it without a row being added, and the reader watching

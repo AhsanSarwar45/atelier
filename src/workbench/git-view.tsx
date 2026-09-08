@@ -59,7 +59,16 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
 import { ApiError, git, type GitBranch, type GitChange, type GitCommit, type GitStatus } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { usePathActions } from '@/workbench/open-path';
 import { useRepositoryReads } from '@/workbench/use-repository-reads';
+
+/**
+ * A repository-relative path made absolute. git talks in paths relative to the
+ * checkout; everything that OPENS a path in this app talks in absolute ones.
+ */
+export function under(root: string, file: string): string {
+  return `${root.replace(/\/+$/, '')}/${file}`;
+}
 
 /**
  * How many saved changes the list asks for. Enough to recognise where the
@@ -205,6 +214,7 @@ export const STATUS_LOOK: Record<
  */
 function FileLine({
   path,
+  absolute,
   state,
   from,
   action,
@@ -214,6 +224,8 @@ function FileLine({
   extra,
 }: {
   path: string;
+  /** Where the file is on disk, so the row opens like every other path. */
+  absolute: string;
   state: FileState;
   from?: string | null;
   action: 'stage' | 'unstage';
@@ -254,8 +266,18 @@ function FileLine({
           {word}
         </Badge>
       </Tooltip>
-      <Tooltip label={from ? `${from} → ${path}` : path}>
-        <span className="flex min-w-0 flex-1 items-baseline gap-1">
+      {/* The name carries the marks every other file name in this app carries,
+          and no handler of its own: the rail's own listeners answer them — the
+          Files tab on a click, the editor on Alt-click, the menu on a
+          right-click (bw-g3o3.9). It keeps the row's own type and weight rather
+          than becoming a capsule, because a rail of twelve capsules is a rail
+          nobody can read down. */}
+      <Tooltip label={from ? `${from} → ${path}` : `${path} — click to open in the Files tab`}>
+        <span
+          className="flex min-w-0 flex-1 cursor-pointer items-baseline gap-1 hover:text-foreground"
+          data-path-mention={absolute}
+          data-path-look="link"
+        >
           <span className="min-w-0 truncate text-xs text-t-secondary">{name}</span>
           {folder && (
             // Gives way first: a folder cut short still says roughly where the
@@ -296,6 +318,9 @@ export interface GitViewProps {
 }
 
 export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
+  // The rail's file names are file chips, answered by the one set of handlers
+  // every other file chip in the app is answered by (bw-g3o3.9).
+  const paths = usePathActions();
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [commits, setCommits] = useState<GitCommit[]>([]);
   /** The lines of work this checkout could move to. */
@@ -555,7 +580,8 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
     conflicted.length === 0;
 
   return (
-    <div className="flex min-h-0 flex-col divide-y divide-border/60" data-testid="git-view">
+    <div className="flex min-h-0 flex-col divide-y divide-border/60" data-testid="git-view" {...paths.chips}>
+      {paths.menu}
       {/* The line of work, and how far it is from the shared copy. Both counts
           are drawn whether or not there is anything in them: "0 ahead, 0
           behind" is an answer, and a row that appears only when it is not zero
@@ -855,6 +881,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
               <FileLine
                 key={file.path}
                 path={file.path}
+                absolute={under(path, file.path)}
                 state="conflicted"
                 action="stage"
                 label="Mark as resolved"
@@ -890,6 +917,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
               <FileLine
                 key={file.path}
                 path={file.path}
+                absolute={under(path, file.path)}
                 state={file.status}
                 from={file.origPath}
                 action="unstage"
@@ -948,6 +976,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
               <FileLine
                 key={file.path}
                 path={file.path}
+                absolute={under(path, file.path)}
                 state={file.status}
                 from={file.origPath}
                 action="stage"
@@ -1005,6 +1034,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
               <FileLine
                 key={file.path}
                 path={file.path}
+                absolute={under(path, file.path)}
                 state="untracked"
                 action="stage"
                 label="Stage"

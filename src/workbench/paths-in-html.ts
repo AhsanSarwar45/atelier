@@ -98,8 +98,12 @@ export const CHIP_CLASS =
   'cursor-pointer underline decoration-dotted underline-offset-2 ' +
   'decoration-muted-foreground/50 hover:decoration-foreground hover:text-foreground';
 
-/** What the reader is told a chip does, before they risk clicking it. */
+/**
+ * What the reader is told a chip does, before they risk clicking it — including
+ * the two ways out of the app, which are the whole reason a plain click no
+ * longer takes one (bw-g3o3.9).
+ */
 export const TITLE = (line: number | null): string =>
   line === null
-    ? 'Click to open this file in your default program'
-    : `Click to open this file in your default program — Alt-click to open your editor at line ${line}`;
+    ? 'Click to open this file in the Files tab — Alt-click to open your editor, right-click for more'
+    : `Click to open this file in the Files tab at line ${line} — Alt-click to open your editor, right-click for more`;

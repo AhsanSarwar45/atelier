@@ -22,6 +22,15 @@
  * of an edit card. Those are dense, already coloured, and read as one line
  * rather than as a sentence — a row of capsules through the middle of them
  * destroys the line as something to read across and copy.
+ *
+ * ## Where a click goes
+ *
+ * Into the Files tab, which is this app's own viewer (bw-g3o3.9); Alt-click
+ * still leaves for the reader's editor. WHERE that is decided is not here:
+ * this file knows how to read a chip and nothing about the project, the
+ * address or the router, and is handed an `OpenPath` to call
+ * (`open-path.tsx`). That is what lets a chip drawn in a card field open the
+ * same way as one drawn in a chat.
  */
 'use client';
 
@@ -29,7 +38,6 @@ import { FILE_BADGE_CLASS, FILE_KINDS, fileKind } from '@/components/file-kinds'
 import { Badge } from '@/components/ui/badge';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { openLocalPath } from '@/workbench/open-local-path';
 import { CHIP_CLASS, TITLE } from '@/workbench/paths-in-html';
 
 /** How a file is drawn where it was named. */
@@ -41,7 +49,6 @@ export function PathChip({
   raw,
   line,
   endLine = null,
-  target = 'default',
   look = 'link',
 }: {
   absolute: string;
@@ -49,13 +56,8 @@ export function PathChip({
   line: number | null;
   /** The last line of a range, when the writer named one (`@a.ts:3-9`). */
   endLine?: number | null;
-  target?: 'default' | 'editor';
   look?: PathLook;
 }) {
-  const label =
-    target === 'editor' && line !== null
-      ? `Click to open this file in your editor at line ${line}`
-      : TITLE(line);
   // Every chip carries the same marks, whichever way it is drawn: the one
   // listener on the conversation finds it by them and by nothing else.
   const marks = {
@@ -65,7 +67,6 @@ export function PathChip({
     // still lands on line one of the range, and what else the reference asked
     // for is there for whoever wants it (bw-gr8y.2).
     ...(line === null || endLine === null ? {} : { 'data-path-range': `${line}-${endLine}` }),
-    ...(target === 'editor' ? { 'data-path-target': 'editor' } : {}),
     'data-testid': 'path-chip',
   };
 
@@ -73,7 +74,7 @@ export function PathChip({
     const kind = fileKind(absolute);
     const Icon = FILE_KINDS[kind].icon;
     return (
-      <Tooltip label={label}>
+      <Tooltip label={TITLE(line)}>
         <Badge
           asChild
           variant="primary"
@@ -92,7 +93,7 @@ export function PathChip({
   }
 
   return (
-    <Tooltip label={label}>
+    <Tooltip label={TITLE(line)}>
       <span {...marks} data-path-look="link" className={CHIP_CLASS}>
         {raw}
       </span>
@@ -100,34 +101,60 @@ export function PathChip({
   );
 }
 
+/** A file somebody pointed at, and how much of it they pointed at. */
+export interface PathTarget {
+  absolute: string;
+  line: number | null;
+  /** The last line of a range, when the words named one. */
+  endLine: number | null;
+}
+
+/** The three places a path can be opened, once somebody has picked one. */
+export type PathHow = 'files' | 'editor' | 'reveal';
+
+/** Opening a path, wherever in the app the path was named. */
+export type OpenPath = (target: PathTarget, how: PathHow) => void;
+
+/** The chip a pointer was over, or nothing when it was over ordinary words. */
+export function chipUnder(node: EventTarget | null): HTMLElement | null {
+  return ((node as HTMLElement | null)?.closest?.('[data-path-mention]') as HTMLElement | null) ?? null;
+}
+
+/** What a chip is carrying, read back off its marks. */
+export function targetOf(chip: HTMLElement): PathTarget {
+  const at = chip.getAttribute('data-path-line');
+  const last = chip.getAttribute('data-path-range')?.split('-')[1];
+  return {
+    absolute: chip.getAttribute('data-path-mention') ?? '',
+    line: at ? Number(at) : null,
+    endLine: last ? Number(last) : null,
+  };
+}
+
 /**
  * A click somewhere in a conversation, answered if it landed on a file.
  *
- * Plain click opens the file the way the machine opens it — whatever program
- * the reader has told their desktop to use. Alt-click, when the address named a
- * line, opens their editor sitting on that line, which no default program can
- * do. Returns whether it was a chip, so the caller knows to stop the click
- * going any further.
+ * Plain click opens the file in the Files tab, which keeps the reader in the
+ * app. Alt-click opens their editor, on the line the address named when it
+ * named one — the escape hatch, kept one modifier away. Returns whether it was
+ * a chip, so the caller knows to stop the click going any further.
  */
-export function openPathClicked(event: {
-  target: EventTarget | null;
-  altKey: boolean;
-  stopPropagation(): void;
-  preventDefault(): void;
-}): boolean {
-  const target = event.target as HTMLElement | null;
-  const chip = target?.closest?.('[data-path-mention]') as HTMLElement | null;
+export function openPathClicked(
+  event: {
+    target: EventTarget | null;
+    altKey: boolean;
+    stopPropagation(): void;
+    preventDefault(): void;
+  },
+  open: OpenPath,
+): boolean {
+  const chip = chipUnder(event.target);
   if (!chip) return false;
 
   event.stopPropagation();
   event.preventDefault();
 
-  const absolute = chip.getAttribute('data-path-mention') ?? '';
-  const at = chip.getAttribute('data-path-line');
-  const line = at ? Number(at) : null;
-  const toEditor = line !== null && (event.altKey || chip.getAttribute('data-path-target') === 'editor');
-
-  openLocalPath(absolute, toEditor ? 'vscode' : 'finder', toEditor ? line : null);
+  open(targetOf(chip), event.altKey ? 'editor' : 'files');
 
   return true;
 }

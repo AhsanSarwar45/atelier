@@ -19,12 +19,23 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 /** Opening a chat's past is a file read plus a wake; this is the whole way in. */
 const WAY_IN_MS = 120_000;
 
-async function projectId(request: APIRequestContext): Promise<string> {
-  if (process.env.BEADS_E2E_PROJECT) return process.env.BEADS_E2E_PROJECT;
+/**
+ * The project this runs against, and where it is on disk. The folder matters
+ * now as well as the id: a file inside it opens in the Files tab, and a file
+ * outside it is the one that still leaves for the desktop (bw-g3o3.9).
+ */
+async function theProject(request: APIRequestContext): Promise<{ id: string; path: string }> {
   const api = process.env.BEADS_E2E_BACKEND ?? '';
-  const projects = (await (await request.get(`${api}/api/projects`)).json()) as { id: string }[];
+  const projects = (await (await request.get(`${api}/api/projects`)).json()) as { id: string; path: string }[];
   expect(projects.length, 'the instance lists no projects').toBeGreaterThan(0);
-  return projects[0]!.id;
+  const wanted = process.env.BEADS_E2E_PROJECT;
+  const chosen = wanted ? projects.find((project) => project.id === wanted) : projects[0];
+  expect(chosen, `the instance lists no project ${wanted}`).toBeTruthy();
+  return chosen!;
+}
+
+async function projectId(request: APIRequestContext): Promise<string> {
+  return (await theProject(request)).id;
 }
 
 /** What was asked to be opened, in the order it was asked. */
@@ -94,8 +105,8 @@ test.describe('a file named in a chat', () => {
   // long before they were allowed to give up.
   test.describe.configure({ timeout: WAY_IN_MS });
 
-  test('is a chip, and opens the file it points at', async ({ page, request }) => {
-    const id = await projectId(request);
+  test('is a chip, and opens the file it points at in the Files tab', async ({ page, request }) => {
+    const { id, path } = await theProject(request);
     const { opened } = await standIn(page, true);
     await openFirstChat(page, id);
     await waitForChips(page);
@@ -111,10 +122,22 @@ test.describe('a file named in a chat', () => {
     ).toBe(true);
     expect((await chip.textContent())?.length, 'a chip drew nothing').toBeGreaterThan(0);
 
-    await chip.click();
-    await expect.poll(() => opened.length, { timeout: 15_000 }).toBe(1);
-    expect(opened[0]!.path, 'the chip opened something other than what it points at').toBe(absolute);
-    expect(opened[0]!.target, 'a plain click must open the reader’s own default program').toBe('finder');
+    // A file of this project's own is shown by this app rather than handed to
+    // another one, which is the whole point of it having a Files tab
+    // (bw-g3o3.9). Picked by address, because a chat can name a file that
+    // belongs to nobody here and that one still leaves for the desktop.
+    const ours = page.locator(`[data-testid="transcript"] [data-path-mention^="${path}/"]`).first();
+    const inside = await ours
+      .waitFor({ state: 'attached', timeout: 20_000 })
+      .then(() => true)
+      .catch(() => false);
+    test.skip(!inside, 'no chat on this instance names a file of this project');
+
+    const mine = await ours.getAttribute('data-path-mention');
+    await ours.click();
+    await expect.poll(() => page.url(), { timeout: 15_000 }).toContain('tab=files');
+    expect(page.url()).toContain(`file=${encodeURIComponent(mine!)}`);
+    expect(opened, 'the app handed its own file to another program').toEqual([]);
   });
 
   test('is a chip inside a command, on the row’s own line and in the command behind it', async ({
@@ -163,7 +186,12 @@ test.describe('a file named in a chat', () => {
       .first();
     const before = await row.getAttribute('data-open');
 
-    await row.locator('[data-testid="tool-toggle"] [data-path-mention]').first().click();
+    // Alt-click, so the reader is still looking at the row afterwards: a plain
+    // click now leaves for the Files tab, which would take the row off the
+    // screen and leave nothing to ask about (bw-g3o3.9). Which button was
+    // pressed does not change the rule under test — the click is answered by
+    // the chip and never reaches the disclosure it is sitting on.
+    await row.locator('[data-testid="tool-toggle"] [data-path-mention]').first().click({ modifiers: ['Alt'] });
     await expect.poll(() => opened.length, { timeout: 15_000 }).toBe(1);
     expect(
       await row.getAttribute('data-open'),

@@ -288,11 +288,14 @@ test.describe('the diff standing where the conversation stands', () => {
       await page.waitForTimeout(400);
       await page.screenshot({ path: `${SHOTS}/bw-rx1y-file-collapsed.png` });
 
-      // ---- the file's name is the way into an editor -----------------------
+      // ---- the file's name is still the way into an editor -----------------
+      // A plain click now opens the file in the Files tab, which is proved in
+      // `chat-edit-links.spec.ts`; that would take this run off the diff it is
+      // here to watch, so what is asked here is the way out that stays put —
+      // Alt-click, the escape hatch to the reader's own editor (bw-g3o3.9).
       const named = section('edited.txt').getByTestId('path-chip').first();
-      await expect(named).toHaveAttribute('data-path-target', 'editor');
       await expect(named).toHaveAttribute('data-path-line', '1');
-      await named.click();
+      await named.click({ modifiers: ['Alt'] });
       await expect
         .poll(() => asked.length, { message: 'clicking the file name asked nothing to open it' })
         .toBe(1);
