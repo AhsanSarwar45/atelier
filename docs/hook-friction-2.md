@@ -876,3 +876,32 @@ So the job took the bypass, having first parked their diff at
 `/tmp/bw-gr8y.6-parked-landing-screenshots.patch`. The friction is not really
 the gate: it is that runs keep leaving regenerated pictures uncommitted in the
 landing checkout, where every later land trips over them.
+
+## bw-t9no — a job cannot close itself once its land step has run
+
+The spine ends `work, checks, land`, and the land step's own acceptance is that
+the worktrees and branches are gone. Closing it therefore leaves the job with
+every child closed and no owned worktree anywhere, which is exactly the state
+the job's own close is refused from:
+
+```
+Changes require an owned Beads work item in its isolated worktree
+(resolved target: /home/ahsan/dev/beads-web).
+```
+
+Closing the job before the land step is refused too — `bw-t9no still has
+unfinished children` — so the two closes cannot be ordered to satisfy both.
+Putting the land card back to `in_progress` to buy a worktree was refused as
+well, by the gate on the very worktree being reopened:
+
+```
+Beads issue bw-t9no.4 must be claimed and in_progress before this worktree is
+changed. The resolved target: /home/ahsan/dev/beads-web/worktrees/bw-t9no.4.
+```
+
+Three bypasses came out of one shape: reopening the land card, closing the job
+from the landing checkout, and removing the land card's own worktree, which for
+the same reason cannot be removed from inside itself. A gate that let a job's
+close through when all its children are closed, or that treated the land step's
+own worktree as removable by the card that owns it, would leave the standing
+refusals intact and cost this job nothing.
