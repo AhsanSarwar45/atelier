@@ -65,6 +65,53 @@ export interface FsEntry {
 }
 
 /**
+ * One entry of a directory as the file browser draws it (bw-g3o3.2).
+ *
+ * A symlink is never followed, so it is a `link` whatever it points at. An
+ * entry git ignores is still listed, flagged: the tree dims it or hides it on
+ * the reader's say-so, which it could not do for something it was never told
+ * about.
+ */
+export interface FsTreeEntry {
+  name: string;
+  path: string;
+  kind: 'dir' | 'file' | 'link';
+  /** Bytes. */
+  size: number;
+  /** Last modified, in milliseconds since the epoch. */
+  mtime: number;
+  ignored: boolean;
+  /** The name starts with a dot. Nothing more is meant by it. */
+  hidden: boolean;
+}
+
+/** One level of a directory: directories first, then names ignoring case. */
+export interface FsTreeResponse {
+  /** The directory that was listed, as the server resolved it. */
+  dir: string;
+  entries: FsTreeEntry[];
+}
+
+/**
+ * A file read back for the viewer (bw-g3o3.2).
+ *
+ * A binary file is an answer and not an error — `kind: 'binary'` with the size
+ * and nothing else, so the viewer can say what it is. Text is decoded UTF-8
+ * lossily and capped at 2 MiB, and `sha256` is of the bytes actually read, not
+ * of the whole file.
+ */
+export interface FsReadResponse {
+  kind: 'text' | 'binary';
+  /** The whole file's size in bytes, whatever was read. */
+  size: number;
+  /** Last modified, in milliseconds since the epoch. */
+  mtime: number;
+  text?: string;
+  truncated?: boolean;
+  sha256?: string;
+}
+
+/**
  * Git branch status information
  */
 export interface BranchStatus {
@@ -868,6 +915,22 @@ export const fs = {
   ),
 
   roots: () => fetchApi<{ home: string; roots: string[] }>('/api/fs/roots'),
+
+  /**
+   * One level of a directory for the file tree, with git's ignore rules
+   * applied but not obeyed: an ignored entry comes back flagged rather than
+   * missing. `.git` is never listed.
+   */
+  tree: (dir: string, signal?: AbortSignal) => fetchApi<FsTreeResponse>(
+    `/api/fs/tree?dir=${encodeURIComponent(dir)}`,
+    signal ? { signal } : undefined,
+  ),
+
+  /** The text of a file, or the news that it is binary. */
+  read: (path: string, signal?: AbortSignal) => fetchApi<FsReadResponse>(
+    `/api/fs/read?path=${encodeURIComponent(path)}`,
+    signal ? { signal } : undefined,
+  ),
 
   /**
    * Open a path in an outside program. `finder` is whatever the machine opens

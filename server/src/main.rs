@@ -497,6 +497,8 @@ async fn serve(open_browser: bool) {
         .route("/api/fs/list", get(routes::fs::list_directory))
         .route("/api/fs/exists", get(routes::fs::path_exists))
         .route("/api/fs/media", get(routes::fs::media))
+        .route("/api/fs/tree", get(routes::fs::tree))
+        .route("/api/fs/read", get(routes::fs::read_file))
         .route(
             "/api/presentation-assets/:asset",
             get(routes::fs::presentation_asset),

@@ -26,6 +26,16 @@ tracing-subscriber = "0.3"
 rust-embed = { version = "8", features = ["include-exclude", "debug-embed"] }
 open = "5"
 mime_guess = "2"
+# One level of a directory with git's own ignore rules applied — the file
+# browser's tree (`routes/fs.rs`). `parents(true)` is what makes a .gitignore
+# further up the tree count for the directory being listed.
+ignore = "0.4"
+# Range responses for `/api/fs/media`, so a <video> can seek. Safari will not
+# play a source that answers a Range request with 200 and the whole file.
+axum-range = "0.4"
+# `TypedHeader<Range>`, which `axum-range` takes. 0.9 is the line that goes
+# with axum 0.7; axum-extra 0.10 and later are for axum 0.8.
+axum-extra = { version = "0.9", features = ["typed-header"] }
 notify = "6"
 tokio-stream = "0.1"
 futures = "0.3"
