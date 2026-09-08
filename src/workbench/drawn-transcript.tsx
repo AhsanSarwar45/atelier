@@ -117,17 +117,25 @@ export function DrawnTranscript({
   if (awaiting.current && loadedItems !== previous.current.many && pane.current) {
     const box = pane.current;
     standing.current = { height: box.scrollHeight, top: box.scrollTop };
-    const top = box.getBoundingClientRect().top;
     held.current = null;
     // The topmost row that begins at or below the fold: the first one he can
     // read a whole line of, and so the one he is holding on to. Chosen by where
     // it is and not by where it comes in the document — the virtualiser reuses
     // its rows, so the order they are written in is not the order they are read
     // in, and taking the first one the document offers picks a row at random.
+    //
+    // How far below the fold is worked out from the row's own place in the
+    // conversation, which each row carries, less where the pane stands. The
+    // browser would answer the same question with two rectangles, but that
+    // answer only makes sense while it is being read together with the pane's
+    // present position — and the putting back below happens frames later, when
+    // that position is no longer the one the answer was about.
     for (const row of box.querySelectorAll<HTMLElement>('[data-transcript-key]')) {
-      const at = row.getBoundingClientRect().top - top;
       const key = row.dataset.transcriptKey;
-      if (at < -0.5 || !key) continue;
+      const start = Number(row.dataset.start);
+      if (!key || !Number.isFinite(start)) continue;
+      const at = start - box.scrollTop;
+      if (at < -0.5) continue;
       if (!held.current || at < held.current.at) held.current = { key, at };
     }
   }
@@ -190,16 +198,15 @@ export function DrawnTranscript({
       // question, rounding its answer to somewhere the pane could sensibly be
       // put. `getTotalSize` above is what brings those measurements up to date.
       const start = index < 0 ? undefined : virtual.measurementsCache[index]?.start;
-      const drawn = box.querySelector<HTMLElement>('[data-testid="virtual-transcript"]');
-      if (start === undefined || !drawn) {
+      if (start === undefined) {
         still = 0;
       } else {
-        // Where that place currently falls in the pane. Measured against the
-        // conversation's own box rather than worked out from the pane's offset,
-        // so whatever sits between the two — padding, a header — is counted
-        // once, by the browser, instead of being left out of the arithmetic.
-        const is = drawn.getBoundingClientRect().top - box.getBoundingClientRect().top + start;
-        const want = box.scrollTop + (is - anchor.at);
+        // Where the pane has to stand for that row to sit where it sat: its
+        // place in the conversation, less how far below the fold it was. A
+        // whole position, not a distance to travel from wherever the pane is
+        // now — so asking for it twice in two frames leaves him in the same
+        // place, where adding the same shift twice took him twice as far.
+        const want = start - anchor.at;
         if (Math.abs(box.scrollTop - want) > 0.5) {
           box.scrollTop = want;
           // So the scroll this causes is not read as the reader travelling
@@ -303,6 +310,7 @@ export function DrawnTranscript({
             key={item.key}
             ref={virtual.measureElement}
             data-index={item.index}
+            data-start={item.start}
             data-transcript-key={rowKey(row)}
             className="absolute left-0 top-0 w-full pb-3"
             style={{ transform: `translateY(${item.start}px)` }}
