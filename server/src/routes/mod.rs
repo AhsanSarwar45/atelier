@@ -8,6 +8,7 @@ pub mod cli;
 pub mod dolt;
 pub mod environment;
 pub mod fs;
+pub mod fs_watch;
 pub mod git;
 pub mod git_watch;
 pub mod live;

@@ -4,7 +4,7 @@
  */
 
 import { apiUrl } from '@/lib/api-base';
-import { onBoard, onRepository, type WatchEvent } from '@/workbench/live-wire';
+import { onBoard, onFolder, onRepository, type WatchEvent } from '@/workbench/live-wire';
 import { BeadsResponseSchema, WorktreeStatusSchema } from '@/lib/api-schemas';
 import type { Project, Tag, Bead, WorktreeStatus, WorktreeEntry, CachedCounts } from '@/types';
 
@@ -931,6 +931,19 @@ export const fs = {
     `/api/fs/read?path=${encodeURIComponent(path)}`,
     signal ? { signal } : undefined,
   ),
+
+  /**
+   * Told whenever files move inside `path` — written from a terminal, by an
+   * agent working in the checkout, by a build — with the absolute paths that
+   * moved (bw-g3o3.3). Returns the way to stop.
+   *
+   * Carried on the window's one connection, tagged `fs`, for the reason
+   * `git.watch` above is: a stream of its own would spend one of the six a
+   * browser allows and never give it back. The server turns away `.git`,
+   * `node_modules`, `target` and whatever the project's `.gitignore` forgets,
+   * so what arrives here is only what a tree would draw.
+   */
+  watch: (path: string, onChange: (paths: string[]) => void) => onFolder(path, onChange),
 
   /**
    * Open a path in an outside program. `finder` is whatever the machine opens

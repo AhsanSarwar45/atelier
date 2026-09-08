@@ -27,6 +27,7 @@
 //! | `chat.error`     | a readable snapshot failure while retrying          |
 //! | `bootstrap`      | dependency installation progress                   |
 //! | `git`            | this repository's git directory moved              |
+//! | `fs`             | files moved in the folder a file tree draws        |
 //!
 //! A named upstream event keeps its name after the tag, which is where
 //! `chat.snapshot` comes from: the helper names that frame `snapshot`.
@@ -129,6 +130,10 @@ pub struct LiveParams {
     /// the panel is drawn beside one chat, and a chat has one project
     /// (src/workbench/git-view.tsx, bw-8nwh.2).
     pub git: Option<String>,
+    /// The folder an open file tree is drawn from, absolute. One at a time,
+    /// for the same reason the repository is: the Files tab shows one project
+    /// or one of its worktrees (src/workbench/live-wire.ts, bw-g3o3.3).
+    pub fs: Option<String>,
 }
 
 /// Whether a query flag was written as a yes.
@@ -596,6 +601,17 @@ pub async fn live(
         let tx = tx.clone();
         tokio::spawn(async move {
             super::git_watch::watch_repo(repo, tx, Some("git")).await;
+        });
+    }
+
+    // The Files tab, while it is on screen: the folder it is drawing watched,
+    // so a file written from a terminal or by an agent appears in the tree
+    // without anybody reopening the folder (bw-g3o3.3).
+    if let Some(root) = params.fs.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+        let root = PathBuf::from(root);
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            super::fs_watch::watch_folder(root, tx, Some("fs")).await;
         });
     }
 

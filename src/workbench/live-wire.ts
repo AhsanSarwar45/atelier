@@ -49,6 +49,15 @@ type BoardListener = (event: WatchEvent) => void;
  */
 type RepositoryListener = () => void;
 
+/**
+ * Told which files moved inside the folder an open file tree is drawn from —
+ * absolute paths, whoever wrote them. Unlike the repository above this one does
+ * carry names: a tree is a drawing of thousands of directories and re-reading
+ * all of them because one file was saved would be the whole tab's work for
+ * nothing, so the reader is told which directories to ask about (bw-g3o3.3).
+ */
+type FolderListener = (paths: string[]) => void;
+
 /** Told what the helper says about every chat at once. */
 interface WorkbenchListener {
   /** One frame, still as text: the reader of it decides what it can read. */
@@ -75,6 +84,7 @@ const boards = new Map<string, Set<BoardListener>>();
 const workbenchers = new Set<WorkbenchListener>();
 const chats = new Map<string, Set<ChatListener>>();
 const repositories = new Map<string, Set<RepositoryListener>>();
+const watchedFolders = new Map<string, Set<FolderListener>>();
 const bootstrappers = new Set<(data: string) => void>();
 
 let source: WebSocket | null = null;
@@ -111,6 +121,8 @@ function shape(): string {
   if (bootstrappers.size > 0) params.set('bootstrap', '1');
   const repository = openRepository();
   if (repository) params.set('git', repository);
+  const folder = openFolder();
+  if (folder) params.set('fs', folder);
   const chat = openChat();
   if (chat) {
     params.set('chat', chat);
@@ -126,6 +138,18 @@ function shape(): string {
  */
 function openRepository(): string | null {
   const open = Array.from(repositories.keys());
+  return open.length === 0 ? null : open[open.length - 1];
+}
+
+/**
+ * The folder an open file tree is drawn from. One at a time, and the last one
+ * registered wins, exactly as the repository above does: the Files tab shows
+ * one project or one of its worktrees, and a second would mean the server
+ * carrying two folder watches and the frames saying which folder each belongs
+ * to — which nothing on screen asks for.
+ */
+function openFolder(): string | null {
+  const open = Array.from(watchedFolders.keys());
   return open.length === 0 ? null : open[open.length - 1];
 }
 
@@ -243,6 +267,25 @@ function heard(raw: string): void {
       // on another project must not be made to re-read git because ours moved.
       repositories.get(openRepository() ?? '')?.forEach((tell) => tell());
       return;
+    case 'fs': {
+      // `watching` says only that the watcher is really behind the tab; there
+      // is nothing to re-read for it, because the tab has just read. A frame
+      // that names nothing is likewise nothing to do.
+      let moved: { kind?: string; paths?: string[] };
+      try {
+        moved = JSON.parse(said) as { kind?: string; paths?: string[] };
+      } catch {
+        // One unreadable folder frame, not the whole connection.
+        return;
+      }
+      if (moved.kind !== 'changed') return;
+      const paths = moved.paths ?? [];
+      if (paths.length === 0) return;
+      // Every reader of this folder, and only this one, for the reason the
+      // repository above gives.
+      watchedFolders.get(openFolder() ?? '')?.forEach((tell) => tell(paths));
+      return;
+    }
     case 'bootstrap':
       bootstrappers.forEach((tell) => tell(said));
       return;
@@ -290,7 +333,8 @@ function nothingWanted(): boolean {
     workbenchers.size === 0 &&
     chats.size === 0 &&
     bootstrappers.size === 0 &&
-    repositories.size === 0
+    repositories.size === 0 &&
+    watchedFolders.size === 0
   );
 }
 
@@ -414,6 +458,26 @@ export function onRepository(repo: string, tell: RepositoryListener): () => void
   };
 }
 
+/**
+ * Watch one folder, for as long as a file tree drawn from it is on screen.
+ * Returns the way to stop.
+ *
+ * On this connection rather than one of its own, for the reason `onRepository`
+ * above gives: a stream opened for the Files tab would spend one of the six a
+ * browser allows across every window, and never give it back (bw-zkh4).
+ */
+export function onFolder(root: string, tell: FolderListener): () => void {
+  const listeners = watchedFolders.get(root) ?? new Set<FolderListener>();
+  listeners.add(tell);
+  watchedFolders.set(root, listeners);
+  reshape();
+  return () => {
+    listeners.delete(tell);
+    if (listeners.size === 0) watchedFolders.delete(root);
+    reshape();
+  };
+}
+
 /** Watch what the helper says about every chat at once. */
 export function onWorkbench(listener: WorkbenchListener): () => void {
   workbenchers.add(listener);
@@ -465,6 +529,7 @@ export function forgetEverything(): void {
   boards.clear();
   workbenchers.clear();
   repositories.clear();
+  watchedFolders.clear();
   chats.clear();
   bootstrappers.clear();
   close();

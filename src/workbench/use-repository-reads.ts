@@ -17,7 +17,9 @@
  *   last one to answer — not the last one to be asked — deciding what is on
  *   screen. A read that arrives while one is in flight queues exactly one more
  *   behind it, which is enough: the queued read sees everything the events
- *   before it were about, because it asks git afresh.
+ *   before it were about, because it asks git afresh. That part is
+ *   `useSerialReads`, shared with the folder rule (`use-folder-reads.ts`),
+ *   which needs the same care about not running its reads over each other.
  * - The repository changing without the app: a commit, a push, a fetch or a
  *   checkout made in a terminal, or by an agent working in this very checkout.
  *   The server watches the git directory and says so on the window's one
@@ -32,9 +34,10 @@
  */
 'use client';
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect } from 'react';
 
 import { git } from '@/lib/api';
+import { useSerialReads } from '@/workbench/use-serial-reads';
 
 /**
  * How often a repository is looked at of its own accord, in ms.
@@ -56,23 +59,11 @@ export const WORKING_TREE_MS = 5_000;
  * wants; it is depended on here.
  */
 export function useRepositoryReads(path: string | null, read: () => Promise<void>): () => Promise<void> {
-  const busyReading = useRef(false);
-  const oneMore = useRef(false);
-  const readAgain = useCallback(async () => {
-    if (busyReading.current) {
-      oneMore.current = true;
-      return;
-    }
-    busyReading.current = true;
-    try {
-      do {
-        oneMore.current = false;
-        await read();
-      } while (oneMore.current);
-    } finally {
-      busyReading.current = false;
-    }
-  }, [read]);
+  // A repository asks about nothing in particular: whatever moved, the caller
+  // re-reads the whole of what it draws, because only git knows what it says
+  // now. So the names `useSerialReads` can carry are simply not used here.
+  const wholeThing = useCallback(() => read(), [read]);
+  const readAgain = useSerialReads<never>(wholeThing);
 
   // The git directory moving, told to us over the window's one connection.
   // Held only while the caller is on screen and only for the path it is
