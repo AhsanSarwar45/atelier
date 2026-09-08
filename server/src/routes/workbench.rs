@@ -1192,7 +1192,11 @@ async fn provider_sessions(
 ) -> Vec<Value> {
     const ANSWER_WITHIN: Duration = Duration::from_secs(8);
     let project_path = project.map(std::path::Path::new);
-    let filter = (!everything).then_some(project_path).flatten();
+    // The folder is not what the switch widens. `everything` adds the agents'
+    // own chats to the kinds listed; it has never meant chats held somewhere
+    // else on the machine, and the record scan beside this one has always kept
+    // the folder whichever way the switch was set (bw-t9no.1).
+    let filter = project_path;
     let ask = |brand: &'static str| async move {
         match tokio::time::timeout(ANSWER_WITHIN, ask_provider_to_list(state, brand, filter)).await
         {
@@ -1258,7 +1262,29 @@ async fn provider_sessions(
             }
         }
     }
+    // `session/list` is asked for one folder, but the answer is the adapter's
+    // to scope and neither provider's honours the ask: measured against the
+    // owner's own machine, 455 of the 643 chats filed under one project were
+    // held in other checkouts, in /tmp and in the home folder, and each one
+    // was adopted into that project on sight. The folder a chat says it is in
+    // is the only thing that decides which project lists it (bw-t9no.1).
+    only_in_this_folder(&mut rows, project_path);
     rows
+}
+
+/// Drop every listed chat that is not held in this project's folder.
+///
+/// A chat placed nowhere at all is dropped with them: an unplaceable chat
+/// belongs to no project, and the reader asked for one.
+fn only_in_this_folder(rows: &mut Vec<Value>, project_path: Option<&std::path::Path>) {
+    let Some(project_path) = project_path else {
+        return;
+    };
+    rows.retain(|row| {
+        row["cwd"]
+            .as_str()
+            .is_some_and(|cwd| std::path::Path::new(cwd).starts_with(project_path))
+    });
 }
 
 /// What the provider's own record says about the saved chats in a folder.
@@ -2554,6 +2580,42 @@ mod tests {
         assert_eq!(rows[0]["sessionId"], "chat-1");
         assert_eq!(rows[0]["title"], "The chat that must remain visible");
         assert_eq!(rows[0]["runningElsewhere"], false);
+    }
+
+    /**
+     * A chat held in another checkout is not this project's to list.
+     *
+     * `session/list` is asked for one folder, but scoping the answer is the
+     * adapter's to do and neither provider's does it: on the owner's own
+     * machine 455 of the 643 chats filed under one project were held in other
+     * checkouts, in /tmp and in the home folder, each adopted on sight. The
+     * switch for the agents' own chats widens the kinds listed, never the
+     * folder (bw-t9no.1).
+     */
+    #[test]
+    fn native_workbench_lists_only_the_chats_held_in_this_project() {
+        let project = std::path::Path::new("/home/ahsan/dev/corsetta");
+        let mut rows = vec![
+            json!({"externalId":"here","cwd":"/home/ahsan/dev/corsetta"}),
+            json!({"externalId":"worktree","cwd":"/home/ahsan/dev/corsetta/worktrees/c-1"}),
+            json!({"externalId":"another-checkout","cwd":"/home/ahsan/dev/aspen"}),
+            json!({"externalId":"the-home-folder","cwd":"/home/ahsan"}),
+            json!({"externalId":"a-scratch-folder","cwd":"/tmp/bench"}),
+            json!({"externalId":"a-name-that-starts-the-same","cwd":"/home/ahsan/dev/corsetta-old"}),
+            json!({"externalId":"placed-nowhere","cwd":Value::Null}),
+        ];
+        only_in_this_folder(&mut rows, Some(project));
+        let listed: Vec<&str> = rows
+            .iter()
+            .map(|row| row["externalId"].as_str().unwrap())
+            .collect();
+        assert_eq!(listed, ["here", "worktree"]);
+
+        // Asked about no project at all — the machine-wide sweep — nothing is
+        // dropped, because there is no folder to be outside of.
+        let mut every = vec![json!({"externalId":"anywhere","cwd":"/tmp"})];
+        only_in_this_folder(&mut every, None);
+        assert_eq!(every.len(), 1);
     }
 
     /**
