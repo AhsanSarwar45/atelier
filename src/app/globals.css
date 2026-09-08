@@ -125,6 +125,32 @@
     --diff-removed: 0 84% 60%;
     --diff-renamed: 38 92% 50%;
 
+    /* ===== Code tokens =====
+     *
+     * What a keyword, a string or a comment is painted with inside the file
+     * viewer's CodeMirror (src/workbench/code-theme.ts) and nowhere else. Its
+     * own set rather than the surface palette above, because that palette has
+     * no word for "string": borrowing --success for one and --info for another
+     * reads as a status report rather than as code, and on the light skins the
+     * two are barely darker than the page.
+     *
+     * These are the dark default, near enough to One Dark to be familiar. The
+     * light skins take the block under `.light`; the four Catppuccin skins name
+     * their own from the published palettes, in themes.css.
+     */
+    --code-keyword: 286 60% 67%;
+    --code-string: 95 38% 62%;
+    --code-comment: 220 5% 53%;
+    --code-number: 29 54% 61%;
+    --code-type: 39 67% 69%;
+    --code-function: 207 82% 66%;
+    --code-variable: 220 14% 71%;
+    --code-operator: 187 47% 55%;
+    --code-punctuation: 220 9% 60%;
+    --code-tag: 355 65% 65%;
+    --code-attribute: 29 54% 61%;
+    --code-invalid: 0 89% 62%;
+
     /* ===== Shape & Layout ===== */
     --radius-card: 0.75rem;        /* 12px - card border radius */
     --radius-column: 0.75rem;      /* 12px - column border radius */
@@ -177,6 +203,24 @@
     --ease-in-out-quad: cubic-bezier(0.455, 0.03, 0.515, 0.955);
     --background-muted: hsl(var(--muted));
     --app-font-size: 16px;
+  }
+
+  /* The same twelve for a light page: dark ink on white, GitHub's light set.
+     Kept at class weight (not `html.light`) so `html[data-theme=…]` in
+     themes.css, which is imported above this file, still overrides it. */
+  .light {
+    --code-keyword: 356 72% 47%;
+    --code-string: 220 82% 23%;
+    --code-comment: 212 8% 47%;
+    --code-number: 212 95% 35%;
+    --code-type: 23 100% 29%;
+    --code-function: 261 69% 59%;
+    --code-variable: 213 13% 16%;
+    --code-operator: 212 95% 35%;
+    --code-punctuation: 212 8% 40%;
+    --code-tag: 139 70% 23%;
+    --code-attribute: 212 95% 35%;
+    --code-invalid: 348 90% 27%;
   }
 
   .dark {

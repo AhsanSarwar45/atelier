@@ -18,3 +18,14 @@ if (!('ResizeObserver' in globalThis)) {
 if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = function scrollIntoView() {};
 }
+
+// The third gap of the same kind. CodeMirror measures where a line landed by
+// asking a Range for its rectangles, and jsdom's Range answers only with
+// `getBoundingClientRect`. Without this the editor's measure pass throws on
+// every mount — caught by CodeMirror, so nothing fails, but each test prints a
+// stack that is about jsdom rather than about the code under it (bw-g3o3.17).
+if (typeof Range !== 'undefined' && !Range.prototype.getClientRects) {
+  Range.prototype.getClientRects = function getClientRects() {
+    return Object.assign([], { item: () => null }) as unknown as DOMRectList;
+  };
+}

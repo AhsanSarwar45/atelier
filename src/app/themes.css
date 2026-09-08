@@ -659,6 +659,20 @@ html[data-theme="catppuccin-latte"] {
      each skin names the share that puts its slider a step off its own pane. */
   --rail-strength: 0.4;
   --rail-strength-hover: 0.65;
+
+  /* Code tokens (the Latte palette — the light one, so these are the darkest inks here) */
+  --code-keyword: 266 85% 58%;
+  --code-string: 109 58% 40%;
+  --code-comment: 233 10% 59%;
+  --code-number: 22 99% 52%;
+  --code-type: 35 77% 49%;
+  --code-function: 220 91% 54%;
+  --code-variable: 234 16% 35%;
+  --code-operator: 197 97% 46%;
+  --code-punctuation: 232 10% 53%;
+  --code-tag: 220 91% 54%;
+  --code-attribute: 35 77% 49%;
+  --code-invalid: 347 87% 44%;
 }
 
 /* --------------------------------------------------
@@ -756,6 +770,20 @@ html[data-theme="catppuccin-frappe"] {
   --card-hover-y: -1px;
   --column-blur: 0;
   --column-bg-alpha: 1;
+
+  /* Code tokens (the Frappé palette, same roles) */
+  --code-keyword: 277 59% 76%;
+  --code-string: 96 44% 68%;
+  --code-comment: 227 17% 58%;
+  --code-number: 20 79% 70%;
+  --code-type: 40 62% 73%;
+  --code-function: 222 74% 74%;
+  --code-variable: 227 70% 87%;
+  --code-operator: 189 48% 73%;
+  --code-punctuation: 228 22% 66%;
+  --code-tag: 222 74% 74%;
+  --code-attribute: 40 62% 73%;
+  --code-invalid: 359 68% 71%;
 }
 
 /* --------------------------------------------------
@@ -853,6 +881,20 @@ html[data-theme="catppuccin-macchiato"] {
   --card-hover-y: -1px;
   --column-blur: 0;
   --column-bg-alpha: 1;
+
+  /* Code tokens (the Macchiato palette, same roles) */
+  --code-keyword: 267 83% 80%;
+  --code-string: 105 48% 72%;
+  --code-comment: 228 15% 57%;
+  --code-number: 21 86% 73%;
+  --code-type: 40 70% 78%;
+  --code-function: 220 83% 75%;
+  --code-variable: 227 68% 88%;
+  --code-operator: 189 59% 73%;
+  --code-punctuation: 228 20% 65%;
+  --code-tag: 220 83% 75%;
+  --code-attribute: 40 70% 78%;
+  --code-invalid: 351 74% 73%;
 }
 
 /* --------------------------------------------------
@@ -950,6 +992,20 @@ html[data-theme="catppuccin-mocha"] {
   --card-hover-y: -1px;
   --column-blur: 0;
   --column-bg-alpha: 1;
+
+  /* Code tokens (mauve/green/overlay1/peach/yellow/blue/text/sky/overlay2/blue/yellow/red) */
+  --code-keyword: 267 84% 81%;
+  --code-string: 115 54% 76%;
+  --code-comment: 228 13% 55%;
+  --code-number: 23 92% 75%;
+  --code-type: 41 86% 83%;
+  --code-function: 217 92% 76%;
+  --code-variable: 226 64% 88%;
+  --code-operator: 189 71% 73%;
+  --code-punctuation: 228 17% 64%;
+  --code-tag: 217 92% 76%;
+  --code-attribute: 41 86% 83%;
+  --code-invalid: 343 81% 75%;
 }
 
 /* ══════════════════════════════════════════════
