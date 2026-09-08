@@ -62,12 +62,18 @@ export interface Disk {
   home: string;
   /** Put these addresses in the queue, if they are not already answered. */
   ask(absolute: string[]): void;
+  /**
+   * How many times answers have come back. Nothing reads the number: it is
+   * here so that this value is a NEW one whenever disk has said something new,
+   * and so whatever was drawn from `real` is drawn again (see below).
+   */
+  answered: number;
 }
 
 export function usePathsOnDisk(): Disk {
   // What is known is kept in a module-wide map so two chats share it; this
   // counter is only how a component learns that the map has changed.
-  const [, redraw] = useState(0);
+  const [answered, redraw] = useState(0);
   const [homeNow, setHomeNow] = useState(home ?? '');
   const queue = useRef<string[]>([]);
   const running = useRef(0);
@@ -131,7 +137,16 @@ export function usePathsOnDisk(): Disk {
   // One value, kept, not built again on every pass. A fresh object here is a
   // fresh `mentions` in the chat, which is every message in the conversation
   // drawn again for one keystroke (bw-2lzj.1).
-  return useMemo(() => ({ real, home: homeNow, ask }), [real, homeNow, ask]);
+  //
+  // But a NEW one each time an answer lands, which is the whole point of asking.
+  // A message is remembered against the `mentions` it was drawn with, and
+  // `mentions` is built from this — so while this value stayed the same the
+  // answers changed nothing on screen, and a conversation that had stopped
+  // moving kept the plain text it was first drawn with: every file named in a
+  // finished chat stayed dead words for as long as the tab was open
+  // (bw-g3o3.11). An answered address is worth one redraw; a keystroke is not,
+  // and the counter moves only for the former.
+  return useMemo(() => ({ real, home: homeNow, ask, answered }), [real, homeNow, ask, answered]);
 }
 
 /** Forget everything asked. For tests, which must not inherit an old disk. */
