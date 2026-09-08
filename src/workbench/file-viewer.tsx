@@ -134,6 +134,13 @@ export interface FileViewerProps {
    * than waiting on the watch (bw-g3o3.8).
    */
   onSaved?: (path: string) => void;
+  /**
+   * Told the first time this file is opened for typing — the Edit button, or a
+   * keystroke into one still read-only. The tab pins the preview slot on it, so
+   * a file being edited cannot be replaced out from under the sentence being
+   * typed by the next click in the tree (bw-g3o3.18).
+   */
+  onEditing?: (path: string) => void;
   className?: string;
 }
 
@@ -145,6 +152,7 @@ export function FileViewer({
   loading = false,
   error = null,
   onSaved,
+  onEditing,
   className,
 }: FileViewerProps) {
   const relative = relativeToRoot(root, path);
@@ -200,6 +208,13 @@ export function FileViewer({
     const wanted = selection?.copied.text ?? (file?.kind === 'text' ? file.text : '');
     if (wanted) void navigator.clipboard?.writeText(wanted);
   }, [selection, file]);
+  // Opening the file up, and the strip told about it: pinning is the tab's to
+  // do, and it only ever has this to go on.
+  const opening = edits.open;
+  const startEditing = useCallback(() => {
+    opening();
+    onEditing?.(path);
+  }, [opening, onEditing, path]);
 
   // A save, and then the folder read again — whether it landed or was refused,
   // since a refusal means the file moved and the tree is out of date either way.
@@ -264,7 +279,7 @@ export function FileViewer({
               title="Edit this file"
               aria-label="Edit this file"
               data-testid="file-viewer-edit"
-              onClick={edits.open}
+              onClick={startEditing}
             >
               <Pencil className="h-3.5 w-3.5" />
             </Button>
@@ -372,7 +387,7 @@ export function FileViewer({
               line={line}
               editable={edits.editable}
               onChange={edits.change}
-              onEditIntent={editableFile ? edits.open : undefined}
+              onEditIntent={editableFile ? startEditing : undefined}
               onSave={editableFile ? () => void save() : undefined}
               onSelection={selected}
               onSelectionCopy={reference}

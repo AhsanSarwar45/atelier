@@ -22,7 +22,7 @@
  * place the files are shown, and remembered per project.
  */
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -44,6 +44,8 @@ import {
 } from '@/workbench/open-files';
 import { OpenFilesStrip } from '@/workbench/open-files-strip';
 import { ResizeDivider, DEFAULT_PANEL_WIDTH, rememberedPanelWidth } from '@/workbench/resize-divider';
+import { useUnsavedPaths } from '@/workbench/unsaved-files';
+import { useFolderReads } from '@/workbench/use-folder-reads';
 
 /** How wide the file rail is, the same key whichever project is open. */
 export const FILES_RAIL_WIDTH = 'workbench.files-rail-width';
@@ -230,30 +232,50 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
   const wantsText = kind !== null && PREVIEWS_NEEDING_TEXT.includes(kind);
   const [read, setRead] = useState<{ file: ViewedFile | null; error: string | null }>({ file: null, error: null });
 
-  useEffect(() => {
-    setRead({ file: null, error: null });
+  // Which file the answer being waited on is for. A read started for one file
+  // can still land after the reader has clicked on to the next, and without
+  // this the second file would be drawn holding the first one's text.
+  const wanted = useRef(file);
+  wanted.current = file;
+
+  const readFile = useCallback(async () => {
     if (!file || !wantsText) return;
-    const stop = new AbortController();
-    let live = true;
-    api.fs
-      .read(file, stop.signal)
-      .then((answer) => {
-        if (!live) return;
-        setRead({
-          file: answer.kind === 'text'
-            ? { kind: 'text', text: answer.text ?? '', truncated: answer.truncated, size: answer.size, sha256: answer.sha256, mtime: answer.mtime }
-            : { kind: 'binary', size: answer.size },
-          error: null,
-        });
-      })
-      .catch((why: unknown) => {
-        if (live && !stop.signal.aborted) setRead({ file: null, error: why instanceof Error ? why.message : 'This file could not be read.' });
+    const asked = file;
+    try {
+      const answer = await api.fs.read(asked);
+      if (wanted.current !== asked) return;
+      setRead({
+        file: answer.kind === 'text'
+          ? { kind: 'text', text: answer.text ?? '', truncated: answer.truncated, size: answer.size, sha256: answer.sha256, mtime: answer.mtime }
+          : { kind: 'binary', size: answer.size },
+        error: null,
       });
-    return () => {
-      live = false;
-      stop.abort();
-    };
+    } catch (why: unknown) {
+      if (wanted.current !== asked) return;
+      setRead({ file: null, error: why instanceof Error ? why.message : 'This file could not be read.' });
+    }
   }, [file, wantsText]);
+
+  // Read once when the file is named, and again whenever its folder moves. Each
+  // fresh read is handed to the viewer, which decides what it means: nothing
+  // typed yet and the text takes; something typed and the reader is asked
+  // (`use-file-edits.ts`). This is what makes a file written from a terminal
+  // show up here without a reload, and what makes a save settle.
+  const folder = file ? file.slice(0, file.lastIndexOf('/')) : null;
+  const readAgain = useFolderReads(wantsText ? folder : null, readFile);
+
+  useEffect(() => {
+    // A different file, and nothing of the last one left on screen while the
+    // new one is being fetched.
+    setRead({ file: null, error: null });
+    void readAgain();
+  }, [readAgain]);
+
+  // The dots on the strip and the window's "are you sure" are drawn from the
+  // one store the viewer marks (`unsaved-files.ts`), so a keystroke into the
+  // file being edited does not redraw every tab.
+  const unsaved = useUnsavedPaths();
+  const dirty = useMemo(() => new Set(unsaved), [unsaved]);
 
   return (
     <div className="flex min-h-0 flex-1" data-testid="files-tab" data-root={root ?? undefined}>
@@ -303,6 +325,7 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
           onPin={pin}
           onClose={close}
           onCloseCurrent={closeCurrent}
+          dirty={dirty}
         />
         {!file || !kind ? (
           <div className="flex min-h-0 flex-1 items-center justify-center">
@@ -318,6 +341,8 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
             file={read.file}
             loading={read.file === null && read.error === null}
             error={read.error}
+            onSaved={() => void readAgain()}
+            onEditing={pin}
           />
         ) : (
           <FilePreview
