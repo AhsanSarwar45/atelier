@@ -398,6 +398,21 @@ impl Store {
             .optional()
     }
 
+/// Whether a saved chat is really held in the project it is filed under.
+///
+/// Provider discovery used to adopt every chat an adapter listed into
+/// whichever project was open at the time, and those rows are still on disk:
+/// 455 of the 643 filed under one project on the owner's own machine are held
+/// in other checkouts, in /tmp and in the home folder. The folder is the
+/// answer, so the rows correct themselves as they are read rather than needing
+/// the store rewritten under a running app (bw-t9no.2).
+///
+/// A project with no folder of its own claims nothing, so nothing is dropped.
+fn held_in_its_project(session: &Session) -> bool {
+    let project = std::path::Path::new(&session.project_path);
+    project.as_os_str().is_empty() || std::path::Path::new(&session.cwd).starts_with(project)
+}
+
     pub fn list_sessions(&self, project_id: Option<&str>) -> rusqlite::Result<Vec<Session>> {
         let (sql, parameter): (&str, Option<&str>) = match project_id {
             Some(project_id) => (
@@ -448,7 +463,9 @@ impl Store {
         everything: bool,
     ) -> rusqlite::Result<Vec<Session>> {
         if everything {
-            return self.list_sessions(project_id);
+            let mut found = self.list_sessions(project_id)?;
+            found.retain(Self::held_in_its_project);
+            return Ok(found);
         }
         let visible = r#"(title IS NOT NULL OR origin='app' OR EXISTS (
             SELECT 1 FROM event WHERE event.session_id=session.id
@@ -462,12 +479,16 @@ impl Store {
             ),
         };
         let mut statement = self.connection.prepare(&sql)?;
-        match project_id {
+        let mut found: Vec<Session> = match project_id {
             Some(project_id) => statement
                 .query_map([project_id], session_from_row)?
-                .collect(),
-            None => statement.query_map([], session_from_row)?.collect(),
-        }
+                .collect::<rusqlite::Result<_>>()?,
+            None => statement
+                .query_map([], session_from_row)?
+                .collect::<rusqlite::Result<_>>()?,
+        };
+        found.retain(Self::held_in_its_project);
+        Ok(found)
     }
 
     pub fn mark_all_dormant(&self) -> rusqlite::Result<usize> {
@@ -2687,6 +2708,48 @@ mod tests {
             store.steering_menu("two").unwrap()["configOptions"][0]["currentValue"],
             false
         );
+    }
+
+    /**
+     * A chat that was filed under the wrong project stops being offered by it.
+     *
+     * Provider discovery adopted every chat an adapter listed into whichever
+     * project was open, and those rows are on disk: 455 of the 643 filed under
+     * one project on the owner's machine are held in aspen, in keystone, in
+     * /tmp and in the home folder. Reading the folder off the row is what
+     * corrects them, so the switch for the agents' own chats — which shows
+     * every row for diagnosis — does not bring them back either (bw-t9no.2).
+     */
+    #[test]
+    fn restore_sessions_drop_a_chat_filed_under_a_project_it_is_not_held_in() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        for (id, cwd) in [
+            ("here", "/project"),
+            ("worktree", "/project/worktrees/one"),
+            ("another-checkout", "/elsewhere/aspen"),
+            ("the-home-folder", "/home/ahsan"),
+            ("a-name-that-starts-the-same", "/project-old"),
+        ] {
+            let mut row = session(id, "claude", None, "2026-08-20T00:00:00Z");
+            row.origin = "terminal".into();
+            row.cwd = cwd.into();
+            store.create_session(&row).unwrap();
+        }
+
+        for everything in [false, true] {
+            let listed = store
+                .list_restore_sessions(Some("project-1"), everything)
+                .unwrap()
+                .into_iter()
+                .map(|row| row.id)
+                .collect::<std::collections::HashSet<_>>();
+            assert_eq!(
+                listed,
+                std::collections::HashSet::from(["here".to_string(), "worktree".to_string()]),
+                "showing the agents' own chats: {everything}"
+            );
+        }
     }
 
     #[test]
