@@ -1,0 +1,130 @@
+
+======== THE APP ON A PHONE: WHAT THE SURVEY FOUND ========
+
+-- the project list (/)
+   * scrolls sideways inside itself: [project-path] holds 570px in 208px
+   * under 44px to a thumb: open-terminal 40x40, Settings 40x40, Add tag 40x40, Project settings 40x40, Open in external application 40x40, Atelier 86x40, Beads CLI 108x40, Show archived 139x40, Claude Protocol orchestr 200x33, Add Project 342x40
+-- the chat tab, no chat open
+   * the chat list starts shut: its first row sits from x=-288 to x=-1, off the left edge, and only the [chat-rail-toggle] brings it back
+-- the chat tab, the list shut
+   * under 44px to a thumb: back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, chat-rail-toggle 40x40, open-kind-filter 40x40, open-search 40x40, toggle-everything 40x40, new-chat-menu 40x40
+-- the chat tab, the list open
+   * the chat list rail is 288px of the 390px window; a scrim is drawn
+   * under 44px to a thumb: back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, chat-rail-toggle 40x40, open-kind-filter 40x40, open-search 40x40, toggle-everything 40x40, new-chat-menu 40x40
+-- a chat open
+   * under 44px to a thumb: back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, chat-rail-toggle 40x40, open-kind-filter 40x40, chat-git-toggle 40x40, chat-right-rail-toggle 40x40, open-search 40x40
+-- the chat's right rail (Chat view)
+   * the rail is 288px wide, fixed, starting at x=102; a scrim is drawn
+   * under 44px to a thumb: back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, chat-rail-toggle 40x40, open-kind-filter 40x40, chat-git-toggle 40x40, chat-right-rail-toggle 40x40, open-search 40x40
+   * the bar buttons that open the rail — [chat-git-toggle] and [chat-right-rail-toggle] — are UNDER the open sheet, because it is inset-y-0 over the whole height including the bar
+-- the chat's right rail (Git view)
+   * under 44px to a thumb: git-amend 16x16, back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, chat-rail-toggle 40x40, open-kind-filter 40x40, chat-git-toggle 40x40, chat-right-rail-toggle 40x40
+-- the git diff
+   * the diff table is 364px wide with 4 columns and 4 cells to a row: each side's text column is only 169px (word-break normal/break-all)
+   * under 44px to a thumb: git-amend 16x16, back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, chat-rail-toggle 40x40, open-kind-filter 40x40, chat-git-toggle 40x40, chat-right-rail-toggle 40x40
+-- the composer and its @ menu
+   * the @ menu is 82px tall, from y=670 to y=752 in an 844px window (fixed)
+   * WITH A KEYBOARD UP (336px) the menu's bottom at y=752 is behind it
+   * under 44px to a thumb: git-amend 16x16, back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, chat-rail-toggle 40x40, open-kind-filter 40x40, chat-git-toggle 40x40, chat-right-rail-toggle 40x40
+   * a phone-only composer settings button is drawn
+-- the composer's phone settings dialog
+   * under 44px to a thumb: git-amend 16x16, back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, chat-rail-toggle 40x40, open-kind-filter 40x40, chat-git-toggle 40x40, chat-right-rail-toggle 40x40
+-- the board
+   * 6 columns, the first 356px wide, in a 390px window
+   * scrolls sideways inside itself: [column-tabs] holds 585px in 390px
+   * scrolls sideways inside itself: [board-scroll] holds 2244px in 390px
+   * under 44px to a thumb: back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, Sort options 40x40, Filter options 40x40, tab-files 54x40, Today 54x40, tab-chat 55x40
+-- the Files tab
+   * the tree rail takes 288px (static) and the viewer 102px of a 390px window
+   * a rail toggle is NOT drawn; a scrim is NOT drawn
+-- the Files tab, the tree
+   * under 44px to a thumb: back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, files-ignored-toggle 40x40, button 40x40, tab-files 54x40, tab-chat 55x40, tab-board 64x40
+-- the Files tab, a text file
+   * the code pane shows 102px of a 399px line while the tree holds the rest of the width
+   * scrolls sideways inside itself: [files-tab] holds 540px in 390px
+   * scrolls sideways inside itself: [files-viewer] holds 252px in 102px
+   * scrolls sideways inside itself: [open-files-strip] holds 125px in 102px
+   * scrolls sideways inside itself: [file-viewer-header] holds 252px in 102px
+   * under 44px to a thumb: back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, files-ignored-toggle 40x40, button 40x40, open-file-close 40x40, file-viewer-edit 40x40, file-viewer-copy-text 40x40
+-- the Files tab, the open-files strip
+   * 1 kept files: the strip shows 102px of 133px (overflow-x: auto)
+   * scrolls sideways inside itself: [open-files-strip] holds 133px in 102px
+   * under 44px to a thumb: back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, files-ignored-toggle 40x40, button 40x40, open-file-close 40x40, tab-files 54x40, tab-chat 55x40
+-- the Files tab, README.md previewed
+   * scrolls sideways inside itself: [files-tab] holds 426px in 390px
+   * scrolls sideways inside itself: [files-viewer] holds 138px in 102px
+   * scrolls sideways inside itself: [open-files-strip] holds 152px in 102px
+   * scrolls sideways inside itself: [file-preview] holds 138px in 102px
+   * scrolls sideways inside itself: [file-preview-bar] holds 138px in 102px
+   * scrolls sideways inside itself: [file-preview-markdown] holds 277px in 102px
+   * under 44px to a thumb: back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, files-ignored-toggle 40x40, button 40x40, open-file-close 40x40, tab-files 54x40, tab-chat 55x40
+-- the Files tab, assets/logo.svg previewed
+   * scrolls sideways inside itself: [files-tab] holds 426px in 390px
+   * scrolls sideways inside itself: [files-viewer] holds 138px in 102px
+   * scrolls sideways inside itself: [open-files-strip] holds 131px in 102px
+   * scrolls sideways inside itself: [file-preview] holds 138px in 102px
+   * scrolls sideways inside itself: [file-preview-bar] holds 138px in 102px
+   * under 44px to a thumb: back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, files-ignored-toggle 40x40, button 40x40, open-file-close 40x40, tab-files 54x40, tab-chat 55x40
+-- the Files tab, assets/shot.png previewed
+   * scrolls sideways inside itself: [files-tab] holds 479px in 390px
+   * scrolls sideways inside itself: [files-viewer] holds 191px in 102px
+   * scrolls sideways inside itself: [open-files-strip] holds 134px in 102px
+   * scrolls sideways inside itself: [file-preview] holds 191px in 102px
+   * scrolls sideways inside itself: [file-preview-bar] holds 191px in 102px
+   * scrolls sideways inside itself: [file-preview-image-stage] holds 131px in 102px
+   * scrolls sideways inside itself: [file-preview-image-transform] holds 131px in 102px
+   * under 44px to a thumb: back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, files-ignored-toggle 40x40, button 40x40, open-file-close 40x40, Zoom out 40x40, Zoom in 40x40
+-- the Files tab, assets/clip.mp4 previewed
+   * scrolls sideways inside itself: [open-files-strip] holds 133px in 102px
+   * under 44px to a thumb: back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, files-ignored-toggle 40x40, button 40x40, open-file-close 40x40, tab-files 54x40, tab-chat 55x40
+-- a picture under two fingers
+   * pinching moved the zoom from 100% to 100% — the picture did not answer the pinch
+   * one finger dragging left the transform UNCHANGED (matrix(1, 0, 0, 1, 0, 0))
+   * scrolls sideways inside itself: [files-tab] holds 479px in 390px
+   * scrolls sideways inside itself: [files-viewer] holds 191px in 102px
+   * scrolls sideways inside itself: [open-files-strip] holds 134px in 102px
+   * scrolls sideways inside itself: [file-preview] holds 191px in 102px
+   * scrolls sideways inside itself: [file-preview-bar] holds 191px in 102px
+   * scrolls sideways inside itself: [file-preview-image-stage] holds 131px in 102px
+   * scrolls sideways inside itself: [file-preview-image-transform] holds 131px in 102px
+   * under 44px to a thumb: back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, files-ignored-toggle 40x40, button 40x40, open-file-close 40x40, Zoom out 40x40, Zoom in 40x40
+-- the Files tab at 430x932
+   * scrolls sideways inside itself: [files-tab] holds 479px in 430px
+   * scrolls sideways inside itself: [files-viewer] holds 191px in 142px
+   * scrolls sideways inside itself: [file-preview] holds 191px in 142px
+   * scrolls sideways inside itself: [file-preview-bar] holds 191px in 142px
+   * scrolls sideways inside itself: [file-preview-image-stage] holds 151px in 142px
+   * scrolls sideways inside itself: [file-preview-image-transform] holds 151px in 142px
+   * under 44px to a thumb: back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, files-ignored-toggle 40x40, button 40x40, open-file-close 40x40, Zoom out 40x40, Zoom in 40x40
+-- a chat at 430x932
+   * the chat list rail is 288px wide here
+   * under 44px to a thumb: git-amend 16x16, back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, chat-rail-toggle 40x40, open-kind-filter 40x40, chat-git-toggle 40x40, chat-right-rail-toggle 40x40
+-- the Files tab at 744x1133
+   * under 44px to a thumb: back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, files-ignored-toggle 40x40, button 40x40, open-file-close 40x40, tab-files 54x40, tab-chat 55x40
+-- a chat at 744x1133
+   * the chat list rail is 288px wide here
+   * under 44px to a thumb: git-amend 16x16, back-arrow 40x40, home-button 40x40, project-menu 40x40, open-terminal 40x40, Settings 40x40, chat-rail-toggle 40x40, open-kind-filter 40x40, chat-git-toggle 40x40, chat-right-rail-toggle 40x40
+
+Pictures:
+   tests/results/phone-survey/01-project-list.png
+   tests/results/phone-survey/02-chat-tab-list-shut.png
+   tests/results/phone-survey/02b-chat-tab-list-open.png
+   tests/results/phone-survey/03-chat-open.png
+   tests/results/phone-survey/04-right-rail-chat.png
+   tests/results/phone-survey/05-right-rail-git.png
+   tests/results/phone-survey/06-git-diff.png
+   tests/results/phone-survey/07-composer-at-menu.png
+   tests/results/phone-survey/08-composer-settings-dialog.png
+   tests/results/phone-survey/09-board.png
+   tests/results/phone-survey/10-files-tree.png
+   tests/results/phone-survey/11-files-text.png
+   tests/results/phone-survey/12-files-strip.png
+   tests/results/phone-survey/13-preview-markdown.png
+   tests/results/phone-survey/14-preview-svg.png
+   tests/results/phone-survey/15-preview-image.png
+   tests/results/phone-survey/16-preview-video.png
+   tests/results/phone-survey/17-picture-touch.png
+   tests/results/phone-survey/18-files-430.png
+   tests/results/phone-survey/19-chat-430.png
+   tests/results/phone-survey/18-files-744.png
+   tests/results/phone-survey/19-chat-744.png
