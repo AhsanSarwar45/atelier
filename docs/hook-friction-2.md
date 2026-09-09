@@ -1142,3 +1142,25 @@ last command of every job is a bypass, just as the first one was.
 worktree has, by its nature, no code to commit, so the only way to satisfy it
 is to write something and name the land card in the subject. This commit is
 that: honest about it rather than dressed up.
+
+## bw-e3dw.7 / bw-e3dw.18 — the same refusal, one card later
+
+Nothing has changed: the copy is `worktrees/bw-e3dw`, the cards worked in it
+are `bw-e3dw.7` and `bw-e3dw.18`, and the gate matches the directory name
+against the epic and refuses. Both cards were written entirely through Bash
+heredocs with `ATELIER_BYPASS` welded onto each command — the spec, the CSS
+rule, the four component files, the friction book itself, and the `rm` of the
+scratch screenshots the runs left behind. The Edit and Write tools were not
+attempted, since they cannot carry the prefix.
+
+Two tool-shaped traps met on the same cards, neither of them a hook:
+
+- `atelier tool checks --help` does not print help. It **runs the project's
+  checks** and records the result as a comment on the card named by the
+  surrounding job — the checks card here picked up a `checks: tree … FAILED`
+  comment from what was meant to be a read of the usage line.
+- `atelier tool board/job new --help` prints only `--what is required`, and
+  every attempt to learn the rest of the flags by running it **creates a real
+  epic**. Two throwaway cards (`bw-ikda`, `bw-z7wg`) had to be cancelled after
+  probing for the flag names. A `--help` that answers, or a `--dry-run` that is
+  honoured, would cost the board nothing.

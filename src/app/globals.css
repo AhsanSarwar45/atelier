@@ -562,6 +562,62 @@
     transform: translateY(-50%);
   }
 
+  /* The same answer again, for the other thing `size="inherit"` is used for
+     (bw-e3dw.18).
+
+     That variant is the app's semantic replacement for a native text button:
+     `h-auto min-h-0 min-w-0 px-0 [font:inherit]`, so a button standing in for
+     a run of words keeps the line's own typography (button.tsx). `min-h-0` is
+     a utility class and the floor above is an element rule inside a media
+     block, so the variant does not merely escape the floor — it TURNS IT OFF,
+     wherever it is used. That is right for a word in a sentence and wrong for
+     a line laid out as a row, and the app uses it for both.
+
+     Measured at 390x844 with touch by tests/e2e/the-app-on-a-phone.spec.ts:
+     the name of a chat in the restore list, which is the only way into that
+     chat, reached 32px; the disclosure line of a file in the Git diff, which
+     is the only way to open it, reached 36px; a tool row, a thought and a
+     kind in the filter tree the same. Half a thumb, on the controls a reader
+     uses most.
+
+     What is NOT done here is putting the floor back on the painted box. These
+     rows carry the typography of what is around them on purpose, and the
+     owner has already said where that ends: 'badges are far too tall on
+     mobile' (bw-e3dw.16). So this is the answer that case arrived at — the
+     painted box is left exactly as it is and an invisible one is grown around
+     it — and for the same reason it is grown up and down ONLY. `left: 0` and
+     `right: 0` are the button's own edges, not the line's: a row grown
+     sideways would reach past whatever sits beside it on its line and answer
+     a press meant for that.
+
+     A mark rather than a selector, because no rule can tell the two kinds
+     apart by looking: `size="inherit"` on a chip inside `<Badge asChild>` and
+     `size="inherit"` on the row that opens a file are the same element with
+     the same classes, and only the call site knows which it wrote. The chips
+     — the tags on the project list, the drive letters in the folder browser,
+     the plan chips in the usage view, a blocked-by id — are deliberately not
+     marked: a chip is a word, and the rule above already gives it what it
+     should have.
+
+     Two rows 40px apart end up with bands that overlap by four pixels. That
+     is a boundary a press can land either side of, not a target stealing
+     another's middle, which is the line the case above draws and the one this
+     rule stays inside: the spec presses every marked row on its own middle
+     and checks that the row itself answers. */
+  [data-reach='row'] {
+    position: relative;
+  }
+
+  [data-reach='row']::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 44px;
+    transform: translateY(-50%);
+  }
+
   /* A slider is two pixels of track and a dot; the dot is what you drag, and
      the height here is what gives your thumb somewhere to land. */
   input[type='range'] {

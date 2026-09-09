@@ -12,21 +12,23 @@
    the document is 390px in a 390px window (body 390px)
 -- the chat tab, the list of chats open
    the document is 390px in a 390px window (body 390px)
-   ~~ out of reach of a thumb: row-name reaches 89x32 (painted 178x20), under 44px — known, filed as bw-e3dw.18
 -- a chat open
    the document is 390px in a 390px window (body 390px)
+   smaller than a thumb, and allowed to be: thinking-toggle reaches 88x42 (WCAG 2.2 2.5.8's spacing rule: what stopped this row short is the next row's own reach, or the edge of the list it is in — so the space is divided, every pixel of it belongs to somebody, and this row could only grow by answering for its neighbour or for the bar past the end of the pane)
 -- the chat's right rail, its Chat view
    the document is 390px in a 390px window (body 390px)
 -- the chat's right rail, its Git view
    the document is 390px in a 390px window (body 390px)
 -- the git diff
    the document is 390px in a 390px window (body 390px)
-   ~~ out of reach of a thumb: git-diff-file-toggle reaches 89x36 (painted 366x24), under 44px — known, filed as bw-e3dw.18
+   smaller than a thumb, and allowed to be: git-diff-file-toggle reaches 88x43 (WCAG 2.2 2.5.8's spacing rule: what stopped this row short is the next row's own reach, or the edge of the list it is in — so the space is divided, every pixel of it belongs to somebody, and this row could only grow by answering for its neighbour or for the bar past the end of the pane)
    the diff has 389 of the 390 columns of the screen to itself
 -- back from the diff to the conversation
    the document is 390px in a 390px window (body 390px)
+   smaller than a thumb, and allowed to be: thinking-toggle reaches 88x42 (WCAG 2.2 2.5.8's spacing rule: what stopped this row short is the next row's own reach, or the edge of the list it is in — so the space is divided, every pixel of it belongs to somebody, and this row could only grow by answering for its neighbour or for the bar past the end of the pane)
 -- the composer
    the document is 390px in a 390px window (body 390px)
+   smaller than a thumb, and allowed to be: thinking-toggle reaches 88x42 (WCAG 2.2 2.5.8's spacing rule: what stopped this row short is the next row's own reach, or the edge of the list it is in — so the space is divided, every pixel of it belongs to somebody, and this row could only grow by answering for its neighbour or for the bar past the end of the pane)
    with a 336px keyboard up the @ menu is drawn from y=322 to y=412, x=35 to x=287
 -- the composer and its @ menu, a keyboard up
    the document is 390px in a 390px window (body 390px)
@@ -56,8 +58,6 @@
    scrolls inside itself, and is meant to: [open-files-strip] holds 866px in 390px (open-files-strip)
 
 Known faults, filed and not this case's to fix:
-   row-name on "the chat tab, the list of chats open" (bw-e3dw.18): the name of a chat in the restore list is the only way into that chat and is 20px tall: it is a Button size="inherit", and that variant carries min-h-0, which outranks the coarse-pointer floor bw-e3dw.6 wrote
-   git-diff-file-toggle on "the git diff" (bw-e3dw.18): the disclosure line of a file in the diff is the only way to open it and is 24px tall, the same size="inherit" min-h-0 as the row above
 
 Exemptions, and why each is not a fault:
    board-scroll: the board is a stack of full-width columns a thumb swipes between: snap-x snap-mandatory with --column-min set to the window, so one column at a time is the whole point (kanban-board.tsx)

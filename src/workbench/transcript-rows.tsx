@@ -542,6 +542,7 @@ export const ToolRow = memo(function ToolRow({
           type="button"
           variant="foreground"
           size="inherit"
+          data-reach="row"
           data-testid="tool-toggle"
           disabled={!hasBody}
           onClick={() => setOpen(!open)}
@@ -672,6 +673,7 @@ export const MachineLine = memo(
               type="button"
               variant="foreground"
               size="inherit"
+              data-reach="row"
               data-testid="note-toggle"
               disabled={!opens}
               onClick={() => setOpen(!open)}
@@ -754,6 +756,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({ item }: { item: Extra
         type="button"
         variant="foreground"
         size="inherit"
+        data-reach="row"
         data-testid="thinking-toggle"
         onClick={() => setOpenedByHand(!open)}
         className="w-full justify-start gap-2 rounded-none p-0 text-left text-xs uppercase tracking-wide text-muted-foreground hover:text-foreground"

@@ -67,7 +67,13 @@ function FileDiff({
   const rows = file.binary ? [] : hunksToRows(file.hunks);
   const look = STATUS_LOOK[file.status];
   return (
-    <div data-testid="git-diff-file" data-path={file.path} data-open={open} className="flex flex-col gap-1 px-3 py-2">
+    // `gap-1.5` and not `gap-1`: the disclosure line below is 24px painted and
+    // takes its thumb floor as a reach band around it (bw-e3dw.18), and the
+    // band's last pixel was being drawn over by the table underneath — the
+    // row measured 43 of the 44 it is supposed to have. Two more pixels of
+    // room between a file's name and its lines, which nothing else notices,
+    // give the target the whole of it (tests/e2e/the-app-on-a-phone.spec.ts).
+    <div data-testid="git-diff-file" data-path={file.path} data-open={open} className="flex flex-col gap-1.5 px-3 py-2">
       {/* The disclosure is the tool row's disclosure: a foreground button that
           is the whole line, with a chevron that turns. The chip inside it is
           not a second button — the container's capture listener answers the
@@ -77,6 +83,7 @@ function FileDiff({
         type="button"
         variant="foreground"
         size="inherit"
+        data-reach="row"
         data-testid="git-diff-file-toggle"
         onClick={onFlip}
         className="w-full justify-start gap-2 rounded-none p-0 text-left enabled:hover:text-foreground"

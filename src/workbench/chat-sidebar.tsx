@@ -786,12 +786,19 @@ export function ChatSidebar({
                       type="button"
                       variant="foreground"
                       size="inherit"
+                      // Laid out as a row, not written into a sentence, so it
+                      // takes the thumb floor back as a reach band (bw-e3dw.18).
+                      data-reach="row"
                       data-testid="row-name"
-                      className="flex-1 justify-start truncate p-0 text-left text-foreground"
+                      // `truncate` on the WORDS, not on the button: it sets
+                      // overflow:hidden, and a reach band is a ::before of the
+                      // button's, so on the button it was clipped to the 20px
+                      // line and the row stayed 20px to a thumb (bw-e3dw.18).
+                      className="min-w-0 flex-1 justify-start p-0 text-left text-foreground"
                       disabled={busy === key}
                       onClick={() => enter(row)}
                     >
-                      {row.title ?? 'Untitled chat'}
+                      <span className="truncate">{row.title ?? 'Untitled chat'}</span>
                     </Button>
                     {/* Said once, here, and nowhere else on the row. There
                         used to be a badge under this as well, spelling out

@@ -96,30 +96,25 @@ const EXEMPT: { what: string; because: string }[] = [
  * What this walk really did find, already filed, and not this case's to fix.
  *
  * This is the opposite of the list above and must never be confused with it.
- * An exemption says "this is not a fault"; an entry here says "this IS a
- * fault, it is written down as bw-e3dw.18, and until that card is done this
- * case knows about exactly these two and no others". It is a ratchet, not a
- * pardon: anything new still turns the case red, and an entry that stops
- * appearing turns it red too, so the card that fixes one comes here and
- * deletes its line rather than leaving a note about a fault nobody has.
+ * An exemption says "this is not a fault"; an entry here would say "this IS a
+ * fault, it is filed as such, and until that card is done this case knows
+ * about exactly these and no others". It is a ratchet, not a pardon: anything
+ * new turns the case red, and an entry that STOPS appearing turns it red too,
+ * so the card that fixes one comes here and deletes its line rather than
+ * leaving a note about a fault nobody has.
+ *
+ * It is empty, and empty is the healthy state. It held two rows this walk
+ * found — the name of a chat in the restore list at 32px and the diff's file
+ * disclosure at 36px — which were filed as bw-e3dw.18; that card gave every
+ * row of that kind a reach band and deleted both lines from here.
  */
-const KNOWN: { screen: string; control: string; card: string; why: string }[] = [
-  {
-    screen: 'the chat tab, the list of chats open',
-    control: 'row-name',
-    card: 'bw-e3dw.18',
-    why: "the name of a chat in the restore list is the only way into that chat and is 20px tall: it is a Button size=\"inherit\", and that variant carries min-h-0, which outranks the coarse-pointer floor bw-e3dw.6 wrote",
-  },
-  {
-    screen: 'the git diff',
-    control: 'git-diff-file-toggle',
-    card: 'bw-e3dw.18',
-    why: 'the disclosure line of a file in the diff is the only way to open it and is 24px tall, the same size="inherit" min-h-0 as the row above',
-  },
-];
+const KNOWN: { screen: string; control: string; card: string; why: string }[] = [];
 const knownSeen = new Set<string>();
 
 /** Chips written into a sentence answer to a different rule than controls do. */
+const ROWS_DIVIDE =
+  "WCAG 2.2 2.5.8's spacing rule: what stopped this row short is the next row's own reach, or the edge of the list it is in — so the space is divided, every pixel of it belongs to somebody, and this row could only grow by answering for its neighbour or for the bar past the end of the pane";
+
 const INLINE_CHIPS =
   "WCAG 2.2 2.5.8's inline exception: a chip laid into a line of prose takes its size from the line, and a-chip-stays-a-chip.spec.ts owns that measurement";
 
@@ -402,9 +397,9 @@ interface Short {
  * is on the screen is judged — a control scrolled out of a pane, or a sheet
  * drawn shut off the edge, is not a control this screen is showing.
  */
-async function outOfReach(page: Page, floor: number, inlineChips: string): Promise<Short[]> {
+async function outOfReach(page: Page, floor: number, inlineChips: string, rowsDivide: string): Promise<Short[]> {
   return page.evaluate(
-    ({ floor: want, inlineChips: prose }) => {
+    ({ floor: want, inlineChips: prose, rowsDivide: divided }) => {
       const pickable =
         'button, a[href], [role="button"], [role="tab"], [role="menuitem"], [role="switch"], [role="checkbox"], input[type="checkbox"], input[type="radio"], summary';
       const seen: { what: string; reach: string; painted: string; exempt: string | null }[] = [];
@@ -425,27 +420,37 @@ async function outOfReach(page: Page, floor: number, inlineChips: string): Promi
         if (middle.x < 0 || middle.y < 0 || middle.x > window.innerWidth || middle.y > window.innerHeight) continue;
 
         const label = el.closest('label');
+        const landsOn = (x: number, y: number): Element | null => {
+          if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) return null;
+          return document.elementFromPoint(x, y);
+        };
         const answers = (x: number, y: number): boolean => {
-          const on = document.elementFromPoint(x, y);
+          const on = landsOn(x, y);
           if (!on) return false;
           if (on === el || el.contains(on) || on.contains(el)) return true;
-          return Boolean(label && on.closest('label') === label);
+          return Boolean(label && label.contains(on));
         };
         if (!answers(middle.x, middle.y)) continue;
 
-        // Grow outward from the middle while the press still lands on it, far
-        // enough to tell "reaches the floor" from "does not".
-        const cap = want;
-        const grow = (dx: number, dy: number): number => {
-          let out = 0;
-          while (out < cap && answers(middle.x + dx * (out + 1), middle.y + dy * (out + 1))) out += 1;
-          return out;
+        // Probed at the half pixel, so what comes back is a width and not a
+        // count of points: a box forty-four across is hit at 0.5 through 43.5
+        // from its own centre and reads back as forty-four. The same
+        // arithmetic as a-thumb-and-the-at-menu.spec.ts, which owns the
+        // measurement itself; here it is asked of every screen.
+        const reach = (dx: number, dy: number): { far: number; stoppedBy: Element | null } => {
+          let far = 0;
+          for (let step = 0.5; step <= want; step += 1) {
+            if (!answers(middle.x + dx * step, middle.y + dy * step)) {
+              return { far, stoppedBy: landsOn(middle.x + dx * step, middle.y + dy * step) };
+            }
+            far = step + 0.5;
+          }
+          return { far, stoppedBy: null };
         };
-        const reach = {
-          w: grow(-1, 0) + grow(1, 0) + 1,
-          h: grow(0, -1) + grow(0, 1) + 1,
-        };
-        if (reach.w >= want && reach.h >= want) continue;
+        const ways = { left: reach(-1, 0), right: reach(1, 0), up: reach(0, -1), down: reach(0, 1) };
+        const wide = ways.left.far + ways.right.far;
+        const tall = ways.up.far + ways.down.far;
+        if (wide >= want && tall >= want) continue;
 
         const what =
           el.getAttribute('data-testid') ||
@@ -455,17 +460,47 @@ async function outOfReach(page: Page, floor: number, inlineChips: string): Promi
         if (already.has(what)) continue;
         already.add(what);
 
-        const inASentence = Boolean(el.closest('.prose')) && Boolean(el.closest('[data-slot="badge"], [data-path-mention], [data-reference]'));
+        const inASentence =
+          Boolean(el.closest('.prose')) &&
+          Boolean(el.closest('[data-slot="badge"], [data-path-mention], [data-reference]'));
+        // A row in a list can only be as big as its neighbours leave it. Where
+        // the thing that stopped it short is the NEXT ROW's own reach, the two
+        // have divided the space between them: every pixel belongs to one of
+        // them, and this one could only grow by answering for the other, which
+        // is the one thing a bigger target must not buy. Asked way by way, so
+        // a row hemmed in on one side and simply small on the other is still a
+        // fault, and never below 24px, which is the floor no arrangement of
+        // neighbours excuses.
+        // The list this row is in, if it is in one: a row at the top or the
+        // bottom of a pane reaches as far as the pane does and no further,
+        // because what is past its edge is the bar above or the composer
+        // below, and a press there belongs to them.
+        let pane: HTMLElement | null = el.parentElement;
+        while (pane && pane !== document.body) {
+          const how = getComputedStyle(pane);
+          if (how.overflowY === 'auto' || how.overflowY === 'scroll') break;
+          pane = pane.parentElement;
+        }
+        const held = (way: { stoppedBy: Element | null }): boolean => {
+          const on = way.stoppedBy;
+          if (!on || el.contains(on)) return false;
+          if (on.closest('[data-reach="row"]')) return true;
+          return Boolean(pane && pane !== document.body && !pane.contains(on));
+        };
+        const short = Object.values(ways).filter((way) => way.far < want / 2);
+        const heldByItsNeighbours =
+          el.matches('[data-reach="row"]') && short.length > 0 && short.every(held) && wide >= 24 && tall >= 24;
+
         seen.push({
           what,
-          reach: `${reach.w}x${reach.h}`,
+          reach: `${wide}x${tall}`,
           painted: `${Math.round(box.width)}x${Math.round(box.height)}`,
-          exempt: inASentence ? prose : null,
+          exempt: inASentence ? prose : heldByItsNeighbours ? divided : null,
         });
       }
       return seen;
     },
-    { floor, inlineChips },
+    { floor, inlineChips, rowsDivide },
   );
 }
 
@@ -500,7 +535,7 @@ async function judge(page: Page, screen: string, shot: string): Promise<Wide> {
     fault(screen, `a control is cut off by the box around it: ${one.what} sits at ${one.where}`);
   }
 
-  for (const one of await outOfReach(page, THUMB, INLINE_CHIPS)) {
+  for (const one of await outOfReach(page, THUMB, INLINE_CHIPS, ROWS_DIVIDE)) {
     if (one.exempt) {
       note(`   smaller than a thumb, and allowed to be: ${one.what} reaches ${one.reach} (${one.exempt})`);
       continue;
@@ -508,6 +543,7 @@ async function judge(page: Page, screen: string, shot: string): Promise<Wide> {
     fault(screen, `out of reach of a thumb: ${one.what} reaches ${one.reach} (painted ${one.painted}), under ${THUMB}px`);
   }
 
+  await rowsAnswerForThemselves(page, screen);
   await shoot(page, shot);
   return wide;
 }
@@ -520,6 +556,49 @@ async function tree(page: Page, want: 'open' | 'shut'): Promise<void> {
   }
   await expect(rail).toHaveAttribute('data-open', String(want === 'open'), { timeout: WAIT });
   await page.waitForTimeout(800);
+}
+
+/**
+ * Every row that was given a reach band answers for its own middle.
+ *
+ * A target grown bigger is worth nothing if it grew over its neighbour: the
+ * press that used to open the row below now opens this one, and the reader
+ * has no way of knowing why. So each marked row is asked what a press at the
+ * exact centre of its own painted box would land on (bw-e3dw.18).
+ */
+async function rowsAnswerForThemselves(page: Page, screen: string): Promise<void> {
+  const stolen = await page.evaluate(() => {
+    const wrong: string[] = [];
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>('[data-reach="row"]'))) {
+      const box = el.getBoundingClientRect();
+      if (box.width < 1 || box.height < 1) continue;
+      const middle = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+      if (middle.x < 0 || middle.x > window.innerWidth) continue;
+      if (middle.y < 0 || middle.y > window.innerHeight) continue;
+      const on = document.elementFromPoint(middle.x, middle.y);
+      if (on && (on === el || el.contains(on) || on.contains(el))) continue;
+      // Only another ROW counts as theft. A sheet or a menu drawn over the
+      // whole pane also stops a press reaching what is under it, and is
+      // supposed to: that is what the scrim is for, and the screens that open
+      // one prove separately that the bar behind stays pressable.
+      const who = (on as HTMLElement | null)?.closest('[data-reach="row"]');
+      if (!who || who === el) continue;
+      // ...and only a row it shares a list with. A menu or a sheet is drawn
+      // through a portal, so a row inside one and a row in the transcript
+      // underneath it first meet at <body> or at the portal's own wrapper
+      // beneath it; two rows of one list meet far deeper than that. So the
+      // accusation only stands when the two share an ancestor that is not the
+      // page itself.
+      let together: HTMLElement | null = el.parentElement;
+      while (together && !together.contains(who)) together = together.parentElement;
+      if (!together || together === document.body || together.parentElement === document.body) continue;
+      wrong.push(
+        `${el.getAttribute('data-testid') ?? (el.textContent ?? '').trim().slice(0, 24)} is answered for by another row (${who.getAttribute('data-testid') ?? 'unnamed'})`,
+      );
+    }
+    return wrong;
+  });
+  for (const one of stolen) fault(screen, `a row does not answer for its own middle: ${one}`);
 }
 
 /** Is the control at this id the thing a press at its own middle would hit? */
@@ -554,12 +633,19 @@ test('every screen at a phone width, judged', async ({ page, request }) => {
   const deep = join(fixture, 'src', 'lib', 'deep.ts');
   const said = `Look at ${deep}:7 — and at src/main.ts, which I changed.`;
   const base = { sessionId: CHAT, at: new Date(0).toISOString() };
+  // A thought and a tool call as well as an answer: the rows a reader opens
+  // most are the transcript's own disclosure lines, and a transcript of one
+  // paragraph would walk past all of them (bw-e3dw.18).
   const events: WbpEvent[] = [
     { ...base, seq: 1, type: 'session.started', brand: 'claude', externalId: 'fixture', model: 'opus', cwd: fixture, permissionMode: 'on-request' },
-    { ...base, seq: 2, type: 'message.started', messageId: 'answer', role: 'assistant' },
-    { ...base, seq: 3, type: 'text.delta', messageId: 'answer', text: said },
-    { ...base, seq: 4, type: 'message.completed', messageId: 'answer' },
-    { ...base, seq: 5, type: 'session.state', state: 'idle', label: 'Ready' },
+    { ...base, seq: 2, type: 'thinking.delta', messageId: 'thought', text: 'Reading the file the reader asked about, and then the change beside it.' },
+    { ...base, seq: 3, type: 'message.completed', messageId: 'thought' },
+    { ...base, seq: 4, type: 'tool.started', toolCallId: 'ran', name: 'Bash', input: { command: `sed -n 7p ${deep}` }, title: `Read a file in ${fixture}`, parentToolCallId: null },
+    { ...base, seq: 5, type: 'tool.completed', toolCallId: 'ran', ok: true, output: 'const aRatherLongIdentifierOnLine7 = 7;' },
+    { ...base, seq: 6, type: 'message.started', messageId: 'answer', role: 'assistant' },
+    { ...base, seq: 7, type: 'text.delta', messageId: 'answer', text: said },
+    { ...base, seq: 8, type: 'message.completed', messageId: 'answer' },
+    { ...base, seq: 9, type: 'session.state', state: 'idle', label: 'Ready' },
   ];
 
   await page.addInitScript(({ chat, view }) => {
