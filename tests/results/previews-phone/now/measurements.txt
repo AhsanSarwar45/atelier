@@ -1,0 +1,12 @@
+
+======== THE PREVIEWS ON A PHONE (now) ========
+
+   * README.md (markdown) at 390px: the preview is 390px and the furthest anything inside it reaches is 390px; nothing holds more than it shows; the document is 390px in 390px
+   * assets/shot.png (image) at 390px: the preview is 390px and the furthest anything inside it reaches is 390px; nothing holds more than it shows; the document is 390px in 390px
+   * assets/wide.png (image) at 390px: the preview is 390px and the furthest anything inside it reaches is 795px; file-preview-image-stage holds 795px in 390px; file-preview-image-transform holds 795px in 390px; the document is 390px in 390px
+   * assets/wide.png at 390px: a 1200px picture on a 390px stage at 1x, overflow-x: hidden — the stage keeps it rather than the page carrying it
+   * assets/drawing.svg (svg) at 390px: the preview is 390px and the furthest anything inside it reaches is 390px; nothing holds more than it shows; the document is 390px in 390px
+   * assets/clip.mp4 (video) at 390px: the preview is 390px and the furthest anything inside it reaches is 390px; nothing holds more than it shows; the document is 390px in 390px
+   * assets/paper.pdf (pdf) at 390px: the preview is 390px and the furthest anything inside it reaches is 390px; nothing holds more than it shows; the document is 390px in 390px
+   * the open-files strip with 6 files open at 390px: 888px of tabs in 390px, overflow-x: auto
+   * with the strip crowded, the document is 390px in 390px
