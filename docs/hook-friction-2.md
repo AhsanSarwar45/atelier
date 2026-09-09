@@ -954,3 +954,19 @@ sits in. Every other write in the card went through `ATELIER_BYPASS` for the
 same reason as bw-e3dw.9 and bw-e3dw.2 above; the Edit and Write tools were not
 attempted at all, since the previous worker recorded that they are refused
 outright here and a heredoc through Bash carries the bypass.
+
+## bw-e3dw.3 / bw-e3dw.5 — the epic copy refuses every write, including `cat > file`
+
+The worktree is named for the epic (`worktrees/bw-e3dw`), so the gate reads the
+job as `bw-e3dw` and refuses:
+
+    Beads issue bw-e3dw is owned by AhsanSarwar45, not this session. The target
+    `tests/e2e/the-git-diff-on-a-phone.spec.ts` resolved from
+    /home/ahsan/dev/beads-web/worktrees/bw-e3dw → …/tests/e2e/the-git-diff-on-a-phone.spec.ts.
+
+It refuses a plain shell redirection into a NEW file, not only an edit of a
+tracked one, so `cat > …`, `sed -i`, and `mv` all need `ATELIER_BYPASS=` welded
+onto the front of the command. The Edit and Write tools cannot be prefixed at
+all and are simply unusable in a job copy, so every line of this card's work had
+to go through Bash heredocs. A child claimed in its parent's copy has no
+unrefused way to write a file.

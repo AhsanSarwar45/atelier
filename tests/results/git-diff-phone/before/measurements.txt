@@ -1,0 +1,4 @@
+
+======== THE GIT DIFF ON A PHONE (before) ========
+
+   * the git diff at 390px: 2 gutter(s) of line numbers, 10 line cells drawn, the widest line of code is 169px; 10 of 30 words are cut across a line break (theFirstRatherLongIdentifierHere, theFirstRatherLongIdentifierHere, theSecondRatherLongIdentifierHere, theSecondRatherLongIdentifierRenamed, theThirdRatherLongIdentifierHere, theThirdRatherLongIdentifierHere); the document is 390px in 390px

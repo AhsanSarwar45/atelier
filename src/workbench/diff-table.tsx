@@ -12,11 +12,15 @@
  * retyped path (bw-gr8y.8). The reader who wanted the code after all takes it
  * from the floating "Copy text" button the selection raises.
  *
+ * On a phone the same rows are stacked into one column instead — see
+ * `STACKED_ROW` — because two columns of code at 390px are two columns nobody
+ * can read (bw-e3dw.3).
+ *
  * Design: docs/agent-workbench.md §8.2.
  */
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 
 import { Copy } from 'lucide-react';
 
@@ -85,6 +89,25 @@ function gutterFor(rows: DiffRow[]): string {
   const highest = rows.reduce((most, r) => Math.max(most, r.leftNo ?? 0, r.rightNo ?? 0), 0);
   return `${Math.max(2, String(highest).length)}ch`;
 }
+
+/**
+ * One line to a row below `md`, side by side above it (bw-e3dw.3).
+ *
+ * At 390px the table gave each side a 169px monospace column, and `break-all`
+ * then cut every identifier in half to fill it — the diff was not overflowing,
+ * it was shattered. So below the breakpoint the row becomes a two-track grid,
+ * one gutter and one line of code, and the two sides are read one under the
+ * other: a removed line over the added line that replaced it, each with its own
+ * number on the one gutter. Above the breakpoint not a rule of this applies and
+ * the table is exactly what it always was.
+ */
+const STACKED_ROW = 'max-md:grid max-md:grid-cols-[calc(var(--diff-gutter)_+_0.5rem)_minmax(0,1fr)]';
+
+/**
+ * A side there is no reason to draw in one column: one that is empty, and the
+ * old side of an unchanged line, which would otherwise be printed twice.
+ */
+const OTHER_SIDE = 'max-md:hidden';
 
 export function DiffTable({
   rows,
@@ -167,38 +190,53 @@ export function DiffTable({
           event.clipboardData.setData('text/plain', now.copied.reference);
           event.preventDefault();
         }}
-        className={cn('w-full table-fixed border-collapse font-mono text-[11px] leading-relaxed text-foreground/80', className)}
+        // The gutter is a `col` width above the breakpoint and a grid track
+        // below it, and it is the same measurement either way, so it is worked
+        // out once and read from here by both. The `0.5rem` the track adds is
+        // the number cell's own `px-1`, which a `col` width already allows for.
+        style={{ '--diff-gutter': gutter } as CSSProperties}
+        className={cn(
+          'w-full table-fixed border-collapse font-mono text-[11px] leading-relaxed text-foreground/80 max-md:block',
+          className,
+        )}
       >
-        <colgroup>
+        {/* Column widths belong to a table, and below the breakpoint this is
+            not one. */}
+        <colgroup className="max-md:hidden">
           <col style={{ width: gutter }} />
           <col />
           <col style={{ width: gutter }} />
           <col />
         </colgroup>
-        <tbody>
+        <tbody className="max-md:block">
           {rows.map((r, i) =>
             r.kind === 'gap' ? (
-              <tr key={i} data-diff-kind="gap">
-                <td colSpan={4} className="bg-muted/30 px-2 py-0.5 text-center text-t-faint select-none">
+              <tr key={i} data-diff-kind="gap" className={STACKED_ROW}>
+                <td colSpan={4} className="bg-muted/30 px-2 py-0.5 text-center text-t-faint select-none max-md:col-span-2">
                   {r.count} unchanged {r.count === 1 ? 'line' : 'lines'}
                 </td>
               </tr>
             ) : (
-              <tr key={i} data-diff-kind={r.kind}>
+              <tr key={i} data-diff-kind={r.kind} className={STACKED_ROW}>
                 <td
                   className={cn(
                     'px-1 py-0.5 text-right align-top tabular-nums text-t-faint select-none',
                     r.kind === 'removed' || r.kind === 'changed' ? 'bg-red-500/15' : '',
                     r.left === null && 'bg-muted/20',
+                    (r.left === null || r.kind === 'same') && OTHER_SIDE,
                   )}
                 >
                   {r.leftNo ?? ''}
                 </td>
                 <td
                   className={cn(
-                    'whitespace-pre-wrap break-all px-2 py-0.5 align-top',
+                    // A word is broken only where it will not fit at all, and
+                    // `break-all` — which cuts one wherever the line happens to
+                    // end — is kept for the narrow columns that need it.
+                    'whitespace-pre-wrap break-words md:break-all px-2 py-0.5 align-top',
                     r.kind === 'removed' || r.kind === 'changed' ? 'bg-red-500/15' : '',
                     r.left === null && 'bg-muted/20',
+                    (r.left === null || r.kind === 'same') && OTHER_SIDE,
                   )}
                 >
                   {r.left === null ? '' : <Line text={r.left} language={language} html={painted[i]!.left} />}
@@ -206,17 +244,22 @@ export function DiffTable({
                 <td
                   className={cn(
                     'border-l border-border/40 px-1 py-0.5 text-right align-top tabular-nums text-t-faint select-none',
+                    // The rule divides two columns; below the breakpoint there
+                    // are not two.
+                    'max-md:border-l-0',
                     r.kind === 'added' || r.kind === 'changed' ? 'bg-emerald-500/15' : '',
                     r.right === null && 'bg-muted/20',
+                    r.right === null && OTHER_SIDE,
                   )}
                 >
                   {r.rightNo ?? ''}
                 </td>
                 <td
                   className={cn(
-                    'whitespace-pre-wrap break-all px-2 py-0.5 align-top',
+                    'whitespace-pre-wrap break-words md:break-all px-2 py-0.5 align-top',
                     r.kind === 'added' || r.kind === 'changed' ? 'bg-emerald-500/15' : '',
                     r.right === null && 'bg-muted/20',
+                    r.right === null && OTHER_SIDE,
                   )}
                 >
                   {r.right === null ? '' : <Line text={r.right} language={language} html={painted[i]!.right} />}

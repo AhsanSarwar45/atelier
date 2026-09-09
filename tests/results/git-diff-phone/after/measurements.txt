@@ -1,0 +1,5 @@
+
+======== THE GIT DIFF ON A PHONE (after) ========
+
+   * the git diff at 390px: 1 gutter(s) of line numbers, 7 line cells drawn, the widest line of code is 343px; 0 of 30 words are cut across a line break; the document is 390px in 390px
+   * the same diff at 1024px: 2 gutter(s), 10 line cells drawn, the widest line of code is 198px
