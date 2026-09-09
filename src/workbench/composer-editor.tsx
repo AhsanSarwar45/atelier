@@ -61,6 +61,7 @@ import { FILE_BADGE_CLASS, FILE_KINDS, fileKind, type FileKind } from '@/compone
 import { badgeVariants } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { ExternalChange } from '@/workbench/code-editor';
+import { drawnCaret } from '@/workbench/drawn-caret';
 import { findReferences, referenceLabel } from '@/workbench/references';
 
 /** What the chat holds this box by: the one thing it ever asks of it. */
@@ -179,7 +180,6 @@ const composerTheme = EditorView.theme({
   },
   '.cm-content': {
     padding: '0',
-    caretColor: 'hsl(var(--text-primary))',
   },
   '.cm-line': { padding: '0' },
   '.cm-placeholder': { color: 'hsl(var(--muted-foreground))' },
@@ -241,6 +241,11 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
         history(),
         drawSelection(),
         dropCursor(),
+        // Both of the above draw a caret of their own instead of the browser's,
+        // and neither knows what colour this app's ink is. drawn-caret.ts is
+        // where that is answered, once, for this box and for the Files tab's
+        // editor together (bw-axtp.1).
+        drawnCaret,
         EditorView.lineWrapping,
         placeholderText(start.placeholder ?? ''),
         composerTheme,

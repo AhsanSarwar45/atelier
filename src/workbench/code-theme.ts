@@ -23,6 +23,8 @@ import type { Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { tags as t } from '@lezer/highlight';
 
+import { drawnCaret } from '@/workbench/drawn-caret';
+
 /** The class a line named by `?line=` wears; the rule for it lives below. */
 export const HIGHLIGHTED_LINE_CLASS = 'cm-highlighted-line';
 
@@ -42,13 +44,12 @@ export const codeSurfaceTheme = EditorView.theme({
     lineHeight: '1.55',
     overflow: 'auto',
   },
+  // No caretColor here: drawSelection() covers the native caret with
+  // `caret-color: transparent !important`, and drawn-caret.ts paints the
+  // element it draws in its place — for this view and for the chat's box
+  // alike (bw-axtp.1).
   '.cm-content': {
-    caretColor: 'hsl(var(--text-primary))',
     padding: '0.5rem 0',
-  },
-  '.cm-cursor, .cm-dropCursor': {
-    borderLeftColor: 'hsl(var(--text-primary))',
-    borderLeftWidth: '2px',
   },
   // Read-only is the resting state, so the selection has to be visible without
   // focus; CM only paints its own layer when focused unless it is told twice.
@@ -188,4 +189,4 @@ export const codeHighlightStyle = HighlightStyle.define([
 ]);
 
 /** The whole look, ready to hand to a Compartment. */
-export const codeTheme: Extension = [codeSurfaceTheme, syntaxHighlighting(codeHighlightStyle)];
+export const codeTheme: Extension = [codeSurfaceTheme, drawnCaret, syntaxHighlighting(codeHighlightStyle)];

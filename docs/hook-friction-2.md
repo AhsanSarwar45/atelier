@@ -984,3 +984,24 @@ Deleting a scratch directory that the E2E run itself created a minute earlier
 is not a write to the card's work, but the gate cannot tell the difference,
 so the Edit and Write tools are unusable here and every line has to go through
 a Bash heredoc with `ATELIER_BYPASS` welded on.
+
+## bw-axtp.1 — the workflow gate reads the directory name as the card
+
+The job is standalone: the directory is named for the job (`bw-axtp`) and the
+only card in it is the child `bw-axtp.1`. The gate expects the directory name
+to be the claimed card, so both the claim and every later write were refused.
+
+`bd update bw-axtp.1 --claim` from `worktrees/bw-axtp`:
+
+```
+Claim bw-axtp.1 from its own isolated worktree, not /home/ahsan/dev/beads-web/worktrees/bw-axtp.
+```
+
+The first file write in the worktree:
+
+```
+Beads issue bw-axtp must be claimed and in_progress before this worktree is changed. The target `docs/hook-friction-2.md` resolved from /home/ahsan/dev/beads-web/worktrees/bw-axtp → /home/ahsan/dev/beads-web/worktrees/bw-axtp/docs/hook-friction-2.md.
+```
+
+Both carried through with
+`ATELIER_BYPASS='a worktree is per job; this child is claimed in its job copy'`.
