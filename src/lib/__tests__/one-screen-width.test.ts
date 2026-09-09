@@ -13,8 +13,8 @@ function sourceFiles(dir: string): string[] {
 
 describe('one screen width', () => {
   it('uses the styling system phone boundary everywhere', () => {
-    expect(PHONE_SCREEN).toBe('(max-width: 639px)');
-    expect(NOT_PHONE_SCREEN).toBe('(min-width: 640px)');
+    expect(PHONE_SCREEN).toBe('(max-width: 767px)');
+    expect(NOT_PHONE_SCREEN).toBe('(min-width: 768px)');
 
     const root = join(process.cwd(), 'src');
     const offenders = sourceFiles(root)

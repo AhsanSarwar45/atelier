@@ -913,3 +913,20 @@ to `/home/ahsan/dev/beads-web` and discarded the ownership of the worktree the
 command was issued from. `board/land bw-2xjd.3` also cannot substitute for the
 cleanup: it requires a commit named after a card the workflow itself marks
 `no-code`.
+
+## bw-e3dw.9 / bw-e3dw.2: a child working in its epic's worktree
+
+The epic `bw-e3dw` keeps one worktree, `worktrees/bw-e3dw`, reused by every
+child under it (a worktree is per job, not per step). Every write from inside
+that copy is refused, because the gate resolves the target by the worktree's
+NAME and looks for a card called `bw-e3dw` that this session owns:
+
+```
+Beads issue bw-e3dw is owned by AhsanSarwar45, not this session. The resolved
+target: /home/ahsan/dev/beads-web/worktrees/bw-e3dw/tests/e2e/the-phone-rails.spec.ts.
+```
+
+The claim was refused first, for the same reason, and so was every subsequent
+Edit and Write in the copy — one bypass per tool call for the whole card. A
+gate that accepted a claimed child of the card the worktree is named after
+would leave the standing refusals intact and cost this job nothing.

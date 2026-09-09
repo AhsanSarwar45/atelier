@@ -247,12 +247,20 @@ export function ChatRightRail({
         'z-30 flex shrink-0 flex-col overflow-hidden border-border/60 bg-background',
         !resizing && 'transition-[width] duration-200 ease-out motion-reduce:transition-none',
         open
-          ? // A sheet down the whole right edge on a phone, as tall as the
-            // screen under the bars and hard against the side it opens from —
+          ? // A sheet down the whole right edge on a phone, hard against the
+            // side it opens from and filling everything the bars left over —
             // and on a wide screen, today's column, in the row and bordered on
             // the one side that touches it.
+            //
+            // `absolute` inside the work area rather than `fixed` over the
+            // whole window: fixed put the sheet on top of the bar it was
+            // opened from, so [chat-git-toggle] and [chat-right-rail-toggle]
+            // were buried under it and the only way from the Chat view to the
+            // Git view on a phone was to shut the sheet first (bw-e3dw.9). It
+            // ends flush with the bars, so there is no gap and no stray box —
+            // the door simply stays in the hand that opened it.
             cn(
-              'fixed inset-y-0 right-0 z-50 w-72 max-w-[85vw] border-l shadow-2xl',
+              'absolute inset-y-0 right-0 z-50 w-72 max-w-[85vw] border-l shadow-2xl',
               'md:static md:inset-auto md:z-30 md:h-full md:w-[var(--chat-right-rail-width)] md:max-w-none md:shadow-none',
             )
           : // Shut, it takes no width at all, on a wide screen as much as on

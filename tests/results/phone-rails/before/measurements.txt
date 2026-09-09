@@ -1,0 +1,13 @@
+
+======== THE PHONE RAILS (before) ========
+
+   * chat right rail open at 390px: 288px fixed starting at y=0, the bar ends at y=105; [chat-git-toggle] is NOT pressable, [chat-right-rail-toggle] is NOT pressable
+   * the Git view could NOT be reached without shutting the sheet first
+   * chat list sheet open at 390px: [chat-rail-toggle] is NOT pressable
+   * at 700px with nothing remembered: the right rail is data-open=true, 288px, fixed; its scrim is in the layout
+   * AT 700px THE RAIL DEFAULTS OPEN AND IS DRAWN AS A SHEET OVER THE READING — two answers, not one
+   * Files tab at 390px, tree shut: rail 288px (static, left=0), viewer 102px of 390px; a toggle is NOT drawn, a scrim is NOT drawn
+   * Files tab at 390px: the document is 390px in 390px; nothing scrolls sideways
+   * Files tab, a text file at 390px: the tree sits at x=0; the code pane shows 102px of a 399px line; [file-viewer-header] holds 252px in 102px
+   * Files tab, README.md previewed at 390px: its heading is 54px wide and 432px tall
+   * Files tab, a picture at 390px: the stage is 102px and the picture 160px

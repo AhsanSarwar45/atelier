@@ -1426,14 +1426,17 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         data-open={railOpen}
         style={{ '--chat-left-rail-width': `${leftWidth}px` } as CSSProperties}
         className={cn(
-          // On a phone it is a sheet over the WHOLE screen, bars included, not
-          // a panel inside the box the bars left over: a sheet that starts
-          // below them reads as a stray box in the page, which is what the
-          // manager sent this back for (bw-81wt.30). Hence `fixed` — the box
-          // around it is only the work area. On a wide screen it is a column
-          // of the row again, and behind the popups as it always was.
+          // On a phone it is a sheet over the transcript, filling everything
+          // the bars left over and flush to their underside — no gap, so it is
+          // still one surface and not the stray box the manager sent this back
+          // for (bw-81wt.30), but it no longer lies on TOP of the bar it was
+          // opened from. Covering the bar buried [chat-rail-toggle] under the
+          // very sheet it opens (bw-e3dw.9), so it is `absolute` in the work
+          // area now rather than `fixed` over the window. On a wide screen it
+          // is a column of the row again, and behind the popups as it always
+          // was.
           'z-50 h-full shrink-0 bg-background transition-transform md:relative md:z-30 md:translate-x-0',
-          'fixed inset-y-0 left-0 md:w-[var(--chat-left-rail-width)]',
+          'absolute inset-y-0 left-0 md:w-[var(--chat-left-rail-width)]',
           railOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full',
         )}
       >
@@ -1452,8 +1455,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           newChatDefault={newChatDefault}
           onNewChatDefault={setNewChatDefault}
           startingNewChat={starting}
-          // The cross inside the drawer, for a phone where the bar that opened
-          // it is behind the sheet (bw-81wt.30).
+          // The cross inside the drawer: the sheet's own way out, beside the
+          // scrim and the toggle on the bar above it, which stays in reach
+          // while the sheet is open (bw-81wt.30, bw-e3dw.9).
           onClose={() => setRailOpen(false)}
         />
       </div>
@@ -1474,14 +1478,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         data-testid="chat-rail-scrim"
         data-open={railOpen}
         className={cn(
-          // Over the whole screen, like the sheet it belongs to: the dimming
-          // stops where the sheet stops, and a sheet that covers the bars with
-          // bright bars showing through beside it is two panels arguing.
+          // Over the work area, like the sheet it belongs to: the dimming
+          // stops where the sheet stops, so the two read as one surface rather
+          // than two panels arguing. It reaches the bars no further than the
+          // sheet does, because a reader has to be able to press the button he
+          // opened this from (bw-e3dw.9).
           // 80% and not 40%, which is what an opened card already uses: the
           // app's own background is 9,9,11, so a light wash over it moves
           // nothing an eye can see — what dims is the WRITING behind the
           // sheet, and 40% left it perfectly readable (bw-81wt.30).
-          'fixed inset-0 z-40 h-auto rounded-none bg-black/80 p-0 md:hidden',
+          'absolute inset-0 z-40 h-auto rounded-none bg-black/80 p-0 md:hidden',
           'transition-opacity duration-200 ease-out motion-reduce:transition-none',
           railOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
         )}
@@ -1534,14 +1540,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           data-testid="chat-right-rail-scrim"
           data-open={rightOpen}
           className={cn(
-            // Over the whole screen, like the sheet it belongs to: the dimming
-          // stops where the sheet stops, and a sheet that covers the bars with
-          // bright bars showing through beside it is two panels arguing.
-          // 80% and not 40%, which is what an opened card already uses: the
-          // app's own background is 9,9,11, so a light wash over it moves
-          // nothing an eye can see — what dims is the WRITING behind the
-          // sheet, and 40% left it perfectly readable (bw-81wt.30).
-            'fixed inset-0 z-40 h-auto rounded-none bg-black/80 p-0 md:hidden',
+            // Over the work area, like the sheet it belongs to: the dimming
+            // stops where the sheet stops, so the two read as one surface
+            // rather than two panels arguing. It reaches the bars no further
+            // than the sheet does, because a reader has to be able to press
+            // the button he opened this from (bw-e3dw.9).
+            // 80% and not 40%, which is what an opened card already uses: the
+            // app's own background is 9,9,11, so a light wash over it moves
+            // nothing an eye can see — what dims is the WRITING behind the
+            // sheet, and 40% left it perfectly readable (bw-81wt.30).
+            'absolute inset-0 z-40 h-auto rounded-none bg-black/80 p-0 md:hidden',
             'transition-opacity duration-200 ease-out motion-reduce:transition-none',
             rightOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
           )}
