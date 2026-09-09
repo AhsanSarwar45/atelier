@@ -1,4 +1,16 @@
 import type { Config } from 'tailwindcss';
+import plugin from 'tailwindcss/plugin';
+
+/**
+ * The width of the composer's tool row that the pickers need to sit on it.
+ *
+ * Measured, not chosen: driven with a chat carrying every steering control a
+ * Claude session offers, the row of pickers is 656px wide
+ * (tests/e2e/the-composer-row.spec.ts). 672 is that with a little slack,
+ * because the things in the row are WORDS — a model's display name, "2 agents"
+ * — and a longer name is a wider row.
+ */
+const ROOM_FOR_THE_PICKERS = '42rem';
 
 const config: Config = {
   darkMode: ['class'],
@@ -144,6 +156,33 @@ const config: Config = {
   plugins: [
     require('tailwindcss-animate'),
     require('@tailwindcss/typography'),
+    /**
+     * `composer-wide:` — is there room on the composer's tool row itself.
+     *
+     * A media query cannot answer this, which is the whole difficulty
+     * (bw-e3dw.12). Above `md` the chat's two rails stop being sheets and
+     * become 288px columns, so the composer is given what is LEFT of the
+     * window rather than the window: 258px at a 900px window and 458px at
+     * 1100px, against a row of pickers that needs 656px. It does not fit until
+     * roughly a 1250px window, and no `min-width` can see that, because the
+     * number a `min-width` reads is the window's.
+     *
+     * A container query reads the width of an ancestor instead, and the
+     * ancestor here is the row itself — `[container-type:inline-size]` on the
+     * tool row in `chat-tab.tsx`. So `composer-wide:` asks the one honest
+     * question: is THIS ROW wide enough to hold its pickers. The answer is the
+     * same as `md:` at every width where the rails are sheets and the pane is
+     * the window, which is everywhere bw-e3dw.11 measured; it differs only
+     * where the rails are columns, which is where the fault was.
+     *
+     * Written here as a variant rather than pulled in as
+     * `@tailwindcss/container-queries`: one at-rule is the whole of what this
+     * app needs from that plugin, and a named variant says what the query is
+     * FOR, which `@[42rem]:` would not.
+     */
+    plugin(({ addVariant }) => {
+      addVariant('composer-wide', `@container composer (min-width: ${ROOM_FOR_THE_PICKERS})`);
+    }),
   ],
 };
 

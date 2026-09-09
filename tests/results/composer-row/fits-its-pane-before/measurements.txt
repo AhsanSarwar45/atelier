@@ -1,0 +1,5 @@
+- at 390px: the tool row holds 324px in 324px; the status line holds 390px in 390px, 40px tall; the pickers are behind the settings button
+- at 700px: the tool row holds 634px in 634px; the status line holds 700px in 700px, 40px tall; the pickers are behind the settings button
+- at 900px: the tool row holds 656px in 258px; the status line holds 324px in 324px, 40px tall; the pickers are on the row (no settings button drawn)
+- at 1100px: the tool row holds 656px in 458px; the status line holds 524px in 524px, 40px tall; the pickers are on the row (no settings button drawn)
+- at 1440px: the tool row holds 798px in 798px; the status line holds 864px in 864px, 40px tall; the pickers are on the row (no settings button drawn)

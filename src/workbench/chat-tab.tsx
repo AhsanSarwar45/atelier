@@ -2023,7 +2023,24 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             // edge, no shadow and no colour of its own.
             className="w-full leading-6"
           />
-          <div className="mt-1.5 flex items-center gap-1">
+          {/* The row asks its OWN width, not the window's, and that is what
+              `[container-type:inline-size]` is here for. Above `md` the chat's
+              two rails stop being sheets and become 288px columns, so this row
+              is given what is left of the window rather than the window: 258px
+              at a 900px window and 458px at an 1100px one, against a row of
+              pickers that needs 656. No media query can see that — a
+              `min-width` reads the window — so the row wore the desktop
+              pickers and printed them over each other from 768 all the way to
+              about 1250 (bw-e3dw.12).
+
+              Naming the container `composer` makes the row the thing its own
+              children measure themselves against, which is the question in one
+              step: `composer-wide:` below is "is this row wide enough to hold
+              its pickers", defined once in `tailwind.config.ts`. It agrees with
+              `md:` at every width where the rails are sheets and this row is
+              the window, which is everywhere bw-e3dw.11 measured; it differs
+              only where the rails are columns. */}
+          <div className="mt-1.5 flex items-center gap-1 [container-name:composer] [container-type:inline-size]">
             {/* A plain button, not the toolbar's: that one speaks through a
                 tooltip and only works inside the bar that hosts one. */}
             <Tooltip label="Attach a picture">
@@ -2041,7 +2058,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             </Tooltip>
             {/* Both act on THIS chat, and are kept in his own settings so the
                 next one opens on them too (§8.2.3). */}
-            <div className="hidden items-center gap-1 md:flex" data-testid="desktop-composer-settings">
+            <div className="hidden items-center gap-1 composer-wide:flex" data-testid="desktop-composer-settings">
             <Picker
               icon={<ModeMark mode={view.permissionMode} className="h-3.5 w-3.5" />}
               label="Permission mode"
@@ -2151,7 +2168,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 size="sm"
                 aria-label="Chat settings"
                 data-testid="mobile-composer-settings"
-                className="rounded-full text-muted-foreground md:hidden"
+                className="rounded-full text-muted-foreground composer-wide:hidden"
                 onClick={() => setComposerSettingsOpen(true)}
               >
                 <SlidersHorizontal className="h-4 w-4" />
@@ -2164,7 +2181,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                   appearance="light"
                   size="sm"
                   data-testid="agent-definitions"
-                  className="hidden md:inline-flex"
+                  /* On this row, so it answers this row: at a 900px window the
+                     row is 258px and a chip saying how many agents the chat has
+                     is the first thing that has nowhere to go. */
+                  className="hidden composer-wide:inline-flex"
                 >
                   {view.menu.agentDefinitions.length} agent{view.menu.agentDefinitions.length === 1 ? '' : 's'}
                 </Badge>

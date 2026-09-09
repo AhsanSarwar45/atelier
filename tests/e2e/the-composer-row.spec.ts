@@ -20,8 +20,13 @@ import type { WbpEvent } from '../../src/workbench/protocol';
  * is about whether there is room for a column BESIDE the reading. A row of
  * controls is about whether its own contents fit on one line, which depends on
  * how many controls this particular chat has, not on the shape of the screen.
- * So this case does not assume; it asks the row, at the three widths that
+ * So this case does not assume; it asks the row, at the five widths that
  * matter, with a chat that has every steering control a Claude session offers.
+ *
+ * bw-e3dw.12 then made the row ask that question of ITSELF rather than of the
+ * window, because between 768 and about 1250 the two open rails are what leave
+ * it short and a media query cannot see them. The two widths this case used to
+ * walk without judging are judged from there on.
  *
  * Run: scripts/workbench-e2e.sh tests/e2e/the-composer-row.spec.ts
  */
@@ -32,26 +37,28 @@ const WAIT = 60_000;
 const CHAT = 'composer-row-chat';
 
 /**
- * A phone, the band the epic is arguing about, and two desktops.
+ * A phone, the band the epic argued about, and two desktops — and the two
+ * widths in between where the rails are what squeeze the row.
  *
- * 900 and 1100 are walked and measured but not judged. Above 768 the two rails
- * stop being sheets and become columns of 288 each, so a 900px window leaves
- * the composer 258px and an 1100px one leaves it 458px, while the desktop row
- * of pickers is 656px wide. It cannot fit in either at any breakpoint, and
- * would need roughly a 1250px window before it did.
+ * Above 768 the two rails stop being sheets and become columns of 288 each, so
+ * a 900px window leaves the composer 258px and an 1100px one leaves it 458px,
+ * while the desktop row of pickers is 656px wide. It did not fit in either at
+ * any breakpoint and would have needed roughly a 1250px window before it did:
+ * the row was squeezed by what is BESIDE it, which no media query can see,
+ * because the number a `min-width` reads is the window's.
  *
- * That is a real fault and a different one: it is the row being squeezed by
- * what is beside it, which no media query can see — a `min-width` asks about
- * the window and the composer is given what two rails have left of it. It
- * belongs to no child of bw-e3dw and is reported rather than fixed here; the
- * numbers are kept so whoever takes it has them. 1440 is the width where the
- * desktop row does have the room it asks for, and that one is judged.
+ * bw-e3dw.11 measured those two widths and left them unjudged, because the
+ * fault was not its card's. bw-e3dw.12 is that card, and every width here is
+ * judged now. The row asks its own width through a container query
+ * (`composer-wide:`, tailwind.config.ts), so 900 and 1100 are answered by the
+ * same rule that answers 390 — and 1440, where the row does have the room it
+ * asks for, still puts the pickers on the row.
  */
 const WIDTHS = [
   { name: '390-a-phone', width: 390, height: 844, judged: true },
   { name: '700-the-band', width: 700, height: 900, judged: true },
-  { name: '900-both-rails-open', width: 900, height: 900, judged: false },
-  { name: '1100-both-rails-open', width: 1100, height: 900, judged: false },
+  { name: '900-both-rails-open', width: 900, height: 900, judged: true },
+  { name: '1100-both-rails-open', width: 1100, height: 900, judged: true },
   { name: '1440-a-desktop', width: 1440, height: 900, judged: true },
 ];
 
