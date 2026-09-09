@@ -55,6 +55,28 @@ export function clampScale(scale: number, min: number, max: number): number {
 }
 
 /**
+ * The scale at which a picture of `content` exactly fills a box of `box` — the
+ * smaller of the two ratios, so the long side decides and nothing is cropped.
+ *
+ * This is the number a zoom floor has to be made of. A floor written as a
+ * constant is an ABSOLUTE answer to a RELATIVE question: whether 25% is far
+ * enough out depends entirely on the picture's own size against the stage it is
+ * drawn on. A 1200px picture on a 390px phone stage needs 0.325 and 25% happens
+ * to clear it; a 4000px one needs 0.0975 and a 12000px one 0.0325, so with a
+ * fixed floor those two simply cannot be made to fit, however far the reader
+ * zooms out (bw-e3dw.17).
+ *
+ * A box or a picture that has not been measured yet answers 1 rather than 0, so
+ * a floor built on this is the fixed one until the numbers are real — never a
+ * floor of zero, which would let a first wheel notch shrink a picture to
+ * nothing.
+ */
+export function fitScale(box: Size | null | undefined, content: Size | null | undefined): number {
+  if (!box?.width || !box?.height || !content?.width || !content?.height) return 1;
+  return Math.min(box.width / content.width, box.height / content.height);
+}
+
+/**
  * How far the picture may be dragged: exactly to its own edges and no further.
  *
  * The limit is the overflow, halved, because the layer is centred — so a

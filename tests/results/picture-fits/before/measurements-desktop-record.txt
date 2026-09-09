@@ -1,0 +1,2 @@
+a desktop, opened: 100% — the picture is drawn 4000×3000 in a stage of 1152×746
+a desktop, zoomed out as far as the app allows: 25% — the picture is drawn 1000×750 in a stage of 1152×746

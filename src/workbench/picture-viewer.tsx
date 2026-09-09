@@ -12,6 +12,18 @@ import { NO_TRANSFORM, clampScale, useZoomPan, type ImageTransform } from '@/wor
 export type { ImageTransform };
 
 const RESET = NO_TRANSFORM;
+/**
+ * 1 is this viewer's FITTED size, not merely its hundred percent.
+ *
+ * The picture below is drawn `object-contain` in the box, so at scale 1 the
+ * whole of it is already in the room and there is nothing further out to go and
+ * see — zooming below 1 would only shrink a fitted picture inside a box it
+ * already fits. That is why this floor is a constant while the Files tab's is
+ * derived (`zoomFloor` in file-preview.tsx): the two agree that the floor is
+ * "the whole picture fits", and differ only in who does the fitting. Here CSS
+ * does it; there the reader is looking at real pixels, so the number has to be
+ * worked out from the picture and the stage (bw-e3dw.17).
+ */
 const MIN_SCALE = 1;
 const MAX_SCALE = 5;
 

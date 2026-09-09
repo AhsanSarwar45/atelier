@@ -23,7 +23,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 
-import { Minus, Plus } from 'lucide-react';
+import { Maximize, Minus, Plus } from 'lucide-react';
 
 import { fileKind } from '@/components/file-kinds';
 import { MarkdownBody } from '@/components/markdown-body';
@@ -31,7 +31,7 @@ import { Button } from '@/components/ui/button';
 import { apiUrl } from '@/lib/api-base';
 import { cn } from '@/lib/utils';
 import { CodeEditor } from '@/workbench/code-editor';
-import { NO_TRANSFORM, clampScale, useZoomPan, type ImageTransform } from '@/workbench/zoom-pan';
+import { NO_TRANSFORM, clampScale, fitScale, useZoomPan, type ImageTransform, type Size } from '@/workbench/zoom-pan';
 
 /**
  * How a file is shown, which is not quite what kind of file it is. `text` means
@@ -87,10 +87,63 @@ const CHECKERBOARD = {
   backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px',
 };
 
+/** The round percentages a person actually asks for. */
 const ZOOMS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 8];
-/** The wheel is continuous, so it is bounded by the ends of that ladder. */
-const MIN_ZOOM = ZOOMS[0];
+/**
+ * The smallest rung of the ladder, which used to be the floor of the zoom
+ * outright — and that was the bug. See `zoomFloor` below.
+ */
+const SMALLEST_RUNG = ZOOMS[0];
 const MAX_ZOOM = ZOOMS[ZOOMS.length - 1];
+
+/**
+ * How far out this picture may be zoomed, on this stage.
+ *
+ * Derived rather than written down: at MOST the smallest rung of the ladder, so
+ * an ordinary picture still stops where it always did, and at LEAST the scale
+ * that fits the whole picture in the stage, so a picture of any size can be
+ * made to fit. The owner's report was a 25% floor met while zooming out of a
+ * large image: "large images cant be fit into view as such" (bw-e3dw.17).
+ *
+ * It moves when either half of it moves — a new picture, or a stage that has
+ * changed size because the phone was rotated or the Files tree sheet opened —
+ * which is why it is computed in render from measured numbers rather than
+ * settled once when the file loads.
+ */
+function zoomFloor(stage: Size | null, picture: Size | null): number {
+  return Math.min(SMALLEST_RUNG, fitScale(stage, picture));
+}
+
+/**
+ * The scale the "Fit" button asks for: the whole picture in the stage, but
+ * never blown up past its own pixels.
+ *
+ * The app decided deliberately that a picture OPENS at its real pixel size
+ * rather than fitted (bw-e3dw.5, bw-e3dw.15), so fit is something the reader
+ * asks for, and asking for it must never enlarge a 32px icon to fill the room —
+ * that is the thing the opening decision exists to prevent.
+ */
+function fitZoom(stage: Size | null, picture: Size | null): number {
+  return Math.min(1, fitScale(stage, picture));
+}
+
+/**
+ * The next rung of the ladder in the direction pressed — strictly past where
+ * the picture is now, and the floor or the ceiling when there is no rung left.
+ *
+ * The old version indexed the ladder and added one, which meant that from a
+ * derived floor of 3% a press of `+` jumped to 50% (past the 25% rung it was
+ * standing below) and a press of `-` could not reach the floor at all. Reaching
+ * fit by pressing zoom-out is the ordinary way a reader finds it; the Fit
+ * button is the fast way, not the only way.
+ */
+export function steppedZoom(zoom: number, by: number, min: number, max: number): number {
+  const nearly = 0.001;
+  const next = by > 0
+    ? ZOOMS.find((one) => one > zoom + nearly)
+    : [...ZOOMS].reverse().find((one) => one < zoom - nearly);
+  return clampScale(next ?? (by > 0 ? max : min), min, max);
+}
 
 function Bar({ children }: { children: ReactNode }) {
   return (
@@ -148,6 +201,16 @@ function SourceSwitch({ showing, onChange }: { showing: 'source' | 'preview'; on
  * actually asks for, and the percentage itself is still the button that puts
  * the picture back — now returning the position along with the scale, because
  * a reset that leaves the picture off in a corner has not reset anything.
+ *
+ * How far OUT it goes is not on the ladder, though, and that is the point of
+ * `zoomFloor`: the picture opens at its real pixel size, so a large one opens
+ * bigger than the room, and the way back to seeing all of it must exist for a
+ * picture of any size rather than for pictures that happen to clear 25%. The
+ * chat's viewer (`picture-viewer.tsx`) floors at 1 for the same reason and not
+ * a different one — it draws its picture with `object-contain`, so its scale 1
+ * already IS the fitted size, and there is nothing below fit to go to. Both
+ * surfaces stop at "the whole picture is in the room"; only one of them has to
+ * work out what number that is.
  */
 function ImagePreview({ path, swap }: { path: string; swap?: ReactNode }) {
   const [shape, setShape] = useState<{ width: number; height: number } | null>(null);
@@ -160,20 +223,34 @@ function ImagePreview({ path, swap }: { path: string; swap?: ReactNode }) {
     setTransform(NO_TRANSFORM);
   }, [path]);
 
+  // The stage's own size, watched rather than read once: it changes when the
+  // window does, when the phone is turned, and when the Files tree sheet opens
+  // over the pane — and each of those changes what "far enough out to fit"
+  // means for the picture already on screen.
+  const [stage, setStage] = useState<Size | null>(null);
+
   const zoom = transform.scale;
+  const minZoom = zoomFloor(stage, shape);
   const { viewportRef, handlers, cursor, pannable, dragging, zoomTo } = useZoomPan({
     transform,
     onChange: setTransform,
-    minScale: MIN_ZOOM,
+    minScale: minZoom,
     maxScale: MAX_ZOOM,
     content: shape,
   });
 
-  const step = (by: number) => {
-    const at = ZOOMS.findIndex((one) => one >= zoom - 0.001);
-    const next = ZOOMS[Math.min(ZOOMS.length - 1, Math.max(0, (at === -1 ? ZOOMS.length - 1 : at) + by))] ?? zoom;
-    zoomTo(clampScale(next, MIN_ZOOM, MAX_ZOOM));
-  };
+  useEffect(() => {
+    const node = viewportRef.current;
+    if (!node) return;
+    const measure = () => setStage({ width: node.clientWidth, height: node.clientHeight });
+    measure();
+    const watch = new ResizeObserver(measure);
+    watch.observe(node);
+    return () => watch.disconnect();
+  }, [viewportRef]);
+
+  const step = (by: number) => zoomTo(steppedZoom(zoom, by, minZoom, MAX_ZOOM));
+  const fitted = fitZoom(stage, shape);
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -200,6 +277,21 @@ function ImagePreview({ path, swap }: { path: string; swap?: ReactNode }) {
           <Button type="button" variant="ghost" size="icon" className="h-5 w-5" aria-label="Zoom in" onClick={() => step(1)}>
             <Plus className="h-3 w-3" />
           </Button>
+          {/* The other half of a reachable fit. A floor low enough to fit a
+              12000px picture is 3%, and reaching 3% by wheeling — on a phone,
+              by pinching — is not reaching it. One press, and the whole
+              picture is in the room. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5"
+            data-testid="file-preview-fit"
+            aria-label="Fit picture to view"
+            onClick={() => setTransform({ scale: fitted, x: 0, y: 0 })}
+          >
+            <Maximize className="h-3 w-3" />
+          </Button>
         </div>
         {/* An SVG reads as source too, and its switch belongs on the bar it
             already has rather than on a second one stacked above it. */}
@@ -209,6 +301,8 @@ function ImagePreview({ path, swap }: { path: string; swap?: ReactNode }) {
         ref={viewportRef}
         data-testid="file-preview-image-stage"
         data-scale={zoom}
+        data-min-scale={minZoom}
+        data-fit-scale={fitted}
         data-pan-x={transform.x}
         data-pan-y={transform.y}
         data-pannable={pannable || undefined}
