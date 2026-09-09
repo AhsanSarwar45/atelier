@@ -1118,3 +1118,27 @@ The tool claimed the card as the session (`s-70a116bd`, which is what
 human owner. The evidence was recorded and the card was left open; closing it
 took a `bd update --claim` and a `bd close` by hand. The tool should close as
 the same actor it claimed as.
+
+### …except on the land card, which is where it did repeat
+
+The paragraph above holds for the work card and the checks card. The land card
+is different: `bd update bw-axtp.4 --claim` from the job copy was refused with
+
+```
+Claim bw-axtp.4 from its own isolated worktree, not
+/home/ahsan/dev/beads-web/worktrees/bw-axtp.
+```
+
+The two that were accepted differ from it in one visible way: they carry a
+`copy:bw-axtp-2` label naming the branch the copy is on, and the land card
+carries none. So the gate is not reading the directory name at all — it is
+matching the card against a copy it has been told about, and a card that has
+never been claimed anywhere has nothing to match. Which means the refusal lands
+on the one card in the spine whose whole job is to take the copy away, and the
+last command of every job is a bypass, just as the first one was.
+
+`atelier tool board/land bw-axtp.4` then refused a second time, with
+`no commit subject on bw-axtp-2 names bw-axtp.4` — a land card that removes a
+worktree has, by its nature, no code to commit, so the only way to satisfy it
+is to write something and name the land card in the subject. This commit is
+that: honest about it rather than dressed up.
