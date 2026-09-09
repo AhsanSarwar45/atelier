@@ -36,7 +36,7 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 
-import { Pencil } from 'lucide-react';
+import { Pencil, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -93,7 +93,7 @@ export function stemLength(name: string): number {
 
 /** What is being asked for, and about what. */
 interface Asked {
-  what: 'rename';
+  what: 'rename' | 'delete';
   target: PathInCheckout;
 }
 
@@ -130,7 +130,7 @@ export function useFileActions(onMoved?: PathMoved): FileActions {
   // The name up to the extension, selected the moment the box appears: that is
   // the part being changed, and it saves typing `.png` back every time.
   useEffect(() => {
-    if (asked === null) return;
+    if (asked?.what !== 'rename') return;
     const there = box.current;
     if (!there) return;
     there.focus();
@@ -141,6 +141,24 @@ export function useFileActions(onMoved?: PathMoved): FileActions {
     setName(nameOf(target.path));
     setAsked({ what, target });
   }, []);
+
+  const remove = useCallback(async () => {
+    if (asked === null || busy) return;
+    const { root, path } = asked.target;
+    setBusy(true);
+    try {
+      await fs.remove(root, path);
+      setAsked(null);
+      onMoved?.(path, null);
+      // Said out loud, because the row simply vanishes and "where did it go" is
+      // exactly the question this answers.
+      toast({ title: `${nameOf(path)} moved to Trash` });
+    } catch (why: unknown) {
+      refused('That could not be deleted', why);
+    } finally {
+      setBusy(false);
+    }
+  }, [asked, busy, onMoved]);
 
   const rename = useCallback(
     async (event: FormEvent) => {
@@ -182,6 +200,13 @@ export function useFileActions(onMoved?: PathMoved): FileActions {
           >
             <Pencil aria-hidden="true" /> Rename…
           </DropdownMenuItem>
+          <DropdownMenuItem
+            data-testid="path-delete"
+            className="text-xs text-destructive focus:text-destructive"
+            onSelect={() => ask('delete', target)}
+          >
+            <Trash2 aria-hidden="true" /> Move to Trash…
+          </DropdownMenuItem>
         </>
       );
     },
@@ -190,6 +215,41 @@ export function useFileActions(onMoved?: PathMoved): FileActions {
 
   const dialogs = (
     <Dialog open={asked !== null} onOpenChange={(open) => { if (!open) setAsked(null); }}>
+      {asked?.what === 'delete' ? (
+        // A decision to be answered rather than a form to fill in, so it is
+        // announced as one — built out of the app's own dialog, the way the Git
+        // rail's confirmation is (`git-view.tsx`). `alert-dialog.tsx` is
+        // reached by nothing in the app and asks for theme variables no theme
+        // defines, so it would draw its dim in an invalid colour.
+        <DialogContent
+          role="alertdialog"
+          className="w-[90vw] gap-3 sm:max-w-md"
+          data-testid="path-delete-dialog"
+        >
+          <DialogHeader>
+            <DialogTitle>Move {asked.target.kind === 'dir' ? 'folder' : 'file'} to Trash?</DialogTitle>
+            {/* Where it goes, in the sentence the reader answers — not in a
+                toast afterwards. This is the only call in the app that cannot
+                be undone from inside it, so what "delete" means here is said
+                out loud: the desktop's trash, restorable from the file manager,
+                and a folder takes everything in it. */}
+            <DialogDescription className="break-words">
+              {nameOf(asked.target.path)}
+              {asked.target.kind === 'dir' ? ', and everything in it,' : ''} goes to your desktop&apos;s
+              Trash. Nothing is erased — you can put it back from your file manager. Atelier itself
+              cannot undo this.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" disabled={busy} data-testid="path-delete-cancel" onClick={() => setAsked(null)}>
+              Keep
+            </Button>
+            <Button variant="destructive" disabled={busy} data-testid="path-delete-confirm" onClick={() => void remove()}>
+              Move to Trash
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      ) : (
       <DialogContent className="sm:max-w-md" data-testid="path-rename-dialog">
         <DialogHeader>
           <DialogTitle>Rename {asked?.target.kind === 'dir' ? 'folder' : 'file'}</DialogTitle>
@@ -223,6 +283,7 @@ export function useFileActions(onMoved?: PathMoved): FileActions {
           </DialogFooter>
         </form>
       </DialogContent>
+      )}
     </Dialog>
   );
 

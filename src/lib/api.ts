@@ -1007,6 +1007,21 @@ export const fs = {
     }),
 
   /**
+   * Put a file or folder in the desktop's own trash (bw-5gax.3).
+   *
+   * The trash and not an unlink, and the screen says so before it is asked:
+   * this is the one call in the app that cannot be undone from inside it, and
+   * every machine already has a place for "removed, but not yet destroyed".
+   * A path outside the named checkout is refused by the SERVER, so this being
+   * offered only for paths inside one is a courtesy and not the guard.
+   */
+  remove: (root: string, path: string) =>
+    fetchApi<FsPathMoved>('/api/fs/delete', {
+      method: 'POST',
+      body: JSON.stringify({ root, path }),
+    }),
+
+  /**
    * Told whenever files move inside `path` — written from a terminal, by an
    * agent working in the checkout, by a build — with the absolute paths that
    * moved (bw-g3o3.3). Returns the way to stop.

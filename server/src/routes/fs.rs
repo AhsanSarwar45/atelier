@@ -704,6 +704,66 @@ pub async fn rename_path(Json(body): Json<FsRenameBody>) -> Response {
     (StatusCode::OK, Json(PathMoved { path: to.path.to_string_lossy().into_owned() })).into_response()
 }
 
+/// What a delete is asked to do.
+#[derive(Debug, Deserialize)]
+pub struct FsPathBody {
+    /// The checkout the path lives in.
+    pub root: String,
+    /// The absolute path.
+    pub path: String,
+}
+
+/// POST /api/fs/delete
+///
+/// Puts a file or folder in the desktop's own trash.
+///
+/// The trash and not `remove_file`, decided rather than defaulted. Deleting is
+/// the one call in this app that cannot be taken back from inside it: unsaved
+/// text can be typed again, a stale save is a 409 and a rename can be renamed
+/// back, but a file git never knew about, unlinked, is simply gone. Every
+/// machine the app runs on already has the place for "removed, but not yet
+/// destroyed" and a file manager that restores from it, and using it costs one
+/// call. The screen says "Move to Trash" for the same reason: the reader is
+/// told which of the two this is BEFORE answering, not afterwards.
+///
+/// A symlink goes as the link and never as what it points at — the same rule
+/// the save route keeps, and here it is the difference between trashing a
+/// shortcut and trashing whatever the shortcut led to.
+///
+/// Off the async threads, because the trash is a directory somewhere else and a
+/// large tree moved into it can mean a copy across filesystems.
+pub async fn delete_path(Json(body): Json<FsPathBody>) -> Response {
+    let root = match checkout(&body.root) {
+        Ok(root) => root,
+        Err(no) => return refusal(no),
+    };
+    let target = match confined(root, std::path::Path::new(&body.path)) {
+        Ok(found) => found,
+        Err(no) => return refusal(no),
+    };
+    if std::fs::symlink_metadata(&target.path).is_err() {
+        return refusal((StatusCode::NOT_FOUND, "That file no longer exists".to_string()));
+    }
+    let gone = target.path.clone();
+    let done = tokio::task::spawn_blocking(move || trash::delete(&gone)).await;
+    let failed = match done {
+        Ok(Ok(())) => None,
+        Ok(Err(e)) => Some(e.to_string()),
+        Err(e) => Some(e.to_string()),
+    };
+    match failed {
+        None => (
+            StatusCode::OK,
+            Json(PathMoved { path: target.path.to_string_lossy().into_owned() }),
+        )
+            .into_response(),
+        Some(why) => refusal((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Could not move it to the trash: {why}"),
+        )),
+    }
+}
+
 /// GET /api/presentation-assets/:asset
 pub async fn presentation_asset(headers: HeaderMap, Path(asset): Path<String>) -> Response {
     if !media_origin_allowed(&headers) {
@@ -1440,6 +1500,7 @@ mod tests {
             .route("/api/fs/read", axum::routing::get(read_file))
             .route("/api/fs/write", axum::routing::put(write_file))
             .route("/api/fs/rename", axum::routing::post(rename_path))
+            .route("/api/fs/delete", axum::routing::post(delete_path))
             .route("/api/fs/media", axum::routing::get(media))
     }
 
@@ -2440,5 +2501,162 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert!(theirs.exists(), "the file the link pointed at was moved");
         assert_eq!(std::fs::read_link(root.path().join("renamed-shortcut")).unwrap(), theirs);
+    }
+
+
+    /// Where the freedesktop trash keeps what it took on this machine.
+    #[cfg(target_os = "linux")]
+    fn trash_dir() -> PathBuf {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| directories::UserDirs::new().unwrap().home_dir().join(".local/share"))
+            .join("Trash")
+    }
+
+    /// Whether the trash is holding what used to be at `path` — and, having
+    /// found it, take it back out again.
+    ///
+    /// Two jobs in one on purpose. The assertion is the point of the delete
+    /// route: it moves things to the trash rather than unlinking them, and
+    /// "the path is gone" alone would pass for either. The tidying is the
+    /// manners: a test suite that fills the developer's own trash a little more
+    /// every run is one they stop running.
+    ///
+    /// Linux only, because the freedesktop layout — a `.trashinfo` beside the
+    /// file, naming where it came from — is the only one that can be read this
+    /// plainly. Elsewhere the route is still exercised; only this check is not.
+    #[cfg(target_os = "linux")]
+    fn taken_by_the_trash(path: &std::path::Path) -> bool {
+        let trash = trash_dir();
+        let Ok(entries) = std::fs::read_dir(trash.join("info")) else { return false };
+        let came_from = format!("Path={}", path.display());
+        for entry in entries.flatten() {
+            let Ok(said) = std::fs::read_to_string(entry.path()) else { continue };
+            if !said.lines().any(|line| line == came_from) {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().trim_end_matches(".trashinfo").to_string();
+            let held = trash.join("files").join(name);
+            let _ = if held.is_dir() { std::fs::remove_dir_all(&held) } else { std::fs::remove_file(&held) };
+            let _ = std::fs::remove_file(entry.path());
+            return true;
+        }
+        false
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn taken_by_the_trash(_path: &std::path::Path) -> bool {
+        true
+    }
+
+    /// The desktop's trash, not an unlink. Both halves are asserted, because
+    /// "the path is gone" alone would pass for either one.
+    #[tokio::test]
+    async fn a_delete_takes_the_file_out_of_the_checkout() {
+        let root = a_checkout();
+        let file = root.path().join("notes.txt");
+
+        let (status, answer) = posted(
+            "/api/fs/delete",
+            serde_json::json!({ "root": root.path(), "path": file }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{answer}");
+        assert_eq!(answer["path"].as_str().unwrap(), file.to_string_lossy());
+        assert!(!file.exists(), "the file is still in the checkout");
+        assert!(taken_by_the_trash(&file), "the file was unlinked rather than put in the trash");
+    }
+
+    #[tokio::test]
+    async fn a_folder_is_deleted_with_everything_in_it() {
+        let root = a_checkout();
+
+        let (status, _) = posted(
+            "/api/fs/delete",
+            serde_json::json!({ "root": root.path(), "path": root.path().join("src") }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(!root.path().join("src").exists());
+        assert!(taken_by_the_trash(&root.path().join("src")), "the folder was erased rather than trashed");
+    }
+
+    /// The card's own line: a delete aimed outside the checkout is impossible
+    /// on the SERVER, not merely unoffered by the client. Each of the four ways
+    /// out is tried against a file that really is there.
+    #[tokio::test]
+    async fn a_delete_aimed_outside_the_checkout_is_refused() {
+        let root = a_checkout();
+        let elsewhere = scratch();
+        let theirs = elsewhere.path().join("theirs.txt");
+        std::fs::write(&theirs, "not yours\n").unwrap();
+        let climbing = root
+            .path()
+            .join("src/../..")
+            .join(elsewhere.path().file_name().unwrap())
+            .join("theirs.txt");
+
+        for (what, aimed) in [
+            ("a plain path in another folder", theirs.clone()),
+            ("a path that climbs out with ..", climbing),
+            ("the checkout's own .git", root.path().join(".git/HEAD")),
+            ("the checkout itself", root.path().to_path_buf()),
+        ] {
+            let (status, _) = posted(
+                "/api/fs/delete",
+                serde_json::json!({ "root": root.path(), "path": aimed }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{what} was allowed");
+        }
+
+        assert!(theirs.exists());
+        assert!(root.path().join(".git/HEAD").exists());
+    }
+
+    /// Naming a folder that is not a checkout as the root buys nothing: the
+    /// home jail alone would allow it, and the second jail is what refuses.
+    #[tokio::test]
+    async fn a_delete_under_a_root_that_is_not_a_checkout_is_refused() {
+        let root = scratch();
+        let file = root.path().join("notes.txt");
+        std::fs::write(&file, "hello\n").unwrap();
+
+        let (status, answer) = posted(
+            "/api/fs/delete",
+            serde_json::json!({ "root": root.path(), "path": file }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(answer["error"].as_str().unwrap().contains("not a checkout"));
+        assert!(file.exists());
+    }
+
+    /// Deleting a link takes the link. Following it would take whatever it
+    /// points at, which is how a call confined to a checkout destroys something
+    /// outside one.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_symlink_is_deleted_as_the_link_and_never_as_its_target() {
+        let root = a_checkout();
+        let elsewhere = scratch();
+        let theirs = elsewhere.path().join("theirs.txt");
+        std::fs::write(&theirs, "not yours\n").unwrap();
+        let link = root.path().join("shortcut");
+        std::os::unix::fs::symlink(&theirs, &link).unwrap();
+
+        let (status, _) = posted(
+            "/api/fs/delete",
+            serde_json::json!({ "root": root.path(), "path": link }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(std::fs::symlink_metadata(&link).is_err(), "the link is still there");
+        assert!(theirs.exists(), "the file the link pointed at was destroyed");
+        assert!(taken_by_the_trash(&link));
     }
 }

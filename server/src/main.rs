@@ -504,6 +504,7 @@ async fn serve(open_browser: bool) {
         // Changing the tree, not only reading it (bw-5gax). Confined to a
         // checkout by the routes themselves, not by the caller.
         .route("/api/fs/rename", post(routes::fs::rename_path))
+        .route("/api/fs/delete", post(routes::fs::delete_path))
         .route(
             "/api/presentation-assets/:asset",
             get(routes::fs::presentation_asset),

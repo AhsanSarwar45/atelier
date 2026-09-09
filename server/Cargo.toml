@@ -70,6 +70,14 @@ png = "0.18"
 # own for the length of that one call (`routes/git.rs`), so this is wanted by
 # the server itself and not only by its tests.
 tempfile = "3"
+# Deleting from the file browser puts things in the DESKTOP's trash rather
+# than unlinking them (bw-5gax.3). It is the one call in the app that cannot be
+# undone from inside it, and every machine already has the place for "removed,
+# but not yet destroyed" — the freedesktop spec on Linux, the Finder's on macOS,
+# the recycle bin on Windows. On Linux it is implemented natively and pulls in
+# only `log`, `once_cell`, `scopeguard` and `urlencoding` beyond what is already
+# here: no dbus, no gio.
+trash = "5"
 
 [dev-dependencies]
 # `test-util` gives the tests a pausable clock, so the supervisor's growing
