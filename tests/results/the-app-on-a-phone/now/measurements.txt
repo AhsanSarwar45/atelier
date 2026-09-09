@@ -1,0 +1,93 @@
+
+======== THE APP ON A PHONE: EVERY SCREEN JUDGED AT 390x844 ========
+
+-- the project list
+   the document is 390px in a 390px window (body 390px)
+-- the board
+   the document is 390px in a 390px window (body 390px)
+   scrolls inside itself, and is meant to: [column-tabs] holds 585px in 390px (column-tabs)
+   scrolls inside itself, and is meant to: [board-scroll] holds 2244px in 390px (board-scroll)
+   the board's strip snaps "x mandatory" and a column is 358px of the 390px it shows
+-- the chat tab, the list of chats shut
+   the document is 390px in a 390px window (body 390px)
+-- the chat tab, the list of chats open
+   the document is 390px in a 390px window (body 390px)
+   ~~ out of reach of a thumb: row-name reaches 89x32 (painted 178x20), under 44px — known, filed as bw-e3dw.18
+-- a chat open
+   the document is 390px in a 390px window (body 390px)
+-- the chat's right rail, its Chat view
+   the document is 390px in a 390px window (body 390px)
+-- the chat's right rail, its Git view
+   the document is 390px in a 390px window (body 390px)
+-- the git diff
+   the document is 390px in a 390px window (body 390px)
+   ~~ out of reach of a thumb: git-diff-file-toggle reaches 89x36 (painted 366x24), under 44px — known, filed as bw-e3dw.18
+   the diff has 389 of the 390 columns of the screen to itself
+-- back from the diff to the conversation
+   the document is 390px in a 390px window (body 390px)
+-- the composer
+   the document is 390px in a 390px window (body 390px)
+   with a 336px keyboard up the @ menu is drawn from y=322 to y=412, x=35 to x=287
+-- the composer and its @ menu, a keyboard up
+   the document is 390px in a 390px window (body 390px)
+   the Files tab gives the viewer 390px of 390px while the tree is open
+-- the Files tab, the tree open as a sheet
+   the document is 390px in a 390px window (body 390px)
+-- the Files tab, the tree shut and the file on the whole screen
+   the document is 390px in a 390px window (body 390px)
+-- the Files tab, a text file
+   the document is 390px in a 390px window (body 390px)
+-- the Files tab, a Markdown preview
+   the document is 390px in a 390px window (body 390px)
+   the fenced code block holds 342px in 342px (overflow-x: auto)
+-- the Files tab, an SVG preview
+   the document is 390px in a 390px window (body 390px)
+-- the Files tab, a picture
+   the document is 390px in a 390px window (body 390px)
+   the picture's stage clips with overflow-x: hidden at scale 1
+   pressing Fit brings the picture to 160px in a 390px window
+-- the Files tab, a picture fitted to the screen
+   the document is 390px in a 390px window (body 390px)
+-- the Files tab, a video
+   the document is 390px in a 390px window (body 390px)
+   6 kept files: the strip shows 390px of 866px (overflow-x: auto)
+-- the Files tab, the strip of kept files
+   the document is 390px in a 390px window (body 390px)
+   scrolls inside itself, and is meant to: [open-files-strip] holds 866px in 390px (open-files-strip)
+
+Known faults, filed and not this case's to fix:
+   row-name on "the chat tab, the list of chats open" (bw-e3dw.18): the name of a chat in the restore list is the only way into that chat and is 20px tall: it is a Button size="inherit", and that variant carries min-h-0, which outranks the coarse-pointer floor bw-e3dw.6 wrote
+   git-diff-file-toggle on "the git diff" (bw-e3dw.18): the disclosure line of a file in the diff is the only way to open it and is 24px tall, the same size="inherit" min-h-0 as the row above
+
+Exemptions, and why each is not a fault:
+   board-scroll: the board is a stack of full-width columns a thumb swipes between: snap-x snap-mandatory with --column-min set to the window, so one column at a time is the whole point (kanban-board.tsx)
+   column-tabs: the row of column names pages sideways with the columns it names, and every name can be brought into view by the same swipe
+   open-files-strip: the kept files scroll under a thumb inside their own strip, which is how a tab strip works on a phone and does not move the page (bw-e3dw.5)
+   file-preview-image-stage: a picture opens at its real pixel size and may be larger than the phone: the stage clips it and the zoom moves it, so the picture never moves the page (bw-e3dw.17)
+   pre: a fenced code block in Markdown keeps a line of code on one line on purpose and carries its own sideways scroll, the way every Markdown reader draws one
+   a chip in a sentence: WCAG 2.2 2.5.8's inline exception: a chip laid into a line of prose takes its size from the line, and a-chip-stays-a-chip.spec.ts owns that measurement
+
+No faults.
+
+Pictures:
+   tests/results/the-app-on-a-phone/now/01-project-list.png
+   tests/results/the-app-on-a-phone/now/02-board.png
+   tests/results/the-app-on-a-phone/now/02b-board-columns-swiped.png
+   tests/results/the-app-on-a-phone/now/03-chat-list-shut.png
+   tests/results/the-app-on-a-phone/now/04-chat-list-open.png
+   tests/results/the-app-on-a-phone/now/05-chat-open.png
+   tests/results/the-app-on-a-phone/now/06-right-rail-chat.png
+   tests/results/the-app-on-a-phone/now/07-right-rail-git.png
+   tests/results/the-app-on-a-phone/now/08-git-diff.png
+   tests/results/the-app-on-a-phone/now/09-back-from-the-diff.png
+   tests/results/the-app-on-a-phone/now/10-composer.png
+   tests/results/the-app-on-a-phone/now/11-composer-at-menu.png
+   tests/results/the-app-on-a-phone/now/13-files-tree.png
+   tests/results/the-app-on-a-phone/now/12-files-viewer.png
+   tests/results/the-app-on-a-phone/now/14-files-text.png
+   tests/results/the-app-on-a-phone/now/15-preview-markdown.png
+   tests/results/the-app-on-a-phone/now/16-preview-svg.png
+   tests/results/the-app-on-a-phone/now/17-preview-image.png
+   tests/results/the-app-on-a-phone/now/18-preview-image-fitted.png
+   tests/results/the-app-on-a-phone/now/19-preview-video.png
+   tests/results/the-app-on-a-phone/now/20-files-strip.png
