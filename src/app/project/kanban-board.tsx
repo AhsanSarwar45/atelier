@@ -376,7 +376,25 @@ export default function KanbanBoard() {
             selected={i === columnOn}
             aria-current={i === columnOn ? 'true' : undefined}
             onClick={() => goToColumn(i)}
-            className="min-h-[40px] shrink-0"
+            /* `shrink-0` and nothing else: a name in this row must not be
+               squeezed by the ones beside it, and how TALL it is is not this
+               row's business.
+
+               It used to carry `min-h-[40px]` as well — the coarse-pointer
+               floor, copied down to the call site by hand, and left saying 40
+               when bw-e3dw.6 moved the floor itself to 44 in the one rule that
+               owns it (`globals.css`). That was not a harmless leftover, which
+               is what it looks like. A utility class outranks the element rule
+               it was copied from, so on a phone this row WON: measured at
+               390px with touch, every column name was 40px tall while the rest
+               of the app was 44, and the row that exists only for a phone was
+               the one place on the board still under the floor. With a mouse
+               it made the same names eight pixels taller than every other
+               `size="sm"` button in the app. Deleted, both numbers come from
+               the parts — 44 on a touch screen, 32 with a mouse — and the row
+               is `sm:hidden`, so there was never a wide screen for it to hold
+               up (bw-e3dw.13, tests/e2e/the-board-column-tabs.spec.ts). */
+            className="shrink-0"
           >
             {title}
             <span className="tabular-nums opacity-60">{(filteredBeadsByStatus[status] || []).length}</span>

@@ -1,0 +1,1 @@
+- a touch screen at 390px: the column names are 44, 44, 44, 44, 44, 44px tall

@@ -1,0 +1,2 @@
+- a mouse at 390px: the column names are 32, 32, 32, 32, 32, 32px tall; `size="sm"` is 32px
+- a mouse at 1100px: the row of column names is `display: none`
