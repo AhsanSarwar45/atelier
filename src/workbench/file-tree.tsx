@@ -47,11 +47,11 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip } from '@/components/ui/tooltip';
 import { git, fs as fsApi, type FsTreeEntry, type GitStatus } from '@/lib/api';
 import { STATUS_LOOK, type FileState } from '@/workbench/git-view';
+import { PointerAnchor } from '@/workbench/menu-anchor';
 import { referenceUnder } from '@/workbench/references';
 import { useFolderReads } from '@/workbench/use-folder-reads';
 import { useRepositoryReads } from '@/workbench/use-repository-reads';
@@ -499,18 +499,19 @@ export default function FileTree({ root, selected, onOpen }: FileTreeProps) {
       {/* Radix hangs a menu off its trigger, and the trigger a right-click
           wants is the pointer itself — so the trigger here is a bodiless anchor
           left where the press landed, and the library does the placing, the
-          flipping near an edge, the keyboard and the dismissing. */}
+          flipping near an edge, the keyboard and the dismissing.
+
+          The anchor is `PointerAnchor` and not a `fixed` box written here,
+          because this tree is drawn inside the Files rail and the rail carries
+          a transform at every width — which makes it, and not the viewport,
+          what a `fixed` box is laid out against (`menu-anchor.tsx`,
+          bw-5gax.1). */}
       <DropdownMenu
         modal={false}
         open={menu !== null}
         onOpenChange={(shown) => (shown ? undefined : setMenu(null))}
       >
-        <DropdownMenuTrigger
-          aria-hidden="true"
-          tabIndex={-1}
-          className="pointer-events-none fixed h-0 w-0"
-          style={{ left: menu?.at.left ?? 0, top: menu?.at.top ?? 0 }}
-        />
+        <PointerAnchor at={menu?.at ?? null} />
         {menu && (
           <DropdownMenuContent
             align="start"

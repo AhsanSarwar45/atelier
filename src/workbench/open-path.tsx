@@ -50,11 +50,11 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { toast } from '@/hooks/use-toast';
 import { addressWith } from '@/lib/address';
 import * as api from '@/lib/api';
+import { PointerAnchor } from '@/workbench/menu-anchor';
 import { openLocalPath } from '@/workbench/open-local-path';
 import { chipUnder, targetOf, openPathClicked, type OpenPath, type PathHow, type PathTarget } from '@/workbench/path-chip';
 import { formatReference } from '@/workbench/references';
@@ -221,9 +221,12 @@ function PathMenu({ asked, onClose }: { asked: Asked; onClose: () => void }) {
   const ours = insideCheckout(asked.target.absolute, checkouts);
   return (
     <DropdownMenu open modal={false} onOpenChange={(now) => { if (!now) onClose(); }}>
-      <DropdownMenuTrigger asChild>
-        <span aria-hidden="true" style={{ position: 'fixed', left: asked.x, top: asked.y, width: 0, height: 0 }} />
-      </DropdownMenuTrigger>
+      {/* Portalled, or the two numbers a pointer gave would be read against
+          whichever transformed ancestor happens to be over this chip rather
+          than against the viewport (`menu-anchor.tsx`, bw-5gax.1). A chip is
+          drawn in a chat, in a card field and in a comment, so there is no one
+          ancestor to check — the anchor simply leaves. */}
+      <PointerAnchor at={{ left: asked.x, top: asked.y }} />
       <DropdownMenuContent align="start" side="bottom" sideOffset={0} className="w-56" data-testid="path-menu">
         {/* Greyed rather than hidden for a file outside the project: the reader
             asked where this path can go, and "not into the Files tab" is part
