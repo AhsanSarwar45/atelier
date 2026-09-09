@@ -1087,7 +1087,12 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
             and not a second button, because it changes what Commit does
             instead of being a different thing to press — and it says so, on
             the button, before it is pressed. */}
-        <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        {/* The row, not the tick, is what a thumb lands on. A sixteen-pixel
+            box can only grow an invisible target as far as the padding of the
+            rail it sits in, and this rail's is twelve — two short of the floor
+            (bw-e3dw.6). Its own words are right beside it and toggle it, so the
+            line they share is the target, and it is the floor tall. */}
+        <label className="flex min-h-11 items-center gap-1.5 text-[11px] text-muted-foreground">
           <Checkbox
             checked={amend}
             disabled={busy}

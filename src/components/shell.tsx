@@ -5,13 +5,15 @@
  * the tabs, and a slot the open tab fills with its own tools. Everything else
  * is the work, and it is the only thing allowed to scroll: the shell is exactly
  * the height of the window and clips, so a pane that overflows scrolls inside
- * itself instead of carrying the bars off the top of the screen.
+ * itself instead of carrying the bars off the top of the screen. On a phone
+ * "the window" means the part of it the keyboard is not standing on
+ * (`src/lib/keyboard-inset.ts`).
  *
  * Design: docs/designs/app-shell.md.
  */
 'use client';
 
-import { createContext, forwardRef, useContext, useState, type ReactNode } from 'react';
+import { createContext, forwardRef, useContext, useEffect, useState, type ReactNode } from 'react';
 
 import { Loader2, SquareTerminal } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -19,6 +21,7 @@ import { createPortal } from 'react-dom';
 import { GlobalSettingsButton } from '@/components/global-settings-button';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
+import { watchKeyboard } from '@/lib/keyboard-inset';
 import { cn } from '@/lib/utils';
 import { useTerminalShells } from '@/workbench/terminal-shells';
 
@@ -86,8 +89,17 @@ export function Shell({
   const [lead, setLead] = useState<HTMLElement | null>(null);
   const [trail, setTrail] = useState<HTMLElement | null>(null);
 
+  // The shell is the height of the window less whatever the keyboard is
+  // standing on. `100dvh` alone is the whole window on a phone whether the
+  // keyboard is up or not, which is how the composer — the last thing in the
+  // box of work — came to be drawn underneath it (bw-e3dw.6).
+  useEffect(watchKeyboard, []);
+
   return (
-    <div data-testid="shell" className="flex h-dvh flex-col overflow-hidden bg-surface-base">
+    <div
+      data-testid="shell"
+      className="flex h-[calc(100dvh-var(--keyboard-inset,0px))] flex-col overflow-hidden bg-surface-base"
+    >
       <div data-shell-bar data-testid="project-bar" className={cn(BAR, barClassName)}>
         {bar}
         {/* The way to a shell and the way out to settings end every bar, drawn

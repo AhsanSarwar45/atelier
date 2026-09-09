@@ -37,11 +37,14 @@ const SHOTS = 'tests/results/responsive';
  * The smallest a control may be on a screen you touch.
  *
  * The accessibility rule floors this at 24 pixels and the phone makers ask for
- * 44; a thumb is about 9 millimetres of glass either way. 40 is what this
+ * 44; a thumb is about 9 millimetres of glass either way. 44 is what this
  * project holds itself to, and only where the pointer is coarse — a mouse
  * hits a 28-pixel icon perfectly well and the desktop bars are built from them.
+ * It said 40 until bw-e3dw.6, which is why the survey of the app at a phone
+ * width found every icon button in it at exactly 40x40: the number is set on
+ * the parts, in `globals.css`, and this is the same number read back.
  */
-const TAP = 40;
+const TAP = 44;
 
 /** A dev preview compiles a route the first time it is asked for. */
 const WAY_IN_MS = 60_000;

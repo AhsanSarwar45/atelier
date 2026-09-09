@@ -1,0 +1,6 @@
+- a chat at 390px: every control reaches 44px
+- the Git view at 390px: [git-amend] paints 16x16; every control reaches 44px
+- the amend row is 44px tall; pressed at its far end the tick went unchecked -> checked
+- the Files tab at 390px: every control reaches 44px
+- the @ menu with a 336px keyboard up: the window is still 844px and the visible band ends at y=508; the menu is 134px from y=278 to y=412; the composer sits from y=396 to y=496
+- a row of the @ menu is 44px tall

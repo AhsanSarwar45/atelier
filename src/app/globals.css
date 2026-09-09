@@ -430,7 +430,14 @@
  * which is why the bars in this app are built from small ones. A thumb is
  * about nine millimetres of glass, and on a phone those same icons are a game
  * of chance. So where the pointer is coarse — and only there — every control
- * you tap is at least 40 pixels each way.
+ * you tap is at least 44 pixels each way.
+ *
+ * 44 and not 40: 40 is what this rule said when it was written, and the survey
+ * of the app at a phone width (bw-e3dw.1) then measured every icon button in
+ * the app at exactly 40x40 — four pixels under the figure both phone makers
+ * ask for. The number lives here, on the parts, and not on the call sites,
+ * because a floor that had to be added by hand to each button is a floor the
+ * next button does without (bw-e3dw.6).
  *
  * Written as element rules rather than a class because most of the controls in
  * this app are plain `button` elements written where they are needed, not the
@@ -452,19 +459,19 @@
   [role='switch'],
   [role='checkbox'],
   input:not([type='hidden']):not([type='range']) {
-    min-height: 40px;
+    min-height: 44px;
   }
 
   /* A dropdown is in the width list as well as the height one: with its arrow
      stripped off, a picker whose whole label is "P0" is seventeen pixels wide
-     and forty tall, which is a line to hit rather than a target (bw-81wt.21). */
+     and forty-four tall, which is a line to hit rather than a target (bw-81wt.21). */
   button,
   select,
   [role='button'],
   [role='tab'],
   [role='switch'],
   [role='checkbox'] {
-    min-width: 40px;
+    min-width: 44px;
   }
 
   /* Links get the same floor, and the rule sorts prose out by itself: a
@@ -472,13 +479,13 @@
      is untouched while a link that has been laid out as a button — the house
      in the project bar, the back arrow, a card — grows. */
   a[href] {
-    min-height: 40px;
-    min-width: 40px;
+    min-height: 44px;
+    min-width: 44px;
   }
 
   /* A slider is two pixels of track and a dot; the dot is what you drag, and
      the height here is what gives your thumb somewhere to land. */
   input[type='range'] {
-    height: 40px;
+    height: 44px;
   }
 }

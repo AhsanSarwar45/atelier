@@ -40,7 +40,7 @@ import {
   type CompletionSource,
 } from '@codemirror/autocomplete';
 import { Prec, type Extension } from '@codemirror/state';
-import { EditorView, keymap } from '@codemirror/view';
+import { EditorView, ViewPlugin, keymap, tooltips } from '@codemirror/view';
 
 import { iconForFile, iconForFolder } from '@/components/file-icon';
 import { ICON_FALLBACK, iconUrl } from '@/components/file-icons';
@@ -199,6 +199,59 @@ const menuTheme = EditorView.theme({
 });
 
 /**
+ * The room the menu is allowed to draw in.
+ *
+ * CodeMirror puts a tooltip wherever there is space between 0 and
+ * `documentElement.clientHeight`, and on a phone that is a lie: the keyboard is
+ * drawn over the bottom third of the window without changing a single length
+ * the layout knows about. The survey found the menu at y=670..752 of an 844px
+ * window with only y<508 left to look at — the whole list under the keyboard,
+ * at the one moment it is wanted (bw-e3dw.1).
+ *
+ * So the space is the visual viewport, which is the part of the page the
+ * reader can see and the only thing that moves when a keyboard comes up. The
+ * numbers are the ones the tooltip is positioned in, which is the window's own
+ * frame, so the visual viewport's offset within it is part of the answer. On a
+ * desktop the two viewports are the same rectangle and this changes nothing.
+ */
+function roomToDrawIn(view: EditorView) {
+  const page = view.dom.ownerDocument.documentElement;
+  const seen = view.dom.ownerDocument.defaultView?.visualViewport;
+  if (!seen) return { top: 0, left: 0, bottom: page.clientHeight, right: page.clientWidth };
+  return {
+    top: seen.offsetTop,
+    left: seen.offsetLeft,
+    bottom: seen.offsetTop + seen.height,
+    right: seen.offsetLeft + seen.width,
+  };
+}
+
+/**
+ * Measure again when the keyboard moves.
+ *
+ * A keyboard opening is not a layout change and fires no `resize` a tooltip
+ * would hear, so a menu already open when it appears would keep the place it
+ * was given under the old rectangle.
+ */
+const followTheKeyboard = ViewPlugin.fromClass(
+  class {
+    private readonly again: () => void;
+    private readonly seen = typeof window === 'undefined' ? null : window.visualViewport;
+
+    constructor(view: EditorView) {
+      this.again = () => view.requestMeasure();
+      this.seen?.addEventListener('resize', this.again);
+      this.seen?.addEventListener('scroll', this.again);
+    }
+
+    destroy() {
+      this.seen?.removeEventListener('resize', this.again);
+      this.seen?.removeEventListener('scroll', this.again);
+    }
+  },
+);
+
+/**
  * The `@` menu, ready to be handed to `ComposerEditor` as `extra`.
  *
  * `rootOf` is asked for the folder to search at every keystroke rather than
@@ -234,6 +287,8 @@ export function fileCompletions(rootOf: () => string): Extension {
       ],
     }),
     Prec.highest(keymap.of(completionKeymap)),
+    tooltips({ tooltipSpace: roomToDrawIn }),
+    followTheKeyboard,
     menuTheme,
   ];
 }
