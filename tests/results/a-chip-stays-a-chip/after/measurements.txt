@@ -1,0 +1,11 @@
+- the chat:
+-   path-chip <span tappable> painted 102x19, reaches 88x19 [in a sentence] (stopped up: the page (p), down: the page (p))
+-   path-chip <span tappable> painted 128x19, reaches 88x19 [in a sentence] (stopped up: the page (p), down: the page (p))
+-   markdown-file-link <a clickable> painted 109x19, reaches 88x19 [in a sentence] (stopped up: the page (p), down: the page (p))
+-   markdown-web-badge <a clickable> painted 82x20, reaches 83x21 [in a sentence] (stopped up: the page (p), down: the page (div))
+- the rail:
+-   bead-chip <button clickable> painted 73x20, reaches 74x45 (stopped up: the page (h3), down: the page (div))
+-   bead-chip <button clickable> painted 73x20, reaches 74x45 (stopped up: the page (h3), down: the page (div))
+- the tallest chip that is not clickable paints 19px
+- 6 chips a thumb is meant to hit: 2 laid out as controls, all reaching 44px; 4 written into a sentence, each answering for its own pill
+- no chip answers for its neighbour

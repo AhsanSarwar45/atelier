@@ -447,10 +447,10 @@
  * alone by the same rule that fixes the bars (bw-81wt.12).
  */
 @media (pointer: coarse) {
-  button,
+  button:not(:where([data-slot='badge'])),
   select,
   textarea,
-  [role='button'],
+  [role='button']:not(:where([data-slot='badge'])),
   [role='tab'],
   [role='menuitem'],
   [role='menuitemcheckbox'],
@@ -465,9 +465,9 @@
   /* A dropdown is in the width list as well as the height one: with its arrow
      stripped off, a picker whose whole label is "P0" is seventeen pixels wide
      and forty-four tall, which is a line to hit rather than a target (bw-81wt.21). */
-  button,
+  button:not(:where([data-slot='badge'])),
   select,
-  [role='button'],
+  [role='button']:not(:where([data-slot='badge'])),
   [role='tab'],
   [role='switch'],
   [role='checkbox'] {
@@ -478,9 +478,88 @@
      minimum size does not apply to an inline box, so a link inside a sentence
      is untouched while a link that has been laid out as a button — the house
      in the project bar, the back arrow, a card — grows. */
-  a[href] {
+  a[href]:not(:where([data-slot='badge'])) {
     min-height: 44px;
     min-width: 44px;
+  }
+
+  /* A chip is the exception the floor above cannot make for itself, and the
+     owner is the one who found it: 'badges are far too tall on mobile'
+     (bw-e3dw.16). A chip is a WORD, not a control — the same pill whether or
+     not it happens to open something — and the app draws a clickable one as
+     exactly the elements the floor names: `<Badge asChild><Button>` for a card,
+     `<Badge asChild><a href>` for a file or a site. So the floor painted those
+     at 44px while the identical chip beside them, a plain `span`, stayed at
+     19px, and a line of chips came out at two heights for no reason a reader
+     could see. Measured at 390px on the running app: a file chip in a message
+     19px, the same file drawn as a markdown link 44px, a card chip in the rail
+     44px.
+     
+     The sentence above about prose is what hid it. It is true of an inline
+     box and a chip is `inline-flex`, which is an ATOMIC inline-level box — a
+     minimum size applies to it in full. Excluding the chip by its own
+     `data-slot` is therefore the narrow fix: no other element in the app
+     carries that mark, and `:where` keeps the exclusion at zero specificity so
+     the floor still outranks nothing it did not already outrank.
+     
+     What replaces the floor is the answer bw-e3dw.6 already found for the
+     16px amend tick: the painted box is left alone and an invisible one is
+     grown around it, so the box a thumb lands on is 44px while the box the eye
+     reads is the chip's own.
+     
+     Grown up and down only, and only outside a sentence. Both limits were
+     measured rather than guessed, on the case below.
+     
+     Up and down, because chips are packed in ROWS: `rail-cards` puts them four
+     pixels apart and a message puts them in a line of words, so a target grown
+     sideways reaches straight past its neighbour's middle and answers a press
+     meant for it, which is the one thing a bigger target must not buy.
+     
+     Outside a sentence, because the same thing happens vertically there. With
+     the chips no longer 44px tall the prose lines closed back up to their own
+     leading, and a 44px band on a chip in one line covered the chip in the
+     line below — measured: one of two file chips in a paragraph stopped
+     answering for its own middle altogether. A chip in a paragraph therefore
+     keeps exactly its own pill, which is what WCAG 2.2 §2.5.8 says it should:
+     the rule exempts a target "in a sentence, or otherwise constrained by the
+     line-height of non-target text", because the lines above and below belong
+     to somebody else. `.prose` is the mark the app already puts on a body of
+     words (`markdown-body.tsx`), so it is what the question is asked with.
+     Everywhere else — a rail, a bar, a row of chips, a card — there is room,
+     and the whole 44 is taken.
+     
+     Painting it behind with `z-index: -1` was tried first and is the wrong
+     answer: it does stop the theft, but a band below the block boxes around it
+     wins no press at all, and every chip measured back at its own pill,
+     including the ones with room to spare.
+     
+     `:is` rather than `:where` here, because this has to outrank a utility
+     class: the card chip in `bead-chip-row` carries a `before:-inset-2.5` of
+     its own that predates all of this and still gives a MOUSE a target, and
+     two `::before` rules of equal weight on one element would be settled by
+     whatever order the built sheet happened to put them in.
+     
+     `[data-path-mention]` is in the list because a file named in a message is a
+     chip you tap that is none of the three: it is a plain `span`, and what
+     opens it is the single listener the conversation keeps for all of them
+     (`path-chip.tsx`). It was never caught by the floor, so it was never too
+     tall — but it was never reachable either, at 19px measured.
+     
+     tests/e2e/a-chip-stays-a-chip.spec.ts measures both numbers for every chip
+     on a 390px screen, records what stopped each target growing, and presses
+     every chip on its own middle to prove that no chip answers for another. */
+  [data-slot='badge']:is(button, a[href], [role='button'], [data-path-mention]):not(.prose *) {
+    position: relative;
+  }
+
+  [data-slot='badge']:is(button, a[href], [role='button'], [data-path-mention]):not(.prose *)::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 44px;
+    transform: translateY(-50%);
   }
 
   /* A slider is two pixels of track and a dot; the dot is what you drag, and

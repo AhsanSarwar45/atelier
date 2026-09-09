@@ -4,6 +4,19 @@
  * Its colours are the `--color-*` names spelled once in `src/app/globals.css`
  * against whichever theme is live; a hue the data carries comes in as `hue`
  * (docs/designs/app-shell.md §1.5). Nothing here writes a finished colour.
+ *
+ * Its HEIGHT is spelled once too, and by `size` below — including on a phone.
+ * A clickable chip is drawn as whatever it has to be to be clicked, which is
+ * `<Badge asChild><Button>` for a card and `<Badge asChild><a href>` for a file
+ * or a site, and the coarse-pointer floor in `globals.css` names exactly those
+ * elements. So the same chip came out at 19px where it was a `span` and 44px
+ * where it was a button or a link, which is the complaint the owner made off
+ * the running app — "badges are far too tall on mobile" (bw-e3dw.16). The chip
+ * is excluded from that floor by its own `data-slot` and given an invisible
+ * 44px-tall target instead; the reasoning, and why the target grows only up and
+ * down, is written where the floor is. Nothing here has to know about it, which
+ * is the point: a chip is a word, and `size` is the only thing that says how
+ * tall a word is.
  */
 import * as React from 'react';
 
