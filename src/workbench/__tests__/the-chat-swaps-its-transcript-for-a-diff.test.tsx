@@ -2,11 +2,18 @@
  * The diff standing in the conversation's own place (bw-rx1y.4).
  *
  * The chat is the only thing on the screen wide enough to read a side-by-side
- * diff in, so the diff takes the centre rather than a third column — but only
- * while all three of the reader's switches say so: the rail open, the rail on
- * Git, and the diff asked for. Shutting the rail or leaving the Git view is the
- * reader putting the whole subject away, and the conversation has to come back
- * on its own, without their remembering a switch two panels deep.
+ * diff in, so the diff takes the centre rather than a third column — but on a
+ * wide screen only while all three of the reader's switches say so: the rail
+ * open, the rail on Git, and the diff asked for. Shutting the rail or leaving
+ * the Git view is the reader putting the whole subject away, and the
+ * conversation has to come back on its own, without their remembering a switch
+ * two panels deep.
+ *
+ * A phone drops the first of the three. There the rail is a sheet lying over
+ * the very column the diff is drawn in, so a rail that had to stay open meant
+ * 102px of a 390px table and shutting the sheet took the diff down with it
+ * (bw-e3dw.14). A phone asks only the two switches that are about the diff, the
+ * button shuts the sheet on the way in, and the bar carries the way back.
  *
  * The status line above and the box below do not move either way, and the place
  * the reader had got to in the conversation is still theirs when they come
@@ -110,6 +117,23 @@ function transcriptShowing() {
   return !transcript().parentElement!.className.split(/\s+/).includes('hidden');
 }
 
+/**
+ * What a phone answers when the app asks. jsdom's own `matchMedia` says no to
+ * every query, which is the wide screen; a phone case has to say so itself.
+ */
+function phoneWidth() {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query.includes('max-width'),
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    onchange: null,
+    dispatchEvent: () => false,
+  }));
+}
+
 beforeEach(() => {
   facts.of = factsIn(WORKTREE);
   switches.right = true;
@@ -167,15 +191,31 @@ describe('the chat swaps its transcript for the diff, and only on all three swit
     expect(transcriptShowing()).toBe(true);
   });
 
-  it('brings the conversation back when the rail is shut, which is what the phone’s drawer does', async () => {
-    // The cross inside the drawer and the scrim behind it both call flipRight;
-    // rightOpen goes false, and the diff goes with it — no code of its own.
+  it('brings the conversation back on a wide screen when the rail is shut', async () => {
+    // On a wide screen the rail and the diff are read side by side, so shutting
+    // the rail is the reader putting the whole subject away.
     switches.right = false;
     await chat();
 
     expect(screen.queryByTestId('git-diff-pane')).not.toBeInTheDocument();
     expect(transcriptShowing()).toBe(true);
   });
+
+  it('keeps the diff on a phone whose rail is shut, because the rail was lying over it', async () => {
+    phoneWidth();
+    switches.right = false;
+    await chat();
+
+    expect(
+      screen.queryByTestId('git-diff-pane'),
+      'shutting the sheet to see the rest of the table took the table away',
+    ).toBeInTheDocument();
+    expect(transcriptShowing()).toBe(false);
+  });
+
+  // The one press back lives on the app's bar (`chat-diff-back`), which is a
+  // portal into the shell this test does not draw. It is proved where it is
+  // used, driven at 390px: tests/e2e/the-git-diff-on-a-phone.spec.ts.
 
   it('hands the rail the switch and the way to flip it', async () => {
     await chat();

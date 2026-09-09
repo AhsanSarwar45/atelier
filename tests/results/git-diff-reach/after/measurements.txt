@@ -1,0 +1,7 @@
+
+======== THE GIT DIFF REACHED ON A PHONE (after) ========
+
+   * the git diff at 390px: the table is laid out 364px wide, 390 of 390 columns of the window have the diff on top at them; nothing is over it; the rail says data-open=false
+   * the way back on the bar measures 44x44
+   * one press on the bar brought the conversation back: true
+   * the same diff at 1024px: the rail says data-open=true, the table is 422px

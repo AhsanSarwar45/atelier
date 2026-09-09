@@ -1,0 +1,4 @@
+
+======== THE GIT DIFF REACHED ON A PHONE (before) ========
+
+   * the git diff at 390px: the table is laid out 364px wide, 0 of 390 columns of the window have the diff on top at them; what is over the rest: chat-right-rail-scrim, chat-right-rail, git-branch; the rail says data-open=true

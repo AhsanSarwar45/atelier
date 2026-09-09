@@ -15,9 +15,38 @@
  * Anything asking "is this a phone" asks here. The case beside this file fails
  * a source file that reaches for `matchMedia` with a width of its own.
  */
+'use client';
+
+import { useEffect, useState } from 'react';
+
 export const PHONE_SCREEN = '(max-width: 767px)';
 export const NOT_PHONE_SCREEN = '(min-width: 768px)';
 
 export function isPhoneScreen(): boolean {
   return typeof window !== 'undefined' && Boolean(window.matchMedia?.(PHONE_SCREEN).matches);
+}
+
+/**
+ * The same answer, watched rather than asked once.
+ *
+ * `isPhoneScreen` reads the width at the moment of a press, which is all a
+ * handler needs. A layout that a width DECIDES has to change when the width
+ * does — a rotated phone still drawing itself by the answer it had on the way
+ * in is the same disagreement between the app and its own CSS that this file
+ * was written to end (bw-e3dw.9). It starts false so the server and the first
+ * client frame draw the same thing.
+ */
+export function usePhoneScreen(): boolean {
+  const [phone, setPhone] = useState(false);
+
+  useEffect(() => {
+    const watched = window.matchMedia?.(PHONE_SCREEN);
+    if (!watched) return;
+    const heard = () => setPhone(watched.matches);
+    heard();
+    watched.addEventListener('change', heard);
+    return () => watched.removeEventListener('change', heard);
+  }, []);
+
+  return phone;
 }

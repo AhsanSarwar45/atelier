@@ -23,6 +23,7 @@ import {
   GitBranch,
   Loader2,
   ListChecks,
+  MessageSquare,
   PanelLeft,
   PanelRight,
   PanelRightClose,
@@ -58,7 +59,7 @@ import { useHeldAtTheEnd } from '@/hooks/held-at-the-end';
 import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
-import { isPhoneScreen } from '@/lib/screen-width';
+import { isPhoneScreen, usePhoneScreen } from '@/lib/screen-width';
 import { ChatRightRail, useGitDiff, useGitPanel, useRightRail } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { ComposerEditor, type ComposerHandle } from '@/workbench/composer-editor';
@@ -749,19 +750,41 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   /** Which of the rail's two views it is on, remembered the same way (bw-8dp8.5). */
   const [gitOpen, flipGit] = useGitPanel();
   /** Whether that view's diff stands in for the transcript (bw-rx1y.4). */
-  const { diffOpen, flipDiff } = useGitDiff();
+  const { diffOpen, flipDiff: rememberDiff } = useGitDiff();
+  /** Watched, because it decides which of the two rules below applies. */
+  const phone = usePhoneScreen();
   /**
-   * Three switches, all of them on, or the conversation stays where it is.
+   * Three switches on a wide screen, two on a phone, or the conversation stays
+   * where it is.
    *
-   * The button that asks for the diff lives inside the Git panel, so the panel
-   * has to be the view AND the rail has to be open for the reader to have been
-   * able to press it — and shutting either of those is the reader putting the
-   * whole subject away, which must bring the conversation back without their
-   * having to remember a switch two panels deep. On a phone that is what the
-   * drawer's cross and its scrim already do: both call `flipRight`, `rightOpen`
-   * goes false, and this goes false with it (no code of its own).
+   * On a wide screen the rail and the diff are read together, so the rail being
+   * open is part of asking for the diff: the button that asks for it lives
+   * inside the Git panel, and shutting the panel or leaving the Git view is the
+   * reader putting the whole subject away, which must bring the conversation
+   * back without their having to remember a switch two panels deep.
+   *
+   * A phone cannot read them together. The rail there is a 288px sheet at x=102
+   * lying OVER the very column the diff is drawn in, so `rightOpen` meant a
+   * reader saw 102px of a 390px table and shutting the sheet to see the rest
+   * took the diff down with it — the whole diff was unreachable on a phone
+   * (bw-e3dw.14). So a phone asks only the two switches that are about the
+   * diff itself; the sheet is a door the reader walked through, not a thing the
+   * diff hangs off. `showTheDiff` below shuts that door on the way in, and the
+   * bar carries the one press back to the conversation.
    */
-  const showDiff = Boolean(sessionId) && rightOpen && gitOpen && diffOpen;
+  const showDiff = Boolean(sessionId) && gitOpen && diffOpen && (phone || rightOpen);
+  /**
+   * The diff button, with the phone's door shut behind it.
+   *
+   * Pressing "Show diff" from inside the sheet would otherwise leave the sheet
+   * standing over the answer it just fetched. Nothing to undo on the way out:
+   * the reader who puts the diff away wanted the conversation, not the panel
+   * they opened it from.
+   */
+  const showTheDiff = useCallback(() => {
+    if (phone && !diffOpen && rightOpen) flipRight();
+    rememberDiff();
+  }, [phone, diffOpen, rightOpen, flipRight, rememberDiff]);
   /**
    * The way into the Git view.
    *
@@ -1318,6 +1341,21 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           controls is the bar that put "New Chat" off the edge of a 390px
           screen (bw-81wt.5, .8). */}
       <TabTrail tab="chat">
+        {/* The one press back to the conversation, and only on a phone.
+            Everywhere else the diff is put away with the same button that asked
+            for it, standing open in the rail beside it. A phone has shut that
+            rail to read the diff at all (bw-e3dw.14), so the way back has to be
+            on the bar — the same rule the rails themselves follow: a door
+            belongs on the side it opens, not two panels deep inside it. */}
+        {showDiff && (
+          <ToolButton
+            icon={<MessageSquare />}
+            label="Back to the conversation"
+            className="md:hidden"
+            data-testid="chat-diff-back"
+            onClick={showTheDiff}
+          />
+        )}
         {/* What the project has changed, which is the chat's other subject: the
             agents in this transcript write those files, so the way to look at
             them belongs on this bar and not in a screen of its own (bw-8dp8). */}
@@ -1525,7 +1563,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             desktopWidth={rightWidth}
             resizing={resizingRight}
             diffOpen={diffOpen}
-            onFlipDiff={flipDiff}
+            onFlipDiff={showTheDiff}
             onToggle={flipRight}
           />
         </>
