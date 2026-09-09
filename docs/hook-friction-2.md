@@ -1164,3 +1164,32 @@ Two tool-shaped traps met on the same cards, neither of them a hook:
   epic**. Two throwaway cards (`bw-ikda`, `bw-z7wg`) had to be cancelled after
   probing for the flag names. A `--help` that answers, or a `--dry-run` that is
   honoured, would cost the board nothing.
+
+## bw-e3dw.19 — the bypass the worktree forces on the worker turns a test red
+
+**Happened.** `atelier tool checks bw-e3dw.19` recorded
+`Project checks=FAILED (831 passed, 1 failed)`. The one failure was
+`server/tests/a_session_event_reaches_the_file_on_disk.rs`:
+
+    thread 'a_compaction_beginning_reaches_the_file_the_screens_read' panicked
+    at tests/a_session_event_reaches_the_file_on_disk.rs:48:5:
+    the gate said something to the session: atelier doing stood down — a
+    worktree is per job; this child is claimed in its job copy (via
+    ATELIER_BYPASS in the environment)
+
+The case asserts the gate says nothing to the session it drives. Every write
+in this copy has to carry `ATELIER_BYPASS`, and once it is exported into the
+shell rather than welded onto one command, the gate stands down **out loud**
+and the test reads its message as the gate having spoken. Re-run on the same
+tree with `env -u ATELIER_BYPASS`, the same command gives
+`Project checks=PASSED (900 passed, 0 failed)`.
+
+**Should have happened.** Either the gate should stand down silently when it
+is bypassed, or the checks step should run the project's command in a clean
+environment. As it is, the two instructions a worker in a job copy is given —
+"weld the bypass onto every command" and "run the declared checks and record
+what you get" — produce a red that belongs to neither the change nor the app.
+
+**Cost.** One FAILED recorded on the checks card, one full re-run of
+`npm test && (cd server && cargo test)`, and a note on the card so the red is
+not read as the epic's.
