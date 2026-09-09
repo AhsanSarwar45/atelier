@@ -1,0 +1,4 @@
+
+======== A PICTURE PINCHED ON A TOUCH SCREEN (before) ========
+
+   * the Files tab, a image: two fingers spread from 80px to 260px about (125, 441) — scale 1 -> 1, the picture 1200px -> 1200px wide, and the point that was under the midpoint moved 90px across, 0px down

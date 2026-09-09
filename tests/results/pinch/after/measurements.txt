@@ -1,0 +1,11 @@
+
+======== A PICTURE PINCHED ON A TOUCH SCREEN (after) ========
+
+   * the Files tab, a image: two fingers spread from 80px to 260px about (125, 441) — scale 1 -> 3.25, the picture 1200px -> 3900px wide, and the point that was under the midpoint moved 0px across, 0px down
+   * the Files tab, a image: one finger dragged 90px left and 60px up moved it -90px across, -60px down
+   * the Files tab, a image: two fingers squeezed back from 260px to 80px — scale 3.25 -> 1
+   * the Files tab, a image: the stage declares touch-action: none, and the page has scrolled 0px sideways
+   * the Files tab, a svg: two fingers spread from 80px to 260px about (125, 441) — scale 1 -> 3.25, the picture 1200px -> 3900px wide, and the point that was under the midpoint moved 0px across, 0px down
+   * the Files tab, a svg: one finger dragged 90px left and 60px up moved it -90px across, -60px down
+   * the Files tab, a svg: two fingers squeezed back from 260px to 80px — scale 3.25 -> 1
+   * the Files tab, a svg: the stage declares touch-action: none, and the page has scrolled 0px sideways
