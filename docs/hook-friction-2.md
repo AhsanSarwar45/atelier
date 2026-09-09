@@ -1037,3 +1037,84 @@ The `~` was never expanded — the shell had not run yet — so the gate treated
 as a relative path and joined it onto the repo root, then refused a path that
 does not exist. An absolute path would have read better in the message, but the
 refusal is the same; it went through with the bypass and a reason of its own.
+## bw-axtp.3/.2 — the gate let this job through, and the bypass was the thing that broke a suite
+
+Same shape of job as bw-axtp.1 above: one worktree named for the epic
+(`worktrees/bw-axtp`), children claimed inside it. The refusals that card
+recorded did **not** repeat. Measured, not assumed — each of these ran with no
+`ATELIER_BYPASS` anywhere and was accepted:
+
+- `bd update bw-axtp.3 --claim` and `bd update bw-axtp.2 --claim` from the job
+  copy;
+- `sed -i` and `cat >>` on files in `src/`, `tests/` and `docs/`;
+- `git add -A` and `git commit` of the whole card.
+
+The one refusal was `git worktree add worktrees/bw-axtp` run from the **main
+checkout**, before the copy existed:
+
+```
+Changes require an owned Beads work item in its isolated worktree
+(resolved target: /home/ahsan/dev/beads-web).
+```
+
+That one is the gate doing its job — cutting a worktree really does write into
+the owner's repository — but it is also unavoidable, because a job copy cannot
+be created from inside itself. Every job that starts with `git worktree add`
+begins with a bypass, and a rule everybody must break on their first command
+teaches them to reach for the bypass on every command after it. That is what
+cost this job its only red (below). If one thing here is worth tuning, it is
+this: `git worktree add worktrees/<job>` for a job the session owns should be
+allowed outright.
+
+## 7. `ATELIER_BYPASS` in the environment turns a declared suite red
+
+**Attempted.** `atelier tool checks bw-axtp.2 --all`, in a shell where
+`ATELIER_BYPASS` was still exported from the worktree-creating command.
+
+**Result.**
+
+```
+checks: tree 126fcc81… Project checks=FAILED (821 passed, 1 failed)
+
+thread 'a_compaction_beginning_reaches_the_file_the_screens_read' panicked at
+tests/a_session_event_reaches_the_file_on_disk.rs:48:5:
+the gate said something to the session: atelier doing stood down —
+a worktree is per job; this child is claimed in its job copy
+(via ATELIER_BYPASS in the environment)
+```
+
+The case asserts the gate says nothing to a session. With the bypass exported
+the gate says it has stood down, that sentence reaches the session's file, and
+the case fails. Nothing in the tree was wrong: the same tree with the variable
+unset gives `Project checks=PASSED (890 passed, 0 failed)`.
+
+**Why it costs.** The bypass is documented as a prefix — `ATELIER_BYPASS=… cmd`
+— but a worker who exports it once, which is what a shell-shaped task
+encourages, poisons every suite run afterwards, and the failure names a
+compaction test rather than the variable. Both readings are now comments on
+bw-axtp.2, because a red recorded and then explained is worth more than a red
+quietly re-run away. Worth fixing at the source: the checks runner could strip
+`ATELIER_BYPASS` from the environment it hands its subprocesses, since a suite
+is never the thing the bypass is for.
+
+## 8. `atelier tool checks --help` runs the checks
+
+`atelier tool checks --help` does not print usage; it runs the project's whole
+declared suite — `npm test && (cd server && cargo test)`, minutes of it —
+against the current tree. There is no way to ask what the flags are without
+paying for a full run.
+
+## 9. The checks tool closes the card as the human, and cannot
+
+After a green run, the last line of `atelier tool checks bw-axtp.2 --all` was:
+
+```
+bd close failed: cannot close bw-axtp.2: assignee is "s-70a116bd",
+actor is "AhsanSarwar45"; reclaim or use --force to override
+```
+
+The tool claimed the card as the session (`s-70a116bd`, which is what
+`bd update --claim` writes) and then tried to close it as the repository's
+human owner. The evidence was recorded and the card was left open; closing it
+took a `bd update --claim` and a `bd close` by hand. The tool should close as
+the same actor it claimed as.
