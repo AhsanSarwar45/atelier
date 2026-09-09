@@ -225,24 +225,20 @@ test('the previews on a phone: markdown, a picture, a drawing, a film and a pape
     expect(fit.document, `${what} scrolls the page sideways`).toBeLessThanOrEqual(fit.window + 1);
   }
 
-  try {
-    await page.goto(`/project?id=${project.id}&tab=files`);
-    await page.getByTestId('files-tree').waitFor({ timeout: WAIT });
-    await expect(page.getByTestId('files-tab')).toHaveAttribute('data-root', fixture, { timeout: WAIT });
-    await page.waitForTimeout(1500);
-
-    fits('the Markdown preview', await look('README.md', 'markdown', '01-markdown'));
-    fits('the picture preview', await look('assets/shot.png', 'image', '02-image'));
-    // A picture is shown at its own pixel size with a zoom, by decision
-    // (`file-preview.tsx`, and `a-picture-zooms-under-the-wheel.spec.ts` holds
-    // it to opening at 100%), so a picture wider than the stage starts cropped
-    // rather than shrunk. Whether a phone should instead open it fitted is
-    // bw-e3dw.4's ground, not this item's. What belongs here is only that the
-    // crop is a crop and not an overflow: the stage keeps it and the page does
-    // not move sideways. So it is measured, but not asked the other question.
-    const wideFit = await look('assets/wide.png', 'image', '02b-image-wide');
-    expect(wideFit.document, 'a wide picture moves the page sideways').toBeLessThanOrEqual(wideFit.window + 1);
-    const wide = await page.evaluate(() => {
+  /**
+   * The other question a picture is asked, because a picture does not fit.
+   *
+   * A picture is shown at its own pixel size with a zoom, by decision
+   * (`file-preview.tsx`, and `a-picture-zooms-under-the-wheel.spec.ts` holds it
+   * to opening at 100%), so a picture wider than the stage starts cropped
+   * rather than shrunk. Whether a phone should instead open it fitted is
+   * bw-e3dw.4's ground, not this item's. What belongs here is only that the
+   * crop is a crop and not an overflow: the stage keeps it and the page does
+   * not move sideways.
+   */
+  async function keptByTheStage(what: string, fit: Fit): Promise<void> {
+    expect(fit.document, `${what} moves the page sideways`).toBeLessThanOrEqual(fit.window + 1);
+    const kept = await page.evaluate(() => {
       const stage = document.querySelector('[data-testid="file-preview-image-stage"]') as HTMLElement | null;
       const picture = document.querySelector('[data-testid="file-preview-image"]') as HTMLElement | null;
       return {
@@ -253,11 +249,31 @@ test('the previews on a phone: markdown, a picture, a drawing, a film and a pape
       };
     });
     note(
-      `assets/wide.png at 390px: a ${wide.picture}px picture on a ${wide.stage}px stage at ${wide.scale}x, ` +
-        `overflow-x: ${wide.clipped} — the stage keeps it rather than the page carrying it`,
+      `${what} at 390px: a ${kept.picture}px picture on a ${kept.stage}px stage at ${kept.scale}x, ` +
+        `overflow-x: ${kept.clipped} — the stage keeps it rather than the page carrying it`,
     );
-    expect(wide.clipped, 'a picture wider than the stage is not kept by the stage').toBe('hidden');
-    fits('the SVG preview', await look('assets/drawing.svg', 'svg', '03-svg'));
+    expect(kept.clipped, `${what} is wider than the stage and the stage does not keep it`).toBe('hidden');
+    expect(kept.scale, `${what} does not open at its own pixel size`).toBe('1');
+  }
+
+  try {
+    await page.goto(`/project?id=${project.id}&tab=files`);
+    await page.getByTestId('files-tree').waitFor({ timeout: WAIT });
+    await expect(page.getByTestId('files-tab')).toHaveAttribute('data-root', fixture, { timeout: WAIT });
+    await page.waitForTimeout(1500);
+
+    fits('the Markdown preview', await look('README.md', 'markdown', '01-markdown'));
+    fits('the picture preview', await look('assets/shot.png', 'image', '02-image'));
+    await keptByTheStage('assets/wide.png', await look('assets/wide.png', 'image', '02b-image-wide'));
+    // A drawing is a picture too, and asks the picture's question rather than
+    // the document's. It used to answer this one differently, because it was
+    // drawn by a stage of its own — a plain `<img className="max-h-full
+    // max-w-full">` that fitted the box and, being fitted, could not be zoomed
+    // by any pointer at all. It comes through the same stage as the PNG now
+    // (bw-e3dw.15), so it starts at its own pixel size like the PNG and is
+    // held to the same rule: the stage keeps the crop, the page does not carry
+    // it, and the reader zooms.
+    await keptByTheStage('assets/drawing.svg', await look('assets/drawing.svg', 'svg', '03-svg'));
     fits('the video preview', await look('assets/clip.mp4', 'video', '04-video'));
     fits('the PDF preview', await look('assets/paper.pdf', 'pdf', '05-pdf'));
 

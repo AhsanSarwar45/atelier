@@ -1,0 +1,5 @@
+
+======== AN SVG ZOOMS LIKE ANY OTHER PICTURE (before) ========
+
+   * the svg stage at rest: data-scale=ABSENT, data-pan-x=ABSENT, data-pannable=ABSENT; the picture is drawn 1047x698
+   * after four wheel notches over the picture: scale (none) -> unchanged, the picture is drawn 1047x698, and the point that was under the pointer moved 0px across, 0px down

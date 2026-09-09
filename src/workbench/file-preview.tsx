@@ -129,6 +129,15 @@ function SourceSwitch({ showing, onChange }: { showing: 'source' | 'preview'; on
  * A picture at its real pixel size, zoomed and moved the way any image viewer
  * does it: the wheel scales about the pointer and the hand drags it around.
  *
+ * Every picture the app draws comes through here — a raster one and an SVG
+ * alike. The SVG used to have a stage of its own a few lines below, a plain
+ * `<img>` in an `overflow-auto` box, which meant an SVG could not be zoomed by
+ * ANY pointer while the PNG beside it zoomed under the wheel. Nothing caught
+ * it because that second stage answered to the same `data-testid` as this one,
+ * so a spec asking for the stage got whichever one the file kind happened to
+ * render (bw-e3dw.15). There is one stage now, and the case beside this file
+ * fails a second source file that draws another under this name.
+ *
  * It used to be a −/%/+ trio over a scrolling box and nothing else, so a
  * zoomed-in picture was a picture you could not look around — the reader who
  * asked for this had just met that in the Files tab (bw-gy6z). The gesture is
@@ -140,7 +149,7 @@ function SourceSwitch({ showing, onChange }: { showing: 'source' | 'preview'; on
  * the picture back — now returning the position along with the scale, because
  * a reset that leaves the picture off in a corner has not reset anything.
  */
-function ImagePreview({ path }: { path: string }) {
+function ImagePreview({ path, swap }: { path: string; swap?: ReactNode }) {
   const [shape, setShape] = useState<{ width: number; height: number } | null>(null);
   const [transform, setTransform] = useState<ImageTransform>(NO_TRANSFORM);
   // A new file is a new picture: its size is not known again until it loads,
@@ -192,6 +201,9 @@ function ImagePreview({ path }: { path: string }) {
             <Plus className="h-3 w-3" />
           </Button>
         </div>
+        {/* An SVG reads as source too, and its switch belongs on the bar it
+            already has rather than on a second one stacked above it. */}
+        {swap}
       </Bar>
       <div
         ref={viewportRef}
@@ -232,20 +244,30 @@ function ImagePreview({ path }: { path: string }) {
   );
 }
 
-function TwoWays({ path, text, preview }: { path: string; text: string; preview: ReactNode }) {
+/**
+ * The kinds that are legibly a picture AND legibly source, with the switch
+ * between the two.
+ *
+ * The switch is handed to the preview rather than drawn above it, because a
+ * preview may already have a bar of its own — an SVG's is the picture's
+ * dimensions and its zoom — and two bars stacked is 44px of chrome on a 390px
+ * screen saying less than one bar would (bw-e3dw.15). The source view has no
+ * bar of its own, so this draws it one.
+ */
+function TwoWays({ path, text, preview }: { path: string; text: string; preview: (swap: ReactNode) => ReactNode }) {
   const [showing, setShowing] = useState<'source' | 'preview'>('preview');
   useEffect(() => setShowing('preview'), [path]);
+  const swap = <SourceSwitch showing={showing} onChange={setShowing} />;
+  if (showing === 'preview') return <>{preview(swap)}</>;
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <Bar>
         <span className="flex-1" />
-        <SourceSwitch showing={showing} onChange={setShowing} />
+        {swap}
       </Bar>
-      {showing === 'preview' ? preview : (
-        <div data-testid="file-preview-source-view" className="min-h-0 flex-1">
-          <CodeEditor text={text} path={path} className="h-full" />
-        </div>
-      )}
+      <div data-testid="file-preview-source-view" className="min-h-0 flex-1">
+        <CodeEditor text={text} path={path} className="h-full" />
+      </div>
     </div>
   );
 }
@@ -284,30 +306,27 @@ export function FilePreview({ path, kind, text = '', className }: FilePreviewPro
       ) : kind === 'pdf' ? (
         <iframe data-testid="file-preview-pdf" src={src} title={path} className="min-h-0 flex-1 border-0 bg-white" />
       ) : kind === 'svg' ? (
-        <TwoWays
-          path={path}
-          text={text}
-          preview={(
-            <div
-              data-testid="file-preview-image-stage"
-              className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-6"
-              style={CHECKERBOARD}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img data-testid="file-preview-image" src={src} alt={path} className="max-h-full max-w-full" />
-            </div>
-          )}
-        />
+        /* The same stage as a PNG, and for the same reason the wheel and the
+           hand live in one hook: an SVG is a picture, and a reader who has just
+           zoomed into one file should not find the next one frozen because it
+           happened to be drawn by a different branch (bw-e3dw.15). */
+        <TwoWays path={path} text={text} preview={(swap) => <ImagePreview path={path} swap={swap} />} />
       ) : (
         <TwoWays
           path={path}
           text={text}
-          preview={(
-            <div data-testid="file-preview-markdown" className="min-h-0 flex-1 overflow-auto p-6">
-              {/* The file's own folder goes with its words, so `./notes.md`
-                  and `../src/a.ts` name the files a reader of this file on
-                  disk would find at those addresses (bw-ewem.1). */}
-              <MarkdownBody base={folderOf(path)}>{text}</MarkdownBody>
+          preview={(swap) => (
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <Bar>
+                <span className="flex-1" />
+                {swap}
+              </Bar>
+              <div data-testid="file-preview-markdown" className="min-h-0 flex-1 overflow-auto p-6">
+                {/* The file's own folder goes with its words, so `./notes.md`
+                    and `../src/a.ts` name the files a reader of this file on
+                    disk would find at those addresses (bw-ewem.1). */}
+                <MarkdownBody base={folderOf(path)}>{text}</MarkdownBody>
+              </div>
             </div>
           )}
         />

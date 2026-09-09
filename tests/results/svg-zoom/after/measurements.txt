@@ -1,0 +1,9 @@
+
+======== AN SVG ZOOMS LIKE ANY OTHER PICTURE (after) ========
+
+   * the svg stage at rest: data-scale=1, data-pan-x=0, data-pannable=true; the picture is drawn 2400x1600
+   * after four wheel notches over the picture: scale 1 -> 1.552707218511336, the picture is drawn 3726x2484, and the point that was under the pointer moved 0px across, 0px down
+   * one drag of 150px left: the svg moved -150px on the glass, data-pan-x=115.29946488544124
+   * the svg preview draws 1 bar(s), carrying both the zoom and the Source/Preview switch
+   * a viewBox-only svg reports "225 × 150" and is drawn 225x150
+   * the same svg under four wheel notches: scale 1.552707218511336
