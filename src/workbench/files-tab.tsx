@@ -15,6 +15,14 @@
  * are open and which of them are pinned, remembered per project so a reader
  * comes back to the set they were working in.
  *
+ * Below `md` the rail is not a column at all: it is a sheet over the viewer,
+ * with a scrim and a toggle on the bar, exactly as the chat's two rails are
+ * (`chat-tab.tsx`, `chat-right-rail.tsx`). A 288px rail beside a 390px screen
+ * left the file 102px to be read in — a text file showed a fifth of its line,
+ * the Markdown preview drew its heading one letter to a line, and the viewer's
+ * own edit/copy/open/reveal buttons were off the right of the pane. That is the
+ * complaint this tab was opened on (bw-e3dw.2).
+ *
  * The root matters more than it looks. A project with worktrees has the same
  * file at several paths at once, on different branches, and a tree that quietly
  * assumed the project's own checkout would show a reader the wrong copy of the
@@ -24,12 +32,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
+import { PanelLeft } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
+import { TabLead, ToolButton } from '@/components/shell';
+import { Button } from '@/components/ui/button';
 import { Picker } from '@/components/ui/picker';
 import { addressWith } from '@/lib/address';
 import * as api from '@/lib/api';
 import type { GitTree } from '@/lib/api';
+import { isPhoneScreen } from '@/lib/screen-width';
+import { cn } from '@/lib/utils';
 import { FilePreview, PREVIEWS_NEEDING_TEXT, previewKind } from '@/workbench/file-preview';
 import FileTree from '@/workbench/file-tree';
 import { FileViewer, type ViewedFile } from '@/workbench/file-viewer';
@@ -113,6 +126,22 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
   const [trees, setTrees] = useState<GitTree[]>([]);
   const [remembered, setRemembered] = useState<string | null>(null);
 
+  // Whether the tree is showing. It only decides anything below `md`, where the
+  // rail is a sheet; above it the rail is a column and the CSS keeps it drawn
+  // whatever this says.
+  const [railOpen, setRailOpen] = useState(false);
+  // The file the tab was opened on, read once: putting `file` in the effect
+  // below would throw the sheet open again on every file the reader picks.
+  const openedOn = useRef(file);
+
+  useEffect(() => {
+    // A phone that arrived with a file to read starts shut — the sheet would
+    // otherwise lie over the very file the address named. A phone that arrived
+    // with none starts open, because the alternative is a tab that opens on
+    // "Pick a file" with the way to pick one out of sight.
+    setRailOpen(!isPhoneScreen() || !openedOn.current);
+  }, []);
+
   useEffect(() => {
     setWidth(rememberedPanelWidth(FILES_RAIL_WIDTH));
   }, []);
@@ -159,7 +188,13 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
    * file being left is wrong for the one arriving.
    */
   const openFile = useCallback(
-    (path: string) => router.push(addressWith(params, { tab: 'files', file: path, line: null })),
+    (path: string) => {
+      // The sheet's work is done the moment a file is named: left open it would
+      // sit over the file it has just opened. Only files come through here —
+      // a folder in the tree opens itself and never calls this.
+      setRailOpen(false);
+      router.push(addressWith(params, { tab: 'files', file: path, line: null }));
+    },
     [router, params],
   );
 
@@ -278,11 +313,38 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
   const dirty = useMemo(() => new Set(unsaved), [unsaved]);
 
   return (
-    <div className="flex min-h-0 flex-1" data-testid="files-tab" data-root={root ?? undefined}>
+    // `relative`, because on a phone the rail and its scrim are drawn inside
+    // this box rather than over the window: a sheet that covered the bar would
+    // bury the toggle that opens it (bw-e3dw.9).
+    <div className="relative flex min-h-0 flex-1" data-testid="files-tab" data-root={root ?? undefined}>
+      {/* First on the row, ahead of the tab selector: the way into the tree
+          opens a whole pane rather than acting on the one already on screen,
+          which is why the chat's own [chat-rail-toggle] sits here too
+          (bw-81wt.5). Gone above `md`, where the tree is simply there. */}
+      <TabLead tab="files">
+        <ToolButton
+          icon={<PanelLeft />}
+          label={railOpen ? 'Hide the file tree' : 'Show the file tree'}
+          emphasis={railOpen ? 'loud' : 'quiet'}
+          className="md:hidden"
+          data-testid="files-rail-toggle"
+          data-open={railOpen}
+          onClick={() => setRailOpen((showing) => !showing)}
+        />
+      </TabLead>
       <div
         data-testid="files-rail"
+        data-open={railOpen}
         style={{ '--files-rail-width': `${width}px` } as CSSProperties}
-        className="flex h-full w-[var(--files-rail-width)] shrink-0 flex-col border-r border-border/40"
+        className={cn(
+          // On a phone a sheet from the left edge, filling what the bars left
+          // over and taking no width from the viewer, which is what a file is
+          // read in. On a wide screen the column it has always been, its width
+          // the one the divider drags.
+          'z-50 flex h-full shrink-0 flex-col border-r border-border/40 bg-background transition-transform md:relative md:z-30 md:translate-x-0',
+          'absolute inset-y-0 left-0 w-72 max-w-[85vw] md:w-[var(--files-rail-width)]',
+          railOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full',
+        )}
       >
         <div className="shrink-0 border-b border-border/40 p-2">
           <Picker
@@ -312,6 +374,24 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
         value={width}
         onChange={changeWidth}
         maximum={() => (typeof window === 'undefined' ? Infinity : window.innerWidth - MIN_VIEWER_WIDTH)}
+      />
+      {/* Mounted either way and faded, so the darkening arrives with the sheet
+          instead of snapping on in front of it. Over the work area only, like
+          the sheet it belongs to and like the chat's two (bw-e3dw.9). */}
+      <Button
+        type="button"
+        variant="foreground"
+        aria-hidden={!railOpen}
+        tabIndex={railOpen ? 0 : -1}
+        aria-label="Close the file tree"
+        data-testid="files-rail-scrim"
+        data-open={railOpen}
+        className={cn(
+          'absolute inset-0 z-40 h-auto rounded-none bg-black/80 p-0 md:hidden',
+          'transition-opacity duration-200 ease-out motion-reduce:transition-none',
+          railOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
+        )}
+        onClick={() => setRailOpen(false)}
       />
       <div
         className="flex min-h-0 min-w-0 flex-1 flex-col"

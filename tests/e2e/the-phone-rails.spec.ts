@@ -103,6 +103,17 @@ async function pressable(page: Page, id: string): Promise<boolean> {
   });
 }
 
+/** Put the Files tab's tree where the next step needs it, however it opened. */
+async function tree(page: Page, want: 'open' | 'shut'): Promise<void> {
+  const toggle = page.getByTestId('files-rail-toggle');
+  if ((await toggle.count()) === 0) return;
+  const rail = page.getByTestId('files-rail');
+  if (((await rail.getAttribute('data-open')) === 'true') !== (want === 'open')) {
+    await toggle.click();
+    await page.waitForTimeout(700);
+  }
+}
+
 /** How far past the right edge of the window anything reaches. */
 async function sideways(page: Page): Promise<{ page: number; window: number; over: string[] }> {
   return page.evaluate(() => {
@@ -203,6 +214,9 @@ test('the phone rails: the bar stays reachable, one breakpoint decides, and the 
         `[chat-git-toggle] ${gitReachable ? 'IS' : 'is NOT'} pressable, [chat-right-rail-toggle] ${toggleReachable ? 'IS' : 'is NOT'} pressable`,
     );
     await shoot(page, '01-chat-right-rail-open');
+    expect(gitReachable, 'the sheet is over [chat-git-toggle]').toBe(true);
+    expect(toggleReachable, 'the sheet is over [chat-right-rail-toggle]').toBe(true);
+    expect(railBox.top, 'the sheet starts above the bottom of the bars').toBeGreaterThanOrEqual(barBottom - 1);
 
     // The whole point: Git from Chat in one tap, without shutting the sheet.
     if (gitReachable) {
@@ -229,6 +243,7 @@ test('the phone rails: the bar stays reachable, one breakpoint decides, and the 
         (await pressable(page, 'chat-rail-toggle')) ? 'IS' : 'is NOT'
       } pressable`,
     );
+    expect(await pressable(page, 'chat-rail-toggle'), 'the chat list sheet is over its own toggle').toBe(true);
     await shoot(page, '03-chat-list-sheet-open');
     // On the bare strip of scrim the 288px sheet leaves, not its centre.
     await page.mouse.click(370, 500);
@@ -257,6 +272,9 @@ test('the phone rails: the bar stays reachable, one breakpoint decides, and the 
     if (at700.position === 'fixed' && at700.open === 'true') {
       note('AT 700px THE RAIL DEFAULTS OPEN AND IS DRAWN AS A SHEET OVER THE READING — two answers, not one');
     }
+    // One answer, not two: a rail that is drawn as a sheet is a rail that did
+    // not default itself open.
+    expect(at700.position === 'fixed' && at700.open === 'true', 'two answers at 700px').toBe(false);
     await shoot(page, '04-chat-at-700');
 
     // ---- bw-e3dw.2: the Files tab at 390px.
@@ -275,6 +293,7 @@ test('the phone rails: the bar stays reachable, one breakpoint decides, and the 
         rail: wide('files-rail'),
         railPosition: rail ? getComputedStyle(rail).position : 'none',
         railLeft: rail ? Math.round(rail.getBoundingClientRect().left) : -1,
+        railWasOpen: rail?.getAttribute('data-open') ?? 'none',
         viewer: wide('files-viewer'),
         window: window.innerWidth,
       };
@@ -282,23 +301,39 @@ test('the phone rails: the bar stays reachable, one breakpoint decides, and the 
     const toggleDrawn = (await page.getByTestId('files-rail-toggle').count()) > 0;
     const scrimDrawn = (await page.getByTestId('files-rail-scrim').count()) > 0;
     note(
-      `Files tab at 390px, tree shut: rail ${split.rail}px (${split.railPosition}, left=${split.railLeft}), ` +
-        `viewer ${split.viewer}px of ${split.window}px; a toggle is ${toggleDrawn ? 'drawn' : 'NOT drawn'}, a scrim is ${
-          scrimDrawn ? 'drawn' : 'NOT drawn'
-        }`,
+      `Files tab at 390px, as it opens: the rail is ${split.rail}px (${split.railPosition}, left=${split.railLeft}, ` +
+        `data-open=${split.railWasOpen}), the viewer ${split.viewer}px of ${split.window}px; a toggle is ${
+          toggleDrawn ? 'drawn' : 'NOT drawn'
+        }, a scrim is ${scrimDrawn ? 'drawn' : 'NOT drawn'}`,
     );
+
+    // The tree put away, which is what a file is read behind.
+    await tree(page, 'shut');
+    const shut = await page.evaluate(() => {
+      const rail = document.querySelector('[data-testid="files-rail"]') as HTMLElement | null;
+      const viewer = document.querySelector('[data-testid="files-viewer"]') as HTMLElement | null;
+      return {
+        left: rail ? Math.round(rail.getBoundingClientRect().left) : -1,
+        viewer: viewer ? Math.round(viewer.getBoundingClientRect().width) : -1,
+      };
+    });
+    note(`Files tab at 390px, tree shut: the rail sits at x=${shut.left} and the viewer takes ${shut.viewer}px of 390px`);
     const overflow = await sideways(page);
     note(
       `Files tab at 390px: the document is ${overflow.page}px in ${overflow.window}px${
         overflow.over.length ? `; ${overflow.over.join('; ')}` : '; nothing scrolls sideways'
       }`,
     );
+    expect(toggleDrawn, 'no way to open the tree on a phone').toBe(true);
+    expect(scrimDrawn, 'no scrim behind the tree on a phone').toBe(true);
+    expect(shut.viewer, 'the tree still takes width from the viewer').toBe(split.window);
+    expect(overflow.page, 'the Files tab scrolls sideways').toBeLessThanOrEqual(overflow.window + 1);
+    expect(overflow.over, 'a pane on the Files tab scrolls sideways inside itself').toEqual([]);
     await shoot(page, '05-files-tree-shut');
 
     // The tree as an overlay, opened the way a thumb opens it.
-    if (toggleDrawn) {
-      await page.getByTestId('files-rail-toggle').click();
-      await page.waitForTimeout(800);
+    {
+      await tree(page, 'open');
       const open = await page.evaluate(() => {
         const rail = document.querySelector('[data-testid="files-rail"]') as HTMLElement | null;
         const viewer = document.querySelector('[data-testid="files-viewer"]') as HTMLElement | null;
@@ -313,10 +348,13 @@ test('the phone rails: the bar stays reachable, one breakpoint decides, and the 
         `Files tab at 390px, tree open: the rail is ${open.rail}px ${open.position} at x=${open.left} OVER a viewer still ${open.viewer}px wide; ` +
           `[files-rail-toggle] ${(await pressable(page, 'files-rail-toggle')) ? 'IS' : 'is NOT'} still pressable`,
       );
+      expect(open.viewer, 'the open tree takes width from the viewer').toBe(PHONE.width);
+      expect(open.left, 'the tree did not come out').toBe(0);
       await shoot(page, '06-files-tree-open');
     }
 
     // A file picked from the overlay shuts it and is read full width.
+    await tree(page, 'open');
     await named('src').click();
     await page.waitForTimeout(400);
     await named('src/lib').click();
@@ -342,13 +380,16 @@ test('the phone rails: the bar stays reachable, one breakpoint decides, and the 
         `the code pane shows ${afterPick.code?.shown ?? -1}px of a ${afterPick.code?.scroll ?? -1}px line; ` +
         `[file-viewer-header] holds ${afterPick.header?.scroll ?? -1}px in ${afterPick.header?.shown ?? -1}px`,
     );
+    expect(afterPick.railLeft, 'the tree stayed over the file it just opened').toBeLessThan(0);
+    expect(afterPick.code!.shown, 'the code pane is not the width of the screen').toBe(PHONE.width);
+    expect(
+      afterPick.header!.scroll,
+      "[file-viewer-header]'s buttons are off the right of the pane",
+    ).toBeLessThanOrEqual(afterPick.header!.shown + 1);
     await shoot(page, '07-files-text');
 
     // The Markdown preview, which is where a 102px viewer showed one letter per line.
-    if (toggleDrawn) {
-      await page.getByTestId('files-rail-toggle').click();
-      await page.waitForTimeout(600);
-    }
+    await tree(page, 'open');
     await named('README.md').click();
     await expect
       .poll(() => page.getByTestId('files-viewer').getAttribute('data-file'), { timeout: WAIT })
@@ -361,13 +402,12 @@ test('the phone rails: the bar stays reachable, one breakpoint decides, and the 
       return { width: Math.round(box.width), height: Math.round(box.height) };
     });
     note(`Files tab, README.md previewed at 390px: its heading is ${heading?.width ?? -1}px wide and ${heading?.height ?? -1}px tall`);
+    // One letter to a line made a two-word heading 432px tall.
+    expect(heading!.height, 'the Markdown heading is still being broken up').toBeLessThan(120);
     await shoot(page, '08-files-markdown');
 
     // And a picture, which had a 102px stage to fit 160px into.
-    if (toggleDrawn) {
-      await page.getByTestId('files-rail-toggle').click();
-      await page.waitForTimeout(600);
-    }
+    await tree(page, 'open');
     await named('assets').click();
     await page.waitForTimeout(500);
     await named('assets/shot.png').click();
@@ -382,7 +422,44 @@ test('the phone rails: the bar stays reachable, one breakpoint decides, and the 
       };
     });
     note(`Files tab, a picture at 390px: the stage is ${stage.stage}px and the picture ${stage.picture}px`);
+    expect(stage.stage, 'the picture has nowhere to be shown').toBeGreaterThanOrEqual(stage.picture);
     await shoot(page, '09-files-image');
+
+    // And the same tab on a wide screen, which must be exactly what it was: a
+    // column of the row, its width the one the divider drags, no toggle and no
+    // scrim in sight.
+    await page.setViewportSize({ width: 1024, height: 900 });
+    await page.waitForTimeout(1500);
+    const wide = await page.evaluate(() => {
+      const rail = document.querySelector('[data-testid="files-rail"]') as HTMLElement | null;
+      const viewer = document.querySelector('[data-testid="files-viewer"]') as HTMLElement | null;
+      const divider = document.querySelector('[data-testid="left-panel-resizer"]') as HTMLElement | null;
+      const toggle = document.querySelector('[data-testid="files-rail-toggle"]') as HTMLElement | null;
+      const scrim = document.querySelector('[data-testid="files-rail-scrim"]') as HTMLElement | null;
+      const drawn = (el: HTMLElement | null) => (el ? getComputedStyle(el).display !== 'none' : false);
+      return {
+        rail: rail ? Math.round(rail.getBoundingClientRect().width) : -1,
+        left: rail ? Math.round(rail.getBoundingClientRect().left) : -1,
+        position: rail ? getComputedStyle(rail).position : 'none',
+        viewer: viewer ? Math.round(viewer.getBoundingClientRect().width) : -1,
+        divider: drawn(divider),
+        toggle: drawn(toggle),
+        scrim: drawn(scrim),
+      };
+    });
+    note(
+      `Files tab at 1024px: the rail is ${wide.rail}px ${wide.position} at x=${wide.left} beside a ${wide.viewer}px viewer; ` +
+        `the divider is ${wide.divider ? 'drawn' : 'hidden'}, the toggle ${wide.toggle ? 'drawn' : 'hidden'}, the scrim ${
+          wide.scrim ? 'drawn' : 'hidden'
+        }`,
+    );
+    // A wide screen is exactly what it was.
+    expect(wide.position, 'the rail is no longer a column on a wide screen').toBe('relative');
+    expect(wide.rail + wide.viewer, 'the rail and the viewer no longer fill the row').toBeGreaterThanOrEqual(1020);
+    expect(wide.divider, 'the divider cannot be dragged on a wide screen').toBe(true);
+    expect(wide.toggle, 'a phone-only toggle is drawn on a wide screen').toBe(false);
+    expect(wide.scrim, 'a phone-only scrim is drawn on a wide screen').toBe(false);
+    await shoot(page, '10-files-wide');
   } finally {
     const report = ['', `======== THE PHONE RAILS (${STAGE}) ========`, '', ...measured.map((one) => `   * ${one}`), ''].join('\n');
     console.log(report);
