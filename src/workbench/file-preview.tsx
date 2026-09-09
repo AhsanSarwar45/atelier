@@ -59,6 +59,15 @@ export function previewKind(path: string): PreviewKind {
   }
 }
 
+/**
+ * The folder a file sits in — what a link written inside it is relative to. A
+ * file at the very root of the machine is its own folder (bw-ewem.1).
+ */
+function folderOf(path: string): string {
+  const cut = path.lastIndexOf('/');
+  return cut <= 0 ? '/' : path.slice(0, cut);
+}
+
 /** Where the bytes of a file on this machine are served from. */
 export function mediaUrl(path: string): string {
   return apiUrl(`/api/fs/media?path=${encodeURIComponent(path)}`);
@@ -295,7 +304,10 @@ export function FilePreview({ path, kind, text = '', className }: FilePreviewPro
           text={text}
           preview={(
             <div data-testid="file-preview-markdown" className="min-h-0 flex-1 overflow-auto p-6">
-              <MarkdownBody>{text}</MarkdownBody>
+              {/* The file's own folder goes with its words, so `./notes.md`
+                  and `../src/a.ts` name the files a reader of this file on
+                  disk would find at those addresses (bw-ewem.1). */}
+              <MarkdownBody base={folderOf(path)}>{text}</MarkdownBody>
             </div>
           )}
         />

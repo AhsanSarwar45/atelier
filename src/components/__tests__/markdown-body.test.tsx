@@ -116,6 +116,64 @@ describe('Markdown file links', () => {
     expect(openExternal).not.toHaveBeenCalled();
   });
 
+  it('opens a link written the way a markdown file writes one, against its own folder', () => {
+    render(
+      <MarkdownBody base="/home/me/project/docs">
+        {'[notes](./notes.md) [source](../src/a.ts) [guide](guide/intro.md)'}
+      </MarkdownBody>,
+    );
+    const links = screen.getAllByTestId('markdown-file-link');
+    expect(links.map((link) => link.getAttribute('data-path-mention'))).toEqual([
+      '/home/me/project/docs/notes.md',
+      '/home/me/project/src/a.ts',
+      '/home/me/project/docs/guide/intro.md',
+    ]);
+  });
+
+  it('keeps a relative link a plain link when the words came from no folder', () => {
+    render(<MarkdownBody>{'[notes](./notes.md)'}</MarkdownBody>);
+    expect(screen.queryByTestId('markdown-file-link')).toBeNull();
+    expect(screen.getByTestId('markdown-link')).toHaveAttribute('href', './notes.md');
+  });
+
+  it('refuses a relative link that climbs out of the reader\'s home', () => {
+    render(<MarkdownBody base="/home/me/project/docs">{'[secrets](../../../../etc/passwd)'}</MarkdownBody>);
+    expect(screen.queryByTestId('markdown-file-link')).toBeNull();
+    expect(screen.getByTestId('markdown-link')).toHaveAttribute('href', '../../../../etc/passwd');
+  });
+
+  it('opens the file an anchored link names, without carrying the anchor into it', () => {
+    render(<MarkdownBody base="/home/me/project/docs">{'[installing](./guide.md#installing)'}</MarkdownBody>);
+    const link = screen.getByTestId('markdown-file-link');
+    expect(link).toHaveAttribute('data-path-mention', '/home/me/project/docs/guide.md');
+    expect(link).not.toHaveAttribute('data-path-line');
+  });
+
+  it('reads the line grammar the rest of the app reads, and no heading as a line', () => {
+    render(
+      <MarkdownBody base="/home/me/project/docs">
+        {'[lines](./guide.md#L12-L40) [release](./CHANGELOG.md#2024)'}
+      </MarkdownBody>,
+    );
+    const [lines, release] = screen.getAllByTestId('markdown-file-link');
+    expect(lines).toHaveAttribute('data-path-mention', '/home/me/project/docs/guide.md');
+    expect(lines).toHaveAttribute('data-path-line', '12');
+    expect(release).toHaveAttribute('data-path-mention', '/home/me/project/docs/CHANGELOG.md');
+    expect(release).not.toHaveAttribute('data-path-line');
+  });
+
+  it('leaves a link into the words themselves alone', () => {
+    render(<MarkdownBody base="/home/me/project/docs">{'[installing](#installing)'}</MarkdownBody>);
+    expect(screen.queryByTestId('markdown-file-link')).toBeNull();
+    expect(screen.getByTestId('markdown-link')).toHaveAttribute('href', '#installing');
+  });
+
+  it('still leaves a web address for the browser when the words have a folder', () => {
+    render(<MarkdownBody base="/home/me/project/docs">{'[site](https://example.com)'}</MarkdownBody>);
+    expect(screen.getByTestId('markdown-web-badge')).toHaveAttribute('target', '_blank');
+    expect(screen.queryByTestId('markdown-file-link')).toBeNull();
+  });
+
   it('tells the reader when the system opener refuses the file', async () => {
     openExternal.mockRejectedValue(new Error('permission denied'));
     render(<MarkdownBody>{'[proof](</home/me/proof.webm>)'}</MarkdownBody>);
@@ -142,6 +200,21 @@ describe('Markdown images', () => {
     render(<MarkdownBody>{'![Remote proof](https://example.com/proof.png)'}</MarkdownBody>);
 
     expect(screen.getByAltText('Remote proof')).toHaveAttribute('src', 'https://example.com/proof.png');
+  });
+
+  it('serves a picture named the way a markdown file names one, against its own folder', () => {
+    render(<MarkdownBody base="/home/me/project/docs">{'![Shot](./shot.png)'}</MarkdownBody>);
+
+    expect(screen.getByAltText('Shot')).toHaveAttribute(
+      'src',
+      '/api/fs/media?path=%2Fhome%2Fme%2Fproject%2Fdocs%2Fshot.png',
+    );
+  });
+
+  it('leaves a relative picture where it was written when the words came from no folder', () => {
+    render(<MarkdownBody>{'![Shot](./shot.png)'}</MarkdownBody>);
+
+    expect(screen.getByAltText('Shot')).toHaveAttribute('src', './shot.png');
   });
 
   it('does not route a forbidden temporary path through local media', () => {

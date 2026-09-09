@@ -27,6 +27,8 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { rehypeMentions, type Piece } from "@/workbench/mentions";
 import { usePathActions } from "@/workbench/open-path";
+import { resolvePath } from "@/workbench/paths";
+import { peelLines } from "@/workbench/references";
 
 /**
  * What a name written in the words should become. Absent — everywhere but a
@@ -282,27 +284,60 @@ function WebLinkBadge({ href, target, children }: { href: string; target: WebTar
   );
 }
 
-/** A path the host can open, rather than an address the browser should visit. */
-function localTarget(href: string): LocalTarget | null {
-  // A leading slash is also an in-app URL. Limit Unix paths to the locations
-  // people can actually link to under the backend's filesystem policy.
-  let path: string;
+/**
+ * Where a link's own name is on the machine, or null when nothing here can say.
+ *
+ * A markdown file writes its links the way a person writes them — `./notes.md`,
+ * `../src/a.ts`, `docs/guide.md` — and every one of those means "next to me".
+ * So a relative name is resolved against the folder the words were read out of,
+ * and without that folder it is not an address at all and stays a plain link
+ * (bw-ewem.1).
+ */
+function machinePath(name: string, base?: string): string | null {
+  if (name.startsWith('/') || /^[A-Za-z]:[\\/]/.test(name)) return name;
+  // A scheme means an address on the web, not a name in somebody's folder.
+  if (/^[a-z][a-z0-9+.-]*:/i.test(name)) return null;
+  if (!base) return null;
+  // No home to hang a `~` on: a markdown file's folder answers `./` and `../`
+  // and nothing else. `resolvePath` flattens the result, so `../..` really does
+  // walk up before the jail below is asked about where it landed.
+  return resolvePath(name, { cwd: base, home: '' });
+}
+
+/**
+ * A path the host can open, rather than an address the browser should visit.
+ *
+ * `base` is the folder the words themselves came from, when there is one.
+ */
+function localTarget(href: string, base?: string): LocalTarget | null {
+  // `#installing` alone names a place in THESE words. There is no file in it.
+  if (href.startsWith('#')) return null;
+
+  let written: string;
   if (href.startsWith('file://')) {
-    try { path = decodeURIComponent(new URL(href).pathname); } catch { return null; }
+    try { written = decodeURIComponent(new URL(href).pathname); } catch { return null; }
   } else {
-    try { path = decodeURIComponent(href); } catch { return null; }
+    try { written = decodeURIComponent(href); } catch { return null; }
   }
 
-  if (!/^\/(home|Users)\//.test(path) && !/^[A-Za-z]:[\\/]/.test(path)) return null;
+  // What a link ends in is not part of the name of the file: an agent's
+  // citation ends `:42` or `:42:7` — editors only need the line — and a
+  // markdown link ends `#L12-L40` or `#installing`. The lines are read by the
+  // one grammar that reads them everywhere (`references.ts`); whatever anchor
+  // is left is a place inside the file and not a file of its own.
+  const { path: named, line } = peelLines(written, { bareHash: false });
+  const anchor = named.indexOf('#');
+  const name = anchor < 0 ? named : named.slice(0, anchor);
+  if (!name) return null;
 
-  // Agent file citations conventionally end in :line or :line:column. Keep
-  // the column out of the filename too; editors only need the line here.
-  const location = path.match(/:(\d+)(?::\d+)?$/);
-  if (!location) return { path, line: null };
-  return {
-    path: path.slice(0, -location[0].length),
-    line: Number(location[1]),
-  };
+  const path = machinePath(name, base);
+  // A leading slash is also an in-app URL. Limit Unix paths to the locations
+  // people can actually link to under the backend's filesystem policy — which
+  // is the same rule that stops `../../../../etc/passwd` becoming something
+  // this app offers to open, since resolving it lands outside home.
+  if (path === null) return null;
+  if (!/^\/(home|Users)\//.test(path) && !/^[A-Za-z]:[\\/]/.test(path)) return null;
+  return { path, line };
 }
 
 /**
@@ -311,8 +346,8 @@ function localTarget(href: string): LocalTarget | null {
  * route; the route returns 403/404 for anything the app is not allowed to
  * expose, leaving the image's alt text as the safe failure state.
  */
-function localImageSource(src: string): string | null {
-  const target = localTarget(src);
+function localImageSource(src: string, base?: string): string | null {
+  const target = localTarget(src, base);
   if (!target || target.line !== null) return null;
   return `/api/fs/media?path=${encodeURIComponent(target.path)}`;
 }
@@ -321,10 +356,18 @@ export function MarkdownBody({
   children,
   className,
   mentions,
+  base,
 }: {
   children: string;
   className?: string;
   mentions?: Mentions;
+  /**
+   * The folder these words were read out of, which is what a link inside them
+   * is written against. The Files tab knows it and passes it; a chat message
+   * came from nobody's folder and passes nothing, so there only an address
+   * written out in full opens, exactly as before (bw-ewem.1).
+   */
+  base?: string;
 }) {
   // Every file named in the words opens the same way, whether the words are a
   // chat message or a card's own field: one set of handlers on the body, and
@@ -342,7 +385,7 @@ export function MarkdownBody({
         components={{
           img: ({ node, ...props }) => {
             const src = String(props.src ?? '');
-            const local = localImageSource(src);
+            const local = localImageSource(src, base);
             return (
               <img
                 {...props}
@@ -364,7 +407,7 @@ export function MarkdownBody({
             const href = String(props.href ?? '');
             const ours = wroteItOut(href, textOf(props.children)) ? mentions?.link?.(href) : null;
             if (ours) return <>{ours}</>;
-            const local = localTarget(href);
+            const local = localTarget(href, base);
             if (local) return (
               <FileLinkBadge href={href} target={local}>
                 {props.children}

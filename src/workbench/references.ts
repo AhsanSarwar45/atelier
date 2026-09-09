@@ -92,9 +92,29 @@ const HASH_NUMBERS = /#(\d+)(?:-(\d+))?$/;
 /** `:12-40`, `:12`, and `:12:7` — the column nobody opens on. */
 const COLON_LINES = /:(\d+)(?:-(\d+)|:\d+)?$/;
 
-/** The lines peeled off the end of a token, and the path that is left. */
-function peelLines(token: string): { path: string; line: number | null; endLine: number | null } {
-  for (const shape of [HASH_LINES, HASH_NUMBERS, COLON_LINES]) {
+/** How much of the line grammar a reader of a token is willing to read. */
+export interface LineForms {
+  /**
+   * Whether a bare `#12` counts as a line. It does in a chat, where the reader
+   * pasted it out of VS Code. It does NOT in a markdown link, where `#2024` is
+   * a heading called 2024 far more often than it is line 2024 (bw-ewem.1).
+   */
+  bareHash?: boolean;
+}
+
+/**
+ * The lines peeled off the end of a token, and the path that is left.
+ *
+ * Exported because a markdown link ends the same ways a reference does —
+ * `#L12-L40`, `:42:7` — and one grammar answering both is the point of this
+ * file (bw-gr8y.2).
+ */
+export function peelLines(
+  token: string,
+  { bareHash = true }: LineForms = {},
+): { path: string; line: number | null; endLine: number | null } {
+  const shapes = bareHash ? [HASH_LINES, HASH_NUMBERS, COLON_LINES] : [HASH_LINES, COLON_LINES];
+  for (const shape of shapes) {
     const at = shape.exec(token);
     if (!at) continue;
     const line = Number(at[1]);
