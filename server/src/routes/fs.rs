@@ -533,6 +533,177 @@ pub async fn write_file(Json(body): Json<FsWriteBody>) -> Response {
     (StatusCode::OK, Json(written)).into_response()
 }
 
+// ── Changing the tree, not only reading it (bw-5gax) ─────────────────────────
+//
+// Everything above this line reads. What follows renames, and beside it will
+// stand the rest of what a file manager does. That is a different kind of call
+// from a read, and it is confined differently.
+//
+// The read routes are jailed to the home directory, and for reading that is
+// right: a reader may point the Files tab at any checkout they own. Changing
+// the disk is not that. So every call below is confined twice over, and the
+// second jail is the checkout the caller is working in:
+//
+// - the checkout has to really be one — it holds a `.git` — so a request that
+//   names `$HOME` as its root is refused before any path under it is looked at;
+// - the target's PARENT is canonicalised, which makes the kernel resolve `..`
+//   and every symlink in the way rather than this file doing it with string
+//   arithmetic, and the result has to be strictly inside that checkout;
+// - `.git` itself is out of bounds, because a file manager that can unlink
+//   `.git/HEAD` is one that can destroy the history the reader would otherwise
+//   have restored a deleted file from.
+//
+// The precedents from [`write_file`] are kept: a refusal is a status and a JSON
+// `error`, a name already taken is a 409 rather than a silent overwrite, and
+// nothing here follows a symlink.
+
+/// A path proved to be inside a checkout, carrying the checkout it is in.
+struct Confined {
+    /// The canonical checkout the call is confined to.
+    root: PathBuf,
+    /// The canonical target. It need not exist yet.
+    path: PathBuf,
+}
+
+/// A refusal: the status to answer with, and what to say.
+type Refused = (StatusCode, String);
+
+/// A refusal in the shape [`write_file`] answers in, so one client error path
+/// reads every one of these routes.
+fn refusal((status, why): Refused) -> Response {
+    (status, Json(serde_json::json!({ "error": why }))).into_response()
+}
+
+/// The checkout a change is confined to, canonicalised and proved to be one.
+fn checkout(given: &str) -> Result<PathBuf, Refused> {
+    let asked = PathBuf::from(given);
+    validate_path_security(&asked).map_err(|e| (StatusCode::FORBIDDEN, e))?;
+    let root = std::fs::canonicalize(&asked)
+        .map_err(|_| (StatusCode::NOT_FOUND, "That checkout does not exist".to_string()))?;
+    if !root.is_dir() {
+        return Err((StatusCode::BAD_REQUEST, "That checkout is not a folder".to_string()));
+    }
+    // `exists` and not `is_dir`: a worktree's `.git` is a FILE pointing back at
+    // the repository, and the worktrees are exactly the roots the Files tab
+    // offers alongside the project itself.
+    if !root.join(".git").exists() {
+        return Err((StatusCode::FORBIDDEN, "That folder is not a checkout".to_string()));
+    }
+    Ok(root)
+}
+
+/// Prove `path` sits inside `root`, without following a link out of it.
+///
+/// The parent is canonicalised and the last component put back afterwards.
+/// Canonicalising the whole path would resolve a symlink AT the target, and a
+/// renamed or deleted link would then be whatever it pointed at rather than the
+/// link — which is precisely how an operation confined to a checkout reaches
+/// outside one.
+fn confined(root: PathBuf, path: &std::path::Path) -> Result<Confined, Refused> {
+    validate_path_security(path).map_err(|e| (StatusCode::FORBIDDEN, e))?;
+    let parent = path
+        .parent()
+        .ok_or((StatusCode::BAD_REQUEST, "That is not a path inside a folder".to_string()))?;
+    let name = path
+        .file_name()
+        .ok_or((StatusCode::BAD_REQUEST, "That path names nothing".to_string()))?;
+    let parent = std::fs::canonicalize(parent)
+        .map_err(|_| (StatusCode::NOT_FOUND, "That folder does not exist".to_string()))?;
+    let whole = parent.join(name);
+    // `starts_with` on a Path compares whole components, so `/repo-elsewhere`
+    // is not inside `/repo`. The checkout itself is excluded too: the root is
+    // not a thing the tree drawn from it may rename or remove.
+    if whole == root || !whole.starts_with(&root) {
+        return Err((StatusCode::FORBIDDEN, "That path is outside the checkout".to_string()));
+    }
+    let inside = whole.strip_prefix(&root).unwrap_or(&whole);
+    if inside.components().any(|part| part.as_os_str() == ".git") {
+        return Err((StatusCode::FORBIDDEN, "The repository's own .git is not editable here".to_string()));
+    }
+    Ok(Confined { root, path: whole })
+}
+
+/// A name the reader typed, checked before it is joined onto anything.
+///
+/// One component and nothing else: no separator, no `.` or `..`, no NUL, and no
+/// surrounding blank. So a "rename" can never become a move into another
+/// folder, and [`confined`] is never handed a name that could climb.
+fn plain_name(name: &str) -> Result<&str, Refused> {
+    let trimmed = name.trim();
+    let bad = |why: &str| (StatusCode::BAD_REQUEST, why.to_string());
+    if trimmed.is_empty() {
+        return Err(bad("A name is needed"));
+    }
+    if trimmed == "." || trimmed == ".." {
+        return Err(bad("That is not a name"));
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') || trimmed.contains('\0') {
+        return Err(bad("A name cannot contain a path separator"));
+    }
+    Ok(trimmed)
+}
+
+/// What a rename is asked to do.
+#[derive(Debug, Deserialize)]
+pub struct FsRenameBody {
+    /// The checkout the file lives in.
+    pub root: String,
+    /// Its absolute path as it is now.
+    pub path: String,
+    /// The new last component. A name, never a path: this is a rename.
+    pub name: String,
+}
+
+/// Where something ended up, so the caller can follow it there.
+#[derive(Debug, Serialize)]
+pub struct PathMoved {
+    /// The absolute path afterwards.
+    pub path: String,
+}
+
+/// POST /api/fs/rename
+///
+/// Gives a file or folder another name in the folder it is already in.
+///
+/// `std::fs::rename` rather than a copy and a delete: within one directory it
+/// is a single atomic step, so a rename that fails leaves the old name exactly
+/// as it was instead of two halves of a file. A name already in use is refused
+/// with 409 rather than taken, because `rename` would otherwise silently
+/// replace what is there — that is the same promise the save route's `ifSha`
+/// makes, that this app does not throw away work it was not asked to.
+pub async fn rename_path(Json(body): Json<FsRenameBody>) -> Response {
+    let root = match checkout(&body.root) {
+        Ok(root) => root,
+        Err(no) => return refusal(no),
+    };
+    let from = match confined(root, std::path::Path::new(&body.path)) {
+        Ok(found) => found,
+        Err(no) => return refusal(no),
+    };
+    let name = match plain_name(&body.name) {
+        Ok(name) => name,
+        Err(no) => return refusal(no),
+    };
+    if std::fs::symlink_metadata(&from.path).is_err() {
+        return refusal((StatusCode::NOT_FOUND, "That file no longer exists".to_string()));
+    }
+    let wanted = from.path.with_file_name(name);
+    let to = match confined(from.root, &wanted) {
+        Ok(found) => found,
+        Err(no) => return refusal(no),
+    };
+    // The comparison is between paths and not names, so that on a filesystem
+    // that does not care about case, `README.md` → `readme.md` is understood as
+    // the same file being spelled differently rather than as a clash.
+    if to.path != from.path && std::fs::symlink_metadata(&to.path).is_ok() {
+        return refusal((StatusCode::CONFLICT, format!("{name} is already there")));
+    }
+    if let Err(e) = std::fs::rename(&from.path, &to.path) {
+        return refusal((StatusCode::INTERNAL_SERVER_ERROR, format!("Could not rename it: {e}")));
+    }
+    (StatusCode::OK, Json(PathMoved { path: to.path.to_string_lossy().into_owned() })).into_response()
+}
+
 /// GET /api/presentation-assets/:asset
 pub async fn presentation_asset(headers: HeaderMap, Path(asset): Path<String>) -> Response {
     if !media_origin_allowed(&headers) {
@@ -1268,6 +1439,7 @@ mod tests {
             .route("/api/fs/find", axum::routing::get(find))
             .route("/api/fs/read", axum::routing::get(read_file))
             .route("/api/fs/write", axum::routing::put(write_file))
+            .route("/api/fs/rename", axum::routing::post(rename_path))
             .route("/api/fs/media", axum::routing::get(media))
     }
 
@@ -2056,5 +2228,217 @@ mod tests {
             "searching 50,000 files took {slowest:?}, over the {budget} ms this build is allowed",
         );
         println!("50,000 files: slowest search {slowest:?} (budget {budget} ms)");
+    }
+
+    // ── Changing the tree (bw-5gax) ──────────────────────────────────────────
+
+    /// A checkout of its own for the routes that change things, because those
+    /// refuse a root with no `.git` in it and `scratch()` is a bare directory.
+    fn a_checkout() -> tempfile::TempDir {
+        let root = scratch();
+        let at = |name: &str| root.path().join(name);
+        std::fs::create_dir(at(".git")).unwrap();
+        std::fs::write(at(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        std::fs::create_dir(at("src")).unwrap();
+        std::fs::write(at("src/main.rs"), "fn main() {}\n").unwrap();
+        std::fs::write(at("notes.txt"), "hello\n").unwrap();
+        root
+    }
+
+    async fn posted(route: &str, body: serde_json::Value) -> (StatusCode, serde_json::Value) {
+        let asked = axum::http::Request::builder()
+            .method("POST")
+            .uri(route)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let (status, _, bytes) = answered(asked).await;
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    #[tokio::test]
+    async fn a_rename_moves_the_file_and_says_where_it_went() {
+        let root = a_checkout();
+        let before = root.path().join("notes.txt");
+
+        let (status, answer) = posted(
+            "/api/fs/rename",
+            serde_json::json!({ "root": root.path(), "path": before, "name": "thoughts.md" }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{answer}");
+        let after = root.path().join("thoughts.md");
+        assert_eq!(answer["path"].as_str().unwrap(), after.to_string_lossy());
+        assert!(!before.exists(), "the old name is still on disk");
+        assert_eq!(std::fs::read_to_string(&after).unwrap(), "hello\n");
+    }
+
+    /// A folder renames whole, contents and all — a rename is one step, so
+    /// there is no half-moved tree to find afterwards.
+    #[tokio::test]
+    async fn a_folder_renames_with_everything_in_it() {
+        let root = a_checkout();
+
+        let (status, _) = posted(
+            "/api/fs/rename",
+            serde_json::json!({ "root": root.path(), "path": root.path().join("src"), "name": "lib" }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(!root.path().join("src").exists());
+        assert_eq!(std::fs::read_to_string(root.path().join("lib/main.rs")).unwrap(), "fn main() {}\n");
+    }
+
+    /// Taking a name that is in use would silently replace what is there, which
+    /// is the one thing `write_file`'s `ifSha` exists to prevent. So: 409.
+    #[tokio::test]
+    async fn a_rename_onto_a_name_in_use_is_refused_rather_than_taken() {
+        let root = a_checkout();
+        std::fs::write(root.path().join("taken.txt"), "mine\n").unwrap();
+
+        let (status, answer) = posted(
+            "/api/fs/rename",
+            serde_json::json!({ "root": root.path(), "path": root.path().join("notes.txt"), "name": "taken.txt" }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(answer["error"].as_str().unwrap().contains("already there"));
+        assert_eq!(std::fs::read_to_string(root.path().join("taken.txt")).unwrap(), "mine\n");
+        assert!(root.path().join("notes.txt").exists());
+    }
+
+    /// A name is one component. Were it not, "rename" would be a move, and the
+    /// checkout jail would be argued about in a text box.
+    #[tokio::test]
+    async fn a_name_carrying_a_path_is_not_a_name() {
+        let root = a_checkout();
+
+        for tried in ["../escaped.txt", "sub/deep.txt", "..", "", "   "] {
+            let (status, _) = posted(
+                "/api/fs/rename",
+                serde_json::json!({ "root": root.path(), "path": root.path().join("notes.txt"), "name": tried }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{tried:?} was accepted as a name");
+        }
+        assert!(root.path().join("notes.txt").exists());
+    }
+
+    /// The server's own jail, not the client's: a path outside the named
+    /// checkout is refused whatever the caller believes it is doing.
+    #[tokio::test]
+    async fn a_path_outside_the_checkout_is_refused() {
+        let root = a_checkout();
+        let elsewhere = scratch();
+        let theirs = elsewhere.path().join("theirs.txt");
+        std::fs::write(&theirs, "not yours\n").unwrap();
+
+        let (status, answer) = posted(
+            "/api/fs/rename",
+            serde_json::json!({ "root": root.path(), "path": theirs, "name": "mine.txt" }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(answer["error"].as_str().unwrap().contains("outside the checkout"));
+        assert!(theirs.exists());
+    }
+
+    /// `..` in the path itself, which is the same escape spelled differently:
+    /// the parent is canonicalised, so the kernel resolves it before the
+    /// comparison rather than the comparison being done on the text.
+    #[tokio::test]
+    async fn a_path_that_climbs_out_with_dot_dot_is_refused() {
+        let root = a_checkout();
+        let elsewhere = scratch();
+        let theirs = elsewhere.path().join("theirs.txt");
+        std::fs::write(&theirs, "not yours\n").unwrap();
+        let climbing = root.path().join("src/../..").join(elsewhere.path().file_name().unwrap()).join("theirs.txt");
+
+        let (status, _) = posted(
+            "/api/fs/rename",
+            serde_json::json!({ "root": root.path(), "path": climbing, "name": "mine.txt" }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(theirs.exists());
+    }
+
+    /// A file manager that can rename `.git/HEAD` is one that can destroy the
+    /// history a reader would have restored their file from.
+    #[tokio::test]
+    async fn the_repositorys_own_git_directory_is_out_of_bounds() {
+        let root = a_checkout();
+
+        let (status, answer) = posted(
+            "/api/fs/rename",
+            serde_json::json!({ "root": root.path(), "path": root.path().join(".git/HEAD"), "name": "HEAD.bak" }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(answer["error"].as_str().unwrap().contains(".git"));
+        assert!(root.path().join(".git/HEAD").exists());
+    }
+
+    /// A root with no `.git` is not a checkout, so naming the home directory as
+    /// one — which the home jail alone would allow — buys nothing.
+    #[tokio::test]
+    async fn a_root_that_is_not_a_checkout_is_refused() {
+        let root = scratch();
+        std::fs::write(root.path().join("notes.txt"), "hello\n").unwrap();
+
+        let (status, answer) = posted(
+            "/api/fs/rename",
+            serde_json::json!({ "root": root.path(), "path": root.path().join("notes.txt"), "name": "other.txt" }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(answer["error"].as_str().unwrap().contains("not a checkout"));
+        assert!(root.path().join("notes.txt").exists());
+    }
+
+    /// The checkout itself is not a thing the tree drawn from it may rename.
+    #[tokio::test]
+    async fn the_checkout_itself_cannot_be_renamed() {
+        let root = a_checkout();
+
+        let (status, _) = posted(
+            "/api/fs/rename",
+            serde_json::json!({ "root": root.path(), "path": root.path(), "name": "elsewhere" }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(root.path().join(".git").exists());
+    }
+
+    /// A symlink is renamed AS the link. Following it would rename whatever it
+    /// pointed at, which is how a call confined to a checkout reaches outside
+    /// one — the same rule `write_file` keeps.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_symlink_is_renamed_as_the_link_and_never_as_its_target() {
+        let root = a_checkout();
+        let elsewhere = scratch();
+        let theirs = elsewhere.path().join("theirs.txt");
+        std::fs::write(&theirs, "not yours\n").unwrap();
+        let link = root.path().join("shortcut");
+        std::os::unix::fs::symlink(&theirs, &link).unwrap();
+
+        let (status, _) = posted(
+            "/api/fs/rename",
+            serde_json::json!({ "root": root.path(), "path": link, "name": "renamed-shortcut" }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(theirs.exists(), "the file the link pointed at was moved");
+        assert_eq!(std::fs::read_link(root.path().join("renamed-shortcut")).unwrap(), theirs);
     }
 }

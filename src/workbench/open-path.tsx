@@ -54,6 +54,7 @@ import {
 import { toast } from '@/hooks/use-toast';
 import { addressWith } from '@/lib/address';
 import * as api from '@/lib/api';
+import { useFileActions, type FileActions } from '@/workbench/file-actions';
 import { PointerAnchor } from '@/workbench/menu-anchor';
 import { openLocalPath } from '@/workbench/open-local-path';
 import { chipUnder, targetOf, openPathClicked, type OpenPath, type PathHow, type PathTarget } from '@/workbench/path-chip';
@@ -215,10 +216,11 @@ interface Asked {
  * component to wrap — and a menu anchored to the pointer works for both without
  * either of them knowing a menu exists.
  */
-function PathMenu({ asked, onClose }: { asked: Asked; onClose: () => void }) {
+function PathMenu({ asked, actions, onClose }: { asked: Asked; actions: FileActions; onClose: () => void }) {
   const checkouts = useCheckouts();
   const open = useOpenPath();
-  const ours = insideCheckout(asked.target.absolute, checkouts);
+  const root = checkoutOf(asked.target.absolute, checkouts);
+  const ours = root !== null;
   return (
     <DropdownMenu open modal={false} onOpenChange={(now) => { if (!now) onClose(); }}>
       {/* Portalled, or the two numbers a pointer gave would be read against
@@ -255,6 +257,11 @@ function PathMenu({ asked, onClose }: { asked: Asked; onClose: () => void }) {
         >
           <Quote aria-hidden="true" /> Copy reference
         </DropdownMenuItem>
+        {/* The same list the tree's own menu draws, and nothing at all for a
+            path outside every checkout: there would be no checkout to confine
+            the call to (`file-actions.tsx`). A chip always names a file — a
+            folder is opened, never chipped. */}
+        {actions.items(root === null ? null : { root, path: asked.target.absolute, kind: 'file' })}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -291,6 +298,10 @@ export interface PathActions {
 export function usePathActions(): PathActions {
   const open = useOpenPath();
   const [asked, setAsked] = useState<Asked | null>(null);
+  // Held out here rather than inside `PathMenu`: choosing an item closes the
+  // menu, which unmounts `PathMenu` — and a dialog living inside it would go
+  // with it before the reader had typed a letter.
+  const actions = useFileActions();
   const held = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Where the finger went down, so a scroll can be told from a press. */
   const from = useRef<{ x: number; y: number } | null>(null);
@@ -355,6 +366,11 @@ export function usePathActions(): PathActions {
       onPointerCancel: letGo,
       onPointerMove: moved,
     },
-    menu: asked && <PathMenu asked={asked} onClose={() => setAsked(null)} />,
+    menu: (
+      <>
+        {asked && <PathMenu asked={asked} actions={actions} onClose={() => setAsked(null)} />}
+        {actions.dialogs}
+      </>
+    ),
   };
 }

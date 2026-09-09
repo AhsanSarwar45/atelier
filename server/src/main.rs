@@ -501,6 +501,9 @@ async fn serve(open_browser: bool) {
         .route("/api/fs/find", get(routes::fs::find))
         .route("/api/fs/read", get(routes::fs::read_file))
         .route("/api/fs/write", axum::routing::put(routes::fs::write_file))
+        // Changing the tree, not only reading it (bw-5gax). Confined to a
+        // checkout by the routes themselves, not by the caller.
+        .route("/api/fs/rename", post(routes::fs::rename_path))
         .route(
             "/api/presentation-assets/:asset",
             get(routes::fs::presentation_asset),

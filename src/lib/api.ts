@@ -135,6 +135,12 @@ export interface FsWriteResponse {
   mtime: number;
 }
 
+/** Where something ended up after a call that changed the tree (bw-5gax). */
+export interface FsPathMoved {
+  /** The absolute path afterwards. */
+  path: string;
+}
+
 /**
  * Git branch status information
  */
@@ -982,6 +988,22 @@ export const fs = {
     fetchApi<FsWriteResponse>('/api/fs/write', {
       method: 'PUT',
       body: JSON.stringify(ifSha ? { path, text, ifSha } : { path, text }),
+    }),
+
+  /**
+   * Give a file or folder another name in the folder it is already in
+   * (bw-5gax.2).
+   *
+   * `root` is the checkout the path lives in, and the server proves the path is
+   * inside it before touching anything — the client naming it is not the guard.
+   * `name` is a name and never a path: a rename does not move a file. A name
+   * already in use answers 409 rather than replacing what is there, the way a
+   * stale save does.
+   */
+  rename: (root: string, path: string, name: string) =>
+    fetchApi<FsPathMoved>('/api/fs/rename', {
+      method: 'POST',
+      body: JSON.stringify({ root, path, name }),
     }),
 
   /**

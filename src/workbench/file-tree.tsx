@@ -50,6 +50,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip } from '@/components/ui/tooltip';
 import { git, fs as fsApi, type FsTreeEntry, type GitStatus } from '@/lib/api';
+import { useFileActions, type PathMoved } from '@/workbench/file-actions';
 import { STATUS_LOOK, type FileState } from '@/workbench/git-view';
 import { PointerAnchor } from '@/workbench/menu-anchor';
 import { referenceUnder } from '@/workbench/references';
@@ -163,9 +164,14 @@ export interface FileTreeProps {
   selected: string | null;
   /** Called with an absolute path when a file is opened. */
   onOpen: (path: string) => void;
+  /**
+   * Called when a path in the tree became another path, or became nothing, so
+   * whatever holds the open files and the address can follow it (bw-5gax.2).
+   */
+  onMoved?: PathMoved;
 }
 
-export default function FileTree({ root, selected, onOpen }: FileTreeProps) {
+export default function FileTree({ root, selected, onOpen, onMoved }: FileTreeProps) {
   const [read, setRead] = useState<ReadonlyMap<string, FsTreeEntry[]>>(new Map());
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [showIgnored, setShowIgnored] = useState(true);
@@ -175,6 +181,9 @@ export default function FileTree({ root, selected, onOpen }: FileTreeProps) {
   /** The entry a right-click asked about, and where its menu is drawn. */
   const [menu, setMenu] = useState<{ row: TreeRow; at: { left: number; top: number } } | null>(null);
   const pane = useRef<HTMLDivElement>(null);
+  // What can be DONE to a path, built once for the whole app so this menu and
+  // the chips' menu cannot come to disagree (`file-actions.tsx`).
+  const actions = useFileActions(onMoved);
 
   useEffect(() => {
     setShowIgnored(localStorage.getItem(HIDE_IGNORED) !== '1');
@@ -538,9 +547,18 @@ export default function FileTree({ root, selected, onOpen }: FileTreeProps) {
             >
               <Copy aria-hidden="true" /> Copy reference
             </DropdownMenuItem>
+            {actions.items(
+              root && menu
+                ? { root, path: menu.row.entry.path, kind: menu.row.entry.kind === 'dir' ? 'dir' : 'file' }
+                : null,
+            )}
           </DropdownMenuContent>
         )}
       </DropdownMenu>
+      {/* Outside the menu, because choosing an item CLOSES the menu — a dialog
+          drawn inside it would be unmounted by the very click that asked for
+          it. */}
+      {actions.dialogs}
     </div>
   );
 }

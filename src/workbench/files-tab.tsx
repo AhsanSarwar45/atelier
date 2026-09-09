@@ -251,6 +251,34 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
     [router, params],
   );
 
+  /**
+   * A path that moved on disk — renamed, or gone — carried through everything
+   * this tab is holding (bw-5gax.2).
+   *
+   * A folder is reported as itself, so what was open INSIDE it has to be worked
+   * out here, which is right: this is the part that knows what is open. The
+   * address is replaced rather than pushed, because the reader did not travel
+   * anywhere — the file they were already looking at is now called something
+   * else, and a Back that returned to a name with nothing behind it would be a
+   * dead end.
+   */
+  const moved = useCallback(
+    (from: string, to: string | null) => {
+      const under = (path: string) => path === from || path.startsWith(`${from}/`);
+      const carried = (path: string) => (to === null ? null : to + path.slice(from.length));
+      setStrip((was) => ({
+        ...was,
+        files: was.files.flatMap((entry) => {
+          if (!under(entry.path)) return [entry];
+          const next = carried(entry.path);
+          return next === null ? [] : [{ ...entry, path: next }];
+        }),
+      }));
+      if (file && under(file)) show(carried(file));
+    },
+    [file, show],
+  );
+
   const applied = useCallback((next: OpenFiles) => {
     setStrip((was) => ({ ...was, files: next.files }));
     if (next.current !== file) show(next.current);
@@ -366,7 +394,7 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
           />
         </div>
         <div className="flex min-h-0 flex-1 flex-col" data-testid="files-tree-slot">
-          <FileTree root={root} selected={file} onOpen={openFile} />
+          <FileTree root={root} selected={file} onOpen={openFile} onMoved={moved} />
         </div>
       </div>
       <ResizeDivider
