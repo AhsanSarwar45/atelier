@@ -11,7 +11,35 @@ pub const GOOSE_ADAPTER_VERSION: &str = "1.41.0";
 pub struct Availability {
     pub available: bool,
     pub adapter: Option<PathBuf>,
+    pub runtime: Option<PathBuf>,
     pub reason: Option<String>,
+}
+
+/// The user-owned program an ACP adapter drives.
+///
+/// Atelier owns and pins the protocol adapter because that is part of its wire
+/// contract. It does not own the provider runtime: models, authentication and
+/// capabilities belong to the provider installation the user keeps current.
+struct ExternalRuntime {
+    brand: &'static str,
+    adapter_variable: &'static str,
+}
+
+const EXTERNAL_RUNTIMES: &[ExternalRuntime] = &[
+    ExternalRuntime {
+        brand: "claude",
+        adapter_variable: "CLAUDE_CODE_EXECUTABLE",
+    },
+    ExternalRuntime {
+        brand: "codex",
+        adapter_variable: "CODEX_PATH",
+    },
+];
+
+fn external_runtime(brand: &str) -> Option<&'static ExternalRuntime> {
+    EXTERNAL_RUNTIMES
+        .iter()
+        .find(|runtime| runtime.brand == brand)
 }
 
 fn executable_name(brand: &str) -> String {
@@ -51,7 +79,13 @@ pub fn bundled_beside(program: &Path, brand: &str) -> Option<PathBuf> {
             .unwrap_or_default(),
         directory
             .parent()
-            .map(|prefix| prefix.join("lib").join("atelier").join("atelier-adapters").join(&name))
+            .map(|prefix| {
+                prefix
+                    .join("lib")
+                    .join("atelier")
+                    .join("atelier-adapters")
+                    .join(&name)
+            })
             .unwrap_or_default(),
         directory.join("adapters").join(&name),
         directory.join(&name),
@@ -75,6 +109,7 @@ fn launch_config_at(
     executable: PathBuf,
     brand: &str,
     model: Option<&str>,
+    provider: Option<&Path>,
 ) -> Option<AcpAgentConfig> {
     let mut config = AcpAgentConfig::new(&executable);
     if brand == super::super::local::BRAND {
@@ -109,35 +144,8 @@ fn launch_config_at(
             }
         });
     }
-    let provider_name = match brand {
-        "codex" => "codex-provider",
-        "claude" => "claude-provider",
-        _ => return Some(config),
-    };
-    let provider = executable.parent()?.join(if cfg!(windows) {
-        format!("{provider_name}.exe")
-    } else {
-        provider_name.to_string()
-    });
-    if !provider.is_file() {
-        return None;
-    }
-    if brand == "codex" {
-        let code_mode_host = executable.parent()?.join(if cfg!(windows) {
-            "codex-code-mode-host.exe"
-        } else {
-            "codex-code-mode-host"
-        });
-        if !code_mode_host.is_file() {
-            return None;
-        }
-    }
-    let variable = if brand == "codex" {
-        "CODEX_PATH"
-    } else {
-        "CLAUDE_CODE_EXECUTABLE"
-    };
-    config = config.env(variable, provider.to_string_lossy());
+    let runtime = external_runtime(brand)?;
+    config = config.env(runtime.adapter_variable, provider?.to_string_lossy());
     if brand == "claude" {
         // The checklist panel is drawn from ACP `plan` updates, and the adapter
         // makes one out of every TodoWrite and every TaskCreate/TaskUpdate/
@@ -154,7 +162,10 @@ fn launch_config_at(
 }
 
 pub fn launch_config(brand: &str, model: Option<&str>) -> Option<AcpAgentConfig> {
-    launch_config_at(find(brand)?, brand, model)
+    let adapter = find(brand)?;
+    let provider =
+        external_runtime(brand).and_then(|runtime| crate::routes::find_tool(runtime.brand, &[]));
+    launch_config_at(adapter, brand, model, provider.as_deref())
 }
 
 /// Whether this installation contains the complete pinned ACP runtime.
@@ -168,6 +179,7 @@ pub fn availability(brand: &str) -> Availability {
         return Availability {
             available: false,
             adapter: None,
+            runtime: None,
             reason: Some(format!("the bundled {brand} ACP adapter was not found")),
         };
     };
@@ -175,19 +187,30 @@ pub fn availability(brand: &str) -> Availability {
         return Availability {
             available: true,
             adapter: Some(adapter),
+            runtime: None,
             reason: None,
         };
     }
-    if launch_config_at(adapter.clone(), brand, None).is_none() {
+    let Some(runtime) = external_runtime(brand) else {
         return Availability {
             available: false,
             adapter: Some(adapter),
-            reason: Some(format!("the bundled {brand} ACP runtime is incomplete")),
+            runtime: None,
+            reason: Some(format!("{brand} is not a registered external provider")),
         };
-    }
+    };
+    let Some(provider) = crate::routes::find_tool(runtime.brand, &[]) else {
+        return Availability {
+            available: false,
+            adapter: Some(adapter),
+            runtime: None,
+            reason: Some(format!("the user-installed {brand} provider was not found")),
+        };
+    };
     Availability {
         available: true,
         adapter: Some(adapter),
+        runtime: Some(provider),
         reason: None,
     }
 }
@@ -235,11 +258,11 @@ mod tests {
     }
 
     #[test]
-    fn adapter_never_falls_back_to_an_unpinned_provider_from_path() {
+    fn external_adapter_requires_a_user_provider_runtime() {
         let root = tempfile::tempdir().unwrap();
         let adapter = root.path().join(executable_name("claude"));
         std::fs::write(&adapter, b"adapter").unwrap();
-        assert!(launch_config_at(adapter, "claude", None).is_none());
+        assert!(launch_config_at(adapter, "claude", None, None).is_none());
     }
 
     /// The checklist panel needs the tools the checklist is made of.
@@ -260,7 +283,7 @@ mod tests {
         });
         std::fs::write(&adapter, b"adapter").unwrap();
         std::fs::write(&provider, b"provider").unwrap();
-        let config = launch_config_at(adapter, "claude", None).unwrap();
+        let config = launch_config_at(adapter, "claude", None, Some(&provider)).unwrap();
         assert_eq!(
             config.environment().get("CLAUDE_CODE_ENABLE_TODO_TOOLS"),
             Some(&"1".to_string())
@@ -268,39 +291,28 @@ mod tests {
     }
 
     #[test]
-    fn codex_adapter_uses_the_release_pinned_provider_binary() {
+    fn every_external_adapter_uses_the_user_runtime_not_a_bundled_shadow() {
         let root = tempfile::tempdir().unwrap();
-        let adapter = root.path().join(executable_name("codex"));
-        let provider = root.path().join(if cfg!(windows) {
-            "codex-provider.exe"
-        } else {
-            "codex-provider"
-        });
-        let host = root.path().join(if cfg!(windows) {
-            "codex-code-mode-host.exe"
-        } else {
-            "codex-code-mode-host"
-        });
-        std::fs::write(&adapter, b"adapter").unwrap();
-        std::fs::write(&provider, b"provider").unwrap();
-        std::fs::write(&host, b"host").unwrap();
-        let config = launch_config_at(adapter, "codex", None).unwrap();
-        let expected = provider.to_string_lossy().to_string();
-        assert_eq!(config.environment().get("CODEX_PATH"), Some(&expected));
-    }
+        for runtime in EXTERNAL_RUNTIMES {
+            let adapter = root.path().join(executable_name(runtime.brand));
+            let bundled_shadow = root.path().join(format!("{}-provider", runtime.brand));
+            let installed = root.path().join("user-bin").join(runtime.brand);
+            std::fs::create_dir_all(installed.parent().unwrap()).unwrap();
+            std::fs::write(&adapter, b"adapter").unwrap();
+            std::fs::write(&bundled_shadow, b"old bundled provider").unwrap();
+            std::fs::write(&installed, b"current user provider").unwrap();
 
-    #[test]
-    fn bundled_codex_runtime_refuses_to_start_without_its_code_mode_host() {
-        let root = tempfile::tempdir().unwrap();
-        let adapter = root.path().join(executable_name("codex"));
-        let provider = root.path().join(if cfg!(windows) {
-            "codex-provider.exe"
-        } else {
-            "codex-provider"
-        });
-        std::fs::write(&adapter, b"adapter").unwrap();
-        std::fs::write(&provider, b"provider").unwrap();
-        assert!(launch_config_at(adapter, "codex", None).is_none());
+            let config = launch_config_at(adapter, runtime.brand, None, Some(&installed)).unwrap();
+            let expected = installed.to_string_lossy().to_string();
+            assert_eq!(
+                config.environment().get(runtime.adapter_variable),
+                Some(&expected)
+            );
+            assert_ne!(
+                config.environment().get(runtime.adapter_variable),
+                Some(&bundled_shadow.to_string_lossy().to_string())
+            );
+        }
     }
 
     #[test]
@@ -310,13 +322,18 @@ mod tests {
             .path()
             .join(executable_name(super::super::super::local::BRAND));
         std::fs::write(&adapter, b"adapter").unwrap();
-        assert!(
-            launch_config_at(adapter.clone(), super::super::super::local::BRAND, None).is_none()
-        );
+        assert!(launch_config_at(
+            adapter.clone(),
+            super::super::super::local::BRAND,
+            None,
+            None
+        )
+        .is_none());
         assert!(launch_config_at(
             adapter,
             super::super::super::local::BRAND,
-            Some("ollama::qwen")
+            Some("ollama::qwen"),
+            None
         )
         .is_some());
     }

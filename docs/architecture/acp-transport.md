@@ -8,17 +8,19 @@ status line and sidebar consumes that same provider-neutral representation.
 
 ## Runtime shape
 
-The Homebrew and release archives contain seven executable files:
+The Homebrew and release archives contain four executable files:
 
 - `atelier`, the React frontend embedded in the Rust server;
-- `atelier-adapters/claude-acp` and `claude-provider`;
-- `atelier-adapters/codex-acp`, `codex-provider`, and `codex-code-mode-host`.
+- `atelier-adapters/claude-acp`;
+- `atelier-adapters/codex-acp`;
 - `atelier-adapters/goose-acp`, the Rust ACP harness for local model runtimes.
 
 The adapters are compiled into standalone executables with Bun at release build
-time. Bun, Node, npm, npx and Python are not invoked, downloaded or required on
-the user's computer. The native provider executables use the user's existing
-Claude Code and Codex authentication and subscription. Atelier does not add an
+time. Bun, Node, npm, npx and Python are not invoked, downloaded or required by
+the adapters on the user's computer. Each adapter launches the provider executable
+from the user's installed-tool registry, so upgrading Claude Code or Codex changes
+its live model and capability catalogue without rebuilding Atelier. Those native
+provider executables use the user's existing authentication and subscription. Atelier does not add an
 API charge; any provider usage has the same account and billing consequences as
 using that provider directly.
 
@@ -28,9 +30,7 @@ Release inputs are exact, audited pins:
 | --- | --- |
 | Rust `agent-client-protocol` SDK | 2.0.0 with stable v1, draft-v2 types, end-turn usage and elicitation |
 | Claude ACP adapter | 0.73.0, commit `ea7076c0bc324603e65d8c124b7573f158749969` |
-| Claude native provider | 0.3.257 |
 | Codex ACP adapter | 1.8.0, commit `87997e2627e8fa246a49de533c612f6196c4004e` |
-| Codex native provider | 0.152.0 |
 | Goose local ACP harness | 1.41.0, commit `39c27c387d726ce4605108d2f974d4feec158ed5` |
 | build-time Bun compiler | 1.3.13 |
 

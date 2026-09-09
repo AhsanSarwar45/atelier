@@ -500,21 +500,10 @@ fn stage_from_archive(archive: &Path, dir: &Path) -> Result<StagedUpdate, String
             "claude-acp.exe",
             "codex-acp.exe",
             "goose-acp.exe",
-            "claude-provider.exe",
-            "codex-provider.exe",
-            "codex-code-mode-host.exe",
             "manifest.json",
         ]
     } else {
-        [
-            "claude-acp",
-            "codex-acp",
-            "goose-acp",
-            "claude-provider",
-            "codex-provider",
-            "codex-code-mode-host",
-            "manifest.json",
-        ]
+        ["claude-acp", "codex-acp", "goose-acp", "manifest.json"]
     };
     let mut got_adapters = std::collections::HashSet::new();
     for entry in entries {
@@ -876,18 +865,6 @@ mod tests {
             ),
             (&format!("atelier-adapters/codex-acp{suffix}"), b"codex-acp"),
             (&format!("atelier-adapters/goose-acp{suffix}"), b"goose-acp"),
-            (
-                &format!("atelier-adapters/claude-provider{suffix}"),
-                b"claude",
-            ),
-            (
-                &format!("atelier-adapters/codex-provider{suffix}"),
-                b"codex",
-            ),
-            (
-                &format!("atelier-adapters/codex-code-mode-host{suffix}"),
-                b"code-mode",
-            ),
             ("atelier-adapters/manifest.json", b"{}"),
         ]);
         let sum = format!("{:x}", Sha256::digest(&archive));
@@ -935,15 +912,6 @@ mod tests {
         assert_eq!(
             std::fs::read(staged.adapters.join(format!("goose-acp{suffix}"))).unwrap(),
             b"goose-acp"
-        );
-        assert_eq!(
-            std::fs::read(
-                staged
-                    .adapters
-                    .join(format!("codex-code-mode-host{suffix}"))
-            )
-            .unwrap(),
-            b"code-mode"
         );
         // The archive itself is consumed by the unpack; only staged files remain.
         assert!(

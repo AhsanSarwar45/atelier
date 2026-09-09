@@ -85,7 +85,7 @@ for archive in ${ATELIER_ARCHIVES:-}; do
   case "$archive" in *win*) expected=atelier.exe ;; esac
   adapter_suffix=
   case "$archive" in *win*) adapter_suffix=.exe ;; esac
-  required="$expected atelier-adapters/claude-acp${adapter_suffix} atelier-adapters/codex-acp${adapter_suffix} atelier-adapters/goose-acp${adapter_suffix} atelier-adapters/claude-provider${adapter_suffix} atelier-adapters/codex-provider${adapter_suffix} atelier-adapters/codex-code-mode-host${adapter_suffix} atelier-adapters/manifest.json"
+  required="$expected atelier-adapters/claude-acp${adapter_suffix} atelier-adapters/codex-acp${adapter_suffix} atelier-adapters/goose-acp${adapter_suffix} atelier-adapters/manifest.json"
   actual="$(printf '%s\n' "$names" | sed '/\/$/d' | sort | tr '\n' ' ' | sed 's/ $//')"
   wanted="$(printf '%s\n' $required | sort | tr '\n' ' ' | sed 's/ $//')"
   if [ "$actual" = "$wanted" ]; then

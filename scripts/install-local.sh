@@ -115,14 +115,14 @@ run cargo build --release --locked --manifest-path server/Cargo.toml
 [ "$DRY_RUN" = 1 ] || [ -x "$BUILT" ] || die "the build did not produce $BUILT"
 ok "release binary is ready"
 
-step "2/4  Build the pinned provider runtimes"
+step "2/4  Build the pinned ACP adapters"
 run node scripts/build-acp-adapters.mjs "$ACP_TARGET" "$ADAPTERS"
 if [ "$DRY_RUN" != 1 ]; then
-  for file in claude-acp codex-acp goose-acp claude-provider codex-provider codex-code-mode-host manifest.json; do
+  for file in claude-acp codex-acp goose-acp manifest.json; do
     [ -f "$ADAPTERS/$file" ] || die "the adapter build did not produce $ADAPTERS/$file"
   done
 fi
-ok "complete ACP runtime bundle is ready (unchanged bundles are reused; Goose Cargo cache: ${ATELIER_ACP_BUILD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/atelier/acp-build})"
+ok "complete ACP adapter bundle is ready (unchanged bundles are reused; Goose Cargo cache: ${ATELIER_ACP_BUILD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/atelier/acp-build})"
 
 step "3/4  Replace the installed runtime"
 run mkdir -p "$TARGET_DIR"
@@ -136,7 +136,7 @@ fi
 
 ADAPTER_TARGET=$TARGET_DIR/atelier-adapters
 run "${ADMIN[@]}" mkdir -p "$ADAPTER_TARGET"
-for file in claude-acp codex-acp goose-acp claude-provider codex-provider codex-code-mode-host; do
+for file in claude-acp codex-acp goose-acp; do
   run "${ADMIN[@]}" install -m 755 "$ADAPTERS/$file" "$ADAPTER_TARGET/$file"
 done
 run "${ADMIN[@]}" install -m 644 "$ADAPTERS/manifest.json" "$ADAPTER_TARGET/manifest.json"

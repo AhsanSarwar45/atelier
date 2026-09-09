@@ -12,9 +12,6 @@ const FILES = [
   'claude-acp',
   'codex-acp',
   'goose-acp',
-  'claude-provider',
-  'codex-provider',
-  'codex-code-mode-host',
 ];
 let roots: string[] = [];
 

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+if [ "${1:-}" = --atelier-fixture-models ]; then
+  cat "${WORKBENCH_E2E_RUN:?}/codex-models.json"
+fi

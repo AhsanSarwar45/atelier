@@ -641,12 +641,11 @@ impl WorkbenchRegistry {
                     ("codex", "Codex", "https://developers.openai.com/codex/cli"),
                 ].into_iter().map(|(brand, name, install_url)| {
                     let runtime = super::acp::adapter::availability(brand);
-                    let path = runtime.adapter.clone();
                     json!({
                         "brand":brand,
                         "name":name,
                         "available":runtime.available,
-                        "path":path,
+                        "path":runtime.runtime,
                         "adapterPath":runtime.adapter,
                         "availabilityReason":runtime.reason,
                         "installUrl":install_url,

@@ -11,13 +11,11 @@ const CLAUDE = Object.freeze({
   version: '0.73.0',
   commit: 'ea7076c0bc324603e65d8c124b7573f158749969',
   repository: 'https://github.com/agentclientprotocol/claude-agent-acp.git',
-  providerVersion: '0.3.257',
 });
 const CODEX = Object.freeze({
   version: '1.8.0',
   commit: '87997e2627e8fa246a49de533c612f6196c4004e',
   repository: 'https://github.com/agentclientprotocol/codex-acp.git',
-  providerVersion: '0.152.0',
 });
 const GOOSE = Object.freeze({
   version: '1.41.0',
@@ -27,20 +25,16 @@ const GOOSE = Object.freeze({
 
 const TARGETS = Object.freeze({
   'aarch64-apple-darwin': {
-    bun: 'bun-darwin-arm64', claude: 'darwin-arm64', codex: 'darwin-arm64',
-    codexTriple: 'aarch64-apple-darwin', exe: '',
+    bun: 'bun-darwin-arm64', exe: '',
   },
   'x86_64-apple-darwin': {
-    bun: 'bun-darwin-x64-baseline', claude: 'darwin-x64', codex: 'darwin-x64',
-    codexTriple: 'x86_64-apple-darwin', exe: '',
+    bun: 'bun-darwin-x64-baseline', exe: '',
   },
   'x86_64-unknown-linux-gnu': {
-    bun: 'bun-linux-x64-baseline', claude: 'linux-x64', codex: 'linux-x64',
-    codexTriple: 'x86_64-unknown-linux-musl', exe: '',
+    bun: 'bun-linux-x64-baseline', exe: '',
   },
   'x86_64-pc-windows-msvc': {
-    bun: 'bun-windows-x64-baseline', claude: 'win32-x64', codex: 'win32-x64',
-    codexTriple: 'x86_64-pc-windows-msvc', exe: '.exe',
+    bun: 'bun-windows-x64-baseline', exe: '.exe',
   },
 });
 
@@ -642,15 +636,6 @@ function patchNativeQuestionNotes(claudeSource, codexSource) {
   writeFileSync(codex, code);
 }
 
-function npmPackage(spec, directory) {
-  mkdirSync(directory, { recursive: true });
-  run('npm', ['pack', spec, '--pack-destination', directory], directory);
-  const archive = readdirSync(directory).find(name => name.endsWith('.tgz'));
-  if (!archive) throw new Error(`npm pack produced no archive for ${spec}`);
-  run('tar', ['-xzf', archive], directory);
-  return join(directory, 'package');
-}
-
 function sha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
@@ -659,9 +644,6 @@ const BUNDLE_FILES = Object.freeze([
   'claude-acp',
   'codex-acp',
   'goose-acp',
-  'claude-provider',
-  'codex-provider',
-  'codex-code-mode-host',
 ]);
 
 /**
@@ -769,43 +751,23 @@ try {
   );
   cpSync(join(gooseTarget, target, 'release', `goose${platform.exe}`), gooseAdapter);
 
-  const claudePackage = npmPackage(
-    `@anthropic-ai/claude-agent-sdk-${platform.claude}@${CLAUDE.providerVersion}`,
-    join(scratch, 'claude-provider'),
-  );
-  const codexPackage = npmPackage(
-    `@openai/codex@${CODEX.providerVersion}-${platform.codex}`,
-    join(scratch, 'codex-provider'),
-  );
-  const claudeNative = join(claudePackage, `claude${platform.exe}`);
-  const codexNative = join(codexPackage, 'vendor', platform.codexTriple, 'bin', `codex${platform.exe}`);
-  const codexCodeModeHostNative = join(codexPackage, 'vendor', platform.codexTriple, 'bin', `codex-code-mode-host${platform.exe}`);
-  if (!existsSync(claudeNative) || !existsSync(codexNative) || !existsSync(codexCodeModeHostNative)) {
-    throw new Error(`provider package layout changed for ${target}`);
-  }
-  const claudeProvider = join(output, `claude-provider${platform.exe}`);
-  const codexProvider = join(output, `codex-provider${platform.exe}`);
-  const codexCodeModeHost = join(output, `codex-code-mode-host${platform.exe}`);
-  cpSync(claudeNative, claudeProvider);
-  cpSync(codexNative, codexProvider);
-  cpSync(codexCodeModeHostNative, codexCodeModeHost);
   if (!platform.exe) {
-    for (const file of [claudeAdapter, codexAdapter, gooseAdapter, claudeProvider, codexProvider, codexCodeModeHost]) chmodSync(file, 0o755);
+    for (const file of [claudeAdapter, codexAdapter, gooseAdapter]) chmodSync(file, 0o755);
   }
 
-  const files = [claudeAdapter, codexAdapter, gooseAdapter, claudeProvider, codexProvider, codexCodeModeHost];
+  const files = [claudeAdapter, codexAdapter, gooseAdapter];
   writeFileSync(join(output, 'manifest.json'), `${JSON.stringify({
     schema: 2,
     target,
     builderFingerprint,
     adapters: {
       claude: {
-        version: CLAUDE.version, commit: CLAUDE.commit, providerVersion: CLAUDE.providerVersion, wireProtocol: 1,
+        version: CLAUDE.version, commit: CLAUDE.commit, wireProtocol: 1,
         compatibilityPatches: ['atelier-context-window', 'atelier-native-subagent-control', 'atelier-child-accounting', 'atelier-native-question-notes'],
         verifiedCapabilities: ['native-mcp-config', 'session-resume'],
       },
       codex: {
-        version: CODEX.version, commit: CODEX.commit, providerVersion: CODEX.providerVersion, wireProtocol: 1,
+        version: CODEX.version, commit: CODEX.commit, wireProtocol: 1,
         compatibilityPatches: ['app-server-stdio', 'bun-child-process-bridge', 'jsonrpc-2-framing', 'atelier-session-policy', 'atelier-native-subagent-control', 'atelier-child-accounting', 'atelier-native-question-notes'],
         verifiedCapabilities: ['native-mcp-config', 'session-resume'],
       },

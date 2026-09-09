@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -6,8 +6,8 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 
 /**
  * The model menu is the active provider's advertised catalog. Atelier does not
- * carry a second release list that can become stale or offer a model this
- * account, adapter or runtime cannot actually select.
+ * carry a second release list or provider runtime that can become stale or
+ * offer a model the user's installed provider cannot actually select.
  *
  * The unit cases under src/workbench/__tests__ and workbench/src/__tests__
  * prove the merge and the markup on their own. This one proves the two ends are
@@ -15,7 +15,11 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
  * the install knows is what the reader is offered, and that the picture the job
  * is signed off on is a picture of the running app.
  *
- * Run: scripts/workbench-e2e.sh tests/e2e/chat-model-catalog.spec.ts
+ * Run with the hermetic adapters and installed-provider stand-ins:
+ * BEADS_E2E_ACP_ADAPTERS="$PWD/tests/fixtures/acp-adapters" \
+ * CLAUDE_PATH="$PWD/tests/fixtures/acp-adapters/claude" \
+ * CODEX_PATH="$PWD/tests/fixtures/acp-adapters/codex" \
+ * scripts/workbench-e2e.sh tests/e2e/chat-model-catalog.spec.ts
  */
 
 /** Where a run leaves its proof. */
@@ -30,6 +34,10 @@ const FIXTURE = join(__dirname, '..', '.workbench-run-model-catalog');
 /** The width this is looked at, with both columns open. */
 const SCREEN = { width: 1440, height: 1000 };
 const PROVIDERS = ['claude', 'codex'] as const;
+
+function installProviderCatalog(brand: typeof PROVIDERS[number], models: string[]) {
+  writeFileSync(join(process.env.WORKBENCH_E2E_RUN!, `${brand}-models.json`), JSON.stringify(models));
+}
 
 /**
  * A project of this run's own, marked as a test project so it stays off the
@@ -76,6 +84,7 @@ test.describe('the model menu', () => {
   for (const brand of PROVIDERS) test(`${brand} draws exactly its active provider catalog and can select one of its models`, async ({
     page, request,
   }) => {
+    installProviderCatalog(brand, [`${brand}-installed-old`, `${brand}-installed-other`]);
     const project = await fixtureProject(request);
     await page.goto(`/project?id=${project.id}&tab=chat`);
     await page.getByTestId('new-chat-tool').click();
@@ -107,6 +116,7 @@ test.describe('the model menu', () => {
     database.close();
     const advertised = (JSON.parse(row.json) as { models: { value: string }[] }).models.map((choice) => choice.value);
     expect(values).toEqual(advertised);
+    expect(values).toEqual([`${brand}-installed-old`, `${brand}-installed-other`]);
     for (const option of await options.all()) await expect(option).not.toHaveText('');
 
     const menu = page.getByTestId('model-picker-menu');
@@ -117,5 +127,22 @@ test.describe('the model menu', () => {
       await options.nth(values.indexOf(selectable)).click();
       await expect(model).toHaveAttribute('data-current', selectable, { timeout: HELLO_MS });
     }
+
+    // Replace the executable's catalog in place. A new session must ask that
+    // same user installation again; rebuilding Atelier is neither required nor
+    // able to influence this fixture.
+    installProviderCatalog(brand, ['gpt-6-astra', `${brand}-installed-current`]);
+    await page.getByTestId('new-chat-tool').click();
+    await asking.waitFor({ timeout: HELLO_MS });
+    await page.getByTestId(`new-chat-provider-${brand}`).click();
+    await asking.getByRole('button', { name: 'Start chat' }).click();
+    await page.waitForURL((url) => url.searchParams.get('chat') !== sessionId, { timeout: HELLO_MS });
+    await expect(model).toHaveAttribute('data-current', 'gpt-6-astra', { timeout: HELLO_MS });
+    await model.click();
+    await expect(page.getByTestId('model-picker-option')).toHaveCount(2, { timeout: HELLO_MS });
+    await expect(page.getByTestId('model-picker-option').first()).toHaveAttribute('data-value', 'gpt-6-astra');
+    await page.getByTestId('model-picker-menu').screenshot({
+      path: `${SHOTS}/${brand === 'claude' ? 'model-menu-provider-catalog' : 'model-menu-codex-provider-catalog'}.png`,
+    });
   });
 });

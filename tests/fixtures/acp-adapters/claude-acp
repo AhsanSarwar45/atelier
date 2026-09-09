@@ -11,6 +11,28 @@
  * Two pages, so the cursor is followed rather than assumed.
  */
 const readline = require('node:readline');
+const { spawnSync } = require('node:child_process');
+
+function providerModels() {
+  const provider = process.env.CLAUDE_CODE_EXECUTABLE ?? process.env.CODEX_PATH;
+  if (!provider) return ['fixture-model-one', 'fixture-model-two'];
+  const run = spawnSync(provider, ['--atelier-fixture-models'], { encoding: 'utf8' });
+  if (run.status !== 0) return ['fixture-model-one', 'fixture-model-two'];
+  try {
+    const models = JSON.parse(run.stdout);
+    if (Array.isArray(models) && models.every((model) => typeof model === 'string') && models.length) return models;
+  } catch {}
+  return ['fixture-model-one', 'fixture-model-two'];
+}
+
+function configOptions(current) {
+  const models = providerModels();
+  const selected = models.includes(current) ? current : models[0];
+  return [{
+    id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: selected,
+    options: models.map((value) => ({ value, name: value })),
+  }];
+}
 
 const PAGES = (cwd) => ({
   first: {
@@ -140,7 +162,15 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   }
   if (method === 'session/new') {
     started += 1;
-    say({ id, result: { sessionId: `acp-session-new-${started}` } });
+    const sessionId = `acp-session-new-${process.pid}-${started}`;
+    selectedModels.set(sessionId, undefined);
+    say({ id, result: { sessionId, configOptions: configOptions() } });
+    return;
+  }
+  if (method === 'session/set_config_option') {
+    const sessionId = params?.sessionId;
+    if (params?.configId === 'model') selectedModels.set(sessionId, params?.value);
+    say({ id, result: { configOptions: configOptions(selectedModels.get(sessionId)) } });
     return;
   }
   if (method === 'session/prompt') {
@@ -207,6 +237,7 @@ async function load(id, params) {
 const QUIET_MS = Number(process.env.BEADS_E2E_ACP_QUIET_MS ?? 20_000);
 let started = 0;
 let asking = 9100;
+const selectedModels = new Map();
 
 async function turn(id, params) {
   asking += 1;
