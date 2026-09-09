@@ -1005,3 +1005,35 @@ Beads issue bw-axtp must be claimed and in_progress before this worktree is chan
 
 Both carried through with
 `ATELIER_BYPASS='a worktree is per job; this child is claimed in its job copy'`.
+
+## bw-5gax — a refused command does not run its safe half either
+
+Same shape as the epics above: the copy is named `bw-5gax`, so the gate reads
+the directory name as the card and refuses every claim and every write, each
+carried through with
+`ATELIER_BYPASS='a worktree is per job; this child is claimed in its job copy'`
+welded onto the front of the command — it does not carry from an earlier
+`export`. Two things this job learnt that the earlier entries do not say:
+
+**A compound command is refused whole.** Writing a spec with
+
+    cat > /tmp/spec.ts <<EOF … EOF && cp /tmp/spec.ts worktrees/bw-5gax/tests/e2e/spec.ts
+
+was rejected before any part of it ran, so even the write to `/tmp` — which
+touches nothing the gate protects — never happened. The gate matches the
+command text, not the effects, and a heredoc into a temporary file is invisible
+to that. The way through is two steps: write the temporary file with the Write
+tool (outside the worktree, so nothing to refuse), then `ATELIER_BYPASS=… cp`.
+
+**A path outside the worktree is resolved as if it were inside it.** Cleaning
+up trash entries the Rust tests had made on the owner's machine:
+
+    rm -rf ~/.local/share/Trash/files/$f
+    → Changes require an owned Beads work item in its isolated worktree
+      (target `~/.local/share/Trash/files/$f` resolved from /home/ahsan/dev/beads-web
+      → /home/ahsan/dev/beads-web/~/.local/share/...)
+
+The `~` was never expanded — the shell had not run yet — so the gate treated it
+as a relative path and joined it onto the repo root, then refused a path that
+does not exist. An absolute path would have read better in the message, but the
+refusal is the same; it went through with the bypass and a reason of its own.
