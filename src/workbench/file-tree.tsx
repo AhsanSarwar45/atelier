@@ -183,7 +183,7 @@ export default function FileTree({ root, selected, onOpen, onMoved }: FileTreePr
   const pane = useRef<HTMLDivElement>(null);
   // What can be DONE to a path, built once for the whole app so this menu and
   // the chips' menu cannot come to disagree (`file-actions.tsx`).
-  const actions = useFileActions(onMoved);
+  const actions = useFileActions(onMoved, onOpen);
 
   useEffect(() => {
     setShowIgnored(localStorage.getItem(HIDE_IGNORED) !== '1');

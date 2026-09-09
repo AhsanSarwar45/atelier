@@ -505,6 +505,8 @@ async fn serve(open_browser: bool) {
         // checkout by the routes themselves, not by the caller.
         .route("/api/fs/rename", post(routes::fs::rename_path))
         .route("/api/fs/delete", post(routes::fs::delete_path))
+        .route("/api/fs/create", post(routes::fs::create_path))
+        .route("/api/fs/duplicate", post(routes::fs::duplicate_path))
         .route(
             "/api/presentation-assets/:asset",
             get(routes::fs::presentation_asset),

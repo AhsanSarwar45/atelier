@@ -76,11 +76,11 @@ test('a file renamed from the tree keeps the viewer and the address on it', asyn
     await page.mouse.click(Math.round(box.x + 40), Math.round(box.y + box.height / 2), { button: 'right' });
     await page.getByTestId('files-tree-menu').waitFor({ timeout: WAIT });
     await page.getByTestId('path-rename').click();
-    const name = page.getByTestId('path-rename-name');
+    const name = page.getByTestId('path-name');
     await name.waitFor({ timeout: WAIT });
     await name.fill(to);
     await name.press('Enter');
-    await expect(page.getByTestId('path-rename-dialog')).toBeHidden({ timeout: WAIT });
+    await expect(page.getByTestId('path-name-dialog')).toBeHidden({ timeout: WAIT });
   };
 
   try {
@@ -129,8 +129,8 @@ test('a file renamed from the tree keeps the viewer and the address on it', asyn
     await page.mouse.click(Math.round(box.x + 40), Math.round(box.y + box.height / 2), { button: 'right' });
     await page.getByTestId('files-tree-menu').waitFor({ timeout: WAIT });
     await page.getByTestId('path-rename').click();
-    await page.getByTestId('path-rename-name').fill('kept.ts');
-    await page.getByTestId('path-rename-name').press('Enter');
+    await page.getByTestId('path-name').fill('kept.ts');
+    await page.getByTestId('path-name').press('Enter');
     await expect(page.getByText('That could not be renamed')).toBeVisible({ timeout: WAIT });
     expect(readFileSync(join(fixture, 'lib', 'kept.ts'), 'utf8')).toBe('export const kept = "these bytes";\n');
     expect(existsSync(join(fixture, 'lib', 'other.ts'))).toBe(true);

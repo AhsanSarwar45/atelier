@@ -764,6 +764,154 @@ pub async fn delete_path(Json(body): Json<FsPathBody>) -> Response {
     }
 }
 
+/// What a create is asked to make.
+#[derive(Debug, Deserialize)]
+pub struct FsCreateBody {
+    /// The checkout it belongs in.
+    pub root: String,
+    /// The absolute folder to make it in.
+    pub dir: String,
+    /// Its name.
+    pub name: String,
+    /// `file` or `dir`.
+    pub kind: String,
+}
+
+/// POST /api/fs/create
+///
+/// Makes an empty file or an empty folder.
+///
+/// `create_new` and not `create`: the whole difference between the two is what
+/// happens when the name is taken, and `create` would truncate whatever was
+/// there. That case is a 409, exactly as a stale save is — and it is refused by
+/// the kernel in the same call that would have made the file, so there is no
+/// window between the looking and the making for somebody else to use.
+pub async fn create_path(Json(body): Json<FsCreateBody>) -> Response {
+    let root = match checkout(&body.root) {
+        Ok(root) => root,
+        Err(no) => return refusal(no),
+    };
+    let name = match plain_name(&body.name) {
+        Ok(name) => name,
+        Err(no) => return refusal(no),
+    };
+    // The name is checked BEFORE it is joined, so what `confined` is handed can
+    // never be a path that climbs.
+    let wanted = std::path::Path::new(&body.dir).join(name);
+    let made = match confined(root, &wanted) {
+        Ok(found) => found,
+        Err(no) => return refusal(no),
+    };
+    if !made.path.parent().is_some_and(|parent| parent.is_dir()) {
+        return refusal((StatusCode::NOT_FOUND, "That folder does not exist".to_string()));
+    }
+    let done = match body.kind.as_str() {
+        "dir" => std::fs::create_dir(&made.path),
+        "file" => std::fs::OpenOptions::new().write(true).create_new(true).open(&made.path).map(|_| ()),
+        _ => return refusal((StatusCode::BAD_REQUEST, "A new thing is a file or a folder".to_string())),
+    };
+    if let Err(e) = done {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            return refusal((StatusCode::CONFLICT, format!("{name} is already there")));
+        }
+        return refusal((StatusCode::INTERNAL_SERVER_ERROR, format!("Could not create it: {e}")));
+    }
+    (StatusCode::OK, Json(PathMoved { path: made.path.to_string_lossy().into_owned() })).into_response()
+}
+
+/// The name a copy of `name` takes: `notes copy.txt`, then `notes copy 2.txt`.
+///
+/// The suffix goes before the extension and not after, so a duplicated `.png`
+/// is still a picture to everything that opens a file by its name — which is
+/// most of the point of duplicating it. A name beginning with a dot is all name
+/// and no extension (`.gitignore copy`), the way every file manager treats one.
+fn copy_named(name: &str, taken: impl Fn(&str) -> bool) -> String {
+    let (stem, extension) = match name.rfind('.') {
+        Some(at) if at > 0 => (&name[..at], &name[at..]),
+        _ => (name, ""),
+    };
+    for nth in 1.. {
+        let tried = if nth == 1 {
+            format!("{stem} copy{extension}")
+        } else {
+            format!("{stem} copy {nth}{extension}")
+        };
+        if !taken(&tried) {
+            return tried;
+        }
+    }
+    unreachable!("the loop only leaves by returning")
+}
+
+/// Copy a whole directory, contents and all.
+///
+/// Written out rather than shelled to `cp -r`: this has to behave the same on
+/// every machine the app runs on, and a shell-out would be a second way for a
+/// path to leave the checkout, argued about in a string. A symlink is copied AS
+/// a link, so a tree holding one does not silently become a tree holding a
+/// second copy of whatever it pointed at — which is also what keeps a duplicate
+/// from copying half the disk into the checkout.
+fn copied_wholly(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    let kind = std::fs::symlink_metadata(from)?;
+    if kind.is_symlink() {
+        #[cfg(unix)]
+        return std::os::unix::fs::symlink(std::fs::read_link(from)?, to);
+        #[cfg(not(unix))]
+        return Err(std::io::Error::other("a link cannot be duplicated on this system"));
+    }
+    if !kind.is_dir() {
+        std::fs::copy(from, to)?;
+        return Ok(());
+    }
+    std::fs::create_dir(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        copied_wholly(&entry.path(), &to.join(entry.file_name()))?;
+    }
+    Ok(())
+}
+
+/// POST /api/fs/duplicate
+///
+/// Copies a file or folder beside itself, under the first free `… copy` name.
+///
+/// The name is chosen by the server rather than asked of the reader, because
+/// the alternative is a dialog for a decision nobody has: a duplicate is made
+/// to be edited, and its name is whatever the editing turns it into.
+///
+/// Off the async threads: a folder of any size is a real amount of copying.
+pub async fn duplicate_path(Json(body): Json<FsPathBody>) -> Response {
+    let root = match checkout(&body.root) {
+        Ok(root) => root,
+        Err(no) => return refusal(no),
+    };
+    let from = match confined(root, std::path::Path::new(&body.path)) {
+        Ok(found) => found,
+        Err(no) => return refusal(no),
+    };
+    if std::fs::symlink_metadata(&from.path).is_err() {
+        return refusal((StatusCode::NOT_FOUND, "That file no longer exists".to_string()));
+    }
+    let name = from.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let beside = from.path.parent().map(|dir| dir.to_path_buf()).unwrap_or_default();
+    let copy = copy_named(&name, |tried| std::fs::symlink_metadata(beside.join(tried)).is_ok());
+    let to = match confined(from.root, &beside.join(copy)) {
+        Ok(found) => found,
+        Err(no) => return refusal(no),
+    };
+    let (there, here) = (from.path.clone(), to.path.clone());
+    let done = tokio::task::spawn_blocking(move || copied_wholly(&there, &here)).await;
+    let failed = match done {
+        Ok(Ok(())) => None,
+        Ok(Err(e)) => Some(e.to_string()),
+        Err(e) => Some(e.to_string()),
+    };
+    match failed {
+        None => (StatusCode::OK, Json(PathMoved { path: to.path.to_string_lossy().into_owned() })).into_response(),
+        Some(why) => refusal((StatusCode::INTERNAL_SERVER_ERROR, format!("Could not duplicate it: {why}"))),
+    }
+}
+
 /// GET /api/presentation-assets/:asset
 pub async fn presentation_asset(headers: HeaderMap, Path(asset): Path<String>) -> Response {
     if !media_origin_allowed(&headers) {
@@ -1501,6 +1649,8 @@ mod tests {
             .route("/api/fs/write", axum::routing::put(write_file))
             .route("/api/fs/rename", axum::routing::post(rename_path))
             .route("/api/fs/delete", axum::routing::post(delete_path))
+            .route("/api/fs/create", axum::routing::post(create_path))
+            .route("/api/fs/duplicate", axum::routing::post(duplicate_path))
             .route("/api/fs/media", axum::routing::get(media))
     }
 
@@ -2658,5 +2808,179 @@ mod tests {
         assert!(std::fs::symlink_metadata(&link).is_err(), "the link is still there");
         assert!(theirs.exists(), "the file the link pointed at was destroyed");
         assert!(taken_by_the_trash(&link));
+    }
+
+    #[tokio::test]
+    async fn a_new_file_and_a_new_folder_are_made_where_they_were_asked_for() {
+        let root = a_checkout();
+
+        let (status, answer) = posted(
+            "/api/fs/create",
+            serde_json::json!({ "root": root.path(), "dir": root.path().join("src"), "name": "fresh.rs", "kind": "file" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{answer}");
+        let made = root.path().join("src/fresh.rs");
+        assert_eq!(answer["path"].as_str().unwrap(), made.to_string_lossy());
+        assert_eq!(std::fs::read_to_string(&made).unwrap(), "");
+
+        let (status, _) = posted(
+            "/api/fs/create",
+            serde_json::json!({ "root": root.path(), "dir": root.path(), "name": "docs", "kind": "dir" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(root.path().join("docs").is_dir());
+    }
+
+    /// `create_new`, so the name being taken is refused by the same call that
+    /// would have made the file — never a look, then a truncating write.
+    #[tokio::test]
+    async fn creating_over_a_name_in_use_is_refused_and_keeps_what_is_there() {
+        let root = a_checkout();
+
+        let (status, answer) = posted(
+            "/api/fs/create",
+            serde_json::json!({ "root": root.path(), "dir": root.path(), "name": "notes.txt", "kind": "file" }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(answer["error"].as_str().unwrap().contains("already there"));
+        assert_eq!(std::fs::read_to_string(root.path().join("notes.txt")).unwrap(), "hello\n");
+    }
+
+    /// The name is checked before it is joined, so a create cannot be a way to
+    /// write outside the checkout with a name that climbs.
+    #[tokio::test]
+    async fn a_new_name_that_climbs_is_refused() {
+        let root = a_checkout();
+
+        for tried in ["../escaped.txt", "sub/deep.txt", "..", ""] {
+            let (status, _) = posted(
+                "/api/fs/create",
+                serde_json::json!({ "root": root.path(), "dir": root.path(), "name": tried, "kind": "file" }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{tried:?} was accepted");
+        }
+        assert!(!root.path().parent().unwrap().join("escaped.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn a_create_in_a_folder_outside_the_checkout_is_refused() {
+        let root = a_checkout();
+        let elsewhere = scratch();
+
+        let (status, _) = posted(
+            "/api/fs/create",
+            serde_json::json!({ "root": root.path(), "dir": elsewhere.path(), "name": "planted.txt", "kind": "file" }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(!elsewhere.path().join("planted.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn a_duplicate_lands_beside_the_original_with_the_same_bytes() {
+        let root = a_checkout();
+
+        let (status, answer) = posted(
+            "/api/fs/duplicate",
+            serde_json::json!({ "root": root.path(), "path": root.path().join("notes.txt") }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{answer}");
+        let copy = root.path().join("notes copy.txt");
+        assert_eq!(answer["path"].as_str().unwrap(), copy.to_string_lossy());
+        assert_eq!(std::fs::read_to_string(&copy).unwrap(), "hello\n");
+        assert_eq!(std::fs::read_to_string(root.path().join("notes.txt")).unwrap(), "hello\n");
+    }
+
+    /// Duplicating twice does not fail and does not overwrite the first copy.
+    #[tokio::test]
+    async fn a_second_duplicate_is_numbered_rather_than_refused() {
+        let root = a_checkout();
+        let asked = serde_json::json!({ "root": root.path(), "path": root.path().join("notes.txt") });
+
+        for _ in 0..3 {
+            let (status, _) = posted("/api/fs/duplicate", asked.clone()).await;
+            assert_eq!(status, StatusCode::OK);
+        }
+
+        assert!(root.path().join("notes copy.txt").exists());
+        assert!(root.path().join("notes copy 2.txt").exists());
+        assert!(root.path().join("notes copy 3.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn a_folder_is_duplicated_with_everything_under_it() {
+        let root = a_checkout();
+        std::fs::create_dir(root.path().join("src/deep")).unwrap();
+        std::fs::write(root.path().join("src/deep/inner.rs"), "inner\n").unwrap();
+
+        let (status, _) = posted(
+            "/api/fs/duplicate",
+            serde_json::json!({ "root": root.path(), "path": root.path().join("src") }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(std::fs::read_to_string(root.path().join("src copy/main.rs")).unwrap(), "fn main() {}\n");
+        assert_eq!(std::fs::read_to_string(root.path().join("src copy/deep/inner.rs")).unwrap(), "inner\n");
+    }
+
+    /// The suffix goes before the extension, and a dotfile is all name.
+    #[test]
+    fn a_copys_name_keeps_the_extension_on_the_end() {
+        let free = |_: &str| false;
+        assert_eq!(copy_named("notes.txt", free), "notes copy.txt");
+        assert_eq!(copy_named("archive.tar.gz", free), "archive.tar copy.gz");
+        assert_eq!(copy_named("Makefile", free), "Makefile copy");
+        assert_eq!(copy_named(".gitignore", free), ".gitignore copy");
+        assert_eq!(copy_named("notes.txt", |tried| tried == "notes copy.txt"), "notes copy 2.txt");
+    }
+
+    /// A link is duplicated as a link. Following it would copy whatever it
+    /// pointed at INTO the checkout, which is how a duplicate becomes a way to
+    /// read a file the routes were confined away from.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_symlink_is_duplicated_as_the_link_and_never_as_its_target() {
+        let root = a_checkout();
+        let elsewhere = scratch();
+        let theirs = elsewhere.path().join("theirs.txt");
+        std::fs::write(&theirs, "not yours\n").unwrap();
+        std::os::unix::fs::symlink(&theirs, root.path().join("shortcut")).unwrap();
+
+        let (status, _) = posted(
+            "/api/fs/duplicate",
+            serde_json::json!({ "root": root.path(), "path": root.path().join("shortcut") }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let copy = root.path().join("shortcut copy");
+        assert!(std::fs::symlink_metadata(&copy).unwrap().is_symlink(), "the link's target was copied in");
+        assert_eq!(std::fs::read_link(&copy).unwrap(), theirs);
+    }
+
+    #[tokio::test]
+    async fn a_duplicate_aimed_outside_the_checkout_is_refused() {
+        let root = a_checkout();
+        let elsewhere = scratch();
+        let theirs = elsewhere.path().join("theirs.txt");
+        std::fs::write(&theirs, "not yours\n").unwrap();
+
+        let (status, _) = posted(
+            "/api/fs/duplicate",
+            serde_json::json!({ "root": root.path(), "path": theirs }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(!elsewhere.path().join("theirs copy.txt").exists());
     }
 }

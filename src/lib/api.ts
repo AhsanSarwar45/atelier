@@ -1022,6 +1022,33 @@ export const fs = {
     }),
 
   /**
+   * Make an empty file or an empty folder in `dir` (bw-5gax.4).
+   *
+   * A name already in use answers 409, refused by the same call that would have
+   * made the file rather than by a look beforehand — so there is no window
+   * between the looking and the making for something else to take the name.
+   */
+  create: (root: string, dir: string, name: string, kind: 'file' | 'dir') =>
+    fetchApi<FsPathMoved>('/api/fs/create', {
+      method: 'POST',
+      body: JSON.stringify({ root, dir, name, kind }),
+    }),
+
+  /**
+   * Copy a file or folder beside itself, under the first free `… copy` name
+   * (bw-5gax.4).
+   *
+   * The name is the server's to choose and is handed back: a duplicate is made
+   * to be edited, and asking for a name up front is a dialog for a decision the
+   * reader has not made yet.
+   */
+  duplicate: (root: string, path: string) =>
+    fetchApi<FsPathMoved>('/api/fs/duplicate', {
+      method: 'POST',
+      body: JSON.stringify({ root, path }),
+    }),
+
+  /**
    * Told whenever files move inside `path` — written from a terminal, by an
    * agent working in the checkout, by a build — with the absolute paths that
    * moved (bw-g3o3.3). Returns the way to stop.

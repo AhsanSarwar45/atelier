@@ -36,7 +36,7 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 
-import { Pencil, Trash2 } from 'lucide-react';
+import { Copy, FilePlus2, FolderPlus, Pencil, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -93,8 +93,25 @@ export function stemLength(name: string): number {
 
 /** What is being asked for, and about what. */
 interface Asked {
-  what: 'rename' | 'delete';
+  what: 'rename' | 'delete' | 'new-file' | 'new-folder';
   target: PathInCheckout;
+}
+
+/** Whether an ask is one of the two that put a new name in a folder. */
+function makesSomething(what: Asked['what']): boolean {
+  return what === 'new-file' || what === 'new-folder';
+}
+
+/**
+ * The folder a new thing goes in: the row itself when it is a folder, and the
+ * folder the row is in when it is a file.
+ *
+ * Which is what a reader means by right-clicking. A new file asked for while
+ * pointing at `src/main.ts` belongs beside `main.ts`, not at the top of the
+ * checkout — and one asked for while pointing at `src/` belongs inside it.
+ */
+export function folderFor(target: PathInCheckout): string {
+  return target.kind === 'dir' ? target.path : target.path.slice(0, target.path.lastIndexOf('/'));
 }
 
 /** What the menus get: the items to draw, and the dialogs to stand beside them. */
@@ -121,16 +138,17 @@ function refused(what: string, why: unknown): void {
  * answer for it; a chip in a chat changes the same disk and simply has nothing
  * of its own to carry.
  */
-export function useFileActions(onMoved?: PathMoved): FileActions {
+export function useFileActions(onMoved?: PathMoved, onMade?: (path: string) => void): FileActions {
   const [asked, setAsked] = useState<Asked | null>(null);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const box = useRef<HTMLInputElement>(null);
 
   // The name up to the extension, selected the moment the box appears: that is
-  // the part being changed, and it saves typing `.png` back every time.
+  // the part being changed, and it saves typing `.png` back every time. A new
+  // thing starts empty, so there is nothing to select.
   useEffect(() => {
-    if (asked?.what !== 'rename') return;
+    if (asked === null || asked.what === 'delete') return;
     const there = box.current;
     if (!there) return;
     there.focus();
@@ -138,7 +156,7 @@ export function useFileActions(onMoved?: PathMoved): FileActions {
   }, [asked]);
 
   const ask = useCallback((what: Asked['what'], target: PathInCheckout) => {
-    setName(nameOf(target.path));
+    setName(makesSomething(what) ? '' : nameOf(target.path));
     setAsked({ what, target });
   }, []);
 
@@ -160,10 +178,42 @@ export function useFileActions(onMoved?: PathMoved): FileActions {
     }
   }, [asked, busy, onMoved]);
 
-  const rename = useCallback(
+  /**
+   * Copy something beside itself. No dialog: the server picks the first free
+   * `… copy` name and hands it back, and the toast says which — a duplicate is
+   * made to be edited, and its real name is whatever the editing turns it into.
+   */
+  const duplicate = useCallback(async (target: PathInCheckout) => {
+    try {
+      const answer = await fs.duplicate(target.root, target.path);
+      toast({ title: `Copied to ${nameOf(answer.path)}` });
+    } catch (why: unknown) {
+      refused('That could not be duplicated', why);
+    }
+  }, []);
+
+  /** The one submit behind the box: renaming, or making a new file or folder. */
+  const submit = useCallback(
     async (event: FormEvent) => {
       event.preventDefault();
       if (asked === null || busy) return;
+      if (makesSomething(asked.what)) {
+        setBusy(true);
+        try {
+          const kind = asked.what === 'new-folder' ? 'dir' : 'file';
+          const answer = await fs.create(asked.target.root, folderFor(asked.target), name, kind);
+          setAsked(null);
+          // A new FILE opens: it is empty, and the only reason to make one is to
+          // put something in it. A new folder does not, because there is nothing
+          // in it to look at.
+          if (kind === 'file') onMade?.(answer.path);
+        } catch (why: unknown) {
+          refused('That could not be created', why);
+        } finally {
+          setBusy(false);
+        }
+        return;
+      }
       const { root, path } = asked.target;
       // An unsaved edit lives in the viewer, keyed by the path it was typed
       // into. Renaming underneath it would leave the reader looking at a file
@@ -184,7 +234,7 @@ export function useFileActions(onMoved?: PathMoved): FileActions {
         setBusy(false);
       }
     },
-    [asked, busy, name, onMoved],
+    [asked, busy, name, onMade, onMoved],
   );
 
   const items = useCallback(
@@ -192,6 +242,28 @@ export function useFileActions(onMoved?: PathMoved): FileActions {
       if (target === null) return null;
       return (
         <>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            data-testid="path-new-file"
+            className="text-xs"
+            onSelect={() => ask('new-file', target)}
+          >
+            <FilePlus2 aria-hidden="true" /> New file…
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-testid="path-new-folder"
+            className="text-xs"
+            onSelect={() => ask('new-folder', target)}
+          >
+            <FolderPlus aria-hidden="true" /> New folder…
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-testid="path-duplicate"
+            className="text-xs"
+            onSelect={() => void duplicate(target)}
+          >
+            <Copy aria-hidden="true" /> Duplicate
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             data-testid="path-rename"
@@ -210,7 +282,7 @@ export function useFileActions(onMoved?: PathMoved): FileActions {
         </>
       );
     },
-    [ask],
+    [ask, duplicate],
   );
 
   const dialogs = (
@@ -250,23 +322,34 @@ export function useFileActions(onMoved?: PathMoved): FileActions {
           </DialogFooter>
         </DialogContent>
       ) : (
-      <DialogContent className="sm:max-w-md" data-testid="path-rename-dialog">
+      // One box for all three, because they are one question — what is this
+      // called — asked about a name that exists or one that does not yet.
+      <DialogContent className="sm:max-w-md" data-testid="path-name-dialog">
         <DialogHeader>
-          <DialogTitle>Rename {asked?.target.kind === 'dir' ? 'folder' : 'file'}</DialogTitle>
-          <DialogDescription>
-            {asked ? nameOf(asked.target.path) : ''} stays in the folder it is in; only its name changes.
+          <DialogTitle>
+            {asked?.what === 'new-file' ? 'New file' : null}
+            {asked?.what === 'new-folder' ? 'New folder' : null}
+            {asked?.what === 'rename' ? `Rename ${asked.target.kind === 'dir' ? 'folder' : 'file'}` : null}
+          </DialogTitle>
+          <DialogDescription className="break-words">
+            {asked === null
+              ? ''
+              : makesSomething(asked.what)
+                ? `In ${nameOf(folderFor(asked.target)) || folderFor(asked.target)}.`
+                : `${nameOf(asked.target.path)} stays in the folder it is in; only its name changes.`}
           </DialogDescription>
         </DialogHeader>
-        {/* A form, so Enter submits — a rename box that needs the mouse to
-            finish is a rename box nobody uses twice. */}
-        <form onSubmit={rename} className="flex flex-col gap-4">
+        {/* A form, so Enter finishes it — a name box that needs the mouse is a
+            name box nobody uses twice. */}
+        <form onSubmit={submit} className="flex flex-col gap-4">
           <Input
             ref={box}
             value={name}
             spellCheck={false}
             autoComplete="off"
-            aria-label="New name"
-            data-testid="path-rename-name"
+            aria-label="Name"
+            placeholder={asked?.what === 'new-folder' ? 'components' : 'notes.md'}
+            data-testid="path-name"
             onChange={(event) => setName(event.target.value)}
           />
           <DialogFooter>
@@ -275,10 +358,14 @@ export function useFileActions(onMoved?: PathMoved): FileActions {
             </Button>
             <Button
               type="submit"
-              data-testid="path-rename-confirm"
-              disabled={busy || name.trim() === '' || name === nameOf(asked?.target.path ?? '')}
+              data-testid="path-name-confirm"
+              disabled={
+                busy ||
+                name.trim() === '' ||
+                (asked !== null && !makesSomething(asked.what) && name === nameOf(asked.target.path))
+              }
             >
-              Rename
+              {asked !== null && makesSomething(asked.what) ? 'Create' : 'Rename'}
             </Button>
           </DialogFooter>
         </form>
