@@ -1664,7 +1664,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           CHIP_GAP,
         )}
       >
-        <ProviderBadge brand={sessionBrand} model={view.model} icon={sessionBrand === 'local' ? <ModelIcon brand={sessionBrand} model={view.model} identity={selectedModel?.family ?? selectedModel?.publisher} className="size-3" /> : undefined} className="hidden sm:inline-flex" />
+        <ProviderBadge brand={sessionBrand} model={view.model} icon={sessionBrand === 'local' ? <ModelIcon brand={sessionBrand} model={view.model} identity={selectedModel?.family ?? selectedModel?.publisher} className="size-3" /> : undefined} className="hidden md:inline-flex" />
         {/* The one thing on this line allowed to give way when the line runs
             short, and the only one that can: the model and the permission mode
             are both named again on the writing box below, while every chip
@@ -1684,7 +1684,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           collaborationMode={view.collaborationMode}
           collaborationModes={view.menu.collaborationModes}
           providers={view.menu.providers}
-          className="hidden sm:flex"
+          className="hidden md:flex"
         />
         {facts?.folder && (
           <Tooltip label={[facts.cwd, facts.branch].filter(Boolean).join(' · ')}>
@@ -1701,7 +1701,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               // Never squeezed by the line, and never wider than a name: a chip
               // that shrinks under its own text spills it over its neighbour
               // (bw-7ks.22.15).
-              className="hidden max-w-40 shrink-0 gap-1 truncate sm:inline-flex"
+              className="hidden max-w-40 shrink-0 gap-1 truncate md:inline-flex"
             >
               {/* A folder that is a checkout says so: the branch is already in
                   this chip's tooltip, and the mark is what says there is one to
@@ -1732,7 +1732,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               shape="circle"
               data-testid="chat-branch-chip"
               data-branch={facts.branch}
-              className="hidden max-w-40 shrink-0 gap-1 truncate sm:inline-flex"
+              className="hidden max-w-40 shrink-0 gap-1 truncate md:inline-flex"
             >
               <GitBranch className="size-3 shrink-0" aria-hidden="true" />
               <span className="min-w-0 truncate">{facts.branch}</span>
@@ -1762,7 +1762,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 data-testid="cost-chip"
                 data-kind={view.cost.kind}
                 data-total={view.cost.kind === 'usd' ? view.cost.usd : view.cost.total}
-                className="hidden font-mono sm:inline-flex"
+                className="hidden font-mono md:inline-flex"
               >
                 <Coins />
                 {costLabel(view.cost)}
@@ -2003,7 +2003,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             </Tooltip>
             {/* Both act on THIS chat, and are kept in his own settings so the
                 next one opens on them too (§8.2.3). */}
-            <div className="hidden items-center gap-1 sm:flex" data-testid="desktop-composer-settings">
+            <div className="hidden items-center gap-1 md:flex" data-testid="desktop-composer-settings">
             <Picker
               icon={<ModeMark mode={view.permissionMode} className="h-3.5 w-3.5" />}
               label="Permission mode"
@@ -2113,7 +2113,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 size="sm"
                 aria-label="Chat settings"
                 data-testid="mobile-composer-settings"
-                className="rounded-full text-muted-foreground sm:hidden"
+                className="rounded-full text-muted-foreground md:hidden"
                 onClick={() => setComposerSettingsOpen(true)}
               >
                 <SlidersHorizontal className="h-4 w-4" />
@@ -2126,7 +2126,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                   appearance="light"
                   size="sm"
                   data-testid="agent-definitions"
-                  className="hidden sm:inline-flex"
+                  className="hidden md:inline-flex"
                 >
                   {view.menu.agentDefinitions.length} agent{view.menu.agentDefinitions.length === 1 ? '' : 's'}
                 </Badge>
@@ -2178,7 +2178,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         </Panel>
         )}
         <Dialog open={composerSettingsOpen} onOpenChange={setComposerSettingsOpen}>
-          <DialogContent className="max-w-[calc(100vw-2rem)] sm:hidden" data-testid="mobile-composer-settings-dialog">
+          <DialogContent className="max-w-[calc(100vw-2rem)] md:hidden" data-testid="mobile-composer-settings-dialog">
             <DialogHeader>
               <DialogTitle>Chat settings</DialogTitle>
             </DialogHeader>
