@@ -18,6 +18,13 @@ import type { WbpEvent } from '../../src/workbench/protocol';
  * caret" has two answers to read — the dead one on `.cm-content` and the live
  * one on `.cm-cursor` — and only the second is on screen.
  *
+ * The caret is not the only thing `drawSelection()` draws without being told
+ * what colour to use: the band under selected text comes from the same
+ * baseTheme, and the same reading applies to it (bw-axtp.3). Both are read here
+ * because both are answered in one place — src/workbench/drawn-marks.ts — and a
+ * value that fixed one and broke the other would pass a spec that only looked
+ * at one of them.
+ *
  * A caret blinks, so nothing here waits to catch it lit: the colour is read off
  * the element with `getComputedStyle`, which the blink animation does not
  * touch (it moves opacity on the layer above, not the border colour). The
@@ -29,6 +36,8 @@ import type { WbpEvent } from '../../src/workbench/protocol';
 
 const STAGE = process.env.CARET_STAGE ?? 'after';
 const SHOTS = `tests/results/caret/${STAGE}`;
+/** The band's own pictures, kept apart from bw-axtp.1's evidence. */
+const BANDS = `tests/results/selection/${STAGE}`;
 const WAIT = 60_000;
 const CHAT = 'caret-chat';
 /** The chat's box, and the Files tab's editor: the app's two CodeMirrors. */
@@ -118,6 +127,14 @@ interface Reading {
   behind: string;
   /** The drawn caret's colour against that background, WCAG contrast. */
   contrast: number | null;
+  /** The selection band as the eye sees it, or null when nothing is selected. */
+  band: string | null;
+  /** The writing, over the band it is sitting on. */
+  ink: string | null;
+  /** The band against the box behind it: can you see where the selection is. */
+  bandOnBox: number | null;
+  /** The writing against the band: can you still read what you selected. */
+  inkOnBand: number | null;
   focused: boolean;
 }
 
@@ -125,7 +142,7 @@ interface Reading {
  * What is on screen right now. Everything is read from computed style, so the
  * answer does not depend on catching the blink lit.
  */
-async function caret(page: Page, which: string): Promise<Reading> {
+async function look(page: Page, which: string): Promise<Reading> {
   return page.evaluate((which: string) => {
     const parse = (c: string): [number, number, number, number] => {
       const n = c.match(/[\d.]+/g)?.map(Number) ?? [];
@@ -156,6 +173,7 @@ async function caret(page: Page, which: string): Promise<Reading> {
 
     const editor = document.querySelector(which);
     const content = editor?.querySelector('.cm-content') ?? null;
+    const band = editor?.querySelector('.cm-selectionBackground') ?? null;
     const cursors = Array.from(editor?.querySelectorAll('.cm-cursor') ?? []);
     const primary = (cursors[0] ?? null) as HTMLElement | null;
     const behind = opaque(content);
@@ -166,6 +184,10 @@ async function caret(page: Page, which: string): Promise<Reading> {
       const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p);
       return Math.round(((x + 0.05) / (y + 0.05)) * 100) / 100;
     };
+    // The band is drawn in a layer under the writing, so what the eye sees is
+    // the band over the box, and the writing over that.
+    const bandSeen = band ? over(getComputedStyle(band).backgroundColor, behind) : null;
+    const inkSeen = content && bandSeen ? over(getComputedStyle(content).color, bandSeen) : null;
     return {
       native: content ? getComputedStyle(content).caretColor : 'no content',
       drawn: seen,
@@ -173,12 +195,57 @@ async function caret(page: Page, which: string): Promise<Reading> {
       drawnCount: cursors.length,
       behind,
       contrast: seen ? ratio(seen, behind) : null,
+      band: bandSeen,
+      ink: inkSeen,
+      bandOnBox: bandSeen ? ratio(bandSeen, behind) : null,
+      inkOnBand: inkSeen && bandSeen ? ratio(inkSeen, bandSeen) : null,
       focused: !!editor?.classList.contains('cm-focused'),
     };
   }, which);
 }
 
-test('the caret in the chat and in the Files tab, in four skins and in every state each box can be in', async ({ page, request }) => {
+/**
+ * What a selected line has to clear.
+ *
+ * The writing on the band is ordinary body text — 15px in the chat's box, 13px
+ * of code in the Files tab — so AA's 4.5:1 is the number it answers to, read
+ * against the band rather than against the page, because the band is what is
+ * behind it while it is selected.
+ *
+ * The band against the box is not text and WCAG has no rule for it. 1.2:1 is
+ * the floor taken here, and it is set from what was measured rather than
+ * chosen first: the tightest of the eight readings is the Default Dark box,
+ * whose surface is nearly black, at 1.21:1 — and the picture beside this file
+ * (tests/results/selection/after/default-a-line-selected.png) shows a band
+ * that is plainly there. The ratio understates a difference at that end of the
+ * range: its +0.05 term is most of both sides of the fraction when the darker
+ * colour is rgb(9, 9, 11). A skin that came out below this is one where the
+ * band has stopped being a mark and become a tint (bw-axtp.3).
+ */
+const READABLE_ON_BAND = 4.5;
+const BAND_IS_VISIBLE = 1.2;
+
+/** Both judgements on one selected line, in the words a failure should read in. */
+function judgeBand(where: string, seen: Reading): string[] {
+  if (!seen.band) return [`${where}: nothing is drawn under the selected line at all`];
+  const bad: string[] = [];
+  if ((seen.inkOnBand ?? 0) < READABLE_ON_BAND)
+    bad.push(`${where}: the writing is ${seen.ink} on a band of ${seen.band} — ${seen.inkOnBand ?? '—'}:1`);
+  if ((seen.bandOnBox ?? 0) < BAND_IS_VISIBLE)
+    bad.push(`${where}: the band is ${seen.band} on ${seen.behind} — ${seen.bandOnBox ?? '—'}:1, no edge to see`);
+  return bad;
+}
+
+/** One line of the record, for a state where something is selected. */
+function bandNote(where: string, seen: Reading): string {
+  return (
+    `${where}: the band is ${seen.band ?? 'not drawn'} on ${seen.behind} = ${seen.bandOnBox ?? '—'}:1; ` +
+    `the writing on it ${seen.ink ?? '—'} = ${seen.inkOnBand ?? '—'}:1; ` +
+    `${seen.focused ? 'focused' : 'not focused'}`
+  );
+}
+
+test('the caret and the selection band in the chat and in the Files tab, in four skins and in every state each box can be in', async ({ page, request }) => {
   test.setTimeout(600_000);
   const fixture = join(__dirname, '..', '.workbench-run-caret');
   seed(fixture);
@@ -238,6 +305,7 @@ test('the caret in the chat and in the Files tab, in four skins and in every sta
 
   const project = await fixtureProject(request, 'caret', fixture);
   mkdirSync(SHOTS, { recursive: true });
+  mkdirSync(BANDS, { recursive: true });
   const wrong: string[] = [];
 
   try {
@@ -285,7 +353,7 @@ test('the caret in the chat and in the Files tab, in four skins and in every sta
       for (const state of states) {
         await state.enter();
         await page.waitForTimeout(250);
-        const seen = await caret(page, COMPOSER);
+        const seen = await look(page, COMPOSER);
         note(
           `${skin.id} · ${state.name}: ${seen.focused ? 'focused' : 'not focused'}; ` +
             `${seen.drawnCount} drawn caret(s), ${seen.drawnShown ? 'shown' : 'not shown'}; ` +
@@ -307,21 +375,16 @@ test('the caret in the chat and in the Files tab, in four skins and in every sta
           );
         }
       }
-      // Noted, not judged: the caret is not the only thing drawSelection draws
-      // without being told what colour to use. The selection band comes from
-      // the same baseTheme and is not this card's to change, so the number is
-      // recorded here for whoever files that one.
+      // The line he just wrote, selected. Read the same way as the caret and
+      // judged on both sides at once: the writing on the band, and the band on
+      // the box (bw-axtp.3).
       await content.click();
       await page.keyboard.press('Control+a');
       await page.waitForTimeout(200);
-      const band = await page.evaluate(() => {
-        const el = document.querySelector('.cm-selectionBackground');
-        const text = document.querySelector('.cm-content');
-        return el && text
-          ? { band: getComputedStyle(el).backgroundColor, ink: getComputedStyle(text).color }
-          : null;
-      });
-      note(`${skin.id} · a line selected: the band is ${band?.band ?? 'not drawn'}, the writing on it ${band?.ink ?? '—'}`);
+      const selected = await look(page, COMPOSER);
+      note(bandNote(`${skin.id} · a line selected`, selected));
+      await box.screenshot({ path: `${BANDS}/${skin.id}-a-line-selected.png`, animations: 'disabled' });
+      wrong.push(...judgeBand(`${skin.id}, a line selected in the chat's box`, selected));
 
       // Emptied, so the next skin starts from the same box.
       await page.keyboard.press('Backspace');
@@ -364,7 +427,7 @@ test('the caret in the chat and in the Files tab, in four skins and in every sta
       for (const step of steps) {
         await step.enter();
         await page.waitForTimeout(250);
-        const seen = await caret(page, FILE);
+        const seen = await look(page, FILE);
         note(
           `files · ${skin.id} · ${step.name}: ${seen.focused ? 'focused' : 'not focused'}; ` +
             `${seen.drawnCount} drawn caret(s), ${seen.drawnShown ? 'shown' : 'not shown'}; ` +
@@ -383,6 +446,26 @@ test('the caret in the chat and in the Files tab, in four skins and in every sta
         }
       }
 
+      // The band in the other editor, which is where its colour was answered
+      // first. Read twice: with the view focused, and with the focus taken
+      // away — this one is read-only at rest, so a band that only shows while
+      // the view has focus would leave a reader unable to see what he has
+      // selected the moment he reaches for anything else.
+      await viewer.locator('.cm-line').first().click();
+      await page.keyboard.press('Control+a');
+      await page.waitForTimeout(200);
+      const held = await look(page, FILE);
+      note(bandNote(`files · ${skin.id} · a line selected`, held));
+      await viewer.screenshot({ path: `${BANDS}/files-${skin.id}-a-line-selected.png`, animations: 'disabled' });
+      wrong.push(...judgeBand(`the Files tab in ${skin.id}, a line selected`, held));
+
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await page.waitForTimeout(200);
+      const dropped = await look(page, FILE);
+      note(bandNote(`files · ${skin.id} · a line selected, focus taken away`, dropped));
+      await viewer.screenshot({ path: `${BANDS}/files-${skin.id}-selected-unfocused.png`, animations: 'disabled' });
+      wrong.push(...judgeBand(`the Files tab in ${skin.id}, selected then left`, dropped));
+
       // Put the file back before leaving it. An unsaved file installs a
       // `beforeunload` handler (src/workbench/unsaved-files.ts), and a
       // navigation answered by that dialog would strand the next skin.
@@ -394,9 +477,11 @@ test('the caret in the chat and in the Files tab, in four skins and in every sta
       await expect(page.getByTestId('open-file-dirty')).toHaveCount(0, { timeout: WAIT });
     }
 
-    expect(wrong, 'a caret is invisible against the box it sits in').toEqual([]);
+    expect(wrong, 'something drawSelection draws is invisible against the box it sits in').toEqual([]);
   } finally {
-    writeFileSync(`${SHOTS}/measurements.txt`, measured.map((m) => `- ${m}`).join('\n') + '\n');
+    const record = measured.map((m) => `- ${m}`).join('\n') + '\n';
+    writeFileSync(`${SHOTS}/measurements.txt`, record);
+    writeFileSync(`${BANDS}/measurements.txt`, record);
     // eslint-disable-next-line no-console
     console.log(`\n${measured.map((m) => `- ${m}`).join('\n')}\n`);
     await request.delete(`/api/projects/${project.id}`).catch(() => {});
