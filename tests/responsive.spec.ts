@@ -176,6 +176,17 @@ async function tooSmall(page: Page, floor: number): Promise<string[]> {
       // apart, and the rule that gives everything else a floor deliberately
       // does not reach an inline box either.
       if (style.display === 'inline') continue;
+      // A chip is a word too, and is measured somewhere else. It is drawn as a
+      // link or a button whenever it opens something, so it lands in the list
+      // above — and this measurement, the painted rectangle, is the wrong
+      // question to ask it: a chip keeps its own height and grows an INVISIBLE
+      // target around it, exactly as the amend tick does (globals.css, the
+      // coarse-pointer block). Asked here it read 44px only while it was being
+      // painted 44px tall, which is the fault the owner reported and
+      // bw-e3dw.16 fixed. The honest measurement — the painted pill and the
+      // area a thumb actually lands on, probed with `elementFromPoint` — is
+      // made in tests/e2e/a-chip-stays-a-chip.spec.ts.
+      if (el.closest('[data-slot="badge"]')) continue;
       const r = el.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) continue;
       // A control inside another control is one target, not two.
