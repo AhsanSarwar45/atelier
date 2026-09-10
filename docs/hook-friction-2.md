@@ -1193,3 +1193,22 @@ what you get" — produce a red that belongs to neither the change nor the app.
 **Cost.** One FAILED recorded on the checks card, one full re-run of
 `npm test && (cd server && cargo test)`, and a note on the card so the red is
 not read as the epic's.
+
+## bw-wk5u — the claim of a child in its epic's worktree
+
+**What happened.** The worktree for this job is cut once and named for the
+epic (`worktrees/bw-wk5u`), which is what "a worktree is per job, not per
+step" asks for. The first write refused:
+
+    Claim bw-wk5u.1 from its own isolated worktree, not
+    /home/ahsan/dev/beads-web/worktrees/bw-wk5u.
+
+**Should have happened.** The gate reads the worktree's name and wants it to
+be the card's. A copy named for the epic holds every child of that epic, so
+the check could be "is this card in the job this copy is named for" rather
+than "is this card's own id the folder name". As it stands the two standing
+instructions disagree, and every claim and every land in a job copy has to
+carry `ATELIER_BYPASS` to get past it.
+
+**Cost.** A refusal on every claim and every land in this job — three cards,
+plus the spine's checks and land cards.

@@ -162,11 +162,11 @@ describe('the tree hands over a reference too', () => {
       screen.getByTestId('files-tree-row-list').querySelector(`[data-path="${path}"]`) as HTMLElement;
 
     fireEvent.contextMenu(rowFor(`${ROOT}/src`));
-    fireEvent.click(screen.getByTestId('files-tree-copy-reference'));
+    fireEvent.click(screen.getByTestId('path-menu-copy-reference'));
     expect(clipboard, 'a folder is a reference with a slash on the end').toBe('@src/');
 
     fireEvent.contextMenu(rowFor(`${ROOT}/x.ts`));
-    fireEvent.click(screen.getByTestId('files-tree-copy-reference'));
+    fireEvent.click(screen.getByTestId('path-menu-copy-reference'));
     expect(clipboard).toBe('@x.ts');
   });
 
@@ -176,7 +176,7 @@ describe('the tree hands over a reference too', () => {
 
     const row = screen.getByTestId('files-tree-row-list').querySelector(`[data-path="${ROOT}/src"]`) as HTMLElement;
     fireEvent.contextMenu(row);
-    fireEvent.click(screen.getByTestId('files-tree-copy-reference'));
+    fireEvent.click(screen.getByTestId('path-menu-copy-reference'));
     expect(screen.queryByTestId('files-tree-menu')).toBeNull();
   });
 });

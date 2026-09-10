@@ -110,6 +110,14 @@ interface Terminals {
   hide: () => void;
   select: (id: string) => void;
   openTab: () => void;
+  /**
+   * A shell at a folder somebody named, rather than at whatever the screen is
+   * showing: what "Open in terminal" on a path menu asks for
+   * (`path-menu.tsx`). Separate from `openTab` rather than an argument to it,
+   * because `openTab` is handed straight to an `onClick` and would be given a
+   * mouse event to start a shell in.
+   */
+  openAt: (folder: string) => void;
   closeTab: (id: string) => void;
   /** What folder the screen is showing, or null when it is showing none. */
   showFolder: (folder: string | null) => void;
@@ -130,6 +138,7 @@ const nothingOpen: Terminals = {
   hide: () => {},
   select: () => {},
   openTab: () => {},
+  openAt: () => {},
   closeTab: () => {},
   showFolder: () => {},
 };
@@ -224,21 +233,32 @@ export function TerminalShells({ children }: { children: ReactNode }) {
     setActive(id);
   }, []);
 
-  const openTab = useCallback(async () => {
-    setOpening(true);
-    try {
-      // Read now rather than when the answer comes back: this is the folder the
-      // person was looking at when they asked for a shell.
-      const startingIn = folder.current;
-      const id = await openShell(startingIn);
-      keep([...held.current, { id, folder: startingIn }]);
-      choose(id);
-    } catch (why) {
-      complain('The shell would not start', why);
-    } finally {
-      setOpening(false);
-    }
-  }, [keep, choose]);
+  /**
+   * Start one shell and put a tab in front for it.
+   *
+   * `at` is a folder somebody named; null means the folder the screen is
+   * showing, which is what the `+` on the window means.
+   */
+  const start = useCallback(
+    async (at: string | null) => {
+      setOpening(true);
+      try {
+        // Read now rather than when the answer comes back: this is the folder the
+        // person was looking at when they asked for a shell.
+        const startingIn = at ?? folder.current;
+        const id = await openShell(startingIn);
+        keep([...held.current, { id, folder: startingIn }]);
+        choose(id);
+      } catch (why) {
+        complain('The shell would not start', why);
+      } finally {
+        setOpening(false);
+      }
+    },
+    [keep, choose],
+  );
+
+  const openTab = useCallback(() => void start(null), [start]);
 
   const closeTab = useCallback(
     async (id: string) => {
@@ -283,6 +303,54 @@ export function TerminalShells({ children }: { children: ReactNode }) {
    * refuses to start is not asked for again and again by an effect watching the
    * empty list it left behind.
    */
+  /**
+   * Take over whatever the server is still holding, once in a page's life, and
+   * say whether it found any.
+   *
+   * Pulled out of the effect below because opening a shell at a named folder
+   * has to do it too: a reader who asks for a terminal at `src/` before the
+   * window has ever been shown should still get back the shells that were
+   * running before the page was loaded, and not only the one they just asked
+   * for.
+   */
+  const adopt = useCallback(async () => {
+    if (asked.current) return false;
+    asked.current = true;
+    try {
+      const said = await listShells();
+      const live = said
+        .filter((one) => !one.exited)
+        .map((one) => ({ id: one.id, folder: one.cwd || null }));
+      if (!live.length) return false;
+      keep(live);
+      // The last one started is the one they were most likely in.
+      choose(live[live.length - 1].id);
+      return true;
+    } catch (why) {
+      complain('The shells already running could not be listed', why);
+      return false;
+    }
+  }, [keep, choose]);
+
+  /**
+   * A shell at a folder a menu named, with the window brought up around it.
+   *
+   * `filling` is claimed before the window is shown, so the effect below sees
+   * this fill already under way and does not start a second shell at the wrong
+   * folder beside it.
+   */
+  const openAt = useCallback(
+    (where: string) => {
+      filling.current = true;
+      setShowing(true);
+      void (async () => {
+        await adopt();
+        await start(where);
+      })();
+    },
+    [adopt, start],
+  );
+
   useEffect(() => {
     if (!showing) {
       filling.current = false;
@@ -291,26 +359,9 @@ export function TerminalShells({ children }: { children: ReactNode }) {
     if (filling.current || held.current.length) return;
     filling.current = true;
     void (async () => {
-      if (!asked.current) {
-        asked.current = true;
-        try {
-          const said = await listShells();
-          const live = said
-            .filter((one) => !one.exited)
-            .map((one) => ({ id: one.id, folder: one.cwd || null }));
-          if (live.length) {
-            keep(live);
-            // The last one started is the one they were most likely in.
-            choose(live[live.length - 1].id);
-            return;
-          }
-        } catch (why) {
-          complain('The shells already running could not be listed', why);
-        }
-      }
-      await openTab();
+      if (!(await adopt())) await start(null);
     })();
-  }, [showing, keep, choose, openTab]);
+  }, [showing, adopt, start]);
 
   return (
     <Shells.Provider
@@ -322,7 +373,8 @@ export function TerminalShells({ children }: { children: ReactNode }) {
         show,
         hide,
         select: choose,
-        openTab: () => void openTab(),
+        openTab,
+        openAt,
         closeTab: (id: string) => void closeTab(id),
         showFolder,
       }}

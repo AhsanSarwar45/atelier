@@ -23,10 +23,13 @@
  * - **The address is the selection.** Clicking a file writes `file=` into the
  *   address, which is what the viewer reads. Nothing about which file is open
  *   lives in this component.
- * - **A right-click hands the entry to the agent.** Copy reference gives
- *   `@src/a.ts` for a file and `@src/` for a folder — the same grammar the
- *   viewer's own copy writes, so a path picked out of the tree and a path
- *   copied out of the text read as one thing (bw-g3o3.10).
+ * - **A right-click offers the app's one path vocabulary.** Copy reference
+ *   gives `@src/a.ts` for a file and `@src/` for a folder — the same grammar
+ *   the viewer's own copy writes, so a path picked out of the tree and a path
+ *   copied out of the text read as one thing (bw-g3o3.10). It is not the
+ *   tree's own list: every item in that menu is drawn from `path-menu.tsx`,
+ *   which is also what the menu behind a path in a chat draws, so the two
+ *   cannot offer different things about the same file (bw-wk5u).
  */
 
 import {
@@ -39,7 +42,7 @@ import {
 } from 'react';
 
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ChevronDown, ChevronRight, Copy, Eye, EyeOff } from 'lucide-react';
+import { ChevronDown, ChevronRight, Eye, EyeOff } from 'lucide-react';
 
 import { FileIcon } from '@/components/file-icon';
 import { Button } from '@/components/ui/button';
@@ -50,10 +53,10 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip } from '@/components/ui/tooltip';
 import { git, fs as fsApi, type FsTreeEntry, type GitStatus } from '@/lib/api';
-import { useFileActions, type PathMoved } from '@/workbench/file-actions';
+import { type PathMoved } from '@/workbench/file-actions';
 import { STATUS_LOOK, type FileState } from '@/workbench/git-view';
 import { PointerAnchor } from '@/workbench/menu-anchor';
-import { referenceUnder } from '@/workbench/references';
+import { usePathMenuItems } from '@/workbench/path-menu';
 import { useFolderReads } from '@/workbench/use-folder-reads';
 import { useRepositoryReads } from '@/workbench/use-repository-reads';
 
@@ -181,9 +184,9 @@ export default function FileTree({ root, selected, onOpen, onMoved }: FileTreePr
   /** The entry a right-click asked about, and where its menu is drawn. */
   const [menu, setMenu] = useState<{ row: TreeRow; at: { left: number; top: number } } | null>(null);
   const pane = useRef<HTMLDivElement>(null);
-  // What can be DONE to a path, built once for the whole app so this menu and
-  // the chips' menu cannot come to disagree (`file-actions.tsx`).
-  const actions = useFileActions(onMoved, onOpen);
+  // Everything a menu over a path offers, built once for the whole app so this
+  // menu and the chips' menu cannot come to disagree (`path-menu.tsx`).
+  const menuItems = usePathMenuItems(onMoved, onOpen);
 
   useEffect(() => {
     setShowIgnored(localStorage.getItem(HIDE_IGNORED) !== '1');
@@ -532,33 +535,25 @@ export default function FileTree({ root, selected, onOpen, onMoved }: FileTreePr
             // bodiless thing sitting where the pointer was.
             onCloseAutoFocus={(event) => event.preventDefault()}
           >
-            <DropdownMenuItem
-              data-testid="files-tree-copy-reference"
-              className="text-xs"
-              onSelect={() => {
-                void navigator.clipboard?.writeText(
-                  referenceUnder({
-                    root,
-                    path: menu.row.entry.path,
-                    kind: menu.row.entry.kind === 'dir' ? 'folder' : 'file',
-                  }),
-                );
-              }}
-            >
-              <Copy aria-hidden="true" /> Copy reference
-            </DropdownMenuItem>
-            {actions.items(
-              root && menu
-                ? { root, path: menu.row.entry.path, kind: menu.row.entry.kind === 'dir' ? 'dir' : 'file' }
-                : null,
-            )}
+            {/* Every word of the menu comes from the one list, so this menu
+                and the chat's say the same things about the same file
+                (`path-menu.tsx`, bw-wk5u). A row in the tree is always in the
+                checkout the tree is drawing, and names no line — the tree
+                points at files, not at lines of them. */}
+            {menuItems.items({
+              absolute: menu.row.entry.path,
+              root,
+              kind: menu.row.entry.kind === 'dir' ? 'dir' : 'file',
+              line: null,
+              endLine: null,
+            })}
           </DropdownMenuContent>
         )}
       </DropdownMenu>
       {/* Outside the menu, because choosing an item CLOSES the menu — a dialog
           drawn inside it would be unmounted by the very click that asked for
           it. */}
-      {actions.dialogs}
+      {menuItems.dialogs}
     </div>
   );
 }

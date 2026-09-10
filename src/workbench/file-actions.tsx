@@ -110,9 +110,25 @@ function makesSomething(what: Asked['what']): boolean {
  * pointing at `src/main.ts` belongs beside `main.ts`, not at the top of the
  * checkout — and one asked for while pointing at `src/` belongs inside it.
  */
-export function folderFor(target: PathInCheckout): string {
+export function folderFor(target: Pick<PathInCheckout, 'path' | 'kind'>): string {
   return target.kind === 'dir' ? target.path : target.path.slice(0, target.path.lastIndexOf('/'));
 }
+
+/**
+ * Every operation this file draws, in the order it draws them, named by the
+ * mark a test finds it by.
+ *
+ * Written down so the one menu vocabulary can be stated as a list and checked
+ * against what each menu really drew (`path-menu.tsx`, bw-wk5u.3). An item
+ * added below and not added here is an item no menu is proved to offer.
+ */
+export const FILE_ACTION_ITEMS = [
+  'path-new-file',
+  'path-new-folder',
+  'path-duplicate',
+  'path-rename',
+  'path-delete',
+] as const;
 
 /** What the menus get: the items to draw, and the dialogs to stand beside them. */
 export interface FileActions {

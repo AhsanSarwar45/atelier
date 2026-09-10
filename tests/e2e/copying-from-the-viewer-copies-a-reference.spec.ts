@@ -136,7 +136,7 @@ test('a tree entry copies @src/ for a folder and @src/x.ts for a file', async ({
     await named('src').click({ button: 'right' });
     await expect(page.getByTestId('files-tree-menu')).toBeVisible();
     await page.screenshot({ path: `${SHOTS}/bw-g3o310-tree-menu.png`, animations: 'disabled' });
-    await page.getByTestId('files-tree-copy-reference').click();
+    await page.getByTestId('path-menu-copy-reference').click();
     await expect
       .poll(() => clipboard(page), { message: 'the tree did not copy a folder as @src/' })
       .toBe('@src/');
@@ -147,7 +147,7 @@ test('a tree entry copies @src/ for a folder and @src/x.ts for a file', async ({
 
     await blank(page);
     await named('src/x.ts').click({ button: 'right' });
-    await page.getByTestId('files-tree-copy-reference').click();
+    await page.getByTestId('path-menu-copy-reference').click();
     await expect
       .poll(() => clipboard(page), { message: 'the tree did not copy a file as @src/x.ts' })
       .toBe('@src/x.ts');
