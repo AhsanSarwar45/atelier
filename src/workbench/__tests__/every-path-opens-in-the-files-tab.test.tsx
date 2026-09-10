@@ -11,8 +11,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 import { PathsOpenProvider, checkoutOf } from '@/workbench/open-path';
-import { PATH_MENU_ITEMS, referenceOf, usePathActions } from '@/workbench/path-menu';
 import { PathChip } from '@/workbench/path-chip';
+import { PATH_MENU_ITEMS, referenceOf, usePathActions } from '@/workbench/path-menu';
 
 const went = vi.hoisted(() => ({ to: vi.fn() }));
 vi.mock('next/navigation', () => ({

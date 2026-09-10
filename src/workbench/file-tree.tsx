@@ -46,11 +46,7 @@ import { ChevronDown, ChevronRight, Eye, EyeOff } from 'lucide-react';
 
 import { FileIcon } from '@/components/file-icon';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent } from '@/components/ui/dropdown-menu';
 import { Tooltip } from '@/components/ui/tooltip';
 import { git, fs as fsApi, type FsTreeEntry, type GitStatus } from '@/lib/api';
 import { type PathMoved } from '@/workbench/file-actions';
