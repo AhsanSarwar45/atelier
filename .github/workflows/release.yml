@@ -13,6 +13,9 @@ on:
 
 jobs:
   build:
+    permissions:
+      contents: read
+      actions: read
     strategy:
       matrix:
         include:
@@ -25,6 +28,35 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      # actions/cache is tag-scoped. Download build outputs from the previous
+      # successful Release run so v0.x can reuse work done for v0.x-1.
+      - name: Find previous release cache
+        id: previous-cache
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          echo "name=release-cache-v1-${ImageOS}-${TARGET}" >> "$GITHUB_OUTPUT"
+          previous=$(gh run list -R "$GITHUB_REPOSITORY" --workflow release.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          echo "run=$previous" >> "$GITHUB_OUTPUT"
+
+      - name: Download previous release cache
+        id: cache-download
+        if: steps.previous-cache.outputs.run != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ steps.previous-cache.outputs.name }}
+          run-id: ${{ steps.previous-cache.outputs.run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/release-cache
+
+      - name: Restore build outputs
+        if: steps.cache-download.outcome == 'success'
+        continue-on-error: true
+        run: bash scripts/release-cache.sh restore "${{ runner.temp }}/release-cache"
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -49,8 +81,26 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build server
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
         working-directory: server
+
+      - name: Reuse published adapter bundle
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ matrix.target }}
+          ARTIFACT: ${{ matrix.artifact }}
+        run: |
+          output="server/target/$TARGET/release/atelier-adapters"
+          if node scripts/build-acp-adapters.mjs "$TARGET" "$output" --cache-only; then
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/published-adapters" "$(dirname "$output")"
+          gh release download -R "$GITHUB_REPOSITORY" -p "$ARTIFACT.tar.gz" -p SHA256SUMS.txt -D "$RUNNER_TEMP/published-adapters"
+          (cd "$RUNNER_TEMP/published-adapters" && sha256sum -c SHA256SUMS.txt --ignore-missing)
+          tar -xzf "$RUNNER_TEMP/published-adapters/$ARTIFACT.tar.gz" -C "$(dirname "$output")" atelier-adapters
+          # The build step always validates the builder fingerprint and all
+          # executable hashes, and rebuilds if the published bundle is stale.
 
       - name: Build pinned standalone ACP adapters
         run: node scripts/build-acp-adapters.mjs "${{ matrix.target }}" "server/target/${{ matrix.target }}/release/atelier-adapters"
@@ -66,6 +116,21 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}.*
 
+      - name: Archive build cache
+        id: cache-save
+        continue-on-error: true
+        run: bash scripts/release-cache.sh save "${{ runner.temp }}/release-cache"
+
+      - name: Save cache for subsequent releases
+        if: steps.cache-save.outcome == 'success' && steps.previous-cache.outputs.name != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.previous-cache.outputs.name }}
+          path: ${{ runner.temp }}/release-cache/*.tar.gz
+          compression-level: 0
+          retention-days: 14
+
   release:
     needs: build
     runs-on: ubuntu-latest
@@ -73,9 +138,10 @@ jobs:
       contents: write
 
     steps:
-      - name: Download all artifacts
+      - name: Download Linux release package
         uses: actions/download-artifact@v7
         with:
+          name: atelier-linux-x64
           path: artifacts
 
       - name: Prepare release assets
