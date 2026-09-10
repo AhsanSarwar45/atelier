@@ -42,11 +42,23 @@
  * a reader means by "a terminal here".
  */
 
-import { useCallback, type ReactNode } from 'react';
+import {
+  useCallback,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from 'react';
 
 import { Copy, ExternalLink, Files, FolderOpen, Quote, SquareTerminal } from 'lucide-react';
 
-import { DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 import { toast } from '@/hooks/use-toast';
 import {
   FILE_ACTION_ITEMS,
@@ -55,7 +67,9 @@ import {
   type FileActions,
   type PathMoved,
 } from '@/workbench/file-actions';
-import { useOpenPath } from '@/workbench/open-path';
+import { PointerAnchor } from '@/workbench/menu-anchor';
+import { checkoutOf, useCheckouts, useOpenPath } from '@/workbench/open-path';
+import { chipUnder, openPathClicked, targetOf, type PathTarget } from '@/workbench/path-chip';
 import { relativeToRoot, referenceUnder } from '@/workbench/references';
 import { useTerminalShells } from '@/workbench/terminal-shells';
 
@@ -220,4 +234,158 @@ export function usePathMenuItems(onMoved?: PathMoved, onMade?: (path: string) =>
   );
 
   return { items, dialogs: actions.dialogs };
+}
+
+
+/** Where a menu was asked for, and what it was asked about. */
+interface Asked {
+  x: number;
+  y: number;
+  target: PathTarget;
+}
+
+/**
+ * The menu behind a right-click on a path named in a chat, a card field or a
+ * comment.
+ *
+ * It hangs off a point rather than off the chip, because the chips are drawn
+ * two different ways — one of them painted into a string of HTML, with no
+ * component to wrap — and a menu anchored to the pointer works for both without
+ * either of them knowing a menu exists.
+ *
+ * What it OFFERS is not written here. It is `items` above, which is also what
+ * the Files tree draws (`file-tree.tsx`), so a reader who learns this menu is
+ * not wrong at the other one (bw-wk5u.2). A chip always names a file — a folder
+ * is opened, never chipped — and the checkout it belongs to is looked up here
+ * because only this side of the app has been told what the checkouts are.
+ */
+function ChipMenu({ asked, menu, onClose }: { asked: Asked; menu: PathMenuItems; onClose: () => void }) {
+  const checkouts = useCheckouts();
+  return (
+    <DropdownMenu open modal={false} onOpenChange={(now) => { if (!now) onClose(); }}>
+      {/* Portalled, or the two numbers a pointer gave would be read against
+          whichever transformed ancestor happens to be over this chip rather
+          than against the viewport (`menu-anchor.tsx`, bw-5gax.1). A chip is
+          drawn in a chat, in a card field and in a comment, so there is no one
+          ancestor to check — the anchor simply leaves. */}
+      <PointerAnchor at={{ left: asked.x, top: asked.y }} />
+      <DropdownMenuContent align="start" side="bottom" sideOffset={0} className="w-56" data-testid="path-menu">
+        {menu.items({
+          absolute: asked.target.absolute,
+          root: checkoutOf(asked.target.absolute, checkouts),
+          kind: 'file',
+          line: asked.target.line,
+          endLine: asked.target.endLine,
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** How long a finger has to stay put before it counts as a right-click. */
+const HELD_LONG_ENOUGH = 500;
+
+/** What a box full of chips puts on itself, and the menu it draws beside it. */
+export interface PathActions {
+  /** Spread onto the box that holds the chips. */
+  chips: {
+    onClickCapture: (event: ReactMouseEvent) => void;
+    onContextMenu: (event: ReactMouseEvent) => void;
+    onPointerDown: (event: ReactPointerEvent) => void;
+    onPointerUp: () => void;
+    onPointerCancel: () => void;
+    onPointerMove: (event: ReactPointerEvent) => void;
+  };
+  /** Drawn beside the box, once there is a menu to draw. */
+  menu: ReactNode;
+}
+
+/**
+ * Everything a container of file chips needs, in one piece.
+ *
+ * One set of handlers on the box rather than a handler per chip: that is the
+ * arrangement the click already used (bw-khe.13), and the menu joins it so a
+ * chip painted into a string of HTML gets the same menu as a chip drawn as a
+ * component. A right-click that did not land on a chip is left entirely alone,
+ * so the browser's own menu — and the diff's copy-on-selection over it
+ * (bw-gr8y.8) — carry on as before.
+ */
+export function usePathActions(): PathActions {
+  const open = useOpenPath();
+  const [asked, setAsked] = useState<Asked | null>(null);
+  // Held out here rather than inside `ChipMenu`: choosing an item closes the
+  // menu, which unmounts `ChipMenu` — and a dialog living inside it would go
+  // with it before the reader had typed a letter.
+  const menu = usePathMenuItems();
+  const held = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Where the finger went down, so a scroll can be told from a press. */
+  const from = useRef<{ x: number; y: number } | null>(null);
+
+  const letGo = useCallback(() => {
+    from.current = null;
+    if (held.current === null) return;
+    clearTimeout(held.current);
+    held.current = null;
+  }, []);
+
+  const onClickCapture = useCallback(
+    (event: ReactMouseEvent) => {
+      openPathClicked(event, open);
+    },
+    [open],
+  );
+
+  const onContextMenu = useCallback((event: ReactMouseEvent) => {
+    const chip = chipUnder(event.target);
+    if (!chip) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setAsked({ x: event.clientX, y: event.clientY, target: targetOf(chip) });
+  }, []);
+
+  // A touch has no second button, so it says the same thing by staying still.
+  const onPointerDown = useCallback(
+    (event: ReactPointerEvent) => {
+      letGo();
+      if (event.pointerType === 'mouse') return;
+      const chip = chipUnder(event.target);
+      if (!chip) return;
+      const { clientX: x, clientY: y } = event;
+      const target = targetOf(chip);
+      from.current = { x, y };
+      held.current = setTimeout(() => {
+        held.current = null;
+        setAsked({ x, y, target });
+      }, HELD_LONG_ENOUGH);
+    },
+    [letGo],
+  );
+
+  // A finger that wandered is a scroll, not a press. A few pixels of wobble is
+  // a finger holding still, so the press survives that and nothing more.
+  const moved = useCallback(
+    (event: ReactPointerEvent) => {
+      const start = from.current;
+      if (start === null) return;
+      if (Math.abs(event.clientX - start.x) + Math.abs(event.clientY - start.y) > 10) letGo();
+    },
+    [letGo],
+  );
+
+  return {
+    chips: {
+      onClickCapture,
+      onContextMenu,
+      onPointerDown,
+      onPointerUp: letGo,
+      onPointerCancel: letGo,
+      onPointerMove: moved,
+    },
+    menu: (
+      <>
+        {asked && <ChipMenu asked={asked} menu={menu} onClose={() => setAsked(null)} />}
+        {menu.dialogs}
+      </>
+    ),
+  };
 }

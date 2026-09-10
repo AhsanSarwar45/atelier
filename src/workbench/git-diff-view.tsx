@@ -34,7 +34,7 @@ import { languageOf } from '@/workbench/colouring';
 import { DiffTable } from '@/workbench/diff-table';
 import { gitSaid, STATUS_LOOK, under } from '@/workbench/git-view';
 import { hunksToRows } from '@/workbench/line-diff';
-import { usePathActions } from '@/workbench/open-path';
+import { usePathActions } from '@/workbench/path-menu';
 import { PathChip } from '@/workbench/path-chip';
 import { useRepositoryReads } from '@/workbench/use-repository-reads';
 

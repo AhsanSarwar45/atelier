@@ -26,7 +26,7 @@ import { FILE_BADGE_CLASS, FILE_KINDS, fileKind } from "@/components/file-kinds"
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { rehypeMentions, type Piece } from "@/workbench/mentions";
-import { usePathActions } from "@/workbench/open-path";
+import { usePathActions } from "@/workbench/path-menu";
 import { resolvePath } from "@/workbench/paths";
 import { peelLines } from "@/workbench/references";
 

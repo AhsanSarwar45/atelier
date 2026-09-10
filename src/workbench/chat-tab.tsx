@@ -73,7 +73,7 @@ import { drawnRows } from '@/workbench/machine-lines';
 import { inWords, PERMISSION_MODE } from '@/workbench/machine-words';
 import { addressedBy, openableAsks, openableIn } from '@/workbench/mentions';
 import { providerMessageIsCurrent } from '@/workbench/provider-messages';
-import { usePathActions } from '@/workbench/open-path';
+import { usePathActions } from '@/workbench/path-menu';
 import { PathChip } from '@/workbench/path-chip';
 import { pathsIn, type Rooted } from '@/workbench/paths';
 import { usePathsOnDisk } from '@/workbench/paths-on-disk';

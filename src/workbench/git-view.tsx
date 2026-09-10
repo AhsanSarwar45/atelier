@@ -59,7 +59,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
 import { ApiError, git, type GitBranch, type GitChange, type GitCommit, type GitStatus } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { usePathActions } from '@/workbench/open-path';
+import { usePathActions } from '@/workbench/path-menu';
 import { useRepositoryReads } from '@/workbench/use-repository-reads';
 
 /**

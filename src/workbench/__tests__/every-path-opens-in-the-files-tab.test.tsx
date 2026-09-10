@@ -10,7 +10,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
-import { PathsOpenProvider, checkoutOf, referenceFor, usePathActions } from '@/workbench/open-path';
+import { PathsOpenProvider, checkoutOf } from '@/workbench/open-path';
+import { PATH_MENU_ITEMS, referenceOf, usePathActions } from '@/workbench/path-menu';
 import { PathChip } from '@/workbench/path-chip';
 
 const went = vi.hoisted(() => ({ to: vi.fn() }));
@@ -71,9 +72,12 @@ describe('which checkout a path belongs to', () => {
   });
 
   it('writes the reference relative to that checkout, in the one grammar', () => {
-    expect(referenceFor({ absolute: `${TREE}/src/a.ts`, line: 3, endLine: 9 }, [PROJECT, TREE]))
-      .toBe('@src/a.ts:3-9');
-    expect(referenceFor({ absolute: '/etc/hosts', line: null, endLine: null }, [PROJECT])).toBe('@/etc/hosts');
+    const ref = (absolute: string, root: string | null, line: number | null, endLine: number | null) =>
+      referenceOf({ absolute, root, kind: 'file', line, endLine });
+    expect(ref(`${TREE}/src/a.ts`, TREE, 3, 9)).toBe('@src/a.ts:3-9');
+    // A path in no checkout of ours has nothing to be made relative to, and
+    // keeps the whole of itself rather than being shortened to a lie.
+    expect(ref('/etc/hosts', null, null, null)).toBe('@/etc/hosts');
   });
 });
 
@@ -139,11 +143,10 @@ describe('the menu behind a right-click on a path', () => {
     return await screen.findByTestId('path-menu');
   }
 
-  it('offers all five places a path can go', async () => {
+  it('offers the whole vocabulary, in the order the one list gives it', async () => {
     const menu = await menuOver(`${PROJECT}/src/a.ts`, 3);
-    for (const what of ['files', 'editor', 'reveal', 'copy-path', 'copy-reference']) {
-      expect(menu.querySelector(`[data-testid="path-menu-${what}"]`)).not.toBeNull();
-    }
+    const drawn = [...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.getAttribute('data-testid'));
+    expect(drawn).toEqual([...PATH_MENU_ITEMS]);
   });
 
   it('opens the file in the Files tab from the menu', async () => {
