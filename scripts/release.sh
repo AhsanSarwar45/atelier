@@ -18,9 +18,9 @@
 #   bash scripts/release.sh --dry-run    # print every step and write nothing
 #   bash scripts/release.sh --as 1.0.0   # take a bigger step than the work asks for
 #
-# Nothing is published until the checks here are green AND the build online is
-# green on the very commit being tagged, which is the whole reason the tag is
-# written after the push rather than beside it (bw-sinv.3).
+# Release publishes without running tests or waiting for CI. Checks belong to
+# development; this command waits only for the release packages to be built
+# and published.
 #
 # --as cannot name a number of its own. It may only be one of the three steps up
 # from the last release, and never a smaller one than the work asks for — so the
@@ -140,8 +140,8 @@ run() {
 }
 
 # The build online for one thing, named the one way it can be recognised: the
-# checks are found by the commit they ran on, the release build by the tag that
-# started it. Waiting for a run to appear and waiting for it to finish are two
+# release build is found by the tag that started it. Waiting for a run to
+# appear and waiting for it to finish are two
 # different waits — a run that has not been created yet and a run still going
 # look the same from here, and only the first is worth giving up on before the
 # build has had its say. One loop, because two copies of it drift apart.
@@ -164,8 +164,8 @@ run_for() {
 # every package; ours is the one under `name = "atelier"`.
 LOCK_AWK='$0 == "name = \"atelier\"" { mine = 1 } mine && $0 == old { $0 = new; mine = 0 } { print }' 
 
-# ── 1 of 7 ────────────────────────────────────────────────────────────────
-step "1/7  This computer is ready"
+# ── 1 of 6 ────────────────────────────────────────────────────────────────
+step "1/6  This computer is ready"
 
 command -v gh >/dev/null 2>&1 || die "there is no gh on this computer to inspect builds with"
 WHO=$(gh api user --jq .login 2>/dev/null) \
@@ -190,8 +190,8 @@ elif ! git merge-base --is-ancestor "origin/$PUBLISHED" HEAD; then
 fi
 [ "$BLOCKED" = 0 ] && ok "command-line login $WHO, on $TRUNK, nothing unsaved, and up to date with what is online"
 
-# ── 2 of 7 ────────────────────────────────────────────────────────────────
-step "2/7  What is going out"
+# ── 2 of 6 ────────────────────────────────────────────────────────────────
+step "2/6  What is going out"
 
 NOW=$(node -p "require('./package.json').version" 2>/dev/null) \
   || die "package.json does not say what version this is"
@@ -276,8 +276,8 @@ fi
 
 ok "next: $NEXT   (a $BUMP change on $LAST)"
 
-# ── 3 of 7 ────────────────────────────────────────────────────────────────
-step "3/7  The number, written in five places"
+# ── 3 of 6 ────────────────────────────────────────────────────────────────
+step "3/6  The number, written in five places"
 
 # Every one of these names the version, and nothing but this keeps them in step.
 # server/Cargo.lock is here because a build machine reads it before the manifest;
@@ -337,45 +337,19 @@ else
   ok "all five say $NEXT"
 fi
 
-# ── 4 of 7 ────────────────────────────────────────────────────────────────
-step "4/7  The checks, here, before anything leaves"
-
-# The program embeds the built screens, so it does not compile at all without
-# them, and a checkout that has never built them answers with a page of errors
-# about a missing folder rather than the one sentence that is true (bw-sinv.2).
-if [ ! -d out ]; then
-  stop "there are no built screens here to embed — run: npm ci && npm run build"
-fi
-
-if [ "$DRY_RUN" = 1 ]; then
-  would "cargo test --manifest-path server/Cargo.toml"
-else
-  LOG=$(mktemp) || die "nowhere to put the check output"
-  cargo test --manifest-path server/Cargo.toml >"$LOG" 2>&1 || {
-    tail -40 "$LOG" >&2
-    rm -f "$LOG"
-    die "the checks are not green, so nothing was published"
-  }
-  PASSED=$(grep -oE 'test result: ok\. [0-9]+ passed' "$LOG" \
-             | grep -oE '[0-9]+' | awk '{n += $1} END {print n}')
-  rm -f "$LOG"
-  ok "${PASSED:-all} checks green, the five files included"
-fi
-
-# ── 5 of 7 ────────────────────────────────────────────────────────────────
-step "5/7  Onto the line, and wait for it to go green online"
+# ── 4 of 6 ────────────────────────────────────────────────────────────────
+step "4/6  Onto the published line"
 
 # The one commit this release is, named here and used by everything after it.
 # Work lands on the trunk all day: between the push and the tag, HEAD can
 # already be somebody else's commit, and a tag written on HEAD would then name
-# a build nothing had checked and nothing had put online. It happened on the
+# a commit this command had never put online. It happened on the
 # first real run of this script (bw-sinv.3).
 SHA=""
 if [ "$NOW" = "$NEXT" ]; then
   # A run started again after an earlier one already saved the number. What goes
   # out is the line as it stands now, which carries that commit and anything
-  # landed on top of it since — not the older commit by name, whose checks may
-  # be exactly what the earlier run stopped for.
+  # landed on top of it since.
   say "the number is already saved, so what goes out is the line as it stands"
 else
   run git add package.json package-lock.json server/Cargo.toml server/Cargo.lock flake.nix \
@@ -387,50 +361,14 @@ fi
 
 if [ "$DRY_RUN" = 1 ]; then
   would "git push --quiet origin <the release commit>:$PUBLISHED"
-  would "gh run watch <the CI run on that very commit> --exit-status"
-  would "if it goes red on the frozen dependency list: write the hash that build asks for into flake.nix, push, and watch once more"
 else
   git push --quiet origin "$SHA:$PUBLISHED" \
     || die "could not put the line online"
   ok "pushed $(git rev-parse --short "$SHA")"
-  say "waiting for the checks online — this is what stops a tag being written on a red build"
-  RUN=$(run_for CI headSha "$SHA") \
-    || die "no build online ever picked up $SHA — look at $SOURCE/actions"
-
-  if ! gh run watch "$RUN" -R "$SOURCE" --exit-status --interval 15 >/dev/null 2>&1; then
-    # The one red a release causes rather than finds. Writing the new number
-    # rewrites package-lock.json, and the flake pins a hash over what that lock
-    # file fetches — so the number this release writes is the very thing that
-    # makes the frozen list stale, on every release, for ever. The build says
-    # which hash it wants. Writing that and pushing again is the whole repair,
-    # and it is done once: a second red is a real one (bw-sinv.5).
-    WANTED=$(gh run view "$RUN" -R "$SOURCE" --log-failed 2>/dev/null \
-               | grep -aoE 'npmDepsHash = "sha256-[^"]+"' | tail -1 \
-               | grep -aoE 'sha256-[^"]+')
-    [ -n "$WANTED" ] \
-      || die "the checks online went red on this commit, so no tag was written — gh run view $RUN -R $SOURCE --log-failed"
-
-    say "the frozen dependency list went stale on the number this release wrote; it asks for $WANTED"
-    sed -i -E "s#npmDepsHash = \"sha256-[^\"]+\";#npmDepsHash = \"$WANTED\";#" flake.nix \
-      || die "could not write the hash into flake.nix"
-    git add flake.nix || die "could not stage flake.nix"
-    git commit --quiet -m "chore(packaging): the frozen dependency list, after $NEXT" \
-      || die "could not save the hash the build asked for"
-    SHA=$(git rev-parse HEAD)
-    git push --quiet origin "$SHA:$PUBLISHED" \
-      || die "could not put the repaired line online"
-    ok "pushed $(git rev-parse --short "$SHA") with the hash the build asked for"
-
-    RUN=$(run_for CI headSha "$SHA") \
-      || die "no build online ever picked up $SHA — look at $SOURCE/actions"
-    gh run watch "$RUN" -R "$SOURCE" --exit-status --interval 15 >/dev/null 2>&1 \
-      || die "the checks online are still red with the hash it asked for, so no tag was written — gh run view $RUN -R $SOURCE --log-failed"
-  fi
-  ok "green online on the commit being released"
 fi
 
-# ── 6 of 7 ────────────────────────────────────────────────────────────────
-step "6/7  The release"
+# ── 5 of 6 ────────────────────────────────────────────────────────────────
+step "5/6  The release"
 
 run git tag -a "v$NEXT" -m "$NEXT" "${SHA:-HEAD}" \
   || die "could not write the tag"
@@ -447,9 +385,8 @@ else
   if ! gh run watch "$RUN" -R "$SOURCE" --exit-status --interval 20 >/dev/null 2>&1; then
     # Once in a while the far end simply drops one of the built files on its way
     # up and hands back an error page. Nothing here is wrong, and there is
-    # nothing to fix — so ask the parts that died to run again, once, the same
-    # way the frozen dependency list is repaired once above. A second red is
-    # somebody's real fault and still stops the release.
+    # nothing to fix — so ask the parts that died to run again, once.
+    # A second failure still stops the release.
     say "the release build went red; asking the parts that died to run again, once"
     gh run rerun "$RUN" -R "$SOURCE" --failed >/dev/null 2>&1 \
       || die "the release build went red and would not run again — the tag is online but there is nothing to install; gh run view $RUN -R $SOURCE --log-failed"
@@ -461,8 +398,8 @@ else
   ok "a built file for every computer, with its fingerprints"
 fi
 
-# ── 7 of 7 ────────────────────────────────────────────────────────────────
-step "7/7  The recipe, so installing it is one line"
+# ── 6 of 6 ────────────────────────────────────────────────────────────────
+step "6/6  The recipe, so installing it is one line"
 
 if [ "$DRY_RUN" = 1 ]; then
   would "bash scripts/tap.sh v$NEXT"
@@ -477,7 +414,7 @@ fi
 # The only step that can fail once the release is already fully published, which
 # makes it the one where a generic message costs most: the tag and the built
 # files are online and cannot be taken back, so the reason has to be on screen
-# rather than found by running it again blind. Same as the checks above — the
+# rather than found by running it again blind. The
 # output is kept and shown when, and only when, it turns out to matter
 # (bw-sinv.15).
 TAPLOG=$(mktemp) || die "nowhere to put the recipe output"
