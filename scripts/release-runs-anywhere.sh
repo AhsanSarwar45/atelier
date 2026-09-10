@@ -57,12 +57,11 @@ if [ ! -x "$BINARY" ]; then
 fi
 pass "built: $(basename "$BINARY"), $(du -h "$BINARY" | cut -f1)"
 
-# The four release recipes must all package exactly the Rust program. This is
-# checked from the workflow itself so the proof covers macOS ARM, macOS Intel,
-# Linux and Windows even when this script runs on only one of those systems.
+# Releases currently publish the Linux x64 package. Check its archive recipe
+# against the workflow used to produce it.
 say "Release archive recipes"
-ARCHIVE_RECIPES="$(sed -n '/name: Bundle archive (Unix)/,/name: Upload artifact/p' "$REPO/.github/workflows/release.yml")"
-for artifact in atelier-darwin-arm64 atelier-darwin-x64 atelier-linux-x64 atelier-win-x64; do
+ARCHIVE_RECIPES="$(sed -n '/name: Bundle Linux archive/,/name: Upload artifact/p' "$REPO/.github/workflows/release.yml")"
+for artifact in atelier-linux-x64; do
   if grep -q "artifact: $artifact" "$REPO/.github/workflows/release.yml"; then
     pass "$artifact has a release recipe"
   else

@@ -7,16 +7,8 @@ class Atelier < Formula
   # Chat orchestration is implemented in Rust. The provider adapters are pinned,
   # self-contained executables, so Node/npm/Python remain build-time-only tools.
 
-  on_macos do
-    on_arm do
-      url "https://github.com/AhsanSarwar45/atelier/releases/download/v__VERSION__/atelier-darwin-arm64.tar.gz"
-      sha256 "__ARM_SHA__"
-    end
-    on_intel do
-      url "https://github.com/AhsanSarwar45/atelier/releases/download/v__VERSION__/atelier-darwin-x64.tar.gz"
-      sha256 "__INTEL_SHA__"
-    end
-  end
+  depends_on :linux
+  depends_on arch: :x86_64
 
   on_linux do
     on_intel do

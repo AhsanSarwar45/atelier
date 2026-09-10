@@ -377,29 +377,20 @@ run git push --quiet origin "v$NEXT" \
 
 if [ "$DRY_RUN" = 1 ]; then
   would "gh run watch <the Release build for v$NEXT> --exit-status"
-  would "if it goes red: gh run rerun <that build> --failed, then watch it once more"
 else
-  ok "v$NEXT is online, and the built files are being made"
+  ok "Tag v$NEXT pushed. Building the Linux package; installation is not ready yet."
   RUN=$(run_for Release headBranch "v$NEXT") \
-    || die "no build ever picked up v$NEXT — look at $SOURCE/actions"
-  if ! gh run watch "$RUN" -R "$SOURCE" --exit-status --interval 20 >/dev/null 2>&1; then
-    # Once in a while the far end simply drops one of the built files on its way
-    # up and hands back an error page. Nothing here is wrong, and there is
-    # nothing to fix — so ask the parts that died to run again, once.
-    # A second failure still stops the release.
-    say "the release build went red; asking the parts that died to run again, once"
-    gh run rerun "$RUN" -R "$SOURCE" --failed >/dev/null 2>&1 \
-      || die "the release build went red and would not run again — the tag is online but there is nothing to install; gh run view $RUN -R $SOURCE --log-failed"
-    sleep 15
-    gh run watch "$RUN" -R "$SOURCE" --exit-status --interval 20 >/dev/null 2>&1 \
-      || die "the release build went red twice — the tag is online but there is nothing to install; gh run view $RUN -R $SOURCE --log-failed"
-    ok "it went green the second time"
+    || die "No release build started for v$NEXT. See https://github.com/$SOURCE/actions"
+  if ! gh run watch "$RUN" -R "$SOURCE" --exit-status --interval 20; then
+    say "Release build did not complete successfully. Fetching failed build logs:"
+    gh run view "$RUN" -R "$SOURCE" --log-failed >&2
+    die "Linux package publication failed. See https://github.com/$SOURCE/actions/runs/$RUN"
   fi
-  ok "a built file for every computer, with its fingerprints"
+  ok "Linux release package and checksum published."
 fi
 
 # ── 6 of 6 ────────────────────────────────────────────────────────────────
-step "6/6  The recipe, so installing it is one line"
+step "6/6  Update Homebrew for Linux"
 
 if [ "$DRY_RUN" = 1 ]; then
   would "bash scripts/tap.sh v$NEXT"

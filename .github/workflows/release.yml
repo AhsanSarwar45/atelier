@@ -16,18 +16,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact: atelier-darwin-arm64
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact: atelier-darwin-x64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: atelier-linux-x64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: atelier-win-x64
 
     runs-on: ${{ matrix.os }}
 
@@ -64,18 +55,10 @@ jobs:
       - name: Build pinned standalone ACP adapters
         run: node scripts/build-acp-adapters.mjs "${{ matrix.target }}" "server/target/${{ matrix.target }}/release/atelier-adapters"
 
-      - name: Bundle archive (Unix)
-        if: runner.os != 'Windows'
+      - name: Bundle Linux archive
         run: |
           tar -czf "${{ matrix.artifact }}.tar.gz" \
             -C "server/target/${{ matrix.target }}/release" atelier atelier-adapters
-
-      - name: Bundle archive (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          tar -czf "${{ matrix.artifact }}.tar.gz" -C "server/target/${{ matrix.target }}/release" atelier.exe atelier-adapters
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -133,14 +116,10 @@ jobs:
           fi
           TAG="${{ inputs.version || github.ref_name }}"
           VERSION="${TAG#v}"
-          ARM=$(sha256sum release/atelier-darwin-arm64.tar.gz | cut -d' ' -f1)
-          INTEL=$(sha256sum release/atelier-darwin-x64.tar.gz | cut -d' ' -f1)
           LINUX=$(sha256sum release/atelier-linux-x64.tar.gz | cut -d' ' -f1)
           git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/AhsanSarwar45/homebrew-atelier.git" tap
           mkdir -p tap/Formula
           sed -e "s|__VERSION__|${VERSION}|g" \
-              -e "s|__ARM_SHA__|${ARM}|g" \
-              -e "s|__INTEL_SHA__|${INTEL}|g" \
               -e "s|__LINUX_SHA__|${LINUX}|g" \
               repo/packaging/homebrew/atelier.rb.tmpl > tap/Formula/atelier.rb
           cd tap
