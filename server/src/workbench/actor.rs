@@ -562,7 +562,13 @@ fn persist_event(
     event
         .fields
         .insert("seq".to_string(), serde_json::json!(seq));
-    if !store.append_event(&event)? {
+    let mut durable = event.clone();
+    if durable.kind == EventKind::SessionMenu {
+        durable
+            .fields
+            .retain(|field, _| matches!(field.as_str(), "sessionId" | "seq" | "at"));
+    }
+    if !store.append_event(&durable)? {
         return Ok(None);
     }
     apply_session_fact(store, session_id, &event)?;
@@ -622,6 +628,49 @@ fn persist_event(
     Ok(Some((seq, event)))
 }
 
+fn view_with_live_menu(mut events: Vec<Event>, live: Option<&Event>) -> Vec<Event> {
+    events.retain(|event| event.kind != EventKind::SessionMenu);
+    if let Some(menu) = live {
+        events.push(menu.clone());
+        events.sort_by_key(|event| event.fields.get("seq").and_then(serde_json::Value::as_i64));
+    }
+    events
+}
+
+fn steering_menu(
+    store: &Store,
+    live_menus: &HashMap<String, Event>,
+    session_id: &str,
+) -> rusqlite::Result<serde_json::Value> {
+    let selected = store.steering_menu(session_id)?;
+    let Some(live) = live_menus.get(session_id) else {
+        return Ok(selected);
+    };
+    let mut menu = live.fields.clone();
+    let selected = selected["configOptions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|patch| {
+            Some((
+                patch["id"].as_str()?.to_string(),
+                patch["currentValue"].clone(),
+            ))
+        })
+        .collect::<HashMap<_, _>>();
+    if let Some(options) = menu
+        .get_mut("configOptions")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for option in options {
+            if let Some(current) = option["id"].as_str().and_then(|id| selected.get(id)) {
+                option["currentValue"] = current.clone();
+            }
+        }
+    }
+    Ok(serde_json::Value::Object(menu))
+}
+
 fn publish_event(
     global: &broadcast::Sender<StoreUpdate>,
     sessions: &Arc<Mutex<HashMap<String, broadcast::Sender<SessionUpdate>>>>,
@@ -647,12 +696,22 @@ fn run(
     sessions: Arc<Mutex<HashMap<String, broadcast::Sender<SessionUpdate>>>>,
 ) {
     let mut agent_lifecycles: HashMap<String, super::lifecycle::AgentLifecycle> = HashMap::new();
+    // Provider catalogues describe the installed provider right now. They are
+    // broadcast and replayed while this process is alive, but never restored
+    // from a chat's durable history.
+    let mut live_menus: HashMap<String, Event> = HashMap::new();
     while let Some(command) = commands.blocking_recv() {
         match command {
             Command::CreateSession(session, reply) => {
                 respond(reply, store.create_session(&session))
             }
-            Command::DeleteSession(id, reply) => respond(reply, store.delete_session(&id)),
+            Command::DeleteSession(id, reply) => {
+                let result = store.delete_session(&id);
+                if result.is_ok() {
+                    live_menus.remove(&id);
+                }
+                respond(reply, result)
+            }
             Command::GetSession(id, reply) => respond(reply, store.get_session(&id)),
             Command::SessionByExternalId(id, reply) => {
                 respond(reply, store.session_by_external_id(&id))
@@ -706,6 +765,9 @@ fn run(
                     });
                 match result {
                     Ok(Some((session_id, seq, event))) => {
+                        if event.kind == EventKind::SessionMenu {
+                            live_menus.insert(session_id.clone(), event.clone());
+                        }
                         publish_event(&global, &sessions, session_id, seq, event.clone());
                         let _ = reply.send(Ok(Some(event)));
                     }
@@ -762,6 +824,11 @@ fn run(
                 match result {
                     Ok(stored) => {
                         let count = stored.len();
+                        for (session_id, _, event) in &stored {
+                            if event.kind == EventKind::SessionMenu {
+                                live_menus.insert(session_id.clone(), event.clone());
+                            }
+                        }
                         if replay {
                             let mut ranges = HashMap::<String, (i64, i64, Event)>::new();
                             for (session_id, seq, event) in stored {
@@ -804,7 +871,16 @@ fn run(
                 }
             }
             Command::EventsSince(session_id, since, reply) => {
-                respond(reply, store.events_since(&session_id, since))
+                let result = store.events_since(&session_id, since).map(|events| {
+                    let live = live_menus.get(&session_id).filter(|menu| {
+                        menu.fields
+                            .get("seq")
+                            .and_then(serde_json::Value::as_i64)
+                            .is_some_and(|seq| seq > since)
+                    });
+                    view_with_live_menu(events, live)
+                });
+                respond(reply, result)
             }
             Command::EventCount(session_id, reply) => {
                 respond(reply, store.event_count(&session_id))
@@ -842,15 +918,21 @@ fn run(
                 respond(reply, store.summary_runs(&project, limit))
             }
             Command::ViewEvents(session_id, reply) => {
-                respond(reply, store.view_events(&session_id))
+                let result = store
+                    .view_events(&session_id)
+                    .map(|events| view_with_live_menu(events, live_menus.get(&session_id)));
+                respond(reply, result)
             }
             Command::SteeringMenu(session_id, reply) => {
-                respond(reply, store.steering_menu(&session_id))
+                respond(reply, steering_menu(&store, &live_menus, &session_id))
             }
             Command::Snapshot(session_id, reply) => {
                 let result = (|| {
                     let started = std::time::Instant::now();
-                    let history = store.view_events(&session_id)?;
+                    let history = view_with_live_menu(
+                        store.view_events(&session_id)?,
+                        live_menus.get(&session_id),
+                    );
                     let after_history = started.elapsed();
                     let page = store.transcript_items(&session_id, None, 40)?;
                     let after_page = started.elapsed();
@@ -1164,7 +1246,27 @@ mod tests {
             .history
             .iter()
             .any(|event| event.kind == EventKind::SessionMenu
-                && event.fields["seq"] == snapshot.page.newest_seq));
+                && event.fields["seq"] == snapshot.page.newest_seq
+                && event.fields["models"][0]["id"] == "gpt-5"));
+
+        drop(database);
+        let durable = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let stored = durable.view_events("chat-1").unwrap();
+        let menu = stored
+            .iter()
+            .find(|event| event.kind == EventKind::SessionMenu)
+            .unwrap();
+        assert!(menu.fields.get("models").is_none());
+        drop(durable);
+
+        let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
+        assert!(database
+            .snapshot("chat-1".into())
+            .await
+            .unwrap()
+            .history
+            .iter()
+            .all(|event| event.kind != EventKind::SessionMenu));
     }
 
     #[tokio::test]

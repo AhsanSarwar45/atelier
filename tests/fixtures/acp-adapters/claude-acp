@@ -221,7 +221,7 @@ async function load(id, params) {
         params: { sessionId: params.sessionId, update: { sessionUpdate, content: { type: 'text', text } } },
       });
     }
-    say({ id, result: {} });
+    say({ id, result: { configOptions: configOptions() } });
 }
 
 /**

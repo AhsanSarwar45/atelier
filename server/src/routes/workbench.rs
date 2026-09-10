@@ -2523,7 +2523,7 @@ mod tests {
         let chunk = first_chunk(response).await;
         assert!(chunk.contains("event: snapshot"), "{chunk}");
         assert!(chunk.contains("still here"), "{chunk}");
-        assert!(chunk.contains("GPT-5"), "{chunk}");
+        assert!(!chunk.contains("GPT-5"), "{chunk}");
         assert!(!chunk.contains("project-only"), "{chunk}");
     }
 

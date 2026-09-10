@@ -1160,7 +1160,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn imported_menu_is_durable_deduplicated_and_refreshable() {
+    async fn imported_menu_is_live_and_refreshable() {
         let directory = tempfile::tempdir().unwrap();
         let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
         let session = imported_session();
@@ -1186,7 +1186,6 @@ mod tests {
                 .len(),
             1
         );
-
         append_import_menu(
             &database,
             &session,
@@ -1198,9 +1197,9 @@ mod tests {
         )
         .await
         .unwrap();
-        let events = database.events_since(session.id, 0).await.unwrap();
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[1].fields["models"][0]["id"], "gpt-6");
+        let events = database.events_since(session.id.clone(), 0).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].fields["models"][0]["id"], "gpt-6");
     }
 
     #[tokio::test]

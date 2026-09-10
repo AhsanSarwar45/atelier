@@ -4,6 +4,8 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
+import { restartInstance } from './restart';
+
 /**
  * The model menu is the active provider's advertised catalog. Atelier does not
  * carry a second release list or provider runtime that can become stale or
@@ -34,6 +36,7 @@ const FIXTURE = join(__dirname, '..', '.workbench-run-model-catalog');
 /** The width this is looked at, with both columns open. */
 const SCREEN = { width: 1440, height: 1000 };
 const PROVIDERS = ['claude', 'codex'] as const;
+const BINARY = process.env.ATELIER_BINARY ?? join(__dirname, '..', '..', 'server', 'target', 'debug', 'atelier');
 
 function installProviderCatalog(brand: typeof PROVIDERS[number], models: string[]) {
   writeFileSync(join(process.env.WORKBENCH_E2E_RUN!, `${brand}-models.json`), JSON.stringify(models));
@@ -114,8 +117,8 @@ test.describe('the model menu', () => {
       "SELECT json FROM event WHERE session_id = ? AND type = 'session.menu' ORDER BY seq DESC LIMIT 1",
     ).get(sessionId) as { json: string };
     database.close();
-    const advertised = (JSON.parse(row.json) as { models: { value: string }[] }).models.map((choice) => choice.value);
-    expect(values).toEqual(advertised);
+    const durableMenu = JSON.parse(row.json) as Record<string, unknown>;
+    expect(durableMenu.models, 'the live provider catalog was persisted in the chat').toBeUndefined();
     expect(values).toEqual([`${brand}-installed-old`, `${brand}-installed-other`]);
     for (const option of await options.all()) await expect(option).not.toHaveText('');
 
@@ -144,5 +147,52 @@ test.describe('the model menu', () => {
     await page.getByTestId('model-picker-menu').screenshot({
       path: `${SHOTS}/${brand === 'claude' ? 'model-menu-provider-catalog' : 'model-menu-codex-provider-catalog'}.png`,
     });
+  });
+
+  test('an existing Codex chat refreshes its catalog after the installed provider changes', async ({ page, request }) => {
+    installProviderCatalog('codex', ['codex-installed-old', 'codex-installed-other']);
+    const project = await fixtureProject(request);
+    await page.goto(`/project?id=${project.id}&tab=chat`);
+    await page.getByTestId('new-chat-tool').click();
+    const asking = page.getByTestId('new-chat-provider-dialog');
+    await asking.waitFor({ timeout: HELLO_MS });
+    await page.getByTestId('new-chat-provider-codex').click();
+    await asking.getByRole('button', { name: 'Start chat' }).click();
+    await page.waitForURL((url) => Boolean(url.searchParams.get('chat')), { timeout: HELLO_MS });
+    const existingChat = page.url();
+    const model = page.getByTestId('model-picker');
+    await expect(model).toHaveAttribute('data-current', 'codex-installed-old', { timeout: HELLO_MS });
+
+    installProviderCatalog('codex', ['gpt-6-astra', 'codex-installed-old']);
+    await restartInstance({
+      binary: BINARY,
+      serverPort: Number(process.env.BEADS_WEB_PORT),
+      sidecarPort: Number(process.env.BEADS_WORKBENCH_PORT),
+      env: process.env,
+      healthUrl: `${process.env.BEADS_E2E_URL}/api/workbench/health`,
+      logFile: join(process.env.WORKBENCH_E2E_RUN!, 'server.log'),
+    });
+    await page.goto(existingChat);
+    await model.click();
+    const options = page.getByTestId('model-picker-option');
+    await expect(options).toHaveCount(2, { timeout: HELLO_MS });
+    await expect(options.first()).toHaveAttribute('data-value', 'gpt-6-astra');
+    await expect(model).toHaveAttribute('data-current', 'codex-installed-old');
+    await page.getByTestId('model-picker-menu').screenshot({
+      path: `${SHOTS}/model-menu-existing-chat-refreshed.png`,
+    });
+
+    const sessionId = new URL(existingChat).searchParams.get('chat')!;
+    const database = new DatabaseSync(join(process.env.ATELIER_DATA_DIR!, 'workbench.db'), { readOnly: true });
+    const rows = database.prepare(
+      "SELECT json FROM event WHERE session_id = ? AND type = 'session.menu' ORDER BY seq",
+    ).all(sessionId) as { json: string }[];
+    database.close();
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      const durableMenu = JSON.parse(row.json) as Record<string, unknown>;
+      expect(durableMenu.models, 'the existing chat retained a provider catalog').toBeUndefined();
+      expect(durableMenu.configOptions, 'the existing chat retained provider options').toBeUndefined();
+    }
   });
 });

@@ -99,6 +99,14 @@ const LEGACY_MIGRATIONS: &[&str] = &[
        );
        CREATE INDEX summary_run_by_project ON summary_run(project, at);"#,
     "ALTER TABLE session ADD COLUMN effort TEXT;",
+    r#"UPDATE event
+       SET json = json_object(
+         'type', 'session.menu',
+         'sessionId', session_id,
+         'seq', seq,
+         'at', at
+       )
+       WHERE type = 'session.menu';"#,
 ];
 
 /// The native owner of the existing workbench database.
@@ -952,104 +960,36 @@ fn held_in_its_project(session: &Session) -> bool {
         .collect()
     }
 
-    /// Newest durable steering catalog for this session's provider.
+    /// Durable values selected for provider-owned config options.
     ///
-    /// Menus are emitted per chat, but model/mode/effort catalogs belong to
-    /// the provider. A migrated chat can predate `session.menu`; borrowing only
-    /// these provider-wide fields keeps its controls useful without leaking
-    /// project-specific commands, skills, or agent definitions across chats.
+    /// The provider's available options are deliberately absent: they are a
+    /// property of the installed provider and live only in the database actor.
+    /// A reconnect uses these value-only patches to restore the chat's choices
+    /// onto the provider's newly advertised definitions.
     pub fn steering_menu(&self, session_id: &str) -> rusqlite::Result<Value> {
-        let brand = self.connection.query_row(
-            "SELECT brand FROM session WHERE id=?1",
-            [session_id],
-            |row| row.get::<_, String>(0),
-        )?;
-        // Search the provider's newest chats, current chat first, through the
-        // existing per-session event index. The former join ordered the entire
-        // multi-provider event table by rowid; a cold 2 GB store could spend
-        // seconds finding a fallback that an ordinary chat did not need.
-        let mut sessions = self.connection.prepare(
-            r#"SELECT id FROM session WHERE brand=?1
-               ORDER BY (id=?2) DESC, COALESCE(last_spoke_at,last_active_at) DESC
-               LIMIT 50"#,
-        )?;
-        let sessions = sessions
-            .query_map(params![brand, session_id], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        let mut latest = self.connection.prepare(
+        let mut selected = HashMap::<String, Value>::new();
+        let mut statement = self.connection.prepare(
             r#"SELECT json FROM event
-               WHERE session_id=?1 AND type='session.menu'
-               ORDER BY seq DESC LIMIT 1"#,
+               WHERE session_id=?1 AND type='session.pinned'
+               ORDER BY seq DESC"#,
         )?;
-        let mut menu = serde_json::Map::new();
-        for session in sessions {
-            let is_current = session == session_id;
-            let Some(row) = latest
-                .query_row([session.as_str()], |row| row.get::<_, String>(0))
-                .optional()?
-            else {
-                continue;
-            };
-            let value: Value = serde_json::from_str(&row).map_err(json_error)?;
-            if is_current {
-                for field in [
-                    "commands",
-                    "skills",
-                    "agentDefinitions",
-                    "agentControls",
-                    "configOptions",
-                ] {
-                    if value[field].is_array() {
-                        menu.insert(field.into(), value[field].clone());
-                    }
-                }
-            }
-            for field in ["models", "permissionModes", "efforts", "collaborationModes"] {
-                if menu
-                    .get(field)
-                    .is_some_and(|held| held.as_array().is_some_and(|rows| !rows.is_empty()))
-                {
-                    continue;
-                }
-                if value[field].as_array().is_some_and(|rows| !rows.is_empty()) {
-                    menu.insert(field.into(), value[field].clone());
-                }
-            }
-            if ["models", "permissionModes", "efforts", "collaborationModes"]
-                .iter()
-                .all(|field| {
-                    menu.get(*field)
-                        .is_some_and(|held| held.as_array().is_some_and(|rows| !rows.is_empty()))
-                })
-            {
-                break;
-            }
-        }
-        if let Some(options) = menu.get_mut("configOptions").and_then(Value::as_array_mut) {
-            let mut selected = HashMap::<String, Value>::new();
-            let mut statement = self.connection.prepare(
-                r#"SELECT json FROM event
-                   WHERE session_id=?1 AND type='session.pinned'
-                   ORDER BY seq DESC"#,
-            )?;
-            let rows = statement.query_map([session_id], |row| row.get::<_, String>(0))?;
-            for row in rows {
-                let event: Value = serde_json::from_str(&row?).map_err(json_error)?;
-                for patch in event["configOptions"].as_array().into_iter().flatten() {
-                    if let Some(id) = patch["id"].as_str() {
-                        selected
-                            .entry(id.to_string())
-                            .or_insert_with(|| patch["currentValue"].clone());
-                    }
-                }
-            }
-            for option in options {
-                if let Some(current) = option["id"].as_str().and_then(|id| selected.get(id)) {
-                    option["currentValue"] = current.clone();
+        let rows = statement.query_map([session_id], |row| row.get::<_, String>(0))?;
+        for row in rows {
+            let event: Value = serde_json::from_str(&row?).map_err(json_error)?;
+            for patch in event["configOptions"].as_array().into_iter().flatten() {
+                if let Some(id) = patch["id"].as_str() {
+                    selected
+                        .entry(id.to_string())
+                        .or_insert_with(|| patch["currentValue"].clone());
                 }
             }
         }
-        Ok(Value::Object(menu))
+        let mut options = selected
+            .into_iter()
+            .map(|(id, current)| json!({"id": id, "currentValue": current}))
+            .collect::<Vec<_>>();
+        options.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
+        Ok(json!({"configOptions": options}))
     }
 
     pub fn open_message(
@@ -2633,7 +2573,7 @@ mod tests {
     }
 
     #[test]
-    fn steering_menu_reuses_only_provider_wide_controls() {
+    fn steering_menu_never_restores_provider_catalogs() {
         let directory = tempfile::tempdir().unwrap();
         let store = Store::open(&directory.path().join("workbench.db")).unwrap();
         for row in [
@@ -2660,19 +2600,60 @@ mod tests {
         .unwrap();
         assert!(store.append_event(&menu).unwrap());
 
-        let inherited = store.steering_menu("migrated").unwrap();
-        assert_eq!(inherited["models"][0]["value"], "gpt-5");
-        assert_eq!(inherited["permissionModes"][0], "on-request");
-        assert!(inherited.get("commands").is_none());
-        assert!(inherited.get("skills").is_none());
-        assert!(inherited.get("agentDefinitions").is_none());
-        assert!(inherited.get("agentControls").is_none());
-        let exact = store.steering_menu("catalog").unwrap();
-        assert_eq!(exact["commands"][0]["name"], "project-only");
-        assert_eq!(exact["skills"][0], "private-skill");
-        assert_eq!(exact["agentDefinitions"][0]["name"], "private-agent");
-        assert_eq!(exact["agentControls"], json!(["stop", "say"]));
-        assert_eq!(store.steering_menu("other").unwrap(), json!({}));
+        assert_eq!(
+            store.steering_menu("migrated").unwrap(),
+            json!({"configOptions": []})
+        );
+        assert_eq!(
+            store.steering_menu("catalog").unwrap(),
+            json!({"configOptions": []})
+        );
+        assert_eq!(
+            store.steering_menu("other").unwrap(),
+            json!({"configOptions": []})
+        );
+    }
+
+    #[test]
+    fn migration_removes_catalogs_already_saved_in_chat_history() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        let store = Store::open(&path).unwrap();
+        store
+            .create_session(&session(
+                "chat",
+                "codex",
+                Some("thread"),
+                "2026-08-20T00:00:00Z",
+            ))
+            .unwrap();
+        let menu: Event = serde_json::from_value(json!({
+            "type":"session.menu", "sessionId":"chat", "seq":1, "at":"now",
+            "models":[{"value":"stale-model"}],
+            "configOptions":[{"id":"model","options":[{"value":"stale-model"}]}]
+        }))
+        .unwrap();
+        assert!(store.append_event(&menu).unwrap());
+        drop(store);
+
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute(
+                "UPDATE schema_version SET version=?1",
+                [LEGACY_MIGRATIONS.len() as i64 - 1],
+            )
+            .unwrap();
+        drop(connection);
+
+        let migrated = Store::open(&path).unwrap();
+        let menu = migrated
+            .view_events("chat")
+            .unwrap()
+            .into_iter()
+            .find(|event| event.kind == EventKind::SessionMenu)
+            .unwrap();
+        assert!(menu.fields.get("models").is_none());
+        assert!(menu.fields.get("configOptions").is_none());
     }
 
     #[test]
@@ -2705,8 +2686,8 @@ mod tests {
             true
         );
         assert_eq!(
-            store.steering_menu("two").unwrap()["configOptions"][0]["currentValue"],
-            false
+            store.steering_menu("two").unwrap()["configOptions"],
+            json!([])
         );
     }
 
