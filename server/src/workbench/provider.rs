@@ -111,10 +111,11 @@ fn delegated_claude_chat(config: &Path, session: &Session) -> bool {
     if session.brand != "claude" {
         return false;
     }
+    let config = super::profiles::chat_dir("claude", session.profile.as_deref(), config);
     session
         .external_id
         .as_deref()
-        .and_then(|external_id| super::claude::history::find_record(config, external_id))
+        .and_then(|external_id| super::claude::history::find_record(&config, external_id))
         .is_some_and(|record| super::claude::history::delegates_work(&record))
 }
 
@@ -439,7 +440,8 @@ async fn import_claude_history(
     let Some(external_id) = session.external_id.as_deref() else {
         return Ok(());
     };
-    let Some(record) = super::claude::history::find_record(config, external_id) else {
+    let config = super::profiles::chat_dir("claude", session.profile.as_deref(), config);
+    let Some(record) = super::claude::history::find_record(&config, external_id) else {
         return Ok(());
     };
     let choice =
@@ -588,7 +590,8 @@ async fn import_codex_history(database: &ChatDb, session: &Session) -> Result<()
             super::codex::history::menu(
                 &transport,
                 Path::new(&session.cwd),
-                session.model.as_deref()
+                session.model.as_deref(),
+                session.profile.as_deref(),
             ),
         );
         (Some(thread), menu)
@@ -599,6 +602,7 @@ async fn import_codex_history(database: &ChatDb, session: &Session) -> Result<()
                 &transport,
                 Path::new(&session.cwd),
                 session.model.as_deref(),
+                session.profile.as_deref(),
             )
             .await,
         )

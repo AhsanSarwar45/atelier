@@ -172,7 +172,13 @@ impl WorkbenchState {
     pub(crate) fn codex_home_directory(&self) -> &std::path::Path {
         self.registry.codex_home_directory()
     }
-    pub(crate) fn codex_record(&self, id: &str) -> Option<std::path::PathBuf> {
+    /// The rollout file for one Codex chat, looked for under the account that
+    /// chat runs on.
+    pub(crate) fn codex_record(
+        &self,
+        id: &str,
+        profile: Option<&str>,
+    ) -> Option<std::path::PathBuf> {
         fn find(root: &std::path::Path, id: &str, depth: u8) -> Option<std::path::PathBuf> {
             if depth == 0 {
                 return None;
@@ -193,7 +199,18 @@ impl WorkbenchState {
             }
             None
         }
-        let key = id.to_lowercase();
+        // Two accounts each keep their own sessions directory, so the memo has
+        // to remember which one a path was found under.
+        let home = crate::workbench::profiles::chat_dir(
+            "codex",
+            profile,
+            self.registry.codex_home_directory(),
+        );
+        let key = format!(
+            "{}/{}",
+            profile.unwrap_or(crate::workbench::profiles::SYSTEM),
+            id.to_lowercase()
+        );
         if let Some(path) = self
             .codex_records
             .lock()
@@ -202,14 +219,7 @@ impl WorkbenchState {
         {
             return Some(path);
         }
-        let found = find(
-            self.registry
-                .codex_home_directory()
-                .join("sessions")
-                .as_path(),
-            id,
-            5,
-        );
+        let found = find(home.join("sessions").as_path(), id, 5);
         if let Some(path) = &found {
             if let Ok(mut records) = self.codex_records.lock() {
                 records.insert(key, path.clone());
@@ -222,7 +232,7 @@ impl WorkbenchState {
         if hold.doing != crate::workbench::external::HeldDoing::Unknown {
             return;
         }
-        if let Some(path) = self.codex_record(&hold.id) {
+        if let Some(path) = self.codex_record(&hold.id, None) {
             let activity = crate::workbench::external::codex_activity_from_path(&path);
             hold.doing = activity.doing;
             hold.detail = activity.detail;
@@ -857,7 +867,12 @@ async fn tokens(
         .as_deref()
         .filter(|_| session.brand == "claude")
         .and_then(|id| {
-            crate::workbench::claude::history::find_record(state.claude_config_directory(), id)
+            let config = crate::workbench::profiles::chat_dir(
+                "claude",
+                session.profile.as_deref(),
+                state.claude_config_directory(),
+            );
+            crate::workbench::claude::history::find_record(&config, id)
         });
     let spent = record.as_deref().and_then(crate::workbench::claude::history::token_spend).or_else(||stats.cost.as_ref().map(|cost| {
         let own = json!({"input":cost["input"],"cacheWrite":0,"cacheRead":0,"output":cost["output"],"thinking":0,"total":cost["total"]});
@@ -2471,7 +2486,10 @@ mod tests {
         state.enrich_unknown_codex_hold(&mut hold);
 
         assert_eq!(hold.doing, crate::workbench::external::HeldDoing::Thinking);
-        assert_eq!(state.codex_record(id).as_deref(), Some(rollout.as_path()));
+        assert_eq!(
+            state.codex_record(id, None).as_deref(),
+            Some(rollout.as_path())
+        );
     }
 
     #[tokio::test]

@@ -207,6 +207,20 @@ impl WorkbenchRegistry {
         &self.database
     }
 
+    /// The provider's own settings files for one account.
+    ///
+    /// A default is a fact about the account it is saved under, so starring a
+    /// model while working on the work profile must not rewrite the settings
+    /// the owner's own terminal reads.
+    fn defaults_for(&self, brand: &str, profile: Option<&str>) -> ProviderDefaultFiles {
+        match profile.filter(|id| *id != super::profiles::SYSTEM) {
+            None => self.defaults.clone(),
+            Some(id) => {
+                ProviderDefaultFiles::in_directory(&self.profiles.chat_dir(brand, Some(id)))
+            }
+        }
+    }
+
     pub fn media_directory(&self) -> &Path {
         &self.paths.media
     }
@@ -640,14 +654,15 @@ impl WorkbenchRegistry {
             }
             CommandKind::ProviderDefaultsRead => {
                 let brand = Self::field(command, "brand")?;
-                serde_json::to_value(self.defaults.read(brand)?).map_err(|e| e.to_string())
+                let files = self.defaults_for(brand, Self::maybe(command, "profileId"));
+                serde_json::to_value(files.read(brand)?).map_err(|e| e.to_string())
             }
             CommandKind::ProviderDefaultsWrite => {
                 let brand = Self::field(command, "brand")?;
                 let kind = Self::field(command, "kind")?;
                 let value = Self::field(command, "value")?;
-                serde_json::to_value(self.defaults.write(brand, kind, value)?)
-                    .map_err(|e| e.to_string())
+                let files = self.defaults_for(brand, Self::maybe(command, "profileId"));
+                serde_json::to_value(files.write(brand, kind, value)?).map_err(|e| e.to_string())
             }
             CommandKind::ProviderAuthenticate => {
                 let brand = Self::field(command, "brand")?;
@@ -996,6 +1011,77 @@ mod tests {
             .await
             .is_err());
         assert!(!registry.has_driver("session-1").await);
+    }
+
+    /// A default is a fact about the account it is saved under.
+    ///
+    /// Starring a model while working on the work profile writes the work
+    /// account's settings file. The owner's own directory — the one their
+    /// terminal reads — must be left exactly as it was, or a preference set
+    /// inside one account would silently follow them into the other.
+    #[tokio::test]
+    async fn a_default_is_written_to_the_account_the_chat_runs_on() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let paths = RegistryPaths {
+            home: home.clone(),
+            claude_config: home.join(".claude"),
+            codex_home: home.join(".codex"),
+            profiles: root.path().join("profiles"),
+            media: root.path().join("media"),
+        };
+        let profiles = Profiles::new(
+            paths.profiles.clone(),
+            paths.claude_config.clone(),
+            paths.codex_home.clone(),
+        );
+        let work = profiles.create("claude", "Work").unwrap();
+        let registry = WorkbenchRegistry::new(
+            database,
+            paths,
+            Arc::new(FakeFactory {
+                calls: Arc::new(AtomicUsize::new(0)),
+            }),
+        );
+
+        registry
+            .execute(&command(
+                CommandKind::ProviderDefaultsWrite,
+                json!({"brand":"claude","kind":"effort","value":"high","profileId":work.id}),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            registry
+                .execute(&command(
+                    CommandKind::ProviderDefaultsRead,
+                    json!({"brand":"claude","profileId":work.id}),
+                ))
+                .await
+                .unwrap()["effort"],
+            "high"
+        );
+        assert_eq!(
+            registry
+                .execute(&command(
+                    CommandKind::ProviderDefaultsRead,
+                    json!({"brand":"claude"}),
+                ))
+                .await
+                .unwrap()["effort"],
+            Value::Null,
+            "the account the server booted with is untouched"
+        );
+        assert!(
+            !home.join(".claude/settings.json").exists(),
+            "the owner's own settings file was not even created"
+        );
+        assert!(profiles
+            .chat_dir("claude", Some(&work.id))
+            .join("settings.json")
+            .is_file());
     }
 
     #[tokio::test]

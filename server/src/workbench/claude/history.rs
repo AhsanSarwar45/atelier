@@ -51,12 +51,6 @@ pub struct ClaudeHistory {
     pub context_window: i64,
 }
 
-pub fn claude_config_dir() -> Option<PathBuf> {
-    std::env::var_os("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .or_else(|| directories::UserDirs::new().map(|dirs| dirs.home_dir().join(".claude")))
-}
-
 fn projects_dir(config: &Path) -> PathBuf {
     if config.file_name().is_some_and(|name| name == "projects") {
         config.to_path_buf()
@@ -2886,5 +2880,45 @@ mod tests {
             && event["agentId"] == "h1"
             && event["state"] == "done"));
         assert!(follower.poll(&parent).1.is_empty());
+    }
+
+    /// A chat reads the transcript belonging to its own account.
+    ///
+    /// Both accounts can hold a record under the same id, and the owner's own
+    /// directory is the one a wrong answer would reach for. Resolving through
+    /// the chat's profile is what keeps a work chat off the personal history.
+    #[test]
+    fn a_chat_reads_the_record_under_the_account_it_runs_on() {
+        use crate::workbench::profiles::Profiles;
+
+        let root = tempfile::tempdir().unwrap();
+        let system = root.path().join("system-claude");
+        let profiles = Profiles::new(
+            root.path().join("profiles"),
+            system.clone(),
+            root.path().join("system-codex"),
+        );
+        let work = profiles.create("claude", "Work").unwrap();
+
+        let id = "11111111-2222-3333-4444-555555555555";
+        let mut written = Vec::new();
+        for config in [&system, &profiles.chat_dir("claude", Some(&work.id))] {
+            let project = config.join("projects").join("-project");
+            std::fs::create_dir_all(&project).unwrap();
+            let record = project.join(format!("{id}.jsonl"));
+            std::fs::write(&record, b"{}\n").unwrap();
+            written.push(record);
+        }
+        let (own_record, work_record) = (&written[0], &written[1]);
+
+        assert_eq!(
+            find_record(&profiles.chat_dir("claude", Some(&work.id)), id).as_ref(),
+            Some(work_record)
+        );
+        assert_eq!(
+            find_record(&profiles.chat_dir("claude", None), id).as_ref(),
+            Some(own_record),
+            "a chat with no profile reads the directory the server booted with"
+        );
     }
 }

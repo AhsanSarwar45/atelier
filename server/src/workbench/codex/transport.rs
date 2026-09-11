@@ -564,7 +564,7 @@ mod tests {
             thread_usage(&transport, "inside").await.unwrap(),
             Some((9, 14, 23))
         );
-        let capabilities = menu(&transport, Path::new("/project"), Some("gpt-5")).await;
+        let capabilities = menu(&transport, Path::new("/project"), Some("gpt-5"), None).await;
         assert_eq!(capabilities["models"][1]["value"], "gpt-5");
         assert_eq!(capabilities["efforts"][0]["value"], "high");
         assert_eq!(capabilities["collaborationModes"][0]["value"], "plan");

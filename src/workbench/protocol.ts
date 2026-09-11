@@ -797,8 +797,14 @@ export const SYSTEM_PROFILE = 'system';
 export type WbpCommand =
   | { type: 'agent-files.list'; projectPath?: string }
   | { type: 'agent-files.read'; path: string; projectPath?: string }
-  | { type: 'provider-defaults.read'; brand: Brand }
-  | { type: 'provider-defaults.write'; brand: Brand; kind: 'model' | 'effort'; value: string }
+  | { type: 'provider-defaults.read'; brand: Brand; profileId?: string }
+  | {
+      type: 'provider-defaults.write';
+      brand: Brand;
+      kind: 'model' | 'effort';
+      value: string;
+      profileId?: string;
+    }
   | { type: 'providers.list' }
   | { type: 'provider.authenticate'; brand: Brand; methodId: string }
   | { type: 'provider.logout'; brand: Brand }

@@ -362,7 +362,12 @@ pub fn effort_menu(models: &[Value], active_model: Option<&str>) -> EffortMenu {
     }
 }
 
-pub async fn menu(transport: &CodexTransport, cwd: &Path, active_model: Option<&str>) -> Value {
+pub async fn menu(
+    transport: &CodexTransport,
+    cwd: &Path,
+    active_model: Option<&str>,
+    profile: Option<&str>,
+) -> Value {
     // Each list is optional across app-server generations. One old method
     // must not erase the capabilities the other two reported.
     let (model_result, skill_result, collaboration_result) = tokio::join!(
@@ -425,14 +430,13 @@ pub async fn menu(transport: &CodexTransport, cwd: &Path, active_model: Option<&
         "collaborationModes": presets.iter().map(|preset|json!({"value":preset["mode"],"displayName":preset.get("name").cloned().unwrap_or_else(||preset["mode"].clone())})).collect::<Vec<_>>(),
         "collaborationPresets": presets,
         "agentControls": ["stop","say"],
-        "agentDefinitions": agent_definitions(cwd)
+        "agentDefinitions": agent_definitions(cwd, profile)
     })
 }
 
-pub(crate) fn agent_definitions(cwd: &Path) -> Vec<Value> {
-    let personal = std::env::var_os("CODEX_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| directories::UserDirs::new().map(|dirs| dirs.home_dir().join(".codex")))
+pub(crate) fn agent_definitions(cwd: &Path, profile: Option<&str>) -> Vec<Value> {
+    let personal = crate::workbench::profiles::system_dir("codex")
+        .map(|system| crate::workbench::profiles::chat_dir("codex", profile, &system))
         .map(|home| home.join("agents"));
     let mut found = std::collections::BTreeMap::new();
     for (directory, source) in personal

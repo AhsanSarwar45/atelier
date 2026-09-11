@@ -187,6 +187,13 @@ impl ProviderDefaultFiles {
         }
     }
 
+    /// The files inside one account's directory. A profile belongs to a single
+    /// brand, so only the matching one of these two is ever read or written;
+    /// the other names a file that brand's CLI does not keep there.
+    pub fn in_directory(directory: &Path) -> Self {
+        Self::new(directory, directory)
+    }
+
     pub fn read(&self, brand: &str) -> Result<ProviderDefaults, String> {
         match brand {
             "claude" => {

@@ -56,6 +56,18 @@ pub fn system_dir(brand: &str) -> Option<PathBuf> {
     }))
 }
 
+/// Where one chat reads its account from, for the call sites that hold a
+/// session but no registry handle. `system` is the directory the server booted
+/// with, which is what a chat on the system profile answers.
+pub fn chat_dir(brand: &str, profile: Option<&str>, system: &Path) -> PathBuf {
+    match profile.filter(|id| *id != SYSTEM) {
+        None => system.to_path_buf(),
+        Some(id) => ambient()
+            .map(|profiles| profiles.chat_dir(brand, Some(id)))
+            .unwrap_or_else(|| system.to_path_buf()),
+    }
+}
+
 /// The registry as the running app sees it, for the spawn path, which has no
 /// registry handle of its own.
 pub fn ambient() -> Option<Profiles> {
@@ -180,6 +192,25 @@ impl Profiles {
 
     fn directory_for(&self, brand: &str, id: &str) -> PathBuf {
         self.root.join(brand).join(id)
+    }
+
+    /// Where one chat's account lives, whether or not the profile is still
+    /// registered.
+    ///
+    /// Deliberately not `directory`: a read must never fall back to the
+    /// directory the server booted with when a profile has been deleted,
+    /// because that would answer a work chat with the owner's own history. An
+    /// unregistered profile simply names a path that is not there, and the
+    /// read answers empty.
+    pub fn chat_dir(&self, brand: &str, profile: Option<&str>) -> PathBuf {
+        match profile.filter(|id| *id != SYSTEM) {
+            Some(id) => self.directory_for(brand, id),
+            None => self
+                .system
+                .get(brand)
+                .cloned()
+                .unwrap_or_else(|| self.root.join(brand).join(SYSTEM)),
+        }
     }
 
     /// Create an empty profile and the directory that will hold its login.
@@ -460,6 +491,51 @@ mod tests {
         assert!(profiles.rename("claude", SYSTEM, "Mine").is_err());
         assert!(profiles.delete("claude", SYSTEM).is_err());
         assert_eq!(profiles.list("claude").len(), 1);
+    }
+
+    /// A deleted profile must not send a chat to the owner's own account.
+    ///
+    /// `directory` refuses an unregistered profile, which is right for a
+    /// spawn: a chat pinned to a work login must not start spending the
+    /// personal one. A read cannot refuse, so it answers a path that is simply
+    /// not there — empty history rather than somebody else's.
+    #[test]
+    fn a_read_never_falls_back_to_the_owners_own_account() {
+        let root = tempfile::tempdir().unwrap();
+        let profiles = profiles(root.path());
+        let made = profiles.create("claude", "Work").unwrap();
+        let account = profiles.chat_dir("claude", Some(&made.id));
+        assert_eq!(account, profiles.directory("claude", &made.id).unwrap());
+
+        profiles.delete("claude", &made.id).unwrap();
+        assert!(profiles.directory("claude", &made.id).is_err());
+        assert_eq!(
+            profiles.chat_dir("claude", Some(&made.id)),
+            account,
+            "still its own directory, which no longer exists"
+        );
+        assert_ne!(
+            profiles.chat_dir("claude", Some(&made.id)),
+            root.path().join("system-claude")
+        );
+    }
+
+    #[test]
+    fn a_chat_with_no_profile_reads_the_directory_the_server_booted_with() {
+        let root = tempfile::tempdir().unwrap();
+        let profiles = profiles(root.path());
+        for (brand, expected) in [("claude", "system-claude"), ("codex", "system-codex")] {
+            assert_eq!(
+                profiles.chat_dir(brand, None),
+                root.path().join(expected),
+                "{brand}"
+            );
+            assert_eq!(
+                profiles.chat_dir(brand, Some(SYSTEM)),
+                root.path().join(expected),
+                "{brand} named explicitly"
+            );
+        }
     }
 
     #[test]

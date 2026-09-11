@@ -1921,9 +1921,10 @@ impl AcpDriver {
         let task_database = database.clone();
         let task_session = session.clone();
         let task_agent_definitions = if brand == "codex" {
-            json!(super::super::codex::history::agent_definitions(Path::new(
-                &session.cwd,
-            )))
+            json!(super::super::codex::history::agent_definitions(
+                Path::new(&session.cwd),
+                session.profile.as_deref(),
+            ))
         } else {
             json!([])
         };

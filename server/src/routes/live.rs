@@ -292,12 +292,14 @@ pub(crate) async fn follow_native_record(
         .and_then(|session| {
             let record = session.external_id.as_deref().and_then(|id| {
                 if session.brand == "claude" {
-                    crate::workbench::claude::history::find_record(
+                    let config = crate::workbench::profiles::chat_dir(
+                        "claude",
+                        session.profile.as_deref(),
                         state.claude_config_directory(),
-                        id,
-                    )
+                    );
+                    crate::workbench::claude::history::find_record(&config, id)
                 } else if session.brand == "codex" {
-                    state.codex_record(id)
+                    state.codex_record(id, session.profile.as_deref())
                 } else {
                     None
                 }
