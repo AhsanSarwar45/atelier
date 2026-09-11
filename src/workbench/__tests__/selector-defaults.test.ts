@@ -30,6 +30,16 @@ describe('new-chat provider default', () => {
     expect(source).toContain("import { Checkbox } from '@/components/ui/checkbox'");
   });
 
+  it('keeps the choice in the app and not in this browser', () => {
+    // The star beside a provider is drawn like the model and effort stars, and
+    // those have never been kept here. One of the three remembered somewhere
+    // else is a difference a person only finds by being surprised by it.
+    expect(source).not.toContain("const NEW_CHAT_DEFAULT = 'workbench.new-chat-default'");
+    expect(source).not.toContain('localStorage.setItem(NEW_CHAT_DEFAULT');
+    expect(source).toContain('loadNewChatDefaults()');
+    expect(source).toContain('saveNewChatProvider(brand)');
+  });
+
   it('never starts a provider the installed backend says is unavailable', () => {
     expect(source).toContain('if (!providerIsAvailable(providers, brand))');
     expect(source).toContain('disabled={starting || !newBrandAvailable || whereMissing !== null}');

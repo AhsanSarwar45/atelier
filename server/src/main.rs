@@ -482,6 +482,13 @@ async fn serve(open_browser: bool) {
             "/api",
             terminal::settings::settings_routes().with_state(database.clone()),
         )
+        // What a new chat opens on — the agent and the account. Same table,
+        // same guard (routes/new_chat.rs); it sits beside the terminal's
+        // setting rather than in the browser so the phone and the desk agree.
+        .nest(
+            "/api",
+            routes::new_chat::new_chat_routes().with_state(database.clone()),
+        )
         .route("/api/beads", get(routes::beads::read_beads))
         .route(
             "/api/beads/create",

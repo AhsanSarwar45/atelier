@@ -74,6 +74,7 @@ import { useKnownCards, useKnownCardStatuses } from '@/workbench/known-cards';
 import { drawnRows } from '@/workbench/machine-lines';
 import { inWords, PERMISSION_MODE } from '@/workbench/machine-words';
 import { addressedBy, openableAsks, openableIn } from '@/workbench/mentions';
+import { loadNewChatDefaults, NO_DEFAULTS, saveNewChatProvider, type NewChatDefaults } from '@/workbench/new-chat-defaults';
 import { providerMessageIsCurrent } from '@/workbench/provider-messages';
 import { usePathActions } from '@/workbench/path-menu';
 import { PathChip } from '@/workbench/path-chip';
@@ -114,7 +115,6 @@ export { ResizeDivider } from '@/workbench/resize-divider';
 
 /** Where the "show me everything" switch is remembered between visits. */
 const EVERY_CHAT = 'workbench.every-chat';
-const NEW_CHAT_DEFAULT = 'workbench.new-chat-default';
 
 /** The starting mark while nothing has been sent — one value, so it never re-renders. */
 const NO_MARK: ReadonlySet<string> = new Set<string>();
@@ -582,7 +582,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const starting = startingBrand !== null;
   const [startError, setStartError] = useState<string | null>(null);
   const [newBrand, setNewBrand] = useState<Brand>('claude');
-  const [newChatDefault, setNewChatDefaultState] = useState<Brand | 'ask'>('ask');
+  /**
+   * What a new chat opens on, as the app holds it. Not local storage: the star
+   * that sets this is drawn like the model and effort stars beside it, and
+   * those are remembered outside the browser, so a person who sets one here
+   * and opens the app on the phone finds the same answer
+   * (new-chat-defaults.ts).
+   */
+  const [newChatDefaults, setNewChatDefaults] = useState<NewChatDefaults>(NO_DEFAULTS);
+  /** Nothing chosen and "ask me" are the same state, and always were. */
+  const newChatDefault: Brand | 'ask' = newChatDefaults.provider ?? 'ask';
   const [modelDefaults, setModelDefaults] = useState<Partial<Record<Brand, string>>>({});
   const [effortDefaults, setEffortDefaults] = useState<Partial<Record<Brand, string>>>({});
   const [composerSettingsOpen, setComposerSettingsOpen] = useState(false);
@@ -592,12 +601,22 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     if (!newBrandAvailable && availableBrand) setNewBrand(availableBrand);
   }, [availableBrand, newBrandAvailable]);
   useEffect(() => {
-    const saved = localStorage.getItem(NEW_CHAT_DEFAULT);
-    if (saved === 'claude' || saved === 'codex' || saved === 'local' || saved === 'ask') setNewChatDefaultState(saved);
+    let current = true;
+    void loadNewChatDefaults()
+      .then((now) => current && setNewChatDefaults(now))
+      .catch((e: unknown) => current && setStartError(e instanceof Error ? e.message : String(e)));
+    return () => { current = false; };
   }, []);
   const setNewChatDefault = useCallback((choice: Brand | 'ask') => {
-    setNewChatDefaultState(choice);
-    localStorage.setItem(NEW_CHAT_DEFAULT, choice);
+    const brand = choice === 'ask' ? null : choice;
+    // Drawn at once and corrected by the answer. A star that waited for the
+    // app before it filled in would look broken on a slow read, and what comes
+    // back is what the next tab sees either way.
+    setNewChatDefaults((was) => ({ ...was, provider: brand }));
+    setStartError(null);
+    void saveNewChatProvider(brand)
+      .then(setNewChatDefaults)
+      .catch((e: unknown) => setStartError(e instanceof Error ? e.message : String(e)));
   }, []);
   /** What went wrong the last time he changed the mode or the model. */
   const [steerError, setSteerError] = useState<string | null>(null);
