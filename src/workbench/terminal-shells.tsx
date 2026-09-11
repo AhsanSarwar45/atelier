@@ -121,6 +121,26 @@ interface Terminals {
   closeTab: (id: string) => void;
   /** What folder the screen is showing, or null when it is showing none. */
   showFolder: (folder: string | null) => void;
+  /**
+   * A pane offering to type into its shell, or taking the offer back.
+   *
+   * The socket belongs to the pane and nothing here is going to take it away:
+   * `terminal-pane.tsx` builds it and tears it down in one effect, and that
+   * arrangement is what keeps a hidden tab's shell attached. So a caller who
+   * wants a line typed asks through here and the pane does the typing.
+   */
+  offerTyping: (id: string, type: ((text: string) => void) | null) => void;
+  /**
+   * Puts a line at the prompt of the shell in `id`, exactly as if it had been
+   * typed. No return is added: what arrives sits on the prompt to be read,
+   * corrected or run, and the decision to run it stays with the person. A list
+   * of old commands is a list of things that were worth doing once, and one
+   * `rm -rf` reached by a fuzzy match and a stray click is the reason.
+   *
+   * Answers whether anything received it, so a caller can say so rather than
+   * appear to have worked.
+   */
+  typeInto: (id: string, text: string) => boolean;
 }
 
 /**
@@ -141,6 +161,8 @@ const nothingOpen: Terminals = {
   openAt: () => {},
   closeTab: () => {},
   showFolder: () => {},
+  offerTyping: () => {},
+  typeInto: () => false,
 };
 
 const Shells = createContext<Terminals>(nothingOpen);
@@ -363,6 +385,28 @@ export function TerminalShells({ children }: { children: ReactNode }) {
     })();
   }, [showing, adopt, start]);
 
+  /**
+   * Which pane will type for which shell.
+   *
+   * A ref and not state: nothing on the screen changes when a pane offers or
+   * withdraws, and making it state would rerender every tab each time one
+   * mounted. It is written during an effect and read from an event handler,
+   * which is the shape a ref is for.
+   */
+  const typists = useRef(new Map<string, (text: string) => void>());
+
+  const offerTyping = useCallback((id: string, type: ((text: string) => void) | null) => {
+    if (type) typists.current.set(id, type);
+    else typists.current.delete(id);
+  }, []);
+
+  const typeInto = useCallback((id: string, text: string) => {
+    const type = typists.current.get(id);
+    if (!type) return false;
+    type(text);
+    return true;
+  }, []);
+
   return (
     <Shells.Provider
       value={{
@@ -377,6 +421,8 @@ export function TerminalShells({ children }: { children: ReactNode }) {
         openAt,
         closeTab: (id: string) => void closeTab(id),
         showFolder,
+        offerTyping,
+        typeInto,
       }}
     >
       {children}

@@ -10,8 +10,11 @@
 //! gets to choose — which shell it opens — kept on the server because the
 //! server is what spawns it. `stream` is the socket that carries the bytes both
 //! ways: what the shell printed while nobody was looking, then what it prints
-//! now, and the keystrokes going back the other way.
+//! now, and the keystrokes going back the other way. `history` is what has been
+//! typed at this computer before now, read out of the file the shell keeps, for
+//! the panel that searches it.
 
+pub mod history;
 pub mod pump;
 pub mod register;
 pub mod routes;

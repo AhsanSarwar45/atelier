@@ -24,7 +24,7 @@
  */
 'use client';
 
-import { type ReactNode } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 
 import { Plus, X } from 'lucide-react';
 
@@ -33,6 +33,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
+import { HistoryButton, HistoryPanel } from './terminal-history';
 import { TerminalPane } from './terminal-pane';
 import { TerminalShells, useTerminalShells } from './terminal-shells';
 import { TerminalWindow } from './terminal-window';
@@ -56,7 +57,7 @@ function tabWhere(folder: string | null): string {
 }
 
 /** The row of tabs, under the window's own bar. */
-function TabStrip() {
+function TabStrip({ searching, onSearch }: { searching: boolean; onSearch: () => void }) {
   const { tabs, active, select, closeTab, openTab, opening } = useTerminalShells();
   return (
     <div
@@ -120,13 +121,42 @@ function TabStrip() {
         size="xs"
         className="size-5 p-0"
       />
+      {/*
+        * Pushed to the far end, away from the crosses. It is the one control on
+        * this strip that does not open or close anything, and a button that
+        * searched sitting next to a row of buttons that close is a button
+        * somebody presses by accident on the way to the wrong one.
+        */}
+      <div className="ml-auto shrink-0 pl-2">
+        <HistoryButton open={searching} onOpen={onSearch} />
+      </div>
     </div>
   );
 }
 
 /** The window itself, once there is anything to put in it. */
 function TabbedTerminal() {
-  const { showing, tabs, active, hide } = useTerminalShells();
+  const { showing, tabs, active, hide, typeInto } = useTerminalShells();
+  /**
+   * Whether the history panel is over the grid.
+   *
+   * Held here rather than inside the panel because the pane below needs to know
+   * too: `focused` going false while the search is open is what keeps the grid
+   * from pulling the keyboard back out of the search box, and its going true
+   * again on close is what puts the keyboard back in the shell with the line
+   * that was just picked already on the prompt. One piece of state doing both
+   * halves, so they cannot disagree.
+   */
+  const [searching, setSearching] = useState(false);
+
+  const put = useCallback(
+    (command: string) => {
+      if (active) typeInto(active, command);
+    },
+    [active, typeInto],
+  );
+
+  const close = useCallback(() => setSearching(false), []);
   // Nothing at all until a shell has been opened; after that it stays, because
   // what is in it is attached to something that is still running.
   if (!showing && !tabs.length) return null;
@@ -134,7 +164,7 @@ function TabbedTerminal() {
   return (
     <TerminalWindow title="Terminal" onClose={hide} className={cn(!showing && 'hidden')}>
       <div className="flex h-full flex-col">
-        <TabStrip />
+        <TabStrip searching={searching} onSearch={() => setSearching((was) => !was)} />
         <div className="relative min-h-0 flex-1">
           {tabs.map((tab) => (
             <div
@@ -153,9 +183,10 @@ function TabbedTerminal() {
                 * closed is only hidden too, and its grid must not keep taking
                 * presses meant for the page.
                 */}
-              <TerminalPane shellId={tab.id} focused={showing && tab.id === active} />
+              <TerminalPane shellId={tab.id} focused={showing && tab.id === active && !searching} />
             </div>
           ))}
+          {searching && active && <HistoryPanel onPick={put} onClose={close} />}
         </div>
       </div>
     </TerminalWindow>

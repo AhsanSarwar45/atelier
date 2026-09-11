@@ -68,6 +68,8 @@ import { Terminal } from '@xterm/xterm';
 import { apiUrl } from '@/lib/api-base';
 import { cn } from '@/lib/utils';
 
+import { useTerminalShells } from './terminal-shells';
+
 import '@xterm/xterm/css/xterm.css';
 
 /** How big the grid is, in characters — which is the only unit a shell knows. */
@@ -151,6 +153,7 @@ export function TerminalPane({
   className?: string;
 }) {
   const host = useRef<HTMLDivElement | null>(null);
+  const { offerTyping: offer } = useTerminalShells();
   /**
    * The grid, for the effect below. The one that builds it cannot also be the
    * one that focuses it: it is keyed on the shell and must not tear a terminal
@@ -243,10 +246,16 @@ export function TerminalPane({
       tellShape();
     };
 
-    term.onData((typed) => {
+    const type = (typed: string): void => {
       if (socket.readyState !== WebSocket.OPEN) return;
       socket.send(keystrokes.encode(typed));
-    });
+    };
+
+    term.onData(type);
+    // Everything else that wants a line typed at this shell — the history
+    // panel, so far — goes through the same function the keyboard does, so
+    // there is one way into this socket rather than two.
+    offer(shellId, type);
 
     // Whatever else moved the grid — the fit above, or a font that finished
     // loading under it — the shell is told the shape the grid actually took.
@@ -272,6 +281,7 @@ export function TerminalPane({
 
     return () => {
       live = false;
+      offer(shellId, null);
       watcher?.disconnect();
       // Unhooked before the close, so a frame already on its way in cannot be
       // written to a terminal that is about to be disposed.
@@ -282,7 +292,7 @@ export function TerminalPane({
       // Takes the grid out of the box with it, along with every listener above.
       term.dispose();
     };
-  }, [shellId]);
+  }, [shellId, offer]);
 
   /**
    * The keyboard, handed to the grid whenever this pane becomes the one on

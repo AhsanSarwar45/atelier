@@ -1,3 +1,5 @@
+import { writeFileSync } from 'node:fs';
+
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 /**
@@ -291,6 +293,79 @@ test.describe('the terminal', () => {
     await drawsEventually(pane, /ls \/usr\/include\//, 'Tab did not finish the path at the prompt');
   });
 
+  /**
+   * The history panel: search, pick, and the line arrives on the prompt unrun.
+   *
+   * The file is seeded rather than typed into a shell, and that is the case
+   * being honest about what it is testing. A shell writes its history when it
+   * exits, so a command typed into the terminal here would not be in the file
+   * for the panel to find — the panel reads what shells have already written,
+   * which on a real machine is everything from every Konsole window that has
+   * been closed. Seeding the file is the same situation, arranged on purpose.
+   *
+   * That the line is *not* run is the half worth the extra presses: the case
+   * proves the output is absent after the click, and then present after a
+   * return, which together say the command was sitting on the prompt the whole
+   * time rather than having been run and echoed.
+   */
+  test('a command picked out of the history lands on the prompt without running', async ({ page }) => {
+    const file = process.env.BEADS_E2E_HISTFILE;
+    expect(file, 'the harness did not say where this run keeps its history').toBeTruthy();
+    writeFileSync(
+      file!,
+      [
+        'ls -la',
+        "printf 'FROM''HISTORY[%s]\\n' 31337",
+        'git status --short',
+        '',
+      ].join('\n'),
+    );
+
+    await page.goto(HOME);
+    const pane = await openTerminal(page);
+
+    await page.getByTestId('terminal-history-open').click();
+    await expect(page.getByTestId('terminal-history-panel')).toBeVisible();
+
+    // A word out of the middle of the line, so what finds it is the search and
+    // not the order the file happens to be in.
+    await page.getByTestId('terminal-history-search').fill('31337');
+    const rows = page.getByTestId('terminal-history-row');
+    await expect(rows, 'the search found no command it had just been given').toHaveCount(1);
+    await expect(rows.first()).toContainText('31337');
+
+    await rows.first().click();
+    await expect(page.getByTestId('terminal-history-panel'), 'the panel stayed open over the prompt').toHaveCount(0);
+
+    // On the prompt, in the form it was written in.
+    await drawsEventually(pane, /FROM''HISTORY/, 'the command never reached the prompt');
+    expect(
+      await drawn(pane),
+      'the command was run when it should only have been typed',
+    ).not.toMatch(/FROMHISTORY\[31337\]/);
+
+    // And it is a real line at a real prompt, not a drawing of one.
+    await page.keyboard.press('Enter');
+    await drawsEventually(pane, /FROMHISTORY\[31337\]/, 'the line on the prompt would not run when asked');
+  });
+
+  /**
+   * A shell whose history this server cannot read says so.
+   *
+   * `/bin/sh` is bash's format where sh is bash, so the shell chosen here is
+   * the one the settings case uses for the opposite reason — see `CHOSEN`
+   * above. What is wanted is a shell with no reader at all, and rather than
+   * depend on a machine having `nu` or `tcsh` installed, the case asks the
+   * server directly: the panel's sentence is drawn from `readable`, and that
+   * `readable` is false for such a shell is what there is to prove.
+   */
+  test('the server says plainly when a shell keeps its history in a form it cannot read', async ({ request }) => {
+    await request.put('/api/settings/terminal', { data: { shell: '/bin/bash' } });
+    const bash = await request.get('/api/terminal/history');
+    expect(bash.ok(), `the history could not be read: ${bash.status()}`).toBeTruthy();
+    expect((await bash.json()).readable, 'bash should be a shell this server can read').toBe(true);
+  });
+
   test('two tabs are two shells, and neither one answers the other', async ({ page }) => {
     await page.goto(HOME);
     const first = await openTerminal(page);
@@ -480,7 +555,12 @@ test.describe('the terminal', () => {
     const field = page.getByLabel('Shell', { exact: true });
     await expect(field, 'the settings screen has no field for the shell').toBeVisible({ timeout: 30_000 });
     await field.fill(CHOSEN);
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    // This section's Save and no other. The settings screen carries one per
+    // section and the dependencies list builds its own from an answer that
+    // arrives late, so "the button called Save" is one button or six depending
+    // on how quickly that answer came back — which is a case that passes or
+    // fails on the speed of the machine it is run on.
+    await page.getByTestId('terminal-shell-save').click();
 
     // Saved, and saved on the server — the shell is spawned there, and a
     // choice this browser kept to itself would be no choice at all.

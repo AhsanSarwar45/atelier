@@ -52,8 +52,18 @@ export CODEX_HOME="$RUN/codex"
 export BEADS_E2E_MARKERS="$CLAUDE_CONFIG_DIR/sessions"
 
 # The terminal cases open real login shells, and bash and fish write history on
-# exit — already into the owner's own. Set here because the shells inherit it.
-export HISTFILE=/dev/null
+# exit — already into the owner's own. Set here because the shells inherit it,
+# and because the server reads the same variable to answer the history panel
+# (server/src/terminal/history.rs).
+#
+# A file of this run's own rather than /dev/null. It keeps the owner's history
+# just as safe — nothing here ever names it — and it leaves the panel something
+# it can be tested against: a case that wants a history seeds this file and then
+# asks the app what it can find. Against /dev/null the only provable answer was
+# "nothing", which is the one answer that cannot tell a working panel from a
+# broken one.
+export HISTFILE="$RUN/bash_history"
+export BEADS_E2E_HISTFILE="$HISTFILE"
 export fish_history=
 
 # A run starts from nothing: sessions left in the store by the last one are
@@ -62,6 +72,9 @@ export fish_history=
 # leaves behind are rows the next run counts.
 rm -rf "$XDG_DATA_HOME" "$ATELIER_DATA_DIR" "$ATELIER_PRESENTATION_MEDIA_DIR" "$RUN/claude" "$RUN/codex"
 mkdir -p "$XDG_DATA_HOME" "$ROOT/tests/results" "$BEADS_E2E_MARKERS" "$CLAUDE_CONFIG_DIR/projects" "$CODEX_HOME"
+# Empty at the start of every run, so a case that seeds it is reading its own
+# lines and not the ones the last run's shells wrote on their way out.
+: > "$HISTFILE"
 
 SERVER_LOG="$RUN/server.log"
 : > "$SERVER_LOG"

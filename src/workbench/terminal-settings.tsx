@@ -131,7 +131,7 @@ export function TerminalSettings() {
           spellCheck={false}
           className="flex-1 font-mono"
         />
-        <Button size="sm" disabled={saving} onClick={() => void choose(wanted)}>
+        <Button size="sm" disabled={saving} onClick={() => void choose(wanted)} data-testid="terminal-shell-save">
           Save
         </Button>
       </div>

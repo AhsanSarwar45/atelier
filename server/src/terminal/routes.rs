@@ -76,6 +76,7 @@ type Refusal = (StatusCode, String);
 pub fn router(shells: Shells) -> Router {
     Router::new()
         .route("/", post(open).get(list))
+        .route("/history", get(history))
         .route("/:id", delete(close))
         .route("/:id/stream", get(crate::terminal::stream::watch))
         .layer(Extension(shells))
@@ -172,6 +173,47 @@ async fn list(Extension(shells): Extension<Shells>) -> Json<Vec<Listed>> {
             })
             .collect(),
     )
+}
+
+/// What the history panel is given.
+#[derive(Serialize)]
+struct History {
+    /// The shell whose file was read, so the panel can say whose history it is
+    /// showing — and so that an empty list from a shell nothing can parse is
+    /// distinguishable from an empty list from a person's first day.
+    shell: String,
+    /// Whether that shell is one whose history this server knows how to read.
+    /// The panel says so plainly rather than drawing an empty box; a reader
+    /// whose shell is `nu` deserves to be told that and not left guessing.
+    readable: bool,
+    commands: Vec<crate::terminal::history::Ran>,
+}
+
+/// The commands this computer's shell has written down, newest first.
+///
+/// Read at every ask rather than held. A history file is appended to by every
+/// shell on the machine all day, and a list cached here would be yesterday's
+/// within the hour — while the file is a few hundred kilobytes that the
+/// operating system has in its page cache anyway.
+async fn history(Extension(settings): Extension<Arc<Database>>) -> Result<Json<History>, Refusal> {
+    // The shell chosen in Settings, and the one the computer would open when
+    // nothing is chosen — the same two, in the same order, as `open` above.
+    // Anything else and the panel would be showing the history of a shell the
+    // terminal beside it does not run.
+    let chosen = settings.terminal_shell().map_err(|why| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("The shell chosen in Settings could not be read: {why}"),
+        )
+    })?;
+    let shell = chosen.unwrap_or_else(crate::terminal::shell::system_default);
+    let home = home()?;
+    let commands = crate::terminal::history::recent(&shell, &home);
+    Ok(Json(History {
+        readable: crate::terminal::history::readable(&shell),
+        shell: shell.display().to_string(),
+        commands,
+    }))
 }
 
 async fn close(
