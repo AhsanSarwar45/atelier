@@ -429,6 +429,15 @@ fn askpass_for_one_call() -> std::io::Result<AskpassForOneCall> {
 /// out to git. Nothing about the passphrase outlives the call: it is never
 /// written down, never logged, and the helper it was read by is gone as soon
 /// as git returns.
+///
+/// The call runs on a task of its own rather than inside the request that
+/// asked for it. A browser that gives up — its own deadline, a reload, a shut
+/// tab — leaves axum to drop the handler, and everything the handler was
+/// awaiting goes with it. Awaited here, that took a `git push` down mid-send:
+/// the pipes it was writing its progress to closed underneath it, git died
+/// partway through, the shared copy never moved, and nothing anywhere said why
+/// (bw-8qrr.1). Detached, the push finishes whatever the reader does, and the
+/// next look at the repository finds the work arrived.
 async fn run_git_remote(
     repo: &Path,
     args: &[&str],
@@ -440,8 +449,10 @@ async fn run_git_remote(
         .current_dir(repo)
         .env("GIT_TERMINAL_PROMPT", "0");
 
-    // Held until git has finished; dropping it takes the helper off disk.
-    let _helper = match passphrase {
+    // Held until git has finished; dropping it takes the helper off disk. It
+    // travels into the task below for exactly that reason: its life is git's,
+    // not the request's.
+    let helper = match passphrase {
         None => {
             running.env("GIT_SSH_COMMAND", ssh_that_cannot_ask(repo).await);
             None
@@ -459,7 +470,17 @@ async fn run_git_remote(
         }
     };
 
-    running.output().await.map_err(could_not_run)
+    let ran = tokio::spawn(async move {
+        let _helper = helper;
+        running.output().await
+    });
+
+    match ran.await {
+        Ok(spoke) => spoke.map_err(could_not_run),
+        // The task itself fell over, which is nothing git did. Said as plainly
+        // as a git that could not be started at all.
+        Err(gone) => Err(could_not_run(std::io::Error::other(gone))),
+    }
 }
 
 /// The helper, or a refusal saying plainly that this platform has no way to

@@ -710,8 +710,18 @@ export interface GitDiffResponse {
  * or one that stops to ask an ssh agent for a passphrase, is regularly longer
  * than that and failing it at ten seconds reports a network fault that is not
  * there.
+ *
+ * Two minutes was still far too short for the one call that actually takes
+ * time. A branch a hundred commits ahead is twenty megabytes of pack, and a
+ * push of that over a home connection's upload runs well past two minutes —
+ * so the browser gave up on a push that was going perfectly well, and the
+ * server, which had the push inside the request, killed it on the way out
+ * (bw-8qrr.1). The server no longer does that; this is the other half. Fifteen
+ * minutes is not a wait anybody sits through, and it does not have to be: the
+ * toast says what is happening and the reader can go and do something else.
+ * It exists only so that a call which will never answer eventually stops.
  */
-const REMOTE_DEADLINE_MS = 120_000;
+const REMOTE_DEADLINE_MS = 15 * 60_000;
 
 /**
  * Git API

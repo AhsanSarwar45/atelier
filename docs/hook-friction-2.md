@@ -1212,3 +1212,31 @@ carry `ATELIER_BYPASS` to get past it.
 
 **Cost.** A refusal on every claim and every land in this job — three cards,
 plus the spine's checks and land cards.
+
+## bw-8qrr — the Edit and Write tools cannot carry a bypass
+
+**What happened.** A job copy named for its epic (`worktrees/bw-8qrr`) refuses
+every write until the epic itself is claimed, which is the friction recorded
+for bw-wk5u above. The documented answer is to weld `ATELIER_BYPASS='why'`
+onto the refused command. But `workflow-gate` also judges the Edit and Write
+tools, and a tool call has no command line to weld an assignment onto:
+
+    Beads issue bw-8qrr must be claimed and in_progress before this worktree
+    is changed. The resolved target:
+    /home/ahsan/dev/beads-web/worktrees/bw-8qrr/server/src/routes/git.rs
+
+So the narrowest switch the table in `docs/hooks.md` offers — one command, with
+its reason — is the one switch that cannot be reached for the tools an agent
+edits with. The wider ones (`ATELIER_BYPASS` in the environment,
+`ATELIER_HOOKS=off`, a `.atelier-hooks-off` file) all cover far more than the
+one edit and say far less about why.
+
+**Should have happened.** Either the gate accepts a claimed descendant of the
+card the copy is named for — which is the bw-wk5u fix and would end this too —
+or Edit and Write learn to read a reason from somewhere a tool call can put
+one, so the narrow switch is available where most of the writing happens.
+
+**Cost.** Every source edit in this job was made by piping a Python script
+through `bash` with the bypass welded on, instead of by the tools meant for
+it: eight patch scripts for what were ordinary edits, each one a place a
+mistyped anchor string could have silently matched nothing.

@@ -26,13 +26,26 @@ const ToastViewport = React.forwardRef<
 ToastViewport.displayName = ToastPrimitives.Viewport.displayName
 
 const toastVariants = cva(
-  "group pointer-events-auto relative flex w-full items-center justify-between space-x-2 overflow-hidden rounded-md border p-4 pr-6 shadow-lg transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-top-full data-[state=open]:sm:slide-in-from-bottom-full",
+  "group pointer-events-auto relative flex w-full items-start gap-2.5 overflow-hidden rounded-md border p-3 pr-7 shadow-lg transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-top-full data-[state=open]:sm:slide-in-from-bottom-full",
   {
     variants: {
       variant: {
         default: "border bg-background text-foreground",
         destructive:
           "destructive group border-destructive bg-destructive text-destructive-foreground",
+        /* The three an operation reports itself with. All opaque and lifted:
+           a toast is drawn over whatever the reader was looking at, so a
+           translucent fill would print the page through its own words. The
+           tone lives in the edge and in the icon beside it, never in the
+           fill — a solid block of the danger colour behind a sentence of
+           git's is unreadable, and a solid block of the success colour
+           shouts louder than anything the panel itself draws. */
+        /** Under way, and not finished; the reader is waiting on it. */
+        running: "border-border/60 bg-surface-raised text-t-primary",
+        /** It did what it said. */
+        success: "border-success/40 bg-surface-raised text-t-primary",
+        /** It did not, and the reason is in the toast. */
+        danger: "border-danger/40 bg-surface-raised text-t-primary",
       },
     },
     defaultVariants: {

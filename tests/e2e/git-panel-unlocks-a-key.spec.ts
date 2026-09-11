@@ -14,6 +14,23 @@ async function settled(dialog: Locator): Promise<void> {
 }
 
 /**
+ * The same for a toast, which slides up from under the window rather than
+ * fading: a picture taken while it is still on its way shows it half off the
+ * bottom of the screen, which is a picture of the animation and not of the
+ * app. Waited for by where it has come to rest, since its opacity is 1 for the
+ * whole of the journey.
+ */
+async function landed(toast: Locator): Promise<void> {
+  await expect
+    .poll(
+      async () =>
+        toast.evaluate((box) => Math.round(box.getBoundingClientRect().bottom - window.innerHeight)),
+      { timeout: 10_000 },
+    )
+    .toBeLessThanOrEqual(0);
+}
+
+/**
  * A push that needs an SSH key unlocked, driven end to end (bw-k778).
  *
  * Nothing here is a mock, including the ssh. The shared copy is reached over
@@ -109,6 +126,13 @@ if [ "$given" != "${PASSPHRASE}" ]; then
   echo "git@fixture-host: Permission denied (publickey)." >&2
   exit 255
 fi
+
+# Long enough that the panel can be caught in the middle of the push, which
+# is the whole of what bw-8qrr.2 is about: the reader must be told something
+# is happening while a push runs, not left looking at a frozen dialog. Real
+# pushes take far longer than this; three seconds is only enough for a test to
+# see the same thing a reader sees for a minute.
+sleep 3
 
 # The passphrase was right, so be the transport: run what git asked for.
 eval exec $wanted
@@ -287,14 +311,41 @@ test.describe('a push that needs the key unlocked', () => {
       await page.getByLabel('SSH key passphrase').fill(PASSPHRASE);
       await page.getByTestId('git-unlock').click();
 
-      await expect(asking, 'the panel is still asking after the key opened').toBeHidden({
-        timeout: 60_000,
-      });
+      // A second in, with the push still running: the one moment the whole of
+      // bw-8qrr.2 is about, photographed before anything is asserted about it
+      // so that the same line can be run against the code as it was and the
+      // two pictures put side by side.
+      await page.waitForTimeout(1_200);
+      await page.screenshot({ path: `${SHOTS}/the-moment-after-the-passphrase.png` });
+
+      // The prompt goes at once, before the push it unlocked has finished
+      // (bw-8qrr.2). It used to sit there for the whole of the push with its
+      // field greyed out, which on a real push is minutes of an app that
+      // looks hung. The fake ssh above sleeps for three seconds so that this
+      // line means something: a dialog that waited for the call would still
+      // be up.
+      await expect(asking, 'the prompt waited for the push instead of getting out of the way')
+        .toBeHidden({ timeout: 2_000 });
+
+      // And the wait it left behind is carried by a toast, which is where the
+      // reader can watch it from while looking at anything else on the page.
+      const toast = page.getByTestId('toast');
+      await expect(toast.getByTestId('toast-title'), 'nothing said the push was running')
+        .toHaveText('Pushing');
+      await expect(toast.getByTestId('toast-message')).toHaveText('main → origin/main');
+      await landed(toast);
+      await page.screenshot({ path: `${SHOTS}/a-push-says-it-is-running.png` });
+
+      // The same toast becomes the answer.
+      await expect(toast.getByTestId('toast-title'), 'the push never reported how it went')
+        .toHaveText('Pushed', { timeout: 60_000 });
       await expect(page.getByTestId('git-ahead'), 'the branch is still ahead').toHaveAttribute(
         'data-count',
         '0',
         { timeout: 30_000 },
       );
+      await landed(toast);
+      await page.screenshot({ path: `${SHOTS}/a-push-that-worked-says-so.png` });
       await page.locator('[data-testid="chat-right-rail"]').screenshot({
         path: `${SHOTS}/the-key-opened-and-the-push-went.png`,
       });
@@ -304,6 +355,40 @@ test.describe('a push that needs the key unlocked', () => {
         theSharedCopyHas(WAITING),
         'the passphrase was taken but the push never reached the shared copy',
       ).toBe(true);
+
+      // ---- and a failure no key would clear -----------------------------
+      // Pointed at a shared copy that is not there, so the next push fails for
+      // a reason the passphrase prompt has nothing to do with. That is the
+      // other half of bw-8qrr.3: the panel has to say a push failed, and say
+      // why, in the same place it said it worked.
+      git(REPO, 'remote', 'set-url', 'origin', join(FIXTURE, 'no-such-copy.git'));
+      writeFileSync(join(REPO, 'kept.txt'), 'Changed again.\n');
+      git(REPO, 'add', '-A');
+      git(REPO, 'commit', '-m', 'one that cannot get out');
+      await page.getByTestId('git-refresh').click();
+      await expect(page.getByTestId('git-ahead')).toHaveAttribute('data-count', '1', {
+        timeout: 30_000,
+      });
+
+      await page.getByTestId('git-push').click();
+      await expect(toast.getByTestId('toast-title'), 'a failed push said nothing at all')
+        .toHaveText('Push failed', { timeout: 60_000 });
+      // A label and one line of git's, not a wall of stderr: the wall is still
+      // in the panel underneath for anyone who wants to read it.
+      await expect(toast.getByTestId('toast-message')).toContainText('does not appear to be a git repository');
+      await expect(page.getByTestId('git-error'), "git's own words are still kept in the panel")
+        .toBeVisible();
+      await landed(toast);
+      await page.screenshot({ path: `${SHOTS}/a-push-that-failed-says-why.png` });
+
+      // And the reason survives the panel's own five-second re-read, which is
+      // what used to wipe it off the screen before it could be read
+      // (bw-8qrr.1).
+      await page.waitForTimeout(7_000);
+      await expect(
+        page.getByTestId('git-error'),
+        'the re-read wiped the reason for the failure off the screen',
+      ).toBeVisible();
     } finally {
       await command(request, { type: 'session.close', sessionId });
       await request.delete(`/api/projects/${project.id}`);

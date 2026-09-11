@@ -22,7 +22,7 @@
  */
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { formatDistanceToNow } from 'date-fns';
 import {
@@ -59,6 +59,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
 import { ApiError, git, type GitBranch, type GitChange, type GitCommit, type GitStatus } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import {
+  howManyFiles,
+  quietlyOn,
+  reportOn,
+  type DeedReport,
+  type GitDeed,
+} from '@/workbench/git-deeds';
 import { usePathActions } from '@/workbench/path-menu';
 import { useRepositoryReads } from '@/workbench/use-repository-reads';
 
@@ -104,6 +111,27 @@ function wantsAKey(trouble: unknown): boolean {
     trouble instanceof ApiError
     && (trouble.body as { needsPassphrase?: boolean } | undefined)?.needsPassphrase === true
   );
+}
+
+/**
+ * What a call is to be reported as: which operation it is, the short line that
+ * goes under the label, and — where git's own answer says it better than the
+ * panel could guess — how to read that line off what came back.
+ *
+ * `quiet` is for an operation whose result is already on the screen; see
+ * `quietlyOn`. It still reports a failure.
+ */
+interface Telling {
+  deed: GitDeed;
+  note?: string;
+  quiet?: boolean;
+  ended?: (answer: unknown) => string | undefined;
+}
+
+/** A commit subject cut to the length a toast has room for. */
+function shortened(subject: string): string {
+  const one = subject.split('\n')[0].trim();
+  return one.length > 60 ? `${one.slice(0, 59)}…` : one;
 }
 
 /** When a commit was made, in the words a reader thinks in. */
@@ -352,15 +380,19 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
   const [asking, setAsking] = useState<{
     said: string;
     verb: string;
+    told: Telling;
     run: () => Promise<unknown>;
   } | null>(null);
   /**
    * The call that came back wanting an unlocked key, kept so that answering
    * the prompt runs the very thing the reader asked for rather than a guess at
    * it — a push that was setting an upstream is still setting one on the
-   * second go.
+   * second go. How it is to be reported travels with it, so the retry raises
+   * the same toast the first go would have.
    */
-  const [locked, setLocked] = useState<((passphrase?: string) => Promise<unknown>) | null>(null);
+  const [locked, setLocked] = useState<
+    { told: Telling; run: (passphrase?: string) => Promise<unknown> } | null
+  >(null);
   /**
    * What the reader has typed. Held no longer than the call it is for: every
    * path out of `act` empties it, so it is gone whether the key opened or not.
@@ -373,6 +405,21 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
    * prompt rather than as the panel's red word on the call (bw-8nwh.1).
    */
   const [keyRefused, setKeyRefused] = useState(false);
+  /**
+   * Which of the two things that can fail put the words in the red panel.
+   *
+   * The panel re-reads itself every few seconds, and a read that works used to
+   * clear the panel — including the words a push had just failed with, five
+   * seconds after the reader pressed the button (bw-8qrr.1). A push also moves
+   * the git directory, so the watcher fired a read at once and the failure was
+   * regularly gone before it could be read at all: pressing Push and being
+   * told nothing was the everyday result.
+   *
+   * So a read clears only what a read put there. What an operation failed with
+   * stays until the reader does something else, which is the next time it
+   * could possibly be out of date.
+   */
+  const faultFrom = useRef<'a read' | 'an operation' | null>(null);
 
   /**
    * Ask git where things stand. Both questions at once because they are drawn
@@ -396,10 +443,14 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
         if (signal?.aborted) return;
         setStatus(state);
         setCommits(history.commits);
-        setFault(null);
+        if (faultFrom.current !== 'an operation') {
+          setFault(null);
+          faultFrom.current = null;
+        }
       } catch (trouble) {
         if (signal?.aborted) return;
         setFault(gitSaid(trouble));
+        faultFrom.current = 'a read';
       } finally {
         if (!quietly && !signal?.aborted) setReading(false);
       }
@@ -461,27 +512,45 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
    * knows that.
    */
   const act = useCallback(
-    async (run: (passphrase?: string) => Promise<unknown>, unlockWith?: string) => {
+    async (
+      told: Telling,
+      run: (passphrase?: string) => Promise<unknown>,
+      unlockWith?: string,
+    ) => {
       if (!path) return;
       setBusy(true);
       setFault(null);
+      faultFrom.current = null;
+      // Raised before the call and not after it, because the toast IS the
+      // wait: a push over a slow link is a minute of a reader wondering
+      // whether anything at all is happening, and "Pushing" is the answer to
+      // that. The same toast then becomes the outcome, so the story is told
+      // once rather than twice (bw-8qrr.2).
+      const telling: DeedReport = told.quiet
+        ? quietlyOn(told.deed, told.note)
+        : reportOn(told.deed, told.note);
       try {
-        await run(unlockWith);
+        const answer = await run(unlockWith);
         setLocked(null);
         setKeyRefused(false);
+        telling.worked(told.ended?.(answer) ?? told.note);
         await read();
       } catch (trouble) {
         if (wantsAKey(trouble)) {
           // Nothing has gone wrong yet: the call is waiting on a key, and the
-          // way on is the prompt. So no fault is set — see the form below.
-          // `setLocked` is given a function that returns the call, because a
-          // plain one would be taken for an updater and called on the spot.
-          setLocked(() => run);
+          // way on is the prompt. So no fault is set — see the form below —
+          // and the toast is let go rather than left spinning behind a dialog
+          // that is now the thing the reader is being asked about.
+          telling.letGo();
+          setLocked({ told, run });
           // Only the second and later goes are a refusal of what was typed;
           // the first is the call finding the key locked in the first place.
           setKeyRefused(unlockWith !== undefined);
         } else {
-          setFault(gitSaid(trouble));
+          const said = gitSaid(trouble);
+          telling.failed(said);
+          setFault(said);
+          faultFrom.current = 'an operation';
           setLocked(null);
           setKeyRefused(false);
         }
@@ -514,6 +583,8 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
     if (!words) return;
     setBusy(true);
     setFault(null);
+    faultFrom.current = null;
+    const telling = reportOn(amend ? 'amend' : 'commit', shortened(words));
     try {
       // Said only when it is meant: an ordinary commit is the very call it
       // always was, amend and all left off the wire.
@@ -525,9 +596,13 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
       // again.
       setMessage('');
       setAmend(false);
+      telling.worked();
       await read();
     } catch (trouble) {
-      setFault(gitSaid(trouble));
+      const said = gitSaid(trouble);
+      telling.failed(said);
+      setFault(said);
+      faultFrom.current = 'an operation';
     } finally {
       setBusy(false);
     }
@@ -540,8 +615,8 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
    * place that decides what asking looks like and one shape of answer.
    */
   const askFirst = useCallback(
-    (said: string, verb: string, run: () => Promise<unknown>) => {
-      setAsking({ said, verb, run });
+    (said: string, verb: string, told: Telling, run: () => Promise<unknown>) => {
+      setAsking({ said, verb, told, run });
     },
     [],
   );
@@ -615,7 +690,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
               .map((branch) => ({ value: branch.name, label: branch.name }))}
             onChange={(branch) => {
               if (!path || branch === status?.branch) return;
-              void act(() => git.checkout(path, branch));
+              void act({ deed: 'checkout', note: branch }, () => git.checkout(path, branch));
             }}
           />
           {status?.detached && (
@@ -680,7 +755,22 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
             className="flex-1"
             disabled={busy}
             data-testid="git-fetch"
-            onClick={() => void act((key) => git.fetch(path, key))}
+            onClick={() =>
+              void act(
+                {
+                  deed: 'fetch',
+                  note: status?.upstream ?? 'origin',
+                  // git says nothing worth reading on a fetch; where the
+                  // branch stands afterwards is the whole of what was wanted,
+                  // and the server counts it for us.
+                  ended: (answer) => {
+                    const stood = answer as { ahead?: number; behind?: number } | undefined;
+                    return `${stood?.ahead ?? 0} ahead · ${stood?.behind ?? 0} behind`;
+                  },
+                },
+                (key) => git.fetch(path, key),
+              )
+            }
           >
             <CloudDownload aria-hidden="true" />
             Fetch
@@ -691,7 +781,12 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
             className="flex-1"
             disabled={busy}
             data-testid="git-pull"
-            onClick={() => void act((key) => git.pull(path, key))}
+            onClick={() =>
+              void act(
+                { deed: 'pull', note: `${status?.upstream ?? 'origin'} → ${status?.branch ?? 'HEAD'}` },
+                (key) => git.pull(path, key),
+              )
+            }
           >
             <Download aria-hidden="true" />
             Pull
@@ -702,7 +797,12 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
             className="flex-1"
             disabled={busy}
             data-testid="git-push"
-            onClick={() => void act((key) => git.push(path, status?.upstream === null, key))}
+            onClick={() =>
+              void act(
+                { deed: 'push', note: `${status?.branch ?? 'HEAD'} → ${status?.upstream ?? 'origin'}` },
+                (key) => git.push(path, status?.upstream === null, key),
+              )
+            }
           >
             <Upload aria-hidden="true" />
             Push
@@ -758,7 +858,20 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
             className="flex flex-col gap-3"
             onSubmit={(sending) => {
               sending.preventDefault();
-              if (locked) void act(locked, passphrase);
+              if (!locked) return;
+              // Put away before the call, not after it (bw-8qrr.2). The push
+              // the passphrase unlocks is the long part of the evening — a
+              // large one runs for minutes — and the dialog used to sit there
+              // for all of it with its field greyed out and nothing moving,
+              // which reads as an app that has hung rather than one that is
+              // working. The wait belongs in the toast `act` raises, where it
+              // can be watched from anywhere on the page; a refused key brings
+              // the prompt straight back with the reason in it.
+              const { told, run } = locked;
+              const typed = passphrase;
+              setLocked(null);
+              setPassphrase('');
+              void act(told, run, typed);
             }}
           >
             <div className="flex flex-col gap-1.5">
@@ -852,9 +965,9 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
                 disabled={busy}
                 data-testid="git-confirm"
                 onClick={() => {
-                  const { run } = asking;
+                  const { run, told } = asking;
                   setAsking(null);
-                  void act(() => run());
+                  void act(told, () => run());
                 }}
               >
                 {asking.verb}
@@ -886,7 +999,11 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
                 action="stage"
                 label="Mark as resolved"
                 busy={busy}
-                onAct={() => void act(() => git.stage(path, [file.path]))}
+                onAct={() =>
+                  void act({ deed: 'stage', quiet: true, note: file.path }, () =>
+                    git.stage(path, [file.path]),
+                  )
+                }
               />
             ))}
           </div>
@@ -905,7 +1022,12 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
               className="h-5 px-1 text-[10px]"
               disabled={busy}
               data-testid="git-unstage-all"
-              onClick={() => void act(() => git.unstageAll(path))}
+              onClick={() =>
+                void act(
+                  { deed: 'unstage', quiet: true, note: howManyFiles(staged.length) },
+                  () => git.unstageAll(path),
+                )
+              }
             >
               <Minus aria-hidden="true" />
               Unstage all
@@ -923,7 +1045,11 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
                 action="unstage"
                 label="Unstage"
                 busy={busy}
-                onAct={() => void act(() => git.unstage(path, [file.path]))}
+                onAct={() =>
+                  void act({ deed: 'unstage', quiet: true, note: file.path }, () =>
+                    git.unstage(path, [file.path]),
+                  )
+                }
               />
             ))}
           </div>
@@ -943,7 +1069,9 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
                 className="h-5 px-1 text-[10px]"
                 disabled={busy}
                 data-testid="git-stage-all"
-                onClick={() => void act(() => git.stageAll(path))}
+                onClick={() =>
+                void act({ deed: 'stage', quiet: true }, () => git.stageAll(path))
+              }
               >
                 <Plus aria-hidden="true" />
                 Stage all
@@ -961,6 +1089,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
                   askFirst(
                     'Discard every change in this project? Files that are new will be deleted; ignored files are kept. This cannot be undone.',
                     'Discard all',
+                    { deed: 'discard', note: howManyFiles(unstaged.length + untracked.length) },
                     () => git.discardAll(path),
                   )
                 }
@@ -982,7 +1111,11 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
                 action="stage"
                 label="Stage"
                 busy={busy}
-                onAct={() => void act(() => git.stage(path, [file.path]))}
+                onAct={() =>
+                  void act({ deed: 'stage', quiet: true, note: file.path }, () =>
+                    git.stage(path, [file.path]),
+                  )
+                }
                 extra={
                   <Tooltip label={`Discard changes to ${file.path}`}>
                     <Button
@@ -996,6 +1129,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
                         askFirst(
                           `Discard changes to ${file.path}? This cannot be undone.`,
                           'Discard',
+                          { deed: 'discard', note: file.path },
                           () => git.discard(path, [file.path]),
                         )
                       }
@@ -1022,7 +1156,9 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
               className="h-5 px-1 text-[10px]"
               disabled={busy}
               data-testid="git-stage-all"
-              onClick={() => void act(() => git.stageAll(path))}
+              onClick={() =>
+                void act({ deed: 'stage', quiet: true }, () => git.stageAll(path))
+              }
             >
               <Plus aria-hidden="true" />
               Stage all
@@ -1039,7 +1175,11 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
                 action="stage"
                 label="Stage"
                 busy={busy}
-                onAct={() => void act(() => git.stage(path, [file.path]))}
+                onAct={() =>
+                  void act({ deed: 'stage', quiet: true, note: file.path }, () =>
+                    git.stage(path, [file.path]),
+                  )
+                }
                 extra={
                   <Tooltip label={`Delete ${file.path}`}>
                     <Button
@@ -1053,6 +1193,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
                         askFirst(
                           `Delete ${file.path}? git has no copy of it, so this cannot be undone.`,
                           'Delete',
+                          { deed: 'remove', note: file.path },
                           () => git.remove(path, [file.path]),
                         )
                       }

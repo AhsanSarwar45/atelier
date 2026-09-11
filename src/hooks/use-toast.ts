@@ -16,6 +16,16 @@ type ToasterToast = ToastProps & {
   title?: React.ReactNode
   description?: React.ReactNode
   action?: ToastActionElement
+  /**
+   * What the toast is about, drawn before its title.
+   *
+   * A toast is read in the corner of an eye that is looking somewhere else,
+   * and an icon is the part of it that arrives first: the reader knows a push
+   * answered before reading which way it went. Given as an element rather than
+   * a name so the toast stays a box that draws what it is handed — the icon
+   * and its colour belong to whatever raised the toast, not here.
+   */
+  icon?: React.ReactNode
 }
 
 let count = 0
