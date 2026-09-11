@@ -12,18 +12,14 @@
  * So both are held out here, against the chat's own id, where the screen coming
  * and going cannot touch them.
  *
- * The line and the pictures are kept in different places on purpose. A line
- * survives closing the window, because that is what he asked for, and the
- * browser's own store is the only thing that outlives a window. Pictures do not
- * go in there: they arrive as their own bytes spelled out in text, one
- * screenshot runs to megabytes, and the store gives up somewhere around five —
- * so a tray of two would start throwing where a line never can. They live in
- * this module instead, which outlasts every screen in the window and nothing
- * more, and that is the whole of what bounds them.
+ * The line and the pictures are kept in different browser stores on purpose.
+ * A line fits in localStorage. Pictures arrive as their own bytes spelled out
+ * in text and one screenshot runs to megabytes, so they live in IndexedDB,
+ * whose quota is meant for blobs and records of that size.
  */
 import { type Dispatch, type SetStateAction, useCallback, useEffect, useState } from 'react';
 
-import type { ImagePayload } from '@/workbench/protocol';
+import type { DraftPicture } from '@/workbench/composer-attachments';
 
 /** Where one chat's unsent line is kept, under its own id. */
 const LINE = 'workbench.unsent-line.';
@@ -49,11 +45,39 @@ const ORDER = 'workbench.unsent-order';
  */
 const KEEP = 50;
 
-/** Every chat's unsent pictures, for as long as this window is open. */
-const TRAYS = new Map<string, ImagePayload[]>();
+const PICTURES = 'workbench-unsent-pictures';
+const TRAYS = new Map<string, DraftPicture[]>();
 
 /** One empty tray, so a chat with no pictures draws the same value every pass. */
-const NO_PICTURES: ImagePayload[] = [];
+const NO_PICTURES: DraftPicture[] = [];
+
+function pictureStore(): Promise<IDBDatabase | null> {
+  if (typeof indexedDB === 'undefined') return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const request = indexedDB.open(PICTURES, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('drafts');
+    request.onerror = () => resolve(null);
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+async function readPictures(sessionId: string): Promise<DraftPicture[]> {
+  const database = await pictureStore();
+  if (!database) return TRAYS.get(sessionId) ?? NO_PICTURES;
+  return new Promise((resolve) => {
+    const request = database.transaction('drafts').objectStore('drafts').get(sessionId);
+    request.onerror = () => resolve(NO_PICTURES);
+    request.onsuccess = () => resolve(Array.isArray(request.result) ? request.result : NO_PICTURES);
+  });
+}
+
+async function writePictures(sessionId: string, pictures: DraftPicture[]): Promise<void> {
+  const database = await pictureStore();
+  if (!database) return;
+  const draftStore = database.transaction('drafts', 'readwrite').objectStore('drafts');
+  if (pictures.length) draftStore.put(pictures, sessionId);
+  else draftStore.delete(sessionId);
+}
 
 /** The browser's store, or nothing where there is not one to have. */
 function store(): Storage | null {
@@ -149,19 +173,34 @@ export function useUnsentLine(sessionId: string): [string, Dispatch<SetStateActi
  */
 export function useUnsentPictures(
   sessionId: string,
-): [ImagePayload[], Dispatch<SetStateAction<ImagePayload[]>>] {
-  const [tray, setTray] = useState<ImagePayload[]>(() => TRAYS.get(sessionId) ?? NO_PICTURES);
+): [DraftPicture[], Dispatch<SetStateAction<DraftPicture[]>>] {
+  const [tray, setTray] = useState<DraftPicture[]>(() => TRAYS.get(sessionId) ?? NO_PICTURES);
 
   useEffect(() => {
-    setTray(TRAYS.get(sessionId) ?? NO_PICTURES);
+    if (TRAYS.has(sessionId)) {
+      setTray(TRAYS.get(sessionId) ?? NO_PICTURES);
+      return;
+    }
+    setTray(NO_PICTURES);
+    let current = true;
+    void readPictures(sessionId).then((pictures) => {
+      if (!current) return;
+      const currentTray = TRAYS.get(sessionId);
+      if (currentTray) setTray(currentTray);
+      else {
+        TRAYS.set(sessionId, pictures);
+        setTray(pictures);
+      }
+    });
+    return () => { current = false; };
   }, [sessionId]);
 
-  const write = useCallback<Dispatch<SetStateAction<ImagePayload[]>>>(
+  const write = useCallback<Dispatch<SetStateAction<DraftPicture[]>>>(
     (next) => {
       setTray((was) => {
         const now = typeof next === 'function' ? next(was) : next;
-        if (now.length) TRAYS.set(sessionId, now);
-        else TRAYS.delete(sessionId);
+        TRAYS.set(sessionId, now);
+        void writePictures(sessionId, now);
         return now;
       });
     },
@@ -174,6 +213,7 @@ export function useUnsentPictures(
 /** Everything this module is holding, dropped. Only a test wants this. */
 export function forgetEveryDraft(): void {
   TRAYS.clear();
+  if (typeof indexedDB !== 'undefined') indexedDB.deleteDatabase(PICTURES);
   const kept = store();
   if (!kept) return;
   const gone: string[] = [ORDER];

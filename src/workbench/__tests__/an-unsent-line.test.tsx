@@ -20,13 +20,13 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { forgetEveryDraft, rememberUnsentLine, useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
-import type { ImagePayload } from '@/workbench/protocol';
+import type { DraftPicture } from '@/workbench/composer-attachments';
 
 const ONE = 'chat-one';
 const TWO = 'chat-two';
 
 /** A picture, small enough to read in a failure message. */
-const SNAP: ImagePayload = { mime: 'image/png', dataUrl: 'data:image/png;base64,AAA', alt: 'a snap' };
+const SNAP: DraftPicture = { id: 'snap', mime: 'image/png', dataUrl: 'data:image/png;base64,AAA', alt: 'a snap' };
 
 /** The writing box of one chat, opened. */
 function box(sessionId: string) {
