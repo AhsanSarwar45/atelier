@@ -18,6 +18,7 @@ pub mod lifecycle;
 pub mod local;
 pub mod media;
 pub mod metadata;
+pub mod profiles;
 pub mod projection;
 pub mod protocol;
 pub mod provider;

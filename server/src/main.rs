@@ -387,6 +387,9 @@ async fn serve(open_browser: bool) {
             home,
             claude_config: claude_config.clone(),
             codex_home,
+            profiles: identity::data_dir()
+                .expect("Failed to resolve the data directory")
+                .join("profiles"),
             // The one store, read back by `GET /api/presentation-assets/:asset`
             // through the same function. A copy that wrote its evidence
             // somewhere of its own would report success and leave the reading

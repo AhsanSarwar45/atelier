@@ -2203,6 +2203,7 @@ mod tests {
             home: directory.path().to_path_buf(),
             claude_config: directory.path().join("claude"),
             codex_home: directory.path().join("codex"),
+            profiles: directory.path().join("profiles"),
             media: directory.path().join("media"),
         };
         let registry = WorkbenchRegistry::new(database, paths, Arc::new(UnavailableFactory));

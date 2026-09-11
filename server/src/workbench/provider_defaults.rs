@@ -93,7 +93,7 @@ fn json_settings(path: &Path) -> Result<Map<String, Value>, String> {
         .ok_or_else(|| format!("{} is not a settings object", path.display()))
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     fs::create_dir_all(path.parent().ok_or("settings path has no parent")?)
         .map_err(|e| e.to_string())?;
     let temporary = path.with_extension(format!(

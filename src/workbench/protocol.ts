@@ -775,6 +775,25 @@ export interface Brief {
   text: string;
 }
 
+/**
+ * One signed-in provider account.
+ *
+ * A profile is one directory holding one account's login, so a profile belongs
+ * to exactly one brand: two Claude accounts and one Codex account need no
+ * pairing between them. The `system` profile is the directory the server
+ * itself booted with — the account already signed into from a terminal — and
+ * is the reason a fresh install has a working profile without creating one.
+ */
+export interface ProfileChoice {
+  id: string;
+  brand: Brand;
+  name: string;
+  system: boolean;
+}
+
+/** The profile id meaning "the directory the server booted with". */
+export const SYSTEM_PROFILE = 'system';
+
 export type WbpCommand =
   | { type: 'agent-files.list'; projectPath?: string }
   | { type: 'agent-files.read'; path: string; projectPath?: string }
@@ -783,6 +802,10 @@ export type WbpCommand =
   | { type: 'providers.list' }
   | { type: 'provider.authenticate'; brand: Brand; methodId: string }
   | { type: 'provider.logout'; brand: Brand }
+  | { type: 'profiles.list'; brand: Brand }
+  | { type: 'profile.create'; brand: Brand; name: string }
+  | { type: 'profile.rename'; brand: Brand; profileId: string; name: string }
+  | { type: 'profile.delete'; brand: Brand; profileId: string }
   | {
       type: 'session.start';
       projectId: string;

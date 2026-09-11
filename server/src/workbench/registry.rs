@@ -5,6 +5,7 @@ use super::agent_files;
 use super::browser::{self, BrowserCapture, BrowserRecipe};
 use super::external::{self, ProviderHold};
 use super::media;
+use super::profiles::Profiles;
 use super::protocol::{Command, CommandKind};
 use super::provider_defaults::ProviderDefaultFiles;
 use super::screen_check::{self, StoredCapture, StoredComparison};
@@ -68,6 +69,8 @@ pub struct RegistryPaths {
     pub home: PathBuf,
     pub claude_config: PathBuf,
     pub codex_home: PathBuf,
+    /// Where created account profiles live.
+    pub profiles: PathBuf,
     pub media: PathBuf,
 }
 
@@ -149,11 +152,17 @@ pub struct WorkbenchRegistry {
     drivers: Arc<RwLock<HashMap<String, Driver>>>,
     paths: RegistryPaths,
     defaults: ProviderDefaultFiles,
+    profiles: Profiles,
 }
 
 impl WorkbenchRegistry {
     pub fn new(database: ChatDb, paths: RegistryPaths, factory: Arc<dyn SessionFactory>) -> Self {
         let defaults = ProviderDefaultFiles::new(&paths.claude_config, &paths.codex_home);
+        let profiles = Profiles::new(
+            paths.profiles.clone(),
+            paths.claude_config.clone(),
+            paths.codex_home.clone(),
+        );
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let db = database.clone();
             let mut updates = database.subscribe_all();
@@ -190,6 +199,7 @@ impl WorkbenchRegistry {
             drivers: Arc::new(RwLock::new(HashMap::new())),
             paths,
             defaults,
+            profiles,
         }
     }
 
@@ -648,6 +658,29 @@ impl WorkbenchRegistry {
                 let brand = Self::field(command, "brand")?;
                 super::acp::client::logout(brand).await
             }
+            CommandKind::ProfilesList => {
+                let brand = Self::field(command, "brand")?;
+                Ok(json!({"profiles":self.profiles.list(brand)}))
+            }
+            CommandKind::ProfileCreate => {
+                let brand = Self::field(command, "brand")?;
+                let name = Self::field(command, "name")?;
+                let made = self.profiles.create(brand, name)?;
+                Ok(json!({"profile":made,"profiles":self.profiles.list(brand)}))
+            }
+            CommandKind::ProfileRename => {
+                let brand = Self::field(command, "brand")?;
+                let id = Self::field(command, "profileId")?;
+                let name = Self::field(command, "name")?;
+                let renamed = self.profiles.rename(brand, id, name)?;
+                Ok(json!({"profile":renamed,"profiles":self.profiles.list(brand)}))
+            }
+            CommandKind::ProfileDelete => {
+                let brand = Self::field(command, "brand")?;
+                let id = Self::field(command, "profileId")?;
+                self.profiles.delete(brand, id)?;
+                Ok(json!({"profiles":self.profiles.list(brand)}))
+            }
             CommandKind::ProvidersList => {
                 let mut providers = [
                     ("claude", "Claude", "https://docs.anthropic.com/en/docs/claude-code"),
@@ -870,6 +903,7 @@ mod tests {
                 home: home.clone(),
                 claude_config: home.join(".claude"),
                 codex_home: home.join(".codex"),
+                profiles: root.path().join("profiles"),
                 media: root.path().join("media"),
             },
             Arc::new(FakeFactory {
@@ -995,6 +1029,7 @@ mod tests {
                 home: root.path().into(),
                 claude_config: root.path().join("claude"),
                 codex_home: root.path().join("codex"),
+                profiles: root.path().join("profiles"),
                 media: root.path().join("media"),
             },
             Arc::new(FakeFactory {
@@ -1065,6 +1100,7 @@ mod tests {
                 home: root.path().into(),
                 claude_config: root.path().join("claude"),
                 codex_home: root.path().join("codex"),
+                profiles: root.path().join("profiles"),
                 media: root.path().join("media"),
             },
             Arc::new(crate::workbench::provider::NativeProviderFactory::new(
@@ -1127,6 +1163,7 @@ mod tests {
                 home: root.path().into(),
                 claude_config: root.path().join("claude"),
                 codex_home: root.path().join("codex"),
+                profiles: root.path().join("profiles"),
                 media: root.path().join("media"),
             },
             Arc::new(crate::workbench::provider::NativeProviderFactory::new(
@@ -1200,6 +1237,7 @@ mod tests {
                 home: root.path().into(),
                 claude_config: root.path().join("claude"),
                 codex_home: root.path().join("codex"),
+                profiles: root.path().join("profiles"),
                 media: root.path().join("media"),
             },
             Arc::new(FakeFactory {
@@ -1272,6 +1310,7 @@ mod tests {
                 home: root.path().into(),
                 claude_config: root.path().join("claude"),
                 codex_home: root.path().join("codex"),
+                profiles: root.path().join("profiles"),
                 media: root.path().join("media"),
             },
             Arc::new(FakeFactory {
@@ -1376,6 +1415,7 @@ mod tests {
                 home: root.path().into(),
                 claude_config: claude,
                 codex_home: root.path().join("codex"),
+                profiles: root.path().join("profiles"),
                 media: root.path().join("media"),
             },
             Arc::new(FakeFactory {
