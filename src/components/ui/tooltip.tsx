@@ -82,6 +82,8 @@ export const Tooltip = React.forwardRef<HTMLElement, TooltipProps>(function Tool
   ref,
 ) {
   const mounted = React.useContext(Mounted);
+  const [open, setOpen] = React.useState(false);
+  const dismissed = React.useRef(false);
   const passed = rest as React.ComponentPropsWithoutRef<typeof Slot>;
   if (label === undefined || label === null || label === '') {
     return <Slot ref={ref} {...passed}>{children}</Slot>;
@@ -108,9 +110,14 @@ export const Tooltip = React.forwardRef<HTMLElement, TooltipProps>(function Tool
   );
 
   const tooltip = (
-    <TooltipPrimitive.Root delayDuration={delayDuration}>
+    <TooltipPrimitive.Root delayDuration={delayDuration} open={open} onOpenChange={(next) => setOpen(next && !dismissed.current)}>
       <TooltipPrimitive.Trigger asChild>
-        <Slot ref={ref} {...passed}>{inner}</Slot>
+        <Slot
+          ref={ref}
+          {...passed}
+          onPointerDownCapture={() => { dismissed.current = true; setOpen(false); }}
+          onPointerLeave={() => { dismissed.current = false; setOpen(false); }}
+        >{inner}</Slot>
       </TooltipPrimitive.Trigger>
       <TooltipContent side={side} align={align} className={className}>
         {label}
