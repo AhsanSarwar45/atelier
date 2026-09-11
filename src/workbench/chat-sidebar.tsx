@@ -33,9 +33,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -360,8 +357,6 @@ interface ChatSidebarProps {
   onSearch?: () => void;
   onToggleEverything?: () => void;
   onNewChat?: (brand?: Brand) => void;
-  newChatDefault?: Brand | 'ask';
-  onNewChatDefault?: (choice: Brand | 'ask') => void;
   startingNewChat?: boolean;
   /**
    * The way out of the drawer, on a phone where this list IS the screen. Drawn
@@ -381,8 +376,6 @@ export function ChatSidebar({
   onSearch,
   onToggleEverything,
   onNewChat,
-  newChatDefault = 'ask',
-  onNewChatDefault,
   startingNewChat = false,
   onClose,
 }: ChatSidebarProps) {
@@ -648,20 +641,6 @@ export function ChatSidebar({
                       </DropdownMenuItem>
                     </Tooltip>
                   ))}
-                  {onNewChatDefault && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuLabel>Main button</DropdownMenuLabel>
-                      <DropdownMenuRadioGroup value={newChatDefault} onValueChange={(value) => onNewChatDefault(value as Brand | 'ask')}>
-                        <DropdownMenuRadioItem value="ask">Ask every time</DropdownMenuRadioItem>
-                        {providers.map(({ brand, available }) => (
-                          <DropdownMenuRadioItem key={brand} value={brand} disabled={!available}>
-                            Use {brandName(brand)} by default
-                          </DropdownMenuRadioItem>
-                        ))}
-                      </DropdownMenuRadioGroup>
-                    </>
-                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>

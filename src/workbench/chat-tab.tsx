@@ -42,7 +42,6 @@ import { type Mentions } from '@/components/markdown-body';
 import { TabLead, TabTools, TabTrail, ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   DropdownMenu,
@@ -74,7 +73,7 @@ import { useKnownCards, useKnownCardStatuses } from '@/workbench/known-cards';
 import { drawnRows } from '@/workbench/machine-lines';
 import { inWords, PERMISSION_MODE } from '@/workbench/machine-words';
 import { addressedBy, openableAsks, openableIn } from '@/workbench/mentions';
-import { loadNewChatDefaults, NO_DEFAULTS, saveNewChatProvider, type NewChatDefaults } from '@/workbench/new-chat-defaults';
+import { loadNewChatDefaults, NO_DEFAULTS, saveNewChatProfile, saveNewChatProvider, type NewChatDefaults } from '@/workbench/new-chat-defaults';
 import { providerMessageIsCurrent } from '@/workbench/provider-messages';
 import { usePathActions } from '@/workbench/path-menu';
 import { PathChip } from '@/workbench/path-chip';
@@ -83,7 +82,10 @@ import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, sentAway, showing as stillShowing, type KindId } from '@/workbench/message-filter';
-import type { Brand, CommandInfo, Cost, LookableImage, SessionConfigOption, TodoItem } from '@/workbench/protocol';
+import type { Brand, CommandInfo, Cost, LookableImage, ProfileChoice, SessionConfigOption, TodoItem } from '@/workbench/protocol';
+
+/** The brands a chat can run on somebody's account. `local` has none. */
+const ACCOUNTED_BRANDS: readonly Brand[] = ['claude', 'codex'];
 import { BRAND_DEFAULT_MODEL, startingChat } from '@/workbench/protocol';
 import { heldElsewhere, sessionOwnership, streamStillAnswers } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
@@ -187,6 +189,69 @@ function glued(text: string | undefined): string | undefined {
  * clickable card rather than beside it: the label and the description light up
  * together, and a click anywhere over either one picks that option (bw-xtic.1).
  */
+/**
+ * The star that says "this is the one I get without asking".
+ *
+ * One component because there is more than one place to set a default now —
+ * the model and effort menus, and the provider and account rows in the
+ * new-chat dialog — and a star that looked or behaved differently in one of
+ * them would read as a different thing (bw-5ihw.6).
+ *
+ * Pointer-down rather than click, because in a menu the click lands after the
+ * menu has decided to close and takes the pick with it. Enter and Space are
+ * answered directly for the same reason, so the keyboard reaches it too.
+ */
+function DefaultStar({
+  on,
+  what,
+  disabled,
+  why,
+  testid,
+  className,
+  onChoose,
+}: {
+  on: boolean;
+  /** The thing being made default, as the reader sees it named. */
+  what: string;
+  disabled?: boolean;
+  /** Why this one cannot be the default, which is said instead of the offer. */
+  why?: string | null;
+  testid: string;
+  className?: string;
+  onChoose: () => void;
+}) {
+  const choose = () => {
+    if (!disabled && !why) onChoose();
+  };
+  return (
+    <Tooltip label={why ?? (on ? 'Default' : 'Make default')}>
+      <Button
+        size="xs"
+        variant="ghost"
+        className={cn('h-5 w-5 shrink-0 rounded-sm p-0', className)}
+        data-testid={testid}
+        data-default={on}
+        aria-pressed={on}
+        disabled={disabled || Boolean(why)}
+        aria-label={why ?? (on ? `${what} is the default` : `Make ${what} the default`)}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          choose();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            choose();
+          }
+        }}
+      >
+        <Star className={cn('h-3 w-3', on && 'fill-current text-primary')} aria-hidden="true" />
+      </Button>
+    </Tooltip>
+  );
+}
+
 export function Picker({
   icon,
   label,
@@ -270,25 +335,15 @@ export function Picker({
                 )}
               </DropdownMenuItem>
               {onDefault && (
-                <Tooltip label={cannotDefault?.(o.value) ?? (defaultValue === o.value ? 'Default' : 'Make default')}>
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    className="mt-1 h-5 w-5 shrink-0 rounded-sm p-0"
-                    data-testid={`${testid}-default-${o.value}`}
-                    data-default={defaultValue === o.value}
-                    aria-pressed={defaultValue === o.value}
-                    disabled={Boolean(o.unavailable) || Boolean(cannotDefault?.(o.value))}
-                    aria-label={cannotDefault?.(o.value) ?? (defaultValue === o.value ? `${o.label} is the default` : `Make ${o.label} the default`)}
-                    onPointerDown={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      if (!cannotDefault?.(o.value)) onDefault(o.value);
-                    }}
-                  >
-                    <Star className={cn('h-3 w-3', defaultValue === o.value && 'fill-current text-primary')} aria-hidden="true" />
-                  </Button>
-                </Tooltip>
+                <DefaultStar
+                  on={defaultValue === o.value}
+                  what={o.label}
+                  why={cannotDefault?.(o.value)}
+                  disabled={Boolean(o.unavailable)}
+                  testid={`${testid}-default-${o.value}`}
+                  className="mt-1"
+                  onChoose={() => onDefault(o.value)}
+                />
               )}
             </div>
             </div>
@@ -596,6 +651,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [newChatDefaults, setNewChatDefaults] = useState<NewChatDefaults>(NO_DEFAULTS);
   /** Nothing chosen and "ask me" are the same state, and always were. */
   const newChatDefault: Brand | 'ask' = newChatDefaults.provider ?? 'ask';
+  /**
+   * The accounts each brand has, read when the dialog opens. Not at mount: a
+   * person who never opens the dialog never needs the answer, and it is two
+   * round trips that would otherwise happen on every chat that loads.
+   */
+  const [accounts, setAccounts] = useState<Partial<Record<Brand, ProfileChoice[]>>>({});
+  /** The account the dialog is holding, per brand, until it is closed. */
+  const [newProfile, setNewProfile] = useState<Partial<Record<Brand, string>>>({});
   const [modelDefaults, setModelDefaults] = useState<Partial<Record<Brand, string>>>({});
   const [effortDefaults, setEffortDefaults] = useState<Partial<Record<Brand, string>>>({});
   const [composerSettingsOpen, setComposerSettingsOpen] = useState(false);
@@ -622,6 +685,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       .then(setNewChatDefaults)
       .catch((e: unknown) => setStartError(e instanceof Error ? e.message : String(e)));
   }, []);
+  const setNewChatProfile = useCallback((brand: Brand, profile: string | null) => {
+    setNewChatDefaults((was) => ({
+      ...was,
+      profiles: { ...was.profiles, [brand]: profile ?? undefined },
+    }));
+    setStartError(null);
+    void saveNewChatProfile(brand, profile)
+      .then(setNewChatDefaults)
+      .catch((e: unknown) => setStartError(e instanceof Error ? e.message : String(e)));
+  }, []);
   /** What went wrong the last time he changed the mode or the model. */
   const [steerError, setSteerError] = useState<string | null>(null);
   /** Why the last thing he wrote did not go, if it did not go. */
@@ -634,7 +707,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // is made first and the chat is started in what git says it made, so the
   // chat and the directory can never disagree about where the work is
   // happening (bw-ov7a.3).
-  const start = useCallback(async (brand: Brand = newBrand, where: Where = { kind: 'project' }) => {
+  const start = useCallback(async (
+    brand: Brand = newBrand,
+    where: Where = { kind: 'project' },
+    profileId?: string,
+  ) => {
     if (!projectId || !projectPath) return;
     if (!providerIsAvailable(providers, brand)) {
       setStartError(`The ${brandName(brand)} provider is not available in this installation.`);
@@ -656,7 +733,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         workingIn = made.path;
       }
       const s = await sendCommand<{ id: string }>(
-        startingChat(projectId, projectPath, brand, workingIn),
+        startingChat(projectId, projectPath, brand, workingIn, profileId),
       );
       open(s.id);
     } catch (e) {
@@ -837,25 +914,59 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [newWhere, setNewWhere] = useState<Where>({ kind: 'project' });
   /** What that choice still needs, as the picker reads it against real git. */
   const [whereMissing, setWhereMissing] = useState<string | null>(null);
+  /** Why the accounts could not be read, if they could not. */
+  const [newAccountsUnread, setNewAccountsUnread] = useState<string | null>(null);
+  // Read when the dialog opens, and again each time it opens: an account
+  // added in settings while a chat was open is one the next chat can use.
+  useEffect(() => {
+    if (showing !== 'new-chat') return;
+    let gone = false;
+    setNewAccountsUnread(null);
+    void Promise.all(
+      ACCOUNTED_BRANDS.map(async (brand) => {
+        const { profiles } = await sendCommand<{ profiles: ProfileChoice[] }>({
+          type: 'profiles.list',
+          brand,
+        });
+        return [brand, profiles] as const;
+      }),
+    )
+      .then((pairs) => {
+        if (!gone) setAccounts(Object.fromEntries(pairs));
+      })
+      .catch((e: unknown) => {
+        if (!gone) setNewAccountsUnread(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      gone = true;
+    };
+  }, [showing]);
+  const newAccounts = accounts[newBrand] ?? [];
+  /**
+   * The account the chat will start on: the one picked in this dialog, else
+   * the starred one, else the system account. A starred account that has since
+   * been removed falls back rather than naming a directory that is not there.
+   */
+  const newAccount =
+    newProfile[newBrand] ??
+    (newAccounts.some((p) => p.id === newChatDefaults.profiles[newBrand])
+      ? newChatDefaults.profiles[newBrand]
+      : undefined) ??
+    'system';
+  /**
+   * Open the dialog, on the brand asked for or on the starred one.
+   *
+   * A starred provider used to skip the dialog altogether and start a chat on
+   * the spot. It cannot now: the dialog asks three things — which agent, which
+   * account, and where to work — and skipping it would answer two of them
+   * silently. A default is what the dialog opens holding, not a way past it
+   * (bw-5ihw.6).
+   */
   const newChat = useCallback((brand?: Brand) => {
-    if (brand) {
-      if (!providerIsAvailable(providers, brand)) {
-        setNewBrand(availableBrand ?? brand);
-        setShowing('new-chat');
-        return;
-      }
-      setRailOpen(false);
-      void start(brand);
-    } else if (newChatDefault === 'ask') {
-      setShowing('new-chat');
-    } else if (providerIsAvailable(providers, newChatDefault)) {
-      setRailOpen(false);
-      void start(newChatDefault);
-    } else {
-      setNewBrand(availableBrand ?? newChatDefault);
-      setShowing('new-chat');
-    }
-  }, [availableBrand, newChatDefault, providers, start]);
+    const wanted = brand ?? (newChatDefault === 'ask' ? newBrand : newChatDefault);
+    setNewBrand(providerIsAvailable(providers, wanted) ? wanted : availableBrand ?? wanted);
+    setShowing('new-chat');
+  }, [availableBrand, newBrand, newChatDefault, providers]);
   /**
    * Whether the list also holds the chats an agent started for another chat.
    * Off unless he says otherwise, and remembered, because it is a way of
@@ -1483,29 +1594,82 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               takes no pointer events and so is never hovered at all. */}
           <div className="grid grid-cols-2 gap-2">
             {providers.map((provider) => (
-              <Tooltip
-                key={provider.brand}
-                side="bottom"
-                label={
-                  provider.available ? null : (
-                    <>
-                      <span className="font-medium">{brandName(provider.brand)}</span>: {whyUnavailable(provider)}
-                    </>
-                  )
-                }
-              >
-                <Button
-                  className="w-full"
-                  variant={newBrand === provider.brand ? 'primary' : 'outline'}
-                  data-testid={`new-chat-provider-${provider.brand}`}
-                  onClick={() => setNewBrand(provider.brand)}
-                  disabled={!provider.available}
+              <div key={provider.brand} className="flex items-center gap-1">
+                <Tooltip
+                  side="bottom"
+                  label={
+                    provider.available ? null : (
+                      <>
+                        <span className="font-medium">{brandName(provider.brand)}</span>: {whyUnavailable(provider)}
+                      </>
+                    )
+                  }
                 >
-                  <BrandIcon brand={provider.brand} /> {brandName(provider.brand)}
-                </Button>
-              </Tooltip>
+                  <Button
+                    className="w-full min-w-0 flex-1"
+                    variant={newBrand === provider.brand ? 'primary' : 'outline'}
+                    data-testid={`new-chat-provider-${provider.brand}`}
+                    onClick={() => setNewBrand(provider.brand)}
+                    disabled={!provider.available}
+                  >
+                    <BrandIcon brand={provider.brand} /> {brandName(provider.brand)}
+                  </Button>
+                </Tooltip>
+                {/* The same star as the model and effort menus, and it means
+                    the same thing: this is the one the dialog opens holding.
+                    It replaced a checkbox in the footer that could only ever
+                    speak for whichever provider happened to be selected. */}
+                <DefaultStar
+                  on={newChatDefault === provider.brand}
+                  what={brandName(provider.brand)}
+                  disabled={!provider.available}
+                  testid={`new-chat-provider-default-${provider.brand}`}
+                  onChoose={() =>
+                    setNewChatDefault(newChatDefault === provider.brand ? 'ask' : provider.brand)
+                  }
+                />
+              </div>
             ))}
           </div>
+          {/* Which account, between which agent and where to work. `local`
+              runs on this computer and has nothing to sign in to, so it has no
+              section at all rather than a section with one row in it. */}
+          {newBrand !== 'local' && (newAccounts.length > 1 || newAccountsUnread) && (
+            <div data-testid="new-chat-profiles">
+              <p className="mb-1.5 text-xs font-medium text-t-secondary">Account</p>
+              {newAccountsUnread ? (
+                <p className="text-xs text-t-muted">{newAccountsUnread}</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  {newAccounts.map((profile) => (
+                    <div key={profile.id} className="flex items-center gap-1">
+                      <Button
+                        className="w-full min-w-0 flex-1 justify-start"
+                        variant={newAccount === profile.id ? 'primary' : 'outline'}
+                        data-testid={`new-chat-profile-${profile.id}`}
+                        onClick={() => setNewProfile((was) => ({ ...was, [newBrand]: profile.id }))}
+                      >
+                        <span className="truncate">{profile.name}</span>
+                      </Button>
+                      <DefaultStar
+                        on={(newChatDefaults.profiles[newBrand] ?? 'system') === profile.id}
+                        what={profile.name}
+                        testid={`new-chat-profile-default-${profile.id}`}
+                        onChoose={() =>
+                          setNewChatProfile(
+                            newBrand,
+                            (newChatDefaults.profiles[newBrand] ?? 'system') === profile.id
+                              ? null
+                              : profile.id,
+                          )
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {projectPath && (
             <WhereToWork
               projectPath={projectPath}
@@ -1516,22 +1680,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             />
           )}
           <DialogFooter className="gap-2 sm:space-x-0">
-            <div className="flex min-h-9 items-center gap-2 rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground">
-              <Checkbox
-              checked={newChatDefault === newBrand}
-              disabled={!newBrandAvailable}
-              data-testid="new-chat-default"
-              aria-label={`Use ${brandName(newBrand)} by default`}
-              onCheckedChange={(checked) => setNewChatDefault(checked ? newBrand : 'ask')}
-              />
-              <span>Use {brandName(newBrand)} by default</span>
-            </div>
             <Button
               variant="primary"
               // A place that is not yet a place cannot start a chat, and the
               // picker is already saying why underneath it.
               disabled={starting || !newBrandAvailable || whereMissing !== null}
-              onClick={() => { setShowing(null); setRailOpen(false); void start(newBrand, newWhere); }}
+              onClick={() => {
+                setShowing(null);
+                setRailOpen(false);
+                void start(newBrand, newWhere, newBrand === 'local' ? undefined : newAccount);
+              }}
             >
               {starting ? 'Starting…' : 'Start chat'}
             </Button>
@@ -1570,8 +1728,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           // its job is done once the chat it starts exists — left open, it would
           // sit over the transcript it just created (bw-81wt.5).
           onNewChat={newChat}
-          newChatDefault={newChatDefault}
-          onNewChatDefault={setNewChatDefault}
           startingNewChat={starting}
           // The cross inside the drawer: the sheet's own way out, beside the
           // scrim and the toggle on the bar above it, which stays in reach

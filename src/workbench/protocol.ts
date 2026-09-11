@@ -1211,6 +1211,9 @@ export function startingChat(
   projectPath: string,
   brand: Brand,
   workingIn?: string | null,
+  /** The account to run on. Left off, and for the system profile, the chat
+   *  runs on the directory the server booted with. */
+  profileId?: string | null,
 ): Extract<WbpCommand, { type: 'session.start' }> {
   const command: Extract<WbpCommand, { type: 'session.start' }> = {
     type: 'session.start',
@@ -1220,6 +1223,7 @@ export function startingChat(
   };
   const where = workingIn?.replace(/\/+$/, '');
   if (where && where !== projectPath.replace(/\/+$/, '')) command.cwd = where;
+  if (profileId && profileId !== 'system') command.profileId = profileId;
   return command;
 }
 

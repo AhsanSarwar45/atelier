@@ -15,19 +15,34 @@ describe('model and reasoning defaults', () => {
   });
 
   it('puts a default action beside every model and effort selector row', () => {
-    expect(source).toContain('data-testid={`${testid}-default-${o.value}`}');
+    expect(source).toContain('testid={`${testid}-default-${o.value}`}');
     expect(source).toContain("defaultValue={sessionBrand === 'local' ? null : modelDefaults[sessionBrand] ?? null}");
     expect(source).toContain('defaultValue={effortDefaults[sessionBrand] ?? null}');
   });
 });
 
 describe('new-chat provider default', () => {
-  it('draws its saved state as a checkbox and lets the user clear it', () => {
-    expect(source).toContain('data-testid="new-chat-default"');
-    expect(source).toContain('<Checkbox');
-    expect(source).toContain('checked={newChatDefault === newBrand}');
-    expect(source).toContain("setNewChatDefault(checked ? newBrand : 'ask')");
-    expect(source).toContain("import { Checkbox } from '@/components/ui/checkbox'");
+  it('draws a star on each provider rather than a checkbox for whichever is selected', () => {
+    // The checkbox stood in the footer and could only ever speak for the
+    // provider that happened to be selected; the star says which one it means
+    // by being on it, the way the model and effort stars do.
+    expect(source).toContain('testid={`new-chat-provider-default-${provider.brand}`}');
+    expect(source).toContain("setNewChatDefault(newChatDefault === provider.brand ? 'ask' : provider.brand)");
+    expect(source).not.toContain('data-testid="new-chat-default"');
+    expect(source).not.toContain("import { Checkbox } from '@/components/ui/checkbox'");
+  });
+
+  it('opens the dialog even when a provider is starred', () => {
+    // A default is what the dialog opens holding. Skipping the dialog would
+    // answer which account and where to work without asking (bw-5ihw.6).
+    expect(source).toContain("setShowing('new-chat');\n  }, [availableBrand, newBrand, newChatDefault, providers]);");
+    expect(source).not.toContain('void start(newChatDefault)');
+  });
+
+  it('offers each brand its accounts, and the local brand none', () => {
+    expect(source).toContain("newBrand !== 'local' && (newAccounts.length > 1 || newAccountsUnread)");
+    expect(source).toContain('testid={`new-chat-profile-default-${profile.id}`}');
+    expect(source).toContain("start(newBrand, newWhere, newBrand === 'local' ? undefined : newAccount)");
   });
 
   it('keeps the choice in the app and not in this browser', () => {
@@ -43,6 +58,6 @@ describe('new-chat provider default', () => {
   it('never starts a provider the installed backend says is unavailable', () => {
     expect(source).toContain('if (!providerIsAvailable(providers, brand))');
     expect(source).toContain('disabled={starting || !newBrandAvailable || whereMissing !== null}');
-    expect(source).toContain('disabled={!newBrandAvailable}');
+    expect(source).toContain('disabled={!provider.available}');
   });
 });
