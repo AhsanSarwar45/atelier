@@ -40,6 +40,32 @@ pub fn variable(brand: &str) -> Option<&'static str> {
         .map(|(_, variable)| *variable)
 }
 
+/// Where a brand's system profile lives: the directory the owner already
+/// signed into from a terminal. One rule, read both when the server boots and
+/// when a chat is spawned, so the two can never disagree about which directory
+/// "system" means.
+pub fn system_dir(brand: &str) -> Option<PathBuf> {
+    let variable = variable(brand)?;
+    if let Some(configured) = std::env::var_os(variable) {
+        return Some(PathBuf::from(configured));
+    }
+    let home = directories::BaseDirs::new()?.home_dir().to_path_buf();
+    Some(home.join(match brand {
+        "claude" => ".claude",
+        _ => ".codex",
+    }))
+}
+
+/// The registry as the running app sees it, for the spawn path, which has no
+/// registry handle of its own.
+pub fn ambient() -> Option<Profiles> {
+    Some(Profiles::new(
+        crate::identity::data_dir()?.join("profiles"),
+        system_dir("claude")?,
+        system_dir("codex")?,
+    ))
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {

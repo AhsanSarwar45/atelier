@@ -59,6 +59,7 @@ mod tests {
                 permission_mode: "default".into(),
                 effort: None,
                 collaboration_mode: None,
+                profile: None,
                 title: None,
                 state: "dormant".into(),
                 origin: "terminal".into(),

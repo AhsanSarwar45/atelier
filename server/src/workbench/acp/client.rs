@@ -242,7 +242,7 @@ fn initialize_request(live: bool) -> Result<UntypedMessage, agent_client_protoco
 /// A caller may fall back to legacy discovery only when this returns an error
 /// (adapter unavailable, capability absent, authentication, or bad peer).
 pub async fn list_sessions(brand: &str, cwd: Option<&Path>) -> Result<Vec<ListedSession>, String> {
-    let config = adapter::launch_config(brand, None)
+    let config = adapter::launch_config(brand, None, None)
         .ok_or_else(|| format!("bundled {brand} ACP adapter is incomplete or unavailable"))?;
     let filter = cwd.map(Path::to_path_buf);
     let client = declining_prompts!(agent_client_protocol::Client.builder());
@@ -305,7 +305,7 @@ async fn one_shot_request(
     method: &str,
     params: Value,
 ) -> Result<Value, String> {
-    let config = adapter::launch_config(brand, model)
+    let config = adapter::launch_config(brand, model, None)
         .ok_or_else(|| format!("bundled {brand} ACP adapter is incomplete or unavailable"))?;
     let capability = capability.map(str::to_string);
     let method = method.to_string();
@@ -416,7 +416,11 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
         .clone()
         .ok_or_else(|| "saved session has no provider id".to_string())?;
     let config =
-        adapter::launch_config(&session.brand, session.model.as_deref()).ok_or_else(|| {
+        adapter::launch_config(
+            &session.brand,
+            session.model.as_deref(),
+            session.profile.as_deref(),
+        ).ok_or_else(|| {
             format!(
                 "bundled {} ACP adapter is incomplete or unavailable",
                 session.brand
@@ -1894,7 +1898,11 @@ impl AcpDriver {
             .await
             .ok()
             .and_then(|stats| stats.cost);
-        let config = match adapter::launch_config(brand, session.model.as_deref()) {
+        let config = match adapter::launch_config(
+            brand,
+            session.model.as_deref(),
+            session.profile.as_deref(),
+        ) {
             Some(config) => config,
             None => {
                 let message = format!("bundled {brand} ACP adapter is incomplete or unavailable");
@@ -2922,6 +2930,7 @@ mod tests {
             permission_mode: "on-request".into(),
             effort: None,
             collaboration_mode: None,
+            profile: None,
             title: Some("Steering".into()),
             state: state.into(),
             origin: "app".into(),
@@ -3366,6 +3375,7 @@ mod tests {
             permission_mode: "default".into(),
             effort: None,
             collaboration_mode: None,
+            profile: None,
             title: None,
             state: "idle".into(),
             origin: "app".into(),
@@ -3451,6 +3461,7 @@ mod tests {
             permission_mode: "default".into(),
             effort: None,
             collaboration_mode: None,
+            profile: None,
             title: None,
             state: "idle".into(),
             origin: "app".into(),

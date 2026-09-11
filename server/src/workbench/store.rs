@@ -127,6 +127,10 @@ pub struct Session {
     pub permission_mode: String,
     pub effort: Option<String>,
     pub collaboration_mode: Option<String>,
+    /// Which account this chat runs on, or `None` for the directory the
+    /// server booted with. Fixed when the chat starts: the CLI reads its
+    /// config directory once, at spawn.
+    pub profile: Option<String>,
     pub title: Option<String>,
     pub state: String,
     pub origin: String,
@@ -274,9 +278,9 @@ impl Store {
         self.connection.execute(
             r#"INSERT INTO session
                  (id, brand, external_id, project_id, project_path, cwd, model,
-                  permission_mode, effort, collaboration_mode, title, state,
+                  permission_mode, effort, collaboration_mode, profile, title, state,
                   origin, created_at, last_active_at, last_spoke_at)
-               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)"#,
+               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)"#,
             params![
                 session.id,
                 session.brand,
@@ -288,6 +292,7 @@ impl Store {
                 session.permission_mode,
                 session.effort,
                 session.collaboration_mode,
+                session.profile,
                 session.title,
                 session.state,
                 session.origin,
@@ -2100,6 +2105,7 @@ fn session_from_row(row: &Row<'_>) -> rusqlite::Result<Session> {
         permission_mode: row.get("permission_mode")?,
         effort: row.get("effort")?,
         collaboration_mode: row.get("collaboration_mode")?,
+        profile: row.get("profile")?,
         title: row.get("title")?,
         state: row.get("state")?,
         origin: row.get("origin")?,
@@ -2149,6 +2155,16 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
         .any(|name| name == "collaboration_mode")
     {
         transaction.execute_batch("ALTER TABLE session ADD COLUMN collaboration_mode TEXT;")?;
+    }
+
+    // Which account the chat runs on. Added here rather than in the numbered
+    // list because this runs on every open and the list is replayed from
+    // whatever version a database is at, where a second ADD COLUMN fails.
+    if !columns(transaction, "session")?
+        .iter()
+        .any(|name| name == "profile")
+    {
+        transaction.execute_batch("ALTER TABLE session ADD COLUMN profile TEXT;")?;
     }
 
     let event_columns = columns(transaction, "event")?;
@@ -2338,6 +2354,7 @@ mod tests {
             permission_mode: "default".to_string(),
             effort: Some("high".to_string()),
             collaboration_mode: None,
+            profile: None,
             title: Some(format!("Chat {id}")),
             state: "idle".to_string(),
             origin: "app".to_string(),
@@ -2345,6 +2362,38 @@ mod tests {
             last_active_at: at.to_string(),
             last_spoke_at: None,
         }
+    }
+
+    /// A chat keeps the account it was started on across a restart.
+    ///
+    /// The CLI reads its config directory once, when it is spawned, so the
+    /// profile has to survive in the record rather than being asked for again
+    /// — otherwise resuming a work chat would quietly reopen it on the
+    /// personal login.
+    #[test]
+    fn a_chat_remembers_which_account_it_runs_on() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        let store = Store::open(&path).unwrap();
+
+        let mut named = session("work", "claude", None, "2026-09-11T00:00:00Z");
+        named.profile = Some("work".to_string());
+        store.create_session(&named).unwrap();
+        store
+            .create_session(&session("own", "claude", None, "2026-09-11T00:00:00Z"))
+            .unwrap();
+        drop(store);
+
+        let reopened = Store::open(&path).unwrap();
+        assert_eq!(
+            reopened.get_session("work").unwrap().unwrap().profile.as_deref(),
+            Some("work")
+        );
+        assert_eq!(
+            reopened.get_session("own").unwrap().unwrap().profile,
+            None,
+            "no profile means the directory the server booted with"
+        );
     }
 
     /// What a chat has spent is a running total, and the spend table is a sum.
@@ -2652,10 +2701,18 @@ mod tests {
         drop(store);
 
         let connection = Connection::open(&path).unwrap();
+        // Rewind to the migration this test is about, found by what it does
+        // rather than by being last. Anything added after it would otherwise
+        // be replayed here too, and an ALTER that is not idempotent would fail
+        // a test that has nothing to do with it.
+        let strips_menus = LEGACY_MIGRATIONS
+            .iter()
+            .position(|migration| migration.contains("'session.menu'"))
+            .expect("the menu-stripping migration is in the list");
         connection
             .execute(
                 "UPDATE schema_version SET version=?1",
-                [LEGACY_MIGRATIONS.len() as i64 - 1],
+                [strips_menus as i64],
             )
             .unwrap();
         drop(connection);

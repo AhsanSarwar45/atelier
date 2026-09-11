@@ -819,6 +819,12 @@ export type WbpCommand =
        * project nor one of its worktrees.
        */
       cwd?: string;
+      /**
+       * Which account to run on. Left off for the system profile — the
+       * directory the server booted with — which is every chat started before
+       * profiles existed.
+       */
+      profileId?: string;
       model?: string;
       permissionMode?: string;
       effort?: string;

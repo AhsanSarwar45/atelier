@@ -110,6 +110,7 @@ fn launch_config_at(
     brand: &str,
     model: Option<&str>,
     provider: Option<&Path>,
+    config_dir: Option<&Path>,
 ) -> Option<AcpAgentConfig> {
     let mut config = AcpAgentConfig::new(&executable);
     if brand == super::super::local::BRAND {
@@ -146,6 +147,16 @@ fn launch_config_at(
     }
     let runtime = external_runtime(brand)?;
     config = config.env(runtime.adapter_variable, provider?.to_string_lossy());
+    // The whole of switching account. The adapter does not clear the
+    // environment before exec'ing the provider, so the CLI reads this as its
+    // own config directory and signs in as whoever that directory holds. A
+    // chat on the system profile sets nothing and inherits the server's, which
+    // is the account the owner signed into from a terminal.
+    if let Some(directory) = config_dir {
+        if let Some(variable) = super::super::profiles::variable(brand) {
+            config = config.env(variable, directory.to_string_lossy());
+        }
+    }
     if brand == "claude" {
         // The checklist panel is drawn from ACP `plan` updates, and the adapter
         // makes one out of every TodoWrite and every TaskCreate/TaskUpdate/
@@ -161,11 +172,26 @@ fn launch_config_at(
     Some(config)
 }
 
-pub fn launch_config(brand: &str, model: Option<&str>) -> Option<AcpAgentConfig> {
+pub fn launch_config(
+    brand: &str,
+    model: Option<&str>,
+    profile: Option<&str>,
+) -> Option<AcpAgentConfig> {
     let adapter = find(brand)?;
     let provider =
         external_runtime(brand).and_then(|runtime| crate::routes::find_tool(runtime.brand, &[]));
-    launch_config_at(adapter, brand, model, provider.as_deref())
+    // A profile the registry no longer knows must not silently fall back to
+    // the owner's own account: a chat pinned to a work login would quietly
+    // start spending the personal one.
+    let directory = match profile {
+        Some(id) if id != super::super::profiles::SYSTEM => Some(
+            super::super::profiles::ambient()?
+                .directory(brand, id)
+                .ok()?,
+        ),
+        _ => None,
+    };
+    launch_config_at(adapter, brand, model, provider.as_deref(), directory.as_deref())
 }
 
 /// Whether this installation contains the complete pinned ACP runtime.
@@ -262,7 +288,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let adapter = root.path().join(executable_name("claude"));
         std::fs::write(&adapter, b"adapter").unwrap();
-        assert!(launch_config_at(adapter, "claude", None, None).is_none());
+        assert!(launch_config_at(adapter, "claude", None, None, None).is_none());
     }
 
     /// The checklist panel needs the tools the checklist is made of.
@@ -283,7 +309,7 @@ mod tests {
         });
         std::fs::write(&adapter, b"adapter").unwrap();
         std::fs::write(&provider, b"provider").unwrap();
-        let config = launch_config_at(adapter, "claude", None, Some(&provider)).unwrap();
+        let config = launch_config_at(adapter, "claude", None, Some(&provider), None).unwrap();
         assert_eq!(
             config.environment().get("CLAUDE_CODE_ENABLE_TODO_TOOLS"),
             Some(&"1".to_string())
@@ -302,7 +328,9 @@ mod tests {
             std::fs::write(&bundled_shadow, b"old bundled provider").unwrap();
             std::fs::write(&installed, b"current user provider").unwrap();
 
-            let config = launch_config_at(adapter, runtime.brand, None, Some(&installed)).unwrap();
+            let config =
+                launch_config_at(adapter, runtime.brand, None, Some(&installed), None)
+                    .unwrap();
             let expected = installed.to_string_lossy().to_string();
             assert_eq!(
                 config.environment().get(runtime.adapter_variable),
@@ -326,6 +354,7 @@ mod tests {
             adapter.clone(),
             super::super::super::local::BRAND,
             None,
+            None,
             None
         )
         .is_none());
@@ -333,8 +362,54 @@ mod tests {
             adapter,
             super::super::super::local::BRAND,
             Some("ollama::qwen"),
+            None,
             None
         )
         .is_some());
+    }
+
+    /// The whole of running a work chat and a personal chat at once.
+    ///
+    /// The provider CLI keeps its login in one directory, so the only thing
+    /// that makes a spawned chat sign in as a different account is this
+    /// variable. A chat on the system profile must set nothing at all: its
+    /// account is whichever directory the server itself booted with, which is
+    /// the one the owner signed into from a terminal.
+    #[test]
+    fn a_named_profile_points_the_cli_at_its_own_account_and_the_system_one_does_not() {
+        let root = tempfile::tempdir().unwrap();
+        for runtime in EXTERNAL_RUNTIMES {
+            let adapter = root.path().join(executable_name(runtime.brand));
+            let installed = root.path().join(format!("{}-runtime", runtime.brand));
+            std::fs::write(&adapter, b"adapter").unwrap();
+            std::fs::write(&installed, b"provider").unwrap();
+            let account = root.path().join("profiles").join(runtime.brand).join("work");
+            std::fs::create_dir_all(&account).unwrap();
+
+            let named = launch_config_at(
+                adapter.clone(),
+                runtime.brand,
+                None,
+                Some(&installed),
+                Some(&account),
+            )
+            .unwrap();
+            let variable = super::super::super::profiles::variable(runtime.brand).unwrap();
+            assert_eq!(
+                named.environment().get(variable),
+                Some(&account.to_string_lossy().to_string()),
+                "{} on a named profile",
+                runtime.brand
+            );
+
+            let system =
+                launch_config_at(adapter, runtime.brand, None, Some(&installed), None).unwrap();
+            assert_eq!(
+                system.environment().get(variable),
+                None,
+                "{} on the system profile",
+                runtime.brand
+            );
+        }
     }
 }

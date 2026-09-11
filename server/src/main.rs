@@ -375,12 +375,10 @@ async fn serve(open_browser: bool) {
     let home = directories::BaseDirs::new()
         .map(|dirs| dirs.home_dir().to_path_buf())
         .expect("Failed to resolve home directory");
-    let claude_config = env::var_os("CLAUDE_CONFIG_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| home.join(".claude"));
-    let codex_home = env::var_os("CODEX_HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| home.join(".codex"));
+    let claude_config = workbench::profiles::system_dir("claude")
+        .expect("Failed to resolve the Claude config directory");
+    let codex_home = workbench::profiles::system_dir("codex")
+        .expect("Failed to resolve the Codex home directory");
     let registry = workbench::registry::WorkbenchRegistry::new(
         chat_db,
         workbench::registry::RegistryPaths {

@@ -272,6 +272,12 @@ fn new_session(
             .map(str::to_string)
             .or_else(|| owner.as_ref().and_then(|settings| settings.effort.clone())),
         collaboration_mode: field(command, "collaborationMode").map(str::to_string),
+        // Only a named profile is stored. `None` means the system profile, so
+        // a chat started before profiles existed keeps working on the account
+        // it already had.
+        profile: field(command, "profileId")
+            .filter(|id| *id != super::profiles::SYSTEM)
+            .map(str::to_string),
         title: field(command, "title").map(str::to_string),
         state: if command.kind == CommandKind::SessionOpen {
             "dormant"
@@ -353,7 +359,8 @@ pub(super) async fn append_started(
         "type":"session.started","sessionId":session.id,"seq":0,"at":now(),
         "brand":session.brand,"externalId":session.external_id,"model":session.model,
         "cwd":session.cwd,"permissionMode":session.permission_mode,"effort":session.effort,
-        "collaborationMode":session.collaboration_mode,"readOnly":read_only
+        "collaborationMode":session.collaboration_mode,"profile":session.profile,
+        "readOnly":read_only
     }))
     .map_err(|error| error.to_string())?;
     database.append(event).await?;
@@ -900,6 +907,7 @@ mod tests {
             permission_mode: "on-request".into(),
             effort: None,
             collaboration_mode: None,
+            profile: None,
             title: Some("Images".into()),
             state: "idle".into(),
             origin: "app".into(),
@@ -1126,6 +1134,7 @@ mod tests {
             permission_mode: "on-request".into(),
             effort: Some("high".into()),
             collaboration_mode: None,
+            profile: None,
             title: Some("Imported chat".into()),
             state: "idle".into(),
             origin: "terminal".into(),
