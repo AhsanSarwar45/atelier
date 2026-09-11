@@ -26,7 +26,7 @@
 
 import { useCallback, useState, type ReactNode } from 'react';
 
-import { Plus, Slash, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Button } from '@/components/ui/button';
@@ -150,7 +150,11 @@ function TabStrip({ searching, onSearch }: { searching: boolean; onSearch: () =>
           * a full-screen terminal is not always holding one.
           */}
         <ToolButton
-          icon={<Slash />}
+          // Its own name, not a picture of one. `^C` is what a terminal prints
+          // when it takes an interrupt and what every person who has ever
+          // needed one is looking for; no glyph carries that, and the drawing
+          // this started as — a bare diagonal stroke — said nothing at all.
+          icon={<span aria-hidden className="font-mono text-[10px] leading-none">^C</span>}
           label="Stop what is running (Ctrl-C)"
           data-testid="terminal-interrupt"
           disabled={!active}
@@ -158,7 +162,7 @@ function TabStrip({ searching, onSearch }: { searching: boolean; onSearch: () =>
             if (active) typeInto(active, INTERRUPT);
           }}
           size="xs"
-          className="size-5 p-0"
+          className="h-5 w-auto px-1.5"
         />
         <HistoryButton open={searching} onOpen={onSearch} />
       </div>
