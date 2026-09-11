@@ -58,7 +58,7 @@ import {
 } from '@codemirror/view';
 
 import { FILE_BADGE_CLASS, FILE_KINDS, fileKind, type FileKind } from '@/components/file-kinds';
-import { badgeVariants } from '@/components/ui/badge';
+import { badgeElement } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { ExternalChange } from '@/workbench/code-editor';
 import type { DraftPicture } from '@/workbench/composer-attachments';
@@ -69,22 +69,6 @@ import { findReferences, referenceLabel } from '@/workbench/references';
 export interface ComposerHandle {
   focus(): void;
   cursor(): number;
-}
-
-class PictureBadge extends WidgetType {
-  constructor(readonly picture: DraftPicture, private readonly onOpen: (picture: DraftPicture) => void) { super(); }
-  eq(other: PictureBadge): boolean { return other.picture.id === this.picture.id && other.picture.alt === this.picture.alt; }
-  toDOM(): HTMLElement {
-    const badge = document.createElement('button');
-    badge.type = 'button';
-    badge.className = cn(badgeVariants({ variant: 'primary', appearance: 'outline', size: 'sm', shape: 'circle' }), 'mx-0.5 cursor-pointer select-none');
-    badge.setAttribute('data-testid', 'composer-image-badge');
-    badge.setAttribute('data-image-id', this.picture.id);
-    badge.textContent = this.picture.alt;
-    badge.onclick = () => this.onOpen(this.picture);
-    return badge;
-  }
-  ignoreEvent(): boolean { return false; }
 }
 
 const RefreshPictures = StateEffect.define<void>();
@@ -99,45 +83,74 @@ type IconSource = (kind: FileKind) => Node | null;
  * chance for them to drift apart.
  */
 const badgeClass = (kind: FileKind) =>
-  cn(
-    badgeVariants({ variant: 'primary', appearance: 'outline', size: 'sm', shape: 'circle' }),
-    FILE_BADGE_CLASS,
-    FILE_KINDS[kind].color,
-    'cursor-default select-none',
-  );
+  cn(FILE_BADGE_CLASS, FILE_KINDS[kind].color);
 
-/** One reference, drawn where its characters are. */
-class ReferenceBadge extends WidgetType {
+/**
+ * One badge, for both things the writing box draws as one.
+ *
+ * A path the reader typed and a picture they attached are the same object to
+ * them — a file, named in the line they are writing — and they were two
+ * different chips: the path got the file kind's icon and colour, the picture
+ * got a bare primary pill with its name in it and no icon at all. Worse, the
+ * picture's was built by hand instead of from the component, so it missed the
+ * `data-slot` that exempts a chip from the coarse-pointer floor and stood
+ * comically tall on a phone while staying 20px on a desktop (bw-e9p5.1).
+ *
+ * The only thing that still differs is whether it answers a press: a picture
+ * opens full size, a path is a drawing of text still being edited and must let
+ * the click through to place a caret. That is the `onOpen` below and nothing
+ * else — the drawing is one drawing.
+ */
+class FileBadge extends WidgetType {
   constructor(
     readonly label: string,
     readonly kind: FileKind,
     private readonly icon: IconSource,
+    /** The picture this stands for, when it stands for one. */
+    readonly picture?: DraftPicture,
+    private readonly onOpen?: (picture: DraftPicture) => void,
   ) {
     super();
   }
 
   /** Two badges are the same badge when they say the same thing. */
-  eq(other: ReferenceBadge): boolean {
-    return other.label === this.label && other.kind === this.kind;
+  eq(other: FileBadge): boolean {
+    return other.label === this.label && other.kind === this.kind && other.picture?.id === this.picture?.id;
   }
 
   toDOM(): HTMLElement {
-    const badge = document.createElement('span');
-    badge.className = badgeClass(this.kind);
-    badge.setAttribute('data-testid', 'composer-reference');
-    badge.setAttribute('data-reference', this.label);
+    const opens = Boolean(this.picture && this.onOpen);
+    const badge = badgeElement(opens ? 'button' : 'span', {
+      variant: 'primary',
+      appearance: 'outline',
+      size: 'sm',
+      shape: 'circle',
+      className: cn(badgeClass(this.kind), opens ? 'cursor-pointer select-none' : 'cursor-default select-none'),
+    });
+    if (this.picture) {
+      badge.setAttribute('data-testid', 'composer-image-badge');
+      badge.setAttribute('data-image-id', this.picture.id);
+    } else {
+      badge.setAttribute('data-testid', 'composer-reference');
+      badge.setAttribute('data-reference', this.label);
+    }
     badge.setAttribute('data-file-kind', this.kind);
     const icon = this.icon(this.kind);
     if (icon) badge.appendChild(icon);
     const words = document.createElement('span');
     words.textContent = this.label;
     badge.appendChild(words);
+    if (opens) badge.onclick = () => this.onOpen!(this.picture!);
     return badge;
   }
 
-  /** Nothing to click: the badge is a drawing of text he is still editing. */
+  /**
+   * A picture's badge is a control and takes its own press; a path's is a
+   * drawing of text the reader is still editing, so the click goes through it
+   * to place a caret.
+   */
   ignoreEvent(): boolean {
-    return true;
+    return !(this.picture && this.onOpen);
   }
 }
 
@@ -145,7 +158,7 @@ class ReferenceBadge extends WidgetType {
 function badges(state: EditorState, icon: IconSource, picture: (id: string) => DraftPicture | undefined, onOpen: (picture: DraftPicture) => void): DecorationSet {
   const text = state.doc.toString();
   const references = findReferences(text).map((ref) =>
-      Decoration.replace({ widget: new ReferenceBadge(referenceLabel(ref), fileKind(ref.path), icon) }).range(
+      Decoration.replace({ widget: new FileBadge(referenceLabel(ref), fileKind(ref.path), icon) }).range(
         ref.start,
         ref.end,
       ),
@@ -153,7 +166,7 @@ function badges(state: EditorState, icon: IconSource, picture: (id: string) => D
   const pictures = Array.from(text.matchAll(/\[\[atelier-image:([a-zA-Z0-9_-]+)\]\]/g)).flatMap((match) => {
     const found = picture(match[1]!);
     return found && match.index !== undefined
-      ? [Decoration.replace({ widget: new PictureBadge(found, onOpen) }).range(match.index, match.index + match[0].length)]
+      ? [Decoration.replace({ widget: new FileBadge(found.alt, fileKind(found.alt), icon, found, onOpen) }).range(match.index, match.index + match[0].length)]
       : [];
   });
   return Decoration.set([...references, ...pictures], true);

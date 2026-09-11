@@ -447,10 +447,10 @@
  * alone by the same rule that fixes the bars (bw-81wt.12).
  */
 @media (pointer: coarse) {
-  button:not(:where([data-slot='badge'])),
+  button:not(:where([data-slot='badge'], [data-reach='own'])),
   select,
   textarea,
-  [role='button']:not(:where([data-slot='badge'])),
+  [role='button']:not(:where([data-slot='badge'], [data-reach='own'])),
   [role='tab'],
   [role='menuitem'],
   [role='menuitemcheckbox'],
@@ -465,9 +465,9 @@
   /* A dropdown is in the width list as well as the height one: with its arrow
      stripped off, a picker whose whole label is "P0" is seventeen pixels wide
      and forty-four tall, which is a line to hit rather than a target (bw-81wt.21). */
-  button:not(:where([data-slot='badge'])),
+  button:not(:where([data-slot='badge'], [data-reach='own'])),
   select,
-  [role='button']:not(:where([data-slot='badge'])),
+  [role='button']:not(:where([data-slot='badge'], [data-reach='own'])),
   [role='tab'],
   [role='switch'],
   [role='checkbox'] {
@@ -478,7 +478,7 @@
      minimum size does not apply to an inline box, so a link inside a sentence
      is untouched while a link that has been laid out as a button — the house
      in the project bar, the back arrow, a card — grows. */
-  a[href]:not(:where([data-slot='badge'])) {
+  a[href]:not(:where([data-slot='badge'], [data-reach='own'])) {
     min-height: 44px;
     min-width: 44px;
   }
@@ -548,11 +548,11 @@
      tests/e2e/a-chip-stays-a-chip.spec.ts measures both numbers for every chip
      on a 390px screen, records what stopped each target growing, and presses
      every chip on its own middle to prove that no chip answers for another. */
-  [data-slot='badge']:is(button, a[href], [role='button'], [data-path-mention]):not(.prose *) {
+  [data-slot='badge']:is(button, a[href], [role='button'], [data-path-mention]):not(.prose *, .cm-content *) {
     position: relative;
   }
 
-  [data-slot='badge']:is(button, a[href], [role='button'], [data-path-mention]):not(.prose *)::before {
+  [data-slot='badge']:is(button, a[href], [role='button'], [data-path-mention]):not(.prose *, .cm-content *)::before {
     content: '';
     position: absolute;
     top: 50%;
@@ -604,6 +604,24 @@
      another's middle, which is the line the case above draws and the one this
      rule stays inside: the spec presses every marked row on its own middle
      and checks that the row itself answers. */
+  /* `own` is the other half of the mark, and it asks for the opposite: the
+     control keeps its painted box and is given NO band at all.
+
+     For a control pinned to a larger target that is already reachable. The
+     cross on an attachment's thumbnail is the case: it is twenty pixels drawn
+     over the corner of a forty-eight pixel picture, and both the floor above
+     and a band here would have it answer for the whole thumbnail — so the one
+     press a reader has would remove the picture instead of opening it, and the
+     cross itself came out bigger than the corner it sits in. The owner's words
+     off the running app were that it is "far too big" (bw-e9p5.2). Twenty
+     pixels beside a forty-eight pixel target is WCAG 2.2 §2.5.8's own
+     exception again: what the reader is aiming at is the picture, and the
+     cross is a smaller thing inside it, not a target competing for the same
+     thumb.
+
+     It is a mark and not a selector for the reason the row above is: nothing
+     in the classes tells a cross pinned to a picture apart from any other
+     small icon button, and only the call site knows which it wrote. */
   [data-reach='row'] {
     position: relative;
   }

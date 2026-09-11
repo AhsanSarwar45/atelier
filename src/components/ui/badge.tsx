@@ -367,4 +367,35 @@ function BadgeDot({ className, ...props }: React.ComponentProps<'span'>) {
   );
 }
 
+/**
+ * The same chip, built as a DOM node rather than rendered.
+ *
+ * CodeMirror draws the writing box's contents itself: a badge standing in for
+ * an attachment or a path is a `WidgetType`, whose `toDOM` hands back an
+ * element, so there is no React there to render `<Badge>` into. That one seam
+ * is how the composer's picture chip came to be a SECOND chip — it borrowed
+ * `badgeVariants` but not the component, and so shipped without the icon, the
+ * file kind's colour, and, worst, without the `data-slot` below. The floor in
+ * `globals.css` exempts chips from the 44px touch minimum BY that attribute,
+ * so the chip stood 20px under a mouse and 44px under a thumb, which is the
+ * complaint the owner made off the running app (bw-e9p5.1).
+ *
+ * So the seam is closed here instead of being re-spelled there: this is the
+ * component, in the one shape the writing box can accept. `one-set-of-parts`
+ * cannot catch a chip built this way — it reads JSX class strings, and these
+ * are assignments — so the only thing keeping the two honest is that there is
+ * nowhere else to get a chip from.
+ */
+export function badgeElement(
+  tag: 'span' | 'button',
+  options: VariantProps<typeof badgeVariants> & { className?: string } = {},
+): HTMLElement {
+  const { className, ...variants } = options;
+  const el = document.createElement(tag);
+  if (tag === 'button') (el as HTMLButtonElement).type = 'button';
+  el.setAttribute('data-slot', 'badge');
+  el.className = cn(badgeVariants(variants), className);
+  return el;
+}
+
 export { Badge, BadgeButton, BadgeDot, badgeVariants };

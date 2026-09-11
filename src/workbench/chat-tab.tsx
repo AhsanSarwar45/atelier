@@ -2054,6 +2054,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                     size="xs"
                     radius="full"
                     data-testid="attachment-remove"
+                    /* Its own twenty pixels on a phone as well as a desktop.
+                       The coarse-pointer floor would take it to 44 square,
+                       which is bigger than the corner of the 48px thumbnail it
+                       is pinned to: it covered the picture, so the one press a
+                       reader has removed the attachment instead of opening it,
+                       and the cross drew "far too big" (bw-e9p5.2). What the
+                       thumb is aiming at here is the thumbnail, which is
+                       already well over the floor; the reasoning is written
+                       where the mark is read, in globals.css. */
+                    data-reach="own"
                     aria-label={`Remove ${img.alt}`}
                     onClick={() => {
                       setAttached((all) => all.filter((picture) => picture.id !== img.id));
