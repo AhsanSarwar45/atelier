@@ -89,7 +89,7 @@ import { heldElsewhere, sessionOwnership, streamStillAnswers } from '@/workbench
 import { SearchPanel } from '@/workbench/search-panel';
 import { AgentView } from '@/workbench/agent-view';
 import { DrawnTranscript } from '@/workbench/drawn-transcript';
-import { drawnAsSent, stillPending, userMessageIds, worthDrawing, type PendingSend } from '@/workbench/pending-sends';
+import { drawnAsSent, stillPending, transcriptMark, worthDrawing, type PendingSend } from '@/workbench/pending-sends';
 import { WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
@@ -1042,6 +1042,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     // (bw-o83v).
     setSteerError(null);
     setSendError(null);
+    // And so does a line still on its way. One tab serves every chat, so a send
+    // left outstanding was being judged against whichever chat was open now —
+    // against another conversation's rows and a mark taken in a third — and the
+    // row either vanished or surfaced in a chat it was never sent to
+    // (bw-ad3r.13).
+    setPendingSends([]);
+    setSendMark(NO_MARK);
   }, [sessionId]);
   useEffect(() => {
     if (recallable && agentRespondedSince(view.items, recallable.itemsBeforeSend)) {
@@ -1264,7 +1271,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     // outstanding: while sends are in flight the earlier mark is the one the
     // count is against, and moving it would make lines already back look new.
     const drawnKey = `sending-${sendKeys.current++}`;
-    if (pendingSends.length === 0) setSendMark(userMessageIds(view.items));
+    if (pendingSends.length === 0) setSendMark(transcriptMark(view.items));
     setPendingSends((prev) => [...prev, { key: drawnKey, text, images }]);
     setDraft('');
     setAttached([]);

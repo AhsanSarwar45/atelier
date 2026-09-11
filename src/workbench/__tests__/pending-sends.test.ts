@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { drawnAsSent, stillPending, userMessageIds, worthDrawing, type PendingSend } from '@/workbench/pending-sends';
+import { drawnAsSent, stillPending, transcriptMark, worthDrawing, type PendingSend } from '@/workbench/pending-sends';
 import type { TranscriptItem } from '@/workbench/fold';
 
 function said(id: string, role: 'user' | 'assistant'): TranscriptItem {
@@ -15,12 +15,12 @@ const SENT: PendingSend[] = [
 describe('a line drawn before the server has spoken it back', () => {
   it('stands while the transcript has gained nothing', () => {
     const before = [said('older-answer', 'assistant')];
-    expect(stillPending(SENT, before, userMessageIds(before))).toEqual(SENT);
+    expect(stillPending(SENT, before, transcriptMark(before))).toEqual(SENT);
   });
 
   it('goes as soon as the server sends its own copy', () => {
     const before = [said('older-answer', 'assistant')];
-    const mark = userMessageIds(before);
+    const mark = transcriptMark(before);
     const after = [...before, said('from-the-server', 'user')];
     expect(stillPending(SENT, after, mark)).toEqual([SENT[1]]);
   });
@@ -33,7 +33,7 @@ describe('a line drawn before the server has spoken it back', () => {
    */
   it('is matched by count, not by the id it was drawn under', () => {
     const before = [said('older-prompt', 'user')];
-    const mark = userMessageIds(before);
+    const mark = transcriptMark(before);
     const after = [...before, said('first-back', 'user'), said('second-back', 'user')];
     expect(stillPending(SENT, after, mark)).toEqual([]);
   });
@@ -42,13 +42,35 @@ describe('a line drawn before the server has spoken it back', () => {
   it('is not spoken for by anything the agent says', () => {
     const before: TranscriptItem[] = [];
     const after = [said('an-answer', 'assistant'), { kind: 'tool', id: 'a-tool' } as TranscriptItem];
-    expect(stillPending(SENT, after, userMessageIds(before))).toEqual(SENT);
+    expect(stillPending(SENT, after, transcriptMark(before))).toEqual(SENT);
+  });
+
+  /**
+   * The reader scrolls up mid-send. Older pages are prepended, every one of
+   * them full of their own past messages — and each of those used to be counted
+   * as the echo of the line still on its way, so the line they had just sent
+   * disappeared from under them (bw-ad3r.11).
+   */
+  it('is not spoken for by older history arriving above it', () => {
+    const before = [said('older-prompt', 'user'), said('older-answer', 'assistant')];
+    const mark = transcriptMark(before);
+    const older = [said('page-back-1', 'user'), said('page-back-2', 'user'), said('page-back-3', 'user')];
+    expect(stillPending(SENT, [...older, ...before], mark)).toEqual(SENT);
+  });
+
+  /** And the echo still retires it once the older pages are sitting above. */
+  it('still goes when its own copy arrives below prepended history', () => {
+    const before = [said('older-answer', 'assistant')];
+    const mark = transcriptMark(before);
+    const older = [said('page-back-1', 'user'), said('page-back-2', 'user')];
+    const after = [...older, ...before, said('from-the-server', 'user')];
+    expect(stillPending(SENT, after, mark)).toEqual([SENT[1]]);
   });
 
   /** Nothing sent, nothing drawn — the ordinary state of a chat being read. */
   it('draws nothing when nothing is outstanding', () => {
     const items = [said('older-prompt', 'user'), said('an-answer', 'assistant')];
-    expect(stillPending([], items, userMessageIds([]))).toEqual([]);
+    expect(stillPending([], items, transcriptMark([]))).toEqual([]);
   });
 
   it('is drawn exactly as the server’s copy will be, so the swap shows nothing', () => {

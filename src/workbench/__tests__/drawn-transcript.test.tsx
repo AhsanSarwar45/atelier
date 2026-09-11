@@ -190,6 +190,29 @@ describe('the virtual transcript window', () => {
     await act(async () => finish({ added: SCREENFUL, hasOlder: true }));
   });
 
+  /**
+   * Scrolling back through a long chat is meant to read as one continuous
+   * transcript. Announcing every page turned it into a banner blinking on and
+   * off at each flick, which on a phone read as a 'load more' control the
+   * reader kept having to get past (bw-ad3r.14).
+   */
+  it('says nothing at all about a page that arrives quickly', async () => {
+    let finish!: (page: { added: number; hasOlder: boolean }) => void;
+    const older = vi.fn(() => new Promise<{ added: number; hasOlder: boolean }>((resolve) => { finish = resolve; }));
+    const { pane, queryByTestId } = chat({ onOlder: older });
+
+    act(() => {
+      scroll(pane.current!, 900);
+      scroll(pane.current!, 500);
+    });
+    expect(older).toHaveBeenCalledTimes(1);
+    expect(queryByTestId('older-loading')).toBeNull();
+
+    await act(async () => finish({ added: SCREENFUL, hasOlder: true }));
+    await act(async () => { await new Promise((done) => setTimeout(done, 500)); });
+    expect(queryByTestId('older-loading')).toBeNull();
+  });
+
   it('drops an older-history loader and ignores its stale completion when the chat changes', async () => {
     let finish!: (page: { added: number; hasOlder: boolean }) => void;
     const older = vi.fn(() => new Promise<{ added: number; hasOlder: boolean }>((resolve) => { finish = resolve; }));
@@ -198,6 +221,11 @@ describe('the virtual transcript window', () => {
       scroll(pane.current!, 900);
       scroll(pane.current!, 500);
     });
+    // The notice holds back until the page is slow enough to be worth
+    // mentioning, so waiting for it is what proves a load is in flight
+    // (bw-ad3r.14).
+    expect(queryByTestId('older-loading')).toBeNull();
+    await act(async () => { await new Promise((done) => setTimeout(done, 500)); });
     expect(queryByTestId('older-loading')).not.toBeNull();
 
     act(() => again({ sessionId: 'another', rows: rows(40, 'another') }));

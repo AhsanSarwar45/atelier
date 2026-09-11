@@ -79,6 +79,8 @@ export function DrawnTranscript({
    */
   const held = useRef<{ key: string; at: number } | null>(null);
   const settling = useRef(0);
+  /** The timer that decides a page is slow enough to be worth announcing. */
+  const announcing = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const previous = useRef({ sessionId, many: loadedItems });
   /** The newest row list, for the settling below to find its anchor in. */
   const latest = useRef(rows);
@@ -183,7 +185,7 @@ export function DrawnTranscript({
       cancelAnimationFrame(settling.current);
       settling.current = 0;
       box.removeEventListener('wheel', done);
-      box.removeEventListener('touchstart', done);
+      box.removeEventListener('touchmove', done);
       box.removeEventListener('keydown', done);
     };
     const pin = () => {
@@ -224,7 +226,12 @@ export function DrawnTranscript({
     };
     cancelAnimationFrame(settling.current);
     box.addEventListener('wheel', done, { passive: true });
-    box.addEventListener('touchstart', done, { passive: true });
+    // `touchmove`, not `touchstart`. On a phone a finger landing is how every
+    // scroll begins, including the one that asked for this page in the first
+    // place — so giving up on `touchstart` meant the anchor was abandoned every
+    // single time and the rows arriving above always jumped the reader
+    // (bw-ad3r.15). A drag is the gesture that says they want to be elsewhere.
+    box.addEventListener('touchmove', done, { passive: true });
     box.addEventListener('keydown', done);
     settling.current = requestAnimationFrame(pin);
     return done;
@@ -246,8 +253,15 @@ export function DrawnTranscript({
       if (now > box.clientHeight || !onOlder || loading.current || awaiting.current) return;
       loading.current = true;
       const request = ++historyRequest.current;
-      setLoadingOlder(true);
       awaiting.current = true;
+      // The notice waits, and usually never comes. A page arrives in a few tens
+      // of milliseconds, and saying so every time turned scrolling back through
+      // a long chat into a banner blinking on and off at every flick — which
+      // read as a 'load more' control interrupting what is meant to be one
+      // continuous transcript (bw-ad3r.14). It is worth showing only when the
+      // wait is long enough that silence would look like nothing happening.
+      clearTimeout(announcing.current);
+      announcing.current = setTimeout(() => setLoadingOlder(true), 450);
       void onOlder()
         .then(({ added }) => {
           // A cursor that failed or is spent must not leave the chat waiting on
@@ -260,6 +274,7 @@ export function DrawnTranscript({
         })
         .finally(() => {
           if (request !== historyRequest.current) return;
+          clearTimeout(announcing.current);
           loading.current = false;
           setLoadingOlder(false);
         });
@@ -278,6 +293,7 @@ export function DrawnTranscript({
     return () => {
       box.removeEventListener('scroll', scrolled);
       box.removeEventListener('wheel', wheeled);
+      clearTimeout(announcing.current);
     };
   }, [sessionId, pane, onOlder]);
 
@@ -299,7 +315,12 @@ export function DrawnTranscript({
       style={{ height: `${virtual.getTotalSize()}px` }}
     >
       {loadingOlder && (
-        <div data-testid="older-loading" className="absolute left-0 right-0 top-1 z-10 text-center text-xs text-muted-foreground">
+        <div
+          data-testid="older-loading"
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none absolute left-0 right-0 top-1 z-10 text-center text-xs text-muted-foreground"
+        >
           Loading earlier messages…
         </div>
       )}

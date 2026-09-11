@@ -214,6 +214,37 @@ export function cacheSessionEvent(event: WbpEvent): void {
   publishCached(event.sessionId, reduce(entry.view, event));
 }
 
+/**
+ * A fresh snapshot, with the older pages the reader had already pulled in.
+ *
+ * The snapshot is the newest window the sidecar holds, and publishing it as-is
+ * threw away every older page the reader had scrolled back through: the
+ * transcript jumped forwards under them and what they were reading was gone
+ * (bw-ad3r.12). The snapshot's own first row says where the two meet — what
+ * sits above it here is history this browser fetched and the snapshot simply
+ * does not reach back to, so it is kept, along with the cursor saying how far
+ * back the reader had got.
+ *
+ * Where the two do not meet — a disconnection long enough that the new window
+ * starts after everything held — there is nothing to join and the snapshot
+ * stands alone.
+ */
+export function keepingHistoryAlreadyRead(had: SessionView, fresh: SessionView): SessionView {
+  if (!had.items.length || !fresh.items.length) return fresh;
+  const name = (item: SessionView['items'][number]) => `${item.kind}:${item.id}`;
+  const meet = had.items.findIndex((item) => name(item) === name(fresh.items[0]!));
+  if (meet <= 0) return fresh;
+  const inFresh = new Set(fresh.items.map(name));
+  const kept = had.items.slice(0, meet).filter((item) => !inFresh.has(name(item)));
+  if (!kept.length) return fresh;
+  return {
+    ...fresh,
+    items: [...kept, ...fresh.items],
+    historyCursor: had.historyCursor,
+    hasOlder: had.hasOlder,
+  };
+}
+
 async function loadHistory(id: string): Promise<HistoryLoad> {
   const entry = cached(id);
   if (entry.loadingOlder) return { added: 0, hasOlder: entry.view.hasOlder };
@@ -284,7 +315,7 @@ export function useSession(sessionId: string | null): LoadedSessionView {
             .sort((a, b) => a.seq - b.seq)
             .reduce(reduce, opening);
           entry.pending = [];
-          publishCached(sessionId, complete, true, true);
+          publishCached(sessionId, keepingHistoryAlreadyRead(entry.view, complete), true, true);
           // The snapshot is the newest server-built window. Loading farther
           // back here makes an opened chat grow through its older history
           // before the reader has asked for it, which reads as the transcript

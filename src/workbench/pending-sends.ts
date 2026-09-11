@@ -30,13 +30,17 @@ export interface PendingSend {
   images: ImagePayload[];
 }
 
-/** The ids of the user messages a transcript holds, as a send's starting mark. */
-export function userMessageIds(items: readonly TranscriptItem[]): Set<string> {
-  const ids = new Set<string>();
-  for (const item of items) {
-    if (item.kind === 'message' && item.role === 'user') ids.add(item.id);
-  }
-  return ids;
+/**
+ * Everything a transcript holds, as a send's starting mark.
+ *
+ * Every row, not only the reader's own: the mark has two jobs. It says which
+ * user messages were already there, and — because the rows are in order — its
+ * last member says where in the transcript the send was made. Older history
+ * arriving lands entirely before that point and new rows entirely after it,
+ * which is what lets one be told from the other (bw-ad3r.11).
+ */
+export function transcriptMark(items: readonly TranscriptItem[]): Set<string> {
+  return new Set(items.map((item) => item.id));
 }
 
 /**
@@ -59,8 +63,26 @@ export function stillPending(
   items: readonly TranscriptItem[],
   baseline: ReadonlySet<string>,
 ): PendingSend[] {
+  if (pending.length === 0) return [];
+  // Only what arrived after the send is a candidate for being its echo.
+  //
+  // Counting every user message outside the mark counted the wrong ones: the
+  // reader scrolling up pulls older history in, that history is full of their
+  // own messages, none of them are in the mark, and each one retired a line
+  // that was still on its way — so a message vanished from under the person
+  // who had just sent it (bw-ad3r.11). Older pages are prepended and new rows
+  // appended, so the last row that was there when the send went out is the
+  // divide, and only what sits after it is counted.
+  let from = 0;
+  for (let at = items.length - 1; at >= 0; at -= 1) {
+    if (baseline.has(items[at]!.id)) {
+      from = at + 1;
+      break;
+    }
+  }
   let spokenFor = 0;
-  for (const item of items) {
+  for (let at = from; at < items.length; at += 1) {
+    const item = items[at]!;
     if (item.kind !== 'message' || item.role !== 'user' || baseline.has(item.id)) continue;
     if (item.text !== '' || item.done) spokenFor += 1;
   }
