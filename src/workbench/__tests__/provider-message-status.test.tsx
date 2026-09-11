@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PROVIDER_MESSAGE_KINDS, providerMessageStatus, type ProviderMessageSignal } from '@/workbench/provider-messages';
+import { type ProviderMessageSignal } from '@/workbench/provider-messages';
 import type { WatchFrame } from '@/workbench/protocol';
 import { tagged } from './tagged';
 
@@ -29,25 +29,19 @@ beforeEach(() => { opened = []; vi.stubGlobal('WebSocket', FakeStream); });
 afterEach(() => vi.unstubAllGlobals());
 
 describe('provider condition in sidebar status', () => {
-  it('overrides Idle, survives a later generic state packet, and restores it when resolved', async () => {
+  it('uses only canonical state events; notices cannot restore activity from an ended turn', async () => {
     vi.resetModules();
     const { useLiveSessions } = await import('@/workbench/live');
     const { result } = renderHook(() => useLiveSessions());
     act(() => opened[0]!.says(snapshot()));
     act(() => opened[0]!.says(frame('provider.message', { signal: signal('active') })));
-    expect(result.current[0]).toMatchObject({ state: 'stopped', activity: 'Limit reached' });
-
-    act(() => opened[0]!.says(frame('session.state', { state: 'idle', label: 'Ready' })));
-    expect(result.current[0]).toMatchObject({ state: 'stopped', activity: 'Limit reached' });
-
-    act(() => opened[0]!.says(frame('provider.message', { signal: signal('resolved') })));
     expect(result.current[0]).toMatchObject({ state: 'idle', activity: 'Ready' });
+    act(() => opened[0]!.says(frame('session.state', { state: 'stopped', label: 'Limit reached' })));
+    expect(result.current[0]).toMatchObject({ state: 'stopped', activity: 'Limit reached' });
+    act(() => opened[0]!.says(frame('session.state', { state: 'streaming', label: 'Answering' })));
+    act(() => opened[0]!.says(frame('session.state', { state: 'stopped', label: 'Stopped' })));
+    act(() => opened[0]!.says(frame('provider.message', { signal: signal('resolved') })));
+    expect(result.current[0]).toMatchObject({ state: 'stopped', activity: 'Stopped', activityCall: null, busySince: null });
   });
 
-  it('has compact user-facing status words for every future-provider category', () => {
-    for (const kind of PROVIDER_MESSAGE_KINDS) {
-      expect(providerMessageStatus(signal('active', { kind })).label).not.toMatch(/claude|codex/i);
-      expect(providerMessageStatus(signal('active', { kind })).label.length).toBeGreaterThan(0);
-    }
-  });
 });

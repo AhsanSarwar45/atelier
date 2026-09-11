@@ -503,7 +503,7 @@ export function chatState(input: ChatStateInput): ChatState {
   // time.sleep(45)" — and drawn as a clause after the standing's word the line
   // read "Running · Running Python: …", the same verb twice in eight
   // characters (bw-gci9).
-  const said = saidOfCall(input);
+  const said = state === 'running_tool' ? saidOfCall(input) : null;
   const word = said?.[0] ?? (input.label && input.label.length > 0 ? input.label : OWN_WORD[state]);
   const working = OWN_WORKING.has(state);
   return {
@@ -511,7 +511,7 @@ export function chatState(input: ChatStateInput): ChatState {
     waiting: state === 'waiting_permission',
     doing: OWN_DOING[state],
     word: word ?? '',
-    detail: said ? said[1] : input.detail ?? null,
+    detail: counting(state) ? (said ? said[1] : input.detail ?? null) : null,
     // Our own driver publishes its state every second; nothing here is inferred.
     told: true,
     // Off the state and never off the word: the driver names its own states, so
