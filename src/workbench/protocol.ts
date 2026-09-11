@@ -161,6 +161,10 @@ export interface ImagePayload {
   alt: string;
 }
 
+export type PromptPart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; image: ImagePayload };
+
 /** A pair the agent asks the conversation to hold together for inspection. */
 export interface ImageComparison {
   mode: 'side_by_side' | 'wipe';
@@ -797,7 +801,7 @@ export type WbpCommand =
       effort?: string;
       brief?: Brief;
     }
-  | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[]; takeover?: boolean }
+  | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[]; parts?: PromptPart[]; takeover?: boolean }
   | { type: 'ask.answer'; sessionId: string; askId: string; optionId: string; value?: string }
   | { type: 'question.answer'; sessionId: string; requestId: string; response: QuestionResponse }
   | { type: 'plan.respond'; sessionId: string; proposalId: string; response: PlanResponse }

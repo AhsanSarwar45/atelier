@@ -1298,21 +1298,45 @@ fn prompt_content(command: &Command, takes_pictures: bool) -> Result<Vec<Content
         .get("text")
         .and_then(Value::as_str)
         .ok_or_else(|| "text is required".to_string())?;
-    let mut content = vec![ContentBlock::Text(TextContent::new(text))];
+    let mut content = Vec::new();
     let mut refused = 0usize;
-    for image in command
-        .fields
-        .get("images")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        if let Some((data, mime)) = attached_picture(image) {
-            if !takes_pictures {
-                refused += 1;
-                continue;
+    let parts = command.fields.get("parts").and_then(Value::as_array);
+    if let Some(parts) = parts {
+        for part in parts {
+            match part["type"].as_str() {
+                Some("text") => {
+                    if let Some(words) = part["text"].as_str().filter(|words| !words.is_empty()) {
+                        content.push(ContentBlock::Text(TextContent::new(words)));
+                    }
+                }
+                Some("image") => {
+                    if let Some((data, mime)) = attached_picture(&part["image"]) {
+                        if takes_pictures {
+                            content.push(ContentBlock::Image(ImageContent::new(data, mime)));
+                        } else {
+                            refused += 1;
+                        }
+                    }
+                }
+                _ => {}
             }
-            content.push(ContentBlock::Image(ImageContent::new(data, mime)));
+        }
+    } else {
+        content.push(ContentBlock::Text(TextContent::new(text)));
+        for image in command
+            .fields
+            .get("images")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let Some((data, mime)) = attached_picture(image) {
+                if !takes_pictures {
+                    refused += 1;
+                    continue;
+                }
+                content.push(ContentBlock::Image(ImageContent::new(data, mime)));
+            }
         }
     }
     if refused > 0 {
@@ -2939,6 +2963,29 @@ mod tests {
             }
             other => panic!("the picture must go as an image block, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn attached_pictures_keep_their_places_between_the_words() {
+        let mut command = prompt_with_images(json!([]));
+        command.fields.insert(
+            "parts".into(),
+            json!([
+                {"type":"text", "text":"before "},
+                {"type":"image", "image":{"mime":"image/png", "dataUrl":"data:image/png;base64,QUJD", "alt":"one.png"}},
+                {"type":"text", "text":" between "},
+                {"type":"image", "image":{"mime":"image/jpeg", "dataUrl":"data:image/jpeg;base64,REVG", "alt":"two.jpg"}},
+                {"type":"text", "text":" after"}
+            ]),
+        );
+
+        let content = prompt_content(&command, true).unwrap();
+        assert_eq!(content.len(), 5);
+        assert!(matches!(&content[0], ContentBlock::Text(text) if text.text == "before "));
+        assert!(matches!(&content[1], ContentBlock::Image(image) if image.data == "QUJD"));
+        assert!(matches!(&content[2], ContentBlock::Text(text) if text.text == " between "));
+        assert!(matches!(&content[3], ContentBlock::Image(image) if image.data == "REVG"));
+        assert!(matches!(&content[4], ContentBlock::Text(text) if text.text == " after"));
     }
 
     /// A caller that already holds the two halves apart does not have to build a

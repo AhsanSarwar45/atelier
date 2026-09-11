@@ -43,7 +43,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-import { Prec, type EditorState, type Extension } from '@codemirror/state';
+import { Prec, StateEffect, type EditorState, type Extension } from '@codemirror/state';
 import {
   Decoration,
   EditorView,
@@ -61,13 +61,33 @@ import { FILE_BADGE_CLASS, FILE_KINDS, fileKind, type FileKind } from '@/compone
 import { badgeVariants } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { ExternalChange } from '@/workbench/code-editor';
+import type { DraftPicture } from '@/workbench/composer-attachments';
 import { drawnMarks } from '@/workbench/drawn-marks';
 import { findReferences, referenceLabel } from '@/workbench/references';
 
 /** What the chat holds this box by: the one thing it ever asks of it. */
 export interface ComposerHandle {
   focus(): void;
+  cursor(): number;
 }
+
+class PictureBadge extends WidgetType {
+  constructor(readonly picture: DraftPicture, private readonly onOpen: (picture: DraftPicture) => void) { super(); }
+  eq(other: PictureBadge): boolean { return other.picture.id === this.picture.id && other.picture.alt === this.picture.alt; }
+  toDOM(): HTMLElement {
+    const badge = document.createElement('button');
+    badge.type = 'button';
+    badge.className = cn(badgeVariants({ variant: 'primary', appearance: 'outline', size: 'sm', shape: 'circle' }), 'mx-0.5 cursor-pointer select-none');
+    badge.setAttribute('data-testid', 'composer-image-badge');
+    badge.setAttribute('data-image-id', this.picture.id);
+    badge.textContent = this.picture.alt;
+    badge.onclick = () => this.onOpen(this.picture);
+    return badge;
+  }
+  ignoreEvent(): boolean { return false; }
+}
+
+const RefreshPictures = StateEffect.define<void>();
 
 /** Where an icon of a given kind is fetched from, already drawn. */
 type IconSource = (kind: FileKind) => Node | null;
@@ -122,16 +142,21 @@ class ReferenceBadge extends WidgetType {
 }
 
 /** Every reference in the document, as a badge over exactly its characters. */
-function badges(state: EditorState, icon: IconSource): DecorationSet {
+function badges(state: EditorState, icon: IconSource, picture: (id: string) => DraftPicture | undefined, onOpen: (picture: DraftPicture) => void): DecorationSet {
   const text = state.doc.toString();
-  return Decoration.set(
-    findReferences(text).map((ref) =>
+  const references = findReferences(text).map((ref) =>
       Decoration.replace({ widget: new ReferenceBadge(referenceLabel(ref), fileKind(ref.path), icon) }).range(
         ref.start,
         ref.end,
       ),
-    ),
-  );
+    );
+  const pictures = Array.from(text.matchAll(/\[\[atelier-image:([a-zA-Z0-9_-]+)\]\]/g)).flatMap((match) => {
+    const found = picture(match[1]!);
+    return found && match.index !== undefined
+      ? [Decoration.replace({ widget: new PictureBadge(found, onOpen) }).range(match.index, match.index + match[0].length)]
+      : [];
+  });
+  return Decoration.set([...references, ...pictures], true);
 }
 
 /**
@@ -142,17 +167,19 @@ function badges(state: EditorState, icon: IconSource): DecorationSet {
  * the end of one takes all of it. Without that, deleting a badge would eat one
  * character of a path that is no longer on screen to be read.
  */
-function referenceBadges(icon: IconSource): Extension {
+function referenceBadges(icon: IconSource, picture: (id: string) => DraftPicture | undefined, onOpen: (picture: DraftPicture) => void): Extension {
   const drawn = ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
 
       constructor(view: EditorView) {
-        this.decorations = badges(view.state, icon);
+        this.decorations = badges(view.state, icon, picture, onOpen);
       }
 
       update(update: ViewUpdate) {
-        if (update.docChanged) this.decorations = badges(update.state, icon);
+        if (update.docChanged || update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(RefreshPictures)))) {
+          this.decorations = badges(update.state, icon, picture, onOpen);
+        }
       }
     },
     { decorations: (plugin) => plugin.decorations },
@@ -197,7 +224,9 @@ export interface ComposerEditorProps {
    */
   onKey: (event: { key: string; shiftKey: boolean }) => boolean;
   /** Files arriving by paste or by drop; both are the chat's to absorb. */
-  onFiles: (files: File[]) => void;
+  onFiles: (files: File[], at: number) => void;
+  pictures?: DraftPicture[];
+  onOpenPicture?: (picture: DraftPicture) => void;
   placeholder?: string;
   /** bw-gr8y.7's seam: read once, when the view is built. */
   extra?: Extension;
@@ -205,7 +234,7 @@ export interface ComposerEditorProps {
 }
 
 export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(function ComposerEditor(
-  { value, onChange, onKey, onFiles, placeholder, extra, className },
+  { value, onChange, onKey, onFiles, pictures = [], onOpenPicture = () => {}, placeholder, extra, className },
   ref,
 ) {
   const host = useRef<HTMLDivElement | null>(null);
@@ -218,9 +247,13 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
   const changed = useRef(onChange);
   const keyed = useRef(onKey);
   const filed = useRef(onFiles);
+  const pictured = useRef(pictures);
+  const openPicture = useRef(onOpenPicture);
   changed.current = onChange;
   keyed.current = onKey;
   filed.current = onFiles;
+  pictured.current = pictures;
+  openPicture.current = onOpenPicture;
 
   // Built once; the props at that moment are the starting state.
   const opening = useRef({ value, placeholder, extra });
@@ -253,7 +286,11 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
         // The kind's icon is cloned out of the hidden row below rather than
         // built here: the icons are React components, and a widget is plain
         // DOM. One drawing of each kind, cloned as often as it is needed.
-        referenceBadges((kind) => icons.current?.querySelector(`[data-icon-kind="${kind}"]`)?.cloneNode(true) ?? null),
+        referenceBadges(
+          (kind) => icons.current?.querySelector(`[data-icon-kind="${kind}"]`)?.cloneNode(true) ?? null,
+          (id) => pictured.current.find((picture) => picture.id === id),
+          (picture) => openPicture.current(picture),
+        ),
         // Ahead of the chat's own answer to a key, because bw-gr8y.7's `@` menu
         // lives in here: while that menu is open, Enter picks a file and Escape
         // shuts the menu, and neither may reach the chat's Enter-sends and
@@ -268,13 +305,13 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
         EditorView.domEventHandlers({
           // Pictures are taken and the event is left alone, so pasted TEXT still
           // lands in the box the ordinary way.
-          paste: (event) => {
-            filed.current(Array.from(event.clipboardData?.files ?? []));
+          paste: (event, editorView) => {
+            filed.current(Array.from(event.clipboardData?.files ?? []), editorView.state.selection.main.head);
             return false;
           },
-          drop: (event) => {
+          drop: (event, editorView) => {
             event.preventDefault();
-            filed.current(Array.from(event.dataTransfer?.files ?? []));
+            filed.current(Array.from(event.dataTransfer?.files ?? []), editorView.posAtCoords({ x: event.clientX, y: event.clientY }) ?? editorView.state.selection.main.head);
             return true;
           },
         }),
@@ -305,7 +342,12 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
     });
   }, [value]);
 
-  useImperativeHandle(ref, () => ({ focus: () => view.current?.focus() }), []);
+  useEffect(() => { view.current?.dispatch({ effects: RefreshPictures.of() }); }, [pictures]);
+
+  useImperativeHandle(ref, () => ({
+    focus: () => view.current?.focus(),
+    cursor: () => view.current?.state.selection.main.head ?? value.length,
+  }), [value]);
 
   return (
     <div className={cn('relative', className)}>
@@ -332,10 +374,10 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
         onKeyDown={(e) => {
           if (onKey(e)) e.preventDefault();
         }}
-        onPaste={(e) => onFiles(Array.from(e.clipboardData.files))}
+        onPaste={(e) => onFiles(Array.from(e.clipboardData.files), value.length)}
         onDrop={(e) => {
           e.preventDefault();
-          onFiles(Array.from(e.dataTransfer.files));
+          onFiles(Array.from(e.dataTransfer.files), value.length);
         }}
         className="sr-only"
       />

@@ -65,6 +65,8 @@ import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { ComposerEditor, type ComposerHandle } from '@/workbench/composer-editor';
 import { fileCompletions } from '@/workbench/composer-files';
 import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
+import { imageIds, imageMarker, orderedPictures, promptParts, promptWithoutImageMarkers } from '@/workbench/composer-attachments';
+import type { DraftPicture } from '@/workbench/composer-attachments';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { GitDiffView } from '@/workbench/git-diff-view';
@@ -80,7 +82,7 @@ import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, sentAway, showing as stillShowing, type KindId } from '@/workbench/message-filter';
-import type { Brand, CommandInfo, Cost, ImageComparison, ImagePayload, LookableImage, SessionConfigOption, TodoItem } from '@/workbench/protocol';
+import type { Brand, CommandInfo, Cost, LookableImage, SessionConfigOption, TodoItem } from '@/workbench/protocol';
 import { BRAND_DEFAULT_MODEL, startingChat } from '@/workbench/protocol';
 import { heldElsewhere, sessionOwnership, streamStillAnswers } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
@@ -148,7 +150,7 @@ interface ChatTabProps {
 /** A prompt remains editable only until the agent puts anything of its own after it. */
 interface RecallablePrompt {
   text: string;
-  images: ImagePayload[];
+  images: DraftPicture[];
   itemsBeforeSend: Set<string>;
 }
 
@@ -1229,13 +1231,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   }
 
   async function submit() {
-    const text = draft.trim();
-    if (!text || !sessionId) return;
+    const text = promptWithoutImageMarkers(draft, attached);
+    if ((!text && attached.length === 0) || !sessionId) return;
     if (sessionBrand === 'local' && !view.model) {
       setSendError('Choose a local model before sending.');
       return;
     }
-    const images = attached;
+    const images = orderedPictures(draft, attached);
     const pending = { text: draft, images, itemsBeforeSend: new Set(view.items.map((item) => item.id)) };
     recallableNow.current = pending;
     setRecallable(pending);
@@ -1249,7 +1251,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     setAttached([]);
     setSendError(null);
     try {
-      const sent = sendCommand<{ messageId: string }>({ type: 'prompt.send', sessionId, text, images, takeover: ownership.kind === 'elsewhere' });
+      const sent = sendCommand<{ messageId: string }>({
+        type: 'prompt.send',
+        sessionId,
+        text,
+        images,
+        ...(attached.length ? { parts: promptParts(draft, attached) } : {}),
+        takeover: ownership.kind === 'elsewhere',
+      });
       sending.current = sent;
       await sent;
     } catch (e) {
@@ -1293,11 +1302,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   }
 
   /** Pictures arrive by paste or by drop; both land in the same tray. */
-  async function absorb(files: FileList | File[] | null) {
+  async function absorb(files: FileList | File[] | null, at = typing.current?.cursor() ?? draft.length) {
     const pictures = Array.from(files ?? []).filter((f) => f.type.startsWith('image/'));
     if (!pictures.length) return;
-    const read = await Promise.all(pictures.map(readImage));
+    const read = await Promise.all(pictures.map(async (file) => ({ ...(await readImage(file)), id: crypto.randomUUID() })));
     setAttached((prev) => [...prev, ...read]);
+    const markers = read.map((picture) => imageMarker(picture.id)).join(' ');
+    setDraft((was) => `${was.slice(0, at)}${markers}${was.slice(at)}`);
   }
 
   if (!projectId || !projectPath) {
@@ -1961,6 +1972,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                   <Tooltip label={`${img.alt} — click to see it full size`}>
                     <img
                       data-testid="attachment-thumb"
+                      id={`composer-image-${img.id}`}
                       src={img.dataUrl}
                       alt={img.alt}
                       onClick={() => setLooking(img)}
@@ -1974,7 +1986,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                     radius="full"
                     data-testid="attachment-remove"
                     aria-label={`Remove ${img.alt}`}
-                    onClick={() => setAttached((all) => all.filter((_, at) => at !== i))}
+                    onClick={() => {
+                      setAttached((all) => all.filter((picture) => picture.id !== img.id));
+                      setDraft((text) => text.replace(imageMarker(img.id), ''));
+                    }}
                     className="absolute -right-1.5 -top-1.5 h-5 w-5 shadow"
                   >
                     <X className="h-3 w-3" />
@@ -2010,8 +2025,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             onChange={(text) => {
               setShut(false);
               setDraft(text);
+              const kept = new Set(imageIds(text));
+              setAttached((pictures) => pictures.filter((picture) => kept.has(picture.id)));
             }}
-            onFiles={(files) => void absorb(files)}
+            onFiles={(files, at) => void absorb(files, at)}
+            pictures={attached}
+            onOpenPicture={setLooking}
             onKey={composerKey}
             extra={completeFiles}
             // No held case here: a held chat draws no box at all, so a disabled
