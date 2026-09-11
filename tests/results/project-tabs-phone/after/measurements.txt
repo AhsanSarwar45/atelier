@@ -1,0 +1,7 @@
+   at 390px tab-chat shows "", is named "Chat", draws 1 icon(s) and is 44x44
+   at 390px tab-board shows "", is named "Board", draws 1 icon(s) and is 44x44
+   at 390px tab-files shows "", is named "Files", draws 1 icon(s) and is 44x44
+   at 390px the three tabs together take 132px of the 390px row
+   at 1024px tab-chat shows "Chat" and is 55x44
+   at 1024px tab-board shows "Board" and is 64x44
+   at 1024px tab-files shows "Files" and is 54x44

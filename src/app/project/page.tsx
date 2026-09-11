@@ -5,7 +5,7 @@ import { type MouseEvent, Suspense, useCallback, useEffect, useRef, useState } f
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { ArrowLeft, EllipsisVertical, Home } from 'lucide-react';
+import { ArrowLeft, EllipsisVertical, Folder, Home, MessageSquare, SquareKanban } from 'lucide-react';
 
 import { CardPanel } from '@/components/card-panel';
 import { ProjectSettingsDialog } from '@/components/project-settings-dialog';
@@ -33,6 +33,24 @@ import { useShowingFolder } from '@/workbench/terminal-shells';
 
 import { BoardCards } from './board-cards';
 import KanbanBoard from './kanban-board';
+
+/**
+ * The three project tabs on a phone.
+ *
+ * The tab bar is shared: after Chat, Board and Files come whatever tools the
+ * open tab hands it, and the board alone hands it eleven. At 390px the three
+ * words were the first thing to spend that row and the tools were what got
+ * pushed off it, so below `sm` each tab is its icon alone — the word is still
+ * there for a screen reader, as `aria-label` on the tab itself.
+ *
+ * `min-w-11` is the 44px floor for a target a thumb has to hit: an icon in the
+ * shared `px-3` comes to 40px on its own, which is under it. Above `sm` the
+ * floor is dropped again so the tabs are sized by their words, exactly as they
+ * always were.
+ */
+const TAB = 'gap-2 min-w-11 sm:min-w-0';
+const GLYPH = 'size-4 shrink-0 sm:hidden';
+const WORD = 'hidden sm:inline';
 
 function LoadingFallback() {
   return (
@@ -205,18 +223,21 @@ function ProjectTabs() {
           }
         >
           <TabsList data-testid="project-tabs">
-            <TabsTrigger value="chat" data-testid="tab-chat">
-              Chat
+            <TabsTrigger value="chat" data-testid="tab-chat" aria-label="Chat" className={TAB}>
+              <MessageSquare className={GLYPH} aria-hidden="true" />
+              <span className={WORD}>Chat</span>
             </TabsTrigger>
             {/* Only the board needs a board. Files stand on the folder itself,
                 so a project that keeps no cards still gets them. */}
             {usesBeads && (
-              <TabsTrigger value="board" data-testid="tab-board">
-                Board
+              <TabsTrigger value="board" data-testid="tab-board" aria-label="Board" className={TAB}>
+                <SquareKanban className={GLYPH} aria-hidden="true" />
+                <span className={WORD}>Board</span>
               </TabsTrigger>
             )}
-            <TabsTrigger value="files" data-testid="tab-files">
-              Files
+            <TabsTrigger value="files" data-testid="tab-files" aria-label="Files" className={TAB}>
+              <Folder className={GLYPH} aria-hidden="true" />
+              <span className={WORD}>Files</span>
             </TabsTrigger>
           </TabsList>
         </Tabs>
