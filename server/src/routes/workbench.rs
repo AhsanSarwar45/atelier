@@ -6,7 +6,7 @@
 
 use axum::{
     body::Body,
-    extract::{Path, Query, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::{Response, StatusCode},
     response::{
         sse::{Event as SseEvent, KeepAlive, Sse},
@@ -787,6 +787,17 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/present", post(present))
         .route("/screen-check", post(screen_check))
         .route("/command", post(command))
+        // A prompt carries its pictures inline, as base64 inside the JSON, and
+        // there is no ceiling on how many a person may attach to one message.
+        // Axum otherwise buffers every body under a 2 MiB default nobody here
+        // chose, which refuses the request in the extractor before any handler
+        // sees it and hands the page a bare `413 Failed to buffer the request
+        // body` (bw-ad3r.2). These three routes are the ones that carry
+        // attachments, and the browser talking to them is on the loopback
+        // address of the same machine: the bytes are already resident in the
+        // page that is sending them, so buffering them here costs a copy, not
+        // an opening for a stranger.
+        .layer(DefaultBodyLimit::disable())
         .with_state(state)
 }
 

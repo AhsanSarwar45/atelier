@@ -1304,6 +1304,28 @@ fn prompt_content(command: &Command, takes_pictures: bool) -> Result<Vec<Content
         .ok_or_else(|| "text is required".to_string())?;
     let mut content = Vec::new();
     let mut refused = 0usize;
+    let attachments = command
+        .fields
+        .get("images")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    // A part says where a picture sits between the words; the picture itself
+    // rides once in `images`, which is also what the record is written from.
+    // Pairing them here by id keeps one copy of the base64 in the request
+    // instead of two (bw-ad3r.3). A part that still carries the whole picture
+    // inline is honoured as it always was, so a page that has not reloaded
+    // since the change keeps working.
+    let named = |part: &Value| -> Option<Value> {
+        if part["image"].is_object() {
+            return Some(part["image"].clone());
+        }
+        let wanted = part["id"].as_str()?;
+        attachments
+            .iter()
+            .find(|picture| picture["id"].as_str() == Some(wanted))
+            .cloned()
+    };
     let parts = command.fields.get("parts").and_then(Value::as_array);
     if let Some(parts) = parts {
         for part in parts {
@@ -1314,7 +1336,7 @@ fn prompt_content(command: &Command, takes_pictures: bool) -> Result<Vec<Content
                     }
                 }
                 Some("image") => {
-                    if let Some((data, mime)) = attached_picture(&part["image"]) {
+                    if let Some((data, mime)) = named(part).as_ref().and_then(attached_picture) {
                         if takes_pictures {
                             content.push(ContentBlock::Image(ImageContent::new(data, mime)));
                         } else {
@@ -2996,6 +3018,69 @@ mod tests {
         assert!(matches!(&content[2], ContentBlock::Text(text) if text.text == " between "));
         assert!(matches!(&content[3], ContentBlock::Image(image) if image.data == "REVG"));
         assert!(matches!(&content[4], ContentBlock::Text(text) if text.text == " after"));
+    }
+
+    /// The writing box names each picture in its parts and sends the picture
+    /// itself once, in `images`. Carrying the base64 in both put every
+    /// attachment on the wire twice and halved what one message could hold
+    /// before the request was refused (bw-ad3r.3).
+    #[test]
+    fn a_part_names_its_picture_and_the_picture_travels_once() {
+        let mut command = prompt_with_images(json!([
+            {"id":"two", "mime":"image/jpeg", "dataUrl":"data:image/jpeg;base64,REVG", "alt":"two.jpg"},
+            {"id":"one", "mime":"image/png", "dataUrl":"data:image/png;base64,QUJD", "alt":"one.png"},
+        ]));
+        command.fields.insert(
+            "parts".into(),
+            json!([
+                {"type":"image", "id":"one"},
+                {"type":"text", "text":" then "},
+                {"type":"image", "id":"two"},
+            ]),
+        );
+
+        let content = prompt_content(&command, true).unwrap();
+        assert_eq!(content.len(), 3);
+        assert!(matches!(&content[0], ContentBlock::Image(image) if image.data == "QUJD"));
+        assert!(matches!(&content[1], ContentBlock::Text(text) if text.text == " then "));
+        assert!(matches!(&content[2], ContentBlock::Image(image) if image.data == "REVG"));
+    }
+
+    /// A page open across the change still sends the whole picture inside its
+    /// parts. It keeps working rather than losing the attachment on reload.
+    #[test]
+    fn a_part_still_carrying_its_whole_picture_is_honoured() {
+        let mut command = prompt_with_images(json!([]));
+        command.fields.insert(
+            "parts".into(),
+            json!([
+                {"type":"image", "image":{"mime":"image/png", "dataUrl":"data:image/png;base64,QUJD", "alt":"one.png"}},
+            ]),
+        );
+
+        let content = prompt_content(&command, true).unwrap();
+        assert_eq!(content.len(), 1);
+        assert!(matches!(&content[0], ContentBlock::Image(image) if image.data == "QUJD"));
+    }
+
+    /// A part naming a picture that is not in `images` leaves the sentence
+    /// alone rather than becoming an empty block the agent has to puzzle over.
+    #[test]
+    fn a_part_naming_no_picture_we_hold_is_dropped() {
+        let mut command = prompt_with_images(json!([
+            {"id":"one", "mime":"image/png", "dataUrl":"data:image/png;base64,QUJD", "alt":"one.png"},
+        ]));
+        command.fields.insert(
+            "parts".into(),
+            json!([
+                {"type":"text", "text":"look"},
+                {"type":"image", "id":"missing"},
+            ]),
+        );
+
+        let content = prompt_content(&command, true).unwrap();
+        assert_eq!(content.len(), 1);
+        assert!(matches!(&content[0], ContentBlock::Text(text) if text.text == "look"));
     }
 
     /// A caller that already holds the two halves apart does not have to build a
