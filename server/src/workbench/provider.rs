@@ -679,18 +679,12 @@ impl SessionFactory for NativeProviderFactory {
             if command.kind == CommandKind::SessionOpen {
                 let session = match found {
                     Some(mut session) => {
-                        session.state = "dormant".into();
-                        database
-                            .update_session(
-                                session.id.clone(),
-                                SessionPatch {
-                                    state: Some("dormant".into()),
-                                    ..SessionPatch::default()
-                                },
-                                None,
-                            )
-                            .await?;
-                        append_state(&database, &session.id, "dormant", "Asleep").await?;
+                        // A detached transport does not erase the turn's outcome.
+                        // Only an unfinished/idle attachment becomes asleep on open.
+                        if !matches!(session.state.as_str(), "stopped" | "errored" | "dormant") {
+                            session.state = "dormant".into();
+                            append_state(&database, &session.id, "dormant", "Asleep").await?;
+                        }
                         session
                     }
                     None => {

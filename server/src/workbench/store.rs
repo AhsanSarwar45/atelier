@@ -501,7 +501,7 @@ fn held_in_its_project(session: &Session) -> bool {
 
     pub fn mark_all_dormant(&self) -> rusqlite::Result<usize> {
         self.connection.execute(
-            "UPDATE session SET state = 'dormant' WHERE state != 'dormant'",
+            "UPDATE session SET state = 'dormant' WHERE state NOT IN ('dormant','stopped','errored')",
             [],
         )
     }
@@ -2310,6 +2310,21 @@ fn columns(transaction: &Transaction<'_>, table: &str) -> rusqlite::Result<Vec<S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recovering_connections_preserves_stopped_and_failed_outcomes() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(&root.path().join("workbench.db")).unwrap();
+        for state in ["stopped", "errored", "streaming"] {
+            let mut row = session(state, "codex", Some(state), "2026-09-11T00:00:00Z");
+            row.state = state.into();
+            store.create_session(&row).unwrap();
+        }
+        assert_eq!(store.mark_all_dormant().unwrap(), 1);
+        assert_eq!(store.get_session("stopped").unwrap().unwrap().state, "stopped");
+        assert_eq!(store.get_session("errored").unwrap().unwrap().state, "errored");
+        assert_eq!(store.get_session("streaming").unwrap().unwrap().state, "dormant");
+    }
 
     fn session(id: &str, brand: &str, external_id: Option<&str>, at: &str) -> Session {
         Session {

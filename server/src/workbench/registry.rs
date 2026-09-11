@@ -88,7 +88,15 @@ async fn supervise_driver(
     loop {
         match requests.try_recv() {
             Ok(DriverRequest::Command(command, reply)) => {
-                let _ = reply.send(driver.command(&command).await);
+                let result = driver.command(&command).await;
+                let detached = result.as_ref().ok().is_some_and(|value| value["detached"] == true);
+                if detached {
+                    // Close before acknowledging Stop. An immediate next prompt
+                    // must resume, rather than queue onto this retired driver.
+                    requests.close();
+                }
+                let _ = reply.send(result);
+                if detached { return; }
                 continue;
             }
             Ok(DriverRequest::WindowNow(reply)) => {
@@ -255,14 +263,15 @@ impl WorkbenchRegistry {
     }
 
     pub async fn has_driver(&self, session_id: &str) -> bool {
-        self.drivers.read().await.contains_key(session_id)
+        self.drivers.read().await.get(session_id).is_some_and(|driver| !driver.is_closed())
     }
 
     /// A test's stand-in for a live provider: the entry alone is what
     /// `has_driver` reads, and nothing is ever sent down it.
     #[cfg(test)]
     pub(crate) async fn pretend_driver(&self, session_id: &str) {
-        let (requests, _receiver) = mpsc::unbounded_channel();
+        let (requests, mut receiver) = mpsc::unbounded_channel();
+        tokio::spawn(async move { while receiver.recv().await.is_some() {} });
         self.drivers
             .write()
             .await
@@ -286,7 +295,7 @@ impl WorkbenchRegistry {
             return Ok(launched.reply);
         };
         let mut drivers = self.drivers.write().await;
-        if drivers.contains_key(&launched.session_id) {
+        if drivers.get(&launched.session_id).is_some_and(|driver| !driver.is_closed()) {
             drop(drivers);
             let mut driver = driver;
             let _ = driver.close().await;
@@ -294,13 +303,17 @@ impl WorkbenchRegistry {
         }
         let (requests, receiver) = mpsc::unbounded_channel();
         let session_id = launched.session_id;
+        let owner = requests.clone();
         drivers.insert(session_id.clone(), requests);
         drop(drivers);
         let live = self.drivers.clone();
         let database = self.database.clone();
         tokio::spawn(async move {
             supervise_driver(database, session_id.clone(), driver, receiver).await;
-            live.write().await.remove(&session_id);
+            let mut live = live.write().await;
+            if live.get(&session_id).is_some_and(|current| current.same_channel(&owner)) {
+                live.remove(&session_id);
+            }
         });
         Ok(launched.reply)
     }
@@ -698,6 +711,21 @@ impl WorkbenchRegistry {
             CommandKind::SessionStart | CommandKind::SessionResume => {
                 self.refuse_external_owner(command).await?;
                 self.launch(command).await
+            }
+            CommandKind::SessionStop
+                if !self.has_driver(Self::field(command, "sessionId")?).await =>
+            {
+                self.refuse_external_owner(command).await?;
+                let session_id = Self::field(command, "sessionId")?;
+                let session = self.database.get_session(session_id.to_string()).await?
+                    .ok_or_else(|| format!("no session {session_id}"))?;
+                if session.state != "stopped" {
+                    self.database.append(serde_json::from_value(json!({
+                        "type":"session.state", "sessionId":session_id, "seq":0,
+                        "at":chrono::Utc::now().to_rfc3339(), "state":"stopped", "label":"Stopped"
+                    })).map_err(|error| error.to_string())?).await?;
+                }
+                Ok(json!({"ok":true,"detached":true}))
             }
             CommandKind::SessionClose
                 if !self.has_driver(Self::field(command, "sessionId")?).await =>

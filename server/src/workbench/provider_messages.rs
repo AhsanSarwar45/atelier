@@ -27,17 +27,9 @@ pub fn needs_signing_in(detail: &str) -> Value {
 
 /// What a chat is doing, in the words of the condition standing over it.
 ///
-/// Twin of `providerMessageStatus` (`src/workbench/provider-messages.ts`), and
-/// it has to be a twin: the live screen reads the condition and says this for
-/// itself, but a chat opened fresh is read off the state the driver wrote down,
-/// and the two must not disagree about the same chat.
-///
-/// They did. Every failed turn published `errored` / `Failed` whatever had gone
-/// wrong, so a chat stopped by its own session limit — with the limit notice on
-/// the page saying so, and the time it lifts beside it — sat in the list as
-/// `Failed`, which reads as a chat that broke rather than one that is waiting
-/// (bw-d516). A failure nothing can name still says `Failed`, because there
-/// that is the truth.
+/// The server publishes this as a canonical `session.state` event. Live
+/// subscribers and restored snapshots consume that same event; the browser
+/// never reconstructs state from a notice or restores an earlier activity.
 pub fn standing(signal: &Value) -> (&'static str, &'static str) {
     let state = match signal["severity"].as_str() {
         Some("blocking") => "stopped",

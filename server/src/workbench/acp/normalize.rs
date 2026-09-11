@@ -91,6 +91,8 @@ impl TokenTally {
 
 pub struct AcpNormalizer {
     serial: u64,
+    turn_finished: bool,
+    prompt_generation: u64,
     event_serial: Cell<u64>,
     stream_id: String,
     active_messages: HashMap<String, (String, String)>,
@@ -150,6 +152,8 @@ impl Default for AcpNormalizer {
     fn default() -> Self {
         Self {
             serial: 0,
+            turn_finished: false,
+            prompt_generation: 0,
             event_serial: Cell::new(0),
             stream_id: uuid::Uuid::new_v4().to_string(),
             active_messages: HashMap::new(),
@@ -711,6 +715,10 @@ impl AcpNormalizer {
         );
         let before_closing = events.len().saturating_sub(1);
         events.insert(before_closing, notice);
+        if let Some(last) = events.last_mut() {
+            last.fields.insert("state".into(), json!("errored"));
+            last.fields.insert("label".into(), json!("Runtime stopped"));
+        }
         events
     }
 
@@ -864,12 +872,31 @@ impl AcpNormalizer {
                 Some("notLoaded") => ("dormant", "Asleep"),
                 _ => ("idle", "Ready"),
             };
+            // A typed terminal state is an ending, even if the prompt RPC
+            // never returns. Unknown metadata remains non-authoritative.
+            let ended = self.turn_is_open()
+                && matches!(status["type"].as_str(), Some("idle" | "systemError" | "notLoaded"));
+            if ended {
+                let mut end = raw.clone();
+                end["stopReason"] = json!("end_turn");
+                // Final accounting belongs to the eventual prompt response.
+                end["_meta"] = Value::Null;
+                events.extend(self.finish_turn(session_id, provider, &end));
+                if state != "idle" {
+                    if let Some(last) = events.last_mut() {
+                        last.fields.insert("state".into(), json!(state));
+                        last.fields.insert("label".into(), json!(label));
+                    }
+                }
+            }
             // Anything this build has no word for lands on Ready, which is a
             // reasonable floor for a chat at rest and a lie about one that is
             // working: it stopped the clock, dropped the row out of the working
             // list, and left nothing after it to put either right. So the floor
             // is only taken when there is no turn to contradict it (bw-xfb4).
-            if state != "idle" || !self.turn_is_open() {
+            if !ended && (!self.turn_finished || !matches!(state, "thinking" | "waiting_permission"))
+                && (state != "idle" || !self.turn_is_open())
+            {
                 events.push(self.envelope(
                     session_id,
                     provider,
@@ -1278,7 +1305,7 @@ impl AcpNormalizer {
     /// chat drawn as finished in the middle of a turn stops its clock, drops it
     /// out of the working list, and has nothing after it to put it right.
     fn turn_is_open(&self) -> bool {
-        self.said_standing.is_some()
+        !self.turn_finished && (self.suppress_local_user || self.said_standing.is_some())
     }
 
     /// The chat saying what it is doing, whenever that changes.
@@ -1297,6 +1324,9 @@ impl AcpNormalizer {
     /// screens draw it; a word invented here would be a fifth opinion. What
     /// this adds is the part the screen cannot know: which call is in flight.
     fn says_standing(&mut self, session_id: &str, provider: &str, raw: &Value) -> Vec<Event> {
+        if self.turn_finished {
+            return Vec::new();
+        }
         let Some((state, detail, call)) = self.standing_now() else {
             return Vec::new();
         };
@@ -1692,6 +1722,25 @@ impl AcpNormalizer {
     }
 
     pub fn update(&mut self, session_id: &str, provider: &str, raw: &Value) -> Vec<Event> {
+        let mut events = Vec::new();
+        for event in self.update_inner(session_id, provider, raw) {
+            let status = (event.kind == EventKind::ProviderMessage)
+                .then(|| event.fields.get("signal"))
+                .flatten()
+                .filter(|signal| signal["phase"] == "active")
+                .map(crate::workbench::provider_messages::standing)
+                .filter(|(state, _)| !self.turn_finished || *state != "running_tool");
+            events.push(event);
+            if let Some((state, label)) = status {
+                events.push(self.envelope(session_id, provider, raw, json!({
+                    "type":"session.state", "state":state, "label":label
+                })));
+            }
+        }
+        events
+    }
+
+    fn update_inner(&mut self, session_id: &str, provider: &str, raw: &Value) -> Vec<Event> {
         let update = &raw["update"];
         match update["sessionUpdate"].as_str() {
             Some("user_message_chunk") if self.suppress_local_user => Vec::new(),
@@ -1728,7 +1777,7 @@ impl AcpNormalizer {
                 // A helper's own call is the helper's business: it is drawn on
                 // the card that stands for it, and naming it here would have
                 // the chat say it is running something it sent away.
-                if parent.is_none() {
+                if parent.is_none() && !self.turn_finished {
                     self.running_calls.push(id.clone());
                     let standing = self.says_standing(session_id, provider, raw);
                     events.extend(standing);
@@ -2343,9 +2392,23 @@ impl AcpNormalizer {
 
     pub fn finish_turn(&mut self, session_id: &str, provider: &str, raw: &Value) -> Vec<Event> {
         self.suppress_local_user = false;
+        self.turn_finished = true;
         self.said_standing = None;
         let failure = Self::typed_failure(provider, raw);
         let mut events = Vec::new();
+        // Activity belongs to this turn. A tool whose final update was lost
+        // cannot become the next turn's activity or keep its old card spinning.
+        for id in std::mem::take(&mut self.running_calls) {
+            self.open_tools.remove(&id);
+            self.tool_starts.remove(&id);
+            self.tool_pictures.remove(&id);
+            self.terminals.remove(&id);
+            events.push(self.envelope(session_id, provider, raw, json!({
+                "type":"tool.completed", "toolCallId":id, "ok":false,
+                "output":"The turn ended before this tool returned."
+            })));
+        }
+
         for (agent, chunks) in std::mem::take(&mut self.deferred_agents) {
             // Its words as the reader saw them, message breaks and all, rather
             // than the raw run of chunks; the two say the same thing, and
@@ -2424,15 +2487,7 @@ impl AcpNormalizer {
             ));
         }
         self.started_messages.clear();
-        if let Some((turn, source)) = Self::turn_usage(raw) {
-            self.cumulative_usage.add(&turn);
-            events.push(self.envelope(
-                session_id,
-                provider,
-                raw,
-                json!({"type":"cost","cost":self.cumulative_usage.value(),"source":source}),
-            ));
-        }
+        events.extend(self.prompt_usage(session_id, provider, raw));
         let failed = failure.as_ref().is_some_and(|signal| {
             matches!(signal["severity"].as_str(), Some("error" | "blocking"))
         });
@@ -2458,11 +2513,16 @@ impl AcpNormalizer {
                 json!({"type":"provider.message","signal":signal}),
             ));
         }
+        let (state, label) = events.iter()
+            .filter(|event| event.kind == EventKind::ProviderMessage)
+            .filter_map(|event| event.fields.get("signal"))
+            .filter(|signal| signal["phase"] == "active")
+            .max_by_key(|signal| crate::workbench::provider_messages::loudness(signal))
+            .map(crate::workbench::provider_messages::standing)
+            .unwrap_or(if failed { ("errored", "Provider failed") } else { ("idle", "Ready") });
         events.push(self.envelope(
-            session_id,
-            provider,
-            raw,
-            json!({"type":"session.state","state":if failed{"errored"}else{"idle"},"label":if failed{"Provider failed"}else{"Ready"}}),
+            session_id, provider, raw,
+            json!({"type":"session.state","state":state,"label":label}),
         ));
         events
     }
@@ -2542,8 +2602,28 @@ impl AcpNormalizer {
         events
     }
 
+    pub fn begin_prompt(&mut self) -> u64 {
+        self.prompt_generation += 1;
+        self.begin_local_prompt();
+        self.prompt_generation
+    }
+
+    pub fn owns_prompt(&self, generation: u64) -> bool {
+        generation == self.prompt_generation && !self.turn_finished
+    }
+
+    // A response to an already ended turn may still supply its final usage.
+    // Keep that accounting without letting it mutate the current turn's state.
+    pub fn prompt_usage(&mut self, session_id: &str, provider: &str, raw: &Value) -> Vec<Event> {
+        let Some((turn, source)) = Self::turn_usage(raw) else { return Vec::new() };
+        self.cumulative_usage.add(&turn);
+        vec![self.envelope(session_id, provider, raw,
+            json!({"type":"cost","cost":self.cumulative_usage.value(),"source":source}))]
+    }
+
     pub fn begin_local_prompt(&mut self) {
         self.suppress_local_user = true;
+        self.turn_finished = false;
     }
 }
 
@@ -2790,10 +2870,11 @@ mod tests {
                     .is_some_and(|detail| !detail.is_empty()),
                 "a notice with nothing to read is not a notice"
             );
-            // Nothing broke — the agent answered, and the answer was that it
-            // stopped — so the chat is ready for the next thing, not errored.
+            // The persisted state now carries the condition that the sidebar
+            // used to reconstruct separately. Live and reload must agree.
             let state = serde_json::to_value(&events[1]).unwrap();
-            assert_eq!(state["state"], "idle");
+            assert_eq!(state["state"], "errored");
+            assert_eq!(state["label"], if kind == "refusal" { "Declined" } else { "Stopped short" });
         }
     }
 
@@ -2835,10 +2916,10 @@ mod tests {
             detail.contains("http://127.0.0.1:8080"),
             "the reader is not told which runtime went: {detail}"
         );
-        // The chat itself is fine — goose is still there and can be asked
-        // again the moment the runtime is back.
+        // Persist the same runtime failure that both live and restored UIs draw.
         let state = serde_json::to_value(events.last().unwrap()).unwrap();
-        assert_eq!(state["state"], "idle");
+        assert_eq!(state["state"], "errored");
+        assert_eq!(state["label"], "Runtime stopped");
     }
 
     /// The same turn, with the runtime still answering, says nothing extra.
@@ -3453,7 +3534,7 @@ mod tests {
                 "title":"Codex is temporarily overloaded.","actions":["retry"]
             }}}}
         }}));
-        assert_eq!(kinds(&failed), vec!["provider.message"]);
+        assert_eq!(kinds(&failed), vec!["provider.message", "session.state"]);
         let active = serde_json::to_value(&failed[0]).unwrap();
         assert_eq!(active["signal"]["kind"], "service_unavailable");
         assert_eq!(active["signal"]["phase"], "active");
@@ -3482,7 +3563,7 @@ mod tests {
         assert_eq!(signal["signal"]["kind"], "network");
         let state = serde_json::to_value(&events[1]).unwrap();
         assert_eq!(state["state"], "errored");
-        assert_eq!(state["label"], "Provider failed");
+        assert_eq!(state["label"], "Connection lost");
     }
 
     #[test]
@@ -4355,6 +4436,60 @@ mod tests {
     /// doesn't use the same classifer that the cards use" (bw-gci9). So what
     /// travels is the call itself, and the words stay where the words are
     /// written.
+    #[test]
+    fn explicit_idle_ends_a_pending_prompt_and_old_responses_do_not_own_the_next() {
+        let mut normalizer = AcpNormalizer::default();
+        let first = normalizer.begin_prompt();
+        normalizer.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call","toolCallId":"first","title":"Run first","kind":"execute"
+        }}));
+        let ended = normalizer.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"session_info_update","title":"Saved title",
+            "_meta":{"codex":{"threadStatus":{"type":"idle","activeFlags":[]}}}
+        }}));
+        assert!(!normalizer.owns_prompt(first));
+        assert!(ended.iter().any(|event| event.kind == EventKind::SessionState && event.fields["state"] == "idle"));
+        assert!(ended.iter().any(|event| event.kind == EventKind::SessionPinned && event.fields["title"] == "Saved title"));
+        let second = normalizer.begin_prompt();
+        assert!(!normalizer.owns_prompt(first));
+        assert!(normalizer.owns_prompt(second));
+        let usage = normalizer.prompt_usage("local", "codex", &json!({"stopReason":"end_turn"}));
+        assert!(usage.iter().all(|event| event.kind != EventKind::SessionState));
+        assert!(normalizer.owns_prompt(second));
+    }
+
+    #[test]
+    fn an_ended_turn_cannot_lend_its_running_call_to_the_next_turn() {
+        for provider in ["claude", "codex"] {
+            for reason in ["end_turn", "cancelled"] {
+                let mut normalizer = AcpNormalizer::default();
+                normalizer.begin_local_prompt();
+                normalizer.update("local", provider, &json!({"sessionId":"remote","update":{
+                    "sessionUpdate":"tool_call","toolCallId":"old-call","title":"Claim the card",
+                    "kind":"execute","rawInput":{"command":"bd update bw-105s.1 --claim"}
+                }}));
+                normalizer.finish_turn("local", provider, &json!({"stopReason":reason}));
+                let late = normalizer.update("local", provider, &json!({"sessionId":"remote","update":{
+                    "sessionUpdate":"session_info_update","_meta":{"codex":{"threadStatus":{"type":"active","activeFlags":[]}}}
+                }}));
+                assert!(late.iter().all(|event| event.kind != EventKind::SessionState));
+                let late_call = normalizer.update("local", provider, &json!({"sessionId":"remote","update":{
+                    "sessionUpdate":"tool_call_update","toolCallId":"old-call", "status":"in_progress",
+                    "title":"Claim the card", "rawInput":{"command":"bd update bw-105s.1 --claim"}
+                }}));
+                assert!(late_call.iter().all(|event| event.kind != EventKind::SessionState));
+                normalizer.begin_local_prompt();
+                let next = normalizer.update("local", provider, &json!({"sessionId":"remote","update":{
+                    "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"The next answer"}
+                }}));
+                let state = next.iter().find(|event| event.kind == EventKind::SessionState)
+                    .expect("the next answer publishes its own activity");
+                assert_eq!(state.fields["state"], "streaming", "{provider} after {reason}");
+                assert!(state.fields["call"].is_null(), "an old command survived the turn ending");
+            }
+        }
+    }
+
     #[test]
     fn a_running_call_is_published_as_what_it_is_and_not_only_as_what_it_says() {
         let mut normalizer = AcpNormalizer::default();

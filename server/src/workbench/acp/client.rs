@@ -2002,6 +2002,9 @@ impl AcpDriver {
             let agent = AcpAgent::new(config);
             let ready = Arc::new(Mutex::new(Some(ready)));
             let connection_ready = ready.clone();
+            let stop_reply = Arc::new(Mutex::new(None::<Reply>));
+            let connection_stop_reply = stop_reply.clone();
+            let stopped_normalizer = normalizer.clone();
             let result = client
                 .connect_with(agent, move |connection: ConnectionTo<Agent>| {
                     let task_database = task_database.clone();
@@ -2013,6 +2016,7 @@ impl AcpDriver {
                     let ready = connection_ready.clone();
                     let replaying = replaying.clone();
                     let closing = task_closing.clone();
+                    let stop_reply = connection_stop_reply.clone();
                     let saved_menu = task_saved_menu.clone();
                     let io = task_io.clone();
                     async move {
@@ -2210,7 +2214,7 @@ impl AcpDriver {
                         while let Some(control) = receiver.recv().await {
                             match control {
                                 Control::Prompt { content, reply } => {
-                                    normalizer.lock().await.begin_local_prompt();
+                                    let generation = normalizer.lock().await.begin_prompt();
                                     let prompt_connection = connection.clone();
                                     let database = task_database.clone();
                                     let local_id = task_session.id.clone();
@@ -2238,10 +2242,14 @@ impl AcpDriver {
                                                     _ => None,
                                                 };
                                                 let mut normalizer = normalizer.lock().await;
-                                                match cut_off {
+                                                if !normalizer.owns_prompt(generation) {
+                                                    normalizer.prompt_usage(&local_id, provider, &raw)
+                                                } else {
+                                                    match cut_off {
                                                     Some(endpoint) => normalizer
                                                         .finish_turn_cut_off(&local_id, provider, &raw, &endpoint),
                                                     None => normalizer.finish_turn(&local_id, provider, &raw),
+                                                    }
                                                 }
                                             }
                                             // The error whole — code, message
@@ -2257,10 +2265,12 @@ impl AcpDriver {
                                                         "code": i32::from(error.code),
                                                         "message": error.to_string(),
                                                     }));
-                                                normalizer
-                                                    .lock()
-                                                    .await
-                                                    .fail_turn(&local_id, provider, &failure)
+                                                let mut normalizer = normalizer.lock().await;
+                                                if normalizer.owns_prompt(generation) {
+                                                    normalizer.fail_turn(&local_id, provider, &failure)
+                                                } else {
+                                                    Vec::new()
+                                                }
                                             }
                                         };
                                         database.append_many(events).await.map_err(acp_error)?;
@@ -2272,11 +2282,17 @@ impl AcpDriver {
                                     let _ = reply.send(answer);
                                 }
                                 Control::Cancel { reply } => {
-                                    let result = connection
-                                        .send_notification(CancelNotification::new(remote_id.clone()))
-                                        .map(|_| json!({"ok":true}))
-                                        .map_err(|error| error.to_string());
-                                    let _ = reply.send(result);
+                                    // Stop owns the connection's end; it never depends on
+                                    // the outstanding prompt responding to cancellation.
+                                    // Dropping the ACP connection cancels its tasks and
+                                    // terminates its owned process group. Resume already
+                                    // attaches a fresh connection to this saved session.
+                                    closing.store(true, Ordering::Release);
+                                    *stop_reply.lock().await = Some(reply);
+                                    let _ = connection.send_notification(
+                                        CancelNotification::new(remote_id.clone()),
+                                    );
+                                    break;
                                 }
                                 Control::Steer { content, suppress_echo, reply } => {
                                     if suppress_echo {
@@ -2467,6 +2483,21 @@ impl AcpDriver {
                     }
                 })
                 .await;
+            // The connection and all its notification/prompt tasks are gone.
+            // Persist the ending last, so no late result can overwrite it.
+            if let Some(reply) = stop_reply.lock().await.take() {
+                let mut events = stopped_normalizer.lock().await.finish_turn(
+                    &stopped_session.id, brand, &json!({"stopReason":"cancelled"}),
+                );
+                if let Some(last) = events.last_mut() {
+                    last.fields.insert("state".into(), json!("stopped"));
+                    last.fields.insert("label".into(), json!("Stopped"));
+                }
+                let result = stopped_database.append_many(events).await
+                    .map(|_| json!({"ok":true,"detached":true}));
+                let _ = reply.send(result);
+                return;
+            }
             // Read before it is stringified: `Display` for an ACP error prints
             // the message and drops the code, and -32000 is the difference
             // between "this is broken" and "sign in" (bw-t26l.20).
@@ -2478,6 +2509,13 @@ impl AcpDriver {
             } else if !stopped_closing.load(Ordering::Acquire) {
                 let (message, signing_in) = failure
                     .unwrap_or_else(|| ("ACP adapter stopped unexpectedly".into(), false));
+                let mut settled = stopped_normalizer.lock().await.finish_turn(
+                    &stopped_session.id, brand, &json!({"stopReason":"cancelled"}),
+                );
+                // Cleanup is shared with Stop; the transport failure supplies
+                // the terminal state instead of finish_turn's ordinary Ready.
+                settled.pop();
+                let _ = stopped_database.append_many(settled).await;
                 record_failure(&stopped_database, &stopped_session, &message, signing_in).await;
                 let _ = ended_send.send(message);
             };
