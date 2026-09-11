@@ -652,7 +652,16 @@ function machineLine(item: TranscriptItem): {
   // The kit writing in HIS name. A shape with no kind is one where it only
   // wrapped words he really typed, and that is his message, not a line about
   // the machine — `hisOwnWords` takes the wrapper off on the way past.
-  if (item.kind === 'message' && item.role === 'user') {
+  //
+  // Asked only of a message whose provenance is unknown. A message this app's
+  // own composer sent is his by construction, and guessing at it read his own
+  // words back as the machine's: attaching a picture before typing put the
+  // composer's `[Image: name]` at the head of the text, the picture shape below
+  // matched on that prefix, and the whole message — his words and his picture
+  // both — was filed as a machine line and hidden by default (bw-oamr.1). The
+  // shapes still run for a chat this app only follows, where the record is all
+  // there is to go on.
+  if (item.kind === 'message' && item.role === 'user' && item.composedHere !== true) {
     const read = notHisWords(item.text);
     if (read !== null && read.kind !== null) {
       return {

@@ -105,6 +105,7 @@ export function drawnAsSent(pending: PendingSend): TranscriptMessage {
     images: pending.images,
     done: true,
     parentId: null,
+    composedHere: true,
   };
 }
 

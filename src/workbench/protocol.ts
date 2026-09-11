@@ -416,7 +416,17 @@ export type WbpEvent = EventBase &
      * rather than nullable: almost every message in a log is the main agent's,
      * and a field on every one of them is paid a million times over.
      */
-    | { type: 'message.started'; messageId: string; role: 'user' | 'assistant'; parentToolCallId?: string }
+    | {
+        type: 'message.started';
+        messageId: string;
+        role: 'user' | 'assistant';
+        parentToolCallId?: string;
+        /**
+         * Set when this app's own composer wrote the message, so the transcript
+         * knows it is his words without having to guess from how they read.
+         */
+        composedHere?: boolean;
+      }
     | { type: 'text.delta'; messageId: string; text: string }
     /**
      * The agent's own reasoning, word by word. Drawn dim, and collapsed once it

@@ -860,7 +860,7 @@ pub(super) async fn record_user_for_transport(
     let id = uuid::Uuid::new_v4().to_string();
     let at = now();
     let mut values = vec![
-        json!({"type":"message.started","sessionId":session.id,"seq":0,"at":at,"messageId":id,"role":"user"}),
+        json!({"type":"message.started","sessionId":session.id,"seq":0,"at":at,"messageId":id,"role":"user","composedHere":true}),
     ];
     values.extend(images.iter().map(|image| {
         json!({

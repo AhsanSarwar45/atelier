@@ -111,6 +111,52 @@ describe('every kind has a family', () => {
   });
 });
 
+/**
+ * One message as this app's own composer stored it — provenance recorded, so
+ * nothing has to be guessed from how the words read. `typed` below is the same
+ * message read back from a chat that recorded no such thing.
+ */
+const sentFromHere = (text: string): TranscriptItem => ({
+  kind: 'message',
+  id: `sent-${text}`,
+  role: 'user',
+  text,
+  images: [],
+  done: true,
+  parentId: null,
+  composedHere: true,
+});
+
+describe('his words are his, whatever they open with', () => {
+  // Attaching a picture before typing put the composer's own `[Image: name]`
+  // at the head of the message. The picture shape matches on that prefix, so
+  // the whole message was filed as a machine line and hidden by default — his
+  // words and his picture both vanished from the transcript (bw-oamr.1).
+  it('draws a message that opens with a picture marker as his', () => {
+    const rows = drawnRows([sentFromHere('[Image: shot.png] what is wrong with this?')]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.row).toBe('other');
+  });
+
+  it('draws one whose picture came after the words as his, as it always did', () => {
+    const rows = drawnRows([sentFromHere('what is wrong with this? [Image: shot.png]')]);
+    expect(rows.map((r) => r.row)).toEqual(['other']);
+  });
+
+  it('does not file a bracketed line he typed himself as the kit\'s', () => {
+    const rows = drawnRows([sentFromHere('[Request interrupted by user]')]);
+    expect(rows[0]!.row).toBe('other');
+  });
+
+  it('still reads the shapes for a chat it only follows', () => {
+    // Nothing recorded who wrote this one, so the words are all there is to go
+    // on and the picture shape is still worth asking.
+    const rows = drawnRows([typed('[Image: shot.png] what is wrong with this?')]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ row: 'machine', kind: 'user/pasted_image' });
+  });
+});
+
 describe('a run collapses', () => {
   it('draws eight retries as one chip reading eight', () => {
     const items = Array.from({ length: 8 }, (_, i) => note('system/api_retry', `Retrying (${i + 1} of 8)`));

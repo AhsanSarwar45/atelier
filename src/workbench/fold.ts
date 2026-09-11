@@ -69,6 +69,13 @@ export interface TranscriptMessage {
   done: boolean;
   /** Set when a sent-off agent said this — the row nests under the call that sent it. */
   parentId: string | null;
+  /**
+   * Set when this app's own composer wrote the message. The transcript reads a
+   * user row's provenance from here rather than guessing it from the words, so
+   * a message that happens to open like one of the kit's own notes is still
+   * drawn as his (bw-oamr.1).
+   */
+  composedHere?: boolean;
   execution?: ExecutionContext;
 }
 
@@ -551,6 +558,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
           widgets: [],
           done: false,
           parentId: e.parentToolCallId ?? null,
+          ...(e.composedHere ? { composedHere: true } : {}),
           ...(e.execution ? { execution: e.execution } : {}),
         },
       ];
@@ -1065,6 +1073,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           widgets: [],
           done: false,
           parentId: e.parentToolCallId ?? null,
+          ...(e.composedHere ? { composedHere: true } : {}),
           ...(e.execution ? { execution: e.execution } : {}),
         });
         break;

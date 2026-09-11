@@ -78,7 +78,11 @@ describe('a line drawn before the server has spoken it back', () => {
     // The same shape a folded user message has, under this page's own name for
     // it: anything the drawing keys on must already be here, or the row would
     // change appearance the moment the server's copy took its place.
-    expect(row).toEqual({ ...said('sending-0', 'user'), text: 'hello' });
+    // `composedHere` among them: the server's copy carries it (provider.rs
+    // stamps it on `message.started`), and a row drawn without it would be
+    // filed as a machine line and hidden for as long as the send was in flight
+    // whenever the words opened with a picture marker (bw-oamr.1).
+    expect(row).toEqual({ ...said('sending-0', 'user'), text: 'hello', composedHere: true });
   });
 });
 

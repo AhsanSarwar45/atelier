@@ -266,6 +266,7 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                 row.insert("done".into(), json!(false));
                 row.insert("parentId".into(), value(event, "parentToolCallId"));
                 copy_if_present(&mut row, event, "execution");
+                copy_if_present(&mut row, event, "composedHere");
                 items.push(Value::Object(row));
             }
             EventKind::Image | EventKind::ImageCompare | EventKind::Widget => {
