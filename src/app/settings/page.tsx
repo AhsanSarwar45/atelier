@@ -21,6 +21,7 @@ import {
   MAX_FONT_SIZE,
   MIN_FONT_SIZE,
 } from "@/lib/font-size";
+import { AccountsSettings } from "@/workbench/accounts-settings";
 import { TerminalSettings } from "@/workbench/terminal-settings";
 import { DependenciesSettings } from "@/workbench/dependencies-settings";
 
@@ -182,6 +183,14 @@ export default function SettingsPage() {
           <h2 className="mb-4 text-lg font-medium text-t-primary">Terminal</h2>
           <Panel inset="md">
             <TerminalSettings />
+          </Panel>
+        </section>
+
+        {/* Accounts Section */}
+        <section className="mb-8">
+          <h2 className="mb-4 text-lg font-medium text-t-primary">Accounts</h2>
+          <Panel inset="md">
+            <AccountsSettings />
           </Panel>
         </section>
 

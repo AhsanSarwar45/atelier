@@ -153,6 +153,10 @@ pub struct WorkbenchRegistry {
     paths: RegistryPaths,
     defaults: ProviderDefaultFiles,
     profiles: Profiles,
+    /// The sign-ins in flight, which belong to the process and not to a
+    /// connection: a person who reloads the page mid-sign-in should find the
+    /// same code waiting, not a new one (signin.rs).
+    signins: Arc<super::signin::SignIns>,
 }
 
 impl WorkbenchRegistry {
@@ -200,6 +204,7 @@ impl WorkbenchRegistry {
             paths,
             defaults,
             profiles,
+            signins: Arc::default(),
         }
     }
 
@@ -695,6 +700,53 @@ impl WorkbenchRegistry {
                 let id = Self::field(command, "profileId")?;
                 self.profiles.delete(brand, id)?;
                 Ok(json!({"profiles":self.profiles.list(brand)}))
+            }
+            CommandKind::ProfilesStanding => {
+                let brand = Self::field(command, "brand")?;
+                let mut standing = serde_json::Map::new();
+                for profile in self.profiles.list(brand) {
+                    // The system profile is asked with the environment left
+                    // alone; see `signin::standing`.
+                    let directory = (!profile.system)
+                        .then(|| self.profiles.chat_dir(brand, Some(&profile.id)));
+                    let answer = super::signin::standing(brand, directory.as_deref()).await;
+                    standing.insert(
+                        profile.id,
+                        serde_json::to_value(answer).map_err(|why| why.to_string())?,
+                    );
+                }
+                Ok(json!({ "standing": standing }))
+            }
+            CommandKind::ProfileSignInStart => {
+                let brand = Self::field(command, "brand")?;
+                let id = Self::field(command, "profileId")?;
+                // Through the registry rather than from the id as sent, so a
+                // sign-in cannot be aimed at a directory no profile names.
+                // The system profile is signed into the way a terminal would
+                // do it, with nothing named; see `signin::standing`.
+                let named = self.profiles.directory(brand, id)?;
+                let directory = (id != super::profiles::SYSTEM).then_some(named);
+                let progress = self.signins.start(brand, id, directory.as_deref()).await?;
+                serde_json::to_value(progress).map_err(|why| why.to_string())
+            }
+            CommandKind::ProfileSignInRead => {
+                let brand = Self::field(command, "brand")?;
+                let id = Self::field(command, "profileId")?;
+                let progress = self.signins.read(brand, id).await?;
+                serde_json::to_value(progress).map_err(|why| why.to_string())
+            }
+            CommandKind::ProfileSignInPaste => {
+                let brand = Self::field(command, "brand")?;
+                let id = Self::field(command, "profileId")?;
+                let code = Self::field(command, "code")?;
+                let progress = self.signins.paste(brand, id, code).await?;
+                serde_json::to_value(progress).map_err(|why| why.to_string())
+            }
+            CommandKind::ProfileSignInCancel => {
+                let brand = Self::field(command, "brand")?;
+                let id = Self::field(command, "profileId")?;
+                self.signins.cancel(brand, id)?;
+                Ok(json!({"ok":true}))
             }
             CommandKind::ProvidersList => {
                 let mut providers = [

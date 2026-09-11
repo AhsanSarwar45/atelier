@@ -805,6 +805,39 @@ export interface ProfileChoice {
 /** The profile id meaning "the directory the server booted with". */
 export const SYSTEM_PROFILE = 'system';
 
+/**
+ * Whether an account is signed in, as the provider itself answers it.
+ *
+ * `unknown` is the third state and is not "signed out": a provider that is not
+ * installed, or that did not answer, has told us nothing, and drawing that as
+ * a signed-out account sends somebody to sign in to a program that is not
+ * there.
+ */
+export interface ProfileStanding {
+  signedIn: boolean;
+  account: string | null;
+  plan: string | null;
+  /** What it was signed in with, where that is all the provider will say. */
+  how: string | null;
+  unknown: string | null;
+}
+
+/** How far along a sign-in is (server/src/workbench/signin.rs). */
+export interface SignInProgress {
+  /**
+   * `starting` while the program is still coming up, `open-the-link` once
+   * there is an address to open, `paste-the-code` while Claude waits for the
+   * code the browser handed back, then `signed-in` or `failed`.
+   */
+  state: 'starting' | 'open-the-link' | 'paste-the-code' | 'signed-in' | 'failed';
+  url: string | null;
+  /** The one-time code to type into the page, for the flow that uses one. */
+  code: string | null;
+  /** The last of what the program printed, for when the state is not enough. */
+  said: string;
+  standing: ProfileStanding | null;
+}
+
 export type WbpCommand =
   | { type: 'agent-files.list'; projectPath?: string }
   | { type: 'agent-files.read'; path: string; projectPath?: string }
@@ -823,6 +856,11 @@ export type WbpCommand =
   | { type: 'profile.create'; brand: Brand; name: string }
   | { type: 'profile.rename'; brand: Brand; profileId: string; name: string }
   | { type: 'profile.delete'; brand: Brand; profileId: string }
+  | { type: 'profiles.standing'; brand: Brand }
+  | { type: 'profile.signin.start'; brand: Brand; profileId: string }
+  | { type: 'profile.signin.read'; brand: Brand; profileId: string }
+  | { type: 'profile.signin.paste'; brand: Brand; profileId: string; code: string }
+  | { type: 'profile.signin.cancel'; brand: Brand; profileId: string }
   | {
       type: 'session.start';
       projectId: string;
