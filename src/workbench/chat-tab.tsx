@@ -65,7 +65,7 @@ import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { ComposerEditor, type ComposerHandle } from '@/workbench/composer-editor';
 import { fileCompletions } from '@/workbench/composer-files';
 import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
-import { imageIds, imageMarker, looksLikeAPicture, orderedPictures, promptParts, promptWithoutImageMarkers } from '@/workbench/composer-attachments';
+import { fileAsABlock, imageIds, imageMarker, looksLikeAPicture, looksLikeText, orderedPictures, promptParts, promptWithoutImageMarkers } from '@/workbench/composer-attachments';
 import type { DraftPicture } from '@/workbench/composer-attachments';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
@@ -388,8 +388,12 @@ function CommandMenu({
           data-command={c.name}
           data-kind={c.kind}
           data-active={i === active}
-          onMouseDown={(e) => {
-            // Down, not click: the box must not lose focus before the pick lands.
+          // Down, not click: the box must not lose focus before the pick lands.
+          // And pointer, not mouse: a tap only produces mouse events if the
+          // browser decides to emulate them, and it declines to on a list this
+          // size when it reads the tap as the start of a scroll — so on a phone
+          // picking a command did nothing at all (bw-ad3r.9).
+          onPointerDown={(e) => {
             e.preventDefault();
             onPick(c);
           }}
@@ -1344,29 +1348,36 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     const chosen = Array.from(files ?? []);
     if (!chosen.length) return;
     const pictures = chosen.filter(looksLikeAPicture);
-    const refused = chosen.filter((file) => !looksLikeAPicture(file));
+    const documents = chosen.filter((file) => !looksLikeAPicture(file) && looksLikeText(file));
+    const refused = chosen.filter((file) => !looksLikeAPicture(file) && !looksLikeText(file));
     if (refused.length) {
       const names = refused.map((file) => file.name || 'that file').join(', ');
       setSendError(
         refused.length === 1
-          ? `${names} is not a picture, and the writing box can only take pictures.`
-          : `These are not pictures, and the writing box can only take pictures: ${names}.`,
+          ? `${names} can go in a message neither as a picture nor as words, so it has been left out.`
+          : `These can go in a message neither as pictures nor as words, so they have been left out: ${names}.`,
       );
     }
-    if (!pictures.length) return;
-    let read;
+    if (!pictures.length && !documents.length) return;
+    let read: DraftPicture[];
+    let written: string[];
     try {
-      read = await Promise.all(
-        pictures.map(async (file) => ({ ...(await readImage(file)), id: crypto.randomUUID() })),
-      );
+      [read, written] = await Promise.all([
+        Promise.all(pictures.map(async (file) => ({ ...(await readImage(file)), id: crypto.randomUUID() }))),
+        Promise.all(documents.map(async (file) => fileAsABlock(file.name || 'the attached file', await file.text()))),
+      ]);
     } catch (e) {
-      setSendError(`That picture could not be read. ${e instanceof Error ? e.message : String(e)}`);
+      setSendError(`That could not be read. ${e instanceof Error ? e.message : String(e)}`);
       return;
     }
     if (!refused.length) setSendError(null);
-    setAttached((prev) => [...prev, ...read]);
+    if (read.length) setAttached((prev) => [...prev, ...read]);
+    // Both go into the box rather than beside it: a picture leaves its badge
+    // where it belongs in the sentence, and a file's contents go in as words the
+    // person can read over and cut down before they send them (bw-ad3r.7).
     const markers = read.map((picture) => imageMarker(picture.id)).join(' ');
-    setDraft((was) => `${was.slice(0, at)}${markers}${was.slice(at)}`);
+    const put = [markers, ...written].filter(Boolean).join('\n');
+    setDraft((was) => `${was.slice(0, at)}${put}${was.slice(at)}`);
   }
 
   if (!projectId || !projectPath) {
@@ -2079,7 +2090,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             ref={picker}
             data-testid="image-input"
             type="file"
-            accept="image/*"
             multiple
             className="sr-only"
             tabIndex={-1}
@@ -2134,12 +2144,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           <div className="mt-1.5 flex items-center gap-1 [container-name:composer] [container-type:inline-size]">
             {/* A plain button, not the toolbar's: that one speaks through a
                 tooltip and only works inside the bar that hosts one. */}
-            <Tooltip label="Attach a picture">
+            <Tooltip label="Attach a picture or a file">
               <Button
                 variant="ghost"
                 mode="icon"
                 size="sm"
-                aria-label="Attach a picture"
+                aria-label="Attach a picture or a file"
                 data-testid="attach-picture"
                 className="rounded-full text-muted-foreground"
                 onClick={() => picker.current?.click()}

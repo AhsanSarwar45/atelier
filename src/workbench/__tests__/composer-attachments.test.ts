@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  fileAsABlock,
   imageIds,
   imageMarker,
   looksLikeAPicture,
+  looksLikeText,
   orderedPictures,
   promptParts,
   promptWithoutImageMarkers,
@@ -63,5 +65,31 @@ describe('what the composer will take', () => {
     expect(looksLikeAPicture({ type: 'application/pdf', name: 'contract.pdf' })).toBe(false);
     expect(looksLikeAPicture({ type: '', name: 'notes.txt' })).toBe(false);
     expect(looksLikeAPicture({ type: '', name: '' })).toBe(false);
+  });
+});
+
+// The writing box could only ever take pictures: one paperclip, accepting
+// image/*, and nowhere for anything else to go (bw-ad3r.7).
+describe('a file that is not a picture', () => {
+  it('is recognised as words by its type, or by its name when there is none', () => {
+    expect(looksLikeText({ type: 'text/plain', name: 'notes.txt' })).toBe(true);
+    expect(looksLikeText({ type: 'application/json', name: 'package.json' })).toBe(true);
+    expect(looksLikeText({ type: '', name: 'main.rs' })).toBe(true);
+    expect(looksLikeText({ type: '', name: 'photo.jpg' })).toBe(false);
+    expect(looksLikeText({ type: 'application/pdf', name: 'contract.pdf' })).toBe(false);
+  });
+
+  it('goes into the draft as a block that names it', () => {
+    expect(fileAsABlock('notes.txt', 'one\ntwo\n')).toBe('notes.txt:\n```txt\none\ntwo\n```\n');
+  });
+
+  // A markdown file carrying its own code blocks would otherwise end the
+  // block early and spill the rest of itself into the message as prose.
+  it('is fenced wider than any run of backticks inside it', () => {
+    const given = 'before\n```js\nconst a = 1;\n```\nafter';
+    const block = fileAsABlock('readme.md', given);
+    expect(block.startsWith('readme.md:\n````md\n')).toBe(true);
+    expect(block.endsWith('\n````\n')).toBe(true);
+    expect(block).toContain('```js');
   });
 });

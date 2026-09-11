@@ -86,3 +86,43 @@ export function looksLikeAPicture(file: { type?: string; name?: string }): boole
   const name = (file.name ?? '').toLowerCase();
   return PICTURE_ENDINGS.some((ending) => name.endsWith(ending));
 }
+
+/**
+ * Whether a chosen file is one we can put into the prompt as words.
+ *
+ * Same reasoning as `looksLikeAPicture`: the reported type first, the name when
+ * the phone had nothing to say. A file that is neither a picture nor readable
+ * as text has nowhere to go in a prompt, and is turned down out loud rather
+ * than dropped (bw-ad3r.7).
+ */
+const TEXT_TYPES = ['text/', 'application/json', 'application/xml', 'application/javascript', 'application/x-yaml'];
+const TEXT_ENDINGS = [
+  '.txt', '.md', '.markdown', '.rst', '.log', '.csv', '.tsv',
+  '.json', '.jsonl', '.yaml', '.yml', '.toml', '.ini', '.conf', '.env',
+  '.xml', '.html', '.htm', '.css', '.scss', '.svg',
+  '.js', '.jsx', '.ts', '.tsx', '.py', '.rb', '.go', '.rs', '.java', '.kt',
+  '.c', '.h', '.cc', '.cpp', '.hpp', '.cs', '.php', '.swift', '.sh', '.bash',
+  '.sql', '.graphql', '.proto', '.diff', '.patch', '.lock', '.gitignore',
+];
+
+export function looksLikeText(file: { type?: string; name?: string }): boolean {
+  if (file.type) return TEXT_TYPES.some((kind) => file.type!.startsWith(kind));
+  const name = (file.name ?? '').toLowerCase();
+  return TEXT_ENDINGS.some((ending) => name.endsWith(ending));
+}
+
+/**
+ * A file's contents as a block in the draft, named so the agent knows what it
+ * is looking at.
+ *
+ * Put into the writing box rather than carried beside it, so that what will be
+ * sent is what the person can see and edit before they send it. The fence is
+ * widened past any run of backticks inside the file, so a markdown file with
+ * its own code blocks does not end the block early.
+ */
+export function fileAsABlock(name: string, contents: string): string {
+  const longest = Math.max(0, ...Array.from(contents.matchAll(/`+/g), (run) => run[0].length));
+  const fence = '`'.repeat(Math.max(3, longest + 1));
+  const ending = name.toLowerCase().split('.').pop() ?? '';
+  return `${name}:\n${fence}${/^[a-z0-9]+$/.test(ending) ? ending : ''}\n${contents.replace(/\n$/, '')}\n${fence}\n`;
+}

@@ -63,8 +63,32 @@ async function refusal(res: Response, command: string): Promise<string> {
   } catch {
     // Not JSON: the raw body is all there is.
   }
+  // Some refusals come from the layer beneath ours and carry no words meant for
+  // a reader. A person attaching pictures was shown 'prompt.send failed: 413
+  // Failed to buffer the request body: length limit exceeded' — the web
+  // server's own words for a rule this app never set, naming an internal
+  // command, with nothing in it to act on (bw-ad3r.4). Those are said again
+  // here in the reader's terms; anything else keeps the status line, which is
+  // better than silence.
+  const plainly = PLAINLY[res.status];
+  if (plainly) return plainly;
   return `${command} failed: ${res.status} ${body}`;
 }
+
+/** What the statuses that arrive without readable words of their own mean. */
+const PLAINLY: Record<number, string> = {
+  // The body limit is off for the routes that carry attachments, so this should
+  // no longer be reachable from the writing box. It stays because the thing it
+  // guards against — a request too large for something between here and the
+  // server — is not ours to promise away.
+  413: 'That was too large to send. Try it with fewer pictures attached.',
+  401: 'This app no longer recognises you. Reload the page.',
+  403: 'This chat is not yours to write to at the moment.',
+  404: 'That chat is no longer there.',
+  502: 'The server is not answering. It may still be starting up.',
+  503: 'The server is not answering. It may still be starting up.',
+  504: 'The server took too long to answer.',
+};
 
 export async function sendCommand<T = unknown>(cmd: WbpCommand): Promise<T> {
   const res = await request('/api/workbench/command', {
