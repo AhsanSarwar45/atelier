@@ -1240,3 +1240,12 @@ one, so the narrow switch is available where most of the writing happens.
 through `bash` with the bypass welded on, instead of by the tools meant for
 it: eight patch scripts for what were ordinary edits, each one a place a
 mistyped anchor string could have silently matched nothing.
+
+**Still happening — bw-ad3r.** The same two refusals, unchanged, on a job of
+fourteen cards: every `bd update --claim`, every `git add`/`git commit`, and
+every source edit. The cost this time was fifteen-odd patch scripts piped
+through `bash` in place of Edit, and a bypass reason repeated on every line of
+the job. Worth noting because the shape of the work makes it worse, not better:
+this job is one epic with many small children, which is exactly the shape the
+worktree-per-job rule was written to encourage, and it is the shape the gate
+punishes hardest.
