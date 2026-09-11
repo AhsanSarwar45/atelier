@@ -64,7 +64,7 @@ import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { ComposerEditor, type ComposerHandle } from '@/workbench/composer-editor';
 import { fileCompletions } from '@/workbench/composer-files';
 import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
-import { fileAsABlock, imageIds, imageMarker, looksLikeAPicture, looksLikeText, orderedPictures, promptParts, promptWithoutImageMarkers } from '@/workbench/composer-attachments';
+import { fileAsABlock, imageIds, imageMarker, looksLikeAPicture, looksLikeText, promptFromDraft, promptParts } from '@/workbench/composer-attachments';
 import type { DraftPicture } from '@/workbench/composer-attachments';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
@@ -1372,13 +1372,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   }
 
   async function submit() {
-    const text = promptWithoutImageMarkers(draft, attached);
+    // The words and the pictures come out of the draft together: each picture
+    // carries where its badge sat, so the sent message can draw it there.
+    const { text, images } = promptFromDraft(draft, attached);
     if ((!text && attached.length === 0) || !sessionId) return;
     if (sessionBrand === 'local' && !view.model) {
       setSendError('Choose a local model before sending.');
       return;
     }
-    const images = orderedPictures(draft, attached);
     const pending = { text: draft, images, itemsBeforeSend: new Set(view.items.map((item) => item.id)) };
     recallableNow.current = pending;
     setRecallable(pending);

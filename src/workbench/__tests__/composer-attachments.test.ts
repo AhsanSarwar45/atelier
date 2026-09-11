@@ -6,9 +6,8 @@ import {
   imageMarker,
   looksLikeAPicture,
   looksLikeText,
-  orderedPictures,
+  promptFromDraft,
   promptParts,
-  promptWithoutImageMarkers,
   type DraftPicture,
 } from '@/workbench/composer-attachments';
 
@@ -16,20 +15,45 @@ const one: DraftPicture = { id: 'one', mime: 'image/png', dataUrl: 'data:one', a
 const two: DraftPicture = { id: 'two', mime: 'image/png', dataUrl: 'data:two', alt: 'second.png' };
 
 describe('image positions in a draft', () => {
-  it('keeps the visible marker out of the words sent to the agent', () => {
+  it('takes the marker out and writes nothing in its place', () => {
     const draft = `Compare ${imageMarker(one.id)} with ${imageMarker(two.id)} please`;
-    expect(promptWithoutImageMarkers(draft, [one, two])).toBe('Compare [Image: first.png] with [Image: second.png] please');
+    // The app's own `[Image: name]` prose used to go in here, and the transcript
+    // then read that prose back to decide whose words these were (bw-oamr.1).
+    expect(promptFromDraft(draft, [one, two]).text).toBe('Compare  with  please');
+  });
+
+  it('says where each picture belongs as an offset into the words', () => {
+    const draft = `Compare ${imageMarker(one.id)} with ${imageMarker(two.id)} please`;
+    const { text, images } = promptFromDraft(draft, [one, two]);
+    expect(images.map((picture) => picture.alt)).toEqual(['first.png', 'second.png']);
+    expect(text.slice(0, images[0]!.at)).toBe('Compare ');
+    expect(text.slice(0, images[1]!.at)).toBe('Compare  with ');
+  });
+
+  it('puts a picture attached before the first word at the very start', () => {
+    // The case that disappeared: attach, then type. Nothing is left in front of
+    // his words for the transcript to mistake for one of the kit's own notes.
+    const draft = `${imageMarker(one.id)} what is wrong with this?`;
+    const { text, images } = promptFromDraft(draft, [one]);
+    expect(text).toBe('what is wrong with this?');
+    expect(images[0]!.at).toBe(0);
   });
 
   it('orders pictures by where their badges occur', () => {
     const draft = `${imageMarker(two.id)} then ${imageMarker(one.id)}`;
     expect(imageIds(draft)).toEqual(['two', 'one']);
-    expect(orderedPictures(draft, [one, two])).toEqual([two, one]);
+    expect(promptFromDraft(draft, [one, two]).images.map((picture) => picture.id)).toEqual(['two', 'one']);
     expect(promptParts(draft, [one, two])).toEqual([
       { type: 'image', id: 'two' },
       { type: 'text', text: ' then ' },
       { type: 'image', id: 'one' },
     ]);
+  });
+
+  it('keeps a picture whose badge was edited away, at the end', () => {
+    const { text, images } = promptFromDraft('just words', [one]);
+    expect(images.map((picture) => picture.id)).toEqual(['one']);
+    expect(images[0]!.at).toBe(text.length);
   });
 
   // A message carrying pictures was refused outright once it grew past a couple
@@ -38,7 +62,7 @@ describe('image positions in a draft', () => {
   it('sends each picture once, however many places it is named', () => {
     const draft = `${imageMarker(one.id)} and again ${imageMarker(one.id)}`;
     const body = JSON.stringify({
-      images: orderedPictures(draft, [one, two]),
+      images: promptFromDraft(draft, [one, two]).images,
       parts: promptParts(draft, [one, two]),
     });
     expect(body.split('data:one').length - 1).toBe(1);

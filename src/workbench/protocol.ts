@@ -159,6 +159,15 @@ export interface ImagePayload {
   mime: string;
   dataUrl: string;
   alt: string;
+  /**
+   * Where this picture belongs in the message's text, as an offset into it.
+   *
+   * Set by the composer, which is the only place that knows where the badge sat
+   * in the writing box. Absent on a picture from anywhere else — a chat the app
+   * only follows, or a record written before this — and those still draw above
+   * the words, as every picture used to (bw-oamr.2).
+   */
+  at?: number;
 }
 
 /**

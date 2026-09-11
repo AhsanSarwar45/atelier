@@ -977,11 +977,47 @@ const MessageRow = memo(function MessageRow({
         sentOff(sentBy) && SENT_OFF,
       )}
     >
-      <PictureGrid images={item.images} onLook={onLook} />
+      <PictureGrid images={drawnInPlace(item).above} onLook={onLook} />
       <RichMessageContent item={item} mentions={mentions} onLook={onLook} />
     </div>
   );
 });
+
+/**
+ * Which of a message's pictures are drawn in the words, and where.
+ *
+ * The composer records where each badge sat as an offset into the text it sent
+ * (bw-oamr.2). Those offsets only mean anything against that same text, and the
+ * drawn text is not always it: `withoutProposedPlans` takes a proposed plan out
+ * and trims the ends, either of which moves everything after it. Trimming is
+ * worked around, because it is a fixed shift; a plan actually taken out is not,
+ * and those pictures go back above the message.
+ *
+ * The two halves of the answer are worked out together and on purpose. When
+ * this was two separate filters — one deciding what to draw above, one deciding
+ * what to draw inline — a picture the second half declined to place was dropped
+ * by the first half as well, and disappeared from the message altogether, which
+ * is the whole family of bug this job is about.
+ */
+function drawnInPlace(item: Extract<TranscriptItem, { kind: 'message' }>): {
+  inline: Map<number, ImagePayload[]>;
+  above: ImagePayload[];
+} {
+  const inline = new Map<number, ImagePayload[]>();
+  const above: ImagePayload[] = [];
+  const drawn = withoutProposedPlans(item.text);
+  const lead = item.text.length - item.text.replace(/^\s+/, '').length;
+  const shifts = drawn === item.text.trim();
+  for (const image of item.images) {
+    if (image.at === undefined || !shifts) {
+      above.push(image);
+      continue;
+    }
+    const at = Math.max(0, Math.min(drawn.length, image.at - lead));
+    inline.set(at, [...(inline.get(at) ?? []), image]);
+  }
+  return { inline, above };
+}
 
 const RICH_BLOCK = /```(atelier-widget|atelier-image-compare)\s*\n([\s\S]*?)\n```/g;
 
@@ -1006,8 +1042,33 @@ function RichMessageContent({ item, mentions, onLook }: {
   };
 
   const visibleText = withoutProposedPlans(item.text);
+  const placed = drawnInPlace(item).inline;
+  const spots = Array.from(placed.keys()).sort((a, b) => a - b);
+  // Both ends of a span are inclusive, so a picture sitting exactly where a
+  // fenced block begins is drawn at the end of the words before it rather than
+  // falling down the gap between two spans. Drawing it is recorded, because an
+  // inclusive end means the next span would otherwise draw it a second time.
+  const drawn = new Set<number>();
+  const pictures = (at: number) => {
+    const group = placed.get(at);
+    if (!group || drawn.has(at)) return;
+    drawn.add(at);
+    parts.push(<PictureGrid key={`pictures-${part++}`} images={group} onLook={onLook} />);
+  };
+  /** The words between two points, with any picture that belongs inside them. */
+  const span = (from: number, to: number) => {
+    let cursor = from;
+    for (const at of spots) {
+      if (at < from || at > to || drawn.has(at)) continue;
+      words(visibleText.slice(cursor, at));
+      pictures(at);
+      cursor = at;
+    }
+    words(visibleText.slice(cursor, to));
+  };
+
   while ((match = blocks.exec(visibleText)) !== null) {
-    words(visibleText.slice(textAt, match.index));
+    span(textAt, match.index);
     const source = match[0];
     if (match[1] === 'atelier-widget' && widgetSpecs(source).length > 0 && widgets[widgetIndex]) {
       parts.push(<ChatWidgetView key={`widget-${part++}`} widget={widgets[widgetIndex++]!} />);
@@ -1018,7 +1079,10 @@ function RichMessageContent({ item, mentions, onLook }: {
     }
     textAt = blocks.lastIndex;
   }
-  words(visibleText.slice(textAt));
+  span(textAt, visibleText.length);
+  // A picture attached after the last word sits at the very end, which no
+  // half-open span above can contain.
+  pictures(visibleText.length);
   return <>{parts}</>;
 }
 

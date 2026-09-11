@@ -14,33 +14,61 @@ export function imageIds(text: string): string[] {
   return Array.from(text.matchAll(MARKER), (match) => match[1]!);
 }
 
-export function promptWithoutImageMarkers(text: string, pictures: DraftPicture[] = []): string {
-  const byId = new Map(pictures.map((picture) => [picture.id, picture]));
-  return text.replace(MARKER, (_marker, id: string) => {
-    const picture = byId.get(id);
-    return picture ? `[Image: ${picture.alt}]` : '';
-  }).replace(/[ \t]+\n/g, '\n').trim();
-}
-
 /**
- * Every attached picture once, in the order the words name them.
+ * What the person wrote, and where each picture they attached belongs in it.
  *
- * Named once each: a draft that mentions the same picture twice used to put its
- * whole base64 in here twice over, which is weight on the wire for a picture
- * the reader already has (bw-ad3r.3). Where a picture is named more than once
- * is `promptParts`' business, and a part names it rather than carrying it.
+ * The marker comes out and nothing is written in its place. It used to be
+ * replaced by the words `[Image: name]`, which put the app's own prose into the
+ * middle of his sentence and then left the transcript to work out, by matching
+ * regexes against that prose, which parts of the message he had actually
+ * written. A picture attached before the first word put that prose at position
+ * zero and the whole message was read as one of the kit's notes and hidden
+ * (bw-oamr.1). Structure the composer already has should not have to be guessed
+ * back out of prose, so the position travels as a number on the picture instead
+ * of as words in the text.
+ *
+ * `at` is an offset into the returned `text`, so the transcript can draw the
+ * picture exactly where its badge sat in the writing box rather than pinning
+ * every picture above the words (bw-oamr.2). A picture named twice is carried
+ * once, at the first place it was named — its bytes travel once (bw-ad3r.3) and
+ * a second copy of the same picture in one message is not what the badge meant.
  */
-export function orderedPictures(text: string, pictures: DraftPicture[]): DraftPicture[] {
+export function promptFromDraft(draft: string, pictures: DraftPicture[] = []): {
+  text: string;
+  images: DraftPicture[];
+} {
   const byId = new Map(pictures.map((picture) => [picture.id, picture]));
-  const mentioned = new Set<string>();
-  const inText: DraftPicture[] = [];
-  for (const id of imageIds(text)) {
-    const picture = byId.get(id);
-    if (!picture || mentioned.has(id)) continue;
-    mentioned.add(id);
-    inText.push(picture);
+  const segments: string[] = [];
+  const marks: Array<{ id: string; after: number }> = [];
+  const named = new Set<string>();
+  let from = 0;
+  for (const match of draft.matchAll(MARKER)) {
+    segments.push(draft.slice(from, match.index!));
+    const id = match[1]!;
+    if (byId.has(id) && !named.has(id)) {
+      named.add(id);
+      marks.push({ id, after: segments.length });
+    }
+    from = match.index! + match[0].length;
   }
-  return [...inText, ...pictures.filter((picture) => !mentioned.has(picture.id))];
+  segments.push(draft.slice(from));
+
+  // Trailing blanks before a newline are cosmetic and live inside one segment,
+  // so taking them out cannot move any segment but their own.
+  const tidy = segments.map((segment) => segment.replace(/[ \t]+\n/g, '\n'));
+  const raw = tidy.join('');
+  const text = raw.trim();
+  // The ends are trimmed off the whole message rather than off a segment, so
+  // every offset shifts by whatever came off the front.
+  const lead = raw.length - raw.replace(/^\s+/, '').length;
+  const placed = marks.map((mark) => {
+    const at = tidy.slice(0, mark.after).join('').length - lead;
+    return { ...byId.get(mark.id)!, at: Math.max(0, Math.min(text.length, at)) };
+  });
+  // A picture whose badge was edited out of the writing box is still attached,
+  // and belongs at the end rather than nowhere.
+  const loose = pictures.filter((picture) => !named.has(picture.id)).map((picture) => ({ ...picture, at: text.length }));
+  return { text, images: [...placed, ...loose] };
 }
 
 /**
