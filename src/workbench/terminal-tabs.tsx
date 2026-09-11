@@ -146,7 +146,14 @@ function TabbedTerminal() {
               hidden={tab.id !== active}
               className={cn('absolute inset-0', tab.id !== active && 'hidden')}
             >
-              <TerminalPane shellId={tab.id} />
+              {/*
+                * Which pane holds the keyboard. A hidden tab is still a mounted
+                * pane (see the note at the top of this file), so "the tab that
+                * is chosen" is not enough on its own: a window that has been
+                * closed is only hidden too, and its grid must not keep taking
+                * presses meant for the page.
+                */}
+              <TerminalPane shellId={tab.id} focused={showing && tab.id === active} />
             </div>
           ))}
         </div>

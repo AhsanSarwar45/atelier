@@ -130,6 +130,7 @@ function streamUrl(shellId: string): string {
 
 export function TerminalPane({
   shellId,
+  focused = false,
   className,
 }: {
   /**
@@ -138,10 +139,24 @@ export function TerminalPane({
    * go, and a new pair is built for the new shell.
    */
   shellId: string;
+  /**
+   * Whether this pane is the one the reader is looking at: its tab is the
+   * chosen one and the window is open. The grid takes the keyboard while that
+   * is true, and it has to be told rather than work it out, because a hidden
+   * tab is a mounted pane and a pane that focused itself on mount would pull
+   * the keyboard out of the tab the reader is actually in.
+   */
+  focused?: boolean;
   /** Whatever the caller needs on the box; it fills whatever it is put in. */
   className?: string;
 }) {
   const host = useRef<HTMLDivElement | null>(null);
+  /**
+   * The grid, for the effect below. The one that builds it cannot also be the
+   * one that focuses it: it is keyed on the shell and must not tear a terminal
+   * down and build another every time a tab is switched to and away from.
+   */
+  const grid = useRef<Terminal | null>(null);
 
   useEffect(() => {
     const box = host.current;
@@ -157,6 +172,7 @@ export function TerminalPane({
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(box);
+    grid.current = term;
 
     /**
      * The icon face, fetched, and then the grid drawn again.
@@ -262,10 +278,34 @@ export function TerminalPane({
       socket.onopen = null;
       socket.onmessage = null;
       socket.close();
+      grid.current = null;
       // Takes the grid out of the box with it, along with every listener above.
       term.dispose();
     };
   }, [shellId]);
+
+  /**
+   * The keyboard, handed to the grid whenever this pane becomes the one on
+   * screen.
+   *
+   * Without this the window opens with the keyboard on its own frame — the
+   * `div` that `terminal-window.tsx` focuses — and every press goes to the page
+   * behind it instead of to the shell. What that looks like is a terminal with
+   * no history and no completion: up-arrow moves the selection on the board,
+   * Tab walks the browser's focus out of the window, and only a reader who
+   * thinks to click on the grid first gets a shell that answers at all. The
+   * window's own focus is written to stand down for exactly this — it takes the
+   * keyboard only when nothing inside it already has — so this is the half of
+   * that arrangement that was missing rather than a second claim on it.
+   *
+   * It runs again on every change of `focused`, which is what makes switching
+   * tabs put the keyboard in the tab switched to, and reopening a hidden window
+   * put it back in the grid.
+   */
+  useEffect(() => {
+    if (!focused) return;
+    grid.current?.focus();
+  }, [focused]);
 
   return (
     <div

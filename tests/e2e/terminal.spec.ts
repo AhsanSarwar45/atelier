@@ -237,6 +237,60 @@ test.describe('the terminal', () => {
     expect(live, 'the server is not holding a shell for the tab on the screen').toHaveLength(1);
   });
 
+  /**
+   * The window opens with the keyboard already in the grid.
+   *
+   * Nothing here clicks on the pane, and that omission is the case: a window
+   * that opened with its own frame focused took every press for the page behind
+   * it, so up-arrow moved the selection on the board and Tab walked out of the
+   * window. The shell was never broken — its history and its completion were
+   * loaded the whole time — the presses simply never reached it, which is why
+   * this is proved by typing and not by reading a setting.
+   */
+  test('the keyboard is in the grid the moment the window opens', async ({ page }) => {
+    await page.goto(HOME);
+    const pane = await openTerminal(page);
+
+    // No click. Straight from the button that opened it to the keys.
+    await page.keyboard.type(`printf 'UNCLICK''ED[%s]\\n' 4242`);
+    await page.keyboard.press('Enter');
+    await drawsEventually(pane, /UNCLICKED\[4242\]/, 'the shell never saw a line typed into a window nobody clicked');
+  });
+
+  /**
+   * Up-arrow walks the shell's history and Tab completes, in the window, with
+   * no click anywhere.
+   *
+   * Both are the shell's own doing and neither is the app's to implement — so
+   * what is actually under test is that the escape sequence and the tab reach
+   * the pseudo-terminal, and that what the shell draws in answer comes back.
+   * The line is recalled rather than retyped: the assertion is that it is on
+   * the prompt again after a press that typed none of it.
+   */
+  test('up-arrow recalls the last line and Tab finishes a word', async ({ page }) => {
+    await page.goto(HOME);
+    const pane = await openTerminal(page);
+
+    await page.keyboard.type(`printf 'REC''ALL[%s]\\n' 8080`);
+    await page.keyboard.press('Enter');
+    await drawsEventually(pane, /RECALL\[8080\]/, 'the shell did not run the line to be recalled');
+
+    await page.keyboard.press('ArrowUp');
+    await drawsEventually(
+      pane,
+      /REC''ALL\[%s\][\s\S]*REC''ALL\[%s\]/,
+      'up-arrow did not put the last line back on the prompt',
+    );
+
+    // Cleared with a fresh line rather than by editing the recalled one, so
+    // what Tab is asked to finish is unambiguous.
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('ls /usr/incl');
+    await page.keyboard.press('Tab');
+    await drawsEventually(pane, /ls \/usr\/include\//, 'Tab did not finish the path at the prompt');
+  });
+
   test('two tabs are two shells, and neither one answers the other', async ({ page }) => {
     await page.goto(HOME);
     const first = await openTerminal(page);
