@@ -1,4 +1,4 @@
-import type { ImagePayload } from '@/workbench/protocol';
+import type { ImagePayload, PromptPart } from '@/workbench/protocol';
 
 export interface DraftPicture extends ImagePayload {
   id: string;
@@ -43,8 +43,6 @@ export function orderedPictures(text: string, pictures: DraftPicture[]): DraftPi
   return [...inText, ...pictures.filter((picture) => !mentioned.has(picture.id))];
 }
 
-export type PromptPart = { type: 'text'; text: string } | { type: 'image'; id: string };
-
 /**
  * Where each picture sits between the words, said by name rather than by value.
  *
@@ -69,4 +67,22 @@ export function promptParts(text: string, pictures: DraftPicture[]): PromptPart[
   }
   if (from < text.length) parts.push({ type: 'text', text: text.slice(from) });
   return parts;
+}
+
+/**
+ * Whether a chosen file is a picture we can attach.
+ *
+ * The type the browser reports is the first answer, but it is not always
+ * there: Android's Drive, Files and Downloads providers hand back a file whose
+ * `type` is the empty string, and iOS does the same for some HEIC paths.
+ * Judging on the reported type alone dropped every one of those silently
+ * (bw-ad3r.6), so a file with nothing to say for itself is judged by the
+ * ending on its name instead.
+ */
+const PICTURE_ENDINGS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.bmp', '.heic', '.heif', '.svg'];
+
+export function looksLikeAPicture(file: { type?: string; name?: string }): boolean {
+  if (file.type) return file.type.startsWith('image/');
+  const name = (file.name ?? '').toLowerCase();
+  return PICTURE_ENDINGS.some((ending) => name.endsWith(ending));
 }

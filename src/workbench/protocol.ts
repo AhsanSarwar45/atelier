@@ -161,8 +161,19 @@ export interface ImagePayload {
   alt: string;
 }
 
+/**
+ * Where a picture sits between the words of a prompt.
+ *
+ * A part names its picture; the picture itself rides once, in the prompt's own
+ * `images`, and the server pairs the two by id. Carrying the whole `dataUrl`
+ * here as well put every attachment on the wire twice in one document, which
+ * halved what a message could hold before the server refused it (bw-ad3r.3).
+ * The old inline shape is still read by the server, for a page open across the
+ * change, but nothing sends it any more.
+ */
 export type PromptPart =
   | { type: 'text'; text: string }
+  | { type: 'image'; id: string }
   | { type: 'image'; image: ImagePayload };
 
 /** A pair the agent asks the conversation to hold together for inspection. */

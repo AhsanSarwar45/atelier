@@ -318,6 +318,23 @@ describe('the terminal window’s tabs', () => {
     expect(tabNames(), 'a shell at home is called what home is called').toEqual(['~']);
   });
 
+  /**
+   * A phone has no Ctrl key, so a command that would not stop could not be
+   * stopped at all: the only thing within reach was the cross, which kills the
+   * whole shell rather than the one thing running in it (bw-ad3r.10).
+   */
+  it('sends an interrupt to the shell in front when the stop key is pressed', async () => {
+    await open('/w/one');
+    const id = screen.getAllByTestId('terminal-tab-body')[0]!.dataset.shell!;
+    const { socket } = paneFor(id);
+    socket.opens();
+
+    fireEvent.click(screen.getByTestId('terminal-interrupt'));
+
+    const up = socket.sent.filter(ArrayBuffer.isView).map((frame) => [...(frame as Uint8Array)]);
+    expect(up).toContainEqual([0x03]);
+  });
+
   it('closes the one shell whose tab was closed, and no other', async () => {
     running = [shell('live-1', '/home/ahsan/dev/corsetta'), shell('live-2', '/home/ahsan/dev/beads-web')];
     await open();

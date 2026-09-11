@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   imageIds,
   imageMarker,
+  looksLikeAPicture,
   orderedPictures,
   promptParts,
   promptWithoutImageMarkers,
@@ -40,5 +41,27 @@ describe('image positions in a draft', () => {
     });
     expect(body.split('data:one').length - 1).toBe(1);
     expect(body.split('data:two').length - 1).toBe(1);
+  });
+});
+
+// Android's own pickers hand back a file whose type is the empty string. The
+// composer judged on that type alone, so the chooser opened, a picture was
+// chosen, and nothing appeared at all (bw-ad3r.6).
+describe('what the composer will take', () => {
+  it('takes a picture the browser has described', () => {
+    expect(looksLikeAPicture({ type: 'image/png', name: 'shot.png' })).toBe(true);
+    expect(looksLikeAPicture({ type: 'image/heic', name: 'IMG_0001.HEIC' })).toBe(true);
+  });
+
+  it('takes a picture the phone said nothing about, by its name', () => {
+    expect(looksLikeAPicture({ type: '', name: 'IMG_0001.HEIC' })).toBe(true);
+    expect(looksLikeAPicture({ type: '', name: 'screenshot.PNG' })).toBe(true);
+    expect(looksLikeAPicture({ name: 'photo.jpeg' })).toBe(true);
+  });
+
+  it('turns down what is not a picture, rather than dropping it in silence', () => {
+    expect(looksLikeAPicture({ type: 'application/pdf', name: 'contract.pdf' })).toBe(false);
+    expect(looksLikeAPicture({ type: '', name: 'notes.txt' })).toBe(false);
+    expect(looksLikeAPicture({ type: '', name: '' })).toBe(false);
   });
 });

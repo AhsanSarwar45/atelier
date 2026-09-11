@@ -26,7 +26,7 @@
 
 import { useCallback, useState, type ReactNode } from 'react';
 
-import { Plus, X } from 'lucide-react';
+import { Plus, Slash, X } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Button } from '@/components/ui/button';
@@ -57,8 +57,14 @@ function tabWhere(folder: string | null): string {
 }
 
 /** The row of tabs, under the window's own bar. */
+/**
+ * The byte a Ctrl-C is: the line discipline turns it into an interrupt for
+ * whatever has the foreground of the shell.
+ */
+const INTERRUPT = '\x03';
+
 function TabStrip({ searching, onSearch }: { searching: boolean; onSearch: () => void }) {
-  const { tabs, active, select, closeTab, openTab, opening } = useTerminalShells();
+  const { tabs, active, select, closeTab, openTab, opening, typeInto } = useTerminalShells();
   return (
     <div
       role="tablist"
@@ -127,7 +133,33 @@ function TabStrip({ searching, onSearch }: { searching: boolean; onSearch: () =>
         * searched sitting next to a row of buttons that close is a button
         * somebody presses by accident on the way to the wrong one.
         */}
-      <div className="ml-auto shrink-0 pl-2">
+      <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
+        {/*
+          * The only way to stop a running command used to be a Ctrl key, which
+          * a phone does not have: a command that would not stop could not be
+          * stopped at all from a phone, and closing the tab kills the whole
+          * shell rather than the one thing running in it (bw-ad3r.10). The
+          * bytes already have a road — the pane publishes its own `type` to the
+          * shells context — so this only has to say the word.
+          *
+          * On the strip rather than down by the keyboard because the strip is
+          * always in view: a key bar pinned to the bottom would sit under the
+          * on-screen keyboard unless it tracked the inset, and the reader who
+          * needs this most is the one who cannot get the keyboard up at all.
+          * Shown on every screen: a keyboard can send this, but a trackpad in
+          * a full-screen terminal is not always holding one.
+          */}
+        <ToolButton
+          icon={<Slash />}
+          label="Stop what is running (Ctrl-C)"
+          data-testid="terminal-interrupt"
+          disabled={!active}
+          onClick={() => {
+            if (active) typeInto(active, INTERRUPT);
+          }}
+          size="xs"
+          className="size-5 p-0"
+        />
         <HistoryButton open={searching} onOpen={onSearch} />
       </div>
     </div>

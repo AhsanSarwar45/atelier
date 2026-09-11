@@ -196,7 +196,11 @@ const composerTheme = EditorView.theme({
   '&': {
     backgroundColor: 'transparent',
     color: 'inherit',
-    fontSize: '15px',
+    // 16px, and not a pixel under. Safari on an iPhone zooms the whole page in
+    // when a control smaller than this takes focus, and never zooms back out —
+    // so tapping the writing box threw the layout sideways and read as the box
+    // being broken (bw-ad3r.8).
+    fontSize: '16px',
   },
   '&.cm-focused': { outline: 'none' },
   '.cm-scroller': {

@@ -65,7 +65,7 @@ import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { ComposerEditor, type ComposerHandle } from '@/workbench/composer-editor';
 import { fileCompletions } from '@/workbench/composer-files';
 import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
-import { imageIds, imageMarker, orderedPictures, promptParts, promptWithoutImageMarkers } from '@/workbench/composer-attachments';
+import { imageIds, imageMarker, looksLikeAPicture, orderedPictures, promptParts, promptWithoutImageMarkers } from '@/workbench/composer-attachments';
 import type { DraftPicture } from '@/workbench/composer-attachments';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
@@ -1320,11 +1320,43 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     }
   }
 
-  /** Pictures arrive by paste or by drop; both land in the same tray. */
+  /**
+   * Pictures arrive by paste, by drop, or from the phone's own chooser; all
+   * three land in the same tray.
+   *
+   * A file is judged by its name as well as by the type the browser reported.
+   * Android's own pickers — Drive, Files, Downloads — routinely hand back a
+   * file with an empty type, and judging on the type alone dropped those
+   * without a word: the chooser opened, a picture was chosen, and nothing
+   * appeared, which from the outside is indistinguishable from the button not
+   * working (bw-ad3r.6). Whatever cannot be taken is said out loud, and a file
+   * that fails to read is said out loud too rather than left as an unhandled
+   * rejection.
+   */
   async function absorb(files: FileList | File[] | null, at = typing.current?.cursor() ?? draft.length) {
-    const pictures = Array.from(files ?? []).filter((f) => f.type.startsWith('image/'));
+    const chosen = Array.from(files ?? []);
+    if (!chosen.length) return;
+    const pictures = chosen.filter(looksLikeAPicture);
+    const refused = chosen.filter((file) => !looksLikeAPicture(file));
+    if (refused.length) {
+      const names = refused.map((file) => file.name || 'that file').join(', ');
+      setSendError(
+        refused.length === 1
+          ? `${names} is not a picture, and the writing box can only take pictures.`
+          : `These are not pictures, and the writing box can only take pictures: ${names}.`,
+      );
+    }
     if (!pictures.length) return;
-    const read = await Promise.all(pictures.map(async (file) => ({ ...(await readImage(file)), id: crypto.randomUUID() })));
+    let read;
+    try {
+      read = await Promise.all(
+        pictures.map(async (file) => ({ ...(await readImage(file)), id: crypto.randomUUID() })),
+      );
+    } catch (e) {
+      setSendError(`That picture could not be read. ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    if (!refused.length) setSendError(null);
     setAttached((prev) => [...prev, ...read]);
     const markers = read.map((picture) => imageMarker(picture.id)).join(' ');
     setDraft((was) => `${was.slice(0, at)}${markers}${was.slice(at)}`);
@@ -2029,14 +2061,28 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               {sendError}
             </p>
           )}
+          {/* Out of sight rather than `display: none`. A phone browser will not
+              open its chooser for a control that was never laid out, so the
+              paperclip's click reached nothing and attaching on a phone looked
+              simply broken (bw-ad3r.5). The same argument the writing box makes
+              for its own mirror at composer-editor.tsx. The value is cleared on
+              the way out so choosing the same picture twice running still
+              raises a change event. */}
           <input
             ref={picker}
             data-testid="image-input"
             type="file"
             accept="image/*"
             multiple
-            className="hidden"
-            onChange={(e) => void absorb(e.target.files)}
+            className="sr-only"
+            tabIndex={-1}
+            aria-hidden
+            onChange={(e) => {
+              const chosen = e.target.files;
+              void absorb(chosen).finally(() => {
+                e.target.value = '';
+              });
+            }}
           />
           <ComposerEditor
             ref={typing}
