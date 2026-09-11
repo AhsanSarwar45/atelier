@@ -731,8 +731,17 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
             {status?.behind ?? 0}
             <span className="sr-only">commits behind</span>
           </span>
+          {/* One ref ordinarily, two when the repository pushes somewhere other
+              than it follows — `remote.origin.push` can send this branch to a
+              name its upstream never hears about, and then a single name here
+              is a name one of the two counts was not taken against
+              (bw-xp12.2). The arrow is the push, in the direction the button
+              below sends. */}
           <span className="min-w-0 flex-1 truncate" data-testid="git-upstream">
             {status?.upstream ?? 'no upstream'}
+            {status?.pushTo && (
+              <span data-testid="git-push-to"> → {status.pushTo}</span>
+            )}
           </span>
         </div>
         {/* Talking to the shared copy uses the keys and credential helper the
@@ -799,7 +808,12 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
             data-testid="git-push"
             onClick={() =>
               void act(
-                { deed: 'push', note: `${status?.branch ?? 'HEAD'} → ${status?.upstream ?? 'origin'}` },
+                // Where git will really write, which is not always what the
+                // branch follows (bw-xp12.2).
+                {
+                  deed: 'push',
+                  note: `${status?.branch ?? 'HEAD'} → ${status?.pushTo ?? status?.upstream ?? 'origin'}`,
+                },
                 (key) => git.push(path, status?.upstream === null, key),
               )
             }

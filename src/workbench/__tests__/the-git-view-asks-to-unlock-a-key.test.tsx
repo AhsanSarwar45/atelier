@@ -58,6 +58,7 @@ const DENIED = 'git@github.com: Permission denied (publickey).';
 const NOTHING_TO_FOLLOW: GitStatus = {
   branch: 'a-line-of-work',
   upstream: null,
+  pushTo: null,
   ahead: 1,
   behind: 0,
   detached: false,

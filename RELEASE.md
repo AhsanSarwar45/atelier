@@ -22,10 +22,16 @@ distribution channel.
 git push
 ```
 
-The trunk of this checkout **is** the line online. `git push` with no arguments
-sends `ours` to `main` on `origin`; this checkout says so in its own settings
-(`remote.origin.push = refs/heads/ours:refs/heads/main`). Nothing is copied,
-nothing is rewritten, no push is ever forced.
+The trunk of this checkout **is** the line online: it is called `main` here and
+`main` on `origin`, and `git push` with no arguments sends one to the other.
+Nothing is copied, nothing is rewritten, no push is ever forced.
+
+It was not always so. This checkout's branch was called `ours` and was sent to
+`main` by a `remote.origin.push` refspec, which meant the branch it followed
+(`origin/ours`) was never the branch it was pushed to. Every tool that counts
+against the upstream — the Git panel, `git status` itself — then reported work
+as unpushed for as long as the branch existed (bw-xp12). The branch is `main`
+now, both names agree, and the refspec is gone.
 
 Every saved change here carries the address it was written under, and GitHub
 shows that address to anybody who opens the page. This used to go through a

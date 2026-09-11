@@ -27,6 +27,7 @@ function blank(): GitStatus {
   return {
     branch: 'main',
     upstream: null,
+    pushTo: null,
     ahead: 0,
     behind: 0,
     detached: false,

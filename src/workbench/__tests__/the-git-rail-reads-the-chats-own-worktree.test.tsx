@@ -51,6 +51,7 @@ function on(branch: string): GitStatus {
   return {
     branch,
     upstream: null,
+    pushTo: null,
     ahead: 0,
     behind: 0,
     detached: false,

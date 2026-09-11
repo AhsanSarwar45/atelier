@@ -55,6 +55,7 @@ const REPO = '/tmp/a-project';
 const CHANGED: GitStatus = {
   branch: 'a-line-of-work',
   upstream: 'origin/a-line-of-work',
+  pushTo: null,
   ahead: 2,
   behind: 3,
   detached: false,

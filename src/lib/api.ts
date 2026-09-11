@@ -560,7 +560,15 @@ export interface GitStatus {
   branch: string;
   /** The branch it tracks, or null when it tracks nothing yet. */
   upstream: string | null;
+  /**
+   * The branch a push would actually write to, when the repository is set up
+   * so that is not `upstream`. `null` whenever the two agree, which is nearly
+   * always.
+   */
+  pushTo: string | null;
+  /** Commits a push would send — counted against `pushTo` when there is one. */
   ahead: number;
+  /** Commits a pull would bring, always counted against `upstream`. */
   behind: number;
   /** No branch at all — sitting on a commit. `branch` is then the sha. */
   detached: boolean;

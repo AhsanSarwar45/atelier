@@ -63,6 +63,7 @@ const NEW = 'brand-new.ts';
 const CHANGED_AND_NEW: GitStatus = {
   branch: 'a-line-of-work',
   upstream: 'origin/a-line-of-work',
+  pushTo: null,
   ahead: 0,
   behind: 0,
   detached: false,

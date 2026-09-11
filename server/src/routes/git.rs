@@ -623,9 +623,17 @@ pub struct StatusResponse {
     pub branch: String,
     /// The shared copy this branch follows, if it follows one.
     pub upstream: Option<String>,
-    /// Commits this branch has that its upstream does not.
+    /// The branch a push would actually write to, when a repository is set up
+    /// so that is not the one above. `null` whenever the two agree, which is
+    /// nearly always, and then there is nothing extra to draw.
+    #[serde(rename = "pushTo")]
+    pub push_to: Option<String>,
+    /// Commits a push would send: measured against `push_to` when there is
+    /// one, and against the upstream otherwise.
     pub ahead: i32,
-    /// Commits the upstream has that this branch does not.
+    /// Commits the upstream has that this branch does not — what a pull would
+    /// bring. Always measured against the upstream, which is where a pull
+    /// reads from however a push is routed.
     pub behind: i32,
     /// Whether HEAD is sitting on a commit rather than a branch.
     pub detached: bool,
@@ -805,7 +813,12 @@ pub async fn status(GitQuery(params): GitQuery<PathParams>) -> Answer {
         )
         .await?,
     )?;
-    Ok(Json(read_porcelain_v2(&output.stdout)).into_response())
+    let mut status = read_porcelain_v2(&output.stdout);
+    if let Some((sent_to, ahead)) = ahead_of_where_a_push_goes(&repo).await {
+        status.ahead = ahead;
+        status.push_to = Some(sent_to);
+    }
+    Ok(Json(status).into_response())
 }
 
 // ----------------------------------------------------------------------------
@@ -1082,6 +1095,55 @@ pub struct PathRequest {
     pub passphrase: Option<String>,
 }
 
+/// What git calls a ref, short — `origin/main` for `@{push}`.
+///
+/// `None` when there is no such ref at all: a branch following nothing, or a
+/// detached HEAD, in which case git exits nonzero and says so on stderr.
+async fn named_ref(repo: &Path, which: &str) -> Option<String> {
+    let named = run_git(repo, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", which])
+        .await
+        .ok()?;
+    if !named.status.success() {
+        return None;
+    }
+    let named = String::from_utf8_lossy(&named.stdout).trim().to_string();
+    if named.is_empty() {
+        None
+    } else {
+        Some(named)
+    }
+}
+
+/// Where a push from this branch would land, and how far in front of it HEAD
+/// is.
+///
+/// A branch is followed by one ref and pushed to another, and a repository can
+/// be set up so those are not the same: `remote.origin.push =
+/// refs/heads/ours:refs/heads/main` sends this branch to a name its upstream
+/// never hears about. Every count taken against the upstream is then a count
+/// of work git has already sent — a panel reading 109 unpushed commits
+/// directly after a push that pushed all 109 of them (bw-xp12.1). git alone
+/// knows the answer, and calls it `@{push}`.
+///
+/// `None` when a push goes exactly where the upstream is, which is the
+/// ordinary case and the one a count against the upstream already answers, and
+/// `None` again when git cannot resolve either ref. In both, the caller's own
+/// count stands.
+async fn ahead_of_where_a_push_goes(repo: &Path) -> Option<(String, i32)> {
+    let sent_to = named_ref(repo, "@{push}").await?;
+    if sent_to == named_ref(repo, "@{upstream}").await? {
+        return None;
+    }
+    let counted = run_git(repo, &["rev-list", "--count", &format!("{sent_to}..HEAD")])
+        .await
+        .ok()?;
+    if !counted.status.success() {
+        return None;
+    }
+    let ahead = String::from_utf8_lossy(&counted.stdout).trim().parse().ok()?;
+    Some((sent_to, ahead))
+}
+
 /// How far the current branch sits from its upstream, or zeroes if it has none.
 async fn distance_from_upstream(repo: &Path) -> (i32, i32) {
     let counted = run_git(
@@ -1097,7 +1159,12 @@ async fn distance_from_upstream(repo: &Path) -> (i32, i32) {
     let mut counts = counts.split_whitespace();
     let ahead = counts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
     let behind = counts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
-    (ahead, behind)
+    // Said the same way the status route says it, so a fetch's "12 ahead"
+    // and the header's arrow never disagree about the same repository.
+    match ahead_of_where_a_push_goes(repo).await {
+        Some((_, sent)) => (sent, behind),
+        None => (ahead, behind),
+    }
 }
 
 /// Ask the shared copy what it has, without taking any of it.
@@ -2247,6 +2314,26 @@ pub async fn drop_tree(GitJson(body): GitJson<DropTreeRequest>) -> Answer {
 mod tests {
     use super::*;
 
+    /// Somewhere to build a repository that the routes will agree to read.
+    ///
+    /// The status route turns away anything outside the home directory, so a
+    /// test that goes through a route cannot use `/tmp`.
+    fn a_scratch_repository_under_home() -> tempfile::TempDir {
+        let home = directories::UserDirs::new().unwrap().home_dir().to_path_buf();
+        tempfile::Builder::new()
+            .prefix(".atelier-git-push-test-")
+            .tempdir_in(home)
+            .unwrap()
+    }
+
+    /// What a route answered, as JSON to be asked about by name.
+    async fn read_json(answer: Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(answer.into_body(), usize::MAX)
+            .await
+            .expect("a route's whole answer");
+        serde_json::from_slice(&bytes).expect("a route answering with JSON")
+    }
+
     fn git(repo: &Path, args: &[&str]) -> String {
         let found = crate::routes::find_git().expect("git on the computer running these tests");
         let output = std::process::Command::new(found)
@@ -2275,6 +2362,95 @@ mod tests {
         assert!(json.contains("\"ahead\":5"));
         assert!(json.contains("\"behind\":2"));
         assert!(json.contains("\"dirty\":false"));
+    }
+
+    /// A repository whose branch is pushed somewhere other than the branch it
+    /// follows, which is the whole reason `@{push}` exists.
+    ///
+    /// Leaves `ours` following `origin/ours` and pushed to `origin/main`, with
+    /// three commits that have reached `main` and never reached `ours`. Hands
+    /// back the working copy.
+    fn a_repository_pushed_somewhere_else(dir: &Path) -> std::path::PathBuf {
+        let shared = dir.join("shared.git");
+        let repo = dir.join("work");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(dir, &["init", "-q", "--bare", "-b", "main", shared.to_str().unwrap()]);
+        git(&repo, &["init", "-q", "-b", "ours"]);
+        git(&repo, &["config", "user.name", "Atelier test"]);
+        git(&repo, &["config", "user.email", "atelier@example.invalid"]);
+        git(&repo, &["remote", "add", "origin", shared.to_str().unwrap()]);
+        std::fs::write(repo.join("kept"), "one\n").unwrap();
+        git(&repo, &["add", "kept"]);
+        git(&repo, &["commit", "-qm", "first"]);
+        // Both names start level, and `ours` is the one the branch follows.
+        git(&repo, &["push", "-q", "--set-upstream", "origin", "ours"]);
+        git(&repo, &["push", "-q", "origin", "ours:main"]);
+
+        for n in 1..=3 {
+            std::fs::write(repo.join("kept"), format!("{n}\n")).unwrap();
+            git(&repo, &["commit", "-qam", &format!("work {n}")]);
+        }
+        // Sent, in full, to a name the upstream never hears about.
+        git(&repo, &["config", "remote.origin.push", "refs/heads/ours:refs/heads/main"]);
+        git(&repo, &["push", "-q"]);
+        repo
+    }
+
+    /// The count the panel draws is of work a push would send, not work the
+    /// upstream happens not to have. Three commits that reached `main` are not
+    /// three commits waiting to go (bw-xp12.1).
+    #[tokio::test]
+    async fn a_branch_pushed_elsewhere_is_counted_against_where_it_is_pushed() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = a_repository_pushed_somewhere_else(dir.path());
+
+        // git itself, asked the ordinary way, still says three.
+        assert_eq!(git(&repo, &["rev-list", "--count", "origin/ours..HEAD"]), "3");
+
+        let (sent_to, ahead) = ahead_of_where_a_push_goes(&repo)
+            .await
+            .expect("a push that goes somewhere other than the upstream");
+        assert_eq!(sent_to, "origin/main");
+        assert_eq!(ahead, 0);
+    }
+
+    /// And the status route says the same, naming the branch it counted
+    /// against so the reader is not left to guess which `0` this is.
+    #[tokio::test]
+    async fn status_names_the_branch_a_push_would_go_to() {
+        let dir = a_scratch_repository_under_home();
+        let repo = a_repository_pushed_somewhere_else(dir.path());
+
+        let answer = status(GitQuery(PathParams { path: repo.to_string_lossy().into_owned() }))
+            .await
+            .expect("a status of a repository that exists");
+        let said = read_json(answer).await;
+
+        assert_eq!(said["branch"], "ours");
+        assert_eq!(said["upstream"], "origin/ours");
+        assert_eq!(said["pushTo"], "origin/main");
+        assert_eq!(said["ahead"], 0);
+        assert_eq!(said["behind"], 0);
+    }
+
+    /// The ordinary repository — pushed where it is followed — is untouched by
+    /// any of this, and says nothing extra.
+    #[tokio::test]
+    async fn a_branch_pushed_where_it_is_followed_says_nothing_extra() {
+        let dir = a_scratch_repository_under_home();
+        let repo = a_repository_pushed_somewhere_else(dir.path());
+        // Take the odd refspec back off and the two refs agree again.
+        git(&repo, &["config", "--unset", "remote.origin.push"]);
+
+        assert!(ahead_of_where_a_push_goes(&repo).await.is_none());
+
+        let answer = status(GitQuery(PathParams { path: repo.to_string_lossy().into_owned() }))
+            .await
+            .expect("a status of a repository that exists");
+        let said = read_json(answer).await;
+
+        assert_eq!(said["pushTo"], serde_json::Value::Null);
+        assert_eq!(said["ahead"], 3);
     }
 
     #[tokio::test]

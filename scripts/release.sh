@@ -32,7 +32,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 OWNER=AhsanSarwar45          # everything this project publishes to (D6)
 SOURCE="$OWNER/atelier"      # where the releases are
-TRUNK=ours                   # the line this computer works on
+TRUNK=main                   # the line this computer works on
 PUBLISHED=main               # what that line is called online
 WAIT_LIMIT=2400              # seconds to give a build before saying so
 STARTED_SSH_AGENT=0

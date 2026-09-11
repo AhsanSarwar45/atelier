@@ -55,6 +55,7 @@ describe('the reads', () => {
       mockResponse({
         branch: 'main',
         upstream: 'origin/main',
+        pushTo: null,
         ahead: 1,
         behind: 2,
         detached: false,

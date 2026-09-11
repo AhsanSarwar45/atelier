@@ -57,6 +57,7 @@ function standing(ahead: number): GitStatus {
   return {
     branch: 'main',
     upstream: 'origin/main',
+    pushTo: null,
     ahead,
     behind: 0,
     detached: false,
