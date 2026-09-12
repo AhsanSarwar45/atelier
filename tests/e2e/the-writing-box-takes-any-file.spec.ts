@@ -152,12 +152,14 @@ test('a video, a recording, a PDF, an archive and a spreadsheet each go in weari
 
   await page.screenshot({ path: join(SHOTS, 'bw-oamr-7-tiles.png'), animations: 'disabled' });
 
-  // And each opens full size, in the thing that can show it.
+  // And each opens full size, in the thing that can show it — which is the
+  // Files tab's own reader for that kind, not a second one built for the chat
+  // (bw-p4r3.2). The testids are that tab's, which is the proof of it.
   const opensAs = [
     { name: 'shot.png', viewer: 'picture-viewer', close: 'picture-viewer-close' },
-    { name: 'clip.mp4', viewer: 'attachment-viewer', close: 'attachment-viewer-close', plays: 'attachment-video' },
-    { name: 'song.mp3', viewer: 'attachment-viewer', close: 'attachment-viewer-close', plays: 'attachment-audio' },
-    { name: 'contract.pdf', viewer: 'attachment-viewer', close: 'attachment-viewer-close', plays: 'attachment-pdf' },
+    { name: 'clip.mp4', viewer: 'attachment-viewer', close: 'attachment-viewer-close', plays: 'file-preview-video' },
+    { name: 'song.mp3', viewer: 'attachment-viewer', close: 'attachment-viewer-close', plays: 'file-preview-audio' },
+    { name: 'contract.pdf', viewer: 'attachment-viewer', close: 'attachment-viewer-close', plays: 'file-preview-pdf' },
     { name: 'notes.txt', viewer: 'attachment-viewer', close: 'attachment-viewer-close', plays: 'attachment-words' },
   ];
   for (const one of opensAs) {

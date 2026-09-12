@@ -209,7 +209,7 @@ function SourceSwitch({ showing, onChange }: { showing: 'source' | 'preview'; on
  * surfaces stop at "the whole picture is in the room"; only one of them has to
  * work out what number that is.
  */
-function ImagePreview({ path, swap }: { path: string; swap?: ReactNode }) {
+function ImagePreview({ path, src, swap }: { path: string; src?: string; swap?: ReactNode }) {
   const [shape, setShape] = useState<{ width: number; height: number } | null>(null);
   const [transform, setTransform] = useState<ImageTransform>(NO_TRANSFORM);
   // A new file is a new picture: its size is not known again until it loads,
@@ -316,7 +316,7 @@ function ImagePreview({ path, swap }: { path: string; swap?: ReactNode }) {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             data-testid="file-preview-image"
-            src={mediaUrl(path)}
+            src={src ?? mediaUrl(path)}
             alt={path}
             // Its own pixels at 100%, so a 32-pixel icon is not blown up to fill
             // the room and called a preview. The zoom is the layer's transform
@@ -369,15 +369,38 @@ export interface FilePreviewProps {
   kind: PreviewKind;
   /** The file's text, for the kinds that read as source too. */
   text?: string;
+  /**
+   * Where the bytes are, when they are not at `path` on this machine.
+   *
+   * A file attached to a message is kept in the content-addressed store under a
+   * digest, and is served from there rather than from the checkout — but it is
+   * the same PDF, wanting the same frame around it. One override is all that
+   * separated this preview from serving the chat as well as the Files tab
+   * (bw-p4r3.2); `path` stays the file's NAME, which is what chooses the kind,
+   * the grammar and the title.
+   */
+  src?: string;
+  /** A file opened on purpose starts playing; one merely selected does not. */
+  autoPlay?: boolean;
+  /**
+   * Grow a film to the room rather than drawing it at its own pixel size.
+   *
+   * In the Files tab a clip sits at its own size beside the tree, which is the
+   * honest drawing of it. Opened full screen from a message it is the only
+   * thing on the screen, and a 320x240 clip in the middle of a 1280px window is
+   * a postage stamp — while the picture beside it in the same strip opens
+   * filling the screen (bw-oamr.7). `object-contain` keeps its shape.
+   */
+  fills?: boolean;
   className?: string;
 }
 
-export function FilePreview({ path, kind, text = '', className }: FilePreviewProps) {
-  const src = mediaUrl(path);
+export function FilePreview({ path, kind, text = '', src: from, autoPlay = false, fills = false, className }: FilePreviewProps) {
+  const src = from ?? mediaUrl(path);
   return (
     <div data-testid="file-preview" data-kind={kind} className={cn('flex min-h-0 min-w-0 flex-1 flex-col', className)}>
       {kind === 'image' ? (
-        <ImagePreview path={path} />
+        <ImagePreview path={path} src={src} />
       ) : kind === 'video' ? (
         <div className="flex min-h-0 flex-1 items-center justify-center bg-black/40 p-4">
           {/* Controls, and nothing preloaded past the first frames: the route
@@ -386,13 +409,14 @@ export function FilePreview({ path, kind, text = '', className }: FilePreviewPro
             data-testid="file-preview-video"
             src={src}
             controls
+            autoPlay={autoPlay}
             preload="metadata"
-            className="max-h-full max-w-full"
+            className={fills ? 'h-full w-full object-contain' : 'max-h-full max-w-full'}
           />
         </div>
       ) : kind === 'audio' ? (
         <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-          <audio data-testid="file-preview-audio" src={src} controls className="w-full max-w-lg" />
+          <audio data-testid="file-preview-audio" src={src} controls autoPlay={autoPlay} className="w-full max-w-lg" />
         </div>
       ) : kind === 'pdf' ? (
         <iframe data-testid="file-preview-pdf" src={src} title={path} className="min-h-0 flex-1 border-0 bg-white" />
@@ -401,7 +425,7 @@ export function FilePreview({ path, kind, text = '', className }: FilePreviewPro
            hand live in one hook: an SVG is a picture, and a reader who has just
            zoomed into one file should not find the next one frozen because it
            happened to be drawn by a different branch (bw-e3dw.15). */
-        <TwoWays path={path} text={text} preview={(swap) => <ImagePreview path={path} swap={swap} />} />
+        <TwoWays path={path} text={text} preview={(swap) => <ImagePreview path={path} src={src} swap={swap} />} />
       ) : (
         <TwoWays
           path={path}
