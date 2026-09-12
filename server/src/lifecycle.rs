@@ -1008,7 +1008,7 @@ fn segment_targets(segment: &Segment, here: &Path) -> Vec<Target> {
         return targets;
     }
     if let Some(call) = git_call(segment, here) {
-        if git_mutates(&call) && !lands(&call) && !isolates(&call) {
+        if git_mutates(&call) && !lands(&call) && !isolates(&call) && !tidies(&call) {
             targets.push(Target::here(&call.cwd));
         }
         return targets;
@@ -1064,6 +1064,73 @@ fn lands(call: &GitCall<'_>) -> bool {
         && call.segment.words[call.verb + 1..]
             .iter()
             .any(|word| word.text == "--ff-only")
+}
+
+/// Has every commit on this branch already reached the landing branch?
+///
+/// A branch nobody can lose anything from is one whose work is already on
+/// `ours`. A name that no longer resolves has no commits to lose either.
+fn already_landed(project: &Path, branch: &str) -> bool {
+    if command(project, "git", &["rev-parse", "--verify", "--quiet", branch])
+        .is_none_or(|(_, ok)| !ok)
+    {
+        return true;
+    }
+    let landing = landing_branch(project);
+    !landing.is_empty()
+        && command(
+            project,
+            "git",
+            &["merge-base", "--is-ancestor", branch, &landing],
+        )
+        .is_some_and(|(_, ok)| ok)
+}
+
+/// Throwing away a spent workspace, which is the last step of every job.
+///
+/// `git worktree remove worktrees/<ID>` and `git branch -d <ID>` are the two
+/// commands a land step exists to run, and they can only be run from the
+/// landing checkout — the worktree being deleted cannot be stood in while it
+/// goes, and a branch's ref lives in the checkout every worktree shares. The
+/// ownership rule refused both, so the last step of every job was a bypass and
+/// finished copies piled up until the disk ran out (`docs/hook-friction-2.md`
+/// §8, §13, §15, §17, bw-gr8y.8, bw-g3o3.8, bw-t9no).
+///
+/// The carve-out is the test `board/land` already makes: the branch is an
+/// ancestor of the landing branch, so the removal loses nothing the repository
+/// holds. A branch with work still on it stays gated.
+fn tidies(call: &GitCall<'_>) -> bool {
+    let verb = call.segment.words[call.verb].text.as_str();
+    let arguments = &call.segment.words[call.verb + 1..];
+    let Some(project) = project_root(&call.cwd) else {
+        return false;
+    };
+    match verb {
+        "worktree" if operands(arguments).first() == Some(&"remove") => {
+            let Some(named) = operands(arguments).get(1).copied() else {
+                return false;
+            };
+            let destination = path_from(&call.cwd, named);
+            // The same shape `isolates` makes: the project's own worktree
+            // directory, named for the card, in this project.
+            if project_root(&destination).as_deref() != Some(project.as_path()) {
+                return false;
+            }
+            worktree_issue(&destination).is_some_and(|issue| already_landed(&project, &issue))
+        }
+        "branch"
+            if arguments
+                .iter()
+                .any(|word| matches!(word.text.as_str(), "-d" | "-D" | "--delete")) =>
+        {
+            let named = operands(arguments);
+            !named.is_empty()
+                && named
+                    .iter()
+                    .all(|branch| already_landed(&project, branch))
+        }
+        _ => false,
+    }
 }
 
 /// `git worktree add worktrees/<ID> -b <ID>`, which builds the isolation the
@@ -2392,6 +2459,64 @@ mod tests {
             mutation_paths(&from_main("bd update bw-x --status open && rm src/lib.rs")),
             vec![PathBuf::from("/repo/src/lib.rs")]
         );
+    }
+
+    /// The last step of every job is throwing its copy away, and it can only
+    /// be run from the landing checkout — which is where the ownership rule
+    /// refused it (`docs/hook-friction-2.md` §13, §15, bw-g3o3.8, bw-t9no).
+    #[test]
+    fn native_machinery_a_spent_workspace_can_be_thrown_away() {
+        let home = tempfile::tempdir().unwrap();
+        let repo = home.path().join("project");
+        std::fs::create_dir(&repo).unwrap();
+        let git = |args: &[&str]| {
+            assert!(Command::new("git")
+                .args(args)
+                .current_dir(&repo)
+                .status()
+                .unwrap()
+                .success());
+        };
+        git(&["init", "-q", "-b", "ours"]);
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(repo.join("a"), "one").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "first"]);
+        // One card's work landed on `ours`; another's has not.
+        git(&["branch", "bw-landed"]);
+        git(&["checkout", "-qb", "bw-open"]);
+        std::fs::write(repo.join("b"), "two").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "unlanded"]);
+        git(&["checkout", "-q", "ours"]);
+        git(&["worktree", "add", "-q", "worktrees/bw-landed", "bw-landed"]);
+
+        let tidying = |command: &str| {
+            shell_segments(command)
+                .iter()
+                .filter_map(|segment| git_call(segment, &repo))
+                .any(|call| tidies(&call))
+        };
+
+        assert!(tidying("git worktree remove worktrees/bw-landed"));
+        assert!(tidying("git worktree remove --force worktrees/bw-landed"));
+        assert!(tidying("git branch -d bw-landed"));
+        assert!(tidying("git branch -D bw-landed"));
+        assert!(
+            tidying("git branch -D bw-never-existed"),
+            "a name with no commits behind it can lose nothing"
+        );
+
+        // Work that is not on the landing branch is still somebody's, and a
+        // removal that is not a spent workspace is still a repository change.
+        assert!(!tidying("git branch -D bw-open"));
+        assert!(!tidying("git branch -D bw-landed bw-open"));
+        assert!(!tidying("git worktree remove worktrees/bw-open"));
+        assert!(!tidying("git worktree add worktrees/bw-landed -b bw-landed"));
+        assert!(!tidying("git worktree prune"));
+        assert!(!tidying("git branch --list"));
+        assert!(!tidying("git branch bw-new"));
     }
 
     #[test]
