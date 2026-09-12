@@ -961,15 +961,7 @@ fn actor(data: &Value) -> Option<Value> {
                 format!(" --actor {who}"),
             ));
         }
-        let is_update_claim = call.segment.words[call.verb].text == "update"
-            && call
-                .segment
-                .words
-                .get(call.verb + 1)
-                .is_some_and(|word| !word.text.starts_with('-'))
-            && call.segment.words[call.verb + 2..]
-                .iter()
-                .any(|word| word.text == "--claim");
+        let is_update_claim = claims(&call);
         let has_copy = args
             .windows(2)
             .any(|pair| pair[0].text == "--add-label" && pair[1].text.starts_with("copy:"))
@@ -1001,10 +993,16 @@ fn actor(data: &Value) -> Option<Value> {
 fn segment_targets(segment: &Segment, here: &Path) -> Vec<Target> {
     let mut targets = redirection_targets(segment, here);
     if let Some(call) = bd_call(segment) {
-        if matches!(
-            call.segment.words[call.verb].text.as_str(),
-            "close" | "create" | "reopen" | "update"
-        ) {
+        // `bd` writes its own database, which is not tracked by any
+        // repository: a status move, a note, a label or a close reaches no
+        // file the worktree rule is about, and judging one by the directory it
+        // was typed in leaves the end of a job with nowhere it may be finished
+        // from (`docs/hook-friction-2.md` §11, §15, bw-oamr, bw-b0m4.6).
+        //
+        // The claim is the exception, and not because of a file: taking a card
+        // is the moment a session says which copy it is working in, so it is
+        // still judged against that copy.
+        if claims(&call) {
             targets.push(Target::here(&bd_cwd(&call, here)));
         }
         return targets;
@@ -1142,6 +1140,19 @@ fn issue_at(path: &Path) -> Option<String> {
     }
 }
 
+/// `bd update <ID> --claim`: the one `bd` write the worktree rule is about.
+fn claims(call: &BdCall<'_>) -> bool {
+    call.segment.words[call.verb].text == "update"
+        && call
+            .segment
+            .words
+            .get(call.verb + 1)
+            .is_some_and(|word| !word.text.starts_with('-'))
+        && call.segment.words[call.verb + 2..]
+            .iter()
+            .any(|word| word.text == "--claim")
+}
+
 fn claim_transition(data: &Value) -> Option<(String, PathBuf)> {
     let parsed = calls(shell(data), &cwd(data));
     let bd_calls: Vec<usize> = parsed
@@ -1169,17 +1180,10 @@ fn claim_transition(data: &Value) -> Option<(String, PathBuf)> {
     let call = bd_call(segment)?;
     let here = &bd_cwd(&call, from);
     let call = &call;
-    if call.segment.words[call.verb].text != "update" {
+    if !claims(call) {
         return None;
     }
     let issue = call.segment.words.get(call.verb + 1)?.text.clone();
-    if issue.starts_with('-')
-        || !call.segment.words[call.verb + 2..]
-            .iter()
-            .any(|word| word.text == "--claim")
-    {
-        return None;
-    }
     Some((issue, here.clone()))
 }
 
@@ -2352,6 +2356,42 @@ mod tests {
         assert!(job_copy("bw-x.1.2").0);
         assert!(job_copy("bw-x").0);
         assert!(!job_copy("bw-y.1").0, "somebody else's job stays refused");
+    }
+
+    /// A card's notes, its status and its close write the board's own
+    /// database and no tracked file, so the directory they were typed in is
+    /// not the gate's business (`docs/hook-friction-2.md` §11, §15, bw-oamr).
+    #[test]
+    fn native_machinery_a_board_only_write_needs_no_worktree() {
+        let from_main = |command: &str| {
+            json!({"tool_name":"Bash", "cwd":"/repo", "tool_input":{"command": command}})
+        };
+        for board_only in [
+            "bd update bw-x --status manager_review",
+            "bd update bw-x --append-notes=the refusal cost a round trip",
+            "bd update bw-x --status open",
+            "bd close bw-x.3",
+            "bd comments add bw-x.3 checks: tree abc PASSED",
+            "bd create --title 'a new fault'",
+        ] {
+            assert!(
+                mutation_paths(&from_main(board_only)).is_empty(),
+                "{board_only} reaches no tracked file"
+            );
+        }
+
+        // The claim is still judged against the copy it is made in: it is the
+        // moment a session says which copy it is working in.
+        assert_eq!(
+            mutation_paths(&from_main("bd update bw-x.1 --claim")),
+            vec![PathBuf::from("/repo")]
+        );
+        // And a command on the same line that does reach a file is judged on
+        // its own.
+        assert_eq!(
+            mutation_paths(&from_main("bd update bw-x --status open && rm src/lib.rs")),
+            vec![PathBuf::from("/repo/src/lib.rs")]
+        );
     }
 
     #[test]
