@@ -9,20 +9,21 @@ use crate::workbench::registry::{DriverFuture, ProviderDriver};
 use crate::workbench::session_policy;
 use crate::workbench::store::{Session, SessionPatch};
 use agent_client_protocol::schema::v1::{
-    CancelNotification, CloseSessionRequest, ContentBlock, CreateElicitationRequest,
-    CreateElicitationResponse, CreateTerminalRequest, ElicitationMode, ImageContent,
-    KillTerminalRequest, ListSessionsRequest, LoadSessionRequest, Meta, NewSessionRequest,
+    AudioContent, BlobResourceContents, CancelNotification, CloseSessionRequest, ContentBlock,
+    CreateElicitationRequest, CreateElicitationResponse, CreateTerminalRequest, ElicitationMode,
+    EmbeddedResource, EmbeddedResourceResource, ImageContent, KillTerminalRequest,
+    ListSessionsRequest, LoadSessionRequest, Meta, NewSessionRequest,
     PromptRequest, ReadTextFileRequest, ReleaseTerminalRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, ResumeSessionRequest,
     SelectedPermissionOutcome, SessionConfigOptionValue, SetSessionConfigOptionRequest,
-    SetSessionModeRequest, TerminalOutputRequest, TextContent, WaitForTerminalExitRequest,
-    WriteTextFileRequest,
+    ResourceLink, SetSessionModeRequest, TerminalOutputRequest, TextContent, TextResourceContents,
+    WaitForTerminalExitRequest, WriteTextFileRequest,
 };
 use agent_client_protocol::{AcpAgent, Agent, ConnectionTo, UntypedMessage};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, Mutex};
 
@@ -1258,67 +1259,236 @@ async fn elicitation(
 /// name is checked before anything is opened — it is a digest and one plain
 /// word, with no separator in it to leave the store with.
 fn kept_bytes(asset: &str) -> Option<String> {
+    let bytes = std::fs::read(kept_file(asset)?).ok()?;
+    use base64::Engine as _;
+    Some(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
+/// Where the store is keeping one file, when it still has it.
+fn kept_file(asset: &str) -> Option<PathBuf> {
     if !crate::routes::fs::valid_presentation_asset(asset) {
         return None;
     }
     // The name having passed the check above, it is one word: joining it on
     // cannot walk anywhere, so being a file is the only thing left to ask.
     let path = crate::identity::presentation_media_dir()?.join(asset);
-    if !path.is_file() {
-        return None;
-    }
-    let bytes = std::fs::read(path).ok()?;
-    use base64::Engine as _;
-    Some(base64::engine::general_purpose::STANDARD.encode(bytes))
+    path.is_file().then_some(path)
 }
 
-fn attached_picture(image: &Value) -> Option<(String, String)> {
-    let (declared, encoded) = match image["dataUrl"]
+/// The base64 of one attachment, wherever it is being kept.
+fn attached_bytes(attachment: &Value) -> Option<String> {
+    let encoded = attachment["dataUrl"]
         .as_str()
         .and_then(|url| url.strip_prefix("data:"))
         .and_then(|rest| rest.split_once(";base64,"))
-    {
-        Some((mime, payload)) => (Some(mime), Some(payload)),
-        None => (None, None),
-    };
+        .map(|(_, payload)| payload);
     // A file the store is keeping has no bytes on the payload; they are read
     // back from it, which is the whole point of keeping them there.
-    let stored = if encoded.is_none() && image["data"].as_str().is_none() {
-        image["asset"].as_str().and_then(kept_bytes)
+    let stored = if encoded.is_none() && attachment["data"].as_str().is_none() {
+        attachment["asset"].as_str().and_then(kept_bytes)
     } else {
         None
     };
-    let data = image["data"]
+    attachment["data"]
         .as_str()
-        .or_else(|| image["base64"].as_str())
+        .or_else(|| attachment["base64"].as_str())
         .or(encoded)
         .or(stored.as_deref())
-        .filter(|data| !data.is_empty())?;
-    let mime = image["mimeType"]
+        .filter(|data| !data.is_empty())
+        .map(str::to_string)
+}
+
+/// What one attachment is, as well as anything knows.
+///
+/// What the browser reported first, then what the data URL declared, then the
+/// ending on the name. A file chosen from Android's Drive, Files or Downloads
+/// provider arrives with an empty type (bw-ad3r.6), and a file the store kept
+/// arrives with only the name it was kept under, so the name has to be able to
+/// answer on its own. `fallback` is what is left when even that says nothing.
+fn attachment_mime(attachment: &Value, fallback: &str) -> String {
+    let declared = attachment["dataUrl"]
         .as_str()
-        .or_else(|| image["mime"].as_str())
+        .and_then(|url| url.strip_prefix("data:"))
+        .and_then(|rest| rest.split_once(";base64,"))
+        .map(|(mime, _)| mime);
+    if let Some(mime) = attachment["mimeType"]
+        .as_str()
+        .or_else(|| attachment["mime"].as_str())
         .or(declared)
         .filter(|mime| !mime.is_empty())
-        .unwrap_or("image/png");
-    Some((data.to_string(), mime.to_string()))
+    {
+        return mime.to_string();
+    }
+    match attachment["alt"].as_str() {
+        Some(name) if !name.is_empty() => mime_guess::from_path(name)
+            .first()
+            .map_or_else(|| fallback.to_string(), |mime| mime.to_string()),
+        _ => fallback.to_string(),
+    }
+}
+
+/// What one agent said it can be handed in a prompt.
+///
+/// Read once off the initialize answer and passed around as three plain facts,
+/// so nothing downstream has to know which agent it is talking to. This is the
+/// whole of the provider question: there are no brand names below this line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Carries {
+    /// `promptCapabilities.image`.
+    pub pictures: bool,
+    /// `promptCapabilities.audio`.
+    pub audio: bool,
+    /// `promptCapabilities.embeddedContext`.
+    pub embedded: bool,
+}
+
+impl Default for Carries {
+    /// What is assumed of an agent that has said nothing.
+    ///
+    /// Pictures yes, the other two no, and the asymmetry is deliberate. A block
+    /// the agent cannot take fails the entire `session/prompt` and takes the
+    /// sentence the owner typed down with it (bw-t26l.20), so the only safe
+    /// default is the one with a fallback behind it. Pictures have none — a
+    /// screenshot is the thing being discussed, and every agent this app
+    /// bundles can take one, so an agent that declares nothing is not thereby
+    /// refusing. Audio and embedded context both fall back to a resource link,
+    /// which every agent MUST support, so there is nothing to gain by guessing.
+    fn default() -> Self {
+        Self { pictures: true, audio: false, embedded: false }
+    }
+}
+
+impl Carries {
+    /// The three flags as one word, so a send reads them without a lock.
+    pub(crate) fn packed(self) -> u8 {
+        u8::from(self.pictures) | u8::from(self.audio) << 1 | u8::from(self.embedded) << 2
+    }
+
+    /// The three flags back out of that word.
+    pub(crate) fn unpacked(word: u8) -> Self {
+        Self {
+            pictures: word & 1 != 0,
+            audio: word & 2 != 0,
+            embedded: word & 4 != 0,
+        }
+    }
+
+    /// What the initialize answer said, over what was assumed.
+    pub(crate) fn read(initialized: &Value) -> Self {
+        let said = |what: &str| {
+            initialized.pointer(&format!("/agentCapabilities/promptCapabilities/{what}"))
+        };
+        Self {
+            pictures: said("image") != Some(&Value::Bool(false)),
+            audio: said("audio") == Some(&Value::Bool(true)),
+            embedded: said("embeddedContext") == Some(&Value::Bool(true)),
+        }
+    }
+}
+
+/// The most a file may weigh before it is linked rather than embedded.
+///
+/// An embedded resource is the whole file, base64'd, inside the prompt. That is
+/// worth it for a page of notes — the agent has the contents without a round
+/// trip — and ruinous for a video, which would arrive as a hundred megabytes of
+/// text in one request and be counted against the turn. Past this the link is
+/// better for both ends, and the file is on the same machine either way.
+const EMBED_LIMIT: u64 = 256 * 1024;
+
+/// How one attached file travels to the agent.
+///
+/// One path for every kind of file and every agent, which is the whole point:
+/// what is sent follows what the file IS and what the agent SAID, never which
+/// brand is on the other end.
+///
+/// A picture goes as a picture and a recording as a recording, where the agent
+/// takes them, because that is the form a model can actually look at or listen
+/// to. Everything else — a PDF, a spreadsheet, an archive, a page of notes —
+/// goes as a resource link, which every agent MUST support: a name and a
+/// `file://` URI pointing at the copy the store is already keeping, which the
+/// agent can open with the tools it already has. A small file goes as an
+/// embedded resource instead when the agent advertised embedded context, so it
+/// arrives read rather than merely named.
+///
+/// `Err` is why one file could not go, in words meant for the owner to read in
+/// his own turn. Silence would have the agent answer about a file it never
+/// received, which is the failure this replaced (bw-t26l.20).
+fn carried_as(attachment: &Value, carries: Carries) -> Result<ContentBlock, String> {
+    let name = attachment["alt"].as_str().unwrap_or("the attached file");
+    let mime = attachment_mime(attachment, "application/octet-stream");
+
+    if mime.starts_with("image/") && carries.pictures {
+        if let Some(data) = attached_bytes(attachment) {
+            return Ok(ContentBlock::Image(ImageContent::new(data, mime)));
+        }
+    }
+    if mime.starts_with("audio/") && carries.audio {
+        if let Some(data) = attached_bytes(attachment) {
+            return Ok(ContentBlock::Audio(AudioContent::new(data, mime)));
+        }
+    }
+
+    // Everything below needs the file itself, which only the store has. Without
+    // it there is no URI to point the agent at, and the only thing left is to
+    // say so — which is why the reason names the capability when there was one:
+    // a picture stopped here was stopped by what the agent said, not by us.
+    let Some(path) = attachment["asset"].as_str().and_then(kept_file) else {
+        return Err(if mime.starts_with("image/") && !carries.pictures {
+            format!("{name} (this agent says it cannot be sent pictures, and the file was not kept)")
+        } else if mime.starts_with("audio/") && !carries.audio {
+            format!("{name} (this agent says it cannot be sent audio, and the file was not kept)")
+        } else {
+            format!("{name} (nothing was left of it to send)")
+        });
+    };
+    let uri = format!("file://{}", path.display());
+    let size = std::fs::metadata(&path).ok().map(|weighed| weighed.len());
+
+    if carries.embedded && size.is_some_and(|bytes| bytes <= EMBED_LIMIT) {
+        // Text goes as text. A page of notes read as a base64 blob is a page of
+        // notes the model has to decode before it can read it, and half the
+        // agents will not bother.
+        let held = if mime.starts_with("text/") || mime == "application/json" {
+            std::fs::read_to_string(&path).ok().map(|words| {
+                EmbeddedResourceResource::TextResourceContents(
+                    TextResourceContents::new(words, uri.clone()).mime_type(mime.clone()),
+                )
+            })
+        } else {
+            attached_bytes(attachment).map(|blob| {
+                EmbeddedResourceResource::BlobResourceContents(
+                    BlobResourceContents::new(blob, uri.clone()).mime_type(mime.clone()),
+                )
+            })
+        };
+        if let Some(held) = held {
+            return Ok(ContentBlock::Resource(EmbeddedResource::new(held)));
+        }
+    }
+
+    Ok(ContentBlock::ResourceLink(
+        ResourceLink::new(name, uri)
+            .mime_type(mime)
+            .size(size.and_then(|bytes| i64::try_from(bytes).ok())),
+    ))
 }
 
 /// What is sent for a message, with the attachments the agent will take.
 ///
-/// `takes_pictures` is what the agent said about `promptCapabilities.image`.
-/// An agent that cannot take one is told so in words rather than handed a
-/// block it will refuse: the refusal fails the entire `session/prompt`, and
-/// what is lost with it is the sentence the owner typed (bw-t26l.20). The
-/// picture cannot be delivered either way; the difference is whether his turn
-/// happens and he is told why, or neither.
-fn prompt_content(command: &Command, takes_pictures: bool) -> Result<Vec<ContentBlock>, String> {
+/// `carries` is what the agent said about its own `promptCapabilities`. Nothing
+/// is handed a block it told us it will refuse: the refusal fails the entire
+/// `session/prompt`, and what is lost with it is the sentence the owner typed
+/// (bw-t26l.20). Almost nothing has to be left off any more — a resource link
+/// is the universal carrier and every agent MUST take one — so the only file
+/// that still goes undelivered is one with no bytes and nothing on disk.
+fn prompt_content(command: &Command, carries: Carries) -> Result<Vec<ContentBlock>, String> {
     let text = command
         .fields
         .get("text")
         .and_then(Value::as_str)
         .ok_or_else(|| "text is required".to_string())?;
     let mut content = Vec::new();
-    let mut refused = 0usize;
+    let mut refused: Vec<String> = Vec::new();
     let attachments = command
         .fields
         .get("images")
@@ -1351,11 +1521,10 @@ fn prompt_content(command: &Command, takes_pictures: bool) -> Result<Vec<Content
                     }
                 }
                 Some("image") => {
-                    if let Some((data, mime)) = named(part).as_ref().and_then(attached_picture) {
-                        if takes_pictures {
-                            content.push(ContentBlock::Image(ImageContent::new(data, mime)));
-                        } else {
-                            refused += 1;
+                    if let Some(attachment) = named(part) {
+                        match carried_as(&attachment, carries) {
+                            Ok(block) => content.push(block),
+                            Err(why) => refused.push(why),
                         }
                     }
                 }
@@ -1371,19 +1540,16 @@ fn prompt_content(command: &Command, takes_pictures: bool) -> Result<Vec<Content
             .into_iter()
             .flatten()
         {
-            if let Some((data, mime)) = attached_picture(image) {
-                if !takes_pictures {
-                    refused += 1;
-                    continue;
-                }
-                content.push(ContentBlock::Image(ImageContent::new(data, mime)));
+            match carried_as(image, carries) {
+                Ok(block) => content.push(block),
+                Err(why) => refused.push(why),
             }
         }
     }
-    if refused > 0 {
+    if !refused.is_empty() {
         content.push(ContentBlock::Text(TextContent::new(format!(
-            "[{refused} {} left off: this agent says it cannot be sent pictures.]",
-            if refused == 1 { "picture was" } else { "pictures were" }
+            "[Left off: {}.]",
+            refused.join("; ")
         ))));
     }
     Ok(content)
@@ -1728,17 +1894,19 @@ pub struct AcpDriver {
     ended: mpsc::UnboundedReceiver<String>,
     permissions: Arc<PermissionBroker>,
     elicitations: Arc<ElicitationBroker>,
-    /// Whether this agent said it can be sent a picture.
+    /// What this agent said it can be handed in a prompt.
     ///
-    /// ACP gates image blocks in a prompt on `promptCapabilities.image`
-    /// (schema `v1/content.rs`: "Requires the `image` prompt capability when
-    /// included in prompts"). We never read it and always sent the block, so
-    /// attaching a picture to a chat on an agent that cannot take one failed
-    /// the whole `session/prompt` — losing what he had typed along with the
-    /// attachment, under a red error that named neither (bw-t26l.20). Set
-    /// from the initialize answer; true until it says otherwise, because an
-    /// agent that declares nothing is not thereby refusing.
-    takes_pictures: Arc<AtomicBool>,
+    /// ACP gates image, audio and embedded-resource blocks on the matching
+    /// `promptCapabilities` flag. We never read any of them and always sent the
+    /// block, so attaching a picture to a chat on an agent that cannot take one
+    /// failed the whole `session/prompt` — losing what he had typed along with
+    /// the attachment, under a red error that named neither (bw-t26l.20). Set
+    /// from the initialize answer; see `Carries::default` for what is assumed
+    /// of an agent that said nothing.
+    ///
+    /// Three flags in one word, because they are read together on every send
+    /// and an agent's answer never changes after initialize.
+    carries: Arc<AtomicU8>,
     normalizer: Arc<Mutex<AcpNormalizer>>,
     reconcile: super::super::status::Reconciler,
     in_flight: super::super::status::Requests,
@@ -1938,8 +2106,8 @@ impl AcpDriver {
         let closing = Arc::new(AtomicBool::new(false));
         let permissions = Arc::new(PermissionBroker::default());
         let elicitations = Arc::new(ElicitationBroker::default());
-        let takes_pictures = Arc::new(AtomicBool::new(true));
-        let task_takes_pictures = takes_pictures.clone();
+        let carries = Arc::new(AtomicU8::new(Carries::default().packed()));
+        let task_carries = carries.clone();
         let task_database = database.clone();
         let task_session = session.clone();
         let task_agent_definitions = if brand == "codex" {
@@ -2120,15 +2288,10 @@ impl AcpDriver {
                         let supports_close = initialized
                             .pointer("/agentCapabilities/sessionCapabilities/close")
                             .is_some();
-                        // Only a stated `false` is a refusal. An agent that
-                        // declares no promptCapabilities at all has not said
-                        // it cannot take a picture, and the ones this app
-                        // bundles all can.
-                        if initialized.pointer("/agentCapabilities/promptCapabilities/image")
-                            == Some(&Value::Bool(false))
-                        {
-                            task_takes_pictures.store(false, Ordering::SeqCst);
-                        }
+                        task_carries.store(
+                            Carries::read(&initialized).packed(),
+                            Ordering::SeqCst,
+                        );
                         // Which API the agent is actually talking to. An agent
                         // that says it has providers is asked; one that does
                         // not is not, and its chat says nothing about an
@@ -2629,7 +2792,7 @@ impl AcpDriver {
             ended,
             permissions,
             elicitations,
-            takes_pictures,
+            carries,
             normalizer: driver_normalizer,
             reconcile,
             in_flight: driver_in_flight,
@@ -2655,7 +2818,8 @@ impl AcpDriver {
                     command.at("text").as_str().unwrap_or_default(),
                 )
                 .await?;
-                let content = prompt_content(command, self.takes_pictures.load(Ordering::SeqCst))?;
+                let content =
+                    prompt_content(command, Carries::unpacked(self.carries.load(Ordering::SeqCst)))?;
                 let images = command
                     .fields
                     .get("images")
@@ -3004,6 +3168,10 @@ mod tests {
         }
     }
 
+    /// The store is chosen by one environment variable, which is the whole
+    /// process's, so the tests that repoint it take turns.
+    static THE_STORE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn prompt_with_images(images: Value) -> Command {
         let mut fields = serde_json::Map::new();
         fields.insert("text".into(), json!("what is in this picture?"));
@@ -3027,7 +3195,7 @@ mod tests {
             "dataUrl": "data:image/png;base64,iVBORw0KGgo=",
             "alt": "a screenshot",
         }]));
-        let content = prompt_content(&command, true).unwrap();
+        let content = prompt_content(&command, Carries::default()).unwrap();
         assert_eq!(content.len(), 2, "the text and the picture both go out");
         match &content[1] {
             ContentBlock::Image(image) => {
@@ -3052,7 +3220,7 @@ mod tests {
             ]),
         );
 
-        let content = prompt_content(&command, true).unwrap();
+        let content = prompt_content(&command, Carries::default()).unwrap();
         assert_eq!(content.len(), 5);
         assert!(matches!(&content[0], ContentBlock::Text(text) if text.text == "before "));
         assert!(matches!(&content[1], ContentBlock::Image(image) if image.data == "QUJD"));
@@ -3080,7 +3248,7 @@ mod tests {
             ]),
         );
 
-        let content = prompt_content(&command, true).unwrap();
+        let content = prompt_content(&command, Carries::default()).unwrap();
         assert_eq!(content.len(), 3);
         assert!(matches!(&content[0], ContentBlock::Image(image) if image.data == "QUJD"));
         assert!(matches!(&content[1], ContentBlock::Text(text) if text.text == " then "));
@@ -3099,7 +3267,7 @@ mod tests {
             ]),
         );
 
-        let content = prompt_content(&command, true).unwrap();
+        let content = prompt_content(&command, Carries::default()).unwrap();
         assert_eq!(content.len(), 1);
         assert!(matches!(&content[0], ContentBlock::Image(image) if image.data == "QUJD"));
     }
@@ -3112,6 +3280,7 @@ mod tests {
     /// handed a message with the picture silently missing from it.
     #[test]
     fn a_picture_kept_in_the_store_is_read_back_for_the_agent() {
+        let _turn = THE_STORE.lock().unwrap_or_else(|held| held.into_inner());
         let root = tempfile::tempdir().unwrap();
         std::env::set_var("ATELIER_PRESENTATION_MEDIA_DIR", root.path());
         let bytes = b"ABC";
@@ -3120,7 +3289,7 @@ mod tests {
         let command = prompt_with_images(json!([
             {"id":"one", "mime":"image/png", "dataUrl":"", "alt":"one.png", "asset":asset},
         ]));
-        let content = prompt_content(&command, true).unwrap();
+        let content = prompt_content(&command, Carries::default()).unwrap();
         assert!(
             content.iter().any(|block| matches!(block, ContentBlock::Image(image) if image.data == "QUJD")),
             "the picture did not reach the agent: {content:?}",
@@ -3132,7 +3301,7 @@ mod tests {
             {"id":"one", "mime":"image/png", "dataUrl":"", "alt":"one.png", "asset":format!("{}.png", "b".repeat(64))},
         ]));
         assert!(
-            !prompt_content(&missing, true).unwrap().iter().any(|block| matches!(block, ContentBlock::Image(_))),
+            !prompt_content(&missing, Carries::default()).unwrap().iter().any(|block| matches!(block, ContentBlock::Image(_))),
             "a picture the store does not have became a block anyway",
         );
         std::env::remove_var("ATELIER_PRESENTATION_MEDIA_DIR");
@@ -3153,7 +3322,7 @@ mod tests {
             ]),
         );
 
-        let content = prompt_content(&command, true).unwrap();
+        let content = prompt_content(&command, Carries::default()).unwrap();
         assert_eq!(content.len(), 1);
         assert!(matches!(&content[0], ContentBlock::Text(text) if text.text == "look"));
     }
@@ -3168,14 +3337,24 @@ mod tests {
             {"mime": "image/gif", "dataUrl": "not-a-data-url"},
             {"alt": "nothing at all"},
         ]));
-        let content = prompt_content(&command, true).unwrap();
-        assert_eq!(content.len(), 2, "only the picture with a payload goes out");
+        let content = prompt_content(&command, Carries::default()).unwrap();
         match &content[1] {
             ContentBlock::Image(image) => {
                 assert_eq!(image.data, "QUJD");
                 assert_eq!(image.mime_type, "image/jpeg");
             }
             other => panic!("the picture must go as an image block, got {other:?}"),
+        }
+        // The other two have neither bytes nor a file in the store, so there is
+        // nothing to send. They are named in one closing line rather than
+        // dropped in silence: the agent must not answer about what never came.
+        assert_eq!(content.len(), 3, "the two empty pictures must be accounted for: {content:?}");
+        match &content[2] {
+            ContentBlock::Text(text) => {
+                assert!(text.text.starts_with("[Left off: "), "{text:?}");
+                assert!(text.text.contains("nothing at all"), "{text:?}");
+            }
+            other => panic!("the tally must go as words, got {other:?}"),
         }
     }
 
@@ -3194,7 +3373,7 @@ mod tests {
             "alt": "a screenshot",
         }]));
 
-        let content = prompt_content(&command, false).unwrap();
+        let content = prompt_content(&command, Carries { pictures: false, ..Carries::default() }).unwrap();
         let words = content
             .iter()
             .map(|block| match block {
@@ -3209,9 +3388,121 @@ mod tests {
         assert!(words[1].contains("cannot be sent pictures"), "{words:?}");
 
         // The same command to an agent that can take one is unchanged.
-        let taken = prompt_content(&command, true).unwrap();
+        let taken = prompt_content(&command, Carries::default()).unwrap();
         assert!(matches!(taken[1], ContentBlock::Image(_)), "{taken:?}");
         assert_eq!(taken.len(), 2);
+    }
+
+    /// Any file at all reaches the agent, as the richest block that agent said
+    /// it takes (bw-oamr.3).
+    ///
+    /// The ladder is one path for every kind and every provider: bytes inline
+    /// when the capability was advertised, and a resource link — which every
+    /// agent MUST support — underneath everything else. There are no brand
+    /// names in it, which is the point: a new agent is carried by what it says
+    /// about itself, not by a branch somebody remembered to add.
+    #[test]
+    fn any_file_goes_as_the_richest_block_the_agent_takes() {
+        let _turn = THE_STORE.lock().unwrap_or_else(|held| held.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        std::env::set_var("ATELIER_PRESENTATION_MEDIA_DIR", root.path());
+        let keep = |bytes: &[u8], name: &str| {
+            crate::workbench::media::import_attachment(bytes, name, root.path()).unwrap()
+        };
+
+        // A PDF: no agent takes one inline, so it goes as a link to the file,
+        // named, typed and weighed so the agent can decide to open it.
+        let paper = prompt_with_images(json!([
+            {"alt":"the paper.pdf", "asset":keep(b"%PDF-1.7 ...", "the paper.pdf")},
+        ]));
+        let content = prompt_content(&paper, Carries::default()).unwrap();
+        match &content[1] {
+            ContentBlock::ResourceLink(link) => {
+                assert_eq!(link.name, "the paper.pdf");
+                assert!(link.uri.starts_with("file://"), "{link:?}");
+                assert!(link.uri.ends_with(".pdf"), "{link:?}");
+                assert_eq!(link.mime_type.as_deref(), Some("application/pdf"));
+                assert_eq!(link.size, Some(12));
+            }
+            other => panic!("a pdf must go as a resource link, got {other:?}"),
+        }
+
+        // A recording: inline to an agent that said it takes audio, and the
+        // same link to one that said nothing.
+        let recording = prompt_with_images(json!([
+            {"alt":"a note.wav", "asset":keep(b"ABC", "a note.wav")},
+        ]));
+        let heard = prompt_content(&recording, Carries { audio: true, ..Carries::default() }).unwrap();
+        match &heard[1] {
+            ContentBlock::Audio(audio) => {
+                assert_eq!(audio.data, "QUJD");
+                assert_eq!(audio.mime_type, "audio/wav");
+            }
+            other => panic!("an agent that takes audio must be given it, got {other:?}"),
+        }
+        let deaf = prompt_content(&recording, Carries::default()).unwrap();
+        assert!(matches!(&deaf[1], ContentBlock::ResourceLink(_)), "{deaf:?}");
+
+        // Words to an agent that takes embedded context go as words, not as a
+        // base64 blob it would have to decode before it could read them.
+        let notes = prompt_with_images(json!([
+            {"alt":"notes.txt", "asset":keep(b"remember the milk", "notes.txt")},
+        ]));
+        let read = prompt_content(&notes, Carries { embedded: true, ..Carries::default() }).unwrap();
+        match &read[1] {
+            ContentBlock::Resource(held) => match &held.resource {
+                EmbeddedResourceResource::TextResourceContents(words) => {
+                    assert_eq!(words.text, "remember the milk");
+                    assert_eq!(words.mime_type.as_deref(), Some("text/plain"));
+                }
+                other => panic!("text must be embedded as text, got {other:?}"),
+            },
+            other => panic!("an agent that takes embedded context must be given it, got {other:?}"),
+        }
+        // The same file to an agent that said nothing still arrives, as a link.
+        let linked = prompt_content(&notes, Carries::default()).unwrap();
+        assert!(matches!(&linked[1], ContentBlock::ResourceLink(_)), "{linked:?}");
+
+        // A file too big to embed goes as a link even to an agent that takes
+        // embedded context: a prompt is not a file transfer.
+        let heavy = prompt_with_images(json!([
+            {"alt":"a dump.txt", "asset":keep(&vec![b'x'; EMBED_LIMIT as usize + 1], "a dump.txt")},
+        ]));
+        let sent = prompt_content(&heavy, Carries { embedded: true, ..Carries::default() }).unwrap();
+        match &sent[1] {
+            ContentBlock::ResourceLink(link) => {
+                assert_eq!(link.size, Some(EMBED_LIMIT as i64 + 1));
+            }
+            other => panic!("a file past the limit must go as a link, got {other:?}"),
+        }
+
+        std::env::remove_var("ATELIER_PRESENTATION_MEDIA_DIR");
+    }
+
+    /// What an agent takes is read off its own initialize answer, and an agent
+    /// that said nothing is assumed to take a picture and nothing else.
+    #[test]
+    fn what_an_agent_takes_is_read_off_its_own_answer() {
+        let said = |capabilities: Value| Carries::read(&json!({"agentCapabilities":{"promptCapabilities":capabilities}}));
+
+        assert_eq!(Carries::read(&json!({})), Carries::default());
+        assert_eq!(said(json!({})), Carries::default());
+        assert_eq!(
+            said(json!({"image": false, "audio": false, "embeddedContext": false})),
+            Carries { pictures: false, audio: false, embedded: false },
+        );
+        assert_eq!(
+            said(json!({"image": true, "audio": true, "embeddedContext": true})),
+            Carries { pictures: true, audio: true, embedded: true },
+        );
+        // Anything but a plain no leaves pictures on: they are the one kind
+        // with no link to fall back to inside the conversation.
+        assert!(said(json!({"image": "yes"})).pictures);
+
+        // And the three facts survive the word they are carried in.
+        for word in 0..8u8 {
+            assert_eq!(Carries::unpacked(word).packed(), word);
+        }
     }
 
     #[tokio::test]
@@ -3269,7 +3560,7 @@ mod tests {
             ended,
             permissions: Arc::new(PermissionBroker::default()),
             elicitations: Arc::new(ElicitationBroker::default()),
-            takes_pictures: Arc::new(AtomicBool::new(true)),
+            carries: Arc::new(AtomicU8::new(Carries::default().packed())),
             normalizer: Arc::new(Mutex::new(activity)),
             reconcile: Arc::new(|| Box::pin(async { Ok(json!({})) })),
             in_flight,
@@ -3341,7 +3632,7 @@ mod tests {
             ended,
             permissions: Arc::new(PermissionBroker::default()),
             elicitations: Arc::new(ElicitationBroker::default()),
-            takes_pictures: Arc::new(AtomicBool::new(true)),
+            carries: Arc::new(AtomicU8::new(Carries::default().packed())),
             normalizer: Arc::new(Mutex::new(AcpNormalizer::default())),
             reconcile: Arc::new(|| Box::pin(async { Ok(json!({})) })),
             in_flight: Default::default(),
@@ -3576,7 +3867,7 @@ mod tests {
             ended,
             permissions: Arc::new(PermissionBroker::default()),
             elicitations: Arc::new(ElicitationBroker::default()),
-            takes_pictures: Arc::new(AtomicBool::new(true)),
+            carries: Arc::new(AtomicU8::new(Carries::default().packed())),
             normalizer: Arc::new(Mutex::new(AcpNormalizer::default())),
             reconcile: Arc::new(|| Box::pin(async { Ok(json!({})) })),
             in_flight: Default::default(),
@@ -3654,7 +3945,7 @@ mod tests {
             ended,
             permissions: Arc::new(PermissionBroker::default()),
             elicitations: Arc::new(ElicitationBroker::default()),
-            takes_pictures: Arc::new(AtomicBool::new(true)),
+            carries: Arc::new(AtomicU8::new(Carries::default().packed())),
             normalizer: Arc::new(Mutex::new(AcpNormalizer::default())),
             reconcile: Arc::new(|| Box::pin(async { Ok(json!({})) })),
             in_flight: Default::default(),
