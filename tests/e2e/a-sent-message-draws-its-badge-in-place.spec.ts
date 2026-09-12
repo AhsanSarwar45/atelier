@@ -7,16 +7,16 @@ import type { WbpEvent } from '../../src/workbench/protocol';
 import { discardFixture, makeFixtureProject } from './fixture-board';
 
 /**
- * A sent message draws each picture where its badge sat (bw-oamr.2).
+ * A sent message wears its attachment's chip in place (bw-oamr.2, bw-oamr.4).
  *
- * Every picture used to be pinned above the words in one grid however the
- * person had arranged them, and the only trace of where a picture belonged was
- * the app's own `[Image: name]` prose, left behind in the middle of his
- * sentence. Two pictures either side of a sentence came out as two thumbnails
- * on top and two bracketed names in the text.
+ * The writing box shows an attachment as a small badge chip sitting in the
+ * sentence. Sending used to throw that chip away and leave the app's own
+ * `[Image: name]` prose in its place, so what he read back was not what he
+ * wrote.
  *
- * The position travels as a number on the picture now, so the words are only
- * his words and each picture is drawn in its place.
+ * The place travels as a number on the picture now, so the sent message wears
+ * the same chip in the same spot, and the pictures keep the grid above the
+ * words they always had.
  *
  * Set BADGE_IN_PLACE_BEFORE to seed the same message the old way — the prose in
  * the text, no position on either picture — which is how the "before" half of
@@ -34,7 +34,7 @@ const PICTURE =
   'ICAgICAgIKCfxOwEBAQEBAQEBAQE9JNYdYCAgICAgICAgICA470LgSCGQy0Mr04AAAAASUVO' +
   'RK5CYII=';
 
-test('a sent message draws each picture where its badge sat', async ({ page, request }) => {
+test('a sent message wears its attachment chip where the badge sat', async ({ page, request }) => {
   await page.setViewportSize({ width: 1100, height: 900 });
   const run = join(process.cwd(), 'tests', '.workbench-run-badge-in-place');
   const projectPath = makeFixtureProject(join(run, 'project'), join(run, 'reporting'));
@@ -96,25 +96,34 @@ test('a sent message draws each picture where its badge sat', async ({ page, req
     await expect(page.getByText('Here is the board')).toBeVisible();
 
     const message = page.locator('[data-testid="user-message"]');
+    // The pictures keep their grid above the words, whichever way it was sent.
+    await expect(message.locator('[data-testid="picture-grid"]')).toHaveCount(1);
     await expect(message.locator('[data-testid="message-image"]')).toHaveCount(2);
 
+    const chips = message.locator('[data-testid="message-attachment-badge"]');
     if (before) {
-      // Both pictures above the words, and the app's prose left in the sentence.
-      await expect(message.locator('[data-testid="picture-grid"]')).toHaveCount(1);
+      // No chip at all, and the app's prose left standing in his sentence.
+      await expect(chips).toHaveCount(0);
       await expect(message).toContainText('[Image: board.png]');
     } else {
-      // One grid per picture, each drawn where its badge sat, and not a bracket
-      // anywhere in what he wrote.
-      await expect(message.locator('[data-testid="picture-grid"]')).toHaveCount(2);
+      // The same chip the writing box gives it, named and in order, with not a
+      // bracket anywhere in what he wrote.
+      await expect(chips).toHaveCount(2);
+      await expect(chips.nth(0)).toHaveText('board.png');
+      await expect(chips.nth(1)).toHaveText('chat.png');
       await expect(message).not.toContainText('[Image:');
 
-      // Proven by position, not just by count: the first picture sits below the
-      // words that came before it and above the words that came after.
+      // Proven by position, not just by order: each chip sits on the same line
+      // as the words it was attached between, which is what the writing box
+      // shows and what breaking the prose into blocks either side would lose.
       const words = await message.locator('p').first().boundingBox();
-      const first = await message.locator('[data-testid="message-image"]').first().boundingBox();
-      const rest = await message.locator('p').nth(1).boundingBox();
-      expect(words!.y, 'the first picture is not below the words it followed').toBeLessThan(first!.y);
-      expect(first!.y, 'the first picture is not above the words it preceded').toBeLessThan(rest!.y);
+      const first = await chips.nth(0).boundingBox();
+      const second = await chips.nth(1).boundingBox();
+      expect(first!.y, 'the first chip is not on the line of the words it sat in')
+        .toBeGreaterThanOrEqual(words!.y - 2);
+      expect(first!.y + first!.height, 'the first chip is not on the line of the words it sat in')
+        .toBeLessThanOrEqual(words!.y + words!.height + 2);
+      expect(first!.x, 'the chips are not in the order they were attached').toBeLessThan(second!.x);
     }
 
     await page.screenshot({

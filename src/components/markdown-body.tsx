@@ -58,6 +58,12 @@ export interface Mentions {
    * the link it already was (bw-8fh2.2).
    */
   link?: (href: string) => ReactNode | null;
+  /**
+   * The nth file attached to this message, drawn as the chip the writing box
+   * gave it, in the place it was attached. Nothing, and the marker the sender
+   * wrote is simply not there to be seen (bw-oamr.4).
+   */
+  attachment?: (index: number) => ReactNode;
 }
 
 const PROSE_CLASSES =
@@ -423,6 +429,10 @@ export function MarkdownBody({
             const marks = props as Record<string, string | undefined>;
             const card = marks['data-card-mention'];
             if (card && mentions) return <>{mentions.card(card)}</>;
+            const attached = marks['data-attachment-mention'];
+            if (attached !== undefined && mentions?.attachment) {
+              return <>{mentions.attachment(Number(attached))}</>;
+            }
             const path = marks['data-path-mention'];
             if (path && mentions?.path) {
               const line = marks['data-path-line'];

@@ -21,6 +21,7 @@ import { Brain, ChevronRight, Hand, Loader2 } from 'lucide-react';
 
 import { MarkdownBody, type Mentions } from '@/components/markdown-body';
 import { Badge } from '@/components/ui/badge';
+import { FILE_BADGE_CLASS, FILE_KINDS, fileKind } from '@/components/file-kinds';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -36,6 +37,7 @@ import { DiffTable } from '@/workbench/diff-table';
 import { diffLines } from '@/workbench/line-diff';
 import { opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
 import { lookOf, markOf } from '@/workbench/machine-look';
+import { attachmentMarker, attachmentsIn } from '@/workbench/mentions';
 import { PictureGrid } from '@/workbench/picture-grid';
 import { withoutProposedPlans } from '@/workbench/proposed-plan';
 import { ImageComparisonView } from '@/workbench/image-comparison';
@@ -977,46 +979,100 @@ const MessageRow = memo(function MessageRow({
         sentOff(sentBy) && SENT_OFF,
       )}
     >
-      <PictureGrid images={drawnInPlace(item).above} onLook={onLook} />
+      <PictureGrid images={item.images} onLook={onLook} />
       <RichMessageContent item={item} mentions={mentions} onLook={onLook} />
     </div>
   );
 });
 
 /**
- * Which of a message's pictures are drawn in the words, and where.
+ * Where each attachment's chip goes in the words of a message.
  *
- * The composer records where each badge sat as an offset into the text it sent
- * (bw-oamr.2). Those offsets only mean anything against that same text, and the
- * drawn text is not always it: `withoutProposedPlans` takes a proposed plan out
- * and trims the ends, either of which moves everything after it. Trimming is
- * worked around, because it is a fixed shift; a plan actually taken out is not,
- * and those pictures go back above the message.
+ * The writing box draws an attachment twice and on purpose: a thumbnail in the
+ * tray above, and a chip inline at the point in the sentence where it was
+ * attached. A sent message drew the thumbnail and not the chip — in its place
+ * were the app's own `[Image: name]` words, which is what the owner reported.
+ * So the chip is drawn here too, from the offset the composer recorded
+ * (bw-oamr.4). The pictures keep the grid above regardless; the chip is an
+ * addition to the message, never a replacement for the picture.
  *
- * The two halves of the answer are worked out together and on purpose. When
- * this was two separate filters — one deciding what to draw above, one deciding
- * what to draw inline — a picture the second half declined to place was dropped
- * by the first half as well, and disappeared from the message altogether, which
- * is the whole family of bug this job is about.
+ * The offsets only mean anything against the text they were taken from, and
+ * the drawn text is not always it: `withoutProposedPlans` takes a plan out and
+ * trims the ends, either of which moves everything after. Trimming is a fixed
+ * shift and is worked around; a plan actually taken out is not, and those
+ * attachments simply go without a chip. Nothing is lost either way, because the
+ * picture itself is in the grid above and never depended on this.
  */
-function drawnInPlace(item: Extract<TranscriptItem, { kind: 'message' }>): {
-  inline: Map<number, ImagePayload[]>;
-  above: ImagePayload[];
-} {
-  const inline = new Map<number, ImagePayload[]>();
-  const above: ImagePayload[] = [];
+function chipsInPlace(item: Extract<TranscriptItem, { kind: 'message' }>): { at: number; image: ImagePayload }[] {
   const drawn = withoutProposedPlans(item.text);
   const lead = item.text.length - item.text.replace(/^\s+/, '').length;
-  const shifts = drawn === item.text.trim();
-  for (const image of item.images) {
-    if (image.at === undefined || !shifts) {
-      above.push(image);
-      continue;
-    }
-    const at = Math.max(0, Math.min(drawn.length, image.at - lead));
-    inline.set(at, [...(inline.get(at) ?? []), image]);
-  }
-  return { inline, above };
+  if (drawn !== item.text.trim()) return [];
+  return item.images
+    .filter((image) => image.at !== undefined)
+    .map((image) => ({ at: Math.max(0, Math.min(drawn.length, image.at! - lead)), image }))
+    .sort((a, b) => a.at - b.at);
+}
+
+/**
+ * The words with a marker written in wherever an attachment was dropped.
+ *
+ * Splicing the chip in as its own element meant splitting the prose into a
+ * block either side of it, and two markdown blocks stack: the chip landed on a
+ * line of its own instead of sitting in the sentence the way the writing box
+ * shows it. A marker goes through as text, so the words stay one block and the
+ * same rewriting step that chips a card id mid-sentence chips this (bw-oamr.4).
+ */
+function withChipMarkers(text: string, chips: { at: number; image: ImagePayload }[]): string {
+  let out = '';
+  let cursor = 0;
+  chips.forEach(({ at }, index) => {
+    out += text.slice(cursor, at) + attachmentMarker(index);
+    cursor = at;
+  });
+  return out + text.slice(cursor);
+}
+
+/**
+ * One attachment, as the chip the writing box gives it.
+ *
+ * The same recipe as a path a reader typed (`path-chip.tsx`) and as the
+ * composer's own widget (`composer-editor.tsx`): the badge variants, the file
+ * kind's colour, the file kind's icon. There is meant to be one chip in this
+ * app and this is it — a second one built by hand is exactly the drift
+ * bw-e9p5.1 closed.
+ */
+function AttachmentChip({ image, onLook }: { image: ImagePayload; onLook: (image: LookableImage) => void }) {
+  const kind = fileKind(image.alt);
+  const Icon = FILE_KINDS[kind].icon;
+  return (
+    <Tooltip label="Click to see it full size">
+      <Badge
+        asChild
+        variant="primary"
+        appearance="outline"
+        size="sm"
+        shape="circle"
+        className={cn(FILE_BADGE_CLASS, 'cursor-zoom-in', FILE_KINDS[kind].color)}
+      >
+        {/* `size="none"`: the badge around it already sets the height, the
+            side padding and the type. The button is here for what it does —
+            the pointer, the focus ring — not for a box of its own, the same
+            way a bead chip wears one (bead-chip-row.tsx). */}
+        <Button
+          type="button"
+          variant="foreground"
+          size="none"
+          className="font-inherit"
+          data-testid="message-attachment-badge"
+          data-file-kind={kind}
+          onClick={() => onLook(image)}
+        >
+          <Icon className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+          <span>{image.alt}</span>
+        </Button>
+      </Badge>
+    </Tooltip>
+  );
 }
 
 const RICH_BLOCK = /```(atelier-widget|atelier-image-compare)\s*\n([\s\S]*?)\n```/g;
@@ -1037,35 +1093,23 @@ function RichMessageContent({ item, mentions, onLook }: {
   const blocks = new RegExp(RICH_BLOCK.source, RICH_BLOCK.flags);
   let match: RegExpExecArray | null;
 
+  const chips = chipsInPlace(item);
+  // The markers ride inside the words, so every offset below — the fenced
+  // blocks the regex finds, the slices handed to `words` — is measured against
+  // the same string the markers are in.
+  const visibleText = withChipMarkers(withoutProposedPlans(item.text), chips);
+  const drawn: Mentions = {
+    ...mentions,
+    split: (text) => attachmentsIn(text, mentions.split),
+    attachment: (index) => {
+      const chip = chips[index];
+      return chip ? <AttachmentChip image={chip.image} onLook={onLook} /> : null;
+    },
+  };
   const words = (text: string) => {
-    if (text) parts.push(<MarkdownBody key={`words-${part++}`} className="text-sm" mentions={mentions}>{text}</MarkdownBody>);
+    if (text) parts.push(<MarkdownBody key={`words-${part++}`} className="text-sm" mentions={drawn}>{text}</MarkdownBody>);
   };
-
-  const visibleText = withoutProposedPlans(item.text);
-  const placed = drawnInPlace(item).inline;
-  const spots = Array.from(placed.keys()).sort((a, b) => a - b);
-  // Both ends of a span are inclusive, so a picture sitting exactly where a
-  // fenced block begins is drawn at the end of the words before it rather than
-  // falling down the gap between two spans. Drawing it is recorded, because an
-  // inclusive end means the next span would otherwise draw it a second time.
-  const drawn = new Set<number>();
-  const pictures = (at: number) => {
-    const group = placed.get(at);
-    if (!group || drawn.has(at)) return;
-    drawn.add(at);
-    parts.push(<PictureGrid key={`pictures-${part++}`} images={group} onLook={onLook} />);
-  };
-  /** The words between two points, with any picture that belongs inside them. */
-  const span = (from: number, to: number) => {
-    let cursor = from;
-    for (const at of spots) {
-      if (at < from || at > to || drawn.has(at)) continue;
-      words(visibleText.slice(cursor, at));
-      pictures(at);
-      cursor = at;
-    }
-    words(visibleText.slice(cursor, to));
-  };
+  const span = (from: number, to: number) => words(visibleText.slice(from, to));
 
   while ((match = blocks.exec(visibleText)) !== null) {
     span(textAt, match.index);
@@ -1080,9 +1124,6 @@ function RichMessageContent({ item, mentions, onLook }: {
     textAt = blocks.lastIndex;
   }
   span(textAt, visibleText.length);
-  // A picture attached after the last word sits at the very end, which no
-  // half-open span above can contain.
-  pictures(visibleText.length);
   return <>{parts}</>;
 }
 

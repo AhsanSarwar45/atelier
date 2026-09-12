@@ -37,7 +37,41 @@ import { findReferences, referenceLabel, resolveReference } from '@/workbench/re
 export type Piece =
   | { kind: 'text'; text: string }
   | { kind: 'card'; id: string }
+  | { kind: 'attachment'; index: number }
   | PathPiece;
+
+/**
+ * Where an attachment sat in the sentence it was attached to.
+ *
+ * The writing box shows an attachment as a chip standing in the words; this is
+ * how that chip survives sending. The sender writes one of these markers into
+ * the message text at the offset the attachment was dropped at, and the same
+ * rewriting step that turns a card id into a chip turns this into the same
+ * chip — so it flows with the words instead of breaking the line, and every
+ * provider gets it from the one path (bw-oamr.4).
+ */
+const ATTACHMENT = /\[\[atelier-attachment:(\d+)\]\]/g;
+
+/** The marker for the nth attachment on a message, to write into its text. */
+export function attachmentMarker(index: number): string {
+  return `[[atelier-attachment:${index}]]`;
+}
+
+/** One split with the attachment markers in it pulled out as their own pieces. */
+export function attachmentsIn(text: string, split: (text: string) => Piece[]): Piece[] {
+  const out: Piece[] = [];
+  let from = 0;
+  const marks = new RegExp(ATTACHMENT.source, ATTACHMENT.flags);
+  let match: RegExpExecArray | null;
+  while ((match = marks.exec(text)) !== null) {
+    if (match.index > from) out.push(...split(text.slice(from, match.index)));
+    out.push({ kind: 'attachment', index: Number(match[1]) });
+    from = marks.lastIndex;
+  }
+  if (out.length === 0) return split(text);
+  if (from < text.length) out.push(...split(text.slice(from)));
+  return out;
+}
 
 /**
  * A word made of parts joined by dashes or dots — the shape both a card id and
@@ -315,11 +349,21 @@ function onlyMarker(node: HastNode): boolean {
   if (!kids || kids.length !== 1) return false;
   const only = kids[0]!;
   return only.type === 'element'
-    && Boolean(only.properties?.['data-card-mention'] || only.properties?.['data-path-mention']);
+    && Boolean(only.properties?.['data-card-mention']
+      || only.properties?.['data-path-mention']
+      || only.properties?.['data-attachment-mention']);
 }
 
 /** One piece, as the span the page then draws as a chip. */
 function marker(piece: Exclude<Piece, { kind: 'text' }>): HastNode {
+  if (piece.kind === 'attachment') {
+    return {
+      type: 'element',
+      tagName: 'span',
+      properties: { 'data-attachment-mention': String(piece.index) },
+      children: [],
+    };
+  }
   if (piece.kind === 'path') {
     return {
       type: 'element',
@@ -350,7 +394,7 @@ function marker(piece: Exclude<Piece, { kind: 'text' }>): HastNode {
 function filesFrom(pieces: Piece[]): Piece[] {
   const out: Piece[] = [];
   for (const piece of pieces) {
-    if (piece.kind === 'path') {
+    if (piece.kind === 'path' || piece.kind === 'attachment') {
       out.push(piece);
       continue;
     }
