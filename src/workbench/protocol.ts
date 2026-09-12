@@ -1148,7 +1148,7 @@ export type WatchFrame =
    * and says it to every page at the same moment, so a chat sitting silent
    * shows the same number as the one being worked in (plan-usage.ts, bw-dmoe).
    */
-  | { kind: 'usage'; brand?: Brand; usage: PlanUsage }
+  | { kind: 'usage'; brand?: Brand; profile?: string | null; usage: PlanUsage }
   | { kind: 'event'; event: WbpEvent };
 
 /** A chat that touched a card, as the card's own side of the join lists it. */

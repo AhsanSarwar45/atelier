@@ -1236,7 +1236,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     }).catch((e: unknown) => setSteerError(e instanceof Error ? e.message : String(e)));
   }, [sessionBrand]);
   /** The selected provider account's allowance, never the other provider's. */
-  const plan = usePlanUsage(sessionBrand);
+  // The allowance of the account this chat runs on, not of whichever account
+  // the server booted with (bw-5ihw.8).
+  const plan = usePlanUsage(sessionBrand, view.profile);
   const externalId = live?.externalId ?? facts?.externalId ?? null;
   // The stream answers while it spoke last. A running set read on the beat
   // before this chat was opened can name it as somebody else's when the chat
@@ -1602,7 +1604,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       </TabTrail>
 
       {showing === 'search' && <SearchPanel onClose={() => setShowing(null)} />}
-      {showing === 'usage' && <UsageView brand={sessionBrand} onClose={() => setShowing(null)} />}
+      {showing === 'usage' && <UsageView brand={sessionBrand} profile={view.profile} onClose={() => setShowing(null)} />}
       {showing === 'tokens' && sessionId && (
         <TokenView sessionId={sessionId} onClose={() => setShowing(null)} />
       )}

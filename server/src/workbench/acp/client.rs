@@ -241,8 +241,12 @@ fn initialize_request(live: bool) -> Result<UntypedMessage, agent_client_protoco
 /// Enumerate every session an ACP agent knows, following its opaque cursors.
 /// A caller may fall back to legacy discovery only when this returns an error
 /// (adapter unavailable, capability absent, authentication, or bad peer).
-pub async fn list_sessions(brand: &str, cwd: Option<&Path>) -> Result<Vec<ListedSession>, String> {
-    let config = adapter::launch_config(brand, None, None)
+pub async fn list_sessions(
+    brand: &str,
+    cwd: Option<&Path>,
+    profile: Option<&str>,
+) -> Result<Vec<ListedSession>, String> {
+    let config = adapter::launch_config(brand, None, profile)
         .ok_or_else(|| format!("bundled {brand} ACP adapter is incomplete or unavailable"))?;
     let filter = cwd.map(Path::to_path_buf);
     let client = declining_prompts!(agent_client_protocol::Client.builder());

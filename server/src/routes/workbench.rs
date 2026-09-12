@@ -35,6 +35,21 @@ use crate::workbench::{
 
 pub type EventStream = Pin<Box<dyn Stream<Item = Result<SseEvent, Infallible>> + Send>>;
 
+/// One usage connection per Claude account, keyed by profile id.
+type ClaudeReaders = Arc<
+    tokio::sync::Mutex<HashMap<String, crate::workbench::claude::transport::ClaudeTransport>>,
+>;
+
+/// One Codex app-server per working directory and account directory.
+type CodexReaders = Arc<
+    tokio::sync::Mutex<
+        HashMap<
+            (std::path::PathBuf, Option<std::path::PathBuf>),
+            crate::workbench::codex::transport::CodexTransport,
+        >,
+    >,
+>;
+
 #[derive(Clone)]
 pub struct WorkbenchState {
     registry: Arc<WorkbenchRegistry>,
@@ -44,13 +59,12 @@ pub struct WorkbenchState {
     discovery_cache: Arc<tokio::sync::Mutex<HashMap<String, (std::time::Instant, Vec<Value>)>>>,
     discoveries: Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     listing_refused: Arc<tokio::sync::Mutex<HashMap<String, std::time::Instant>>>,
-    claude_usage_reader:
-        Arc<tokio::sync::Mutex<Option<crate::workbench::claude::transport::ClaudeTransport>>>,
-    codex_readers: Arc<
-        tokio::sync::Mutex<
-            HashMap<std::path::PathBuf, crate::workbench::codex::transport::CodexTransport>,
-        >,
-    >,
+    /// One usage connection per Claude account, keyed by profile id.
+    claude_usage_readers: ClaudeReaders,
+    /// One Codex app-server per working directory and account. `None` for the
+    /// account the server booted with, which is read with the environment it
+    /// already has.
+    codex_readers: CodexReaders,
     codex_records: Arc<std::sync::Mutex<HashMap<String, std::path::PathBuf>>>,
     claim_sweeps: Arc<tokio::sync::Mutex<HashMap<std::path::PathBuf, std::time::Instant>>>,
     watch_polls: broadcast::Sender<Value>,
@@ -126,7 +140,7 @@ impl WorkbenchState {
             discovery_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             discoveries: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             listing_refused: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-            claude_usage_reader: Arc::new(tokio::sync::Mutex::new(None)),
+            claude_usage_readers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             codex_readers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             codex_records: Arc::new(std::sync::Mutex::new(HashMap::new())),
             claim_sweeps: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -174,6 +188,39 @@ impl WorkbenchState {
     }
     pub(crate) fn codex_home_directory(&self) -> &std::path::Path {
         self.registry.codex_home_directory()
+    }
+    /// Every directory one brand's accounts keep their records in, for the
+    /// scans that read files rather than spawn a CLI.
+    fn account_directories(&self, brand: &str) -> Vec<std::path::PathBuf> {
+        let known: Vec<std::path::PathBuf> = self
+            .registry
+            .every_account(brand)
+            .into_iter()
+            .map(|(_, directory)| directory)
+            .collect();
+        if known.is_empty() {
+            vec![match brand {
+                "claude" => self.claude_config_directory().to_path_buf(),
+                _ => self.codex_home_directory().to_path_buf(),
+            }]
+        } else {
+            known
+        }
+    }
+
+    /// Every account a Codex app-server can be pointed at, the system one as
+    /// `None` so its process is left the environment it already has.
+    fn codex_account_homes(&self) -> Vec<Option<std::path::PathBuf>> {
+        let accounts = self.registry.every_account("codex");
+        if accounts.is_empty() {
+            return vec![None];
+        }
+        accounts
+            .into_iter()
+            .map(|(id, directory)| {
+                (id != crate::workbench::profiles::SYSTEM).then_some(directory)
+            })
+            .collect()
     }
     /// The rollout file for one Codex chat, looked for under the account that
     /// chat runs on.
@@ -235,7 +282,23 @@ impl WorkbenchState {
         if hold.doing != crate::workbench::external::HeldDoing::Unknown {
             return;
         }
-        if let Some(path) = self.codex_record(&hold.id, None) {
+        // Under whichever account keeps it. A chat held open in a terminal on
+        // the work account has its rollout there and nowhere else, and looking
+        // only under the system account left it reading "Unknown" (bw-5ihw.8).
+        let found = self
+            .registry
+            .every_account("codex")
+            .into_iter()
+            .map(|(id, _)| id)
+            .chain(std::iter::once(
+                crate::workbench::profiles::SYSTEM.to_string(),
+            ))
+            .find_map(|profile| {
+                let named =
+                    (profile != crate::workbench::profiles::SYSTEM).then_some(profile.as_str());
+                self.codex_record(&hold.id, named)
+            });
+        if let Some(path) = found {
             let activity = crate::workbench::external::codex_activity_from_path(&path);
             hold.doing = activity.doing;
             hold.detail = activity.detail;
@@ -244,19 +307,30 @@ impl WorkbenchState {
         }
     }
 
-    /// One read-only app-server per working directory. Initializing Codex is
-    /// expensive; list, metadata and usage reads must share it just as the
-    /// former sidecar's reader cache did.
+    /// One read-only app-server per working directory and account.
+    ///
+    /// Initializing Codex is expensive; list, metadata and usage reads must
+    /// share it just as the former sidecar's reader cache did. The account is
+    /// part of the key because an app-server answers for the `CODEX_HOME` it
+    /// was started with and nothing else: one reader per folder would have
+    /// answered the work account's allowance with the personal account's
+    /// (bw-5ihw.8).
     async fn codex_reader(
         &self,
         cwd: &std::path::Path,
+        home: Option<&std::path::Path>,
     ) -> Result<crate::workbench::codex::transport::CodexTransport, String> {
-        let key = cwd.to_path_buf();
+        let key = (cwd.to_path_buf(), home.map(std::path::Path::to_path_buf));
         let mut readers = self.codex_readers.lock().await;
         if let Some(reader) = readers.get(&key) {
             return Ok(reader.clone());
         }
         let mut config = crate::workbench::codex::transport::CodexTransportConfig::app_server(cwd);
+        if let Some(home) = home {
+            config
+                .environment
+                .push(("CODEX_HOME".into(), home.to_string_lossy().into_owned()));
+        }
         if let Some(executable) = crate::routes::find_tool("codex", &[]) {
             config.executable = executable;
         }
@@ -275,15 +349,17 @@ impl WorkbenchState {
     async fn forget_codex_reader(
         &self,
         cwd: &std::path::Path,
+        home: Option<&std::path::Path>,
         failed: &crate::workbench::codex::transport::CodexTransport,
     ) {
+        let key = (cwd.to_path_buf(), home.map(std::path::Path::to_path_buf));
         let removed = {
             let mut readers = self.codex_readers.lock().await;
             if readers
-                .get(cwd)
+                .get(&key)
                 .is_some_and(|reader| reader.child_id() == failed.child_id())
             {
-                readers.remove(cwd)
+                readers.remove(&key)
             } else {
                 None
             }
@@ -309,11 +385,19 @@ impl WorkbenchState {
             .clone()
     }
 
+    /// The connection plan usage is read over, one per account.
+    ///
+    /// `directory` is where that account's login lives, or `None` for the one
+    /// the computer itself is signed in with — which is asked with the
+    /// environment left alone, because `CLAUDE_CONFIG_DIR=~/.claude` makes
+    /// Claude look for `~/.claude/.claude.json` and answer for nobody.
     async fn claude_usage_reader(
         &self,
+        profile: &str,
+        directory: Option<&std::path::Path>,
     ) -> Result<crate::workbench::claude::transport::ClaudeTransport, String> {
-        let mut reader = self.claude_usage_reader.lock().await;
-        if let Some(transport) = reader.as_ref() {
+        let mut readers = self.claude_usage_readers.lock().await;
+        if let Some(transport) = readers.get(profile) {
             return Ok(transport.clone());
         }
         let options = crate::workbench::claude::transport::ClaudeSessionOptions {
@@ -326,6 +410,12 @@ impl WorkbenchState {
         };
         let mut config =
             crate::workbench::claude::transport::ClaudeTransportConfig::session(&options);
+        if let Some(directory) = directory {
+            config.environment.push((
+                "CLAUDE_CONFIG_DIR".into(),
+                directory.to_string_lossy().into_owned(),
+            ));
+        }
         if let Some(executable) = crate::routes::find_tool("claude", &[]) {
             config.executable = executable;
         }
@@ -338,21 +428,22 @@ impl WorkbenchState {
         if let Some(mut inbound) = transport.take_inbound() {
             tokio::spawn(async move { while inbound.recv().await.is_some() {} });
         }
-        *reader = Some(transport.clone());
+        readers.insert(profile.to_string(), transport.clone());
         Ok(transport)
     }
 
     async fn forget_claude_usage_reader(
         &self,
+        profile: &str,
         failed: &crate::workbench::claude::transport::ClaudeTransport,
     ) {
         let removed = {
-            let mut reader = self.claude_usage_reader.lock().await;
-            if reader
-                .as_ref()
+            let mut readers = self.claude_usage_readers.lock().await;
+            if readers
+                .get(profile)
                 .is_some_and(|current| current.child_id() == failed.child_id())
             {
-                reader.take()
+                readers.remove(profile)
             } else {
                 None
             }
@@ -447,11 +538,23 @@ impl WorkbenchState {
                 }
             })
             .ok();
-        let claude_projects = self.claude_config_directory().join("projects");
-        let codex_sessions = self.codex_home_directory().join("sessions");
+        // One watch per account's record directory. Watching only the boot
+        // account's meant a chat worked on elsewhere under another account
+        // never moved anything on screen (bw-5ihw.8).
+        let claude_projects: Vec<std::path::PathBuf> = self
+            .account_directories("claude")
+            .into_iter()
+            .map(|directory| directory.join("projects"))
+            .collect();
+        let codex_sessions: Vec<std::path::PathBuf> = self
+            .account_directories("codex")
+            .into_iter()
+            .map(|directory| directory.join("sessions"))
+            .collect();
         if let Some(watcher) = external_watcher.as_mut() {
-            let _ = watcher.watch(&claude_projects, RecursiveMode::Recursive);
-            let _ = watcher.watch(&codex_sessions, RecursiveMode::Recursive);
+            for root in claude_projects.iter().chain(codex_sessions.iter()) {
+                let _ = watcher.watch(root, RecursiveMode::Recursive);
+            }
         }
         let mut external_tick = tokio::time::interval_at(
             tokio::time::Instant::now() + Duration::from_secs(1),
@@ -492,18 +595,35 @@ impl WorkbenchState {
                     self.keep_following_the_worked_in(&holds, &mut followed).await;
                 },
                 _ = usage_tick.tick() => {
+                    // Every account of every brand, not one reading per brand:
+                    // an allowance belongs to a login, and the browser keeps
+                    // them apart by the profile named here (bw-5ihw.8).
+                    let asking: Vec<(&str, String)> = ["claude", "codex"]
+                        .iter()
+                        .flat_map(|brand| {
+                            self.registry
+                                .every_account(brand)
+                                .into_iter()
+                                .map(move |(id, _)| (*brand, id))
+                        })
+                        .collect();
                     let readings = async {
-                        tokio::join!(
-                            self.account_usage("claude"),
-                            self.account_usage("codex"),
-                        )
+                        let mut readings = Vec::new();
+                        for (brand, profile) in &asking {
+                            readings.push((
+                                *brand,
+                                profile.clone(),
+                                self.account_usage(brand, Some(profile)).await,
+                            ));
+                        }
+                        readings
                     };
                     tokio::select! {
                         _ = self.watch_poll_wake.notified() => {},
-                        (claude, codex) = readings => {
-                            for (brand, result) in [("claude", claude), ("codex", codex)] {
+                        readings = readings => {
+                            for (brand, profile, result) in readings {
                                 if let Ok(usage) = result {
-                                    let _ = self.watch_polls.send(json!({"kind":"usage","brand":brand,"usage":usage}));
+                                    let _ = self.watch_polls.send(json!({"kind":"usage","brand":brand,"profile":profile,"usage":usage}));
                                 }
                             }
                         }
@@ -716,42 +836,57 @@ impl WorkbenchState {
         }
     }
 
-    pub(crate) async fn account_usage(&self, brand: &str) -> Result<Value, String> {
-        if let Some(value) = fresh_usage(&self.usage_cache, brand).await {
+    /// What one account has left of its plan.
+    ///
+    /// Keyed by brand and account, everywhere: the cache, the in-flight
+    /// refresh, and the connection it is read over. An allowance belongs to a
+    /// login, so a single reading per brand meant a chat on the work account
+    /// drew the owner's own remaining hours (bw-5ihw.8).
+    pub(crate) async fn account_usage(
+        &self,
+        brand: &str,
+        profile: Option<&str>,
+    ) -> Result<Value, String> {
+        let profile = profile.unwrap_or(crate::workbench::profiles::SYSTEM);
+        let key = usage_key(brand, profile);
+        if let Some(value) = fresh_usage(&self.usage_cache, &key).await {
             return Ok(value);
         }
-        // Only callers for this provider share an in-flight refresh. Claude
-        // and Codex must never wait behind each other's fifteen-second native
-        // allowance request.
-        let refresh = self.usage_refresh(brand).await;
+        // Only callers for this account share an in-flight refresh. Claude and
+        // Codex must never wait behind each other's fifteen-second native
+        // allowance request, and neither must two accounts of one brand.
+        let refresh = self.usage_refresh(&key).await;
         let _refresh = refresh.lock().await;
-        if let Some(value) = fresh_usage(&self.usage_cache, brand).await {
+        if let Some(value) = fresh_usage(&self.usage_cache, &key).await {
             return Ok(value);
         }
+        // Where the account's login lives. The system account is read with the
+        // environment the server already has, which is the one thing that
+        // cannot be spelled out; see `claude_usage_reader`.
+        let named = (profile != crate::workbench::profiles::SYSTEM)
+            .then(|| self.registry.profile_directory(brand, profile));
         let at = chrono::Utc::now().to_rfc3339();
         let value = if brand == "codex" {
             let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
-            let transport = self.codex_reader(&cwd).await?;
+            let transport = self.codex_reader(&cwd, named.as_deref()).await?;
             let result = crate::workbench::usage::read_codex(&transport, at).await;
             if result.is_err() {
-                self.forget_codex_reader(&cwd, &transport).await;
+                self.forget_codex_reader(&cwd, named.as_deref(), &transport)
+                    .await;
             }
             serde_json::to_value(result?).map_err(|e| e.to_string())?
         } else if brand == "claude" {
-            let transport = self.claude_usage_reader().await?;
+            let transport = self.claude_usage_reader(profile, named.as_deref()).await?;
             let result = crate::workbench::usage::read_claude(&transport, at).await;
             if result.is_err() {
-                self.forget_claude_usage_reader(&transport).await;
+                self.forget_claude_usage_reader(profile, &transport).await;
             }
             serde_json::to_value(result?).map_err(|e| e.to_string())?
         } else {
             return Err(format!("unknown usage provider {brand}"));
         };
         let mut cache = self.usage_cache.lock().await;
-        cache.insert(
-            brand.to_string(),
-            (std::time::Instant::now(), value.clone()),
-        );
+        cache.insert(key, (std::time::Instant::now(), value.clone()));
         Ok(value)
     }
     async fn window_now(&self, session: &str) -> Option<Result<Value, String>> {
@@ -759,14 +894,22 @@ impl WorkbenchState {
     }
 }
 
+/// One account's allowance, under the brand it belongs to.
+///
+/// Exercised on its own so that the shape the cache and the refresh lock share
+/// cannot drift apart (bw-5ihw.8).
+pub(crate) fn usage_key(brand: &str, profile: &str) -> String {
+    format!("{brand}/{profile}")
+}
+
 async fn fresh_usage(
     cache: &tokio::sync::Mutex<HashMap<String, (std::time::Instant, Value)>>,
-    brand: &str,
+    key: &str,
 ) -> Option<Value> {
     cache
         .lock()
         .await
-        .get(brand)
+        .get(key)
         .filter(|(at, _)| at.elapsed() < Duration::from_secs(30))
         .map(|(_, value)| value.clone())
 }
@@ -850,6 +993,9 @@ async fn spend(State(state): State<WorkbenchState>) -> Result<Json<Value>, ApiEr
 #[derive(Deserialize)]
 struct UsageQuery {
     brand: Option<String>,
+    /// Which account to ask. Absent means the one the computer is signed in
+    /// with, which is what every caller meant before accounts existed.
+    profile: Option<String>,
 }
 async fn usage(
     State(state): State<WorkbenchState>,
@@ -857,7 +1003,10 @@ async fn usage(
 ) -> Result<Json<Value>, ApiError> {
     Ok(Json(
         state
-            .account_usage(query.brand.as_deref().unwrap_or("claude"))
+            .account_usage(
+                query.brand.as_deref().unwrap_or("claude"),
+                query.profile.as_deref(),
+            )
             .await?,
     ))
 }
@@ -1182,7 +1331,28 @@ async fn ask_provider_to_list(
             return Err(format!("{brand} refused session/list a moment ago"));
         }
     }
-    let listed = crate::workbench::acp::client::list_sessions(brand, filter).await;
+    // Each account answers for its own saved chats, so every account is asked
+    // and the answers put together. One refusal does not speak for the others:
+    // an account that is signed out refuses while the signed-in one answers,
+    // and the list is only refused when nothing answered (bw-5ihw.8).
+    let mut listed: Result<Vec<crate::workbench::acp::client::ListedSession>, String> =
+        Err(format!("no {brand} account answered session/list"));
+    // A brand with no relocatable account — the local one — has no accounts to
+    // walk and is asked once, the way it always was.
+    let accounts = match state.registry.every_account(brand) {
+        empty if empty.is_empty() => vec![crate::workbench::profiles::SYSTEM.to_string()],
+        known => known.into_iter().map(|(id, _)| id).collect(),
+    };
+    for profile in accounts {
+        let named = (profile != crate::workbench::profiles::SYSTEM).then_some(profile.as_str());
+        let answer = crate::workbench::acp::client::list_sessions(brand, filter, named).await;
+        match (answer, &mut listed) {
+            (Ok(sessions), Ok(known)) => known.extend(sessions),
+            (Ok(sessions), slot) => *slot = Ok(sessions),
+            (Err(why), Err(first)) => *first = why,
+            (Err(_), Ok(_)) => {}
+        }
+    }
     let mut refusals = state.listing_refused.lock().await;
     if listed.is_err() {
         refusals.insert(brand.to_string(), std::time::Instant::now());
@@ -1326,14 +1496,20 @@ async fn recorded_sessions(
 ) -> Vec<Value> {
     if brand == "claude" {
         let project_owned = project.map(std::path::PathBuf::from);
-        let claude_config = state.registry.claude_config_directory().to_path_buf();
+        // Every account's record directory. A chat saved on the work account
+        // lives under the work account and was simply missing from this list
+        // before (bw-5ihw.8).
+        let directories = state.account_directories("claude");
         return tokio::task::spawn_blocking(move || {
-            crate::workbench::claude::history::list_sessions(
-                &claude_config,
-                project_owned.as_deref(),
-                everything,
-            )
-            .into_iter()
+            directories
+            .iter()
+            .flat_map(|claude_config| {
+                crate::workbench::claude::history::list_sessions(
+                    claude_config,
+                    project_owned.as_deref(),
+                    everything,
+                )
+            })
             .map(|session| json!({
                 "brand":"claude", "externalId":session.session_id, "lastActiveAt":session.last_modified,
                 "name":session.name, "cwd":session.cwd, "branch":session.git_branch,
@@ -1345,15 +1521,25 @@ async fn recorded_sessions(
         .unwrap_or_default();
     }
     let cwd = project_path.unwrap_or_else(|| std::path::Path::new("."));
-    let Ok(transport) = state.codex_reader(cwd).await else {
-        return Vec::new();
-    };
-    let listed =
-        crate::workbench::codex::history::list_threads(&transport, project_path, everything).await;
-    let Ok(threads) = listed else {
-        state.forget_codex_reader(cwd, &transport).await;
-        return Vec::new();
-    };
+    // One app-server per account: a thread list answers for the CODEX_HOME it
+    // was started with, so the accounts are asked one after another and their
+    // answers put together (bw-5ihw.8).
+    let mut threads: Vec<Value> = Vec::new();
+    for home in state.codex_account_homes() {
+        let Ok(transport) = state.codex_reader(cwd, home.as_deref()).await else {
+            continue;
+        };
+        match crate::workbench::codex::history::list_threads(&transport, project_path, everything)
+            .await
+        {
+            Ok(listed) => threads.extend(listed),
+            Err(_) => {
+                state
+                    .forget_codex_reader(cwd, home.as_deref(), &transport)
+                    .await
+            }
+        }
+    }
     threads
         .into_iter()
         .filter_map(|thread| {
@@ -2336,12 +2522,37 @@ mod tests {
         assert!(state.begin_claim_sweep(second).await);
     }
 
+    /// An allowance belongs to a login, so both the cache and the in-flight
+    /// refresh are keyed by the account and not only by the brand.
+    ///
+    /// Before this, one reading per brand was taken and handed to every chat:
+    /// a chat on the work account drew the owner's own remaining hours, and
+    /// the first reading taken kept the second from ever being asked for
+    /// thirty seconds (bw-5ihw.8).
+    #[test]
+    fn an_allowance_is_filed_under_the_account_that_holds_it() {
+        assert_eq!(usage_key("claude", "system"), "claude/system");
+        assert_ne!(
+            usage_key("claude", "system"),
+            usage_key("claude", "work"),
+            "two accounts of one brand must not share a reading"
+        );
+        assert_ne!(
+            usage_key("claude", "work"),
+            usage_key("codex", "work"),
+            "two brands must not share a reading"
+        );
+    }
+
     #[tokio::test]
     async fn usage_single_flights_are_shared_per_provider_not_across_providers() {
         let (_directory, state) = fixture();
-        let claude = state.usage_refresh("claude").await;
-        let same_claude = state.usage_refresh("claude").await;
-        let codex = state.usage_refresh("codex").await;
+        let claude = state.usage_refresh(&usage_key("claude", "system")).await;
+        let same_claude = state.usage_refresh(&usage_key("claude", "system")).await;
+        let codex = state.usage_refresh(&usage_key("codex", "system")).await;
+        // And one account of a brand never waits behind another's.
+        let work = state.usage_refresh(&usage_key("claude", "work")).await;
+        assert!(!Arc::ptr_eq(&claude, &work));
 
         assert!(Arc::ptr_eq(&claude, &same_claude));
         assert!(!Arc::ptr_eq(&claude, &codex));
@@ -2365,7 +2576,7 @@ mod tests {
             let mut cache = state.usage_cache.lock().await;
             for brand in ["claude", "codex"] {
                 cache.insert(
-                    brand.into(),
+                    usage_key(brand, crate::workbench::profiles::SYSTEM),
                     (std::time::Instant::now(), json!({"at":"now"})),
                 );
             }
@@ -2428,7 +2639,7 @@ mod tests {
             let mut cache = state.usage_cache.lock().await;
             for brand in ["claude", "codex"] {
                 cache.insert(
-                    brand.into(),
+                    usage_key(brand, crate::workbench::profiles::SYSTEM),
                     (std::time::Instant::now(), json!({"brand":brand})),
                 );
             }

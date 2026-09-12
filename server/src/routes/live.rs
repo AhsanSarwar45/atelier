@@ -796,11 +796,51 @@ mod tests {
         assert_eq!(
             crate::workbench::external::changed_record_folders(
                 &paths,
-                &home.path().join("claude/projects"),
-                &codex,
+                std::slice::from_ref(&home.path().join("claude/projects")),
+                std::slice::from_ref(&codex),
                 &mut HashMap::new(),
             ),
             Some(vec!["/work/project".to_string()])
+        );
+    }
+
+    /// A record written under a second account is still a record.
+    ///
+    /// The watch used to be handed one `projects/` and one `sessions/`, so a
+    /// chat worked on in a terminal under the work account moved nothing on
+    /// screen: its path belonged to no root the placer knew, and it was
+    /// silently skipped (bw-5ihw.8).
+    #[test]
+    fn outside_change_is_placed_under_whichever_account_wrote_it() {
+        let home = tempfile::tempdir().expect("a temporary provider home");
+        let mine = home.path().join("claude/projects");
+        let work = home.path().join("profiles/claude/work/projects");
+        let codex = home.path().join("codex/sessions");
+        let folder = work.join("-work-elsewhere");
+        fs::create_dir_all(&folder).expect("the work account's project folder");
+        let record = folder.join("session.jsonl");
+        fs::write(&record, "{\"type\":\"meta\",\"cwd\":\"/work/elsewhere\"}\n")
+            .expect("a Claude record");
+
+        let paths = HashSet::from([record]);
+        assert_eq!(
+            crate::workbench::external::changed_record_folders(
+                &paths,
+                std::slice::from_ref(&mine),
+                std::slice::from_ref(&codex),
+                &mut HashMap::new(),
+            ),
+            None,
+            "the work account's record belonged to no root the placer knew"
+        );
+        assert_eq!(
+            crate::workbench::external::changed_record_folders(
+                &paths,
+                &[mine, work],
+                std::slice::from_ref(&codex),
+                &mut HashMap::new(),
+            ),
+            Some(vec!["/work/elsewhere".to_string()])
         );
     }
 
@@ -819,7 +859,7 @@ mod tests {
 
         let paths = HashSet::from([record]);
         assert_eq!(
-            crate::workbench::external::changed_record_folders(&paths, &claude, &codex, &mut HashMap::new()),
+            crate::workbench::external::changed_record_folders(&paths, std::slice::from_ref(&claude), std::slice::from_ref(&codex), &mut HashMap::new()),
             Some(vec!["/work/codex".to_string()])
         );
     }
@@ -836,8 +876,8 @@ mod tests {
         assert_eq!(
             crate::workbench::external::changed_record_folders(
                 &HashSet::from([record]),
-                &claude,
-                &codex,
+                std::slice::from_ref(&claude),
+                std::slice::from_ref(&codex),
                 &mut HashMap::new(),
             ),
             None

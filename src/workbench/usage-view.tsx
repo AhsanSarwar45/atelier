@@ -124,8 +124,8 @@ function Spending({ driving }: { driving: Driving }) {
   );
 }
 
-export function UsageView({ brand = 'claude', onClose }: { brand?: Brand; onClose: () => void }) {
-  const usage = usePlanUsage(brand);
+export function UsageView({ brand = 'claude', profile, onClose }: { brand?: Brand; profile?: string | null; onClose: () => void }) {
+  const usage = usePlanUsage(brand, profile);
   const now = new Date();
   const windows = [usage.session, usage.week, ...usage.perModel].filter((w): w is PlanWindow => w !== null);
 

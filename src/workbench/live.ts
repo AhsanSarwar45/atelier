@@ -19,6 +19,7 @@ import { chatState, counting, type ChatState, type HeldChat } from '@/workbench/
 import { onWorkbench } from '@/workbench/live-wire';
 import { cacheSessionEvent } from '@/workbench/use-session';
 import { NOTHING_KNOWN, type PlanUsage } from '@/workbench/plan-usage';
+import { SYSTEM_PROFILE } from '@/workbench/protocol';
 import type { Brand, RanCall, SessionState, SessionSummary, WatchFrame } from '@/workbench/protocol';
 
 /** What one chat is doing, as every global view needs it. */
@@ -207,7 +208,23 @@ const heardOutside = new Map<string, number>();
  * from the one being worked in (bw-dmoe). Nothing known until the stream
  * speaks, which the chip draws as no chip at all rather than as a zero.
  */
-const usage = new Map<Brand, PlanUsage>([['claude', NOTHING_KNOWN], ['codex', NOTHING_KNOWN]]);
+const usage = new Map<string, PlanUsage>([
+  [usageKey('claude', null), NOTHING_KNOWN],
+  [usageKey('codex', null), NOTHING_KNOWN],
+]);
+
+/**
+ * One account's figure, under the brand it belongs to.
+ *
+ * An allowance belongs to a login, not to a brand: the work account and the
+ * personal one have their own hours, and one figure per brand drew whichever
+ * arrived last over both (bw-5ihw.8). `null` is the account the computer
+ * itself is signed in with, which is what every chat meant before accounts
+ * existed.
+ */
+export function usageKey(brand: Brand, profile: string | null | undefined): string {
+  return `${brand}/${profile ?? SYSTEM_PROFILE}`;
+}
 
 /**
  * How long a figure stands on screen without being said again.
@@ -225,25 +242,25 @@ const usage = new Map<Brand, PlanUsage>([['claude', NOTHING_KNOWN], ['codex', NO
  */
 const FIGURE_STANDS_MS = 90_000;
 
-/** One per brand, restarted every time that brand's figure is said. */
-const figureTimers = new Map<Brand, ReturnType<typeof setTimeout>>();
+/** One per account, restarted every time that account's figure is said. */
+const figureTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-function figureSaid(brand: Brand): void {
-  const standing = figureTimers.get(brand);
+function figureSaid(key: string): void {
+  const standing = figureTimers.get(key);
   if (standing) clearTimeout(standing);
   figureTimers.set(
-    brand,
+    key,
     setTimeout(() => {
-      figureTimers.delete(brand);
-      letFigureGo(brand);
+      figureTimers.delete(key);
+      letFigureGo(key);
     }, FIGURE_STANDS_MS),
   );
 }
 
 /** Back to nothing known, which the chip draws as no chip rather than a zero. */
-function letFigureGo(brand: Brand): void {
-  if (usage.get(brand) === NOTHING_KNOWN) return;
-  usage.set(brand, NOTHING_KNOWN);
+function letFigureGo(key: string): void {
+  if (usage.get(key) === NOTHING_KNOWN) return;
+  usage.set(key, NOTHING_KNOWN);
   announce();
 }
 
@@ -251,9 +268,9 @@ function everyFigureGoes(): boolean {
   figureTimers.forEach((t) => clearTimeout(t));
   figureTimers.clear();
   let letGo = false;
-  usage.forEach((held, brand) => {
+  usage.forEach((held, key) => {
     if (held === NOTHING_KNOWN) return;
-    usage.set(brand, NOTHING_KNOWN);
+    usage.set(key, NOTHING_KNOWN);
     letGo = true;
   });
   return letGo;
@@ -392,9 +409,9 @@ function noteMismatch(now: boolean): void {
 
 function absorb(frame: WatchFrame): void {
   if (frame.kind === 'usage') {
-    const brand = frame.brand ?? 'claude';
-    usage.set(brand, frame.usage);
-    figureSaid(brand);
+    const key = usageKey(frame.brand ?? 'claude', frame.profile);
+    usage.set(key, frame.usage);
+    figureSaid(key);
     listeners.forEach((fn) => fn());
     return;
   }
@@ -633,10 +650,11 @@ export function useLiveSessions(): LiveSession[] {
  * the same number, and the silent one moves while the other spends. No screen
  * asks for it and no chat's traffic decides how fresh it is (bw-dmoe).
  */
-export function usePlanUsage(brand: Brand = 'claude'): PlanUsage {
+export function usePlanUsage(brand: Brand = 'claude', profile?: string | null): PlanUsage {
+  const key = usageKey(brand, profile);
   return useSyncExternalStore(
     subscribe,
-    () => usage.get(brand) ?? NOTHING_KNOWN,
+    () => usage.get(key) ?? NOTHING_KNOWN,
     () => NOTHING_KNOWN,
   );
 }

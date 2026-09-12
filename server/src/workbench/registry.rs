@@ -310,13 +310,48 @@ impl WorkbenchRegistry {
         &self.paths.codex_home
     }
 
+    /// Where one account's login lives.
+    ///
+    /// Deliberately `chat_dir` and not `directory`: an account that has been
+    /// deleted names a path that is not there, and a read there answers empty.
+    /// Falling back to the directory the server booted with would answer a
+    /// question about the work account with the owner's own figures, which is
+    /// the one wrong answer this whole epic exists to stop.
+    pub fn profile_directory(&self, brand: &str, profile: &str) -> PathBuf {
+        self.profiles.chat_dir(brand, Some(profile))
+    }
+
+    /// Every account this brand can be read on, as an id and its directory.
+    pub fn every_account(&self, brand: &str) -> Vec<(String, PathBuf)> {
+        self.profiles.everywhere(brand)
+    }
+
+    /// Who is holding a chat open outside this app, across every account.
+    ///
+    /// A hold is found by reading a provider's own record directory, and each
+    /// account keeps its own. Scanning only the directory the server booted
+    /// with meant a chat open in a terminal on the work account read as
+    /// nobody's (bw-5ihw.8).
     pub fn provider_holds(&self, proc_root: &Path, now_ms: i64) -> Vec<ProviderHold> {
-        external::provider_holds(
-            &self.paths.claude_config,
-            proc_root,
-            &self.paths.codex_home,
-            now_ms,
-        )
+        let claude = self.account_directories("claude", &self.paths.claude_config);
+        let codex = self.account_directories("codex", &self.paths.codex_home);
+        external::provider_holds(&claude, proc_root, &codex, now_ms)
+    }
+
+    /// Every directory one brand's accounts live in, the boot directory alone
+    /// for a brand that has no relocatable account.
+    fn account_directories(&self, brand: &str, booted: &Path) -> Vec<PathBuf> {
+        let known: Vec<PathBuf> = self
+            .profiles
+            .everywhere(brand)
+            .into_iter()
+            .map(|(_, directory)| directory)
+            .collect();
+        if known.is_empty() {
+            vec![booted.to_path_buf()]
+        } else {
+            known
+        }
     }
 
     pub async fn window_now(&self, session_id: &str) -> Option<Result<Value, String>> {

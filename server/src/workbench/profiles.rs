@@ -213,6 +213,29 @@ impl Profiles {
         }
     }
 
+    /// Every account one brand can be read on, as an id and the directory that
+    /// holds it.
+    ///
+    /// The app-wide scans — plan usage, who is holding a chat open outside,
+    /// the watch on the record directories, the provider's own list of
+    /// sessions — each used to look in one directory and so answered for one
+    /// account, whichever the server booted with. They walk this instead
+    /// (bw-5ihw.8).
+    ///
+    /// The system profile answers with its own resolved directory here, unlike
+    /// the sign-in path which leaves it `None` on purpose: a scan reads files
+    /// and needs a path to read, while `claude auth` must be left to find its
+    /// own or it looks for `~/.claude/.claude.json` (see `signin::standing`).
+    pub fn everywhere(&self, brand: &str) -> Vec<(String, PathBuf)> {
+        self.list(brand)
+            .into_iter()
+            .map(|profile| {
+                let directory = self.chat_dir(brand, Some(&profile.id));
+                (profile.id, directory)
+            })
+            .collect()
+    }
+
     /// Create an empty profile and the directory that will hold its login.
     ///
     /// The directory is made here rather than at first sign-in so that the
@@ -536,6 +559,30 @@ mod tests {
                 "{brand} named explicitly"
             );
         }
+    }
+
+    /// What the app-wide scans walk.
+    ///
+    /// Plan usage, the holds scan, the watch on the record directories and the
+    /// provider's own session list each used to read one directory and so
+    /// answered for one account. They walk this instead, and it has to hold
+    /// the system account's own directory as a path — unlike the sign-in path,
+    /// which must leave it unnamed (bw-5ihw.8).
+    #[test]
+    fn every_account_of_a_brand_is_somewhere_to_look() {
+        let root = tempfile::tempdir().unwrap();
+        let made = profiles(root.path()).create("claude", "Work").unwrap();
+        let walked = profiles(root.path()).everywhere("claude");
+
+        assert_eq!(walked.len(), 2);
+        assert_eq!(walked[0].0, SYSTEM);
+        assert_eq!(walked[0].1, root.path().join("system-claude"));
+        assert_eq!(walked[1].0, made.id);
+        assert!(walked[1].1.is_dir());
+
+        // A brand with no relocatable account has nowhere of its own to look,
+        // which is what leaves the boot directory standing for it.
+        assert!(profiles(root.path()).everywhere("local").is_empty());
     }
 
     #[test]

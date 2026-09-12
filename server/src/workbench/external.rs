@@ -44,8 +44,8 @@ fn claude_folder_cwd(folder: &Path) -> Option<String> {
 /// conservatively refresh every visible project rather than miss a chat.
 pub(crate) fn changed_record_folders(
     paths: &HashSet<PathBuf>,
-    claude_projects: &Path,
-    codex_sessions: &Path,
+    claude_projects: &[PathBuf],
+    codex_sessions: &[PathBuf],
     known: &mut HashMap<PathBuf, String>,
 ) -> Option<Vec<String>> {
     if paths.is_empty() {
@@ -53,16 +53,21 @@ pub(crate) fn changed_record_folders(
     }
     let mut moved = Vec::new();
     for path in paths {
-        let key = if let Ok(relative) = path.strip_prefix(claude_projects) {
+        // Each account keeps its own record directory, so a written path is
+        // placed against every one of them (bw-5ihw.8).
+        let under_claude = claude_projects
+            .iter()
+            .find_map(|root| path.strip_prefix(root).ok().map(|relative| (root, relative)));
+        let (key, is_claude) = if let Some((root, relative)) = under_claude {
             let project = relative.components().next()?.as_os_str();
-            claude_projects.join(project)
-        } else if path.starts_with(codex_sessions) {
-            path.clone()
+            (root.join(project), true)
+        } else if codex_sessions.iter().any(|root| path.starts_with(root)) {
+            (path.clone(), false)
         } else {
             continue;
         };
         let cwd = known.get(&key).cloned().or_else(|| {
-            let found = if key.starts_with(claude_projects) {
+            let found = if is_claude {
                 claude_folder_cwd(&key)
             } else {
                 record_cwd(&key)
@@ -1263,19 +1268,40 @@ pub fn codex_doing_from_path(path: &Path) -> HeldDoing {
     codex_activity_from_path(path).doing
 }
 
-/// One provider-neutral ownership snapshot. A UUID is case-insensitive and
-/// duplicate provider observations are merged instead of drawing two owners.
+/// One provider-neutral ownership snapshot, across every account.
+///
+/// A UUID is case-insensitive and duplicate provider observations are merged
+/// instead of drawing two owners — which is also what makes the fan-out safe:
+/// one terminal chat found under two accounts' record directories is still one
+/// chat, and the merge puts its pids together rather than drawing it twice.
+///
+/// Each brand is given every directory its accounts live in. Reading only the
+/// one the server booted with meant a chat held open in a terminal on the work
+/// account read as nobody's (bw-5ihw.8).
 pub fn provider_holds(
-    claude_config: &Path,
+    claude_configs: &[PathBuf],
     proc_root: &Path,
-    codex_home: &Path,
+    codex_homes: &[PathBuf],
     now_ms: i64,
 ) -> Vec<ProviderHold> {
-    let mut holds: BTreeMap<String, ProviderHold> = claude_holds(claude_config, proc_root, now_ms)
-        .into_iter()
-        .map(|hold| (hold.id.to_lowercase(), hold))
-        .collect();
-    let (codex, rollouts) = codex_thread_processes(proc_root, codex_home);
+    let mut holds: BTreeMap<String, ProviderHold> = BTreeMap::new();
+    for config in claude_configs {
+        for hold in claude_holds(config, proc_root, now_ms) {
+            holds
+                .entry(hold.id.to_lowercase())
+                .and_modify(|known| known.pids.extend(&hold.pids))
+                .or_insert(hold);
+        }
+    }
+    let mut codex: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
+    let mut rollouts: HashMap<String, PathBuf> = HashMap::new();
+    for home in codex_homes {
+        let (threads, found) = codex_thread_processes(proc_root, home);
+        for (id, pids) in threads {
+            codex.entry(id).or_default().extend(pids);
+        }
+        rollouts.extend(found);
+    }
     for (id, pids) in codex {
         let activity = rollouts
             .get(&id)
@@ -1406,6 +1432,65 @@ mod tests {
     fn provider_pid_signals_fail_closed_outside_the_unix_pid_range() {
         let error = terminate_pid(u32::MAX).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    /// A chat held open in a terminal on a second account is still somebody's.
+    ///
+    /// Each account keeps its own `sessions/` directory of markers, and the
+    /// scan used to be handed one of them — the directory the server booted
+    /// with — so a terminal chat on the work account read as nobody's, and the
+    /// app would have let a second driver into it (bw-5ihw.8).
+    #[test]
+    fn a_hold_is_found_under_whichever_account_keeps_it() {
+        const WORK_CHAT: &str = "99999999-9999-4999-8999-999999999999";
+        let root = tempfile::tempdir().unwrap();
+        let proc_root = root.path().join("proc");
+        let mine = root.path().join("claude");
+        let work = root.path().join("profiles/claude/work");
+        for (config, pid, chat) in [(&mine, "42", CHAT), (&work, "43", WORK_CHAT)] {
+            let sessions = config.join("sessions");
+            fs::create_dir_all(&sessions).unwrap();
+            fs::create_dir_all(proc_root.join(pid)).unwrap();
+            fs::write(proc_root.join(format!("{pid}/stat")), stat("9001")).unwrap();
+            let marker = serde_json::json!({
+                "sessionId": chat, "pid": pid.parse::<u32>().unwrap(), "cwd": "/project",
+                "startedAt": 100, "procStart": "9001", "entrypoint": "cli",
+                "kind": "interactive"
+            });
+            fs::write(sessions.join(format!("{pid}.json")), marker.to_string()).unwrap();
+        }
+        let codex_home = root.path().join("codex");
+        fs::create_dir_all(&codex_home).unwrap();
+
+        let one_account = provider_holds(
+            std::slice::from_ref(&mine),
+            &proc_root,
+            std::slice::from_ref(&codex_home),
+            1_000,
+        );
+        assert_eq!(one_account.len(), 1, "only the booted account was scanned");
+
+        let held: Vec<String> = provider_holds(
+            &[mine.clone(), work.clone()],
+            &proc_root,
+            std::slice::from_ref(&codex_home),
+            1_000,
+        )
+        .into_iter()
+        .map(|hold| hold.id.to_lowercase())
+        .collect();
+        assert!(held.contains(&CHAT.to_lowercase()));
+        assert!(held.contains(&WORK_CHAT.to_string()));
+
+        // The same account named twice is still one hold, which is what makes
+        // walking overlapping lists safe.
+        let twice = provider_holds(
+            &[mine.clone(), mine.clone()],
+            &proc_root,
+            std::slice::from_ref(&codex_home),
+            1_000,
+        );
+        assert_eq!(twice.len(), 1);
     }
 
     #[test]
@@ -1578,7 +1663,12 @@ mod tests {
         .unwrap();
         std::os::unix::fs::symlink(&rollout, fd_root.join("7")).unwrap();
 
-        let hold = provider_holds(&claude_config, &proc_root, &codex_home, 0)
+        let hold = provider_holds(
+            std::slice::from_ref(&claude_config),
+            &proc_root,
+            std::slice::from_ref(&codex_home),
+            0,
+        )
             .into_iter()
             .find(|hold| hold.id == CHAT)
             .unwrap();

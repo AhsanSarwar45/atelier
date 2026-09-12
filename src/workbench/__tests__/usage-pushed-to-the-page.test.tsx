@@ -35,9 +35,14 @@ class FakeStream {
   }
 
 
-  /** The sidecar says what the account has spent. */
-  saysUsage(percent: number): void {
-    this.onmessage?.(tagged('workbench', JSON.stringify({ kind: 'usage', usage: reading(percent) })));
+  /** The sidecar says what one account has spent. */
+  saysUsage(percent: number, profile?: string): void {
+    this.onmessage?.(
+      tagged(
+        'workbench',
+        JSON.stringify({ kind: 'usage', ...(profile ? { profile } : {}), usage: reading(percent) }),
+      ),
+    );
   }
 
   /** The connection dies. */
@@ -99,6 +104,23 @@ describe('the plan figure on a silent chat', () => {
     act(() => opened[0].saysUsage(52));
     expect(result.current.session?.percent).toBe(52);
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps each account\'s figure apart, and both of them fresh', async () => {
+    // An allowance belongs to a login. One figure per brand meant the work
+    // account's reading landed on the personal account's chat and back again
+    // every thirty seconds, each overwriting the other (bw-5ihw.8).
+    const { usePlanUsage } = await freshModule();
+    const mine = renderHook(() => usePlanUsage('claude'));
+    const work = renderHook(() => usePlanUsage('claude', 'work'));
+
+    act(() => opened[0].saysUsage(47));
+    expect(mine.result.current.session?.percent).toBe(47);
+    expect(work.result.current.available, "the work account took the system account's figure").toBe(false);
+
+    act(() => opened[0].saysUsage(91, 'work'));
+    expect(work.result.current.session?.percent).toBe(91);
+    expect(mine.result.current.session?.percent, 'the system account lost its own figure').toBe(47);
   });
 
   it('is one number for every screen on it, over one connection', async () => {
