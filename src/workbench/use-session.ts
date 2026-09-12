@@ -16,6 +16,8 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { request } from '@/lib/api';
+import { keepFile } from '@/workbench/attachment-store';
+import { pictureShape } from '@/workbench/picture-shape';
 import { onChat } from '@/workbench/live-wire';
 import { asView, EMPTY, reduce, type SessionView } from '@/workbench/fold';
 import type { ImagePayload, SessionFacts, SessionState, WbpCommand, WbpEvent } from '@/workbench/protocol';
@@ -45,6 +47,32 @@ export function readImage(file: File): Promise<ImagePayload> {
       resolve({ mime: file.type, dataUrl: String(reader.result), alt: file.name });
     reader.readAsDataURL(file);
   });
+}
+
+/**
+ * The same file, read and then handed to the store to keep.
+ *
+ * The bytes stay on the payload as well, so the writing box can draw the file
+ * the instant it is chosen without waiting for a round trip. They are dropped
+ * on the way out — what is sent, and so what the log keeps, is the name alone
+ * (`promptFromDraft`).
+ *
+ * A store that cannot take it is not fatal: the file keeps its own bytes and
+ * behaves exactly as it did before there was a store, which is worse but is
+ * not nothing.
+ */
+export async function readAndKeep(file: File): Promise<ImagePayload> {
+  const read = await readImage(file);
+  // Measured here, while the bytes are still in hand: once it is in the store
+  // there is no header left to read, and a picture with no shape cannot have
+  // its place held open before it decodes (bw-cdav.3).
+  const shape = pictureShape(read.dataUrl);
+  try {
+    const kept = await keepFile(file.name || 'the attached file', read.dataUrl);
+    return { ...read, asset: kept.asset, size: kept.size, ...(shape ?? {}) };
+  } catch {
+    return read;
+  }
 }
 
 /**

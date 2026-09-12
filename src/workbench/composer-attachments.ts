@@ -37,7 +37,14 @@ export function promptFromDraft(draft: string, pictures: DraftPicture[] = []): {
   text: string;
   images: DraftPicture[];
 } {
-  const byId = new Map(pictures.map((picture) => [picture.id, picture]));
+  // Its bytes stay behind. A kept file is named by its asset, and the name is
+  // all the message needs: carrying the base64 too would put it back in the
+  // event log, which is the thing bw-oamr.5 took it out of. A picture the store
+  // never answered for keeps its own bytes, because otherwise it is lost.
+  const byId = new Map(pictures.map((picture) => [
+    picture.id,
+    picture.asset ? { ...picture, dataUrl: '' } : picture,
+  ]));
   const segments: string[] = [];
   const marks: Array<{ id: string; after: number }> = [];
   const named = new Set<string>();

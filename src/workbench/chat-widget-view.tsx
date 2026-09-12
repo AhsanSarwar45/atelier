@@ -16,6 +16,7 @@ import { PictureViewer } from '@/workbench/picture-viewer';
 import type { LookableImage } from '@/workbench/protocol';
 import { VisualArtifactView } from '@/workbench/visual-artifact-view';
 import { openLocalPath } from '@/workbench/open-local-path';
+import { presentationAssetUrl } from '@/workbench/attachment-store';
 
 const COLORS = ['var(--color-primary)', 'var(--color-info)', 'var(--color-success)', 'var(--color-warning)'];
 const EXPLAINER_ACCENTS = ['var(--color-info-accent)', 'var(--color-warning-accent)', 'var(--color-success-accent)', 'var(--color-primary-accent)', 'var(--color-destructive-accent)'];
@@ -61,7 +62,7 @@ function mediaUrl(src: string): string {
   }
 }
 
-const presentationAssetUrl = (asset: string) => apiUrl(`/api/presentation-assets/${encodeURIComponent(asset)}`);
+
 
 function Chart({ widget }: { widget: ChartWidget }) {
   const values = widget.data.flatMap((point) => point.values);

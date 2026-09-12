@@ -933,6 +933,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/present", post(present))
         .route("/screen-check", post(screen_check))
         .route("/command", post(command))
+        .route("/attachment", post(attachment))
         // A prompt carries its pictures inline, as base64 inside the JSON, and
         // there is no ceiling on how many a person may attach to one message.
         // Axum otherwise buffers every body under a 2 MiB default nobody here
@@ -2259,6 +2260,40 @@ fn decoded(files: BTreeMap<String, String>) -> Result<BTreeMap<String, Vec<u8>>,
                 .map_err(|error| format!("{label}: {error}"))
         })
         .collect()
+}
+
+/// One file the owner attached, on its way to being a name instead of bytes.
+#[derive(Deserialize)]
+struct AttachmentRequest {
+    /// What the file is called, which is all the extension is read off.
+    name: String,
+    /// Its bytes, base64'd — the one way a browser can hand them over in JSON.
+    data: String,
+}
+
+/// POST /api/workbench/attachment
+///
+/// Keeps an attached file in the same content-addressed store the app's own
+/// presentation media lives in, and answers with the name it was kept under.
+/// From here on the message carries that name: the bytes are fetched back
+/// through `GET /api/presentation-assets/:asset` by whoever needs to draw
+/// them, and the agent is handed the file's own path (bw-oamr.5).
+async fn attachment(
+    State(state): State<WorkbenchState>,
+    Json(request): Json<AttachmentRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(request.data.as_bytes())
+        .map_err(|error| format!("{}: {error}", request.name))?;
+    let directory = state.registry.media_directory().to_path_buf();
+    let size = bytes.len();
+    let asset = crate::workbench::media::import_attachment(&bytes, &request.name, &directory)?;
+    let path = directory.join(&asset);
+    Ok(Json(json!({
+        "asset": asset,
+        "size": size,
+        "path": path.to_string_lossy(),
+    })))
 }
 
 async fn present(

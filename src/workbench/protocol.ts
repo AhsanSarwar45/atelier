@@ -155,11 +155,38 @@ export interface TodoItem {
   status: 'pending' | 'in_progress' | 'completed';
 }
 
-/** A picture, inline. `dataUrl` so it survives in the event log with the turn. */
+/** An attachment on a message: a picture, or any other file it carries. */
 export interface ImagePayload {
   mime: string;
+  /**
+   * The bytes themselves, for anything written before there was a store to
+   * keep them in — and, for a moment, for a file the writing box has read but
+   * not yet handed over. Everything else names its file in `asset` instead.
+   */
   dataUrl: string;
   alt: string;
+  /**
+   * The name this file was kept under, in the app's content-addressed store.
+   *
+   * The message carries this rather than the bytes: the event log is handed to
+   * every browser on every snapshot and kept for the life of the chat, so a
+   * video inside it would be re-sent in full each time and stored forever
+   * (bw-oamr.5). Use `attachmentSrc` to point at it.
+   */
+  asset?: string;
+  /** How many bytes it is, when the store has weighed it. */
+  size?: number;
+  /**
+   * The shape of the picture, in pixels, read off its header when it was
+   * attached.
+   *
+   * Carried rather than worked out on the spot, because once the bytes live in
+   * the store there is nothing here to read a header out of — and without a
+   * shape the picture's place cannot be held open before it decodes, which is
+   * the jump bw-cdav.3 fixed.
+   */
+  width?: number;
+  height?: number;
   /**
    * Where this picture belongs in the message's text, as an offset into it.
    *

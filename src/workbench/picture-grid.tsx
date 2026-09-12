@@ -17,6 +17,7 @@
 import { Tooltip } from '@/components/ui/tooltip';
 import { inlineMediaBounds } from '@/workbench/media-bounds';
 import type { ImagePayload } from '@/workbench/protocol';
+import { attachmentSrc } from '@/workbench/attachment-store';
 
 /**
  * How many pictures stand side by side, given how many the message holds.
@@ -72,7 +73,7 @@ export function PictureGrid({ images, onLook }: PictureGridProps): JSX.Element |
         <Tooltip key={i} label="Click to see it full size">
           <img
             data-testid="message-image"
-            src={img.dataUrl}
+            src={attachmentSrc(img)}
             alt={img.alt}
             onClick={() => onLook(img)}
             // A picture on its own keeps its own shape — there is no neighbour for
@@ -85,7 +86,7 @@ export function PictureGrid({ images, onLook }: PictureGridProps): JSX.Element |
                 ? `${THUMB} justify-self-start object-contain`
                 : `${THUMB} aspect-[4/3] w-full object-cover`
             }
-            style={alone ? inlineMediaBounds(img.dataUrl) : undefined}
+            style={alone ? inlineMediaBounds(img) : undefined}
           />
         </Tooltip>
       ))}

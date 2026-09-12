@@ -10,6 +10,14 @@ use std::io::{Cursor, Write};
 use std::path::Path;
 
 const IMAGE_LIMIT: usize = 25 * 1024 * 1024;
+/// What one attached file may weigh.
+///
+/// Far above the picture limit because this is the ceiling for a video, and a
+/// short screen recording is tens of megabytes before anyone has done anything
+/// unusual. It is a ceiling rather than an absence of one: the bytes cross the
+/// wire base64'd, which costs a third again, and a file with no limit at all is
+/// a way to fill the owner's disk by dragging the wrong thing into a chat.
+pub const ATTACHMENT_LIMIT: usize = 100 * 1024 * 1024;
 const ARTIFACT_LIMIT: usize = 1024 * 1024;
 const PNG_MAGIC: &[u8] = &[137, 80, 78, 71, 13, 10, 26, 10];
 
@@ -66,6 +74,43 @@ pub fn import_image(bytes: &[u8], label: &str, directory: &Path) -> Result<Strin
     let kind = image_kind(bytes)
         .ok_or_else(|| format!("{label} is not a PNG, JPEG, GIF, or WebP image"))?;
     let asset = format!("{}.{}", digest(bytes), kind.extension());
+    keep_new(&directory.join(&asset), bytes)?;
+    Ok(asset)
+}
+
+/// The extension an attachment is kept under, read off the name it arrived with.
+///
+/// The name comes from a browser and is never trusted as a path: only the run
+/// of letters and digits after the last dot is taken, lowercased, and only when
+/// it is short enough to be a real extension. Anything else — no dot, a dot in
+/// a folder name, `.tar.gz`, a name that is one long word — is kept as `bin`,
+/// which serves as a download and nothing else.
+pub fn attachment_extension(name: &str) -> String {
+    name.rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase())
+        .filter(|extension| {
+            (1..=12).contains(&extension.len())
+                && extension.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        })
+        .unwrap_or_else(|| "bin".to_string())
+}
+
+/// One attached file, kept under the digest of its own bytes.
+///
+/// The same store the app's presentation media uses, for the same reason: a
+/// file named by its content is written once however many times it is
+/// attached, and the message that carries it needs to hold only the name of it.
+/// Before this, an attachment's bytes rode base64 inside the event log — so a
+/// video was re-sent to every browser on every snapshot and kept in the chat
+/// database for good (bw-oamr.5).
+pub fn import_attachment(bytes: &[u8], name: &str, directory: &Path) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Err(format!("{name} is empty"));
+    }
+    if bytes.len() > ATTACHMENT_LIMIT {
+        return Err(format!("{name} is larger than 100 MiB"));
+    }
+    let asset = format!("{}.{}", digest(bytes), attachment_extension(name));
     keep_new(&directory.join(&asset), bytes)?;
     Ok(asset)
 }
@@ -1172,6 +1217,47 @@ pub fn compare_png(before: &[u8], after: &[u8], threshold: f64) -> PixelComparis
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An attachment is kept by its content, under a name read off its own.
+    #[test]
+    fn an_attached_file_is_kept_under_the_digest_of_its_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        let bytes = b"not a picture at all".to_vec();
+        let asset = import_attachment(&bytes, "notes.md", root.path()).unwrap();
+        let (digest_part, extension) = asset.split_once('.').unwrap();
+        assert_eq!(digest_part.len(), 64, "kept under a sha256 of its bytes");
+        assert_eq!(extension, "md");
+        assert_eq!(std::fs::read(root.path().join(&asset)).unwrap(), bytes);
+        // The same file attached twice is one file, which is the whole point
+        // of naming it by its content.
+        assert_eq!(import_attachment(&bytes, "notes.md", root.path()).unwrap(), asset);
+    }
+
+    /// The name is a label, never a path. Whatever the browser sends, what
+    /// comes out is one short word of letters and digits or nothing at all.
+    #[test]
+    fn the_extension_is_read_off_the_name_without_trusting_it() {
+        assert_eq!(attachment_extension("clip.MP4"), "mp4");
+        assert_eq!(attachment_extension("archive.tar.gz"), "gz");
+        assert_eq!(attachment_extension("Makefile"), "bin");
+        assert_eq!(attachment_extension("../../etc/passwd"), "bin");
+        assert_eq!(attachment_extension("sneaky.pn/g"), "bin");
+        assert_eq!(attachment_extension("sneaky.p g"), "bin");
+        assert_eq!(attachment_extension("long.abcdefghijklmnop"), "bin");
+        assert_eq!(attachment_extension("trailing."), "bin");
+    }
+
+    /// A ceiling and a floor, both said out loud rather than written silently.
+    #[test]
+    fn an_attachment_too_big_or_empty_is_turned_down_by_name() {
+        let root = tempfile::tempdir().unwrap();
+        let empty = import_attachment(&[], "nothing.txt", root.path()).unwrap_err();
+        assert!(empty.contains("nothing.txt"), "{empty}");
+        let huge = vec![0u8; ATTACHMENT_LIMIT + 1];
+        let refused = import_attachment(&huge, "huge.mp4", root.path()).unwrap_err();
+        assert!(refused.contains("huge.mp4") && refused.contains("100 MiB"), "{refused}");
+    }
+
     fn png(colors: &[[u8; 4]]) -> Vec<u8> {
         let mut bytes = Vec::new();
         {

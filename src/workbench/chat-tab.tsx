@@ -63,6 +63,7 @@ import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { ComposerEditor, type ComposerHandle } from '@/workbench/composer-editor';
 import { fileCompletions } from '@/workbench/composer-files';
 import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
+import { attachmentSrc } from '@/workbench/attachment-store';
 import { fileAsABlock, imageIds, imageMarker, looksLikeAPicture, looksLikeText, promptFromDraft, promptParts } from '@/workbench/composer-attachments';
 import type { DraftPicture } from '@/workbench/composer-attachments';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
@@ -95,7 +96,7 @@ import { WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
 import { CHIP_GAP, ModeMark, modelName, modelWords, modeWords, WhatItRuns } from '@/workbench/what-it-runs';
-import { isBusy, readImage, sendCommand, useSession, useSessionFactsRead, type TranscriptItem } from '@/workbench/use-session';
+import { isBusy, readAndKeep, sendCommand, useSession, useSessionFactsRead, type TranscriptItem } from '@/workbench/use-session';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import { BrandIcon, ProfileBadge, ProviderBadge, brandName } from '@/workbench/brand-icon';
 import { workingLine } from '@/workbench/working-line';
@@ -1496,7 +1497,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     let written: string[];
     try {
       [read, written] = await Promise.all([
-        Promise.all(pictures.map(async (file) => ({ ...(await readImage(file)), id: crypto.randomUUID() }))),
+        Promise.all(pictures.map(async (file) => ({ ...(await readAndKeep(file)), id: crypto.randomUUID() }))),
         Promise.all(documents.map(async (file) => fileAsABlock(file.name || 'the attached file', await file.text()))),
       ]);
     } catch (e) {
@@ -2180,7 +2181,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                     <img
                       data-testid="attachment-thumb"
                       id={`composer-image-${img.id}`}
-                      src={img.dataUrl}
+                      src={attachmentSrc(img)}
                       alt={img.alt}
                       onClick={() => setLooking(img)}
                       className="h-12 w-12 cursor-zoom-in rounded border border-border/60 object-cover"

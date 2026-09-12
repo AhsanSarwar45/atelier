@@ -19,10 +19,56 @@ use tracing::warn;
 
 const PRESENTATION_ASSET: &str = "presentation asset";
 
-fn valid_presentation_asset(asset: &str) -> bool {
+pub(crate) fn valid_presentation_asset(asset: &str) -> bool {
     asset.split_once('.').is_some_and(|(digest, extension)| digest.len() == 64
         && digest.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-        && matches!(extension, "png" | "jpg" | "gif" | "webp" | "artifact.json"))
+        && (matches!(extension, "png" | "jpg" | "gif" | "webp" | "artifact.json")
+            // An attachment is kept under whatever extension its name gave it,
+            // which is any short word (`media::attachment_extension`). The name
+            // is still not a path: it is one run of letters and digits, so
+            // there is no separator in it to walk out of the store with.
+            || ((1..=12).contains(&extension.len())
+                && extension.bytes().all(|byte| byte.is_ascii_alphanumeric()))))
+}
+
+/// How an asset is handed to the browser, by the extension it is kept under.
+///
+/// Only a type the browser can be trusted to render is served as itself. An
+/// attachment is a file the owner chose, not something this app wrote, and the
+/// store answers on the app's own origin — so anything that could carry script
+/// where a page can see it (`.html`, `.svg`) is deliberately not on this list
+/// and goes down as a download instead. Source code and the rest of the plain
+/// formats go as `text/plain` for the same reason: they are words to be read,
+/// never markup to be run.
+fn served_as(extension: &str) -> Option<&'static str> {
+    Some(match extension {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "avif" => "image/avif",
+        "bmp" => "image/bmp",
+        "mp4" | "m4v" => "video/mp4",
+        "webm" => "video/webm",
+        "ogv" => "video/ogg",
+        "mov" => "video/quicktime",
+        "mkv" => "video/x-matroska",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" | "oga" => "audio/ogg",
+        "opus" => "audio/opus",
+        "m4a" | "aac" => "audio/mp4",
+        "flac" => "audio/flac",
+        "pdf" => "application/pdf",
+        "json" => "application/json",
+        "txt" | "md" | "markdown" | "rst" | "log" | "csv" | "tsv" | "yaml" | "yml" | "toml"
+        | "ini" | "conf" | "env" | "xml" | "css" | "js" | "jsx" | "ts" | "tsx" | "py" | "rb"
+        | "go" | "rs" | "java" | "kt" | "c" | "h" | "cc" | "cpp" | "hpp" | "cs" | "php"
+        | "swift" | "sh" | "bash" | "sql" | "graphql" | "proto" | "diff" | "patch" => {
+            "text/plain; charset=utf-8"
+        }
+        _ => return None,
+    })
 }
 
 fn presentation_asset_path(directory: &std::path::Path, asset: &str) -> Option<PathBuf> {
@@ -930,12 +976,15 @@ pub async fn presentation_asset(headers: HeaderMap, Path(asset): Path<String>) -
         Ok(bytes) => bytes,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to read presentation asset: {e}")).into_response(),
     };
-    let content_type = match asset.rsplit_once('.').map(|(_, extension)| extension).unwrap_or_default() {
-        "png" => "image/png", "jpg" => "image/jpeg", "gif" => "image/gif", "webp" => "image/webp", "json" => "application/json", _ => unreachable!(),
-    };
+    // A type the browser is trusted with is shown; anything else is a download,
+    // which is what keeps a file the owner attached from being a page on this
+    // app's own origin.
+    let served = served_as(asset.rsplit_once('.').map(|(_, extension)| extension).unwrap_or_default());
+    let content_type = served.unwrap_or("application/octet-stream");
+    let disposition = if served.is_some() { "inline" } else { "attachment" };
     Response::builder()
         .header(header::CONTENT_TYPE, content_type)
-        .header(header::CONTENT_DISPOSITION, "inline")
+        .header(header::CONTENT_DISPOSITION, disposition)
         .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
         .body(Body::from(bytes))
@@ -2125,9 +2174,45 @@ mod tests {
         assert!(valid_presentation_asset(&format!("{digest}.png")));
         assert!(valid_presentation_asset(&format!("{digest}.webp")));
         assert!(valid_presentation_asset(&format!("{digest}.artifact.json")));
+        // An attachment is kept under whatever kind it is, so the name no
+        // longer says no to one. It is still one plain word — a digest and a
+        // run of letters and digits — with no separator in it to leave the
+        // store with (bw-oamr.5).
+        assert!(valid_presentation_asset(&format!("{digest}.mp4")));
+        assert!(valid_presentation_asset(&format!("{digest}.zip")));
         assert!(!valid_presentation_asset("../secret.png"));
-        assert!(!valid_presentation_asset(&format!("{}.svg", "a".repeat(64))));
+        assert!(!valid_presentation_asset(&format!("{digest}./../passwd")));
+        assert!(!valid_presentation_asset(&format!("{digest}.p-g")));
+        assert!(!valid_presentation_asset(&format!("{digest}.abcdefghijklmnop")));
+        assert!(!valid_presentation_asset(&digest));
+        assert!(!valid_presentation_asset(&format!("{}.png", "a".repeat(63))));
         assert!(!valid_presentation_asset(&format!("{}.png", "A".repeat(64))));
+    }
+
+    /// Where saying no to an SVG moved to.
+    ///
+    /// It used to be refused by name, which also refused it as something the
+    /// owner might legitimately attach. The refusal that matters is the one
+    /// that stops it being a page on this app's own origin, so it is made
+    /// where the bytes are handed over instead: an SVG is now a file he can
+    /// attach and download, and never a document the browser will run.
+    #[test]
+    fn a_file_that_could_carry_script_is_a_download_and_not_a_page() {
+        assert!(valid_presentation_asset(&format!("{}.svg", "a".repeat(64))));
+        for extension in ["svg", "html", "htm", "xhtml", "mjs", "wasm", "zip", "bin"] {
+            assert_eq!(served_as(extension), None, "{extension} must not be shown inline");
+        }
+        for (extension, kind) in [
+            ("png", "image/png"),
+            ("mp4", "video/mp4"),
+            ("mp3", "audio/mpeg"),
+            ("pdf", "application/pdf"),
+        ] {
+            assert_eq!(served_as(extension), Some(kind), "{extension} should be shown");
+        }
+        // Words, never markup: source and data are read, not run.
+        assert_eq!(served_as("ts"), Some("text/plain; charset=utf-8"));
+        assert_eq!(served_as("xml"), Some("text/plain; charset=utf-8"));
     }
 
     #[test]

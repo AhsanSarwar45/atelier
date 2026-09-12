@@ -27,8 +27,18 @@ export const INLINE_MEDIA_BOUNDS = {
  * A picture whose header says nothing gets the old bounds and the old jump,
  * which is no worse than before.
  */
-export function inlineMediaBounds(dataUrl: string): CSSProperties {
-  const shape = pictureShape(dataUrl);
+export function inlineMediaBounds(
+  /**
+   * The picture, which says its own shape when it knows it. A picture kept in
+   * the store has no bytes here to read a header out of, so the shape it was
+   * measured at when it was attached is carried on it instead (bw-oamr.5).
+   */
+  image: string | { dataUrl?: string; width?: number; height?: number },
+): CSSProperties {
+  const given = typeof image === 'string' ? null : image;
+  const shape = given?.width && given.height
+    ? { width: given.width, height: given.height }
+    : pictureShape(typeof image === 'string' ? image : image.dataUrl ?? '');
   if (!shape) return INLINE_MEDIA_BOUNDS;
   // Its own width, brought down if the cap on height is what binds.
   const wide = shape.height > CAP ? Math.round((shape.width * CAP) / shape.height) : shape.width;

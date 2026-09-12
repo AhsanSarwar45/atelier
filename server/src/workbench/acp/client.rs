@@ -1251,6 +1251,27 @@ async fn elicitation(
 ///
 /// The older key names are still read first, so a caller that already holds the
 /// two halves apart does not have to build a data URL to hand them over.
+/// The bytes of a file the store is keeping, base64'd as ACP wants them.
+///
+/// An attachment names its file rather than carrying it (bw-oamr.5), so when
+/// the agent is to be handed the bytes themselves they are read back here. The
+/// name is checked before anything is opened — it is a digest and one plain
+/// word, with no separator in it to leave the store with.
+fn kept_bytes(asset: &str) -> Option<String> {
+    if !crate::routes::fs::valid_presentation_asset(asset) {
+        return None;
+    }
+    // The name having passed the check above, it is one word: joining it on
+    // cannot walk anywhere, so being a file is the only thing left to ask.
+    let path = crate::identity::presentation_media_dir()?.join(asset);
+    if !path.is_file() {
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    use base64::Engine as _;
+    Some(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
 fn attached_picture(image: &Value) -> Option<(String, String)> {
     let (declared, encoded) = match image["dataUrl"]
         .as_str()
@@ -1260,10 +1281,18 @@ fn attached_picture(image: &Value) -> Option<(String, String)> {
         Some((mime, payload)) => (Some(mime), Some(payload)),
         None => (None, None),
     };
+    // A file the store is keeping has no bytes on the payload; they are read
+    // back from it, which is the whole point of keeping them there.
+    let stored = if encoded.is_none() && image["data"].as_str().is_none() {
+        image["asset"].as_str().and_then(kept_bytes)
+    } else {
+        None
+    };
     let data = image["data"]
         .as_str()
         .or_else(|| image["base64"].as_str())
         .or(encoded)
+        .or(stored.as_deref())
         .filter(|data| !data.is_empty())?;
     let mime = image["mimeType"]
         .as_str()
@@ -3073,6 +3102,40 @@ mod tests {
         let content = prompt_content(&command, true).unwrap();
         assert_eq!(content.len(), 1);
         assert!(matches!(&content[0], ContentBlock::Image(image) if image.data == "QUJD"));
+    }
+
+    /// A picture that names its file instead of carrying it still reaches the
+    /// agent whole: the bytes are read back out of the store (bw-oamr.5).
+    ///
+    /// This is what makes it safe for the message — and so the event log — to
+    /// hold only the name. If the read-back ever broke, the agent would be
+    /// handed a message with the picture silently missing from it.
+    #[test]
+    fn a_picture_kept_in_the_store_is_read_back_for_the_agent() {
+        let root = tempfile::tempdir().unwrap();
+        std::env::set_var("ATELIER_PRESENTATION_MEDIA_DIR", root.path());
+        let bytes = b"ABC";
+        let asset = crate::workbench::media::import_attachment(bytes, "one.png", root.path()).unwrap();
+
+        let command = prompt_with_images(json!([
+            {"id":"one", "mime":"image/png", "dataUrl":"", "alt":"one.png", "asset":asset},
+        ]));
+        let content = prompt_content(&command, true).unwrap();
+        assert!(
+            content.iter().any(|block| matches!(block, ContentBlock::Image(image) if image.data == "QUJD")),
+            "the picture did not reach the agent: {content:?}",
+        );
+
+        // A name the store has nothing under is left out rather than sent as an
+        // empty picture.
+        let missing = prompt_with_images(json!([
+            {"id":"one", "mime":"image/png", "dataUrl":"", "alt":"one.png", "asset":format!("{}.png", "b".repeat(64))},
+        ]));
+        assert!(
+            !prompt_content(&missing, true).unwrap().iter().any(|block| matches!(block, ContentBlock::Image(_))),
+            "a picture the store does not have became a block anyway",
+        );
+        std::env::remove_var("ATELIER_PRESENTATION_MEDIA_DIR");
     }
 
     /// A part naming a picture that is not in `images` leaves the sentence

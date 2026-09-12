@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Panel } from '@/components/ui/panel';
 import type { ImageComparison, ImagePayload, LookableImage } from '@/workbench/protocol';
 import { NO_TRANSFORM, clampScale, useZoomPan, type ImageTransform } from '@/workbench/zoom-pan';
+import { attachmentSrc } from '@/workbench/attachment-store';
 
 export type { ImageTransform };
 
@@ -98,7 +99,7 @@ function Controls({ transform, onChange }: { transform: ImageTransform; onChange
 }
 
 function Picture({ image, testId }: { image: ImagePayload; testId?: string }) {
-  return <img data-testid={testId} src={image.dataUrl} alt={image.alt} className="pointer-events-none h-full w-full select-none object-contain" draggable={false} />;
+  return <img data-testid={testId} src={attachmentSrc(image)} alt={image.alt} className="pointer-events-none h-full w-full select-none object-contain" draggable={false} />;
 }
 
 function Single({ image, transform, onChange }: { image: ImagePayload; transform: ImageTransform; onChange: (value: ImageTransform) => void }) {
