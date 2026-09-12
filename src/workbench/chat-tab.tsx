@@ -88,6 +88,7 @@ import type { Brand, CommandInfo, LookableImage, ProfileChoice, SessionConfigOpt
 /** The brands a chat can run on somebody's account. `local` has none. */
 const ACCOUNTED_BRANDS: readonly Brand[] = ['claude', 'codex'];
 import { BRAND_DEFAULT_MODEL, startingChat } from '@/workbench/protocol';
+import { SectionHeading } from '@/workbench/section-heading';
 import { heldElsewhere, sessionOwnership, streamStillAnswers } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
 import { AgentView } from '@/workbench/agent-view';
@@ -1693,8 +1694,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       <Dialog open={showing === 'new-chat'} onOpenChange={(opened) => { if (!opened) setShowing(null); }}>
         <DialogContent className="sm:max-w-md" data-testid="new-chat-provider-dialog">
           <DialogHeader>
-            <DialogTitle>Choose a coding agent</DialogTitle>
-            <DialogDescription>This choice applies to this new chat.</DialogDescription>
+            <DialogTitle>New chat</DialogTitle>
+            {/* Said to a screen reader and to nobody else: the three headings
+                below already name what the dialog is asking, and a sentence
+                repeating them was one more line to read past (bw-ospn.3). */}
+            <DialogDescription className="sr-only">
+              Choose the agent, the account and the worktree this chat starts on.
+            </DialogDescription>
           </DialogHeader>
           {/* Why a choice is grey, on the choice itself and only while the
               reader is asking about it. Standing under the buttons it read as
@@ -1705,6 +1711,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               it too, which is what the standing text was there for (bw-u6cl.9).
               The wrapper is what carries the label, because a disabled button
               takes no pointer events and so is never hovered at all. */}
+          <div className="flex flex-col gap-2" data-testid="new-chat-agents">
+          <SectionHeading>Agent</SectionHeading>
           <div className="grid grid-cols-2 gap-2">
             {/* The star means what it means in the model and effort menus:
                 this is the one the dialog opens holding. It replaced a
@@ -1736,12 +1744,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               </ChoiceWithStar>
             ))}
           </div>
+          </div>
           {/* Which account, between which agent and where to work. `local`
               runs on this computer and has nothing to sign in to, so it has no
               section at all rather than a section with one row in it. */}
           {newBrand !== 'local' && (newAccounts.length > 1 || newAccountsUnread) && (
-            <div data-testid="new-chat-profiles">
-              <p className="mb-1.5 text-xs font-medium text-t-secondary">Account</p>
+            <div className="flex flex-col gap-2" data-testid="new-chat-profiles">
+              <SectionHeading>Account</SectionHeading>
               {newAccountsUnread ? (
                 <p className="text-xs text-t-muted">{newAccountsUnread}</p>
               ) : (

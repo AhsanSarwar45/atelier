@@ -24,6 +24,7 @@ import type { GitBranch as Branch, GitTree } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Picker } from '@/components/ui/picker';
+import { SectionHeading } from '@/workbench/section-heading';
 
 /** The place a chat is to be started in, as the person has said it so far. */
 export type Where =
@@ -174,15 +175,12 @@ export function WhereToWork({
 
   return (
     <section className="flex flex-col gap-2" data-testid="where-to-work">
-      <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-        Worktree
-      </h3>
+      <SectionHeading>Worktree</SectionHeading>
       <div className="grid grid-cols-3 gap-2" role="group" aria-label="Worktree">
         {modes.map((mode) => (
           <Button
             key={mode.kind}
             type="button"
-            size="sm"
             variant={value.kind === mode.kind ? 'primary' : 'outline'}
             disabled={disabled || (mode.kind === 'existing' && worktrees.length === 0)}
             data-testid={`where-${mode.kind}`}
@@ -240,7 +238,6 @@ export function WhereToWork({
           <div className="flex gap-2" role="group" aria-label="Branch">
             <Button
               type="button"
-              size="sm"
               variant={value.create ? 'primary' : 'outline'}
               disabled={disabled}
               data-testid="where-branch-new"
@@ -250,7 +247,6 @@ export function WhereToWork({
             </Button>
             <Button
               type="button"
-              size="sm"
               variant={value.create ? 'outline' : 'primary'}
               disabled={disabled || bases.length === 0}
               data-testid="where-branch-existing"

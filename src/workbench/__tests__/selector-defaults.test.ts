@@ -80,6 +80,32 @@ describe('new-chat provider default', () => {
   });
 });
 
+describe('the new-chat dialog’s three sections', () => {
+  const where = readFileSync('src/workbench/where-to-work.tsx', 'utf8');
+
+  it('titles each of them with the one heading, and none of them by hand', () => {
+    // A dialog title over the agents, sentence case over the accounts and
+    // small caps over the worktree made three questions of equal weight look
+    // like three unrelated things (bw-ospn.3).
+    expect(source).toContain('<SectionHeading>Agent</SectionHeading>');
+    expect(source).toContain('<SectionHeading>Account</SectionHeading>');
+    expect(where).toContain('<SectionHeading>Worktree</SectionHeading>');
+    expect(source).not.toContain('<p className="mb-1.5 text-xs font-medium text-t-secondary">Account</p>');
+    expect(where).not.toContain('uppercase tracking-wider');
+  });
+
+  it('says what it is asking in its headings rather than in a sentence', () => {
+    expect(source).toContain('<DialogTitle>New chat</DialogTitle>');
+    expect(source).not.toContain('This choice applies to this new chat.');
+  });
+
+  it('stands every row in it at the same height', () => {
+    // The worktree row was a size smaller than the agents and accounts above
+    // it, which is the same complaint one line further down.
+    expect(where).not.toContain('size="sm"');
+  });
+});
+
 describe('the screen with no chat on it', () => {
   it('asks nothing the dialog asks, and opens the dialog instead', () => {
     // It used to carry its own agent buttons, its own list of why one was

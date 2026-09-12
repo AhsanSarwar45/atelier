@@ -52,7 +52,19 @@ test('every provider and account is one split control with its star', async ({ p
     await expect(page.getByTestId('new-chat-profiles')).toBeVisible();
 
     mkdirSync('tests/results', { recursive: true });
-    await dialog.screenshot({ path: 'tests/results/bw-ospn-1-after.png' });
+    await dialog.screenshot({ path: 'tests/results/bw-ospn-3-after.png' });
+
+    // One heading over each of the three questions, in one style: the dialog
+    // used to title them three different ways (bw-ospn.3).
+    const headings = dialog.locator('h3');
+    await expect(headings).toHaveText(['Agent', 'Account', 'Worktree']);
+    const faces = await headings.evaluateAll((all) =>
+      all.map((one) => {
+        const style = getComputedStyle(one);
+        return [style.fontSize, style.fontWeight, style.textTransform, style.letterSpacing, style.color].join('/');
+      }),
+    );
+    expect(new Set(faces).size).toBe(1);
 
     // The seam, on the pair the dialog opens holding and on a resting pair:
     // the choice is square on the side it shares, the star square on its own,
