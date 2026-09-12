@@ -141,9 +141,33 @@ pub fn rules_dir() -> Option<PathBuf> {
 pub fn presentation_media_dir() -> Option<PathBuf> {
     resolve_presentation_media_dir(
         std::env::var("ATELIER_PRESENTATION_MEDIA_DIR").ok(),
-        directories::ProjectDirs::from(QUALIFIER, ORGANISATION, APPLICATION)
-            .map(|dirs| dirs.data_dir().to_path_buf()),
+        shared_presentation_data_dir(),
     )
+}
+
+/// The one installed-user location every copy reads, including a disposable
+/// copy whose databases are isolated with `XDG_DATA_HOME`.
+///
+/// `ProjectDirs::data_dir()` is right for a process's own data, but on Linux
+/// it follows `XDG_DATA_HOME`. Using it here let a throwaway presenter report
+/// success after writing the bytes into its throwaway data root; its cleanup
+/// then deleted them and the reader could only draw the image's alt text
+/// (bw-agw3.1). The home directory itself does not follow XDG data overrides.
+fn shared_presentation_data_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        directories::BaseDirs::new().map(|dirs| linux_presentation_data_dir(dirs.home_dir()))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        directories::ProjectDirs::from(QUALIFIER, ORGANISATION, APPLICATION)
+            .map(|dirs| dirs.data_dir().to_path_buf())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_presentation_data_dir(home: &Path) -> PathBuf {
+    home.join(".local/share").join(APPLICATION)
 }
 
 /// The rule behind it, kept apart from the environment so it can be tested
@@ -206,6 +230,24 @@ mod tests {
             resolve_data_dir(Some("/tmp/throwaway".into())),
             Some(PathBuf::from("/tmp/throwaway")),
             "a throwaway copy still keeps its own settings and chats apart"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn isolated_xdg_data_homes_cannot_move_the_presentation_store() {
+        let home = PathBuf::from("/home/reader");
+        let shared = linux_presentation_data_dir(&home);
+
+        // A writer and reader may each set XDG_DATA_HOME to a different
+        // disposable directory. Neither value is an input to this path.
+        assert_eq!(shared, PathBuf::from("/home/reader/.local/share/atelier"));
+        assert_eq!(
+            resolve_presentation_media_dir(None, Some(shared)),
+            Some(PathBuf::from(
+                "/home/reader/.local/share/atelier/presentation-media"
+            )),
+            "writer and reader must resolve the same durable asset"
         );
     }
 
