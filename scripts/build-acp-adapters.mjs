@@ -669,6 +669,28 @@ function bundleIsCurrent(output, target, fingerprint, platform) {
   }
 }
 
+/**
+ * A compatibility patch for one provider must not invalidate an unchanged
+ * provider executable. The manifest pins Goose independently from the bundle
+ * builder and records the executable digest, so both must agree before reuse.
+ */
+function gooseIsCurrent(output, target, platform) {
+  try {
+    const manifest = JSON.parse(readFileSync(join(output, 'manifest.json'), 'utf8'));
+    const file = `goose-acp${platform.exe}`;
+    return manifest.schema === 2
+      && manifest.target === target
+      && manifest.adapters?.local?.adapter === 'goose'
+      && manifest.adapters.local.version === GOOSE.version
+      && manifest.adapters.local.commit === GOOSE.commit
+      && typeof manifest.files?.[file]?.sha256 === 'string'
+      && existsSync(join(output, file))
+      && sha256(join(output, file)) === manifest.files[file].sha256;
+  } catch {
+    return false;
+  }
+}
+
 function cacheRoot() {
   if (process.env.ATELIER_ACP_BUILD_CACHE) return resolve(process.env.ATELIER_ACP_BUILD_CACHE);
   const base = process.env.XDG_CACHE_HOME
@@ -691,7 +713,12 @@ const builderFingerprint = createHash('sha256')
   .digest('hex');
 const gooseTarget = join(cacheRoot(), 'goose', target, GOOSE.commit);
 if (cacheInfo) {
-  console.log(JSON.stringify({ builderFingerprint, gooseTarget, target }));
+  console.log(JSON.stringify({
+    builderFingerprint,
+    gooseReusable: gooseIsCurrent(output, target, platform),
+    gooseTarget,
+    target,
+  }));
   process.exit(0);
 }
 if (bundleIsCurrent(output, target, builderFingerprint, platform)) {
@@ -705,6 +732,10 @@ if (cacheOnly) {
 
 const scratch = mkdtempSync(join(tmpdir(), 'atelier-acp-build-'));
 try {
+  const reusableGoose = gooseIsCurrent(output, target, platform);
+  const cachedGoose = join(scratch, `goose-acp${platform.exe}`);
+  if (reusableGoose) cpSync(join(output, `goose-acp${platform.exe}`), cachedGoose);
+
   const claudeSource = join(scratch, 'claude-agent-acp');
   const codexSource = join(scratch, 'codex-acp');
   const gooseSource = join(scratch, 'goose');
@@ -744,18 +775,22 @@ try {
   const gooseAdapter = join(output, `goose-acp${platform.exe}`);
   run('bun', ['build', 'src/index.ts', '--minify', '--compile', `--target=${platform.bun}`, `--outfile=${claudeAdapter}`], claudeSource);
   run('bun', ['build', 'src/index.ts', '--minify', '--compile', `--target=${platform.bun}`, `--outfile=${codexAdapter}`], codexSource);
-  // The source clone is disposable; compiled Rust dependencies are not. Cargo
-  // owns invalidation inside a cache separated by target and pinned Goose
-  // revision, so a changed pin cannot borrow incompatible workspace artifacts
-  // and an unchanged local install never recompiles the dependency graph.
-  mkdirSync(gooseTarget, { recursive: true });
-  run(
-    'cargo',
-    ['build', '--release', '--locked', '--target', target, '-p', 'goose-cli', '--bin', 'goose'],
-    gooseSource,
-    { ...process.env, CARGO_TARGET_DIR: gooseTarget },
-  );
-  cpSync(join(gooseTarget, target, 'release', `goose${platform.exe}`), gooseAdapter);
+  if (reusableGoose) {
+    cpSync(cachedGoose, gooseAdapter);
+    console.log(`Reused pinned Goose ${GOOSE.version} executable from the existing bundle.`);
+  } else {
+    // The source clone is disposable; compiled Rust dependencies are not.
+    // Cargo owns invalidation inside a cache separated by target and pinned
+    // Goose revision, so a changed pin cannot borrow incompatible artifacts.
+    mkdirSync(gooseTarget, { recursive: true });
+    run(
+      'cargo',
+      ['build', '--release', '--locked', '--target', target, '-p', 'goose-cli', '--bin', 'goose'],
+      gooseSource,
+      { ...process.env, CARGO_TARGET_DIR: gooseTarget },
+    );
+    cpSync(join(gooseTarget, target, 'release', `goose${platform.exe}`), gooseAdapter);
+  }
 
   if (!platform.exe) {
     for (const file of [claudeAdapter, codexAdapter, gooseAdapter]) chmodSync(file, 0o755);

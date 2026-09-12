@@ -27,6 +27,13 @@ function completeBundle(root: string, fingerprint = createHash('sha256').update(
     schema: 2,
     target: TARGET,
     builderFingerprint: fingerprint,
+    adapters: {
+      local: {
+        adapter: 'goose',
+        version: '1.41.0',
+        commit: '39c27c387d726ce4605108d2f974d4feec158ed5',
+      },
+    },
     files: Object.fromEntries(FILES.map(file => [file, { sha256: sha256(join(output, file)) }])),
   })}\n`);
   return output;
@@ -80,5 +87,27 @@ describe('the local ACP build cache', () => {
     expect(a.gooseTarget).toContain(cache);
     expect(a.gooseTarget).toContain(TARGET);
     expect(a.gooseTarget).toMatch(/[0-9a-f]{40}$/);
+  });
+
+  it('reuses pinned Goose independently when another adapter input changes', () => {
+    const root = mkdtempSync(join(tmpdir(), 'atelier-acp-cache-test-'));
+    roots.push(root);
+    const output = completeBundle(root, 'changed-bundle-builder');
+
+    const reusable = run(output, '--cache-info');
+    expect(reusable.status, reusable.stderr).toBe(0);
+    expect(JSON.parse(reusable.stdout).gooseReusable).toBe(true);
+
+    writeFileSync(join(output, 'goose-acp'), 'tampered\n');
+    const tampered = run(output, '--cache-info');
+    expect(JSON.parse(tampered.stdout).gooseReusable).toBe(false);
+
+    completeBundle(root, 'changed-bundle-builder');
+    const manifestPath = join(output, 'manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    manifest.adapters.local.commit = 'different-pin';
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    const repinned = run(output, '--cache-info');
+    expect(JSON.parse(repinned.stdout).gooseReusable).toBe(false);
   });
 });
