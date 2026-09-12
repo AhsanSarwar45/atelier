@@ -30,21 +30,26 @@ const CHAT = 'the-writing-box-takes-any-file';
 const FIXTURE = join(process.cwd(), 'tests', `.workbench-run-${CHAT}`);
 
 /**
- * One file of each kind the app draws differently, and what it should be read
- * as. The bytes are not the point — a chip is drawn from the name — so each is
- * just enough of a file to be chosen and kept.
+ * One file of each kind the app draws differently: what kind it IS, for the
+ * icon and the colour, and what can be MADE of it, which is not the same
+ * question — a PDF and a log are both `text` and only one of them opens in a
+ * frame (`attachment-look.ts`). These are real files: a video has to have a
+ * first frame to draw and a recording has to have something to play.
  */
+const FIXTURES = join(__dirname, '..', 'fixtures', 'files-preview');
+
 const FILES = [
-  { name: 'clip.mp4', kind: 'video' },
-  { name: 'song.mp3', kind: 'audio' },
-  { name: 'contract.pdf', kind: 'text' },
-  { name: 'bundle.zip', kind: 'archive' },
-  { name: 'books.xlsx', kind: 'table' },
+  { name: 'shot.png', kind: 'image', look: 'picture' },
+  { name: 'clip.mp4', kind: 'video', look: 'video' },
+  { name: 'song.mp3', kind: 'audio', look: 'audio' },
+  { name: 'contract.pdf', kind: 'text', look: 'pdf' },
+  { name: 'notes.txt', kind: 'text', look: 'words' },
+  { name: 'bundle.zip', kind: 'archive', look: 'nothing' },
 ];
 
 async function openTheBox(page: Page, request: { post: Function; get: Function }): Promise<void> {
   mkdirSync(FIXTURE, { recursive: true });
-  for (const file of FILES) writeFileSync(join(FIXTURE, file.name), `${file.name} stands in for a real one\n`);
+  writeFileSync(join(FIXTURE, 'keep'), '');
 
   await page.route(/\/api\/projects(\?[^/]*)?$/, async (route) => {
     if (route.request().method() !== 'GET') return route.continue();
@@ -102,7 +107,7 @@ test('a video, a recording, a PDF, an archive and a spreadsheet each go in weari
 
   const chooser = page.waitForEvent('filechooser', { timeout: WAIT });
   await page.getByTestId('attach-picture').click();
-  await (await chooser).setFiles(FILES.map((file) => join(FIXTURE, file.name)));
+  await (await chooser).setFiles(FILES.map((file) => join(FIXTURES, file.name)));
 
   await expect(page.getByTestId('attachment-tray')).toBeVisible({ timeout: WAIT });
 
@@ -117,7 +122,7 @@ test('a video, a recording, a PDF, an archive and a spreadsheet each go in weari
   for (const [at, file] of FILES.entries()) {
     const tile = tiles.nth(at);
     await expect(tile, `${file.name} has no tile above the box`).toHaveAttribute('data-file-kind', file.kind);
-    await expect(tile, `${file.name}'s tile does not name it`).toContainText(file.name);
+    await expect(tile, `${file.name}'s tile does not know what can be made of it`).toHaveAttribute('data-look', file.look);
 
     const chip = page.getByTestId('composer-image-badge').nth(at);
     await expect(chip, `${file.name} has no chip in the box`).toHaveText(file.name);
@@ -125,5 +130,50 @@ test('a video, a recording, a PDF, an archive and a spreadsheet each go in weari
     expect(await chip.locator('svg').count(), `${file.name}'s chip draws no icon`).toBe(1);
   }
 
-  await page.screenshot({ path: join(SHOTS, 'bw-oamr-6-any-file.png'), animations: 'disabled' });
+  // Every tile is the same square. A strip that mixed a picture's thumbnail
+  // with a wide name-shaped pill for everything else did not line up at all,
+  // which is what the owner sent back (bw-oamr.7).
+  const shapes = await tiles.evaluateAll((els) =>
+    els.map((el) => {
+      const box = el.getBoundingClientRect();
+      return { width: Math.round(box.width), height: Math.round(box.height) };
+    }),
+  );
+  const first = shapes[0]!;
+  expect(first.width, `a tile measured ${first.width}x${first.height} and is meant to be square`).toBe(first.height);
+  for (const [at, shape] of shapes.entries()) {
+    expect(shape, `${FILES[at]!.name}'s tile is not the shape the others are`).toEqual(first);
+  }
+
+  // The video's tile is the video's own first frame, not an icon standing in
+  // for one: it has decoded something with a size.
+  const frame = page.getByTestId('attachment-frame');
+  await expect(frame).toHaveJSProperty('videoWidth', 320, { timeout: WAIT });
+
+  await page.screenshot({ path: join(SHOTS, 'bw-oamr-7-tiles.png'), animations: 'disabled' });
+
+  // And each opens full size, in the thing that can show it.
+  const opensAs = [
+    { name: 'shot.png', viewer: 'picture-viewer', close: 'picture-viewer-close' },
+    { name: 'clip.mp4', viewer: 'attachment-viewer', close: 'attachment-viewer-close', plays: 'attachment-video' },
+    { name: 'song.mp3', viewer: 'attachment-viewer', close: 'attachment-viewer-close', plays: 'attachment-audio' },
+    { name: 'contract.pdf', viewer: 'attachment-viewer', close: 'attachment-viewer-close', plays: 'attachment-pdf' },
+    { name: 'notes.txt', viewer: 'attachment-viewer', close: 'attachment-viewer-close', plays: 'attachment-words' },
+  ];
+  for (const one of opensAs) {
+    const at = FILES.findIndex((file) => file.name === one.name);
+    await tiles.nth(at).click();
+    await expect(page.getByTestId(one.viewer), `${one.name} did not open`).toBeVisible({ timeout: WAIT });
+    if (one.plays) await expect(page.getByTestId(one.plays), `${one.name} opened with nothing in it`).toBeVisible({ timeout: WAIT });
+    if (one.name === 'clip.mp4') {
+      await page.screenshot({ path: join(SHOTS, 'bw-oamr-7-video.png'), animations: 'disabled' });
+    }
+    await page.getByTestId(one.close).click();
+    await expect(page.getByTestId(one.viewer)).toHaveCount(0, { timeout: WAIT });
+  }
+
+  // An archive has nothing a browser can show, so its tile does not pretend to
+  // open one.
+  const zip = FILES.findIndex((file) => file.name === 'bundle.zip');
+  await expect(tiles.nth(zip)).toBeDisabled();
 });

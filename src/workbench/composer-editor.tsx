@@ -62,6 +62,7 @@ import { badgeElement } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { ExternalChange } from '@/workbench/code-editor';
 import type { DraftPicture } from '@/workbench/composer-attachments';
+import { opens as opensIt } from '@/workbench/attachment-look';
 import { drawnMarks } from '@/workbench/drawn-marks';
 import { findReferences, referenceLabel } from '@/workbench/references';
 
@@ -167,11 +168,12 @@ function badges(state: EditorState, icon: IconSource, picture: (id: string) => D
     const found = picture(match[1]!);
     if (!found || match.index === undefined) return [];
     const kind = fileKind(found.alt);
-    // A press opens what there is something to open. A picture opens full size;
-    // an archive or a spreadsheet has nothing to show yet, so its badge lets the
-    // click through to place a caret instead of opening an empty viewer.
-    const opens = kind === 'image' ? onOpen : undefined;
-    return [Decoration.replace({ widget: new FileBadge(found.alt, kind, icon, found, opens) }).range(match.index, match.index + match[0].length)];
+    // A press opens what there is something to open: a picture, a video, a
+    // recording, a PDF, a file of words. An archive has nothing a browser can
+    // show, so its badge lets the click through to place a caret instead of
+    // opening an empty box (`attachment-look.ts`).
+    const press = opensIt(found) ? onOpen : undefined;
+    return [Decoration.replace({ widget: new FileBadge(found.alt, kind, icon, found, press) }).range(match.index, match.index + match[0].length)];
   });
   return Decoration.set([...references, ...pictures], true);
 }

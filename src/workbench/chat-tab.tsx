@@ -63,7 +63,6 @@ import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { ComposerEditor, type ComposerHandle } from '@/workbench/composer-editor';
 import { fileCompletions } from '@/workbench/composer-files';
 import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
-import { fileKind } from '@/components/file-kinds';
 import { AttachmentTile } from '@/workbench/attachment-tile';
 import { imageIds, imageMarker, promptFromDraft, promptParts, whyNot } from '@/workbench/composer-attachments';
 import type { DraftPicture } from '@/workbench/composer-attachments';
@@ -101,7 +100,7 @@ import { isBusy, readAndKeep, sendCommand, useSession, useSessionFactsRead, type
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import { BrandIcon, ProfileBadge, ProviderBadge, brandName } from '@/workbench/brand-icon';
 import { workingLine } from '@/workbench/working-line';
-import { PictureViewer } from '@/workbench/picture-viewer';
+import { AttachmentViewer } from '@/workbench/attachment-viewer';
 import { useEpicChecklist } from '@/workbench/epic-checklist';
 import { firstAvailableProvider, providerIsAvailable, useProviders, whyUnavailable } from '@/workbench/providers';
 import { ModelIcon } from '@/workbench/model-icon';
@@ -2177,7 +2176,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 <AttachmentTile
                   key={file.id}
                   file={file}
-                  onOpen={fileKind(file.alt) === 'image' ? () => setLooking(file) : undefined}
+                  onOpen={() => setLooking(file)}
                   onRemove={() => {
                     setAttached((all) => all.filter((picture) => picture.id !== file.id));
                     setDraft((text) => text.replace(imageMarker(file.id), ''));
@@ -2559,7 +2558,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         </Dialog>
       </div>
 
-      {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}
+      {looking && <AttachmentViewer image={looking} onClose={() => setLooking(null)} />}
       {/* Read from the row as it stands right now, never from what was clicked:
           an agent opened while it works goes on working, and its clock, its
           spend and its answer keep arriving behind the pane. */}
