@@ -27,8 +27,22 @@ export function presentationAssetUrl(asset: string): string {
  * picture still being read in the writing box, before its upload has answered —
  * still carries its own bytes and is used as it stands.
  */
-export function attachmentSrc(image: Pick<ImagePayload, 'dataUrl'> & { asset?: string }): string {
-  return image.asset ? presentationAssetUrl(image.asset) : image.dataUrl;
+export function attachmentSrc(image: Pick<ImagePayload, 'dataUrl'> & { asset?: string; path?: string }): string {
+  if (image.asset) return presentationAssetUrl(image.asset);
+  if (image.dataUrl) return image.dataUrl;
+  return image.path ? mediaUrl(image.path) : '';
+}
+
+/**
+ * Where the bytes of a file already on this machine are served from.
+ *
+ * A path typed into the writing box is not an attachment yet — nothing was
+ * read and nothing was kept — but it is still a file the reader wants to see,
+ * and this is the door the Files tab and the transcript's own previews already
+ * go through (bw-oamr.8).
+ */
+export function mediaUrl(path: string): string {
+  return apiUrl(`/api/fs/media?path=${encodeURIComponent(path)}`);
 }
 
 /** How long one file may take to reach the store before it is given up on. */

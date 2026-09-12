@@ -174,6 +174,15 @@ export interface ImagePayload {
    * (bw-oamr.5). Use `attachmentSrc` to point at it.
    */
   asset?: string;
+  /**
+   * Where the file sits on this machine, when it is a place rather than bytes.
+   *
+   * A path typed into the writing box names a file nobody read: there is no
+   * `dataUrl` and no `asset`, only somewhere to go and look. `attachmentSrc`
+   * takes this as its last answer, which is what lets a typed path be drawn by
+   * the same tile as an attached one (bw-oamr.8).
+   */
+  path?: string;
   /** How many bytes it is, when the store has weighed it. */
   size?: number;
   /**

@@ -4,7 +4,8 @@ export interface DraftPicture extends ImagePayload {
   id: string;
 }
 
-const MARKER = /\[\[atelier-image:([a-zA-Z0-9_-]+)\]\]/g;
+/** How an attached file is named in the draft: the badge's own characters. */
+export const MARKER = /\[\[atelier-image:([a-zA-Z0-9_-]+)\]\]/g;
 
 export function imageMarker(id: string): string {
   return `[[atelier-image:${id}]]`;

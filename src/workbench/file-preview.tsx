@@ -28,8 +28,8 @@ import { Maximize, Minus, Plus } from 'lucide-react';
 import { fileKind } from '@/components/file-kinds';
 import { MarkdownBody } from '@/components/markdown-body';
 import { Button } from '@/components/ui/button';
-import { apiUrl } from '@/lib/api-base';
 import { cn } from '@/lib/utils';
+import { mediaUrl } from '@/workbench/attachment-store';
 import { CodeEditor } from '@/workbench/code-editor';
 import { NO_TRANSFORM, clampScale, fitScale, useZoomPan, type ImageTransform, type Size } from '@/workbench/zoom-pan';
 
@@ -68,10 +68,7 @@ function folderOf(path: string): string {
   return cut <= 0 ? '/' : path.slice(0, cut);
 }
 
-/** Where the bytes of a file on this machine are served from. */
-export function mediaUrl(path: string): string {
-  return apiUrl(`/api/fs/media?path=${encodeURIComponent(path)}`);
-}
+
 
 /**
  * The light and dark squares behind a picture, so a transparent PNG reads as
@@ -428,3 +425,7 @@ export function FilePreview({ path, kind, text = '', className }: FilePreviewPro
     </div>
   );
 }
+
+/** Where the bytes of a file on this machine are served from. Kept here as
+    well because every caller of this preview has always reached for it here. */
+export { mediaUrl };

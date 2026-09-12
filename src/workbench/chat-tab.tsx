@@ -64,6 +64,7 @@ import { ComposerEditor, type ComposerHandle } from '@/workbench/composer-editor
 import { fileCompletions } from '@/workbench/composer-files';
 import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
 import { AttachmentTile } from '@/workbench/attachment-tile';
+import { draftFiles, withoutFile } from '@/workbench/draft-files';
 import { imageIds, imageMarker, promptFromDraft, promptParts, whyNot } from '@/workbench/composer-attachments';
 import type { DraftPicture } from '@/workbench/composer-attachments';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
@@ -820,6 +821,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [attached, setAttached] = useUnsentPictures(sessionId ?? '');
   /** The picture being looked at, from the tray or from a message. */
   const [looking, setLooking] = useState<LookableImage | null>(null);
+
+  /**
+   * Every file this message carries, attached or typed, in writing order.
+   *
+   * Derived rather than held: the draft is the record of what the message
+   * names, and a second list kept alongside it is a second thing to go stale.
+   */
+  const tray = useMemo(() => draftFiles(draft, attached, where), [draft, attached, where]);
   /** Which sent-off agent's own conversation is open, by the call that sent it. */
   const [openAgent, setOpenAgent] = useState<string | null>(null);
   /**
@@ -2170,16 +2179,20 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             'focus-within:border-primary/60 focus-within:ring-1 focus-within:ring-primary/30',
           )}
         >
-          {attached.length > 0 && (
+          {/* One list, drawn twice: this strip and the badges inside the box
+              are both `draftFiles`, so a path the reader typed has a tile and
+              a badge, and taking either away takes the characters out of the
+              line — which takes the other away with them (bw-oamr.8). */}
+          {tray.length > 0 && (
             <div data-testid="attachment-tray" className="mb-2 flex flex-wrap gap-2">
-              {attached.map((file) => (
+              {tray.map((named) => (
                 <AttachmentTile
-                  key={file.id}
-                  file={file}
-                  onOpen={() => setLooking(file)}
+                  key={named.key}
+                  file={named.file}
+                  onOpen={() => setLooking(named.file)}
                   onRemove={() => {
-                    setAttached((all) => all.filter((picture) => picture.id !== file.id));
-                    setDraft((text) => text.replace(imageMarker(file.id), ''));
+                    if (named.picture) setAttached((all) => all.filter((picture) => picture.id !== named.picture!.id));
+                    setDraft((text) => withoutFile(text, named));
                   }}
                 />
               ))}
