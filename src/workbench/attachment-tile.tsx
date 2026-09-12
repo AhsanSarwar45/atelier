@@ -56,55 +56,75 @@ function PlayBadge() {
   );
 }
 
-export function AttachmentTile({ file, onOpen, onRemove }: AttachmentTileProps) {
+/**
+ * What fills the box, whatever shape the box is.
+ *
+ * The writing box's tray is a row of eighty-pixel squares and a sent message is
+ * a bounded grid of wider cells, because a screenshot in a conversation has to
+ * be recognisable and a tray is a tray. Those are two boxes; what goes IN one
+ * is the same question in both, and asking it twice is how the two drawings of
+ * a zip come to disagree (bw-oamr.9).
+ *
+ * A picture and a video fill the box with themselves; everything else stacks
+ * its kind's icon over its name, which is the only thing there is to say about
+ * a zip.
+ *
+ * A video is asked only for its metadata, and for the frame a tenth of a second
+ * in: a video that opens on black — and many do — would otherwise draw as an
+ * empty box, which says less than the icon would have.
+ */
+export function AttachmentFace({ file, fit = 'cover' }: { file: ImagePayload; fit?: 'cover' | 'contain' }) {
   const kind = fileKind(file.alt);
   const look = lookOf(file);
   const Icon = FILE_KINDS[kind].icon;
+  const src = attachmentSrc(file);
+  const how = fit === 'contain' ? 'object-contain' : 'object-cover';
+
+  if (look === 'picture') {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={src} alt={file.alt} className={cn('size-full', how)} />;
+  }
+  if (look === 'video') {
+    return (
+      <>
+        <video
+          data-testid="attachment-frame"
+          src={`${src}#t=0.1`}
+          preload="metadata"
+          muted
+          playsInline
+          className={cn('size-full bg-black', how)}
+        />
+        <PlayBadge />
+      </>
+    );
+  }
+  return (
+    <span className={cn('flex size-full flex-col items-center justify-center gap-1 px-1', FILE_KINDS[kind].color)}>
+      {/* A recording has no frame to show, so what stands in its place is the
+          thing you would press: a play button over its name, which is what the
+          owner asked for and is also the only useful thing to say about an
+          audio file at eighty pixels. */}
+      {look === 'audio' ? (
+        <span data-testid="attachment-play" className="flex size-8 shrink-0 items-center justify-center rounded-full bg-current/15">
+          <Play className="size-4 translate-x-px fill-current" aria-hidden="true" />
+        </span>
+      ) : (
+        <Icon className="size-8 shrink-0" aria-hidden="true" />
+      )}
+      {/* Two lines, and broken anywhere: `contract.pdf` does not fit across
+          eighty pixels on one line and a name cut to `contract.p…` has lost the
+          one part of it that says what the file is. */}
+      <span className="line-clamp-2 w-full break-all text-center font-mono text-[0.625rem] leading-tight">{file.alt}</span>
+    </span>
+  );
+}
+
+export function AttachmentTile({ file, onOpen, onRemove }: AttachmentTileProps) {
+  const kind = fileKind(file.alt);
+  const look = lookOf(file);
   const openable = Boolean(onOpen) && opens(file);
   const press = openable ? onOpen : undefined;
-  const src = attachmentSrc(file);
-
-  /**
-   * What fills the square. A picture and a video fill it edge to edge with
-   * themselves; everything else stacks its kind's icon over its name, which is
-   * the only thing there is to say about a zip.
-   *
-   * A video is asked only for its metadata, and for the frame a tenth of a
-   * second in: a video that opens on black — and many do — would otherwise draw
-   * as an empty square, which says less than the icon would have.
-   */
-  const inside =
-    look === 'picture' ? (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src={src} alt={file.alt} className="size-full object-cover" />
-    ) : look === 'video' ? (
-      <video
-        data-testid="attachment-frame"
-        src={`${src}#t=0.1`}
-        preload="metadata"
-        muted
-        playsInline
-        className="size-full bg-black object-cover"
-      />
-    ) : (
-      <span className={cn('flex size-full flex-col items-center justify-center gap-1 px-1', FILE_KINDS[kind].color)}>
-        {/* A recording has no frame to show, so what stands in its place is the
-            thing you would press: a play button over its name, which is what
-            the owner asked for and is also the only useful thing to say about
-            an audio file at eighty pixels. */}
-        {look === 'audio' ? (
-          <span data-testid="attachment-play" className="flex size-8 shrink-0 items-center justify-center rounded-full bg-current/15">
-            <Play className="size-4 translate-x-px fill-current" aria-hidden="true" />
-          </span>
-        ) : (
-          <Icon className="size-8 shrink-0" aria-hidden="true" />
-        )}
-        {/* Two lines, and broken anywhere: `contract.pdf` does not fit across
-            eighty pixels on one line and a name cut to `contract.p…` has lost
-            the one part of it that says what the file is. */}
-        <span className="line-clamp-2 w-full break-all text-center font-mono text-[0.625rem] leading-tight">{file.alt}</span>
-      </span>
-    );
 
   return (
     <span className="relative">
@@ -121,8 +141,7 @@ export function AttachmentTile({ file, onOpen, onRemove }: AttachmentTileProps) 
           disabled={!openable}
           className={cn(SQUARE, 'relative block p-0', openable ? 'cursor-zoom-in' : 'cursor-default')}
         >
-          {inside}
-          {look === 'video' && <PlayBadge />}
+          <AttachmentFace file={file} />
         </Button>
       </Tooltip>
       {onRemove && (

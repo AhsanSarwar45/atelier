@@ -60,7 +60,7 @@ describe('a picture a tool answered with', () => {
     const call = foldAll(took()).items.find((it): it is TranscriptTool => it.kind === 'tool')!;
     render(<ToolRow item={call} nested={false} />);
     // Not behind the row's click: a screenshot IS the answer.
-    expect(screen.getByTestId('picture-grid')).toBeInTheDocument();
+    expect(screen.getByTestId('attachment-grid')).toBeInTheDocument();
     expect(screen.getByAltText('the board')).toBeInTheDocument();
   });
 });

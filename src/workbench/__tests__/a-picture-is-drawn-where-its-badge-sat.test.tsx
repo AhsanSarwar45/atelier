@@ -69,7 +69,7 @@ function inOrder(container: HTMLElement): string[] {
     }
     // The pictures above the words are their own thing and are asserted on
     // their own; they are not part of the sentence being read here.
-    if (node.dataset.testid === 'picture-grid') return;
+    if (node.dataset.testid === 'attachment-grid') return;
     for (const kid of Array.from(node.childNodes)) walk(kid);
   };
   walk(container.querySelector('[data-testid="user-message"]')!);
@@ -112,7 +112,7 @@ describe('an attachment with a place', () => {
     // The chip says where it was attached; the picture is still the picture.
     // Drawing one instead of the other is what made the owner ask twice.
     const { container } = draw(sent('look at this', [shot('shot.png', 0)]));
-    const grid = container.querySelector('[data-testid="picture-grid"]')!;
+    const grid = container.querySelector('[data-testid="attachment-grid"]')!;
     expect(within(grid as HTMLElement).getByAltText('shot.png')).toBeTruthy();
     expect(screen.getAllByTestId('message-attachment-badge')).toHaveLength(1);
   });
@@ -127,7 +127,7 @@ describe('an attachment with no place', () => {
   it('keeps its picture and simply goes without a chip', () => {
     // A chat this app only follows, or a message recorded before any of this.
     const { container } = draw(sent('read this back', [shot('shot.png')]));
-    const grid = container.querySelector('[data-testid="picture-grid"]')!;
+    const grid = container.querySelector('[data-testid="attachment-grid"]')!;
     expect(within(grid as HTMLElement).getByAltText('shot.png')).toBeTruthy();
     expect(screen.queryAllByTestId('message-attachment-badge')).toHaveLength(0);
   });
@@ -137,7 +137,7 @@ describe('an attachment with no place', () => {
     // after it. Going without the chip is fine; losing the picture is not.
     const text = '<proposed_plan>do the thing</proposed_plan>after the plan';
     const { container } = draw(sent(text, [shot('shot.png', text.length)]));
-    const grid = container.querySelector('[data-testid="picture-grid"]')!;
+    const grid = container.querySelector('[data-testid="attachment-grid"]')!;
     expect(within(grid as HTMLElement).getByAltText('shot.png')).toBeTruthy();
     expect(screen.queryAllByTestId('message-attachment-badge')).toHaveLength(0);
   });

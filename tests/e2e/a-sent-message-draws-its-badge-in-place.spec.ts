@@ -97,7 +97,7 @@ test('a sent message wears its attachment chip where the badge sat', async ({ pa
 
     const message = page.locator('[data-testid="user-message"]');
     // The pictures keep their grid above the words, whichever way it was sent.
-    await expect(message.locator('[data-testid="picture-grid"]')).toHaveCount(1);
+    await expect(message.locator('[data-testid="attachment-grid"]')).toHaveCount(1);
     await expect(message.locator('[data-testid="message-image"]')).toHaveCount(2);
 
     const chips = message.locator('[data-testid="message-attachment-badge"]');

@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ImagePayload } from '@/workbench/protocol';
 
-import { PictureGrid, acrossFor } from '../picture-grid';
+import { AttachmentGrid, acrossFor, shownFrom } from '../attachment-grid';
 import { inlineMediaBounds } from '../media-bounds';
 
 /** A one-pixel PNG, small enough to write out here in full. */
@@ -36,8 +36,8 @@ function pictures(count: number): ImagePayload[] {
 function drawn(count: number) {
   cleanup();
   const looked = vi.fn();
-  render(<PictureGrid images={pictures(count)} onLook={looked} />);
-  const grid = screen.getByTestId('picture-grid');
+  render(<AttachmentGrid files={pictures(count)} onLook={looked} />);
+  const grid = screen.getByTestId('attachment-grid');
   return {
     grid,
     looked,
@@ -121,7 +121,51 @@ describe('a message’s pictures on the page', () => {
   });
 
   it('draws nothing at all for a message with no pictures in it', () => {
-    render(<PictureGrid images={[]} onLook={vi.fn()} />);
-    expect(screen.queryByTestId('picture-grid')).toBeNull();
+    render(<AttachmentGrid files={[]} onLook={vi.fn()} />);
+    expect(screen.queryByTestId('attachment-grid')).toBeNull();
+  });
+});
+
+/** One file of each kind a message can carry. */
+const CARRIED: ImagePayload[] = [
+  { mime: 'image/png', dataUrl: PIXEL, alt: 'shot.png' },
+  { mime: '', dataUrl: '', path: '/p/clip.mp4', alt: 'clip.mp4' },
+  { mime: '', dataUrl: '', path: '/p/song.mp3', alt: 'song.mp3' },
+  { mime: '', dataUrl: '', path: '/p/notes.txt', alt: 'notes.txt' },
+  { mime: '', dataUrl: '', path: '/p/bundle.zip', alt: 'bundle.zip' },
+];
+
+describe('what a message shows above its words', () => {
+  // The whole of bw-oamr.9: the strip held pictures only, so sending a message
+  // with a video or a zip in it made them vanish from the screen the writing
+  // box had just shown them on.
+  it('draws a cell for every file his own message carries', () => {
+    cleanup();
+    render(<AttachmentGrid files={shownFrom('user', CARRIED)} onLook={vi.fn()} />);
+    expect(screen.getAllByTestId('message-image')).toHaveLength(1);
+    expect(screen.getAllByTestId('message-attachment').map((cell) => cell.getAttribute('data-look'))).toEqual([
+      'video',
+      'audio',
+      'words',
+      'nothing',
+    ]);
+  });
+
+  it('draws only what there is something to look at from the agent', () => {
+    expect(shownFrom('assistant', CARRIED).map((file) => file.alt)).toEqual(['shot.png', 'clip.mp4', 'song.mp3']);
+  });
+
+  it('does not offer to open a file a browser cannot show', () => {
+    cleanup();
+    render(<AttachmentGrid files={[CARRIED[4]!]} onLook={vi.fn()} />);
+    expect(screen.getByTestId('message-attachment')).toBeDisabled();
+  });
+
+  it('opens the file that was pressed', () => {
+    cleanup();
+    const looked = vi.fn();
+    render(<AttachmentGrid files={shownFrom('user', CARRIED)} onLook={looked} />);
+    fireEvent.click(screen.getAllByTestId('message-attachment')[0]!);
+    expect(looked).toHaveBeenCalledWith(CARRIED[1]);
   });
 });

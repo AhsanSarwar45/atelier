@@ -256,7 +256,7 @@ test.describe('a picture in a chat that already happened', () => {
       await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 60_000 });
       await expect(page.getByTestId('transcript').getByText(ANSWERED)).toBeVisible({ timeout: 60_000 });
 
-      const grid = page.getByTestId('user-message').getByTestId('picture-grid').first();
+      const grid = page.getByTestId('user-message').getByTestId('attachment-grid').first();
       await expect(grid).toBeVisible({ timeout: 60_000 });
       const thumbs = page.getByTestId('user-message').getByTestId('message-image');
       await expect(thumbs).toHaveCount(5);

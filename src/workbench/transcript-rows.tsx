@@ -38,7 +38,7 @@ import { diffLines } from '@/workbench/line-diff';
 import { opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
 import { lookOf, markOf } from '@/workbench/machine-look';
 import { attachmentMarker, attachmentsIn } from '@/workbench/mentions';
-import { PictureGrid } from '@/workbench/picture-grid';
+import { AttachmentGrid, shownFrom } from '@/workbench/attachment-grid';
 import { withoutProposedPlans } from '@/workbench/proposed-plan';
 import { ImageComparisonView } from '@/workbench/image-comparison';
 import { comparisonSpecs } from '@/workbench/chat-media';
@@ -627,7 +627,7 @@ export const ToolRow = memo(function ToolRow({
           failure this replaced (bw-t26l.20). */}
       {item.images && item.images.length > 0 && (
         <div className="pt-1">
-          <PictureGrid images={item.images} onLook={onLook} />
+          <AttachmentGrid files={shownFrom('assistant', item.images)} onLook={onLook} />
         </div>
       )}
     </div>
@@ -979,7 +979,9 @@ const MessageRow = memo(function MessageRow({
         sentOff(sentBy) && SENT_OFF,
       )}
     >
-      <PictureGrid images={item.images} onLook={onLook} />
+      {/* His own message shows every file it carries; the agent's shows
+          only what there is something to look at (bw-oamr.9). */}
+      <AttachmentGrid files={shownFrom(item.role === 'user' ? 'user' : 'assistant', item.images)} onLook={onLook} />
       <RichMessageContent item={item} mentions={mentions} onLook={onLook} />
     </div>
   );
