@@ -1222,6 +1222,37 @@ fn claimable(card: &Value, who: &str) -> bool {
         || expired(card)
 }
 
+/// Is `card` the job `job` names, or a piece of work underneath it?
+///
+/// A worktree belongs to a job and is reused by every child under it — one
+/// checkout for a whole epic, not one per step. Beads ids are hierarchical, so
+/// `bw-x.1` and `bw-x.1.2` are both work in `bw-x` and nothing else is.
+fn descends(card: &str, job: &str) -> bool {
+    card == job
+        || card
+            .strip_prefix(job)
+            .is_some_and(|rest| rest.starts_with('.'))
+}
+
+/// Does this session hold open work inside the job a copy is named for?
+///
+/// The copy names the unit of isolation; a card names the unit of work, and
+/// those are not the same size (`docs/hook-friction-2.md` §18). A session
+/// writing in a job's copy is entitled to it when it owns the job itself or
+/// any card under it.
+fn owns_work_under(project: &Path, job: &str, who: &str) -> bool {
+    let Some(value) = bd(
+        project,
+        &["list", "--status", "in_progress", "--limit", "0", "--json"],
+    ) else {
+        return false;
+    };
+    rows(value).into_iter().any(|card| {
+        card["assignee"].as_str() == Some(who)
+            && card["id"].as_str().is_some_and(|id| descends(id, job))
+    })
+}
+
 fn ownership_refusal(card: &Value, issue: &str, who: &str) -> Option<String> {
     if card["status"].as_str() != Some("in_progress") {
         return Some(format!(
@@ -1246,11 +1277,14 @@ fn workflow(data: &Value) -> Option<Value> {
         return None;
     }
     if let Some((issue, here)) = claim_transition(data) {
-        let isolated = issue_at(&here).as_deref() == Some(&issue)
+        // The copy is cut per job and reused by every card under it, so the
+        // card being claimed need only be work inside the job the copy is
+        // named for (`docs/hook-friction-2.md` §18).
+        let isolated = issue_at(&here).is_some_and(|job| descends(&issue, &job))
             || isolation_made(data, &issue).as_deref() == Some(here.as_path());
         if !isolated {
             return deny(format!(
-                "Claim {issue} from its own isolated worktree, not {}.",
+                "Claim {issue} from the worktree of its own job, not {}.",
                 here.display()
             ));
         }
@@ -1293,7 +1327,14 @@ fn workflow(data: &Value) -> Option<Value> {
             // An isolated Git worktree on a task branch is enough during a temporary board outage.
             continue;
         };
-        if let Some(reason) = ownership_refusal(&card, &issue, &session(data)) {
+        let who = session(data);
+        if let Some(reason) = ownership_refusal(&card, &issue, &who) {
+            // The copy is named for a job, and a job's work is its children.
+            // Ownership of any card under it is ownership of the copy
+            // (`docs/hook-friction-2.md` §18).
+            if owns_work_under(&project, &issue, &who) {
+                continue;
+            }
             return deny(format!("{reason} The {}.", target.spelled()));
         }
     }
@@ -2279,6 +2320,38 @@ mod tests {
         assert!(!merges("echo git merge --ff-only bw-1"));
         assert!(!merges("echo 'git merge --ff-only bw-1'"));
         assert!(!merges("touch git-merge"));
+    }
+
+    /// A worktree belongs to a job and is reused by every card under it, but
+    /// the gate read the directory name as the card and refused the children
+    /// (`docs/hook-friction-2.md` §18, bw-wk5u, bw-8qrr, bw-ad3r, bw-oamr).
+    #[test]
+    fn native_machinery_a_job_copy_holds_the_work_underneath_it() {
+        assert!(descends("bw-x", "bw-x"), "the job is work in itself");
+        assert!(descends("bw-x.1", "bw-x"));
+        assert!(descends("bw-x.1.2", "bw-x"), "an epic under an epic");
+        // A neighbour whose id merely starts with the same letters is not
+        // work in this job.
+        assert!(!descends("bw-xy", "bw-x"));
+        assert!(!descends("bw-x1", "bw-x"));
+        assert!(!descends("bw-y.1", "bw-x"));
+        assert!(!descends("bw-x", "bw-x.1"), "a parent is not its child's work");
+
+        // The claim of a child, made in the copy cut for its job, is a claim
+        // made in its own isolated worktree.
+        let job_copy = |card: &str| {
+            let data = json!({"tool_name":"Bash", "cwd":"/repo/worktrees/bw-x",
+                "tool_input":{"command": format!("bd update {card} --claim")}});
+            let (issue, here) = claim_transition(&data).unwrap();
+            (
+                worktree_issue(&here).is_some_and(|job| descends(&issue, &job)),
+                issue,
+            )
+        };
+        assert!(job_copy("bw-x.1").0);
+        assert!(job_copy("bw-x.1.2").0);
+        assert!(job_copy("bw-x").0);
+        assert!(!job_copy("bw-y.1").0, "somebody else's job stays refused");
     }
 
     #[test]
