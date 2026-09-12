@@ -220,7 +220,6 @@ test.describe('workbench', () => {
       const editRow = page.locator('[data-testid="tool-row"][data-tool-name^="Edit"]').last();
       await expect(editRow).toHaveAttribute('data-tool-status', 'ok', { timeout: 120_000 });
 
-      await expect(page.getByTestId('cost-chip')).toBeVisible({ timeout: 180_000 });
       await editRow.scrollIntoViewIfNeeded();
       await page.screenshot({ path: join(SHOTS, 'permission-allowed.png'), fullPage: false });
     } finally {
@@ -322,8 +321,9 @@ test.describe('workbench', () => {
       );
       await page.getByTestId('send-button').click();
 
-      // The turn is over when the agent reports its cost.
-      await expect(page.getByTestId('cost-chip')).toBeVisible({ timeout: 480_000 });
+      // The turn is over when its stop control goes away.
+      await expect(page.getByTestId('stop-button')).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId('stop-button')).toHaveCount(0, { timeout: 480_000 });
 
       // 1. tool rows
       await expect(page.getByTestId('tool-row').first()).toBeVisible();
@@ -498,7 +498,6 @@ test.describe('workbench', () => {
       // ---- (a) the chip nobody typed --------------------------------------
       const chip = page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`);
       await expect(chip).toBeVisible({ timeout: 300_000 });
-      await expect(page.getByTestId('cost-chip')).toBeVisible({ timeout: 300_000 });
       await page.screenshot({ path: join(SHOTS, 'link-a.png'), fullPage: false });
 
       // The board is the record, so the edge must be readable straight from bd.

@@ -949,19 +949,23 @@ test.describe('the agents a chat sends off', () => {
       const folded = page.getByTestId('toggle-stopped-agents');
       if (await folded.isVisible()) await folded.click();
 
-      // The whole of it: the chat's own turns AND every one of theirs.
-      const chip = page.getByTestId('cost-chip');
-      await expect(chip).toBeVisible();
-      await expect(chip).toHaveAttribute('data-kind', 'tokens');
-      await expect(chip).toHaveAttribute('data-total', String(written.spend.total));
+      // The whole of it remains in the token picture: the chat's own turns AND
+      // every one of theirs, without repeating that total in the header.
+      await expect(page.getByTestId('cost-chip')).toHaveCount(0);
+      await page.getByTestId('context-chip-open').click();
+      const total = page.getByTestId('token-spent-total');
+      await expect(total).toBeVisible();
+      await expect(total).toHaveAttribute('data-total', String(written.spend.total));
+      await page.screenshot({ path: `${SHOTS}/token-picture-with-total.png`, fullPage: false });
       // Said as a sum rather than as one number, so a failure says which half
       // went missing: the delegated work is most of this chat's bill.
       expect(written.spend.total, 'the fixture spent nothing on its helpers').toBe(
         written.spend.own + written.spend.helpers,
       );
       expect(written.spend.helpers, 'nothing was delegated, so nothing is being proved').toBeGreaterThan(0);
-      // And the chat's own turns alone are not what is on the line.
-      expect(Number(await chip.getAttribute('data-total'))).toBeGreaterThan(written.spend.own);
+      // And the chat's own turns alone are not what the picture reports.
+      expect(Number(await total.getAttribute('data-total'))).toBeGreaterThan(written.spend.own);
+      await page.getByTestId('token-close').click();
 
       // ---- and each of the three is its own row ----------------------------
       for (const mine of THREE_ROWS) {

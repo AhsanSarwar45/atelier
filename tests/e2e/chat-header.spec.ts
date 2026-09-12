@@ -97,7 +97,6 @@ const PIECES = [
   'session-meta',
   'chat-folder-chip',
   'context-chip',
-  'cost-chip',
   'plan-chips',
 ] as const;
 
@@ -195,8 +194,8 @@ test.describe('the line above a conversation', () => {
     await page.goto(`/project?id=${project.id}&tab=chat&chat=${started.id}`);
     await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
 
-    // One word back, which is what puts numbers on the line: what the chat is
-    // using, what it has spent, and what the account has left.
+    // One word back, which is what puts the two useful controls on the line:
+    // what the chat is using and what the account has left.
     const asked = await request.post('/api/workbench/command', {
       data: { type: 'prompt.send', sessionId: started.id, text: 'Reply with the single word OK and nothing else.' },
     });
@@ -374,15 +373,15 @@ test.describe('the line above a conversation', () => {
 
       await page.screenshot({ path: `${SHOTS}/chat-header-outside-cramped.png`, clip: { ...cramped } });
 
-      // On a phone, identity badges and lifetime spend step aside for the two
-      // numbers that matter while working: this chat's context and the plan's
-      // session/week windows. Composer settings become one thumb-sized door.
+      // On a phone, identity badges step aside for the two numbers that matter
+      // while working: this chat's context and the plan's session/week windows.
+      // Composer settings become one thumb-sized door.
       await page.setViewportSize({ width: 390, height: 844 });
       await page.reload();
       await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
       await expect(page.getByTestId('chat-status-line')).toBeVisible();
       await expect(page.getByTestId('chat-model-chip')).toBeHidden();
-      await expect(page.getByTestId('cost-chip')).toBeHidden();
+      await expect(page.getByTestId('cost-chip')).toHaveCount(0);
       await expect(page.getByTestId('mobile-composer-settings')).toBeVisible();
       await expect(page.getByTestId('desktop-composer-settings')).toBeHidden();
       await page.screenshot({ path: `${SHOTS}/mobile-chat-ui-after.png`, fullPage: true });

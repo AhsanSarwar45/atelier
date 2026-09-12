@@ -14,7 +14,6 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowDown,
   ArrowUp,
-  Coins,
   ChevronDown,
   ChevronRight,
   Folder,
@@ -82,7 +81,7 @@ import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, sentAway, showing as stillShowing, type KindId } from '@/workbench/message-filter';
-import type { Brand, CommandInfo, Cost, LookableImage, ProfileChoice, SessionConfigOption, TodoItem } from '@/workbench/protocol';
+import type { Brand, CommandInfo, LookableImage, ProfileChoice, SessionConfigOption, TodoItem } from '@/workbench/protocol';
 
 /** The brands a chat can run on somebody's account. `local` has none. */
 const ACCOUNTED_BRANDS: readonly Brand[] = ['claude', 'codex'];
@@ -580,14 +579,6 @@ export function TodoPanel({ items }: { items: TodoItem[] }) {
       </ul>
     </Panel>
   );
-}
-
-/**
- * What a conversation has spent, in whatever the brand bills in: money on the
- * ones that charge money, tokens on the ones that do not.
- */
-function costLabel(cost: Cost): string {
-  return cost.kind === 'usd' ? `$${cost.usd.toFixed(4)}` : `${cost.total.toLocaleString()} tokens`;
 }
 
 /** Desktop keeps its quick Enter shortcut; phone keyboards always make a new line. */
@@ -2022,12 +2013,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             </Badge>
           </Tooltip>
         )}
-        {/* What this chat is using and what it has spent, then how much of the
-            account's own five-hour allowance is gone. All three are numbers a
-            reader watching the work has to see without opening anything, so
-            they live on the line and not in the column beside it — the column
-            holds what the chat produced (bw-7ks.22.13, bw-malh). Each wears its
-            own mark, because three bare numbers in a row read as one. */}
+        {/* Keep the header to the two glanceable controls: the context gauge
+            opens the complete token picture (including total task usage), and
+            plan usage opens the account allowance. The total does not need a
+            second, read-only copy beside its own way in (bw-fpuk.1). */}
         <div className={cn('ml-auto flex shrink-0 items-center', CHIP_GAP)}>
           {view.context && (
             <ContextChip
@@ -2035,22 +2024,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               window={view.context.window}
               onOpen={() => setShowing('tokens')}
             />
-          )}
-          {view.cost && (
-            <Tooltip label="Total usage including subagents">
-              <Badge
-                variant="secondary"
-                appearance="light"
-                size="sm"
-                data-testid="cost-chip"
-                data-kind={view.cost.kind}
-                data-total={view.cost.kind === 'usd' ? view.cost.usd : view.cost.total}
-                className="hidden font-mono md:inline-flex"
-              >
-                <Coins />
-                {costLabel(view.cost)}
-              </Badge>
-            </Tooltip>
           )}
           <PlanChip usage={plan} onOpen={() => setShowing('usage')} />
         </div>

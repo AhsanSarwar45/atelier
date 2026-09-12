@@ -1275,3 +1275,14 @@ worktree, then used the explicit per-job bypass to reopen the epic, add its
 regression child, and claim that child. Tracker-only reopening must be allowed
 before ownership of a new child can exist; repository edits still need the
 owned job worktree. No installed app or live chat state was modified.
+
+## Edit resolves a job worktree as the landing checkout (bw-fpuk.1)
+
+The Edit-compatible `apply_patch` tool refused a source change under
+`worktrees/bw-fpuk` even though child `bw-fpuk.1` was claimed there. Its error
+reported the resolved target as `/home/ahsan/dev/beads-web`, the landing
+checkout, rather than the file path in the job worktree. The same patch applied
+when the documented per-job bypass was prefixed to the `apply_patch` command.
+
+The gate should resolve absolute patch targets to their containing worktree and
+accept the claimed descendant of the epic that names that worktree.
