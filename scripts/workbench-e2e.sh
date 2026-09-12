@@ -28,6 +28,9 @@ export ATELIER_DATA_DIR="$RUN/data"
 # so that a throwaway copy's evidence is still there for the one that draws it
 # (bw-9px0.13). A run of the cases is the one thing that must not join in.
 export ATELIER_PRESENTATION_MEDIA_DIR="$RUN/presentation-media"
+# Calls made inside a case create fixtures, not durable transcript evidence.
+# Ordinary CLI calls do not carry this marker, even when aimed at this port.
+export ATELIER_PRESENTATION_EPHEMERAL=1
 export BEADS_E2E_URL="http://$BEADS_WEB_HOST:$BEADS_WEB_PORT"
 # The links test builds its own reporting tree; the real one is never written to.
 export REPORTS_DIR="${REPORTS_DIR:-$ROOT/tests/.workbench-run-links/reporting}"

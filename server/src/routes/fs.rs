@@ -78,6 +78,12 @@ fn presentation_asset_path(directory: &std::path::Path, asset: &str) -> Option<P
     (path.starts_with(root) && path.is_file()).then_some(path)
 }
 
+fn presentation_asset_in_stores(primary: &std::path::Path, durable: Option<&std::path::Path>, asset: &str) -> Option<PathBuf> {
+    presentation_asset_path(primary, asset).or_else(|| durable
+        .filter(|directory| *directory != primary)
+        .and_then(|directory| presentation_asset_path(directory, asset)))
+}
+
 use super::validate_path_security;
 
 /// Query parameters for the list directory endpoint.
@@ -969,7 +975,8 @@ pub async fn presentation_asset(headers: HeaderMap, Path(asset): Path<String>) -
     let Some(directory) = crate::identity::presentation_media_dir() else {
         return (StatusCode::INTERNAL_SERVER_ERROR, "Presentation storage is unavailable").into_response();
     };
-    let Some(path) = presentation_asset_path(&directory, &asset) else {
+    let durable = crate::identity::durable_presentation_media_dir();
+    let Some(path) = presentation_asset_in_stores(&directory, durable.as_deref(), &asset) else {
         return (StatusCode::NOT_FOUND, "Presentation asset does not exist").into_response();
     };
     let bytes = match tokio::fs::read(&path).await {
@@ -2230,6 +2237,18 @@ mod tests {
             std::fs::write(root.path().join("outside.png"), b"outside").unwrap();
             assert!(presentation_asset_path(&media, &format!("{}.png", "c".repeat(64))).is_none());
         }
+    }
+
+    #[test]
+    fn an_isolated_copy_reads_a_durable_presenters_asset() {
+        let isolated = tempfile::tempdir().unwrap();
+        let durable = tempfile::tempdir().unwrap();
+        let name = format!("{}.png", "d".repeat(64));
+        std::fs::write(durable.path().join(&name), b"durable pixels").unwrap();
+        assert_eq!(
+            presentation_asset_in_stores(isolated.path(), Some(durable.path()), &name),
+            Some(std::fs::canonicalize(durable.path().join(name)).unwrap())
+        );
     }
 
     /// The walk must survive a launcher that runs and *then* fails. `xdg-open`

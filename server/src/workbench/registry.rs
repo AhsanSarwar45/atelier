@@ -370,8 +370,9 @@ impl WorkbenchRegistry {
         args: &[String],
         stdin: &str,
         files: &std::collections::BTreeMap<String, Vec<u8>>,
+        media: &Path,
     ) -> Result<String, String> {
-        media::present_uploaded(args, stdin, files, &self.paths.media)
+        media::present_uploaded(args, stdin, files, media)
     }
 
     pub async fn capture_browser(
@@ -387,16 +388,18 @@ impl WorkbenchRegistry {
         bytes: &[u8],
         label: &str,
         source: &str,
+        media: &Path,
     ) -> Result<StoredCapture, String> {
-        screen_check::store_static(bytes, label, source, &self.paths.media)
+        screen_check::store_static(bytes, label, source, media)
     }
 
     pub fn compare_captures(
         &self,
         before: &[u8],
         after: &[u8],
+        media: &Path,
     ) -> Result<StoredComparison, String> {
-        screen_check::compare_and_store(before, after, &self.paths.media)
+        screen_check::compare_and_store(before, after, media)
     }
 
     pub async fn has_driver(&self, session_id: &str) -> bool {

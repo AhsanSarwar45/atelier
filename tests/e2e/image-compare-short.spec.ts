@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { PNG } from 'pngjs';
@@ -33,6 +34,7 @@ const DARK_ALT = 'A page half white and half black after the change';
 // file's default is the suite's `fullyParallel`, which put them there.
 test.describe.configure({ mode: 'serial' });
 
+type ImageCompareWidget = Extract<ChatWidget, { type: 'image_compare' }>;
 type Box = { x: number; y: number; width: number; height: number };
 const overlaps = (a: Box, b: Box) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
@@ -42,6 +44,15 @@ async function chipRow(browser: Browser, path: string, gap: number): Promise<str
   const chips = ['bw-r8iy.3', 'area:interface', 'kind:bug', 'step:work', 'P2', 'limit 4px', 'limit 8px'].map((label) =>
     `<span style="display:inline-block;padding:4px 10px;border:1px solid #444;border-radius:999px;background:#1e1e22;color:#ddd;font:13px system-ui">${label}</span>`).join('');
   await page.setContent(`<body style="margin:0;background:#111;padding:16px 24px;white-space:nowrap"><div style="display:flex;gap:${gap}px">${chips}</div></body>`);
+  await page.screenshot({ path });
+  await page.close();
+  return path;
+}
+
+/** The exact aspect ratio that exposed the missing durable comparison files. */
+async function thinRow(browser: Browser, path: string, color: string): Promise<string> {
+  const page = await browser.newPage({ viewport: { width: 864, height: 40 }, colorScheme: 'dark' });
+  await page.setContent(`<body style="margin:0;height:40px;background:#111;display:flex;align-items:center;gap:8px;padding:0 12px;box-sizing:border-box"><span style="height:20px;width:180px;border-radius:10px;background:${color}"></span><span style="height:20px;width:280px;border-radius:10px;background:#333"></span></body>`);
   await page.screenshot({ path });
   await page.close();
   return path;
@@ -57,10 +68,12 @@ async function bands(browser: Browser, path: string, mark: string): Promise<stri
 }
 
 /** The comparison the sidecar itself produces from two files on disk. */
-function comparisonOf(before: string, after: string, beforeAlt: string, afterAlt: string): ChatWidget {
+function comparisonOf(before: string, after: string, beforeAlt: string, afterAlt: string, mode: 'side_by_side' | 'wipe' = 'wipe', durable = false): ImageCompareWidget {
   const command = join(process.cwd(), 'server/target/debug/atelier');
+  const env = { ...process.env };
+  if (durable) delete env.ATELIER_PRESENTATION_EPHEMERAL;
   return widgetSpecs(execFileSync(command, ['tool', 'present', 'compare',
-    '--before', before, '--after', after, '--before-alt', beforeAlt, '--after-alt', afterAlt, '--mode', 'wipe'], { encoding: 'utf8' }))[0]!;
+    '--before', before, '--after', after, '--before-alt', beforeAlt, '--after-alt', afterAlt, '--mode', mode], { encoding: 'utf8', env }))[0]! as ImageCompareWidget;
 }
 
 /**
@@ -174,6 +187,32 @@ async function dividerReadsOnBothHalves(divider: Locator, picture: Locator, wher
   expect(darkestOnWhite, `${where}: the line cannot be seen against the white half of the picture`).toBeLessThan(100);
   expect(lightestOnBlack, `${where}: the line cannot be seen against the black half of the picture`).toBeGreaterThan(155);
 }
+
+test('a presenter-created 864x40 side-by-side comparison survives its source files and disposable app store', async ({ page, request, browser }) => {
+  const run = process.env.WORKBENCH_E2E_RUN!;
+  const before = await thinRow(browser, join(run, 'durable-before.png'), '#7c3aed');
+  const after = await thinRow(browser, join(run, 'durable-after.png'), '#059669');
+  const comparison = comparisonOf(before, after, 'Before durable strip', 'After durable strip', 'side_by_side', true);
+  unlinkSync(before);
+  unlinkSync(after);
+  for (const image of [comparison.before, comparison.after]) {
+    expect(existsSync(join(process.env.ATELIER_PRESENTATION_MEDIA_DIR!, image.asset)), 'the presenter wrote into the disposable app store').toBe(false);
+  }
+
+  let project: { id: string } | null = null;
+  try {
+    project = await chatShowing(page, request, comparison, 'managed-durable-comparison', 'Durable comparison proof');
+    const frame = page.locator('[data-widget="image_compare"]');
+    for (const alt of ['Before durable strip', 'After durable strip']) {
+      const image = frame.getByRole('img', { name: alt });
+      await painted(image);
+      expect(await image.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBe(864);
+      expect(await image.evaluate((element) => (element as HTMLImageElement).naturalHeight)).toBe(40);
+    }
+    await frame.scrollIntoViewIfNeeded();
+    await frame.screenshot({ path: 'tests/results/image-compare-durable-after.png' });
+  } finally { if (project) await request.delete(`/api/projects/${project.id}`); }
+});
 
 test('a wide, short wipe comparison keeps its labels and zoom button clear of the picture', async ({ page, request, browser }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });

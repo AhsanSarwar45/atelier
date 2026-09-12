@@ -145,6 +145,17 @@ pub fn presentation_media_dir() -> Option<PathBuf> {
     )
 }
 
+/// The durable presentation store, ignoring a disposable test copy's media
+/// override. Normal presenter and screen-check commands use this path, so
+/// pointing one at a throwaway app port cannot make its widget temporary.
+pub fn durable_presentation_media_dir() -> Option<PathBuf> {
+    resolve_durable_presentation_media_dir(shared_presentation_data_dir())
+}
+
+fn resolve_durable_presentation_media_dir(shared: Option<PathBuf>) -> Option<PathBuf> {
+    shared.map(|dir| dir.join("presentation-media"))
+}
+
 /// The one installed-user location every copy reads, including a disposable
 /// copy whose databases are isolated with `XDG_DATA_HOME`.
 ///
@@ -262,6 +273,18 @@ mod tests {
         assert_eq!(
             resolve_presentation_media_dir(Some("   ".into()), Some("/shared".into())),
             Some(PathBuf::from("/shared/presentation-media"))
+        );
+    }
+
+    #[test]
+    fn a_durable_presentation_ignores_a_copys_test_store() {
+        assert_eq!(
+            resolve_durable_presentation_media_dir(Some(PathBuf::from(
+                "/home/reader/.local/share/atelier"
+            ))),
+            Some(PathBuf::from(
+                "/home/reader/.local/share/atelier/presentation-media"
+            ))
         );
     }
 

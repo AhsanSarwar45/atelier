@@ -2247,6 +2247,17 @@ struct UploadedRequest {
     stdin: String,
     #[serde(default)]
     files: BTreeMap<String, String>,
+    #[serde(default)]
+    ephemeral: bool,
+}
+
+fn presentation_directory(state: &WorkbenchState, ephemeral: bool) -> Result<std::path::PathBuf, String> {
+    if ephemeral {
+        Ok(state.registry.media_directory().to_path_buf())
+    } else {
+        crate::identity::durable_presentation_media_dir()
+            .ok_or_else(|| "Durable presentation storage is unavailable".to_string())
+    }
 }
 
 fn decoded(files: BTreeMap<String, String>) -> Result<BTreeMap<String, Vec<u8>>, String> {
@@ -2301,8 +2312,9 @@ async fn present(
     Json(request): Json<UploadedRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let files = decoded(request.files)?;
+    let media = presentation_directory(&state, request.ephemeral)?;
     Ok(Json(
-        json!({"output":state.registry.present(&request.args, &request.stdin, &files)?}),
+        json!({"output":state.registry.present(&request.args, &request.stdin, &files, &media)?}),
     ))
 }
 
@@ -2318,6 +2330,7 @@ async fn screen_check(
     Json(request): Json<UploadedRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let files = decoded(request.files)?;
+    let media = presentation_directory(&state, request.ephemeral)?;
     let action = request.args.first().map(String::as_str).unwrap_or("help");
     if matches!(action, "help" | "--help" | "-h") {
         return Ok(Json(
@@ -2350,11 +2363,11 @@ async fn screen_check(
             .ok_or_else(|| format!("no upload for {after}"))?;
         let before_stored = state
             .registry
-            .store_capture(before_bytes, "Before", "image")?;
+            .store_capture(before_bytes, "Before", "image", &media)?;
         let after_stored = state
             .registry
-            .store_capture(after_bytes, "After", "image")?;
-        let comparison = state.registry.compare_captures(before_bytes, after_bytes)?;
+            .store_capture(after_bytes, "After", "image", &media)?;
+        let comparison = state.registry.compare_captures(before_bytes, after_bytes, &media)?;
         captures.push(
             json!({"asset":before_stored.asset,"label":"Before","evidence":before_stored.evidence}),
         );
@@ -2374,7 +2387,7 @@ async fn screen_check(
         let capture = state.registry.capture_browser(&recipe, &files).await?;
         state
             .registry
-            .store_capture(&capture.bytes, "Browser capture", "browser")?
+            .store_capture(&capture.bytes, "Browser capture", "browser", &media)?
     } else if let Some(window_id) = option(&request.args, "--window-id") {
         let stable_ms = option(&request.args, "--stable-ms")
             .and_then(|value| value.parse().ok())
@@ -2392,7 +2405,7 @@ async fn screen_check(
         .await?;
         state
             .registry
-            .store_capture(&bytes, "Window capture", "window")?
+            .store_capture(&bytes, "Window capture", "window", &media)?
     } else {
         let target = option(&request.args, "--target")
             .ok_or_else(|| "--target, --window-id or --recipe is required".to_string())?;
@@ -2401,7 +2414,7 @@ async fn screen_check(
             .ok_or_else(|| format!("no upload for {target}"))?;
         state
             .registry
-            .store_capture(bytes, "Image capture", "image")?
+            .store_capture(bytes, "Image capture", "image", &media)?
     };
     captures.push(json!({"asset":stored.asset,"label":"Capture","evidence":stored.evidence}));
     Ok(Json(

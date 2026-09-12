@@ -11,6 +11,8 @@ struct UploadedRequest<'a> {
     args: &'a [String],
     stdin: String,
     files: std::collections::BTreeMap<String, String>,
+    /// Only the app's E2E harness sets this. Ordinary tool calls are durable.
+    ephemeral: bool,
 }
 
 fn uploaded_request<'a>(
@@ -36,6 +38,7 @@ fn uploaded_request<'a>(
         args: rest,
         stdin,
         files,
+        ephemeral: std::env::var("ATELIER_PRESENTATION_EPHEMERAL").as_deref() == Ok("1"),
     })
 }
 
