@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { request } from '@/lib/api';
 import { keepFile } from '@/workbench/attachment-store';
+import { looksLikeAPicture } from '@/workbench/composer-attachments';
 import { pictureShape } from '@/workbench/picture-shape';
 import { onChat } from '@/workbench/live-wire';
 import { asView, EMPTY, reduce, type SessionView } from '@/workbench/fold';
@@ -57,20 +58,24 @@ export function readImage(file: File): Promise<ImagePayload> {
  * on the way out — what is sent, and so what the log keeps, is the name alone
  * (`promptFromDraft`).
  *
- * A store that cannot take it is not fatal: the file keeps its own bytes and
- * behaves exactly as it did before there was a store, which is worse but is
- * not nothing.
+ * A picture the store cannot take is not fatal: it keeps its own bytes and
+ * behaves exactly as it did before there was a store, which is worse but is not
+ * nothing. Nothing else gets that fallback. A picture is small and is drawn
+ * from what it carries; a refused archive or video would be a hundred megabytes
+ * of base64 riding in the record for a file the reader cannot even see, which
+ * is the thing bw-oamr.5 took out of it. So it is refused out loud instead.
  */
 export async function readAndKeep(file: File): Promise<ImagePayload> {
   const read = await readImage(file);
   // Measured here, while the bytes are still in hand: once it is in the store
   // there is no header left to read, and a picture with no shape cannot have
-  // its place held open before it decodes (bw-cdav.3).
+  // its place held open before it decodes (bw-cdav.3). Only a picture has one.
   const shape = pictureShape(read.dataUrl);
   try {
     const kept = await keepFile(file.name || 'the attached file', read.dataUrl);
     return { ...read, asset: kept.asset, size: kept.size, ...(shape ?? {}) };
-  } catch {
+  } catch (e) {
+    if (!looksLikeAPicture(file)) throw e;
     return read;
   }
 }

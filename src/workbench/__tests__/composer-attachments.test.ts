@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  fileAsABlock,
+  ATTACHMENT_LIMIT,
   imageIds,
   imageMarker,
   looksLikeAPicture,
-  looksLikeText,
+  whyNot,
   promptFromDraft,
   promptParts,
   type DraftPicture,
@@ -85,35 +85,40 @@ describe('what the composer will take', () => {
     expect(looksLikeAPicture({ name: 'photo.jpeg' })).toBe(true);
   });
 
-  it('turns down what is not a picture, rather than dropping it in silence', () => {
+  // Judging a file by its kind is how a video, an audio file, a PDF, a zip and
+  // a spreadsheet all used to be dropped on the floor with a notice saying they
+  // could go in a message "neither as a picture nor as words" (bw-oamr.6). What
+  // a picture is still matters — only a picture has a shape to measure and only
+  // a picture falls back to its own bytes when the store will not take it — but
+  // it no longer decides what may be attached.
+  it('still knows what is not a picture, without that deciding anything', () => {
     expect(looksLikeAPicture({ type: 'application/pdf', name: 'contract.pdf' })).toBe(false);
     expect(looksLikeAPicture({ type: '', name: 'notes.txt' })).toBe(false);
     expect(looksLikeAPicture({ type: '', name: '' })).toBe(false);
   });
 });
 
-// The writing box could only ever take pictures: one paperclip, accepting
-// image/*, and nowhere for anything else to go (bw-ad3r.7).
-describe('a file that is not a picture', () => {
-  it('is recognised as words by its type, or by its name when there is none', () => {
-    expect(looksLikeText({ type: 'text/plain', name: 'notes.txt' })).toBe(true);
-    expect(looksLikeText({ type: 'application/json', name: 'package.json' })).toBe(true);
-    expect(looksLikeText({ type: '', name: 'main.rs' })).toBe(true);
-    expect(looksLikeText({ type: '', name: 'photo.jpg' })).toBe(false);
-    expect(looksLikeText({ type: 'application/pdf', name: 'contract.pdf' })).toBe(false);
+// The writing box could only ever take pictures and files it could unroll into
+// the draft as words: one paperclip, two hand-written extension lists, and
+// nowhere for anything else to go (bw-ad3r.7, bw-oamr.6).
+describe('what the writing box turns down', () => {
+  it('takes every kind of file there is', () => {
+    for (const name of ['clip.mp4', 'song.mp3', 'contract.pdf', 'bundle.zip', 'books.xlsx', 'notes.txt', 'thing.unheardof', 'README']) {
+      expect(whyNot({ name, size: 10 })).toBeNull();
+    }
   });
 
-  it('goes into the draft as a block that names it', () => {
-    expect(fileAsABlock('notes.txt', 'one\ntwo\n')).toBe('notes.txt:\n```txt\none\ntwo\n```\n');
+  it('turns down a file past the ceiling, by name and out loud', () => {
+    const why = whyNot({ name: 'huge.mov', size: ATTACHMENT_LIMIT + 1 });
+    expect(why).toContain('huge.mov');
+    expect(why).toContain('100 MB');
   });
 
-  // A markdown file carrying its own code blocks would otherwise end the
-  // block early and spill the rest of itself into the message as prose.
-  it('is fenced wider than any run of backticks inside it', () => {
-    const given = 'before\n```js\nconst a = 1;\n```\nafter';
-    const block = fileAsABlock('readme.md', given);
-    expect(block.startsWith('readme.md:\n````md\n')).toBe(true);
-    expect(block.endsWith('\n````\n')).toBe(true);
-    expect(block).toContain('```js');
+  it('turns down a file with nothing in it', () => {
+    expect(whyNot({ name: 'empty.log', size: 0 })).toContain('empty.log');
+  });
+
+  it('takes a file right up to the ceiling', () => {
+    expect(whyNot({ name: 'just-fits.zip', size: ATTACHMENT_LIMIT })).toBeNull();
   });
 });

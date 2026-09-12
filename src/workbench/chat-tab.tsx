@@ -63,8 +63,9 @@ import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { ComposerEditor, type ComposerHandle } from '@/workbench/composer-editor';
 import { fileCompletions } from '@/workbench/composer-files';
 import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
-import { attachmentSrc } from '@/workbench/attachment-store';
-import { fileAsABlock, imageIds, imageMarker, looksLikeAPicture, looksLikeText, promptFromDraft, promptParts } from '@/workbench/composer-attachments';
+import { fileKind } from '@/components/file-kinds';
+import { AttachmentTile } from '@/workbench/attachment-tile';
+import { imageIds, imageMarker, promptFromDraft, promptParts, whyNot } from '@/workbench/composer-attachments';
 import type { DraftPicture } from '@/workbench/composer-attachments';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
@@ -1466,52 +1467,50 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   }
 
   /**
-   * Pictures arrive by paste, by drop, or from the phone's own chooser; all
-   * three land in the same tray.
+   * Files arrive by paste, by drop, or from the phone's own chooser; all three
+   * land in the same tray, whatever kind of file they are.
    *
-   * A file is judged by its name as well as by the type the browser reported.
-   * Android's own pickers — Drive, Files, Downloads — routinely hand back a
-   * file with an empty type, and judging on the type alone dropped those
-   * without a word: the chooser opened, a picture was chosen, and nothing
-   * appeared, which from the outside is indistinguishable from the button not
-   * working (bw-ad3r.6). Whatever cannot be taken is said out loud, and a file
-   * that fails to read is said out loud too rather than left as an unhandled
-   * rejection.
+   * Any file at all can be attached. There used to be two hand-written lists of
+   * extensions here — one of pictures, one of things readable as words — and a
+   * file in neither was announced as having nowhere to go in a message and
+   * dropped. A video, an audio recording, a PDF, a zip, a spreadsheet: all of
+   * them are files a person may reasonably want to hand an agent, and none of
+   * them were takeable. Now the file is kept by the store under a name, the
+   * name is what travels, and the only thing that can turn one down is its size
+   * (`whyNot`), which is said out loud.
+   *
+   * A text file goes in as a badge like everything else rather than being
+   * unrolled into the writing box as a fenced block. The block was the only way
+   * to get a file to an agent back when nothing but a picture could be carried;
+   * with a name on disk there is no longer any reason for the reader's own
+   * sentence to be buried under the contents of a file they can already see the
+   * name of.
+   *
+   * A file that fails to read or that the store will not keep is said out loud
+   * too, rather than left as an unhandled rejection.
    */
   async function absorb(files: FileList | File[] | null, at = typing.current?.cursor() ?? draft.length) {
     const chosen = Array.from(files ?? []);
     if (!chosen.length) return;
-    const pictures = chosen.filter(looksLikeAPicture);
-    const documents = chosen.filter((file) => !looksLikeAPicture(file) && looksLikeText(file));
-    const refused = chosen.filter((file) => !looksLikeAPicture(file) && !looksLikeText(file));
-    if (refused.length) {
-      const names = refused.map((file) => file.name || 'that file').join(', ');
-      setSendError(
-        refused.length === 1
-          ? `${names} can go in a message neither as a picture nor as words, so it has been left out.`
-          : `These can go in a message neither as pictures nor as words, so they have been left out: ${names}.`,
-      );
-    }
-    if (!pictures.length && !documents.length) return;
+    const refused = chosen.map((file) => whyNot(file)).filter((why): why is string => why !== null);
+    const taking = chosen.filter((file) => whyNot(file) === null);
+    if (refused.length) setSendError(refused.join(' '));
+    if (!taking.length) return;
     let read: DraftPicture[];
-    let written: string[];
     try {
-      [read, written] = await Promise.all([
-        Promise.all(pictures.map(async (file) => ({ ...(await readAndKeep(file)), id: crypto.randomUUID() }))),
-        Promise.all(documents.map(async (file) => fileAsABlock(file.name || 'the attached file', await file.text()))),
-      ]);
+      read = await Promise.all(
+        taking.map(async (file) => ({ ...(await readAndKeep(file)), id: crypto.randomUUID() })),
+      );
     } catch (e) {
-      setSendError(`That could not be read. ${e instanceof Error ? e.message : String(e)}`);
+      setSendError(`That could not be attached. ${e instanceof Error ? e.message : String(e)}`);
       return;
     }
     if (!refused.length) setSendError(null);
-    if (read.length) setAttached((prev) => [...prev, ...read]);
-    // Both go into the box rather than beside it: a picture leaves its badge
-    // where it belongs in the sentence, and a file's contents go in as words the
-    // person can read over and cut down before they send them (bw-ad3r.7).
+    setAttached((prev) => [...prev, ...read]);
+    // The badge goes into the box rather than beside it, so it sits where it
+    // belongs in the sentence the person is writing (bw-ad3r.7).
     const markers = read.map((picture) => imageMarker(picture.id)).join(' ');
-    const put = [markers, ...written].filter(Boolean).join('\n');
-    setDraft((was) => `${was.slice(0, at)}${put}${was.slice(at)}`);
+    setDraft((was) => `${was.slice(0, at)}${markers}${was.slice(at)}`);
   }
 
   if (!projectId || !projectPath) {
@@ -2174,45 +2173,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         >
           {attached.length > 0 && (
             <div data-testid="attachment-tray" className="mb-2 flex flex-wrap gap-2">
-              {attached.map((img, i) => (
-                <span key={i} className="relative">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <Tooltip label={`${img.alt} — click to see it full size`}>
-                    <img
-                      data-testid="attachment-thumb"
-                      id={`composer-image-${img.id}`}
-                      src={attachmentSrc(img)}
-                      alt={img.alt}
-                      onClick={() => setLooking(img)}
-                      className="h-12 w-12 cursor-zoom-in rounded border border-border/60 object-cover"
-                    />
-                  </Tooltip>
-                  <Button
-                    variant="outline"
-                    mode="icon"
-                    size="xs"
-                    radius="full"
-                    data-testid="attachment-remove"
-                    /* Its own twenty pixels on a phone as well as a desktop.
-                       The coarse-pointer floor would take it to 44 square,
-                       which is bigger than the corner of the 48px thumbnail it
-                       is pinned to: it covered the picture, so the one press a
-                       reader has removed the attachment instead of opening it,
-                       and the cross drew "far too big" (bw-e9p5.2). What the
-                       thumb is aiming at here is the thumbnail, which is
-                       already well over the floor; the reasoning is written
-                       where the mark is read, in globals.css. */
-                    data-reach="own"
-                    aria-label={`Remove ${img.alt}`}
-                    onClick={() => {
-                      setAttached((all) => all.filter((picture) => picture.id !== img.id));
-                      setDraft((text) => text.replace(imageMarker(img.id), ''));
-                    }}
-                    className="absolute -right-1.5 -top-1.5 h-5 w-5 shadow"
-                  >
-                    <X className="h-3 w-3" />
-                  </Button>
-                </span>
+              {attached.map((file) => (
+                <AttachmentTile
+                  key={file.id}
+                  file={file}
+                  onOpen={fileKind(file.alt) === 'image' ? () => setLooking(file) : undefined}
+                  onRemove={() => {
+                    setAttached((all) => all.filter((picture) => picture.id !== file.id));
+                    setDraft((text) => text.replace(imageMarker(file.id), ''));
+                  }}
+                />
               ))}
             </div>
           )}

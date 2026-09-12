@@ -123,41 +123,31 @@ export function looksLikeAPicture(file: { type?: string; name?: string }): boole
 }
 
 /**
- * Whether a chosen file is one we can put into the prompt as words.
+ * The largest file the store will keep, in bytes, and the same number the
+ * server enforces (`server/src/workbench/media.rs`, ATTACHMENT_LIMIT).
  *
- * Same reasoning as `looksLikeAPicture`: the reported type first, the name when
- * the phone had nothing to say. A file that is neither a picture nor readable
- * as text has nowhere to go in a prompt, and is turned down out loud rather
- * than dropped (bw-ad3r.7).
+ * Held here as well so a file too big is turned down while it is still on the
+ * disk it came from, rather than after it has been read into a string, turned
+ * into base64 and pushed a hundred megabytes up the wire to be refused at the
+ * far end.
  */
-const TEXT_TYPES = ['text/', 'application/json', 'application/xml', 'application/javascript', 'application/x-yaml'];
-const TEXT_ENDINGS = [
-  '.txt', '.md', '.markdown', '.rst', '.log', '.csv', '.tsv',
-  '.json', '.jsonl', '.yaml', '.yml', '.toml', '.ini', '.conf', '.env',
-  '.xml', '.html', '.htm', '.css', '.scss', '.svg',
-  '.js', '.jsx', '.ts', '.tsx', '.py', '.rb', '.go', '.rs', '.java', '.kt',
-  '.c', '.h', '.cc', '.cpp', '.hpp', '.cs', '.php', '.swift', '.sh', '.bash',
-  '.sql', '.graphql', '.proto', '.diff', '.patch', '.lock', '.gitignore',
-];
-
-export function looksLikeText(file: { type?: string; name?: string }): boolean {
-  if (file.type) return TEXT_TYPES.some((kind) => file.type!.startsWith(kind));
-  const name = (file.name ?? '').toLowerCase();
-  return TEXT_ENDINGS.some((ending) => name.endsWith(ending));
-}
+export const ATTACHMENT_LIMIT = 100 * 1024 * 1024;
 
 /**
- * A file's contents as a block in the draft, named so the agent knows what it
- * is looking at.
+ * Why a chosen file cannot be attached, or nothing when it can.
  *
- * Put into the writing box rather than carried beside it, so that what will be
- * sent is what the person can see and edit before they send it. The fence is
- * widened past any run of backticks inside the file, so a markdown file with
- * its own code blocks does not end the block early.
+ * There is no longer a list of kinds this box will take. A zip, a video, a
+ * spreadsheet and a screenshot are all a file with a name, and every one of
+ * them is something a person may reasonably hand an agent; what used to happen
+ * instead was that anything outside two hand-written extension lists was
+ * announced as having "nowhere to go in a message" and dropped (bw-ad3r.7).
+ * Size is the only thing left that can stop one, and it is said out loud.
  */
-export function fileAsABlock(name: string, contents: string): string {
-  const longest = Math.max(0, ...Array.from(contents.matchAll(/`+/g), (run) => run[0].length));
-  const fence = '`'.repeat(Math.max(3, longest + 1));
-  const ending = name.toLowerCase().split('.').pop() ?? '';
-  return `${name}:\n${fence}${/^[a-z0-9]+$/.test(ending) ? ending : ''}\n${contents.replace(/\n$/, '')}\n${fence}\n`;
+export function whyNot(file: { name?: string; size?: number }): string | null {
+  const name = file.name || 'that file';
+  if (file.size === 0) return `${name} is empty, so there is nothing to attach.`;
+  if ((file.size ?? 0) > ATTACHMENT_LIMIT) {
+    return `${name} is larger than ${ATTACHMENT_LIMIT / (1024 * 1024)} MB, which is more than a message can carry.`;
+  }
+  return null;
 }

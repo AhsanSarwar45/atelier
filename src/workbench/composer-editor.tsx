@@ -165,9 +165,13 @@ function badges(state: EditorState, icon: IconSource, picture: (id: string) => D
     );
   const pictures = Array.from(text.matchAll(/\[\[atelier-image:([a-zA-Z0-9_-]+)\]\]/g)).flatMap((match) => {
     const found = picture(match[1]!);
-    return found && match.index !== undefined
-      ? [Decoration.replace({ widget: new FileBadge(found.alt, fileKind(found.alt), icon, found, onOpen) }).range(match.index, match.index + match[0].length)]
-      : [];
+    if (!found || match.index === undefined) return [];
+    const kind = fileKind(found.alt);
+    // A press opens what there is something to open. A picture opens full size;
+    // an archive or a spreadsheet has nothing to show yet, so its badge lets the
+    // click through to place a caret instead of opening an empty viewer.
+    const opens = kind === 'image' ? onOpen : undefined;
+    return [Decoration.replace({ widget: new FileBadge(found.alt, kind, icon, found, opens) }).range(match.index, match.index + match[0].length)];
   });
   return Decoration.set([...references, ...pictures], true);
 }
