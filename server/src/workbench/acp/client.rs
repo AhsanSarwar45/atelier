@@ -2377,28 +2377,34 @@ impl AcpDriver {
                                 .await?;
                         }
                         let mut local_model = task_session.model.clone();
-                        if create_remote {
-                            let desired_mode = mode_to_acp(brand, &task_session.permission_mode);
-                            if !desired_mode.is_empty()
-                                && modes["currentModeId"] != desired_mode
-                                && offers_mode(&modes, &desired_mode)
-                            {
-                                connection.send_request(SetSessionModeRequest::new(remote_id.clone(), desired_mode.clone())).block_task().await?;
-                                modes["currentModeId"] = json!(desired_mode);
-                            }
-                            for (target, desired) in [
-                                (ConfigTarget::Model, task_session.model.as_deref()),
-                                (ConfigTarget::Effort, task_session.effort.as_deref()),
-                                (ConfigTarget::Collaboration, task_session.collaboration_mode.as_deref()),
-                            ] {
-                                if let Some(desired) = desired.filter(|value| !value.is_empty() && *value != "default") {
-                                    let Some(key) = config_option_id(&config_options, &target) else { continue };
-                                    let desired = if brand == super::super::local::BRAND && matches!(target, ConfigTarget::Model) {
-                                        super::super::local::decode_model(desired).map(|(_, model)| model).unwrap_or(desired)
-                                    } else { desired };
-                                    let response = connection.send_request(SetSessionConfigOptionRequest::new(remote_id.clone(), key, desired)).block_task().await?;
-                                    config_options = serde_json::to_value(response.config_options).map_err(acp_error)?;
-                                }
+                        // What the chat was pinned to is pushed to the agent
+                        // whether the remote session is new or resumed. A
+                        // resumed agent is a fresh process that comes up at
+                        // its own defaults and knows nothing of the pins; the
+                        // read-back below would then write those defaults over
+                        // the pins and send them to the chips, which is how a
+                        // mode and effort set before a message were lost by
+                        // sending it (bw-l4fr.1).
+                        let desired_mode = mode_to_acp(brand, &task_session.permission_mode);
+                        if !desired_mode.is_empty()
+                            && modes["currentModeId"] != desired_mode
+                            && offers_mode(&modes, &desired_mode)
+                        {
+                            connection.send_request(SetSessionModeRequest::new(remote_id.clone(), desired_mode.clone())).block_task().await?;
+                            modes["currentModeId"] = json!(desired_mode);
+                        }
+                        for (target, desired) in [
+                            (ConfigTarget::Model, task_session.model.as_deref()),
+                            (ConfigTarget::Effort, task_session.effort.as_deref()),
+                            (ConfigTarget::Collaboration, task_session.collaboration_mode.as_deref()),
+                        ] {
+                            if let Some(desired) = desired.filter(|value| !value.is_empty() && *value != "default") {
+                                let Some(key) = config_option_id(&config_options, &target) else { continue };
+                                let desired = if brand == super::super::local::BRAND && matches!(target, ConfigTarget::Model) {
+                                    super::super::local::decode_model(desired).map(|(_, model)| model).unwrap_or(desired)
+                                } else { desired };
+                                let response = connection.send_request(SetSessionConfigOptionRequest::new(remote_id.clone(), key, desired)).block_task().await?;
+                                config_options = serde_json::to_value(response.config_options).map_err(acp_error)?;
                             }
                         }
                         for saved in extra_config_options(&saved_menu["configOptions"]) {

@@ -1286,3 +1286,18 @@ when the documented per-job bypass was prefixed to the `apply_patch` command.
 
 The gate should resolve absolute patch targets to their containing worktree and
 accept the claimed descendant of the epic that names that worktree.
+
+## The gate reads the pre-expansion text of a path (bw-l4fr.1)
+
+Same job-copy refusal as every entry above — worktree named `bw-l4fr`, claim on
+child `bw-l4fr.1`, every write re-done with the per-job bypass welded on. The
+count is now five jobs paying it.
+
+One new detail worth writing down. A command whose target came from a shell
+variable was refused with the target quoted *unexpanded*: it reported
+`/home/ahsan/dev/beads-web/worktrees/bw-l4fr/$WORKBENCH_E2E_RUN` rather than the
+directory that variable holds. So the gate is matching on the literal text of
+the argument, not on the path the shell will actually open. That cuts both
+ways and the second way is the bad one: a refusal can name a path that does not
+exist, and a write can be judged against a string that is not where the bytes
+land.

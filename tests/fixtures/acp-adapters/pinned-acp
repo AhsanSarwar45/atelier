@@ -1,0 +1,158 @@
+#!/usr/bin/env node
+/**
+ * An ACP agent that forgets, the way a restarted one does.
+ *
+ * A chat's permission mode and reasoning effort are Atelier's to remember, not
+ * the agent's. The agent process that was told them is gone by the time the
+ * next message is sent, and the one that takes its place comes up at the
+ * defaults it was compiled with — it has no idea a mode was ever picked. So
+ * this fixture answers `session/load` at its own defaults every single time,
+ * however many times it has been told otherwise. Anything the chips still say
+ * afterwards was put back by Atelier, which is the whole of bw-l4fr.1.
+ *
+ * It writes every method it is asked down in order, so the case can say not
+ * just that the chips are right but that the agent was told.
+ */
+const readline = require('node:readline');
+const { appendFileSync } = require('node:fs');
+const { join } = require('node:path');
+
+const DEFAULT_MODE = 'default';
+const DEFAULT_EFFORT = 'medium';
+const WIRE = process.env.PINNED_ACP_WIRE ?? join(process.cwd(), 'pinned-acp-wire.jsonl');
+
+/** What this process has been told since it started. Never read at load. */
+const modes = new Map();
+const efforts = new Map();
+let started = 0;
+
+function note(method, params) {
+  try {
+    appendFileSync(WIRE, `${JSON.stringify({ pid: process.pid, method, params })}\n`);
+  } catch {}
+}
+
+function availableModes() {
+  return [
+    { id: 'default', name: 'Ask first' },
+    { id: 'acceptEdits', name: 'Accept edits' },
+    { id: 'bypassPermissions', name: 'Bypass permissions' },
+    { id: 'plan', name: 'Plan only' },
+  ];
+}
+
+function configOptions(effort) {
+  return [
+    {
+      id: 'reasoning_effort',
+      name: 'Reasoning effort',
+      category: 'thought_level',
+      type: 'select',
+      currentValue: effort ?? DEFAULT_EFFORT,
+      options: [
+        { value: 'low', name: 'Low' },
+        { value: 'medium', name: 'Medium' },
+        { value: 'high', name: 'High' },
+      ],
+    },
+  ];
+}
+
+function say(message) {
+  process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
+}
+
+readline.createInterface({ input: process.stdin }).on('line', (line) => {
+  let message;
+  try {
+    message = JSON.parse(line);
+  } catch {
+    return;
+  }
+  const { id, method, params } = message;
+  if (id === undefined) return;
+  note(method, params);
+  const sessionId = params?.sessionId;
+
+  if (method === 'initialize') {
+    // No `resume`, so a saved chat comes back through `session/load` — the
+    // path a dormant chat takes when the next message wakes it.
+    say({
+      id,
+      result: {
+        protocolVersion: 1,
+        agentCapabilities: { loadSession: true, promptCapabilities: {} },
+        authMethods: [],
+      },
+    });
+    return;
+  }
+
+  if (method === 'session/new') {
+    started += 1;
+    const minted = `pinned-session-${process.pid}-${started}`;
+    modes.set(minted, DEFAULT_MODE);
+    efforts.set(minted, DEFAULT_EFFORT);
+    say({
+      id,
+      result: {
+        sessionId: minted,
+        modes: { currentModeId: DEFAULT_MODE, availableModes: availableModes() },
+        configOptions: configOptions(DEFAULT_EFFORT),
+      },
+    });
+    return;
+  }
+
+  if (method === 'session/load') {
+    // The forgetting. A fresh process knows only its defaults.
+    modes.set(sessionId, DEFAULT_MODE);
+    efforts.set(sessionId, DEFAULT_EFFORT);
+    say({
+      id,
+      result: {
+        modes: { currentModeId: DEFAULT_MODE, availableModes: availableModes() },
+        configOptions: configOptions(DEFAULT_EFFORT),
+      },
+    });
+    return;
+  }
+
+  if (method === 'session/set_mode') {
+    if (!availableModes().some((mode) => mode.id === params?.modeId)) {
+      say({ id, error: { code: -32602, message: `no mode ${params?.modeId} here` } });
+      return;
+    }
+    modes.set(sessionId, params.modeId);
+    say({ id, result: {} });
+    return;
+  }
+
+  if (method === 'session/set_config_option') {
+    if (params?.configId === 'reasoning_effort') efforts.set(sessionId, params?.value);
+    say({ id, result: { configOptions: configOptions(efforts.get(sessionId)) } });
+    return;
+  }
+
+  if (method === 'session/prompt') {
+    // Said back so the transcript carries what this process believed it was
+    // running as when the turn came round.
+    say({
+      method: 'session/update',
+      params: {
+        sessionId,
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: {
+            type: 'text',
+            text: `running as ${modes.get(sessionId) ?? DEFAULT_MODE} at ${efforts.get(sessionId) ?? DEFAULT_EFFORT}`,
+          },
+        },
+      },
+    });
+    say({ id, result: { stopReason: 'end_turn' } });
+    return;
+  }
+
+  say({ id, error: { code: -32601, message: `no ${method} here` } });
+});
