@@ -10,8 +10,9 @@ try {
   await page.goto(base, { waitUntil: 'networkidle' });
   await page.getByText('Atelier', { exact: true }).nth(1).click();
   await page.getByTestId('tab-chat').click();
-  await page.getByTestId('agent-codex').click();
   await page.getByTestId('new-chat').click();
+  await page.getByTestId('new-chat-provider-codex').click();
+  await page.getByTestId('new-chat-start').click();
 
   const picker = page.getByTestId('effort-picker');
   await picker.waitFor();

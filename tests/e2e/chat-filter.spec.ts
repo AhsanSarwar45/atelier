@@ -369,6 +369,7 @@ test.describe('choosing which kinds of message show', () => {
     try {
       await page.goto(`/project?id=${project.id}&tab=chat`);
       await page.getByTestId('new-chat').click();
+      await page.getByTestId('new-chat-start').click();
       await page.getByTestId('chat-tab').waitFor({ timeout: OPEN_MS });
 
       // Nothing is typed into it. What it holds is the machine's own, switched

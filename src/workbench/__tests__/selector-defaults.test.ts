@@ -61,3 +61,24 @@ describe('new-chat provider default', () => {
     expect(source).toContain('disabled={!provider.available}');
   });
 });
+
+describe('the screen with no chat on it', () => {
+  it('asks nothing the dialog asks, and opens the dialog instead', () => {
+    // It used to carry its own agent buttons, its own list of why one was
+    // grey, and its own where-to-work picker — the dialog's questions over
+    // again, in a second place that had to be kept answering them as the
+    // dialog grew an account section (bw-5ihw.9).
+    const empty = source.slice(source.indexOf('if (!sessionId) {'), source.indexOf('data-testid="chat-tab"'));
+    expect(empty).toContain('onClick={() => newChat()}');
+    expect(empty).toContain('New Chat');
+    expect(empty).not.toContain('agent-${provider.brand}');
+    expect(empty).not.toContain('<WhereToWork');
+    expect(empty).not.toContain('void start(');
+  });
+
+  it('still says why the button is grey, which is the one thing the dialog cannot say', () => {
+    const empty = source.slice(source.indexOf('if (!sessionId) {'), source.indexOf('data-testid="chat-tab"'));
+    expect(empty).toContain('{!availableBrand && (');
+    expect(empty).toContain('data-testid="provider-unavailable-reasons"');
+  });
+});

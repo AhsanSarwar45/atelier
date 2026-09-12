@@ -139,6 +139,7 @@ test.describe('workbench', () => {
       await openChatTab(page);
 
       await page.getByTestId('new-chat').click();
+      await page.getByTestId('new-chat-start').click();
       await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 30_000 });
 
       await page.getByTestId('composer').fill(PROMPT);

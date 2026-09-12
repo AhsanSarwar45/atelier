@@ -1683,6 +1683,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           <DialogFooter className="gap-2 sm:space-x-0">
             <Button
               variant="primary"
+              data-testid="new-chat-start"
               // A place that is not yet a place cannot start a chat, and the
               // picker is already saying why underneath it.
               disabled={starting || !newBrandAvailable || whereMissing !== null}
@@ -1859,24 +1860,22 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     return shell(
       <div className="flex flex-1 flex-col items-center justify-center gap-4">
         <p className="text-muted-foreground">No chat selected</p>
-        <div className="flex items-center gap-2" role="group" aria-label="Coding agent">
-          {providers.map((provider) => (
-            <Tooltip key={provider.brand} label={provider.available ? undefined : whyUnavailable(provider)}>
-              <Button
-                variant={newBrand === provider.brand ? 'primary' : 'secondary'}
-                onClick={() => setNewBrand(provider.brand)}
-                disabled={starting || !provider.available}
-                data-testid={`agent-${provider.brand}`}
-              >
-                {brandName(provider.brand)}
-              </Button>
-            </Tooltip>
-          ))}
-        </div>
-        {/* Standing text here, unlike the dialog above: this screen is what a
-            reader lands on with no chat at all, and the grey button is most of
-            what it has to say (bw-u6cl.9). */}
-        {providers.some((provider) => !provider.available) && (
+        {/* One button, and the dialog behind it. This screen used to ask the
+            dialog's questions over again — which agent, and where to work —
+            so every question the dialog grew had to be answered twice
+            (bw-5ihw.9). */}
+        <Button
+          variant="primary"
+          onClick={() => newChat()}
+          disabled={starting || !availableBrand}
+          data-testid="new-chat"
+        >
+          <Plus data-testid="new-chat-empty-plus" aria-hidden="true" />
+          New Chat
+        </Button>
+        {/* The one thing the dialog cannot say from behind a button that
+            will not open it. */}
+        {!availableBrand && (
           <ul data-testid="provider-unavailable-reasons" className="flex max-w-md flex-col gap-0.5 text-center text-[11px] text-muted-foreground">
             {providers
               .filter((provider) => !provider.available)
@@ -1887,28 +1886,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               ))}
           </ul>
         )}
-        {/* The same choice the dialog offers, because this screen starts a
-            chat without ever opening that dialog (bw-ov7a.3). */}
-        {projectPath && (
-          <div className="w-full max-w-md">
-            <WhereToWork
-              projectPath={projectPath}
-              value={newWhere}
-              onChange={setNewWhere}
-              onMissing={setWhereMissing}
-              disabled={starting}
-            />
-          </div>
-        )}
-        <Button
-          variant="primary"
-          onClick={() => void start(newBrand, newWhere)}
-          disabled={starting || !newBrandAvailable || whereMissing !== null}
-          data-testid="new-chat"
-        >
-          {starting ? null : <Plus data-testid="new-chat-empty-plus" aria-hidden="true" />}
-          {starting ? 'Starting…' : `New ${brandName(newBrand)} chat`}
-        </Button>
         {startError && <p className="max-w-lg text-center text-sm text-red-500">{startError}</p>}
       </div>,
     );
