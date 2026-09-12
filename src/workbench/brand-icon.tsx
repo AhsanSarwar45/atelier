@@ -1,5 +1,6 @@
 'use client';
 
+import { UserRound } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -53,6 +54,31 @@ export function ProviderBadge({ brand, model, icon, className }: { brand: Brand;
       >
         {icon ?? <BrandIcon brand={brand} className="size-3" />}
         <span>{brand === 'local' && model ? model.split('::').at(-1) : brandName(brand)}</span>
+      </Badge>
+    </Tooltip>
+  );
+}
+
+/**
+ * Which account a chat is running on, beside the agent it is running.
+ *
+ * Drawn only for a chat started on a named account: a chat on the account the
+ * computer itself is signed in with is the ordinary case, and a badge saying
+ * so on every chat would be a word that never varies (bw-5ihw.7).
+ */
+export function ProfileBadge({ name, brand, className }: { name: string; brand: Brand; className?: string }) {
+  return (
+    <Tooltip label={`Account — ${name} on ${brandName(brand)}`}>
+      <Badge
+        appearance="light"
+        size="sm"
+        shape="circle"
+        className={cn('shrink-0 gap-1 bg-sky-500/10 text-sky-600 dark:text-sky-300', className)}
+        data-testid="session-profile"
+        data-profile={name}
+      >
+        <UserRound className="size-3" aria-hidden="true" />
+        <span>{name}</span>
       </Badge>
     </Tooltip>
   );

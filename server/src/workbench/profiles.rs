@@ -160,7 +160,7 @@ impl Profiles {
         };
         let mut profiles = vec![system];
         profiles.extend(self.read_index().profiles.into_iter().filter_map(|stored| {
-            (stored.brand == brand).then(|| Profile {
+            (stored.brand == brand).then_some(Profile {
                 id: stored.id,
                 brand: stored.brand,
                 name: stored.name,

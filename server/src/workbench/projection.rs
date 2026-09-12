@@ -50,6 +50,11 @@ pub(crate) fn empty_view() -> Map<String, Value> {
     view.insert("model".into(), Value::Null);
     view.insert("effort".into(), Value::Null);
     view.insert("collaborationMode".into(), Value::Null);
+    // The account the chat was started on, or null for the one the computer
+    // is signed in with. Taken off the start record rather than looked up,
+    // so a chat still says which account it ran on after that account has
+    // been deleted (bw-5ihw.7).
+    view.insert("profile".into(), Value::Null);
     view.insert("menu".into(), empty_menu());
     view.insert("thinkingTokens".into(), json!(0));
     view.insert("error".into(), Value::Null);
@@ -232,6 +237,7 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                     "collaborationMode".into(),
                     value(event, "collaborationMode"),
                 );
+                view.insert("profile".into(), value(event, "profile"));
             }
             EventKind::SessionState => {
                 let state = value(event, "state");
@@ -723,6 +729,36 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn started(fields: Value) -> Event {
+        let mut value = fields;
+        let object = value.as_object_mut().unwrap();
+        object.insert("type".into(), json!("session.started"));
+        object.insert("sessionId".into(), json!("chat"));
+        object.insert("seq".into(), json!(1));
+        object.insert("at".into(), json!("2026-09-12T12:00:00Z"));
+        serde_json::from_value(value).unwrap()
+    }
+
+    /// The account a chat ran on is read off its own start record.
+    ///
+    /// The server keeps it so it can point the provider at the right directory;
+    /// the screen needs it to say which account the chat is spending. A chat
+    /// started before accounts existed, or on the one the computer itself is
+    /// signed in with, carries nothing — and null is the whole of what the
+    /// badge needs to stay away (bw-5ihw.7).
+    #[test]
+    fn a_chat_says_which_account_it_was_started_on() {
+        let on_an_account = fold_all(&[started(
+            json!({"brand":"claude","model":null,"permissionMode":"default","profile":"work"}),
+        )]);
+        assert_eq!(on_an_account.view["profile"], json!("work"));
+
+        let on_the_computers_own = fold_all(&[started(
+            json!({"brand":"claude","model":null,"permissionMode":"default"}),
+        )]);
+        assert_eq!(on_the_computers_own.view["profile"], Value::Null);
+    }
 
     fn contract_events() -> Vec<Event> {
         let fixture: Value =

@@ -348,7 +348,7 @@ export interface TerminalRun {
 
 export type WbpEvent = EventBase &
   (
-    | { type: 'session.started'; brand: Brand; externalId: string | null; model: string | null; cwd: string; permissionMode: string; effort?: string | null; collaborationMode?: string | null }
+    | { type: 'session.started'; brand: Brand; externalId: string | null; model: string | null; cwd: string; permissionMode: string; effort?: string | null; collaborationMode?: string | null; profile?: string | null }
     | {
         type: 'session.state';
         state: SessionState;

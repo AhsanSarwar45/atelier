@@ -384,6 +384,8 @@ export interface SessionView {
   model: string | null;
   effort: string | null;
   collaborationMode: string | null;
+  /** The account this chat runs on, or null for the one the computer is signed in with. */
+  profile: string | null;
   /** What the writing box can offer for this session: its commands, skills, models. */
   menu: SessionMenu;
   /** Thinking done in this turn when the thinking itself is withheld, as the brand estimates it. */
@@ -429,6 +431,7 @@ export const EMPTY: SessionView = {
   model: null,
   effort: null,
   collaborationMode: null,
+  profile: null,
   menu: NO_MENU,
   thinkingTokens: 0,
   error: null,
@@ -532,6 +535,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       next.collaborationMode = e.collaborationMode ?? null;
       next.model = e.model;
       next.effort = e.effort ?? null;
+      next.profile = e.profile ?? null;
       return next;
 
     case 'session.state':
@@ -1049,6 +1053,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         view.model = e.model;
         view.effort = e.effort ?? null;
         view.collaborationMode = e.collaborationMode ?? null;
+        view.profile = e.profile ?? null;
         break;
 
       case 'session.state':

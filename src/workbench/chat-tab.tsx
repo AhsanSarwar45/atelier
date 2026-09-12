@@ -98,7 +98,7 @@ import { PlanChip, UsageView } from '@/workbench/usage-view';
 import { CHIP_GAP, ModeMark, modelName, modelWords, modeWords, WhatItRuns } from '@/workbench/what-it-runs';
 import { isBusy, readImage, sendCommand, useSession, useSessionFactsRead, type TranscriptItem } from '@/workbench/use-session';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
-import { BrandIcon, ProviderBadge, brandName } from '@/workbench/brand-icon';
+import { BrandIcon, ProfileBadge, ProviderBadge, brandName } from '@/workbench/brand-icon';
 import { workingLine } from '@/workbench/working-line';
 import { PictureViewer } from '@/workbench/picture-viewer';
 import { useEpicChecklist } from '@/workbench/epic-checklist';
@@ -1186,6 +1186,34 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const live = useLiveSessions().find((s) => s.id === sessionId);
   const sessionBrand = live?.brand ?? facts?.brand ?? 'claude';
   const selectedModel = view.menu.models.find((model) => model.value === view.model);
+  // The chat's own account, read once for the brand it runs on. The chat
+  // knows the id it was started with; the name belongs to the account and
+  // moves when it is renamed, so it is looked up rather than remembered.
+  useEffect(() => {
+    const brand = sessionBrand;
+    if (!view.profile || brand === 'local') return;
+    if (accounts[brand]) return;
+    let gone = false;
+    void sendCommand<{ profiles: ProfileChoice[] }>({ type: 'profiles.list', brand })
+      .then(({ profiles }) => {
+        if (!gone) setAccounts((was) => ({ ...was, [brand]: profiles }));
+      })
+      .catch(() => {});
+    return () => {
+      gone = true;
+    };
+  }, [accounts, sessionBrand, view.profile]);
+  /**
+   * What to call the chat's account, or nothing at all.
+   *
+   * An id that no longer names an account — it was deleted after this chat
+   * ran — still draws, under the id: the chat did run on something, and a
+   * badge that vanished would say it ran on the computer's own account.
+   */
+  const sessionProfileName =
+    !view.profile || sessionBrand === 'local'
+      ? null
+      : (accounts[sessionBrand]?.find((p) => p.id === view.profile)?.name ?? view.profile);
   useEffect(() => {
     let current = true;
     if (sessionBrand === 'local') return () => { current = false; };
@@ -1917,6 +1945,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         )}
       >
         <ProviderBadge brand={sessionBrand} model={view.model} icon={sessionBrand === 'local' ? <ModelIcon brand={sessionBrand} model={view.model} identity={selectedModel?.family ?? selectedModel?.publisher} className="size-3" /> : undefined} className="hidden md:inline-flex" />
+        {sessionProfileName && <ProfileBadge name={sessionProfileName} brand={sessionBrand} className="hidden md:inline-flex" />}
         {/* The one thing on this line allowed to give way when the line runs
             short, and the only one that can: the model and the permission mode
             are both named again on the writing box below, while every chip
