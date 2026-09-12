@@ -26,7 +26,7 @@ describe('new-chat provider default', () => {
     // The checkbox stood in the footer and could only ever speak for the
     // provider that happened to be selected; the star says which one it means
     // by being on it, the way the model and effort stars do.
-    expect(source).toContain('testid={`new-chat-provider-default-${provider.brand}`}');
+    expect(source).toContain('testid: `new-chat-provider-default-${provider.brand}`,');
     expect(source).toContain("setNewChatDefault(newChatDefault === provider.brand ? 'ask' : provider.brand)");
     expect(source).not.toContain('data-testid="new-chat-default"');
     expect(source).not.toContain("import { Checkbox } from '@/components/ui/checkbox'");
@@ -41,8 +41,26 @@ describe('new-chat provider default', () => {
 
   it('offers each brand its accounts, and the local brand none', () => {
     expect(source).toContain("newBrand !== 'local' && (newAccounts.length > 1 || newAccountsUnread)");
-    expect(source).toContain('testid={`new-chat-profile-default-${profile.id}`}');
+    expect(source).toContain('testid: `new-chat-profile-default-${profile.id}`,');
     expect(source).toContain("start(newBrand, newWhere, newBrand === 'local' ? undefined : newAccount)");
+  });
+
+  it('attaches each star to the choice it belongs to, as one split control', () => {
+    // Loose beside the button, with a gap on either side of it, a row of four
+    // choices read as eight scattered things; joined, it reads as four
+    // controls that happen to have two halves (bw-ospn.1).
+    expect(source).toContain('<ChoiceWithStar');
+    expect(source).not.toContain('<div key={provider.brand} className="flex items-center gap-1">');
+    expect(source).not.toContain('<div key={profile.id} className="flex items-center gap-1">');
+    // The seam: the choice is square on its right, the star square on its
+    // left, and one line between them either way the pair is painted.
+    const split = source.slice(source.indexOf('function ChoiceWithStar('), source.indexOf('export function Picker('));
+    expect(split).toContain('rounded-r-none');
+    expect(split).toContain("chosen ? 'border-l border-primary-foreground/20' : '-ml-px'");
+    expect(split).toContain('segment');
+    // Both halves wear the same face, so neither looks like a stray.
+    expect(split).toContain("const variant = chosen ? 'primary' : 'outline';");
+    expect(split).toContain('variant={variant}');
   });
 
   it('keeps the choice in the app and not in this browser', () => {

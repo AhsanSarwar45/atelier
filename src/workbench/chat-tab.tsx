@@ -209,6 +209,8 @@ function DefaultStar({
   why,
   testid,
   className,
+  segment,
+  variant = 'ghost',
   onChoose,
 }: {
   on: boolean;
@@ -219,6 +221,13 @@ function DefaultStar({
   why?: string | null;
   testid: string;
   className?: string;
+  /**
+   * Drawn as the second half of a split control rather than a loose icon: the
+   * full height of the choice beside it, square on the edge the two share.
+   */
+  segment?: boolean;
+  /** The face of the choice it is attached to, so both halves match. */
+  variant?: 'ghost' | 'outline' | 'primary';
   onChoose: () => void;
 }) {
   const choose = () => {
@@ -227,9 +236,13 @@ function DefaultStar({
   return (
     <Tooltip label={why ?? (on ? 'Default' : 'Make default')}>
       <Button
-        size="xs"
-        variant="ghost"
-        className={cn('h-5 w-5 shrink-0 rounded-sm p-0', className)}
+        size={segment ? 'md' : 'xs'}
+        variant={variant}
+        className={cn(
+          'shrink-0 p-0',
+          segment ? 'w-9 rounded-l-none' : 'h-5 w-5 rounded-sm',
+          className,
+        )}
         data-testid={testid}
         data-default={on}
         aria-pressed={on}
@@ -247,9 +260,79 @@ function DefaultStar({
           }
         }}
       >
-        <Star className={cn('h-3 w-3', on && 'fill-current text-primary')} aria-hidden="true" />
+        <Star
+          className={cn(
+            segment ? 'size-3.5' : 'h-3 w-3',
+            // On a filled choice the star is already on the accent, and the
+            // accent's own colour on top of it is barely a star at all.
+            on && (variant === 'primary' ? 'fill-current' : 'fill-current text-primary'),
+          )}
+          aria-hidden="true"
+        />
       </Button>
     </Tooltip>
+  );
+}
+
+/**
+ * A choice and the star that makes it the default, as one split control: the
+ * choice on the left, the star on the right, sharing a height and a border and
+ * square where they meet — the shape the sidebar's New Chat button and its
+ * chevron already have.
+ *
+ * The star used to float loose beside the button with a gap on either side, so
+ * a row of choices read as scattered icons rather than one control each
+ * (bw-ospn.1).
+ */
+function ChoiceWithStar({
+  chosen,
+  disabled,
+  why,
+  testid,
+  onPick,
+  star,
+  className,
+  children,
+}: {
+  chosen: boolean;
+  disabled?: boolean;
+  /** Why this choice cannot be taken, said on hover over the choice itself. */
+  why?: ReactNode;
+  testid: string;
+  onPick: () => void;
+  star: { on: boolean; what: string; testid: string; onChoose: () => void };
+  /** On the choice half, for the cases that want their words left-aligned. */
+  className?: string;
+  children: ReactNode;
+}) {
+  const variant = chosen ? 'primary' : 'outline';
+  return (
+    <div className="flex min-w-0">
+      <Tooltip side="bottom" label={why} wrapperClassName="min-w-0 flex-1 rounded-r-none">
+        <Button
+          className={cn('w-full min-w-0 flex-1 rounded-r-none', className)}
+          variant={variant}
+          data-testid={testid}
+          onClick={onPick}
+          disabled={disabled}
+        >
+          {children}
+        </Button>
+      </Tooltip>
+      <DefaultStar
+        segment
+        variant={variant}
+        // One line between the halves, whichever way round they are painted:
+        // a filled choice draws its own, and two outlined ones would otherwise
+        // stack their borders into a two-pixel seam.
+        className={chosen ? 'border-l border-primary-foreground/20' : '-ml-px'}
+        on={star.on}
+        what={star.what}
+        disabled={disabled}
+        testid={star.testid}
+        onChoose={star.onChoose}
+      />
+    </div>
   );
 }
 
@@ -1623,42 +1706,34 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               The wrapper is what carries the label, because a disabled button
               takes no pointer events and so is never hovered at all. */}
           <div className="grid grid-cols-2 gap-2">
+            {/* The star means what it means in the model and effort menus:
+                this is the one the dialog opens holding. It replaced a
+                checkbox in the footer that could only ever speak for
+                whichever provider happened to be selected. */}
             {providers.map((provider) => (
-              <div key={provider.brand} className="flex items-center gap-1">
-                <Tooltip
-                  side="bottom"
-                  label={
-                    provider.available ? null : (
-                      <>
-                        <span className="font-medium">{brandName(provider.brand)}</span>: {whyUnavailable(provider)}
-                      </>
-                    )
-                  }
-                >
-                  <Button
-                    className="w-full min-w-0 flex-1"
-                    variant={newBrand === provider.brand ? 'primary' : 'outline'}
-                    data-testid={`new-chat-provider-${provider.brand}`}
-                    onClick={() => setNewBrand(provider.brand)}
-                    disabled={!provider.available}
-                  >
-                    <BrandIcon brand={provider.brand} /> {brandName(provider.brand)}
-                  </Button>
-                </Tooltip>
-                {/* The same star as the model and effort menus, and it means
-                    the same thing: this is the one the dialog opens holding.
-                    It replaced a checkbox in the footer that could only ever
-                    speak for whichever provider happened to be selected. */}
-                <DefaultStar
-                  on={newChatDefault === provider.brand}
-                  what={brandName(provider.brand)}
-                  disabled={!provider.available}
-                  testid={`new-chat-provider-default-${provider.brand}`}
-                  onChoose={() =>
-                    setNewChatDefault(newChatDefault === provider.brand ? 'ask' : provider.brand)
-                  }
-                />
-              </div>
+              <ChoiceWithStar
+                key={provider.brand}
+                chosen={newBrand === provider.brand}
+                disabled={!provider.available}
+                why={
+                  provider.available ? null : (
+                    <>
+                      <span className="font-medium">{brandName(provider.brand)}</span>: {whyUnavailable(provider)}
+                    </>
+                  )
+                }
+                testid={`new-chat-provider-${provider.brand}`}
+                onPick={() => setNewBrand(provider.brand)}
+                star={{
+                  on: newChatDefault === provider.brand,
+                  what: brandName(provider.brand),
+                  testid: `new-chat-provider-default-${provider.brand}`,
+                  onChoose: () =>
+                    setNewChatDefault(newChatDefault === provider.brand ? 'ask' : provider.brand),
+                }}
+              >
+                <BrandIcon brand={provider.brand} /> {brandName(provider.brand)}
+              </ChoiceWithStar>
             ))}
           </div>
           {/* Which account, between which agent and where to work. `local`
@@ -1672,29 +1747,27 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               ) : (
                 <div className="grid grid-cols-2 gap-2">
                   {newAccounts.map((profile) => (
-                    <div key={profile.id} className="flex items-center gap-1">
-                      <Button
-                        className="w-full min-w-0 flex-1 justify-start"
-                        variant={newAccount === profile.id ? 'primary' : 'outline'}
-                        data-testid={`new-chat-profile-${profile.id}`}
-                        onClick={() => setNewProfile((was) => ({ ...was, [newBrand]: profile.id }))}
-                      >
-                        <span className="truncate">{profile.name}</span>
-                      </Button>
-                      <DefaultStar
-                        on={(newChatDefaults.profiles[newBrand] ?? 'system') === profile.id}
-                        what={profile.name}
-                        testid={`new-chat-profile-default-${profile.id}`}
-                        onChoose={() =>
+                    <ChoiceWithStar
+                      key={profile.id}
+                      chosen={newAccount === profile.id}
+                      className="justify-start"
+                      testid={`new-chat-profile-${profile.id}`}
+                      onPick={() => setNewProfile((was) => ({ ...was, [newBrand]: profile.id }))}
+                      star={{
+                        on: (newChatDefaults.profiles[newBrand] ?? 'system') === profile.id,
+                        what: profile.name,
+                        testid: `new-chat-profile-default-${profile.id}`,
+                        onChoose: () =>
                           setNewChatProfile(
                             newBrand,
                             (newChatDefaults.profiles[newBrand] ?? 'system') === profile.id
                               ? null
                               : profile.id,
-                          )
-                        }
-                      />
-                    </div>
+                          ),
+                      }}
+                    >
+                      <span className="truncate">{profile.name}</span>
+                    </ChoiceWithStar>
                   ))}
                 </div>
               )}
