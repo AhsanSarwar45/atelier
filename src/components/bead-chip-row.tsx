@@ -75,7 +75,14 @@ export function BeadChip({
           type="button"
           variant="foreground"
           size="none"
-          className="relative font-inherit before:absolute before:-inset-2.5 before:content-['']"
+          /* No `font-inherit` here. It is not a class this project builds —
+             nothing defines one — but tailwind-merge reads it as an answer to
+             the font-family question and drops the `font-mono` the chip asked
+             for on its way past, leaving the id drawn in the page's own face
+             while every other chip kept the typewriter one (bw-oamr.6). The
+             button sets no type of its own, which is what `size="none"` means,
+             so there is nothing here to override. */
+          className="relative before:absolute before:-inset-2.5 before:content-['']"
           data-testid={testId}
           data-bead-id={id}
           data-bead-status={status}

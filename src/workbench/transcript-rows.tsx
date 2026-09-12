@@ -1057,12 +1057,19 @@ function AttachmentChip({ image, onLook }: { image: ImagePayload; onLook: (image
         {/* `size="none"`: the badge around it already sets the height, the
             side padding and the type. The button is here for what it does —
             the pointer, the focus ring — not for a box of its own, the same
-            way a bead chip wears one (bead-chip-row.tsx). */}
+            way a bead chip wears one (bead-chip-row.tsx).
+
+            And nothing else. It wore a `font-inherit` copied from that chip,
+            which is not a class this project builds — but tailwind-merge reads
+            it as an answer to the font-family question and drops the chip's own
+            `font-mono` on the way past, so the name was drawn in the page's
+            face at the pill's eleven pixels while its descenders ran into the
+            border. The manager photographed it: the letters sitting low in the
+            badge, not like any other badge in the app (bw-oamr.6). */}
         <Button
           type="button"
           variant="foreground"
           size="none"
-          className="font-inherit"
           data-testid="message-attachment-badge"
           data-file-kind={kind}
           onClick={() => onLook(image)}
