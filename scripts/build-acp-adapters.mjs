@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { patchClaudeTurnPhase } from './claude-turn-phase.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -684,7 +685,10 @@ const platform = TARGETS[target];
 if (!platform) {
   throw new Error(`usage: build-acp-adapters.mjs <${Object.keys(TARGETS).join('|')}> [output]`);
 }
-const builderFingerprint = sha256(fileURLToPath(import.meta.url));
+const builderFingerprint = createHash('sha256')
+  .update(readFileSync(fileURLToPath(import.meta.url)))
+  .update(readFileSync(new URL('./claude-turn-phase.mjs', import.meta.url)))
+  .digest('hex');
 const gooseTarget = join(cacheRoot(), 'goose', target, GOOSE.commit);
 if (cacheInfo) {
   console.log(JSON.stringify({ builderFingerprint, gooseTarget, target }));
@@ -721,6 +725,8 @@ try {
   patchCodexSessionPolicy(codexSource);
   patchCodexSubagentControl(codexSource);
   patchCodexAccounting(codexSource);
+  const claudeAgentFile = join(claudeSource, 'src', 'acp-agent.ts');
+  writeFileSync(claudeAgentFile, patchClaudeTurnPhase(readFileSync(claudeAgentFile, 'utf8')));
   patchClaudeWindowNow(claudeSource);
   patchClaudeAccounting(claudeSource);
   patchNativeQuestionNotes(claudeSource, codexSource);

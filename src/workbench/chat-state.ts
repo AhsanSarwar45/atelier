@@ -314,6 +314,7 @@ const OWN_WORD: Record<SessionState, string> = {
   thinking: 'Thinking',
   streaming: 'Answering',
   running_tool: 'Running',
+  waiting_for_agents: 'Helper working',
   waiting_permission: 'Waiting for you',
   stopped: 'Stopped',
   errored: 'Failed',
@@ -327,6 +328,7 @@ const OWN_MARK: Record<SessionState, StateMark> = {
   thinking: 'thinking',
   streaming: 'answering',
   running_tool: 'running',
+  waiting_for_agents: 'helping',
   waiting_permission: 'waiting',
   stopped: 'stopped',
   errored: 'failed',
@@ -349,6 +351,7 @@ const OWN_DOING: Record<SessionState, Doing> = {
   thinking: 'thinking',
   streaming: 'answering',
   running_tool: 'running',
+  waiting_for_agents: 'helping',
   waiting_permission: 'waiting',
   stopped: 'idle',
   errored: 'idle',
@@ -361,6 +364,7 @@ const OWN_WORKING: ReadonlySet<SessionState> = new Set<SessionState>([
   'thinking',
   'streaming',
   'running_tool',
+  'waiting_for_agents',
 ]);
 
 /**

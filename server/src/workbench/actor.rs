@@ -72,6 +72,7 @@ enum Command {
     MarkImported(String, Reply<()>),
     RememberFollowed(String, i64, Reply<()>),
     WasDrivenHere(String, Reply<bool>),
+    SessionStatus(String, Reply<Option<serde_json::Value>>),
     SessionActivity(String, Reply<SessionActivity>),
     SessionActivities(Reply<HashMap<String, SessionActivity>>),
     TokenStats(String, Reply<TokenStats>),
@@ -319,6 +320,13 @@ impl ChatDb {
     }
     pub async fn session_activity(&self, session_id: String) -> Result<SessionActivity, String> {
         self.request(|reply| Command::SessionActivity(session_id, reply))
+            .await
+    }
+    pub async fn session_status(
+        &self,
+        session_id: String,
+    ) -> Result<Option<serde_json::Value>, String> {
+        self.request(|reply| Command::SessionStatus(session_id, reply))
             .await
     }
     pub async fn session_activities(&self) -> Result<HashMap<String, SessionActivity>, String> {
@@ -902,6 +910,9 @@ fn run(
             }
             Command::WasDrivenHere(session_id, reply) => {
                 respond(reply, store.was_driven_here(&session_id))
+            }
+            Command::SessionStatus(session_id, reply) => {
+                respond(reply, store.session_status(&session_id))
             }
             Command::SessionActivity(session_id, reply) => {
                 respond(reply, store.session_activity(&session_id))

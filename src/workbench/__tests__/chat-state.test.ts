@@ -36,6 +36,7 @@ const ALL: SessionState[] = [
   'thinking',
   'streaming',
   'running_tool',
+  'waiting_for_agents',
   'waiting_permission',
   'stopped',
   'errored',
@@ -43,7 +44,7 @@ const ALL: SessionState[] = [
 ];
 
 /** The states in which an agent of ours owes an answer and the mark must move. */
-const MOVING: SessionState[] = ['starting', 'thinking', 'streaming', 'running_tool'];
+const MOVING: SessionState[] = ['starting', 'thinking', 'streaming', 'running_tool', 'waiting_for_agents'];
 
 function held(over: Partial<HeldChat> = {}): HeldChat {
   return { id: 'ef56704b', holder: 'terminal', doing: 'working', since: 1_000, ...over };

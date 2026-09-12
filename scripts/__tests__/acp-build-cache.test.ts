@@ -19,7 +19,7 @@ function sha256(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
-function completeBundle(root: string, fingerprint = sha256(BUILDER)): string {
+function completeBundle(root: string, fingerprint = createHash('sha256').update(readFileSync(BUILDER)).update(readFileSync(resolve(process.cwd(), 'scripts/claude-turn-phase.mjs'))).digest('hex')): string {
   const output = join(root, 'bundle');
   mkdirSync(output, { recursive: true });
   for (const file of FILES) writeFileSync(join(output, file), `complete ${file}\n`);

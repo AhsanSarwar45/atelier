@@ -156,6 +156,9 @@ impl WorkbenchState {
     pub fn database(&self) -> &ChatDb {
         self.registry.database()
     }
+    pub(crate) async fn reconcile_status(&self, session_id: &str) -> Result<Value, String> {
+        self.registry.reconcile_status(session_id).await
+    }
     pub(crate) async fn has_driver(&self, session_id: &str) -> bool {
         self.registry.has_driver(session_id).await
     }
@@ -1828,6 +1831,7 @@ async fn events(
     let receiver = state.database().subscribe_session(&query.session);
     let since = query.since.unwrap_or(0).max(0);
     let (initial, watermark) = if since == 0 {
+        state.reconcile_status(&query.session).await?;
         let view = snapshot(state.database(), &query.session).await?;
         let watermark = view["lastSeq"].as_i64().unwrap_or_default();
         (vec![Ok(snapshot_frame(&view))], watermark)

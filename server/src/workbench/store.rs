@@ -773,7 +773,7 @@ fn held_in_its_project(session: &Session) -> bool {
         };
         let counting = matches!(
             state.as_str(),
-            "starting" | "thinking" | "streaming" | "running_tool" | "waiting_permission"
+            "starting" | "thinking" | "streaming" | "running_tool" | "waiting_for_agents" | "waiting_permission"
         );
         let shown = if state == "dormant" { "" } else { label };
         let busy_since = counting.then(|| {
@@ -793,6 +793,18 @@ fn held_in_its_project(session: &Session) -> bool {
             call: Value::Null,
             busy_since,
         })
+    }
+
+    pub fn session_status(&self, session_id: &str) -> rusqlite::Result<Option<Value>> {
+        self.connection
+            .query_row(
+                "SELECT json FROM event WHERE session_id=?1 AND type='session.state' ORDER BY seq DESC LIMIT 1",
+                [session_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|json| serde_json::from_str(&json).map_err(json_error))
+            .transpose()
     }
     /// The activity of every chat that ever reported one, read from its latest
     /// `session.state` row alone.
@@ -828,7 +840,7 @@ fn held_in_its_project(session: &Session) -> bool {
             let Some(state) = state else { continue };
             let counting = matches!(
                 state.as_str(),
-                "starting" | "thinking" | "streaming" | "running_tool" | "waiting_permission"
+                "starting" | "thinking" | "streaming" | "running_tool" | "waiting_for_agents" | "waiting_permission"
             );
             let activity = if counting {
                 SessionActivity {

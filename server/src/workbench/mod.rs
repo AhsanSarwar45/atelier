@@ -33,3 +33,5 @@ pub mod store;
 pub mod summary;
 pub mod usage;
 pub mod wire;
+
+pub mod status;

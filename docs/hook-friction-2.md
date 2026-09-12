@@ -1266,3 +1266,12 @@ bw-8qrr and bw-ad3r entries above describe, for the same reason: a tool call
 has nowhere to put a per-command reason. Worth adding only because the count
 keeps climbing and the fix has not moved: four jobs now (bw-wk5u, bw-8qrr,
 bw-ad3r, and this one) have paid the same price in the same way.
+## Reopening a reported regression after job cleanup (bw-b0m4.6)
+
+The workflow gate refused `bd update bw-b0m4 --status open` in the landing
+checkout after the completed job worktree had been removed, requiring an owned
+isolated worktree before the job could be reopened. Recreated the same job
+worktree, then used the explicit per-job bypass to reopen the epic, add its
+regression child, and claim that child. Tracker-only reopening must be allowed
+before ownership of a new child can exist; repository edits still need the
+owned job worktree. No installed app or live chat state was modified.

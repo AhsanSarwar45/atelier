@@ -978,16 +978,7 @@ async fn permission(
         json!({"type":"ask.resolved", "sessionId":local_session_id, "seq":0, "at":now(),
             "askId":ask_id, "chosen":selected})
     };
-    database
-        .append_many(vec![
-            event(resolved)?,
-            event(json!({
-                "type":"session.state", "sessionId":local_session_id, "seq":0, "at":now(),
-                "state":"streaming", "label":"Working"
-            }))?,
-        ])
-        .await
-        .map_err(acp_error)?;
+    database.append(event(resolved)?).await.map_err(acp_error)?;
     Ok(RequestPermissionResponse::new(
         RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(selected)),
     ))
@@ -1228,20 +1219,11 @@ async fn elicitation(
     } else {
         "ask.resolved"
     };
-    let mut resolution = vec![event(json!({
+    let resolution = vec![event(json!({
         "type":resolved_type, "sessionId":local_session_id, "seq":0, "at":now(),
         "requestId":request_id, "askId":request_id,
         "answers":response["answers"], "chosen":response["action"]
     }))?];
-    if accepted {
-        // The reader has answered, so the waiting line goes now rather than
-        // lingering until the agent's next update happens to carry a state.
-        // A decline leaves the state alone, the way a stopped card does.
-        resolution.push(event(json!({
-            "type":"session.state", "sessionId":local_session_id, "seq":0, "at":now(),
-            "state":"streaming", "label":"Working"
-        }))?);
-    }
     database.append_many(resolution).await.map_err(acp_error)?;
     let wire = if accepted {
         json!({"action":"accept","content":typed_elicitation_content(&raw["requestedSchema"], &response["content"])})
@@ -1429,10 +1411,6 @@ fn slash_name(text: &str) -> Option<&str> {
     let command = trimmed.strip_prefix('/')?;
     let name = command.split_whitespace().next()?;
     (!name.is_empty() && !name.contains('/')).then_some(name)
-}
-
-fn turn_is_active(state: &str) -> bool {
-    matches!(state, "thinking" | "streaming" | "running_tool")
 }
 
 fn command_is_offered(name: &str, commands: &[Value]) -> Result<(), String> {
@@ -1728,6 +1706,9 @@ pub struct AcpDriver {
     /// from the initialize answer; true until it says otherwise, because an
     /// agent that declares nothing is not thereby refusing.
     takes_pictures: Arc<AtomicBool>,
+    normalizer: Arc<Mutex<AcpNormalizer>>,
+    reconcile: super::super::status::Reconciler,
+    in_flight: super::super::status::Requests,
 }
 
 impl AcpDriver {
@@ -1737,11 +1718,7 @@ impl AcpDriver {
         images: &[Value],
         content: Vec<ContentBlock>,
     ) -> Result<Value, String> {
-        let active = self
-            .database
-            .get_session(self.session.id.clone())
-            .await?
-            .is_some_and(|session| turn_is_active(&session.state));
+        let active = self.normalizer.lock().await.request_is_active(&self.in_flight);
         // The id of the line just written is the only handle anyone has on it
         // afterwards. Dropping it here is what left the screen unable to say
         // which message to take back when the reader recalls a prompt, and
@@ -1754,15 +1731,6 @@ impl AcpDriver {
             images,
         )
         .await?;
-        self.database
-            .append(
-                serde_json::from_value(json!({
-                    "type":"session.state", "sessionId":self.session.id,
-                    "seq":0, "at":now(), "state":"streaming", "label":"Working"
-                }))
-                .map_err(|error| error.to_string())?,
-            )
-            .await?;
         let mut accepted = if active {
             self.control(|reply| Control::Steer {
                 content,
@@ -1774,6 +1742,7 @@ impl AcpDriver {
             self.control(|reply| Control::Prompt { content, reply })
                 .await?
         };
+        (self.reconcile)().await?;
         // Both routes answer with an object; a driver that ever answered with
         // something else keeps its answer whole rather than having it replaced
         // by a bare id.
@@ -1812,6 +1781,7 @@ impl AcpDriver {
         let database = self.database.clone();
         let controls = self.controls.clone();
         let session_id = self.session.id.clone();
+        let normalizer = self.normalizer.clone();
         tokio::spawn(async move {
             let tick = std::time::Duration::from_secs(HELD_TURN_TICK);
             let grace = std::time::Duration::from_secs(HELD_TURN_GRACE);
@@ -1833,10 +1803,7 @@ impl AcpDriver {
                 if quiet_since.elapsed() < grace {
                     continue;
                 }
-                let Ok(Some(session)) = database.get_session(session_id.clone()).await else {
-                    return;
-                };
-                if !turn_is_active(&session.state) {
+                if !normalizer.lock().await.turn_is_open() {
                     return;
                 }
                 let Ok(agents) = database.projected_agents(session_id.clone()).await else {
@@ -1970,10 +1937,42 @@ impl AcpDriver {
         } else {
             Value::Null
         };
+        let mut task_normalizer = AcpNormalizer::new(PathBuf::from(&task_session.cwd));
+        task_normalizer.seed_usage(task_saved_cost.as_ref());
+        let normalizer = Arc::new(Mutex::new(task_normalizer));
+        let driver_normalizer = normalizer.clone();
+        let in_flight = super::super::status::Requests::default();
+        let driver_in_flight = in_flight.clone();
+        let status_in_flight = in_flight.clone();
+        let status_normalizer = normalizer.clone();
+        let status_database = database.clone();
+        let status_session = session.id.clone();
+        let status_controls = controls.clone();
+        let status_permissions = permissions.clone();
+        let status_elicitations = elicitations.clone();
+        let reconcile: super::super::status::Reconciler = Arc::new(move || {
+            let normalizer = status_normalizer.clone();
+            let requests = status_in_flight.clone();
+            let database = status_database.clone();
+            let session_id = status_session.clone();
+            let controls = status_controls.clone();
+            let permissions = status_permissions.clone();
+            let elicitations = status_elicitations.clone();
+            Box::pin(async move {
+                let mut activity = normalizer.lock().await;
+                if !controls.is_closed() && !activity.request_is_active(&requests) && activity.turn_is_open() {
+                    permissions.cancel_all().await;
+                    elicitations.cancel_all().await;
+                    let ended = activity.finish_turn(&session_id, brand, &json!({"stopReason":"end_turn"}));
+                    database.append_many(ended).await?;
+                }
+                let pending = permissions.pending.lock().await.values().any(|ask| !ask.answer.is_closed())
+                    || elicitations.pending.lock().await.values().any(|ask| !ask.answer.is_closed());
+                let facts = activity.runtime_facts(!controls.is_closed(), pending, &requests);
+                super::super::status::reconcile(&database, &session_id, Some(&facts)).await
+            })
+        });
         tokio::spawn(async move {
-            let mut task_normalizer = AcpNormalizer::new(PathBuf::from(&task_session.cwd));
-            task_normalizer.seed_usage(task_saved_cost.as_ref());
-            let normalizer = Arc::new(Mutex::new(task_normalizer));
             let replaying = Arc::new(AtomicBool::new(false));
             let updates_db = task_database.clone();
             let updates_session = task_session.id.clone();
@@ -2270,6 +2269,7 @@ impl AcpDriver {
                             match control {
                                 Control::Prompt { content, reply } => {
                                     let generation = normalizer.lock().await.begin_prompt();
+                                    let request_lease = super::super::status::RequestLease::new(in_flight.clone(), generation);
                                     let prompt_connection = connection.clone();
                                     let database = task_database.clone();
                                     let local_id = task_session.id.clone();
@@ -2278,6 +2278,7 @@ impl AcpDriver {
                                     let normalizer = normalizer.clone();
                                     let local_model = task_session.model.clone();
                                     let spawned = connection.spawn(async move {
+                                        let _request_lease = request_lease;
                                         let result = prompt_connection
                                             .send_request(PromptRequest::new(remote_id, content))
                                             .block_task()
@@ -2596,6 +2597,9 @@ impl AcpDriver {
             permissions,
             elicitations,
             takes_pictures,
+            normalizer: driver_normalizer,
+            reconcile,
+            in_flight: driver_in_flight,
         })
     }
 
@@ -2855,6 +2859,10 @@ impl AcpDriver {
 }
 
 impl ProviderDriver for AcpDriver {
+    fn reconciler(&self) -> Option<super::super::status::Reconciler> {
+        Some(self.reconcile.clone())
+    }
+
     fn brand(&self) -> &'static str {
         self.brand
     }
@@ -3182,6 +3190,10 @@ mod tests {
         database.create_session(session.clone()).await.unwrap();
         let (controls, mut requests) = mpsc::unbounded_channel();
         let (_, ended) = mpsc::unbounded_channel();
+        let mut activity = AcpNormalizer::default();
+        let generation = activity.begin_prompt();
+        let in_flight = super::super::super::status::Requests::default();
+        let _request = super::super::super::status::RequestLease::new(in_flight.clone(), generation);
         let driver = AcpDriver {
             brand: "codex",
             database: database.clone(),
@@ -3191,6 +3203,9 @@ mod tests {
             permissions: Arc::new(PermissionBroker::default()),
             elicitations: Arc::new(ElicitationBroker::default()),
             takes_pictures: Arc::new(AtomicBool::new(true)),
+            normalizer: Arc::new(Mutex::new(activity)),
+            reconcile: Arc::new(|| Box::pin(async { Ok(json!({})) })),
+            in_flight,
         };
         let sent = tokio::spawn(async move {
             driver
@@ -3247,7 +3262,7 @@ mod tests {
     async fn a_sent_prompt_is_answered_with_the_id_of_the_line_it_became() {
         let root = tempfile::tempdir().unwrap();
         let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
-        let session = test_session("idle");
+        let session = test_session("streaming");
         database.create_session(session.clone()).await.unwrap();
         let (controls, mut requests) = mpsc::unbounded_channel();
         let (_, ended) = mpsc::unbounded_channel();
@@ -3260,6 +3275,9 @@ mod tests {
             permissions: Arc::new(PermissionBroker::default()),
             elicitations: Arc::new(ElicitationBroker::default()),
             takes_pictures: Arc::new(AtomicBool::new(true)),
+            normalizer: Arc::new(Mutex::new(AcpNormalizer::default())),
+            reconcile: Arc::new(|| Box::pin(async { Ok(json!({})) })),
+            in_flight: Default::default(),
         };
         let sent = tokio::spawn(async move {
             driver
@@ -3492,6 +3510,9 @@ mod tests {
             permissions: Arc::new(PermissionBroker::default()),
             elicitations: Arc::new(ElicitationBroker::default()),
             takes_pictures: Arc::new(AtomicBool::new(true)),
+            normalizer: Arc::new(Mutex::new(AcpNormalizer::default())),
+            reconcile: Arc::new(|| Box::pin(async { Ok(json!({})) })),
+            in_flight: Default::default(),
         };
 
         driver
@@ -3567,6 +3588,9 @@ mod tests {
             permissions: Arc::new(PermissionBroker::default()),
             elicitations: Arc::new(ElicitationBroker::default()),
             takes_pictures: Arc::new(AtomicBool::new(true)),
+            normalizer: Arc::new(Mutex::new(AcpNormalizer::default())),
+            reconcile: Arc::new(|| Box::pin(async { Ok(json!({})) })),
+            in_flight: Default::default(),
         };
 
         driver

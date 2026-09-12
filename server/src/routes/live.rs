@@ -227,6 +227,7 @@ async fn send_chat_snapshot(
     session_id: &str,
     tx: &mpsc::Sender<Tagged>,
 ) -> Result<i64, String> {
+    state.reconcile_status(session_id).await?;
     let snapshot = workbench::snapshot(state.database(), session_id)
         .await
         .map_err(|error| format!("Could not load this conversation: {error}"))?;

@@ -109,7 +109,7 @@ export function waitsOnYou(s: LiveSession): boolean {
 
 /** Working right now, as opposed to stopped for an answer or asleep. */
 export function isRunning(s: LiveSession): boolean {
-  return s.state === 'thinking' || s.state === 'streaming' || s.state === 'running_tool';
+  return s.state === 'thinking' || s.state === 'streaming' || s.state === 'waiting_for_agents' || s.state === 'running_tool';
 }
 
 /**

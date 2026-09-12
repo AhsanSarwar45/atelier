@@ -25,6 +25,7 @@ pub type LaunchFuture<'a> =
 /// A live provider behind the browser's existing command vocabulary.
 pub trait ProviderDriver: Send {
     fn brand(&self) -> &'static str;
+    fn reconciler(&self) -> Option<super::status::Reconciler> { None }
     fn command<'a>(&'a mut self, command: &'a Command) -> DriverFuture<'a>;
     fn next<'a>(&'a mut self) -> DriverFuture<'a> {
         Box::pin(async {
@@ -80,7 +81,42 @@ enum DriverRequest {
     Close(Command, oneshot::Sender<Result<Value, String>>),
 }
 
-type Driver = mpsc::UnboundedSender<DriverRequest>;
+#[derive(Clone)]
+struct Driver {
+    requests: mpsc::UnboundedSender<DriverRequest>,
+    reconcile: Option<super::status::Reconciler>,
+}
+impl std::ops::Deref for Driver {
+    type Target = mpsc::UnboundedSender<DriverRequest>;
+    fn deref(&self) -> &Self::Target { &self.requests }
+}
+
+async fn reconcile_session(
+    database: &ChatDb,
+    drivers: &RwLock<HashMap<String, Driver>>,
+    launching: &std::sync::atomic::AtomicUsize,
+    session_id: &str,
+) -> Result<Value, String> {
+    // Keep attachment identity stable through publication. A retired probe
+    // cannot write its outcome over a newly attached turn.
+    let live = drivers.read().await;
+    if let Some(driver) = live.get(session_id).filter(|driver| !driver.is_closed()) {
+        if let Some(reconcile) = &driver.reconcile { return reconcile().await; }
+        // Only test drivers lack an actual runtime probe.
+        return Ok(Value::Null);
+    }
+    if launching.load(std::sync::atomic::Ordering::Acquire) != 0 {
+        if database.get_session(session_id.to_string()).await?.is_some_and(|session| session.state == "starting") {
+            return Ok(Value::Null);
+        }
+    }
+    super::status::reconcile(database, session_id, None).await
+}
+
+struct LaunchGuard(Arc<std::sync::atomic::AtomicUsize>);
+impl Drop for LaunchGuard {
+    fn drop(&mut self) { self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel); }
+}
 
 async fn supervise_driver(
     database: ChatDb,
@@ -150,6 +186,7 @@ pub struct WorkbenchRegistry {
     database: ChatDb,
     factory: Arc<dyn SessionFactory>,
     drivers: Arc<RwLock<HashMap<String, Driver>>>,
+    launching: Arc<std::sync::atomic::AtomicUsize>,
     paths: RegistryPaths,
     defaults: ProviderDefaultFiles,
     profiles: Profiles,
@@ -167,6 +204,41 @@ impl WorkbenchRegistry {
             paths.claude_config.clone(),
             paths.codex_home.clone(),
         );
+        let drivers = Arc::new(RwLock::new(HashMap::<String, Driver>::new()));
+        let launching = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let live = Arc::downgrade(&drivers);
+            let starts = launching.clone();
+            let db = database.clone();
+            let mut events = database.subscribe_all();
+            handle.spawn(async move {
+                let mut sweep = tokio::time::interval(Duration::from_secs(5));
+                loop {
+                    let changed = tokio::select! {
+                        _ = sweep.tick() => None,
+                        event = events.recv() => match event {
+                            Ok(event) => Some(event.session_id),
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => None,
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        }
+                    };
+                    let Some(live) = live.upgrade() else { break };
+                    if let Some(id) = changed {
+                        // Initialization may publish events before the handle is
+                        // registered. Attached runtimes alone own event refreshes.
+                        if live.read().await.contains_key(&id) {
+                            let _ = reconcile_session(&db, &live, &starts, &id).await;
+                        }
+                    } else if let Ok(sessions) = db.list_sessions(None).await {
+                        for session in sessions {
+                            if super::status::is_active(&session.state) || live.read().await.contains_key(&session.id) {
+                                let _ = reconcile_session(&db, &live, &starts, &session.id).await;
+                            }
+                        }
+                    }
+                }
+            });
+        }
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let db = database.clone();
             let mut updates = database.subscribe_all();
@@ -200,7 +272,8 @@ impl WorkbenchRegistry {
         Self {
             database,
             factory,
-            drivers: Arc::new(RwLock::new(HashMap::new())),
+            drivers,
+            launching,
             paths,
             defaults,
             profiles,
@@ -304,7 +377,7 @@ impl WorkbenchRegistry {
         self.drivers
             .write()
             .await
-            .insert(session_id.to_string(), requests);
+            .insert(session_id.to_string(), Driver { requests, reconcile: None });
     }
 
     /// Reading by URL is the same operation as clicking a stored row. It does
@@ -319,6 +392,9 @@ impl WorkbenchRegistry {
     }
 
     async fn launch(&self, command: &Command) -> Result<Value, String> {
+        self.launching.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        let _launch = LaunchGuard(self.launching.clone());
+
         let mut launched = self.factory.launch(self.database.clone(), command).await?;
         let Some(driver) = launched.driver.take() else {
             return Ok(launched.reply);
@@ -333,15 +409,17 @@ impl WorkbenchRegistry {
         let (requests, receiver) = mpsc::unbounded_channel();
         let session_id = launched.session_id;
         let owner = requests.clone();
-        drivers.insert(session_id.clone(), requests);
+        drivers.insert(session_id.clone(), Driver { requests, reconcile: driver.reconciler() });
         drop(drivers);
         let live = self.drivers.clone();
         let database = self.database.clone();
         tokio::spawn(async move {
-            supervise_driver(database, session_id.clone(), driver, receiver).await;
+            supervise_driver(database.clone(), session_id.clone(), driver, receiver).await;
             let mut live = live.write().await;
             if live.get(&session_id).is_some_and(|current| current.same_channel(&owner)) {
                 live.remove(&session_id);
+                // Even a dropped completion callback leaves no active status.
+                let _ = super::status::reconcile(&database, &session_id, None).await;
             }
         });
         Ok(launched.reply)
@@ -612,7 +690,7 @@ impl WorkbenchRegistry {
             && session.model.is_some()
             && !matches!(
                 session.state.as_str(),
-                "thinking" | "streaming" | "running_tool" | "waiting_permission"
+                "thinking" | "streaming" | "running_tool" | "waiting_for_agents" | "waiting_permission"
             )
         {
             let ready: crate::workbench::protocol::Event = serde_json::from_value(json!({
@@ -628,7 +706,31 @@ impl WorkbenchRegistry {
     /// Execute one already-decoded WBP command and return the exact JSON body
     /// the former helper returned. Unknown discriminators have already been
     /// refused by `protocol::Command` before they can reach this registry.
+    /// Every read/interaction uses this same runtime reconciliation entrypoint.
+    pub async fn reconcile_status(&self, session_id: &str) -> Result<Value, String> {
+        reconcile_session(&self.database, &self.drivers, &self.launching, session_id).await
+    }
+
     pub async fn execute(&self, command: &Command) -> Result<Value, String> {
+        let id = command.fields.get("sessionId").and_then(Value::as_str);
+        if command.kind != CommandKind::SessionStop {
+            if let Some(id) = id { self.reconcile_status(id).await?; }
+        }
+        let result = self.execute_inner(command).await;
+        let result_id = id.or_else(|| result.as_ref().ok().and_then(|value| value["id"].as_str()));
+        if let Some(id) = result_id {
+            self.reconcile_status(id).await?;
+            if command.kind == CommandKind::SessionOpen && result.is_ok() {
+                if let Some(session) = self.database.get_session(id.to_string()).await? {
+                    return serde_json::to_value(session).map_err(|error| error.to_string());
+                }
+            }
+        }
+        result
+    }
+
+    async fn execute_inner(&self, command: &Command) -> Result<Value, String> {
+
         match command.kind {
             // A project is what the reader narrows to, never what he needs to
             // have: the screen opens on "Personal files only", and a machine
@@ -1339,7 +1441,7 @@ mod tests {
     /// and nothing after it to put either right. The manager: "some chats are
     /// straight up showing as idle even they are are working" (bw-xfb4).
     #[tokio::test]
-    async fn native_workbench_registry_never_calls_a_working_local_chat_ready() {
+    async fn native_workbench_registry_repairs_stale_local_activity_before_model_selection() {
         let root = tempfile::tempdir().unwrap();
         let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
         let chat = |id: &str, state: &str| crate::workbench::store::Session {
@@ -1387,6 +1489,10 @@ mod tests {
             }),
         );
 
+        // Another provider initializing must not postpone recovery of this
+        // chat's stale Answering/Running state.
+        registry.launching.store(1, Ordering::Release);
+
         let ready_events = |id: &'static str| {
             let database = database.clone();
             async move {
@@ -1413,8 +1519,8 @@ mod tests {
         }
         assert_eq!(
             ready_events("working").await,
-            Vec::<String>::new(),
-            "a chat mid-turn was drawn as finished by a model being chosen"
+            vec!["idle".to_string()],
+            "a driverless cached running state must not pretend that a turn exists"
         );
         // And a chat at rest is still told it is ready, which is what this
         // write is for.

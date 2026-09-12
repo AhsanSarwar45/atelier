@@ -92,6 +92,8 @@ impl TokenTally {
 pub struct AcpNormalizer {
     serial: u64,
     turn_finished: bool,
+    waiting_for_agents: bool,
+    outcome: Value,
     prompt_generation: u64,
     event_serial: Cell<u64>,
     stream_id: String,
@@ -153,6 +155,8 @@ impl Default for AcpNormalizer {
         Self {
             serial: 0,
             turn_finished: false,
+            waiting_for_agents: false,
+            outcome: json!({"state":"idle","label":"Ready"}),
             prompt_generation: 0,
             event_serial: Cell::new(0),
             stream_id: uuid::Uuid::new_v4().to_string(),
@@ -718,6 +722,7 @@ impl AcpNormalizer {
         if let Some(last) = events.last_mut() {
             last.fields.insert("state".into(), json!("errored"));
             last.fields.insert("label".into(), json!("Runtime stopped"));
+            self.outcome = json!({"state":"errored","label":"Runtime stopped"});
         }
         events
     }
@@ -823,6 +828,43 @@ impl AcpNormalizer {
     fn session_info(&mut self, session_id: &str, provider: &str, raw: &Value) -> Vec<Event> {
         let update = &raw["update"];
         let mut events = Vec::new();
+        if !self.turn_finished
+            && update
+                .pointer("/_meta/atelier/turnPhase")
+                .and_then(Value::as_str)
+                == Some("waiting_for_agents")
+        {
+            self.waiting_for_agents = true;
+            // The parent's result ended its answer, not its helpers' lanes.
+            let roots: Vec<_> = self
+                .active_messages
+                .iter()
+                .filter(|(_, (_, id))| self.root_assistant_messages.contains(id))
+                .map(|(lane, (_, id))| (lane.clone(), id.clone()))
+                .collect();
+            for (lane, id) in roots {
+                self.active_messages.remove(&lane);
+                events.extend(self.complete_message(session_id, provider, raw, id, Value::Null));
+            }
+            let roots: Vec<_> = self
+                .active_thinking
+                .keys()
+                .filter(|lane| lane.ends_with(":root"))
+                .cloned()
+                .collect();
+            for lane in roots {
+                if let Some(id) = self.active_thinking.remove(&lane) {
+                    events.extend(self.complete_message(
+                        session_id,
+                        provider,
+                        raw,
+                        id,
+                        Value::Null,
+                    ));
+                }
+            }
+            events.extend(self.says_standing(session_id, provider, raw));
+        }
         if let Some(signal) = Self::typed_failure(provider, update) {
             self.record_signal(&signal);
             events.push(self.envelope(
@@ -883,6 +925,7 @@ impl AcpNormalizer {
                 end["_meta"] = Value::Null;
                 events.extend(self.finish_turn(session_id, provider, &end));
                 if state != "idle" {
+                    self.outcome = json!({"state":state,"label":label});
                     if let Some(last) = events.last_mut() {
                         last.fields.insert("state".into(), json!(state));
                         last.fields.insert("label".into(), json!(label));
@@ -1276,6 +1319,10 @@ impl AcpNormalizer {
     /// outside a turn is. The turn's own beginning and end are published by the
     /// driver and are not this reading's to overrule.
     fn standing_now(&self) -> Option<(&'static str, Option<String>, Option<Value>)> {
+        if self.waiting_for_agents {
+            return Some(("waiting_for_agents", None, None));
+        }
+
         if let Some(started) = self
             .running_calls
             .iter()
@@ -1304,8 +1351,29 @@ impl AcpNormalizer {
     /// everything that would otherwise write "Ready" over work in flight — a
     /// chat drawn as finished in the middle of a turn stops its clock, drops it
     /// out of the working list, and has nothing after it to put it right.
-    fn turn_is_open(&self) -> bool {
+    pub fn turn_is_open(&self) -> bool {
         !self.turn_finished && (self.suppress_local_user || self.said_standing.is_some())
+    }
+
+    pub fn request_is_active(&self, requests: &super::super::status::Requests) -> bool {
+        requests.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|generation| self.owns_prompt(*generation))
+    }
+
+    pub fn runtime_facts(&self, connected: bool, pending_answer: bool, requests: &super::super::status::Requests) -> super::super::status::RuntimeFacts {
+        let turn_open = self.request_is_active(requests);
+        super::super::status::RuntimeFacts {
+            connected,
+            turn_open,
+            pending_answer,
+            activity: self.standing_now().map(|(state, detail, call)| json!({
+                "state":state, "label":Value::Null, "detail":detail, "call":call
+            })),
+            // A future that vanished without publishing completion still
+            // cannot leave its old activity behind. The request lifetime wins.
+            outcome: if !turn_open && self.turn_is_open() {
+                json!({"state":"idle","label":"Ready"})
+            } else { self.outcome.clone() },
+        }
     }
 
     /// The chat saying what it is doing, whenever that changes.
@@ -1552,6 +1620,10 @@ impl AcpNormalizer {
         let mut events = Vec::new();
         let thread = raw["sessionId"].as_str().unwrap_or("root");
         let parent = self.parent_tool_call(raw);
+        if role == "assistant" && parent.is_none() {
+            self.waiting_for_agents = false;
+        }
+
         // What an asynchronous helper says is kept, not announced: it is still
         // running, and the chat carrying on around it says nothing about
         // whether it is done. The manager speaking again used to be read as the
@@ -1685,6 +1757,10 @@ impl AcpNormalizer {
     ) -> Vec<Event> {
         let thread = raw["sessionId"].as_str().unwrap_or("root");
         let parent = self.parent_tool_call(raw);
+        if parent.is_none() {
+            self.waiting_for_agents = false;
+        }
+
         let lane = format!("{thread}:{}", parent.as_deref().unwrap_or("root"));
         let sent_id = raw["update"]["messageId"]
             .as_str()
@@ -1778,6 +1854,7 @@ impl AcpNormalizer {
                 // the card that stands for it, and naming it here would have
                 // the chat say it is running something it sent away.
                 if parent.is_none() && !self.turn_finished {
+                    self.waiting_for_agents = false;
                     self.running_calls.push(id.clone());
                     let standing = self.says_standing(session_id, provider, raw);
                     events.extend(standing);
@@ -2393,6 +2470,7 @@ impl AcpNormalizer {
     pub fn finish_turn(&mut self, session_id: &str, provider: &str, raw: &Value) -> Vec<Event> {
         self.suppress_local_user = false;
         self.turn_finished = true;
+        self.waiting_for_agents = false;
         self.said_standing = None;
         let failure = Self::typed_failure(provider, raw);
         let mut events = Vec::new();
@@ -2520,6 +2598,7 @@ impl AcpNormalizer {
             .max_by_key(|signal| crate::workbench::provider_messages::loudness(signal))
             .map(crate::workbench::provider_messages::standing)
             .unwrap_or(if failed { ("errored", "Provider failed") } else { ("idle", "Ready") });
+        self.outcome = json!({"state":state,"label":label});
         events.push(self.envelope(
             session_id, provider, raw,
             json!({"type":"session.state","state":state,"label":label}),
@@ -2593,6 +2672,7 @@ impl AcpNormalizer {
             .max_by_key(|signal| crate::workbench::provider_messages::loudness(signal))
             .map(crate::workbench::provider_messages::standing)
             .unwrap_or(("errored", "Failed"));
+        self.outcome = json!({"state":state,"label":label});
         events.push(self.envelope(
             session_id,
             provider,
@@ -2624,6 +2704,7 @@ impl AcpNormalizer {
     pub fn begin_local_prompt(&mut self) {
         self.suppress_local_user = true;
         self.turn_finished = false;
+        self.waiting_for_agents = false;
     }
 }
 
@@ -2636,6 +2717,49 @@ mod tests {
             .iter()
             .map(|event| serde_json::to_value(event).unwrap()["type"].clone())
             .collect()
+    }
+
+    #[test]
+    fn held_parent_answer_keeps_helper_activity_until_followup_or_completion() {
+        let mut n = AcpNormalizer::default();
+        n.begin_local_prompt();
+        let parent = json!({"sessionId":"remote","update":{
+            "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Finished."}
+        }});
+        let held = json!({"sessionId":"remote","update":{
+            "sessionUpdate":"session_info_update","_meta":{"atelier":{"turnPhase":"waiting_for_agents"}}
+        }});
+        let states = |events: &[Event]| {
+            events
+                .iter()
+                .filter(|e| e.kind == EventKind::SessionState)
+                .map(|e| e.fields["state"].clone())
+                .collect::<Vec<_>>()
+        };
+        n.update("local", "claude", &parent);
+        let waiting = n.update("local", "claude", &held);
+        assert!(kinds(&waiting).contains(&json!("message.completed")));
+        assert_eq!(states(&waiting), vec![json!("waiting_for_agents")]);
+        assert!(n.root_assistant_messages.is_empty());
+        let mut child = parent.clone();
+        child["update"]["_meta"] = json!({"claudeCode":{"parentToolUseId":"helper"}});
+        assert!(states(&n.update("local", "claude", &child)).is_empty());
+        assert_eq!(n.standing_now().unwrap().0, "waiting_for_agents");
+        assert_eq!(
+            states(&n.update("local", "claude", &parent)),
+            vec![json!("streaming")]
+        );
+        n.update("local", "claude", &held);
+        assert_eq!(
+            states(&n.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}))),
+            vec![json!("idle")]
+        );
+        assert!(states(&n.update("local", "claude", &held)).is_empty());
+        n.begin_local_prompt();
+        assert_eq!(
+            states(&n.update("local", "claude", &parent)),
+            vec![json!("streaming")]
+        );
     }
 
     #[test]

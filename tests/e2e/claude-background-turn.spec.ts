@@ -1,0 +1,73 @@
+import { expect, test } from '@playwright/test';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+const run = process.env.WORKBENCH_E2E_RUN;
+const baseline = process.env.CLAUDE_PHASE_BASELINE === '1';
+const testUrl = process.env.BEADS_E2E_URL ? new URL(process.env.BEADS_E2E_URL) : null;
+test.skip(!testUrl || !['localhost', '127.0.0.1'].includes(testUrl.hostname) || !testUrl.port || testUrl.port === '3008', 'requires an explicitly addressed disposable app, never the owner app');
+test.skip(!run || !process.env.CLAUDE_ACP_TEST_SOURCE, 'requires the compiled pinned adapter and isolated fake Query');
+test('the real Claude adapter exposes helper work and settles completion and Stop', async ({ page, request }) => {
+  test.setTimeout(90_000);
+  const projectPath = resolve(run!, baseline ? 'background-project' : 'background-project-after');
+  rmSync(projectPath, { recursive: true, force: true });
+  const existing = await (await request.get('/api/projects')).json();
+  for (const project of existing.filter((p: { path: string }) => p.path === projectPath)) {
+    await request.delete(`/api/projects/${project.id}`);
+  }
+  mkdirSync(resolve(projectPath, '.beads'), { recursive: true });
+  writeFileSync(resolve(projectPath, '.beads/metadata.json'), JSON.stringify({ database: 'fixture.db', backend: 'sqlite' }));
+  writeFileSync(resolve(projectPath, '.beads/issues.jsonl'), '');
+  const made = await request.post('/api/projects', { data: { name: 'Claude background completion', path: projectPath } });
+  expect(made.ok(), await made.text()).toBe(true);
+  const project = await made.json();
+  const command = async (data: Record<string, unknown>) => {
+    const response = await request.post('/api/workbench/command', { data });
+    expect(response.ok(), await response.text()).toBe(true);
+    return response.json();
+  };
+  const session = await command({ type: 'session.start', brand: 'claude', projectId: project.id, projectPath, title: 'Parent finished, helper running' });
+  writeFileSync(resolve(run!, 'background-url'), `/project?id=${project.id}&tab=chat&chat=${session.id}`);
+  const send = (text: string) => command({ type: 'prompt.send', sessionId: session.id, text });
+  const row = page.locator(`[data-testid="restore-row"][data-row-key="${session.id}"]`);
+  await send('Start a background helper and finish the parent answer.');
+  await page.goto(`/project?id=${project.id}&tab=chat&chat=${session.id}`);
+  await expect(page.getByTestId('chat-tab')).toContainText('The parent answer is complete.');
+  await expect.poll(() => existsSync(resolve(projectPath, 'held-turns'))).toBe(true);
+  await expect(row).toHaveAttribute('data-state', baseline ? 'streaming' : 'waiting_for_agents');
+  await expect(row).toContainText(baseline ? 'Answering' : 'Helper working');
+  await expect(page.getByTestId('stop-button')).toBeVisible();
+  await page.screenshot({ path: `tests/results/bw-b0m4-helper-${baseline ? 'before' : 'after'}.png` });
+  // Leave the baseline visible for the separate native screen-check capture.
+  if (baseline) return;
+  await page.reload();
+  await expect(row).toContainText('Helper working');
+  writeFileSync(resolve(projectPath, 'ask-helper-1'), 'ask');
+  await expect(row).toHaveAttribute('data-state', 'waiting_permission');
+  await page.getByRole('button', { name: 'Allow helper', exact: true }).click();
+  await expect(row).toHaveAttribute('data-state', 'waiting_for_agents');
+  await expect(row).toContainText('Helper working');
+  writeFileSync(resolve(projectPath, 'question-helper-1'), 'ask');
+  const question = page.getByTestId('question-card');
+  await expect(question).toBeVisible();
+  await expect(row).toHaveAttribute('data-state', 'waiting_permission');
+  await question.getByLabel('Continue helper').click();
+  await question.getByRole('button', { name: 'Answer', exact: true }).click();
+  await expect(row).toHaveAttribute('data-state', 'waiting_for_agents');
+  writeFileSync(resolve(projectPath, 'finish-helper-1'), 'done');
+  await expect(page.getByTestId('chat-tab')).toContainText('The helper finished and its followup is complete.');
+  await expect(row).toHaveAttribute('data-state', 'idle');
+  await expect(page.getByTestId('stop-button')).toHaveCount(0);
+  await send('Start another background helper.');
+  await expect(row).toContainText('Helper working');
+  const pid = Number(readFileSync(resolve(projectPath, 'adapter-pids'), 'utf8').trim().split('\n').at(-1));
+  await page.getByTestId('stop-button').click();
+  await expect(row).toContainText('Stopped');
+  await expect.poll(() => { try { process.kill(pid, 0); return false; } catch { return true; } }).toBe(true);
+  await page.reload();
+  await expect(row).toContainText('Stopped');
+  await send('complete immediately');
+  await expect(page.getByTestId('chat-tab')).toContainText('The new turn completed.');
+  await expect(row).toHaveAttribute('data-state', 'idle');
+  await expect(row.getByTestId('chat-state-count')).toHaveCount(0);
+});

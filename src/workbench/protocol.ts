@@ -32,6 +32,7 @@ export type SessionState =
   | 'thinking'
   | 'streaming'
   | 'running_tool'
+  | 'waiting_for_agents'
   | 'waiting_permission'
   | 'stopped'
   | 'errored'
