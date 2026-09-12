@@ -65,6 +65,7 @@ import { fileCompletions } from '@/workbench/composer-files';
 import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
 import { AttachmentTile } from '@/workbench/attachment-tile';
 import { draftFiles, withoutFile } from '@/workbench/draft-files';
+import { FileDropTarget } from '@/workbench/file-drop';
 import { imageIds, imageMarker, promptFromDraft, promptParts, whyNot } from '@/workbench/composer-attachments';
 import type { DraftPicture } from '@/workbench/composer-attachments';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
@@ -2004,6 +2005,23 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
 
   return shell(
     <div className="flex min-h-0 flex-1 flex-col" data-testid="chat-tab" data-session-id={sessionId}>
+      {/* The whole conversation takes a dropped file, not just the one line at
+          the bottom that CodeMirror answers for. A file dropped on the
+          transcript used to leave the app entirely — the browser opened it —
+          which is the worst answer available to a gesture aimed at the biggest
+          target on the screen (bw-p4r3.1). The box keeps its own aim: a drop it
+          took is already prevented by the time it reaches here.
+
+          Wrapped rather than indented: this is one element around six hundred
+          lines that have not otherwise moved, and a diff of the whole pane
+          would hide the one line that changed. */}
+      <FileDropTarget
+        className="flex min-h-0 flex-1 flex-col"
+        onFiles={(files) => void absorb(files)}
+        // Nothing to attach to while another program holds the chat: there is
+        // no box on the screen to put a badge in.
+        disabled={ownership.kind === 'elsewhere'}
+      >
       {/* Nothing on this line grows with the work: the cards, the reports and
           what the chat has spent are all in the column beside it
           (docs/agent-workbench.md §8.2.6). It is drawn as one line wherever
@@ -2652,6 +2670,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           </DialogContent>
         </Dialog>
       </div>
+
+      </FileDropTarget>
 
       {looking && <AttachmentViewer image={looking} onClose={() => setLooking(null)} />}
       {/* Read from the row as it stands right now, never from what was clicked:
