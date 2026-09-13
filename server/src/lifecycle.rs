@@ -1216,9 +1216,44 @@ fn worktree_issue(path: &Path) -> Option<String> {
     })
 }
 
+fn real_directory(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|about| about.is_dir())
+}
+
+/// Residue git never carried: ignored, with nothing tracked underneath.
+///
+/// Deleting something `.gitignore` matches changes no tracked file and can
+/// never reach a commit — scratch an end-to-end run left behind, a
+/// `node_modules` the owner's checkout lent, the leftovers of a directory
+/// whose tracked files a commit already removed. Each was refused as a
+/// repository change, and one of them blocked a release
+/// (`docs/hook-friction-2.md` §12, §14).
+fn ignored_residue(project: &Path, path: &Path) -> bool {
+    let Some(target) = path.to_str() else {
+        return false;
+    };
+    if command(project, "git", &["check-ignore", "-q", "--", target])
+        .is_none_or(|(_, ok)| !ok)
+    {
+        return false;
+    }
+    // A path git ignores can still hold something git tracks, if it was ever
+    // force-added. That is a repository change like any other.
+    command(project, "git", &["ls-files", "--", target])
+        .is_some_and(|(out, ok)| ok && out.is_empty())
+}
+
+/// The repository a target belongs to.
+///
+/// The walk up stops at the first real directory, and a symlink is not one:
+/// asking git from inside a link follows it, so a worktree that borrows the
+/// owner's packages with `node_modules -> …/beads-web/node_modules` made every
+/// write to that link read as a write into the owner's checkout
+/// (`docs/hook-friction-2.md` bw-g3o3.12). The link entry lives where it sits,
+/// so that is where it is judged.
 fn git_root(path: &Path) -> Option<PathBuf> {
     let mut probe = path;
-    while !probe.is_dir() {
+    while !real_directory(probe) {
         probe = probe.parent()?;
     }
     command(probe, "git", &["rev-parse", "--show-toplevel"])
@@ -1415,6 +1450,9 @@ fn workflow(data: &Value) -> Option<Value> {
         let Some(project) = git_root(&target.path) else {
             continue;
         };
+        if ignored_residue(&project, &target.path) {
+            continue;
+        }
         let Some(issue) = issue_at(&project) else {
             return deny(format!(
                 "Changes require an owned Beads work item in its isolated worktree ({}).",
@@ -2577,6 +2615,56 @@ mod tests {
         assert_eq!(
             target.spelled(),
             format!("resolved target: {home}/scratch/x")
+        );
+    }
+
+    /// Scratch an end-to-end run left behind, the leftovers of a deleted
+    /// directory, and a borrowed `node_modules` were all refused as
+    /// repository changes — one of them blocked a release
+    /// (`docs/hook-friction-2.md` §12, §14, bw-g3o3.12).
+    #[test]
+    fn native_machinery_residue_git_never_carried_is_not_a_change() {
+        let home = tempfile::tempdir().unwrap();
+        let repo = home.path().join("project");
+        let lent = home.path().join("lent");
+        std::fs::create_dir_all(lent.join("react")).unwrap();
+        std::fs::create_dir(&repo).unwrap();
+        let git = |args: &[&str]| {
+            assert!(Command::new("git")
+                .args(args)
+                .current_dir(&repo)
+                .status()
+                .unwrap()
+                .success());
+        };
+        git(&["init", "-q", "-b", "ours"]);
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(repo.join(".gitignore"), "node_modules\ntests/.e2e-run-*\nkept\n").unwrap();
+        std::fs::create_dir(repo.join("tests")).unwrap();
+        std::fs::write(repo.join("tests/a.spec.ts"), "case").unwrap();
+        // A path git ignores but has been made to carry anyway is still its.
+        std::fs::write(repo.join("kept"), "forced in").unwrap();
+        git(&["add", "-A", "-f"]);
+        git(&["commit", "-qm", "first"]);
+        std::fs::create_dir(repo.join("tests/.e2e-run-bw-1")).unwrap();
+
+        assert!(ignored_residue(&repo, &repo.join("tests/.e2e-run-bw-1")));
+        assert!(ignored_residue(&repo, &repo.join("node_modules")));
+        assert!(!ignored_residue(&repo, &repo.join("tests/a.spec.ts")));
+        assert!(!ignored_residue(&repo, &repo.join("kept")), "tracked, however ignored");
+
+        // A borrowed `node_modules` is a link that lives in this worktree; the
+        // repository it points into is not the one being written.
+        std::os::unix::fs::symlink(&lent, repo.join("node_modules")).unwrap();
+        assert_eq!(
+            git_root(&repo.join("node_modules")).as_deref(),
+            Some(repo.as_path()),
+            "the link entry is judged where it sits"
+        );
+        assert_eq!(
+            git_root(&repo.join("tests/a.spec.ts")).as_deref(),
+            Some(repo.as_path())
         );
     }
 
