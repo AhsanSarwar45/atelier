@@ -1557,3 +1557,10 @@ absolute target and `worktrees/bw-8vcb/...` were reported as resolving to
 cause: Edit target resolution is discarding the worktree path itself. Running
 `apply_patch` from the claimed worktree with the documented explicit bypass
 succeeded.
+
+## Edit again resolves a claimed job worktree as the landing checkout (bw-1kpq.1)
+
+The Edit-compatible `apply_patch` tool refused an absolute target under
+`worktrees/bw-1kpq` while child `bw-1kpq.1` was claimed in that job copy. It
+reported `/home/ahsan/dev/beads-web` as the resolved target. Running
+`apply_patch` from the worktree with the documented per-job bypass succeeded.

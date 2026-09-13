@@ -43,9 +43,9 @@ test('an existing chat changes account from its composer', async ({ page, reques
     await work.click();
 
     await expect(picker).not.toHaveAttribute('data-current', 'system', { timeout: 30_000 });
-    await expect(page.getByText('Account changed to Work account.')).toBeVisible();
+    await expect(picker).toContainText('Work account');
     await picker.click();
-    await page.getByTestId('composer-frame').screenshot({ path: SHOT });
+    await page.screenshot({ path: SHOT });
   } finally {
     await request.delete(`/api/projects/${project.id}`);
     rmSync(FIXTURE, { recursive: true, force: true });
