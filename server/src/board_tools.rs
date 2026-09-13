@@ -360,12 +360,16 @@ fn landed_subjects(work: &Path, branch: &str, landing: &str) -> Result<(bool, St
 /// the lander that demanded it be handed over (`docs/hook-friction-2.md` §4).
 /// Acting as the owner keeps the rule the assignee check exists for: work
 /// owned by somebody else still refuses.
-fn landing_actor(configured: Option<&str>, item: &Value) -> String {
+fn card_actor(configured: Option<&str>, item: &Value, fallback: &str) -> String {
     configured
         .filter(|value| !value.trim().is_empty())
         .or_else(|| item["assignee"].as_str().filter(|who| !who.is_empty()))
-        .unwrap_or("atelier-land")
+        .unwrap_or(fallback)
         .to_string()
+}
+
+fn landing_actor(configured: Option<&str>, item: &Value) -> String {
+    card_actor(configured, item, "atelier-land")
 }
 
 fn subject_names(subject: &str, id: &str) -> bool {
@@ -378,9 +382,22 @@ fn manifest(root: &Path) -> Result<crate::project_manifest::ProjectManifest, Str
         .ok_or_else(|| "This project has no Atelier settings. Run `atelier init` first.".to_string())
 }
 
+/// Run a declared suite, in an environment with no standing bypass in it.
+///
+/// A bypass is documented as a prefix, but a worker in a job copy has to carry
+/// one on every command and a shell-shaped task encourages exporting it once.
+/// Exported, the gate stands down out loud, its sentence reaches the session's
+/// own file, and a case asserting the gate says nothing to a session fails —
+/// a red that belongs to neither the change nor the app, named after a
+/// compaction test rather than the variable (`docs/hook-friction-2.md` §7 of
+/// the tooling entries, bw-e3dw.19). A suite is never the thing a bypass is
+/// for, so it does not inherit one.
 fn shell_output(root: &Path, command: &str) -> Result<std::process::Output, String> {
-    if cfg!(windows) { Command::new("cmd").args(["/C", command]).current_dir(root).output() }
-    else { Command::new("sh").args(["-c", command]).current_dir(root).output() }
+    let mut shell = if cfg!(windows) { Command::new("cmd") } else { Command::new("sh") };
+    shell.args([if cfg!(windows) { "/C" } else { "-c" }, command])
+        .current_dir(root)
+        .env_remove(crate::hook_bypass::TOKEN)
+        .output()
         .map_err(|error| format!("could not run `{command}`: {error}"))
 }
 
@@ -496,10 +513,16 @@ fn checks(rest: &[String]) -> Result<i32, String> {
     let proof = format!("checks: tree {tree} {}", tokens.join(" "));
     println!("{proof}");
     if let Some(card) = card {
-        bd(&root, &["comments".into(), "add".into(), card.clone(), proof.clone()])?;
+        // The card was claimed by the session that called this tool, so close
+        // it as that session rather than as the repository's human owner: a
+        // run that passes every suite and then cannot flip the status leaves
+        // the card open with its own evidence attached saying it passed
+        // (`docs/hook-friction-2.md` §10).
+        let row = self::card(&root, card)?;
+        let actor = card_actor(std::env::var("BEADS_ACTOR").ok().as_deref(), &row, "atelier-checks");
+        bd(&root, &["--actor".into(), actor.clone(), "comments".into(), "add".into(), card.clone(), proof.clone()])?;
         if failure.is_none() {
-            bd(&root, &["close".into(), card.clone(), "--reason".into(), format!("{proof}. Run by `atelier tool checks {card}`")])?;
-            let row = self::card(&root, card)?;
+            bd(&root, &["--actor".into(), actor, "close".into(), card.clone(), "--reason".into(), format!("{proof}. Run by `atelier tool checks {card}`")])?;
             if let Some(goal) = row["parent"].as_str().or_else(|| row["parent_id"].as_str()) {
                 advance_goal(&root, goal)?;
             }
@@ -617,6 +640,24 @@ fn review(rest: &[String]) -> Result<i32, String> {
 mod tests {
     use super::*;
 
+    /// A worker in a job copy has to carry a bypass on every command; once it
+    /// is exported rather than welded on, the gate stands down out loud and a
+    /// case asserting the gate says nothing to a session goes red
+    /// (`docs/hook-friction-2.md` bw-e3dw.19).
+    #[test]
+    fn native_machinery_a_declared_suite_inherits_no_standing_bypass() {
+        let root = tempfile::tempdir().unwrap();
+        // SAFETY: single-threaded test setup, restored before it returns.
+        unsafe { std::env::set_var(crate::hook_bypass::TOKEN, "a worktree is per job") };
+        let out = shell_output(
+            root.path(),
+            &format!("printf %s \"${{{}:-none}}\"", crate::hook_bypass::TOKEN),
+        )
+        .unwrap();
+        unsafe { std::env::remove_var(crate::hook_bypass::TOKEN) };
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "none");
+    }
+
     #[test]
     fn native_machinery_commit_subjects_name_exact_cards_only() {
         assert!(subject_names("bw-one.12: finish native machinery", "bw-one.12"));
@@ -631,6 +672,11 @@ mod tests {
     fn native_machinery_the_lander_acts_as_the_card_it_was_given() {
         let mine = serde_json::json!({"id":"bw-1", "assignee":"s-abc"});
         let nobodys = serde_json::json!({"id":"bw-1"});
+        // The checks tool closed as the repository's human owner and could
+        // not, after every suite had already run (`docs/hook-friction-2.md`
+        // §10). It signs as the card's own assignee now, like the lander.
+        assert_eq!(card_actor(None, &mine, "atelier-checks"), "s-abc");
+        assert_eq!(card_actor(None, &nobodys, "atelier-checks"), "atelier-checks");
         assert_eq!(landing_actor(None, &mine), "s-abc");
         assert_eq!(landing_actor(None, &nobodys), "atelier-land");
         assert_eq!(landing_actor(Some("s-set"), &mine), "s-set");
