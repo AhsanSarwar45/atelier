@@ -51,6 +51,7 @@ enum Command {
     SessionByExternalId(String, Reply<Option<Session>>),
     UpdateSession(String, SessionPatch, Option<String>, Reply<()>),
     MarkSpoke(String, String, Reply<()>),
+    MarkBegunBy(String, String, Reply<()>),
     ListSessions(Option<String>, Reply<Vec<Session>>),
     LastModelForBrand(String, Reply<Option<String>>),
     ListRestoreSessions(Option<String>, bool, Reply<Vec<Session>>),
@@ -195,6 +196,11 @@ impl ChatDb {
 
     pub async fn mark_spoke(&self, id: String, at: String) -> Result<(), String> {
         self.request(|reply| Command::MarkSpoke(id, at, reply))
+            .await
+    }
+
+    pub async fn mark_begun_by(&self, id: String, who: String) -> Result<(), String> {
+        self.request(|reply| Command::MarkBegunBy(id, who, reply))
             .await
     }
 
@@ -728,6 +734,9 @@ fn run(
                 respond(reply, store.update_session(&id, patch, touch_at.as_deref()))
             }
             Command::MarkSpoke(id, at, reply) => respond(reply, store.mark_spoke(&id, &at)),
+            Command::MarkBegunBy(id, who, reply) => {
+                respond(reply, store.mark_begun_by(&id, &who))
+            }
             Command::LastModelForBrand(brand, reply) => {
                 respond(reply, store.last_model_for_brand(&brand))
             }
@@ -1241,6 +1250,7 @@ mod tests {
                 created_at: "now".into(),
                 last_active_at: "now".into(),
                 last_spoke_at: None,
+                begun_by: None,
             })
             .await
             .unwrap();
@@ -1304,6 +1314,7 @@ mod tests {
                 created_at: "now".into(),
                 last_active_at: "now".into(),
                 last_spoke_at: None,
+                begun_by: None,
             })
             .await
             .unwrap();

@@ -129,6 +129,35 @@ fn byte_window(path: &Path, from: i64, limit: usize) -> Vec<Value> {
         .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
         .collect()
 }
+/// Who sent the chat's first prompt, read forward from the top of the record
+/// to that prompt and no further; `None` when the record does not say.
+///
+/// Not read off the head window. That window is 128 KB, and a chat an agent
+/// drives opens with far more than that in front of its first prompt: the
+/// owner's review chats begin with an 80 KB attachment row and a first prompt
+/// of 80 KB more, so the window ended inside the prompt, the row was dropped
+/// as unparsable, and the first prompt the rule ever saw was a tool result
+/// further down with no authorship on it — 75 of them read as a person's
+/// after bw-p61.16 had made the rule (bw-p61.17).
+fn first_prompt_by_a_person(path: &Path) -> Option<bool> {
+    const WITHIN: u64 = 8 * 1024 * 1024;
+    let file = fs::File::open(path).ok()?;
+    let reader = std::io::BufReader::new(file.take(WITHIN));
+    for line in std::io::BufRead::lines(reader) {
+        let Ok(line) = line else { break };
+        let Ok(row) = serde_json::from_str::<Value>(line.trim()) else {
+            continue;
+        };
+        if row["type"] == "user" && row["isMeta"] != true && row["isSidechain"] != true {
+            return row["origin"]["kind"]
+                .as_str()
+                .map(|kind| kind == "human")
+                .or_else(|| row["promptSource"].as_str().map(|source| source != "sdk"));
+        }
+    }
+    None
+}
+
 fn edge_jsonl(path: &Path) -> (Vec<Value>, Vec<Value>) {
     let mut rows = byte_window(path, 0, 128 * 1024);
     let mut seen: HashSet<String> = rows.iter().map(Value::to_string).collect();
@@ -727,6 +756,9 @@ fn summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
             }
         }
     }
+    // The first prompt itself, wherever in the file it is; the window's
+    // reading stands only for a record whose first prompt says nothing.
+    let started_by_a_person = first_prompt_by_a_person(&path).or(started_by_a_person);
     // Claude's resume index does not offer a record that contains only
     // initialization metadata. Keep explicitly titled/summarized records, but
     // do not turn every abandoned process start into an external chat row.
@@ -2227,6 +2259,42 @@ mod tests {
             "a chat nobody typed in is out; one too old to say stays in"
         );
         assert_eq!(listed(true).len(), 3, "the switch brings the agent's own back");
+    }
+
+    /**
+     * The first prompt decides authorship however far into the record it is.
+     *
+     * The owner's review chats open with an 80 KB attachment row and a first
+     * prompt of 80 KB more, past the 128 KB head window; the window ended
+     * inside the prompt, the row was dropped, and the first prompt the rule
+     * saw was a tool result with no authorship on it, so 75 of them read as a
+     * person's (bw-p61.17).
+     */
+    #[test]
+    fn claude_discovery_reads_the_first_prompt_past_a_huge_opening_row() {
+        let home = tempdir().unwrap();
+        let dir = home.path().join("projects/project");
+        create_dir_all(&dir).unwrap();
+        let attachment = json!({"type":"attachment","cwd":"/work/repo","isSidechain":false,
+            "attachment":{"text":"x".repeat(100 * 1024)}});
+        let prompt = json!({"type":"user","isSidechain":false,"promptSource":"sdk",
+            "entrypoint":"sdk-cli","cwd":"/work/repo","timestamp":"2026-08-27T13:11:37Z",
+            "message":{"content":format!("You are reviewing a change you did not write {}", "y".repeat(100 * 1024))}});
+        let result = json!({"type":"user","isSidechain":false,"cwd":"/work/repo",
+            "timestamp":"2026-08-27T13:12:07Z",
+            "message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}});
+        let record = [attachment, prompt, result]
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        write(dir.join(format!("{CHAT}.jsonl")), record).unwrap();
+
+        assert!(
+            list_sessions(home.path(), None, false).is_empty(),
+            "a chat an agent began is out however long its opening is"
+        );
+        assert!(list_sessions(home.path(), None, true)[0].programmatic);
     }
 
     #[test]

@@ -1503,3 +1503,24 @@ while child `bw-uktp.1` was claimed. The refusal reported the resolved target
 as `/home/ahsan/dev/beads-web`, not the job worktree. This is the same failure
 recorded above for `bw-fpuk.1`, despite that entry being marked resolved by
 `bw-mslg.1`. The documented per-job bypass allowed the patch.
+
+## A card's worktree cannot be re-cut from its surviving branch (bw-p61.17)
+
+The card had been released with its commit on branch `bw-p61.17` and its
+worktree gone. `git worktree add worktrees/bw-p61.17 bw-p61.17` was refused —
+the opening carve-out recognises only the `-b <ID>` shape, and `-b` cannot be
+used on a branch that already exists. Carried through with the per-command
+bypass. The carve-out should also accept the branch named for the card as the
+checkout source, since that is how any released card is resumed.
+
+## A compound cd-and-claim line is not stamped with the session actor (bw-p61.17)
+
+`cd worktrees/bw-p61.17 && bd update bw-p61.17 --claim` — the documented
+opening as one line — claimed the card, but `board-actor` did not stamp it, so
+the claim went to the git user rather than `s-dc8ce99c`. Every command in the
+copy was then refused as "owned by AhsanSarwar45, not this session", including
+`bd update --help` and the reassignment that would fix it. Carried through with
+the bypass: `bd update bw-p61.17 --assignee s-dc8ce99c --force --actor
+s-dc8ce99c`. Either `board-actor` should stamp a `bd` call wherever it sits on
+the line, or the gate should let a card assigned to the git user be claimed by
+a session.

@@ -278,6 +278,22 @@ impl WorkbenchState {
         found
     }
 
+    /// The rollout file for one Codex chat under whichever account keeps it.
+    pub(crate) fn codex_record_anywhere(&self, id: &str) -> Option<std::path::PathBuf> {
+        self.registry
+            .every_account("codex")
+            .into_iter()
+            .map(|(id, _)| id)
+            .chain(std::iter::once(
+                crate::workbench::profiles::SYSTEM.to_string(),
+            ))
+            .find_map(|profile| {
+                let named =
+                    (profile != crate::workbench::profiles::SYSTEM).then_some(profile.as_str());
+                self.codex_record(id, named)
+            })
+    }
+
     fn enrich_unknown_codex_hold(&self, hold: &mut crate::workbench::external::ProviderHold) {
         if hold.doing != crate::workbench::external::HeldDoing::Unknown {
             return;
@@ -1221,6 +1237,7 @@ fn restore_row(
         "sessionId": session.id, "externalId": session.external_id, "brand": session.brand, "model":session.model,
         "title": session.title, "lastActiveAt": session.last_active_at,
         "lastSpokeAt": session.last_spoke_at, "state": session.state, "origin": session.origin,
+        "begunBy": session.begun_by,
         "projectId": session.project_id, "cwdHint": session.cwd, "folder": folder,
         "branch": branch, "beads": beads, "runningElsewhere": held.is_some(), "held": held,
     })
@@ -1248,12 +1265,10 @@ const DISCOVERY_FRESH: Duration = Duration::from_secs(5);
 /// answer behind for the rest of the window. This is also what keeps a chat to
 /// one row: two overlapping discoveries each saw a chat no row matched, and
 /// each cached a row for it (bw-t26l.20).
-async fn provider_sessions_shared(
-    state: &WorkbenchState,
-    project: Option<&str>,
-    everything: bool,
-) -> Vec<Value> {
-    let key = format!("{}\u{0}{everything}", project.unwrap_or_default());
+async fn provider_sessions_shared(state: &WorkbenchState, project: Option<&str>) -> Vec<Value> {
+    // One answer serves the switch either way: everyone's chats are listed,
+    // each saying who began it, and `restore` applies the switch (bw-p61.17).
+    let key = project.unwrap_or_default().to_string();
     if let Some(rows) = fresh_discovery(&state.discovery_cache, &key).await {
         return rows;
     }
@@ -1262,7 +1277,7 @@ async fn provider_sessions_shared(
     if let Some(rows) = fresh_discovery(&state.discovery_cache, &key).await {
         return rows;
     }
-    let rows = provider_sessions(state, project, everything).await;
+    let rows = provider_sessions(state, project).await;
     state
         .discovery_cache
         .lock()
@@ -1284,19 +1299,15 @@ async fn provider_sessions_shared(
 /// provider's own name for the chat correct themselves on the next open, which
 /// is within the same page load: the sidebar's own restore asks for the very
 /// same listing at the very same moment (bw-550g.1).
-async fn provider_sessions_in_hand(
-    state: &WorkbenchState,
-    project: Option<&str>,
-    everything: bool,
-) -> Vec<Value> {
-    let key = format!("{}\u{0}{everything}", project.unwrap_or_default());
+async fn provider_sessions_in_hand(state: &WorkbenchState, project: Option<&str>) -> Vec<Value> {
+    let key = project.unwrap_or_default().to_string();
     if let Some(rows) = fresh_discovery(&state.discovery_cache, &key).await {
         return rows;
     }
     let behind = state.clone();
     let project = project.map(str::to_string);
     tokio::spawn(async move {
-        provider_sessions_shared(&behind, project.as_deref(), everything).await;
+        provider_sessions_shared(&behind, project.as_deref()).await;
     });
     Vec::new()
 }
@@ -1385,15 +1396,11 @@ async fn ask_provider_to_list(
 /// eight seconds is let go for the record scan that already stands in when
 /// there is no adapter at all (bw-uxoe). The local list is drawn before any of
 /// this, and a chat begun elsewhere still arrives on the live feed.
-async fn provider_sessions(
-    state: &WorkbenchState,
-    project: Option<&str>,
-    everything: bool,
-) -> Vec<Value> {
+async fn provider_sessions(state: &WorkbenchState, project: Option<&str>) -> Vec<Value> {
     const ANSWER_WITHIN: Duration = Duration::from_secs(8);
     let project_path = project.map(std::path::Path::new);
-    // The folder is not what the switch widens. `everything` adds the agents'
-    // own chats to the kinds listed; it has never meant chats held somewhere
+    // The folder is not what the switch widens. The switch adds the agents'
+    // own chats to the kinds offered; it has never meant chats held somewhere
     // else on the machine, and the record scan beside this one has always kept
     // the folder whichever way the switch was set (bw-t9no.1).
     let filter = project_path;
@@ -1410,7 +1417,7 @@ async fn provider_sessions(
     let (claude_acp, codex_acp) = tokio::join!(ask("claude"), ask("codex"));
     let mut rows = Vec::new();
     for (brand, result) in [("claude", claude_acp), ("codex", codex_acp)] {
-        let recorded = recorded_sessions(state, brand, project, project_path, everything).await;
+        let recorded = recorded_sessions(state, brand, project, project_path).await;
         match result {
             Ok(sessions) => {
                 let mut recorded: std::collections::HashMap<String, Value> = recorded
@@ -1430,6 +1437,9 @@ async fn provider_sessions(
                         "cwd":session.cwd,
                         "branch":Value::Null,
                         "acpMeta":session.meta,
+                        // `session/list` has no field for who began a chat.
+                        // The record beside it says, or nobody does.
+                        "begunBy":"unknown",
                     });
                     if let Some(known) = known {
                         // The clocks too, when the record has them. The
@@ -1442,7 +1452,7 @@ async fn provider_sessions(
                         // chat whose last word is 10:00 AM sits under 10:14 PM,
                         // the minute its file happened to be written, and only
                         // when the adapter is the one answering (bw-t26l.20).
-                        for field in ["name", "branch", "lastActiveAt", "lastSpokeAt"] {
+                        for field in ["name", "branch", "lastActiveAt", "lastSpokeAt", "begunBy"] {
                             match known.get(field) {
                                 Some(value) if !value.is_null() => {
                                     row[field] = value.clone();
@@ -1469,6 +1479,10 @@ async fn provider_sessions(
     // was adopted into that project on sight. The folder a chat says it is in
     // is the only thing that decides which project lists it (bw-t9no.1).
     only_in_this_folder(&mut rows, project_path);
+    // Everyone's, whichever way the switch is set, each saying who began it.
+    // The switch is applied by `restore`, after the saved rows have been
+    // corrected by what is listed here: applied any earlier, a saved row an
+    // agent began is never told so, and stays on the list (bw-p61.17).
     rows
 }
 
@@ -1493,7 +1507,6 @@ async fn recorded_sessions(
     brand: &str,
     project: Option<&str>,
     project_path: Option<&std::path::Path>,
-    everything: bool,
 ) -> Vec<Value> {
     if brand == "claude" {
         let project_owned = project.map(std::path::PathBuf::from);
@@ -1508,13 +1521,21 @@ async fn recorded_sessions(
                 crate::workbench::claude::history::list_sessions(
                     claude_config,
                     project_owned.as_deref(),
-                    everything,
+                    // Everyone's, each saying who began it. The switch is
+                    // applied once by the caller, after the adapter's answer
+                    // is merged in: a chat that is out of the list still has
+                    // to be recognised as the agents' own, or the row saved
+                    // for it before there was such a rule is never corrected,
+                    // and the adapter's answer for it is adopted as a person's
+                    // (bw-p61.17).
+                    true,
                 )
             })
             .map(|session| json!({
                 "brand":"claude", "externalId":session.session_id, "lastActiveAt":session.last_modified,
                 "name":session.name, "cwd":session.cwd, "branch":session.git_branch,
                 "lastSpokeAt":session.last_spoke_at,
+                "begunBy": if session.programmatic { "agent" } else { "person" },
             }))
             .collect::<Vec<_>>()
         })
@@ -1530,7 +1551,10 @@ async fn recorded_sessions(
         let Ok(transport) = state.codex_reader(cwd, home.as_deref()).await else {
             continue;
         };
-        match crate::workbench::codex::history::list_threads(&transport, project_path, everything)
+        // Every source kind, for the same reason as the Claude record above:
+        // a subagent's thread left unlisted is a thread the adapter's answer
+        // then adopts as a person's (bw-p61.17).
+        match crate::workbench::codex::history::list_threads(&transport, project_path, true)
             .await
         {
             Ok(listed) => threads.extend(listed),
@@ -1560,7 +1584,8 @@ async fn recorded_sessions(
                     })
                 });
             let preview = thread["preview"].as_str().unwrap_or_default();
-            Some(json!({"brand":"codex","externalId":id,"lastActiveAt":updated,
+            let begun_by = crate::workbench::codex::history::begun_by(&thread);
+            Some(json!({"brand":"codex","externalId":id,"lastActiveAt":updated,"begunBy":begun_by,
                 "name":thread.get("name").filter(|v|!v.is_null()).cloned().unwrap_or_else(||json!(crate::workbench::metadata::conversation_title(preview))),
                 "cwd":thread["cwd"],"branch":thread["gitInfo"]["branch"],"lastSpokeAt":thread["path"].as_str().and_then(|path|crate::workbench::codex::history::last_spoke_at(std::path::Path::new(path)))}))
         })
@@ -1608,7 +1633,7 @@ async fn restore(
             restore_row(session, linked, &holds, &checkouts)
         })
         .collect();
-    let known_sessions = provider_sessions_shared(&state, query.path.as_deref(), everything).await;
+    let known_sessions = provider_sessions_shared(&state, query.path.as_deref()).await;
     for known in known_sessions {
         let key = format!(
             "{}:{}",
@@ -1691,6 +1716,35 @@ async fn restore(
             row["branch"] = known["branch"].clone();
             row["runningElsewhere"] = json!(held.is_some());
             row["held"] = json!(held);
+            // The record has just said who began this chat. The local answer
+            // is drawn from the database alone and cannot read records, so
+            // keep it — this is what corrects the rows adopted before there
+            // was any such rule, one project's worth per load (bw-p61.17).
+            if let Some(who) = known["begunBy"]
+                .as_str()
+                .filter(|who| *who == "person" || *who == "agent")
+            {
+                if row["begunBy"].as_str() != Some(who) {
+                    row["begunBy"] = json!(who);
+                    if let Some(session_id) = row["sessionId"].as_str() {
+                        state
+                            .database()
+                            .mark_begun_by(session_id.to_string(), who.to_string())
+                            .await?;
+                    }
+                }
+            }
+            continue;
+        }
+        // A chat nobody is known to have begun by hand is not offered until
+        // the switch asks for it, and is not adopted into the saved rows
+        // either. Each discovery path used to apply the switch for itself and
+        // the adapter's never did, so every review and guardian chat was
+        // adopted on every load, titled, and drawn with the switch off for
+        // good — 501 of them in the owner's own database by 2026-09-13. A chat
+        // only the adapter names, with no record to say who began it, is not
+        // a person's on a guess (bw-p61.17).
+        if !everything && known["begunBy"] != "person" {
             continue;
         }
         let durable_id = if let (Some(project_id), Some(external_id), Some(brand), Some(cwd)) = (
@@ -1721,6 +1775,10 @@ async fn restore(
                 created_at: at.clone(),
                 last_active_at: at,
                 last_spoke_at: known["lastSpokeAt"].as_str().map(str::to_string),
+                begun_by: known["begunBy"]
+                    .as_str()
+                    .filter(|who| *who == "person" || *who == "agent")
+                    .map(str::to_string),
             };
             // The rows above are only the ones this request's own listing
             // drew. A row cached by a request already in flight — the sidebar
@@ -1757,6 +1815,7 @@ async fn restore(
         };
         rows.push(json!({"sessionId":durable_id,"externalId":known["externalId"],"brand":known["brand"],
             "title":known["name"],"lastActiveAt":known["lastActiveAt"],"lastSpokeAt":known["lastSpokeAt"],
+            "begunBy":known["begunBy"],
             "state":"dormant","origin":"terminal","projectId":query.project,"cwdHint":known["cwd"],
             "folder":known["cwd"].as_str().and_then(folder_of),"branch":known["branch"],"beads":[],
             "runningElsewhere":held.is_some(),"held":held}));
@@ -1774,6 +1833,53 @@ async fn restore(
         row["folder"] = json!(checkout.folder);
         row["branch"] = json!(checkout.branch);
     }
+    // A saved Codex chat the index no longer lists is still a chat with a
+    // rollout on disk, and the rollout's first line says who began it: five
+    // of the owner's 144 guardian chats were placed this way and no other.
+    // Bounded, because a row with no rollout anywhere is looked for on every
+    // load (bw-p61.17).
+    const PLACE_AT_MOST: usize = 50;
+    let unplaced: Vec<(String, String)> = rows
+        .iter()
+        .filter(|row| row["brand"] == "codex" && row["begunBy"].is_null())
+        .filter_map(|row| {
+            Some((
+                row["sessionId"].as_str()?.to_string(),
+                row["externalId"].as_str()?.to_string(),
+            ))
+        })
+        .take(PLACE_AT_MOST)
+        .collect();
+    if !unplaced.is_empty() {
+        let behind = state.clone();
+        let placed = tokio::task::spawn_blocking(move || {
+            unplaced
+                .into_iter()
+                .filter_map(|(session_id, external_id)| {
+                    let path = behind.codex_record_anywhere(&external_id)?;
+                    let who = crate::workbench::codex::history::begun_by(&json!({ "path": path }));
+                    (who != "unknown").then_some((session_id, who))
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .unwrap_or_default();
+        for (session_id, who) in placed {
+            state
+                .database()
+                .mark_begun_by(session_id.clone(), who.to_string())
+                .await?;
+            if let Some(row) = rows.iter_mut().find(|row| row["sessionId"] == session_id) {
+                row["begunBy"] = json!(who);
+            }
+        }
+    }
+    // A saved row the record has just placed as the agents' own leaves this
+    // answer as well as the next one: its fact is now kept, so the local
+    // answer drawn before any of this drops it on the load after (bw-p61.17).
+    if !everything {
+        rows.retain(|row| row["begunBy"] != "agent");
+    }
     rows.sort_by(|a, b| restore_clock(b).cmp(restore_clock(a)));
     Ok(Json(rows))
 }
@@ -1790,7 +1896,7 @@ async fn session(
     // Asked on every open, and it used to start an adapter per provider each
     // time: the shared answer is the one the sidebar just drew from, and it is
     // only taken if it is already there (bw-550g.1).
-    let known = provider_sessions_in_hand(&state, Some(&found.project_path), false)
+    let known = provider_sessions_in_hand(&state, Some(&found.project_path))
         .await
         .into_iter()
         .find(|known| {
@@ -2494,6 +2600,7 @@ mod tests {
             created_at: "2026-08-30T00:00:00.000Z".into(),
             last_active_at: "2026-08-30T00:01:00.000Z".into(),
             last_spoke_at: Some("2026-08-30T00:00:30.000Z".into()),
+            begun_by: None,
         }
     }
 
@@ -2925,14 +3032,14 @@ mod tests {
     #[tokio::test]
     async fn native_workbench_shares_one_discovery_between_overlapping_asks() {
         let (_directory, state) = fixture();
-        let key = format!("/work/project\u{0}false");
+        let key = "/work/project".to_string();
         let listed = vec![json!({"brand":"claude","externalId":"thread-1"})];
         state
             .discovery_cache
             .lock()
             .await
             .insert(key.clone(), (std::time::Instant::now(), listed.clone()));
-        let rows = provider_sessions_shared(&state, Some("/work/project"), false).await;
+        let rows = provider_sessions_shared(&state, Some("/work/project")).await;
         assert_eq!(rows, listed, "a fresh answer is handed back as it stands");
 
         state.discovery_cache.lock().await.insert(
@@ -2948,7 +3055,7 @@ mod tests {
         );
         // And the folder is part of what makes an answer this reader's.
         assert!(
-            fresh_discovery(&state.discovery_cache, "/somewhere/else\u{0}false")
+            fresh_discovery(&state.discovery_cache, "/somewhere/else")
                 .await
                 .is_none()
         );
@@ -2966,7 +3073,7 @@ mod tests {
     #[tokio::test]
     async fn native_workbench_chat_facts_do_not_wait_for_a_listing_still_on_its_way() {
         let (_directory, state) = fixture();
-        let key = "/work/project\u{0}false".to_string();
+        let key = "/work/project".to_string();
         let listed = vec![json!({"brand":"codex","externalId":"thread-1"})];
         state
             .discovery_cache
@@ -2974,7 +3081,7 @@ mod tests {
             .await
             .insert(key.clone(), (std::time::Instant::now(), listed.clone()));
         assert_eq!(
-            provider_sessions_in_hand(&state, Some("/work/project"), false).await,
+            provider_sessions_in_hand(&state, Some("/work/project")).await,
             listed,
             "an answer already in hand is the one used"
         );
@@ -2992,7 +3099,7 @@ mod tests {
         let _held = running.lock().await;
         let answered = tokio::time::timeout(
             Duration::from_secs(2),
-            provider_sessions_in_hand(&state, Some("/work/project"), false),
+            provider_sessions_in_hand(&state, Some("/work/project")),
         )
         .await
         .expect("the chat's facts waited for a listing that had not come back");

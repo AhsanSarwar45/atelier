@@ -913,6 +913,7 @@ mod tests {
                 created_at: at.into(),
                 last_active_at: at.into(),
                 last_spoke_at: None,
+                begun_by: None,
             })
             .await
             .unwrap();
@@ -1025,6 +1026,7 @@ mod tests {
                 created_at: at.into(),
                 last_active_at: at.into(),
                 last_spoke_at: None,
+                begun_by: None,
             })
             .await
             .unwrap();

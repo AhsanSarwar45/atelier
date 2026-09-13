@@ -1299,6 +1299,7 @@ mod tests {
                 created_at: "2026-08-30T00:00:00Z".into(),
                 last_active_at: "2026-08-30T00:00:01Z".into(),
                 last_spoke_at: None,
+                begun_by: None,
             })
             .await
             .unwrap();
@@ -1372,6 +1373,7 @@ mod tests {
             created_at: "2026-08-30T00:00:00Z".into(),
             last_active_at: "2026-08-30T00:00:01Z".into(),
             last_spoke_at: None,
+            begun_by: None,
         };
         database.create_session(session.clone()).await.unwrap();
         let registry = WorkbenchRegistry::new(
@@ -1435,6 +1437,7 @@ mod tests {
                 created_at: "2026-09-04T00:00:00Z".into(),
                 last_active_at: "2026-09-04T00:00:00Z".into(),
                 last_spoke_at: None,
+                begun_by: None,
             })
             .await
             .unwrap();
@@ -1500,6 +1503,7 @@ mod tests {
             created_at: "2026-09-05T00:00:00Z".into(),
             last_active_at: "2026-09-05T00:00:00Z".into(),
             last_spoke_at: None,
+            begun_by: None,
         };
         database.create_session(chat("working", "running_tool")).await.unwrap();
         database.create_session(chat("resting", "idle")).await.unwrap();
@@ -1588,6 +1592,7 @@ mod tests {
                 created_at: "2026-08-30T00:00:00Z".into(),
                 last_active_at: "2026-08-30T00:00:00Z".into(),
                 last_spoke_at: None,
+                begun_by: None,
             })
             .await
             .unwrap();
@@ -1671,6 +1676,7 @@ mod tests {
                 created_at: "2026-08-30T00:00:00Z".into(),
                 last_active_at: "2026-08-30T00:00:00Z".into(),
                 last_spoke_at: None,
+                begun_by: None,
             })
             .await
             .unwrap();

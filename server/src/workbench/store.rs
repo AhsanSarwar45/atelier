@@ -137,6 +137,11 @@ pub struct Session {
     pub created_at: String,
     pub last_active_at: String,
     pub last_spoke_at: Option<String>,
+    /// Who began this chat, as its provider's own record says: `person` or
+    /// `agent`. `None` until the record has been read for it, and `None` is
+    /// never a reason to hide a chat — a chat is not put out of sight on a
+    /// guess (bw-p61.17).
+    pub begun_by: Option<String>,
 }
 
 /// `Some(None)` clears a nullable setting; `None` leaves it untouched.
@@ -279,8 +284,8 @@ impl Store {
             r#"INSERT INTO session
                  (id, brand, external_id, project_id, project_path, cwd, model,
                   permission_mode, effort, collaboration_mode, profile, title, state,
-                  origin, created_at, last_active_at, last_spoke_at)
-               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)"#,
+                  origin, created_at, last_active_at, last_spoke_at, begun_by)
+               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)"#,
             params![
                 session.id,
                 session.brand,
@@ -299,6 +304,7 @@ impl Store {
                 session.created_at,
                 session.last_active_at,
                 session.last_spoke_at,
+                session.begun_by,
             ],
         )?;
         Ok(())
@@ -370,6 +376,22 @@ impl Store {
         self.connection.execute(
             "UPDATE session SET last_spoke_at = ?1 WHERE id = ?2",
             params![at, id],
+        )?;
+        Ok(())
+    }
+
+    /// Record who began this chat — `person` or `agent` — as the provider's
+    /// own record tells it.
+    ///
+    /// The restore list cannot read records — it answers from the database
+    /// alone, and must answer before provider discovery has finished. So the
+    /// answer discovery already worked out is kept here the first time it is
+    /// seen, which is also what corrects the rows adopted before there was any
+    /// such rule (bw-p61.17).
+    pub fn mark_begun_by(&self, id: &str, who: &str) -> rusqlite::Result<()> {
+        self.connection.execute(
+            "UPDATE session SET begun_by = ?1 WHERE id = ?2",
+            params![who, id],
         )?;
         Ok(())
     }
@@ -480,9 +502,10 @@ fn held_in_its_project(session: &Session) -> bool {
             found.retain(Self::held_in_its_project);
             return Ok(found);
         }
-        let visible = r#"(title IS NOT NULL OR origin='app' OR EXISTS (
+        let visible = r#"(COALESCE(begun_by, '') <> 'agent'
+            AND (title IS NOT NULL OR origin='app' OR EXISTS (
             SELECT 1 FROM event WHERE event.session_id=session.id
-              AND event.type='message.started' LIMIT 1))"#;
+              AND event.type='message.started' LIMIT 1)))"#;
         let sql = match project_id {
             Some(_) => format!(
                 "SELECT * FROM session WHERE project_id=?1 AND {visible} ORDER BY COALESCE(last_spoke_at,last_active_at) DESC"
@@ -2124,6 +2147,7 @@ fn session_from_row(row: &Row<'_>) -> rusqlite::Result<Session> {
         created_at: row.get("created_at")?,
         last_active_at: row.get("last_active_at")?,
         last_spoke_at: row.get("last_spoke_at")?,
+        begun_by: row.get("begun_by")?,
     })
 }
 
@@ -2167,6 +2191,20 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
         .any(|name| name == "collaboration_mode")
     {
         transaction.execute_batch("ALTER TABLE session ADD COLUMN collaboration_mode TEXT;")?;
+    }
+    // Who began this chat, `person` or `agent`. Left NULL until the provider's
+    // own record has been read for it, and NULL means visible: a chat is never
+    // hidden on a guess. A chat begun at this app's own button is a person's
+    // from the start, so the rows already saved that way are placed at once
+    // (bw-p61.17).
+    if !columns(transaction, "session")?
+        .iter()
+        .any(|name| name == "begun_by")
+    {
+        transaction.execute_batch(
+            "ALTER TABLE session ADD COLUMN begun_by TEXT;
+             UPDATE session SET begun_by='person' WHERE origin='app' AND begun_by IS NULL;",
+        )?;
     }
 
     // Which account the chat runs on. Added here rather than in the numbered
@@ -2373,6 +2411,7 @@ mod tests {
             created_at: at.to_string(),
             last_active_at: at.to_string(),
             last_spoke_at: None,
+            begun_by: None,
         }
     }
 
@@ -2815,6 +2854,47 @@ mod tests {
                 "showing the agents' own chats: {everything}"
             );
         }
+    }
+
+    /**
+     * A saved chat an agent started stays out of the list until it is asked for.
+     *
+     * The restore list answers from the database alone, before provider
+     * discovery has finished, so the record's reading of who started a chat is
+     * kept on the row the first time it is seen. Without it the rows adopted
+     * before there was any such rule filled the list forever: Corsetta's held
+     * 125 review and harness chats against 63 of his own (bw-p61.17).
+     */
+    #[test]
+    fn restore_sessions_hide_a_saved_chat_an_agent_started() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        for id in ["his-own", "the-agents-own", "not-yet-read"] {
+            let mut row = session(id, "claude", None, "2026-08-20T00:00:00Z");
+            row.origin = "terminal".into();
+            store.create_session(&row).unwrap();
+        }
+        store.mark_begun_by("his-own", "person").unwrap();
+        store.mark_begun_by("the-agents-own", "agent").unwrap();
+
+        let listed = |everything| {
+            store
+                .list_restore_sessions(Some("project-1"), everything)
+                .unwrap()
+                .into_iter()
+                .map(|row| row.id)
+                .collect::<std::collections::HashSet<_>>()
+        };
+        assert_eq!(
+            listed(false),
+            std::collections::HashSet::from([
+                "his-own".to_string(),
+                // Never read, so never hidden: a chat is not put out of sight
+                // on a guess.
+                "not-yet-read".to_string(),
+            ])
+        );
+        assert_eq!(listed(true).len(), 3, "the switch brings the agent's own back");
     }
 
     #[test]

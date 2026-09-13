@@ -295,6 +295,9 @@ fn new_session(
         created_at: at.clone(),
         last_active_at: at,
         last_spoke_at: field(command, "lastSpokeAt").map(str::to_string),
+        // Starting a chat here is a person's act; a chat opened from outside
+        // is placed by its own record on the next listing (bw-p61.17).
+        begun_by: (command.kind == CommandKind::SessionStart).then(|| "person".to_string()),
     })
 }
 
@@ -918,6 +921,7 @@ mod tests {
             created_at: "2026-09-02T00:00:00Z".into(),
             last_active_at: "2026-09-02T00:00:00Z".into(),
             last_spoke_at: None,
+            begun_by: None,
         };
         database.create_session(session.clone()).await.unwrap();
         record_user_for_transport(
@@ -1145,6 +1149,7 @@ mod tests {
             created_at: "2026-08-31T00:00:00Z".into(),
             last_active_at: "2026-08-31T00:00:00Z".into(),
             last_spoke_at: None,
+            begun_by: None,
         }
     }
 

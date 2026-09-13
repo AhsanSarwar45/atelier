@@ -111,6 +111,54 @@ fn last_row_timestamp(path: &Path, accept: impl Fn(&Value) -> bool) -> Option<St
     None
 }
 
+/// Who began a thread, `person` or `agent`, as its own record says; `unknown`
+/// when nothing does.
+///
+/// Codex writes the answer into the first line of the rollout, `session_meta`:
+/// `source` is `"cli"`, `"vscode"` or `"exec"` for a person's own thread and
+/// an object naming the subagent kind for one another thread started —
+/// `{"subagent":{"other":"guardian"}}` is what every one of the owner's 144
+/// guardian review threads carried. The index's `thread/list` answers the
+/// same field on the thread when it has it, and is asked first (bw-p61.17).
+pub fn begun_by(thread: &Value) -> &'static str {
+    let source = match thread.get("source").filter(|source| !source.is_null()) {
+        Some(source) => source.clone(),
+        None => thread["path"]
+            .as_str()
+            .and_then(|path| session_source(Path::new(path)))
+            .unwrap_or(Value::Null),
+    };
+    match source {
+        Value::Null => "unknown",
+        source if by_a_subagent(&source) => "agent",
+        _ => "person",
+    }
+}
+
+fn by_a_subagent(source: &Value) -> bool {
+    match source {
+        Value::Object(map) => map.keys().any(|key| key.eq_ignore_ascii_case("subagent")),
+        Value::String(kind) => {
+            let kind = kind.to_ascii_lowercase().replace('_', "");
+            kind.starts_with("subagent")
+        }
+        _ => false,
+    }
+}
+
+/// The `source` of a rollout's `session_meta`, its first line.
+fn session_source(path: &Path) -> Option<Value> {
+    let file = File::open(path).ok()?;
+    let mut line = String::new();
+    std::io::BufRead::read_line(&mut std::io::BufReader::new(file), &mut line).ok()?;
+    let row: Value = serde_json::from_str(line.trim()).ok()?;
+    if row["type"] != "session_meta" {
+        return None;
+    }
+    let source = row["payload"]["source"].clone();
+    (!source.is_null()).then_some(source)
+}
+
 pub async fn list_threads(
     transport: &CodexTransport,
     cwd: Option<&Path>,
@@ -487,6 +535,38 @@ pub(crate) fn agent_definitions(cwd: &Path, profile: Option<&str>) -> Vec<Value>
 
 #[cfg(test)]
 mod tests {
+    /**
+     * A thread is the agents' own when its rollout says a subagent began it.
+     *
+     * The guardian's review threads carry `{"subagent":{"other":"guardian"}}`
+     * and a person's terminal thread carries `"cli"`; the index says the same
+     * on the thread when it has the field, and a thread with neither is not
+     * placed on a guess (bw-p61.17).
+     */
+    #[test]
+    fn a_thread_a_subagent_began_is_the_agents_own() {
+        use super::begun_by;
+        use serde_json::json;
+        let directory = tempfile::tempdir().unwrap();
+        let guardian = directory.path().join("guardian.jsonl");
+        std::fs::write(
+            &guardian,
+            "{\"timestamp\":\"t\",\"type\":\"session_meta\",\"payload\":{\"id\":\"g\",\"source\":{\"subagent\":{\"other\":\"guardian\"}}}}\n{\"type\":\"event_msg\"}\n",
+        )
+        .unwrap();
+        let terminal = directory.path().join("terminal.jsonl");
+        std::fs::write(
+            &terminal,
+            "{\"timestamp\":\"t\",\"type\":\"session_meta\",\"payload\":{\"id\":\"c\",\"source\":\"cli\"}}\n",
+        )
+        .unwrap();
+        assert_eq!(begun_by(&json!({"path": guardian})), "agent");
+        assert_eq!(begun_by(&json!({"path": terminal})), "person");
+        assert_eq!(begun_by(&json!({"path": terminal, "source": "subAgentReview"})), "agent");
+        assert_eq!(begun_by(&json!({"source": "vscode"})), "person");
+        assert_eq!(begun_by(&json!({"path": directory.path().join("missing.jsonl")})), "unknown");
+    }
+
     use super::*;
     use std::io::Write;
 

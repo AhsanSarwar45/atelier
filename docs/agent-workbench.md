@@ -644,6 +644,27 @@ own `/resume` picker uses. Measured on Corsetta, 2026-08-16: 306 chats offered,
 218 of them a person's; the 88 it withholds are every "You are reviewing a
 change" review agent and every unnamed one (bw-p61.3).
 
+Who began a chat is a fact the store keeps, not one the list works out each
+time. Each provider's record says it — Claude's first user row carries
+`promptSource` and `origin.kind` (bw-p61.16), Codex's `session_meta` carries
+`source`, an object naming the subagent kind when one began it — and every
+discovery path writes it to `session.begun_by` the moment a chat is cached, so
+the fast list, which answers from the database alone, obeys the same rule as
+the slow one. Until it was kept, each listing path filtered for itself and
+forgot: a chat cached once with a title stayed on the list with the switch off
+for good, and the ACP `session/list` path, which has no such filter, adopted
+every review and guardian chat on every load — 501 of them in the owner's own
+database by 2026-09-13, each its own session named by its prompt's first line,
+so the rail read as one chat repeated. A saved chat the record has not been
+read for is never hidden; a chat only the adapter names, with no record to say
+who began it, is not adopted as a person's. Two more things the same job found:
+Claude's first prompt is read forward from the top of the record rather than
+off the 128 KB head window, because a review chat's prompt sits behind an 80 KB
+attachment and is 80 KB itself, so the window ended inside it and 75 review
+chats read as a person's; and a saved Codex chat the index no longer lists is
+placed by its own rollout's first line, found by id, which is how the last
+five guardian chats left the rail (bw-p61.17).
+
 The nothing-said rule is for those chats, and only those. A chat begun at this
 app's own New Chat button is on the list from the moment it is made, named or
 not, spoken in or not — `origin` is what tells the two apart, and only starting

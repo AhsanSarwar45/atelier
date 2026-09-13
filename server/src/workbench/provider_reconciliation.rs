@@ -66,6 +66,7 @@ mod tests {
                 created_at: "now".into(),
                 last_active_at: "now".into(),
                 last_spoke_at: None,
+                begun_by: None,
             })
             .await
             .unwrap();

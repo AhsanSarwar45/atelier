@@ -1032,6 +1032,14 @@ export interface RestoreRow {
   lastSpokeAt?: string | null;
   state: SessionState;
   origin: 'app' | 'terminal';
+  /**
+   * Who began it, as its provider's own record says. `agent` is a chat another
+   * chat started to do a piece of work, and the list withholds those until the
+   * switch asks for them (§6.3.1). Null until the record has been read for it,
+   * and `unknown` when only the adapter names it — neither is a reason to hide
+   * a saved chat (bw-p61.17).
+   */
+  begunBy?: 'person' | 'agent' | 'unknown' | null;
   projectId: string | null;
   cwdHint: string | null;
   /** The directory it ran in, by its own name — a worktree's is the worktree. */
