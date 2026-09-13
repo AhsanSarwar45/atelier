@@ -359,7 +359,13 @@ fn land(rest: &[String]) -> Result<i32, String> {
     if branch == landing { return Err(format!("{landing} is the landing branch; run board/land from the branch carrying the work")); }
     let (already, subjects) = landed_subjects(&work, &branch, &landing)?;
     if !subjects.lines().any(|subject| subject_names(subject, id)) {
-        return Err(format!("no commit subject on {branch} names {id}"));
+        let read: Vec<String> = subjects.lines().map(|subject| format!("  {subject}")).collect();
+        let read = if read.is_empty() {
+            format!("  (no commit on {branch} that is not already on {landing})")
+        } else {
+            read.join("\n")
+        };
+        return Err(format!("no commit subject on {branch} names {id}. The subjects read were:\n{read}"));
     }
     let open_work: Vec<Value> = children(&work, &goal)?.into_iter().filter(|row| {
         row["status"].as_str() != Some("closed") && labels(row).contains(&"step:work")
@@ -436,8 +442,18 @@ fn landing_actor(configured: Option<&str>, item: &Value) -> String {
     card_actor(configured, item, "atelier-land")
 }
 
+/// Does this subject name this card?
+///
+/// It asks whether the subject holds the id it was given, as a whole word.
+/// Guessing at the shape of an id instead — a hyphen and a digit — made every
+/// card `bd` issued without a digit in it unlandable: `bw-uxoe` was invisible
+/// to the check, so no subject in any form could satisfy it, and the refusal
+/// then reported a naming failure that had not happened
+/// (`docs/hook-friction-2.md` §5).
 fn subject_names(subject: &str, id: &str) -> bool {
-    card_ids(subject).iter().any(|word| word == id)
+    subject
+        .split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '.')))
+        .any(|word| word == id)
 }
 
 fn manifest(root: &Path) -> Result<crate::project_manifest::ProjectManifest, String> {
@@ -521,12 +537,6 @@ pub(crate) fn proof_of(tree: &str, suites: &[&str], ok: &[bool]) -> String {
         })
         .collect();
     format!("checks: tree {tree} {}", tokens.join(" "))
-}
-
-fn card_ids(text: &str) -> Vec<String> {
-    text.split(|character: char| !(character.is_ascii_alphanumeric() || character == '-' || character == '.'))
-        .filter(|word| word.contains('-') && word.chars().any(|character| character.is_ascii_digit()))
-        .map(str::to_string).collect()
 }
 
 fn checks(rest: &[String]) -> Result<i32, String> {
@@ -746,6 +756,13 @@ mod tests {
         assert!(subject_names("bw-one.12: finish native machinery", "bw-one.12"));
         assert!(!subject_names("bw-one.123: a different card", "bw-one.12"));
         assert!(!subject_names("mention bw-one.12 only in a body we did not pass", "bw-one.1"));
+
+        // An id `bd` issued with no digit in it was invisible to the check, so
+        // no subject in any form could land it (`docs/hook-friction-2.md` §5).
+        assert!(subject_names("bw-uxoe: the chat list opens again", "bw-uxoe"));
+        assert!(subject_names("fix(bw-uxoe): the chat list opens again", "bw-uxoe"));
+        assert!(subject_names("bw-uxoe", "bw-uxoe"));
+        assert!(!subject_names("bw-uxoen: a neighbour", "bw-uxoe"));
     }
 
     /// `docs/hook-friction-2.md` §4: the lander closing this session's own work
