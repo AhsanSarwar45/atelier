@@ -2159,85 +2159,22 @@ async fn events(
 pub(crate) async fn snapshot(database: &ChatDb, session_id: &str) -> Result<Value, String> {
     let snapshot = database.snapshot(session_id.to_string()).await?;
     let mut view = fold_all(&snapshot.history).view;
-    let fields = ["models", "permissionModes", "efforts", "collaborationModes"];
-    if fields.iter().any(|field| {
-        view["menu"][field]
-            .as_array()
-            .is_none_or(|rows| rows.is_empty())
-    }) {
-        // Most chats carry their own current session.menu. The provider-wide
-        // catalog is only a migration fallback, and on a large event store its
-        // global lookup must not sit in front of every ordinary transcript.
-        let steering = database.steering_menu(session_id.to_string()).await?;
-        for field in fields {
-            let empty = view["menu"][field]
-                .as_array()
-                .is_none_or(|rows| rows.is_empty());
-            if empty
-                && steering[field]
-                    .as_array()
-                    .is_some_and(|rows| !rows.is_empty())
-            {
-                view["menu"][field] = steering[field].clone();
-            }
-        }
-    }
-    // A picker with no options is intentionally absent in the browser. Older
-    // sessions can predate session.menu while still carrying exact saved pins
-    // in session.started/session.pinned. Keep those controls visible without
-    // inventing a provider catalog: the one known current value is a safe
-    // fallback until an ACP/provider menu replaces it.
-    let model = view["model"].as_str().map(str::to_string).or_else(|| {
-        matches!(view["brand"].as_str(), Some("claude" | "codex")).then(|| "default".to_string())
-    });
-    let permission_mode = view["permissionMode"].as_str().map(str::to_string);
-    let effort = view["effort"].as_str().map(str::to_string);
-    let collaboration_mode = view["collaborationMode"].as_str().map(str::to_string);
-    if view["menu"]["models"]
-        .as_array()
-        .is_none_or(|rows| rows.is_empty())
-    {
-        if let Some(value) = model {
-            let display_name = if value == "default" {
-                "Default".to_string()
-            } else {
-                value.clone()
-            };
-            view["menu"]["models"] = json!([{
-                "value":value,
-                "displayName":display_name,
-                "description":"Saved session selection; the full provider catalog loads when available.",
-                "group":"session"
-            }]);
-        }
-    }
-    if view["menu"]["permissionModes"]
-        .as_array()
-        .is_none_or(|rows| rows.is_empty())
-    {
-        if let Some(value) = permission_mode {
-            view["menu"]["permissionModes"] = json!([value]);
-        }
-    }
-    if view["menu"]["efforts"]
-        .as_array()
-        .is_none_or(|rows| rows.is_empty())
-    {
-        if let Some(value) = effort {
-            let display_name = value.clone();
-            view["menu"]["efforts"] = json!([{"value":value,"displayName":display_name}]);
-        }
-    }
-    if view["menu"]["collaborationModes"]
-        .as_array()
-        .is_none_or(|rows| rows.is_empty())
-    {
-        if let Some(value) = collaboration_mode {
-            let display_name = value.clone();
-            view["menu"]["collaborationModes"] =
-                json!([{"value":value,"displayName":display_name}]);
-        }
-    }
+    // What a chat can be set to belongs to the installed provider, and it is
+    // asked for when the chat's agent answers. It is never built here out of
+    // what the chat is already set to.
+    //
+    // This used to invent one: a chat whose provider menu had not arrived got a
+    // list of exactly one option, the value it was already on, labelled with
+    // the wire's own spelling. So the effort chip read `high` where every other
+    // chip reads `High` — the app has one place that puts a level into words
+    // and an invented displayName went around it — and opening the picker
+    // offered that single fabricated choice, with the provider's real levels
+    // nowhere in it. It read as a menu and it was a mirror (bw-l4fr.4).
+    //
+    // A control with no options is deliberately absent instead. The pins
+    // themselves are unaffected: they ride on `session.pinned`, the chips name
+    // them through the app's own words, and the real catalog replaces nothing
+    // when the agent supplies it.
     view["items"] = json!(snapshot.page.items);
     view["agents"] = json!(snapshot.agents);
     view["lastSeq"] = json!(snapshot.page.newest_seq);
@@ -2927,8 +2864,15 @@ mod tests {
         assert!(!chunk.contains("project-only"), "{chunk}");
     }
 
+    /// A chat that is set to something is not thereby a chat that offers it.
+    ///
+    /// The pins and the catalog are different facts with different owners: what
+    /// this chat is set to is the chat's, and what it could be set to is the
+    /// installed provider's. Building the second out of the first produced a
+    /// menu of one item spelled the way the wire spells it, which is both a
+    /// wrong list and a wrong word (bw-l4fr.4).
     #[tokio::test]
-    async fn saved_pins_keep_every_known_picker_visible_without_a_historical_menu() {
+    async fn saved_pins_do_not_fabricate_a_catalog_of_one() {
         let (_directory, state) = fixture();
         let mut session = saved_session();
         session.permission_mode = "on-request".into();
@@ -2949,10 +2893,19 @@ mod tests {
         state.database().append(started).await.unwrap();
 
         let view = snapshot(state.database(), &session.id).await.unwrap();
-        assert_eq!(view["menu"]["models"][0]["value"], "gpt-5");
-        assert_eq!(view["menu"]["permissionModes"], json!(["on-request"]));
-        assert_eq!(view["menu"]["efforts"][0]["value"], "high");
-        assert_eq!(view["menu"]["collaborationModes"][0]["value"], "plan");
+        for field in ["models", "permissionModes", "efforts", "collaborationModes"] {
+            assert_eq!(
+                view["menu"][field],
+                json!([]),
+                "{field} was invented from what the chat is already set to"
+            );
+        }
+        // And every pin is still there to be named, which is the half of this
+        // the chips actually read.
+        assert_eq!(view["model"], "gpt-5");
+        assert_eq!(view["permissionMode"], "on-request");
+        assert_eq!(view["effort"], "high");
+        assert_eq!(view["collaborationMode"], "plan");
     }
 
     #[tokio::test]
