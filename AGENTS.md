@@ -1,5 +1,24 @@
 # Agent Instructions
 
+## Atelier process permission
+
+Never install, replace, stop, start, or restart any Atelier instance or
+service, including installed and local/dev instances, without the user's
+explicit permission immediately before that exact action. This is the sole
+Atelier-specific permission exception: for every other action already within
+the user's requested scope, proceed autonomously without asking for
+precautionary or redundant permission. Still obey platform-required approvals
+and ask only when genuinely blocked by a decision, missing authority, or
+information only the user can provide.
+
+## Enforced board lifecycle
+
+Do not rely on an agent voluntarily following the merge and review lifecycle.
+Instructions must state the lifecycle, and provider-equivalent hooks must
+prevent closing or advancing work before its worktree changes are committed
+and merged. A permissive `bd` CLI is not authorization to bypass the project
+workflow.
+
 ## Isolated app instances
 
 Each worktree must use its own disposable app stack. Never touch the owner's

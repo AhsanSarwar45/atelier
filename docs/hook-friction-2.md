@@ -1495,3 +1495,11 @@ means knowing what the shell holds, which a gate that runs before the shell
 does not; the honest half-fix would be for a target that survives expansion as
 a literal `$` to be named as unresolvable rather than judged, and nothing here
 has done that yet.
+
+## Absolute Edit target in a job worktree resolves to the landing checkout (bw-uktp.1)
+
+The `apply_patch` tool refused an absolute target under `worktrees/bw-uktp`
+while child `bw-uktp.1` was claimed. The refusal reported the resolved target
+as `/home/ahsan/dev/beads-web`, not the job worktree. This is the same failure
+recorded above for `bw-fpuk.1`, despite that entry being marked resolved by
+`bw-mslg.1`. The documented per-job bypass allowed the patch.
