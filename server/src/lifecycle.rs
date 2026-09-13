@@ -766,7 +766,10 @@ impl Target {
     /// spelling out when it did something — an absolute path resolved to
     /// itself.
     fn spelled(&self) -> String {
-        if self.named.is_empty() || Path::new(&self.named).is_absolute() {
+        if self.named.is_empty()
+            || Path::new(&self.named).is_absolute()
+            || home_relative(&self.named).is_some()
+        {
             return format!("resolved target: {}", self.path.display());
         }
         format!(
@@ -778,7 +781,33 @@ impl Target {
     }
 }
 
+/// The home directory a leading `~/` or `$HOME/` stands for.
+///
+/// The gate reads a command as written, before the shell has run, so these two
+/// are neither absolute nor relative but literal. Joining the literal onto the
+/// working directory gives a path that exists nowhere and then refuses the
+/// session on it — a delete of the session's own scratch in Atelier's data
+/// directory was refused as a repository change (`docs/hook-friction-2.md` §9,
+/// bw-5gax). Nothing else is expanded: `~` and `$HOME` are the two spellings
+/// with one meaning, and guessing at another variable would be guessing.
+fn home_relative(text: &str) -> Option<&str> {
+    ["~/", "$HOME/", "${HOME}/"]
+        .iter()
+        .find_map(|prefix| text.strip_prefix(prefix))
+        .or_else(|| matches!(text, "~" | "$HOME" | "${HOME}").then_some(""))
+}
+
+fn home() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+}
+
 fn path_from(here: &Path, text: &str) -> PathBuf {
+    if let (Some(rest), Some(home)) = (home_relative(text), home()) {
+        return tidy(&home.join(rest));
+    }
     let path = PathBuf::from(text);
     tidy(&if path.is_absolute() {
         path
@@ -2517,6 +2546,38 @@ mod tests {
         assert!(!tidying("git worktree prune"));
         assert!(!tidying("git branch --list"));
         assert!(!tidying("git branch bw-new"));
+    }
+
+    /// `~` and `$HOME` were joined onto the repository root, so a delete of
+    /// the session's own scratch outside any repository was refused as a
+    /// repository change (`docs/hook-friction-2.md` §9, bw-5gax).
+    #[test]
+    fn native_machinery_a_home_path_is_read_where_it_points() {
+        let home = std::env::var("HOME").expect("a home directory");
+        let repo = Path::new("/repo");
+        for spelling in ["~/scratch/x", "$HOME/scratch/x", "${HOME}/scratch/x"] {
+            assert_eq!(
+                path_from(repo, spelling),
+                PathBuf::from(&home).join("scratch/x"),
+                "{spelling}"
+            );
+        }
+        assert_eq!(path_from(repo, "~"), PathBuf::from(&home));
+
+        // A name that merely begins with the same letters is still a path in
+        // the repository, and everything else is unchanged.
+        assert_eq!(path_from(repo, "~notme/x"), PathBuf::from("/repo/~notme/x"));
+        assert_eq!(path_from(repo, "$HOMEWORK/x"), PathBuf::from("/repo/$HOMEWORK/x"));
+        assert_eq!(path_from(repo, "src/lib.rs"), PathBuf::from("/repo/src/lib.rs"));
+        assert_eq!(path_from(repo, "/tmp/x"), PathBuf::from("/tmp/x"));
+
+        // And the refusal does not claim a home path was resolved against the
+        // repository it was typed in.
+        let target = Target::named(repo, "~/scratch/x");
+        assert_eq!(
+            target.spelled(),
+            format!("resolved target: {home}/scratch/x")
+        );
     }
 
     #[test]
