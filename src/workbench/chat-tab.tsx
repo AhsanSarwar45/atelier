@@ -1302,9 +1302,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     if (!ACCOUNTED_BRANDS.includes(brand)) return;
     if (accounts[brand]) return;
     let gone = false;
-    void sendCommand<{ profiles: ProfileChoice[] }>({ type: 'profiles.list', brand })
+    void sendCommand<{ profiles?: ProfileChoice[] }>({ type: 'profiles.list', brand })
       .then(({ profiles }) => {
-        if (!gone) setAccounts((was) => ({ ...was, [brand]: profiles }));
+        if (!gone) setAccounts((was) => ({
+          ...was,
+          [brand]: Array.isArray(profiles) ? profiles : [],
+        }));
       })
       .catch((error: unknown) => {
         if (!gone) setSteerError(error instanceof Error ? error.message : String(error));
