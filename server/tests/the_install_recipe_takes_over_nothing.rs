@@ -14,10 +14,13 @@ fn the_recipe_asks_homebrew_for_nothing_that_shadows_the_readers_own_tools() {
     let recipe = fs::read_to_string("../packaging/homebrew/atelier.rb.tmpl")
         .expect("the install recipe is not where the tap script reads it from");
 
+    // Homebrew spells platform compatibility with `depends_on` too, although
+    // these requirements install and link no formula.
+    let compatibility = ["depends_on :linux", "depends_on arch: :x86_64"];
     let asked: Vec<&str> = recipe
         .lines()
         .map(str::trim)
-        .filter(|line| line.starts_with("depends_on"))
+        .filter(|line| line.starts_with("depends_on") && !compatibility.contains(line))
         .collect();
 
     assert!(
