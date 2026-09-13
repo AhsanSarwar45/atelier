@@ -901,7 +901,7 @@ export type WbpCommand =
   | {
       type: 'provider-defaults.write';
       brand: Brand;
-      kind: 'model' | 'effort';
+      kind: 'model' | 'effort' | 'permission';
       value: string;
       profileId?: string;
     }

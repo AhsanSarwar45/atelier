@@ -225,12 +225,24 @@ fn new_session(
         return Err(format!("unknown provider {brand}"));
     }
     let project_path = required(command, "projectPath")?.to_string();
+    let profile = field(command, "profileId").filter(|id| *id != super::profiles::SYSTEM);
     let at = field(command, "lastActiveAt")
         .map(str::to_string)
         .unwrap_or_else(now);
-    let owner = (brand == "claude").then(|| {
-        super::provider_defaults::read_owner_settings(claude_config, Path::new(&project_path))
-    });
+    let owner = if brand == "claude" {
+        Some(super::provider_defaults::read_owner_settings(claude_config, Path::new(&project_path)))
+    } else if brand == "codex" {
+        let files = match profile.and_then(|id| super::profiles::ambient()?.directory(&brand, id).ok()) {
+            Some(directory) => super::provider_defaults::ProviderDefaultFiles::in_directory(&directory),
+            None => super::provider_defaults::ProviderDefaultFiles::new(
+                claude_config,
+                &super::profiles::system_dir("codex").ok_or("cannot resolve Codex settings directory")?,
+            ),
+        };
+        files.read("codex").ok().map(|defaults| super::provider_defaults::OwnerSettings {
+            model: defaults.model, permission_mode: defaults.permission_mode, effort: defaults.effort,
+        })
+    } else { None };
     Ok(Session {
         id,
         brand: brand.clone(),
@@ -276,9 +288,7 @@ fn new_session(
         // Only a named profile is stored. `None` means the system profile, so
         // a chat started before profiles existed keeps working on the account
         // it already had.
-        profile: field(command, "profileId")
-            .filter(|id| *id != super::profiles::SYSTEM)
-            .map(str::to_string),
+        profile: profile.map(str::to_string),
         title: field(command, "title").map(str::to_string),
         state: if command.kind == CommandKind::SessionOpen {
             "dormant"
