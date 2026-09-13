@@ -23,8 +23,8 @@ test.beforeAll(() => {
 
 test('reads provider files without editing them', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/settings/agent-files');
-  await expect(page.getByRole('heading', { name: 'Agent files' })).toBeVisible();
+  await page.goto('/settings?section=files');
+  await expect(page.getByTestId('settings-section-files')).toHaveAttribute('aria-current', 'page');
   await expect(page.getByText('Claude', { exact: true })).toBeVisible();
   await expect(page.getByText('Codex', { exact: true })).toBeVisible();
   await expect(page.locator('pre')).toContainText('# Personal instructions');
@@ -34,7 +34,7 @@ test('reads provider files without editing them', async ({ page }) => {
 
 test('uses file-list then reader navigation on a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/settings/agent-files');
+  await page.goto('/settings?section=files');
   await expect(page.getByText('CLAUDE.md').first()).toBeVisible();
   await page.getByText('CLAUDE.md').first().click();
   await expect(page.getByRole('button', { name: 'Files' })).toBeVisible();
