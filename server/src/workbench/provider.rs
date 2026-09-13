@@ -413,23 +413,26 @@ async fn append_import_pinned(
     append_import_menu(database, session, provider, value).await
 }
 
-fn claude_import_menu(session: &Session) -> Value {
-    let model = session.model.as_deref().unwrap_or("default");
+/// The controls a chat read off a Claude record is drawn with.
+///
+/// It offers no models and no efforts. It used to offer one of each, built out
+/// of what the chat was already pinned to and labelled with the wire's own
+/// spelling — so an imported chat's effort picker held a single lowercase
+/// `high` and the chip beside it read `high` too, going around the one place
+/// this app puts a level into words. A chat is not offered a choice by being
+/// on it (bw-l4fr.5).
+///
+/// The permission modes stay, because they are not a catalog read off a
+/// provider: they are this app's own vocabulary for Claude, the same list
+/// whatever is installed.
+fn claude_import_menu(_session: &Session) -> Value {
     json!({
         "type":"session.menu",
         "commands":[],
         "skills":[],
-        "models":[{
-            "value":model,
-            "displayName":model,
-            "description":"Saved session selection; the live provider catalog loads when the chat resumes.",
-            "group":"session"
-        }],
+        "models":[],
         "permissionModes":["default","acceptEdits","bypassPermissions","plan","dontAsk","auto"],
-        "efforts":session.effort.as_ref().map(|effort| vec![json!({
-            "value":effort,
-            "displayName":effort
-        })]).unwrap_or_default(),
+        "efforts":[],
         "agentDefinitions":[],
         "agentControls":["stop","park","say"]
     })
@@ -1239,22 +1242,24 @@ mod tests {
         assert_eq!(pinned.fields["effort"], "high");
     }
 
+    /// Being on a setting is not being offered it.
+    ///
+    /// This menu used to carry one model and one effort, both copied off the
+    /// chat's own pins and labelled with the wire's spelling, which put a
+    /// lowercase `high` in the picker and on the chip (bw-l4fr.5).
     #[test]
-    fn archived_claude_menu_keeps_saved_selectors_without_a_catalog_guess() {
+    fn archived_claude_menu_offers_no_catalog_of_its_own() {
         let mut session = imported_session();
         session.brand = "claude".into();
         session.model = Some("provider-model".into());
         session.effort = Some("provider-effort".into());
-        let menu = claude_import_menu(&session);
-        assert_eq!(menu["models"][0]["value"], "provider-model");
-        assert_eq!(menu["efforts"][0]["value"], "provider-effort");
-        assert_eq!(menu["permissionModes"][0], "default");
 
-        session.model = None;
-        assert_eq!(
-            claude_import_menu(&session)["models"][0]["value"],
-            "default"
-        );
+        let menu = claude_import_menu(&session);
+        assert_eq!(menu["models"], json!([]));
+        assert_eq!(menu["efforts"], json!([]));
+        // This app's own vocabulary for Claude, which is not read off any
+        // installed provider, is still offered.
+        assert_eq!(menu["permissionModes"][0], "default");
     }
 
     #[tokio::test]
