@@ -971,6 +971,7 @@ export type WbpCommand =
   | { type: 'session.mode'; sessionId: string; mode: string }
   | { type: 'session.model'; sessionId: string; model: string }
   | { type: 'session.effort'; sessionId: string; effort: string }
+  | { type: 'session.profile'; sessionId: string; profileId: string }
   | { type: 'session.collaboration-mode'; sessionId: string; mode: string }
   | { type: 'session.config-option'; sessionId: string; configId: string; value: boolean | string }
   | {

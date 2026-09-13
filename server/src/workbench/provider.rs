@@ -332,7 +332,7 @@ async fn append_state(
     Ok(())
 }
 
-async fn append_notice(database: &ChatDb, session_id: &str, text: &str) -> Result<(), String> {
+pub(super) async fn append_notice(database: &ChatDb, session_id: &str, text: &str) -> Result<(), String> {
     let event: Event = serde_json::from_value(json!({
         "type":"notice", "sessionId":session_id, "seq":0, "at":now(), "text":text
     }))

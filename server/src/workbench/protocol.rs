@@ -71,6 +71,7 @@ wire_kinds!(CommandKind {
     SessionMode => "session.mode",
     SessionModel => "session.model",
     SessionEffort => "session.effort",
+    SessionProfile => "session.profile",
     SessionCollaborationMode => "session.collaboration-mode",
     SessionConfigOption => "session.config-option",
     SessionOpen => "session.open",

@@ -21,6 +21,7 @@
     { "type": "session.mode", "sessionId": "session-1", "mode": "acceptEdits" },
     { "type": "session.model", "sessionId": "session-1", "model": "opus" },
     { "type": "session.effort", "sessionId": "session-1", "effort": "high" },
+    { "type": "session.profile", "sessionId": "session-1", "profileId": "work" },
     { "type": "session.collaboration-mode", "sessionId": "session-1", "mode": "plan" },
     { "type": "session.open", "sessionId": "session-1", "externalId": "external-1", "brand": "claude", "projectId": "project-1", "projectPath": "/project", "title": "Existing", "cwd": "/project", "lastActiveAt": "2026-08-30T00:00:00.000Z" },
     { "type": "session.resume", "sessionId": "session-1", "externalId": "external-1", "brand": "codex", "projectId": "project-1", "projectPath": "/project" }

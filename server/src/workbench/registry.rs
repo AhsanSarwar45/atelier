@@ -51,6 +51,10 @@ pub trait ProviderDriver: Send {
     fn window_now<'a>(&'a mut self) -> DriverFuture<'a> {
         Box::pin(async { Err("This chat's brand cannot say what is in its window.".into()) })
     }
+    /// Stop this process without ending the remote conversation it had open.
+    fn retire<'a>(&'a mut self) -> DriverFuture<'a> {
+        self.close()
+    }
     fn close<'a>(&'a mut self) -> DriverFuture<'a>;
 }
 
@@ -94,6 +98,7 @@ enum DriverRequest {
     Command(Command, oneshot::Sender<Result<Value, String>>),
     WindowNow(oneshot::Sender<Result<Value, String>>),
     Close(Command, oneshot::Sender<Result<Value, String>>),
+    Retire(oneshot::Sender<Result<Value, String>>),
 }
 
 #[derive(Clone)]
@@ -187,6 +192,11 @@ async fn supervise_driver(
                         let _ = database.append(event).await;
                     }
                 }
+                let _ = reply.send(result);
+                return;
+            }
+            Ok(DriverRequest::Retire(reply)) => {
+                let result = driver.retire().await;
                 let _ = reply.send(result);
                 return;
             }
@@ -833,6 +843,91 @@ impl WorkbenchRegistry {
         Ok(json!({"ok":true}))
     }
 
+    /// Move the next turn to another login while keeping this local chat.
+    /// Provider CLIs choose their account from an environment variable at
+    /// process startup, so this cannot be an in-process setting change.
+    async fn switch_profile(&self, command: &Command) -> Result<Value, String> {
+        let session_id = Self::field(command, "sessionId")?;
+        let profile_id = Self::field(command, "profileId")?;
+        let mut session = self
+            .database
+            .get_session(session_id.to_string())
+            .await?
+            .ok_or_else(|| format!("no session {session_id}"))?;
+        if super::profiles::variable(&session.brand).is_none() {
+            return Err(format!("{} has no account to switch", session.brand));
+        }
+        let profile = self
+            .profiles
+            .list(&session.brand)
+            .into_iter()
+            .find(|profile| profile.id == profile_id)
+            .ok_or_else(|| format!("no {} profile {profile_id}", session.brand))?;
+        let chosen = (!profile.system).then(|| profile.id.clone());
+        if session.profile == chosen {
+            return Ok(json!({"ok":true,"profile":chosen}));
+        }
+        if matches!(
+            session.state.as_str(),
+            "starting" | "thinking" | "streaming" | "running_tool" | "waiting_for_agents" | "waiting_permission"
+        ) {
+            return Err("Wait for the current response to finish before changing accounts.".into());
+        }
+
+        let context = self.database.account_handoff(session_id.to_string()).await?;
+
+        // Remove first so a prompt arriving after the reply always takes the
+        // lazy attach path. Retiring closes only the process; unlike Chat Close
+        // it does not end the conversation or add an Asleep transition.
+        if let Some(driver) = self.drivers.write().await.remove(session_id) {
+            let (reply, receive) = oneshot::channel();
+            driver
+                .send(DriverRequest::Retire(reply))
+                .map_err(|_| format!("provider for {session_id} stopped"))?;
+            receive
+                .await
+                .map_err(|_| format!("provider for {session_id} stopped before switching"))??;
+        }
+
+        if context.is_empty() {
+            self.database.clear_account_handoff(session_id.to_string()).await?;
+        } else {
+            self.database
+                .save_account_handoff(session_id.to_string(), context)
+                .await?;
+        }
+
+        session.profile = chosen.clone();
+        session.external_id = None;
+        session.state = "dormant".into();
+        self.database
+            .update_session(
+                session_id.to_string(),
+                crate::workbench::store::SessionPatch {
+                    external_id: Some(None),
+                    profile: Some(chosen.clone()),
+                    state: Some("dormant".into()),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await?;
+        super::provider::append_started(&self.database, &session, false).await?;
+        super::provider::append_notice(
+            &self.database,
+            session_id,
+            &format!("Account changed to {}. The next message continues this conversation there.", profile.name),
+        )
+        .await?;
+        self.database
+            .append(serde_json::from_value(json!({
+                "type":"session.state", "sessionId":session_id, "seq":0,
+                "at":chrono::Utc::now().to_rfc3339(), "state":"dormant", "label":"Asleep"
+            })).map_err(|error| error.to_string())?)
+            .await?;
+        Ok(json!({"ok":true,"profile":chosen}))
+    }
+
     /// Execute one already-decoded WBP command and return the exact JSON body
     /// the former helper returned. Unknown discriminators have already been
     /// refused by `protocol::Command` before they can reach this registry.
@@ -981,6 +1076,7 @@ impl WorkbenchRegistry {
                 self.signins.cancel(brand, id)?;
                 Ok(json!({"ok":true}))
             }
+            CommandKind::SessionProfile => self.switch_profile(command).await,
             CommandKind::ProvidersList => {
                 let mut providers = [
                     (
@@ -1201,6 +1297,68 @@ mod tests {
             kind,
             fields: fields.as_object().cloned().unwrap_or_else(Map::new),
         }
+    }
+
+    #[tokio::test]
+    async fn changing_account_keeps_the_chat_and_hands_its_words_to_the_next_process() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let registry = WorkbenchRegistry::new(
+            database.clone(),
+            RegistryPaths {
+                home: root.path().join("home"),
+                claude_config: root.path().join("claude"),
+                codex_home: root.path().join("codex"),
+                profiles: root.path().join("profiles"),
+                media: root.path().join("media"),
+            },
+            Arc::new(FakeFactory { calls: Arc::new(AtomicUsize::new(0)) }),
+        );
+        database.create_session(crate::workbench::store::Session {
+            id: "session-1".into(),
+            brand: "claude".into(),
+            external_id: Some("old-thread".into()),
+            project_id: "project".into(),
+            project_path: "/project".into(),
+            cwd: "/project".into(),
+            model: None,
+            permission_mode: "default".into(),
+            effort: None,
+            collaboration_mode: None,
+            profile: None,
+            title: Some("Existing chat".into()),
+            state: "idle".into(),
+            origin: "app".into(),
+            created_at: "2026-09-13T00:00:00Z".into(),
+            last_active_at: "2026-09-13T00:00:00Z".into(),
+            last_spoke_at: None,
+            begun_by: Some("person".into()),
+        }).await.unwrap();
+        for value in [
+            json!({"type":"message.started","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:01Z","messageId":"u1","role":"user"}),
+            json!({"type":"text.delta","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:01Z","messageId":"u1","text":"remember the blue door"}),
+            json!({"type":"message.completed","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:01Z","messageId":"u1"}),
+        ] {
+            database.append(serde_json::from_value(value).unwrap()).await.unwrap();
+        }
+        let made = registry.execute(&command(
+            CommandKind::ProfileCreate,
+            json!({"brand":"claude","name":"Work"}),
+        )).await.unwrap();
+        let profile = made["profile"]["id"].as_str().unwrap();
+
+        registry.execute(&command(
+            CommandKind::SessionProfile,
+            json!({"sessionId":"session-1","profileId":profile}),
+        )).await.unwrap();
+
+        let stored = database.get_session("session-1".into()).await.unwrap().unwrap();
+        assert_eq!(stored.profile.as_deref(), Some(profile));
+        assert_eq!(stored.external_id, None, "the old account's remote id is not reused");
+        assert_eq!(stored.state, "dormant");
+        let handoff = database.saved_account_handoff("session-1".into()).await.unwrap().unwrap();
+        assert!(handoff.contains("User: remember the blue door"), "{handoff}");
+        assert!(database.timeline_count("session-1".into()).await.unwrap() >= 1);
     }
 
     #[tokio::test]

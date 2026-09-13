@@ -61,6 +61,10 @@ enum Command {
     RememberBeadLink(String, String, String, String, Reply<()>),
     SessionsForBead(String, Reply<Vec<Session>>),
     Search(String, usize, Reply<Vec<SearchHit>>),
+    AccountHandoff(String, Reply<String>),
+    SaveAccountHandoff(String, String, Reply<()>),
+    SavedAccountHandoff(String, Reply<Option<String>>),
+    ClearAccountHandoff(String, Reply<()>),
     Spend(Reply<Vec<Spend>>),
     ToolDetails(String, String, Reply<Option<serde_json::Value>>),
     Append(Event, Reply<Option<Event>>),
@@ -256,6 +260,18 @@ impl ChatDb {
     pub async fn search(&self, query: String, limit: usize) -> Result<Vec<SearchHit>, String> {
         self.request(|reply| Command::Search(query, limit, reply))
             .await
+    }
+    pub async fn account_handoff(&self, id: String) -> Result<String, String> {
+        self.request(|reply| Command::AccountHandoff(id, reply)).await
+    }
+    pub async fn save_account_handoff(&self, id: String, context: String) -> Result<(), String> {
+        self.request(|reply| Command::SaveAccountHandoff(id, context, reply)).await
+    }
+    pub async fn saved_account_handoff(&self, id: String) -> Result<Option<String>, String> {
+        self.request(|reply| Command::SavedAccountHandoff(id, reply)).await
+    }
+    pub async fn clear_account_handoff(&self, id: String) -> Result<(), String> {
+        self.request(|reply| Command::ClearAccountHandoff(id, reply)).await
     }
     pub async fn spend(&self) -> Result<Vec<Spend>, String> {
         self.request(Command::Spend).await
@@ -461,6 +477,9 @@ fn apply_session_fact(store: &Store, session_id: &str, event: &Event) -> rusqlit
             }
             if event.fields.contains_key("collaborationMode") {
                 patch.collaboration_mode = Some(string(event, "collaborationMode"));
+            }
+            if event.fields.contains_key("profile") {
+                patch.profile = Some(string(event, "profile"));
             }
         }
         EventKind::SessionState => {
@@ -758,6 +777,10 @@ fn run(
             ),
             Command::SessionsForBead(id, reply) => respond(reply, store.sessions_for_bead(&id)),
             Command::Search(query, limit, reply) => respond(reply, store.search(&query, limit)),
+            Command::AccountHandoff(id, reply) => respond(reply, store.account_handoff(&id)),
+            Command::SaveAccountHandoff(id, context, reply) => respond(reply, store.save_account_handoff(&id, &context)),
+            Command::SavedAccountHandoff(id, reply) => respond(reply, store.saved_account_handoff(&id)),
+            Command::ClearAccountHandoff(id, reply) => respond(reply, store.clear_account_handoff(&id)),
             Command::Spend(reply) => respond(reply, store.spend()),
             Command::ToolDetails(session, tool, reply) => {
                 respond(reply, store.tool_details(&session, &tool))

@@ -154,6 +154,7 @@ pub struct SessionPatch {
     pub permission_mode: Option<String>,
     pub effort: Option<Option<String>>,
     pub collaboration_mode: Option<Option<String>>,
+    pub profile: Option<Option<String>>,
 }
 
 /// One match, as the panel draws it: the sentence it fell in, the words that
@@ -314,6 +315,7 @@ impl Store {
         let transaction = self.connection.transaction()?;
         transaction.execute("DELETE FROM event WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM bead_link WHERE session_id = ?1", [id])?;
+        transaction.execute("DELETE FROM session_handoff WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM session WHERE id = ?1", [id])?;
         transaction.commit()
     }
@@ -337,6 +339,7 @@ impl Store {
         nullable("model", patch.model);
         nullable("effort", patch.effort);
         nullable("collaboration_mode", patch.collaboration_mode);
+        nullable("profile", patch.profile);
         if let Some(state) = patch.state {
             sets.push("state = ?".to_string());
             values.push(SqlValue::Text(state));
@@ -1096,6 +1099,51 @@ fn held_in_its_project(session: &Session) -> bool {
             })?
             .collect();
         found
+    }
+
+    /// A compact, provider-neutral handoff for a fresh process that takes an
+    /// existing chat over under another account. The local transcript remains
+    /// authoritative; this is only enough conversational context for the new
+    /// provider session to continue coherently.
+    pub fn account_handoff(&self, session_id: &str) -> rusqlite::Result<String> {
+        let mut statement = self.connection.prepare(
+            "SELECT role, text FROM message WHERE session_id=?1 AND text<>'' ORDER BY at DESC LIMIT 80",
+        )?;
+        let mut messages = statement
+            .query_map([session_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        messages.reverse();
+        let mut kept = Vec::new();
+        let mut length = 0usize;
+        for (role, text) in messages.into_iter().rev() {
+            let line = format!("{}: {}", if role == "assistant" { "Assistant" } else { "User" }, text);
+            if length + line.len() > 60_000 && !kept.is_empty() {
+                break;
+            }
+            length += line.len();
+            kept.push(line);
+        }
+        kept.reverse();
+        Ok(kept.join("\n\n"))
+    }
+
+    pub fn save_account_handoff(&self, session_id: &str, context: &str) -> rusqlite::Result<()> {
+        self.connection.execute(
+            "INSERT INTO session_handoff(session_id, context) VALUES (?1,?2) ON CONFLICT(session_id) DO UPDATE SET context=excluded.context",
+            params![session_id, context],
+        )?;
+        Ok(())
+    }
+
+    pub fn saved_account_handoff(&self, session_id: &str) -> rusqlite::Result<Option<String>> {
+        self.connection
+            .query_row("SELECT context FROM session_handoff WHERE session_id=?1", [session_id], |row| row.get(0))
+            .optional()
+    }
+
+    pub fn clear_account_handoff(&self, session_id: &str) -> rusqlite::Result<()> {
+        self.connection.execute("DELETE FROM session_handoff WHERE session_id=?1", [session_id])?;
+        Ok(())
     }
 
     /// The sentence a match fell in, and the words as they were actually
@@ -2216,6 +2264,12 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
     {
         transaction.execute_batch("ALTER TABLE session ADD COLUMN profile TEXT;")?;
     }
+    transaction.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_handoff (
+           session_id TEXT PRIMARY KEY,
+           context TEXT NOT NULL
+         );",
+    )?;
 
     let event_columns = columns(transaction, "event")?;
     for column in ["provider", "provider_thread_id", "provider_event_id"] {

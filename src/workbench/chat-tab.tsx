@@ -32,6 +32,7 @@ import {
   SlidersHorizontal,
   Square,
   Star,
+  UserRound,
   Workflow,
   X,
 } from 'lucide-react';
@@ -1272,23 +1273,37 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const live = useLiveSessions().find((s) => s.id === sessionId);
   const sessionBrand = live?.brand ?? facts?.brand ?? 'claude';
   const selectedModel = view.menu.models.find((model) => model.value === view.model);
-  // The chat's own account, read once for the brand it runs on. The chat
-  // knows the id it was started with; the name belongs to the account and
-  // moves when it is renamed, so it is looked up rather than remembered.
+  // The chat's own accounts are needed even on the system account: that is the
+  // row from which somebody switches to a named one. Names belong to the
+  // account and move when it is renamed, so they are looked up rather than
+  // remembered on the chat.
   useEffect(() => {
     const brand = sessionBrand;
-    if (!view.profile || brand === 'local') return;
+    if (!ACCOUNTED_BRANDS.includes(brand)) return;
     if (accounts[brand]) return;
     let gone = false;
     void sendCommand<{ profiles: ProfileChoice[] }>({ type: 'profiles.list', brand })
       .then(({ profiles }) => {
         if (!gone) setAccounts((was) => ({ ...was, [brand]: profiles }));
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        if (!gone) setSteerError(error instanceof Error ? error.message : String(error));
+      });
     return () => {
       gone = true;
     };
-  }, [accounts, sessionBrand, view.profile]);
+  }, [accounts, sessionBrand]);
+  const sessionAccounts = accounts[sessionBrand] ?? [];
+  const sessionProfile = view.profile ?? 'system';
+  const sessionProfileLabel =
+    sessionAccounts.find((profile) => profile.id === sessionProfile)?.name ??
+    (view.profile || 'System');
+  const switchAccount = useCallback((profileId: string) => {
+    if (!sessionId) return;
+    setSteerError(null);
+    void sendCommand({ type: 'session.profile', sessionId, profileId })
+      .catch((error: unknown) => setSteerError(error instanceof Error ? error.message : String(error)));
+  }, [sessionId]);
   /**
    * What to call the chat's account, or nothing at all.
    *
@@ -2433,6 +2448,25 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 }}
               />
             )}
+            {sessionAccounts.length > 1 && (
+              <Picker
+                icon={<UserRound className="h-3.5 w-3.5" />}
+                label="Account"
+                testid="account-picker"
+                current={sessionProfile}
+                currentLabel={sessionProfileLabel}
+                asleep={asleep}
+                options={sessionAccounts.map((profile) => ({
+                  value: profile.id,
+                  label: profile.name,
+                  hint: profile.system ? 'The account configured on this computer' : undefined,
+                  unavailable: busy && profile.id !== sessionProfile
+                    ? 'Wait for the current response to finish'
+                    : undefined,
+                }))}
+                onPick={switchAccount}
+              />
+            )}
             <Picker
               icon={<ModelIcon brand={sessionBrand} model={view.model} identity={selectedModel?.family ?? selectedModel?.publisher} className="h-3.5 w-3.5" />}
               label="Model"
@@ -2610,6 +2644,25 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                       setSteerError(error instanceof Error ? error.message : String(error)),
                     );
                   }}
+                />
+              )}
+              {sessionAccounts.length > 1 && (
+                <Picker
+                  icon={<UserRound className="h-4 w-4" />}
+                  label="Account"
+                  testid="mobile-account-picker"
+                  current={sessionProfile}
+                  currentLabel={sessionProfileLabel}
+                  asleep={asleep}
+                  options={sessionAccounts.map((profile) => ({
+                    value: profile.id,
+                    label: profile.name,
+                    hint: profile.system ? 'The account configured on this computer' : undefined,
+                    unavailable: busy && profile.id !== sessionProfile
+                      ? 'Wait for the current response to finish'
+                      : undefined,
+                  }))}
+                  onPick={switchAccount}
                 />
               )}
               <Picker

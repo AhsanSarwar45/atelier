@@ -601,6 +601,9 @@ enum Control {
     Close {
         reply: Reply,
     },
+    Disconnect {
+        reply: Reply,
+    },
 }
 
 enum ConfigTarget {
@@ -2073,8 +2076,11 @@ impl AcpDriver {
             other => return Err(format!("ACP adapter is not configured for {other}")),
         };
         let task_policy = session_policy::build(Path::new(&session.cwd))?;
-        let create_remote =
-            create || (brand == super::super::local::BRAND && session.external_id.is_none());
+        // Switching accounts deliberately clears the old provider id: that id
+        // belongs to the old account's record directory. The local chat stays
+        // the same, but its replacement provider process needs a new remote
+        // session just as a brand-new chat does.
+        let create_remote = create || session.external_id.is_none();
         if create {
             database.create_session(session.clone()).await?;
             super::super::provider::append_started(&database, &session, false).await?;
@@ -2734,6 +2740,15 @@ impl AcpDriver {
                                     let _ = reply.send(result);
                                     break;
                                 }
+                                Control::Disconnect { reply } => {
+                                    // Account switching replaces only the
+                                    // local authenticated process. The remote
+                                    // conversation stays available if the
+                                    // person later switches back.
+                                    closing.store(true, Ordering::Release);
+                                    let _ = reply.send(Ok(json!({"ok":true})));
+                                    break;
+                                }
                             }
                         }
                         io.shutdown().await;
@@ -2824,20 +2839,30 @@ impl AcpDriver {
                     command.at("text").as_str().unwrap_or_default(),
                 )
                 .await?;
-                let content =
+                let mut content =
                     prompt_content(command, Carries::unpacked(self.carries.load(Ordering::SeqCst)))?;
+                let handoff = self.database.saved_account_handoff(self.session.id.clone()).await?;
+                if let Some(context) = handoff.as_deref().filter(|context| !context.is_empty()) {
+                    content.insert(0, ContentBlock::Text(TextContent::new(format!(
+                        "<account_handoff>\nThe account changed during this chat. Continue from this prior conversation without repeating it:\n\n{context}\n</account_handoff>"
+                    ))));
+                }
                 let images = command
                     .fields
                     .get("images")
                     .and_then(Value::as_array)
                     .map(Vec::as_slice)
                     .unwrap_or(&[]);
-                self.submit_user_turn(
+                let accepted = self.submit_user_turn(
                     command.at("text").as_str().unwrap_or_default(),
                     images,
                     content,
                 )
-                .await
+                .await?;
+                if handoff.is_some() {
+                    self.database.clear_account_handoff(self.session.id.clone()).await?;
+                }
+                Ok(accepted)
             }
             CommandKind::AskAnswer => {
                 let id = command.at("askId").as_str().unwrap_or_default();
@@ -3090,6 +3115,10 @@ impl ProviderDriver for AcpDriver {
 
     fn close<'a>(&'a mut self) -> DriverFuture<'a> {
         Box::pin(async move { self.control(|reply| Control::Close { reply }).await })
+    }
+
+    fn retire<'a>(&'a mut self) -> DriverFuture<'a> {
+        Box::pin(async move { self.control(|reply| Control::Disconnect { reply }).await })
     }
 }
 
