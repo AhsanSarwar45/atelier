@@ -1,7 +1,8 @@
 'use client';
 import { MemoryStick } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { BadgeButton } from '@/components/ui/badge';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { apiUrl } from '@/lib/api-base';
 
@@ -25,9 +26,14 @@ export function MemoryBadge() {
   useEffect(() => { read(); const timer = window.setInterval(read, 3_000); return () => window.clearInterval(timer); }, [read]);
   if (!report) return null;
   return <Popover onOpenChange={open => open && read()}>
-    <PopoverTrigger asChild><BadgeButton data-testid="memory-badge" aria-label={`Atelier RAM usage: ${memoryWords(report.totalBytes)}`} className="hidden shrink-0 gap-1 md:inline-flex">
-      <MemoryStick className="size-3" aria-hidden="true" /><span>{memoryWords(report.totalBytes)}</span>
-    </BadgeButton></PopoverTrigger>
+    <PopoverTrigger asChild>
+      <Badge asChild appearance="outline" size="sm" shape="circle" className="hidden shrink-0 md:inline-flex">
+        <Button variant="ghost" size="sm" data-testid="memory-badge" aria-label={`Atelier RAM usage: ${memoryWords(report.totalBytes)}`}>
+          <MemoryStick className="size-3" aria-hidden="true" />
+          <span>{memoryWords(report.totalBytes)}</span>
+        </Button>
+      </Badge>
+    </PopoverTrigger>
     <PopoverContent align="start" className="w-80 p-0" data-testid="memory-popup">
       <div className="border-b px-3 py-2"><p className="text-sm font-medium">RAM usage</p><p className="text-xs text-muted-foreground">Atelier and all {report.processes} processes</p></div>
       <div className="max-h-72 overflow-y-auto p-2 text-sm">
