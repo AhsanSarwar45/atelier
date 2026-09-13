@@ -28,6 +28,10 @@ describe('the endpoint a chat says it is on', () => {
     expect(endpointWords(provider({ apiType: 'anthropic', baseUrl: 'https://api.anthropic.com' }))).toBeNull();
   });
 
+  it('does not draw the OpenAI endpoint badge', () => {
+    expect(endpointWords(provider({ apiType: 'openai', baseUrl: 'https://api.openai.com/v1' }))).toBeNull();
+  });
+
   it('names the service when the chat is on another one', () => {
     const said = endpointWords(provider({ apiType: 'bedrock', baseUrl: 'https://bedrock-runtime.us-east-1.amazonaws.com' }));
     expect(said?.label).toBe('Bedrock');

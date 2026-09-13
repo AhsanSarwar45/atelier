@@ -45,6 +45,7 @@ export function endpointWords(providers: ApiProvider[]): { label: string; title:
   const current = providers.find((provider) => provider.current)?.current;
   if (!current) return null;
   if (current.apiType === ORDINARY_API.apiType && current.baseUrl === ORDINARY_API.baseUrl) return null;
+  if (current.apiType.toLowerCase() === 'openai') return null;
   // Its host, not the whole URL: a chip is a few characters wide and the rest
   // of the address is in the tooltip beside it.
   let host = current.baseUrl;
