@@ -11,7 +11,9 @@
  * Two pages, so the cursor is followed rather than assumed.
  */
 const readline = require('node:readline');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
+const { existsSync, writeFileSync } = require('node:fs');
+const { join } = require('node:path');
 
 function providerModels() {
   const provider = process.env.CLAUDE_CODE_EXECUTABLE ?? process.env.CODEX_PATH;
@@ -239,7 +241,28 @@ let started = 0;
 let asking = 9100;
 const selectedModels = new Map();
 
+async function dropOnceWithOwnedProvider(sessionId) {
+  const sentinel = process.env.BEADS_E2E_ACP_DROP_ONCE;
+  if (!sentinel || existsSync(sentinel)) return false;
+  const holder = spawn(process.execPath, [join(__dirname, 'owned-provider-holder.cjs'), sessionId], {
+    detached: true,
+    env: process.env,
+    stdio: 'ignore',
+  });
+  holder.unref();
+  const marker = join(process.env.CLAUDE_CONFIG_DIR, 'sessions', `${holder.pid}.json`);
+  const until = Date.now() + 2_000;
+  while (!existsSync(marker) && Date.now() < until) {
+    await new Promise((settle) => setTimeout(settle, 10));
+  }
+  writeFileSync(sentinel, `${holder.pid}\n`);
+  // Break the ACP stream without cleaning up the provider, reproducing the
+  // production failure where the driver vanished but Claude stayed alive.
+  process.exit(86);
+}
+
 async function turn(id, params) {
+  if (await dropOnceWithOwnedProvider(params?.sessionId)) return;
   asking += 1;
   const reply = await ask({
     id: asking,

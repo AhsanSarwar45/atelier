@@ -14,6 +14,47 @@ use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+/// Process provenance carried through the ACP adapter into its provider.
+///
+/// A random value belongs to one running Atelier process. It survives a
+/// driver-channel failure and provider reparenting, while a new Atelier process
+/// receives a different value and therefore treats survivors from an older
+/// instance as external.
+pub const OWNER_ENV: &str = "ATELIER_PROVIDER_OWNER";
+
+pub fn owner_token() -> &'static str {
+    static TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TOKEN.get_or_init(|| uuid::Uuid::new_v4().to_string())
+}
+
+fn carries_owner_token(pid: u32, proc_root: &Path) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let Ok(environment) = fs::read(proc_root.join(pid.to_string()).join("environ")) else {
+            return false;
+        };
+        environment.split(|byte| *byte == 0).any(|entry| {
+            entry
+                .strip_prefix(format!("{OWNER_ENV}=").as_bytes())
+                .is_some_and(|value| value == owner_token().as_bytes())
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (pid, proc_root);
+        false
+    }
+}
+
+/// Whether a provider belongs to this running Atelier instance.
+///
+/// The explicit token is authoritative and remains readable after its adapter
+/// dies. Process-group ancestry is retained as the startup fallback for an
+/// adapter/provider that has not inherited the token yet.
+pub fn owned_by_this_process(pid: u32, proc_root: &Path) -> bool {
+    carries_owner_token(pid, proc_root) || in_a_group_this_process_started(pid, proc_root)
+}
+
 fn record_cwd(path: &Path) -> Option<String> {
     let mut file = File::open(path).ok()?;
     let mut front = Vec::with_capacity(64_000);
@@ -55,9 +96,11 @@ pub(crate) fn changed_record_folders(
     for path in paths {
         // Each account keeps its own record directory, so a written path is
         // placed against every one of them (bw-5ihw.8).
-        let under_claude = claude_projects
-            .iter()
-            .find_map(|root| path.strip_prefix(root).ok().map(|relative| (root, relative)));
+        let under_claude = claude_projects.iter().find_map(|root| {
+            path.strip_prefix(root)
+                .ok()
+                .map(|relative| (root, relative))
+        });
         let (key, is_claude) = if let Some((root, relative)) = under_claude {
             let project = relative.components().next()?.as_os_str();
             (root.join(project), true)
@@ -525,7 +568,8 @@ pub fn in_a_group_this_process_started(pid: u32, proc_root: &Path) -> bool {
         if group == pid {
             return false;
         }
-        fields(proc_root, group).is_some_and(|(leader_parent, _)| leader_parent == std::process::id())
+        fields(proc_root, group)
+            .is_some_and(|(leader_parent, _)| leader_parent == std::process::id())
     }
     #[cfg(all(unix, not(target_os = "linux")))]
     {
@@ -535,7 +579,10 @@ pub fn in_a_group_this_process_started(pid: u32, proc_root: &Path) -> bool {
                 .args(["-o", &format!("{column}="), "-p", &pid.to_string()])
                 .output()
                 .ok()?;
-            String::from_utf8_lossy(&out.stdout).trim().parse::<u32>().ok()
+            String::from_utf8_lossy(&out.stdout)
+                .trim()
+                .parse::<u32>()
+                .ok()
         }
         let Some(group) = ask(pid, "pgid") else {
             return false;
@@ -702,13 +749,16 @@ fn marker_doing(status: &str) -> Option<HeldDoing> {
     })
 }
 
-/// Live Claude markers, newest live marker winning when two name one chat.
+/// Live Claude markers, with the newest marker supplying activity metadata and
+/// every live marker contributing its PID. Keeping the complete PID set is
+/// part of the ownership invariant: an Atelier-owned process must never hide a
+/// second, genuinely external process that names the same chat.
 pub fn claude_holds(config: &Path, proc_root: &Path, now_ms: i64) -> Vec<ProviderHold> {
     let sessions = config.join("sessions");
     let Ok(entries) = fs::read_dir(&sessions) else {
         return Vec::new();
     };
-    let mut newest: HashMap<String, ClaudeMarker> = HashMap::new();
+    let mut sessions_by_id: HashMap<String, (ClaudeMarker, BTreeSet<u32>)> = HashMap::new();
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
@@ -724,16 +774,19 @@ pub fn claude_holds(config: &Path, proc_root: &Path, now_ms: i64) -> Vec<Provide
             continue;
         };
         let key = marker.session_id.to_lowercase();
-        if newest
-            .get(&key)
-            .is_none_or(|old| old.started_at < marker.started_at)
-        {
-            newest.insert(key, marker);
-        }
+        sessions_by_id
+            .entry(key)
+            .and_modify(|(newest, pids)| {
+                pids.insert(marker.pid);
+                if newest.started_at < marker.started_at {
+                    *newest = marker.clone();
+                }
+            })
+            .or_insert_with(|| (marker.clone(), BTreeSet::from([marker.pid])));
     }
-    let mut holds: Vec<_> = newest
+    let mut holds: Vec<_> = sessions_by_id
         .into_values()
-        .map(|marker| {
+        .map(|(marker, pids)| {
             let record = crate::workbench::claude::history::find_record(config, &marker.session_id);
             let spoke_at = record.as_deref().and_then(record_spoke_at);
             let said = told(&sessions, &marker.session_id, now_ms, spoke_at);
@@ -786,7 +839,7 @@ pub fn claude_holds(config: &Path, proc_root: &Path, now_ms: i64) -> Vec<Provide
                 since,
                 turn_since: None,
                 typical_ms: None,
-                pids: BTreeSet::from([marker.pid]),
+                pids,
             }
         })
         .collect();
@@ -1543,6 +1596,38 @@ mod tests {
         assert!(claude_holds(&config, &proc_root, 1_000).is_empty());
     }
 
+    #[test]
+    fn every_live_pid_is_retained_when_markers_name_the_same_chat() {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("claude");
+        let sessions = config.join("sessions");
+        let proc_root = root.path().join("proc");
+        fs::create_dir_all(&sessions).unwrap();
+        for (pid, started_at, entrypoint) in [(42_u32, 100, "cli"), (43, 200, "sdk")] {
+            fs::create_dir_all(proc_root.join(pid.to_string())).unwrap();
+            fs::write(proc_root.join(format!("{pid}/stat")), stat("9001")).unwrap();
+            fs::write(
+                sessions.join(format!("{pid}.json")),
+                serde_json::json!({
+                    "sessionId": CHAT, "pid": pid, "cwd": "/project",
+                    "startedAt": started_at, "procStart": "9001",
+                    "entrypoint": entrypoint, "kind": "interactive"
+                })
+                .to_string(),
+            )
+            .unwrap();
+        }
+
+        let holds = claude_holds(&config, &proc_root, 1_000);
+        assert_eq!(holds.len(), 1);
+        assert_eq!(
+            holds[0].holder,
+            Holder::Program,
+            "newest marker supplies metadata"
+        );
+        assert_eq!(holds[0].pids, BTreeSet::from([42, 43]));
+    }
+
     /**
      * A marker that last said "idle" does not go on saying it while the chat
      * is working (bw-t26l.20).
@@ -1582,7 +1667,11 @@ mod tests {
         });
         fs::write(&record, format!("{working}\n")).unwrap();
         let hold = claude_holds(&config, &proc_root, 1_764_000_060_000).remove(0);
-        assert_eq!(hold.doing, HeldDoing::Working, "the record has spoken since");
+        assert_eq!(
+            hold.doing,
+            HeldDoing::Working,
+            "the record has spoken since"
+        );
 
         // And where the record has NOT spoken since, the marker's word stands.
         let answered = serde_json::json!({
@@ -1669,9 +1758,9 @@ mod tests {
             std::slice::from_ref(&codex_home),
             0,
         )
-            .into_iter()
-            .find(|hold| hold.id == CHAT)
-            .unwrap();
+        .into_iter()
+        .find(|hold| hold.id == CHAT)
+        .unwrap();
         assert_eq!(hold.doing, HeldDoing::Running);
         assert_eq!(
             hold.detail.as_deref(),
@@ -1848,7 +1937,11 @@ mod tests {
         // Silent through the compaction — measured at 97 to 186 seconds on the
         // fourteen in this project's own longest record.
         let quiet = root.path().join("quiet.jsonl");
-        fs::write(&quiet, "{\"type\":\"user\",\"timestamp\":\"2027-01-15T08:00:00.000Z\"}\n").unwrap();
+        fs::write(
+            &quiet,
+            "{\"type\":\"user\",\"timestamp\":\"2027-01-15T08:00:00.000Z\"}\n",
+        )
+        .unwrap();
         let before = record_spoke_at(&quiet);
         let (doing, _, detail) = told(&sessions, chat, now, before).expect("the claim to stand");
         assert_eq!(doing, HeldDoing::Summarising);
@@ -1999,6 +2092,24 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn explicit_owner_token_survives_without_process_ancestry() {
+        let root = tempfile::tempdir().unwrap();
+        let process = root.path().join("42");
+        std::fs::create_dir(&process).unwrap();
+        std::fs::write(
+            process.join("environ"),
+            format!("PATH=/bin\0{OWNER_ENV}={}\0", owner_token()),
+        )
+        .unwrap();
+
+        // There is deliberately no stat file and therefore no parent or group
+        // to infer from. The per-instance token alone is sufficient proof.
+        assert!(!in_a_group_this_process_started(42, root.path()));
+        assert!(owned_by_this_process(42, root.path()));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn native_workbench_services_external_a_member_of_a_group_we_lead_is_ours() {
         use std::io::BufRead as _;
         use std::os::unix::process::CommandExt as _;
@@ -2016,13 +2127,30 @@ mod tests {
             .unwrap();
         let member: u32 = line.trim().parse().unwrap();
         let proc_root = Path::new("/proc");
-        assert!(in_a_group_this_process_started(member, proc_root), "the member under our leader");
-        assert!(!in_a_group_this_process_started(leader.id(), proc_root), "the leader itself is a plain child");
+        assert!(
+            in_a_group_this_process_started(member, proc_root),
+            "the member under our leader"
+        );
+        assert!(
+            !in_a_group_this_process_started(leader.id(), proc_root),
+            "the leader itself is a plain child"
+        );
         // A plain child in our own group is not ours by this rule either.
-        let mut plain = std::process::Command::new("sleep").arg("60").spawn().unwrap();
-        assert!(!in_a_group_this_process_started(plain.id(), proc_root), "a plain child");
-        assert!(!in_a_group_this_process_started(std::process::id(), proc_root), "ourselves");
-        let _ = std::process::Command::new("kill").args(["-9", &member.to_string()]).status();
+        let mut plain = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .unwrap();
+        assert!(
+            !in_a_group_this_process_started(plain.id(), proc_root),
+            "a plain child"
+        );
+        assert!(
+            !in_a_group_this_process_started(std::process::id(), proc_root),
+            "ourselves"
+        );
+        let _ = std::process::Command::new("kill")
+            .args(["-9", &member.to_string()])
+            .status();
         let _ = leader.kill();
         let _ = leader.wait();
         let _ = plain.kill();

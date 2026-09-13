@@ -18,6 +18,19 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
+/// One process-level ownership reading, classified at the registry boundary.
+///
+/// Callers must never interpret raw provider markers themselves: a marker
+/// written by a provider this process started is ours even after its driver
+/// channel has failed. Keeping that distinction in the type makes it
+/// impossible for a command guard and the browser to disagree about who owns
+/// a conversation.
+#[derive(Default)]
+pub struct ProviderOwnership {
+    pub ours: Vec<ProviderHold>,
+    pub external: Vec<ProviderHold>,
+}
+
 pub type DriverFuture<'a> = Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>;
 pub type LaunchFuture<'a> =
     Pin<Box<dyn Future<Output = Result<LaunchedSession, String>> + Send + 'a>>;
@@ -25,7 +38,9 @@ pub type LaunchFuture<'a> =
 /// A live provider behind the browser's existing command vocabulary.
 pub trait ProviderDriver: Send {
     fn brand(&self) -> &'static str;
-    fn reconciler(&self) -> Option<super::status::Reconciler> { None }
+    fn reconciler(&self) -> Option<super::status::Reconciler> {
+        None
+    }
     fn command<'a>(&'a mut self, command: &'a Command) -> DriverFuture<'a>;
     fn next<'a>(&'a mut self) -> DriverFuture<'a> {
         Box::pin(async {
@@ -88,7 +103,9 @@ struct Driver {
 }
 impl std::ops::Deref for Driver {
     type Target = mpsc::UnboundedSender<DriverRequest>;
-    fn deref(&self) -> &Self::Target { &self.requests }
+    fn deref(&self) -> &Self::Target {
+        &self.requests
+    }
 }
 
 async fn reconcile_session(
@@ -101,12 +118,18 @@ async fn reconcile_session(
     // cannot write its outcome over a newly attached turn.
     let live = drivers.read().await;
     if let Some(driver) = live.get(session_id).filter(|driver| !driver.is_closed()) {
-        if let Some(reconcile) = &driver.reconcile { return reconcile().await; }
+        if let Some(reconcile) = &driver.reconcile {
+            return reconcile().await;
+        }
         // Only test drivers lack an actual runtime probe.
         return Ok(Value::Null);
     }
     if launching.load(std::sync::atomic::Ordering::Acquire) != 0 {
-        if database.get_session(session_id.to_string()).await?.is_some_and(|session| session.state == "starting") {
+        if database
+            .get_session(session_id.to_string())
+            .await?
+            .is_some_and(|session| session.state == "starting")
+        {
             return Ok(Value::Null);
         }
     }
@@ -115,7 +138,9 @@ async fn reconcile_session(
 
 struct LaunchGuard(Arc<std::sync::atomic::AtomicUsize>);
 impl Drop for LaunchGuard {
-    fn drop(&mut self) { self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel); }
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
 }
 
 async fn supervise_driver(
@@ -128,14 +153,19 @@ async fn supervise_driver(
         match requests.try_recv() {
             Ok(DriverRequest::Command(command, reply)) => {
                 let result = driver.command(&command).await;
-                let detached = result.as_ref().ok().is_some_and(|value| value["detached"] == true);
+                let detached = result
+                    .as_ref()
+                    .ok()
+                    .is_some_and(|value| value["detached"] == true);
                 if detached {
                     // Close before acknowledging Stop. An immediate next prompt
                     // must resume, rather than queue onto this retired driver.
                     requests.close();
                 }
                 let _ = reply.send(result);
-                if detached { return; }
+                if detached {
+                    return;
+                }
                 continue;
             }
             Ok(DriverRequest::WindowNow(reply)) => {
@@ -173,8 +203,21 @@ async fn supervise_driver(
             // Retire it; the registry's lazy prompt path will attach one fresh
             // run to the durable conversation. Keeping a dead handle around
             // makes later prompts claim to be Thinking with nobody reading.
-            Ok(Err(_)) => {
-                let _ = tokio::time::timeout(Duration::from_millis(250), driver.close()).await;
+            Ok(Err(error)) => {
+                let cleanup =
+                    tokio::time::timeout(Duration::from_millis(250), driver.close()).await;
+                let cleanup = match cleanup {
+                    Ok(Ok(_)) => "cleanup completed".to_string(),
+                    Ok(Err(why)) => format!("cleanup failed: {why}"),
+                    Err(_) => "cleanup timed out after 250ms".to_string(),
+                };
+                if let Ok(event) = serde_json::from_value(json!({
+                    "type":"error", "sessionId":session_id, "seq":0,
+                    "at":chrono::Utc::now().to_rfc3339(), "fatal":false,
+                    "message":format!("Provider stream closed: {error}; {cleanup}")
+                })) {
+                    let _ = database.append(event).await;
+                }
                 return;
             }
             Err(_) => {}
@@ -231,7 +274,9 @@ impl WorkbenchRegistry {
                         }
                     } else if let Ok(sessions) = db.list_sessions(None).await {
                         for session in sessions {
-                            if super::status::is_active(&session.state) || live.read().await.contains_key(&session.id) {
+                            if super::status::is_active(&session.state)
+                                || live.read().await.contains_key(&session.id)
+                            {
                                 let _ = reconcile_session(&db, &live, &starts, &session.id).await;
                             }
                         }
@@ -326,16 +371,43 @@ impl WorkbenchRegistry {
         self.profiles.everywhere(brand)
     }
 
-    /// Who is holding a chat open outside this app, across every account.
+    /// Who is holding each chat, partitioned by process provenance.
     ///
     /// A hold is found by reading a provider's own record directory, and each
     /// account keeps its own. Scanning only the directory the server booted
     /// with meant a chat open in a terminal on the work account read as
     /// nobody's (bw-5ihw.8).
-    pub fn provider_holds(&self, proc_root: &Path, now_ms: i64) -> Vec<ProviderHold> {
+    pub fn provider_ownership(&self, proc_root: &Path, now_ms: i64) -> ProviderOwnership {
         let claude = self.account_directories("claude", &self.paths.claude_config);
         let codex = self.account_directories("codex", &self.paths.codex_home);
-        external::provider_holds(&claude, proc_root, &codex, now_ms)
+        let mut ownership = ProviderOwnership::default();
+        for hold in external::provider_holds(&claude, proc_root, &codex, now_ms) {
+            let pids = hold.pids.clone();
+            let mut ours = hold.clone();
+            let mut outside = hold;
+            ours.pids.clear();
+            outside.pids.clear();
+            for pid in pids {
+                if external::owned_by_this_process(pid, proc_root) {
+                    ours.pids.insert(pid);
+                } else {
+                    outside.pids.insert(pid);
+                }
+            }
+            if !ours.pids.is_empty() {
+                ownership.ours.push(ours);
+            }
+            if !outside.pids.is_empty() {
+                ownership.external.push(outside);
+            }
+        }
+        ownership
+    }
+
+    /// Holds outside this Atelier process. This is the only ownership view a
+    /// browser or a command refusal may consume.
+    pub fn provider_holds(&self, proc_root: &Path, now_ms: i64) -> Vec<ProviderHold> {
+        self.provider_ownership(proc_root, now_ms).external
     }
 
     /// Every directory one brand's accounts live in, the boot directory alone
@@ -403,7 +475,11 @@ impl WorkbenchRegistry {
     }
 
     pub async fn has_driver(&self, session_id: &str) -> bool {
-        self.drivers.read().await.get(session_id).is_some_and(|driver| !driver.is_closed())
+        self.drivers
+            .read()
+            .await
+            .get(session_id)
+            .is_some_and(|driver| !driver.is_closed())
     }
 
     /// A test's stand-in for a live provider: the entry alone is what
@@ -412,10 +488,13 @@ impl WorkbenchRegistry {
     pub(crate) async fn pretend_driver(&self, session_id: &str) {
         let (requests, mut receiver) = mpsc::unbounded_channel();
         tokio::spawn(async move { while receiver.recv().await.is_some() {} });
-        self.drivers
-            .write()
-            .await
-            .insert(session_id.to_string(), Driver { requests, reconcile: None });
+        self.drivers.write().await.insert(
+            session_id.to_string(),
+            Driver {
+                requests,
+                reconcile: None,
+            },
+        );
     }
 
     /// Reading by URL is the same operation as clicking a stored row. It does
@@ -430,7 +509,8 @@ impl WorkbenchRegistry {
     }
 
     async fn launch(&self, command: &Command) -> Result<Value, String> {
-        self.launching.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        self.launching
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         let _launch = LaunchGuard(self.launching.clone());
 
         let mut launched = self.factory.launch(self.database.clone(), command).await?;
@@ -438,7 +518,10 @@ impl WorkbenchRegistry {
             return Ok(launched.reply);
         };
         let mut drivers = self.drivers.write().await;
-        if drivers.get(&launched.session_id).is_some_and(|driver| !driver.is_closed()) {
+        if drivers
+            .get(&launched.session_id)
+            .is_some_and(|driver| !driver.is_closed())
+        {
             drop(drivers);
             let mut driver = driver;
             let _ = driver.close().await;
@@ -447,14 +530,23 @@ impl WorkbenchRegistry {
         let (requests, receiver) = mpsc::unbounded_channel();
         let session_id = launched.session_id;
         let owner = requests.clone();
-        drivers.insert(session_id.clone(), Driver { requests, reconcile: driver.reconciler() });
+        drivers.insert(
+            session_id.clone(),
+            Driver {
+                requests,
+                reconcile: driver.reconciler(),
+            },
+        );
         drop(drivers);
         let live = self.drivers.clone();
         let database = self.database.clone();
         tokio::spawn(async move {
             supervise_driver(database.clone(), session_id.clone(), driver, receiver).await;
             let mut live = live.write().await;
-            if live.get(&session_id).is_some_and(|current| current.same_channel(&owner)) {
+            if live
+                .get(&session_id)
+                .is_some_and(|current| current.same_channel(&owner))
+            {
                 live.remove(&session_id);
                 // Even a dropped completion callback leaves no active status.
                 let _ = super::status::reconcile(&database, &session_id, None).await;
@@ -549,7 +641,14 @@ impl WorkbenchRegistry {
             .map_err(|_| format!("provider for {session_id} stopped before replying"))?
     }
 
-    async fn refuse_external_owner(&self, command: &Command) -> Result<(), String> {
+    /// Establish the only state from which a driverless command may proceed.
+    ///
+    /// A genuine outside owner blocks unless the caller explicitly requested
+    /// takeover. A surviving process from one of our retired drivers is not
+    /// outside ownership and is reaped before a replacement is launched. Thus
+    /// neither a false external refusal nor two Atelier-owned providers can be
+    /// produced by a dropped driver stream.
+    async fn prepare_unattached(&self, command: &Command, takeover: bool) -> Result<(), String> {
         let session = if let Ok(id) = Self::field(command, "sessionId") {
             self.database.get_session(id.to_string()).await?
         } else if let Ok(id) = Self::field(command, "externalId") {
@@ -568,40 +667,25 @@ impl WorkbenchRegistry {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64;
-        if self
-            .provider_holds(Path::new("/proc"), now)
+        let ownership = self.provider_ownership(Path::new("/proc"), now);
+        let outside = ownership
+            .external
             .iter()
-            .any(|hold| hold.id.eq_ignore_ascii_case(external_id))
-        {
+            .filter(|hold| hold.id.eq_ignore_ascii_case(external_id))
+            .flat_map(|hold| hold.pids.iter().copied())
+            .collect::<std::collections::BTreeSet<_>>();
+        if !outside.is_empty() && !takeover {
             return Err("Another program has this chat open".into());
         }
-        Ok(())
-    }
-
-    /// Stop only the provider processes already attributed to this exact
-    /// conversation, then wait for their PIDs to disappear before attaching
-    /// Atelier's driver. The browser sends `takeover` only when the ownership
-    /// row it is drawing says another local program currently owns the chat.
-    async fn take_over(&self, command: &Command) -> Result<(), String> {
-        let session_id = Self::field(command, "sessionId")?;
-        let Some(session) = self.database.get_session(session_id.to_string()).await? else {
-            return Err(format!("session {session_id} does not exist"));
-        };
-        let Some(external_id) = session.external_id.as_deref() else {
-            return Ok(());
-        };
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64;
-        let own_pid = std::process::id();
-        let pids = self
-            .provider_holds(Path::new("/proc"), now)
-            .into_iter()
+        let mut pids = ownership
+            .ours
+            .iter()
             .filter(|hold| hold.id.eq_ignore_ascii_case(external_id))
-            .flat_map(|hold| hold.pids)
-            .filter(|pid| *pid != own_pid)
+            .flat_map(|hold| hold.pids.iter().copied())
             .collect::<std::collections::BTreeSet<_>>();
+        if takeover {
+            pids.extend(outside);
+        }
         for pid in &pids {
             if let Err(error) = super::external::terminate_pid(*pid) {
                 // It can release between discovery and the signal. Only a PID
@@ -623,7 +707,11 @@ impl WorkbenchRegistry {
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        Err("Chat is still active elsewhere.".into())
+        Err(if takeover {
+            "Chat is still active elsewhere.".into()
+        } else {
+            "Atelier's previous provider process is still shutting down.".into()
+        })
     }
 
     async fn pin_saved_session(&self, command: &Command) -> Result<Value, String> {
@@ -728,7 +816,11 @@ impl WorkbenchRegistry {
             && session.model.is_some()
             && !matches!(
                 session.state.as_str(),
-                "thinking" | "streaming" | "running_tool" | "waiting_for_agents" | "waiting_permission"
+                "thinking"
+                    | "streaming"
+                    | "running_tool"
+                    | "waiting_for_agents"
+                    | "waiting_permission"
             )
         {
             let ready: crate::workbench::protocol::Event = serde_json::from_value(json!({
@@ -752,7 +844,9 @@ impl WorkbenchRegistry {
     pub async fn execute(&self, command: &Command) -> Result<Value, String> {
         let id = command.fields.get("sessionId").and_then(Value::as_str);
         if command.kind != CommandKind::SessionStop {
-            if let Some(id) = id { self.reconcile_status(id).await?; }
+            if let Some(id) = id {
+                self.reconcile_status(id).await?;
+            }
         }
         let result = self.execute_inner(command).await;
         let result_id = id.or_else(|| result.as_ref().ok().and_then(|value| value["id"].as_str()));
@@ -768,7 +862,6 @@ impl WorkbenchRegistry {
     }
 
     async fn execute_inner(&self, command: &Command) -> Result<Value, String> {
-
         match command.kind {
             // A project is what the reader narrows to, never what he needs to
             // have: the screen opens on "Personal files only", and a machine
@@ -847,8 +940,8 @@ impl WorkbenchRegistry {
                 for profile in self.profiles.list(brand) {
                     // The system profile is asked with the environment left
                     // alone; see `signin::standing`.
-                    let directory = (!profile.system)
-                        .then(|| self.profiles.chat_dir(brand, Some(&profile.id)));
+                    let directory =
+                        (!profile.system).then(|| self.profiles.chat_dir(brand, Some(&profile.id)));
                     let answer = super::signin::standing(brand, directory.as_deref()).await;
                     standing.insert(
                         profile.id,
@@ -890,9 +983,15 @@ impl WorkbenchRegistry {
             }
             CommandKind::ProvidersList => {
                 let mut providers = [
-                    ("claude", "Claude", "https://docs.anthropic.com/en/docs/claude-code"),
+                    (
+                        "claude",
+                        "Claude",
+                        "https://docs.anthropic.com/en/docs/claude-code",
+                    ),
                     ("codex", "Codex", "https://developers.openai.com/codex/cli"),
-                ].into_iter().map(|(brand, name, install_url)| {
+                ]
+                .into_iter()
+                .map(|(brand, name, install_url)| {
                     let runtime = super::acp::adapter::availability(brand);
                     json!({
                         "brand":brand,
@@ -904,7 +1003,8 @@ impl WorkbenchRegistry {
                         "installUrl":install_url,
                         "models":[]
                     })
-                }).collect::<Vec<_>>();
+                })
+                .collect::<Vec<_>>();
                 providers.extend(super::local::providers().await);
                 Ok(json!({"providers":providers}))
             }
@@ -913,8 +1013,11 @@ impl WorkbenchRegistry {
                 if self.has_driver(session_id).await {
                     return Err("close the live session before deleting it".into());
                 }
-                self.refuse_external_owner(command).await?;
-                let session = self.database.get_session(session_id.to_string()).await?
+                self.prepare_unattached(command, false).await?;
+                let session = self
+                    .database
+                    .get_session(session_id.to_string())
+                    .await?
                     .ok_or_else(|| format!("no session {session_id}"))?;
                 super::acp::client::delete_session(&session).await?;
                 self.database.delete_session(session_id.to_string()).await?;
@@ -922,10 +1025,14 @@ impl WorkbenchRegistry {
             }
             CommandKind::SessionFork => {
                 let session_id = Self::field(command, "sessionId")?;
-                let source = self.database.get_session(session_id.to_string()).await?
+                let source = self
+                    .database
+                    .get_session(session_id.to_string())
+                    .await?
                     .ok_or_else(|| format!("no session {session_id}"))?;
                 let response = super::acp::client::fork_session(&source).await?;
-                let external_id = response["sessionId"].as_str()
+                let external_id = response["sessionId"]
+                    .as_str()
                     .filter(|id| !id.is_empty())
                     .ok_or_else(|| "ACP session/fork returned no session id".to_string())?;
                 let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
@@ -949,15 +1056,21 @@ impl WorkbenchRegistry {
                 self.launch(command).await
             }
             CommandKind::SessionStart | CommandKind::SessionResume => {
-                self.refuse_external_owner(command).await?;
+                if let Some(session) = self.already_live_open(command).await? {
+                    return Ok(session);
+                }
+                self.prepare_unattached(command, false).await?;
                 self.launch(command).await
             }
             CommandKind::SessionStop
                 if !self.has_driver(Self::field(command, "sessionId")?).await =>
             {
-                self.refuse_external_owner(command).await?;
+                self.prepare_unattached(command, false).await?;
                 let session_id = Self::field(command, "sessionId")?;
-                let session = self.database.get_session(session_id.to_string()).await?
+                let session = self
+                    .database
+                    .get_session(session_id.to_string())
+                    .await?
                     .ok_or_else(|| format!("no session {session_id}"))?;
                 if session.state != "stopped" {
                     self.database.append(serde_json::from_value(json!({
@@ -970,7 +1083,7 @@ impl WorkbenchRegistry {
             CommandKind::SessionClose
                 if !self.has_driver(Self::field(command, "sessionId")?).await =>
             {
-                self.refuse_external_owner(command).await?;
+                self.prepare_unattached(command, false).await?;
                 let session_id = Self::field(command, "sessionId")?;
                 let session = self
                     .database
@@ -1003,11 +1116,8 @@ impl WorkbenchRegistry {
             CommandKind::PromptSend
                 if !self.has_driver(Self::field(command, "sessionId")?).await =>
             {
-                if command.at("takeover") == &json!(true) {
-                    self.take_over(command).await?;
-                } else {
-                    self.refuse_external_owner(command).await?;
-                }
+                self.prepare_unattached(command, command.at("takeover") == &json!(true))
+                    .await?;
                 self.launch(command).await?;
                 self.driver_command(command).await
             }
@@ -1142,10 +1252,7 @@ mod tests {
             .is_some_and(|files| files.iter().any(|file| file["path"] == json!(own))));
         assert_eq!(
             registry
-                .execute(&command(
-                    CommandKind::AgentFilesRead,
-                    json!({"path":own}),
-                ))
+                .execute(&command(CommandKind::AgentFilesRead, json!({"path":own}),))
                 .await
                 .unwrap()["content"],
             json!("personal rules")
@@ -1457,7 +1564,11 @@ mod tests {
 
         registry.looked_at("waiting").await;
 
-        let session = database.get_session("waiting".into()).await.unwrap().unwrap();
+        let session = database
+            .get_session("waiting".into())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(session.state, "idle");
         assert!(!registry.has_driver("waiting").await);
         assert!(
@@ -1505,8 +1616,14 @@ mod tests {
             last_spoke_at: None,
             begun_by: None,
         };
-        database.create_session(chat("working", "running_tool")).await.unwrap();
-        database.create_session(chat("resting", "idle")).await.unwrap();
+        database
+            .create_session(chat("working", "running_tool"))
+            .await
+            .unwrap();
+        database
+            .create_session(chat("resting", "idle"))
+            .await
+            .unwrap();
         // A model can only be pinned if the chat advertises it, so both are
         // handed the catalogue the pin is checked against.
         for id in ["working", "resting"] {
@@ -1644,6 +1761,120 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
+    async fn dropped_driver_child_is_reaped_and_can_never_be_an_external_owner() {
+        use std::io::BufRead as _;
+        use std::os::unix::process::CommandExt as _;
+
+        struct OwnedGroup(std::process::Child);
+        impl Drop for OwnedGroup {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let claude = root.path().join("claude");
+        std::fs::create_dir_all(claude.join("sessions")).unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        database
+            .create_session(crate::workbench::store::Session {
+                id: "session-1".into(),
+                brand: "claude".into(),
+                external_id: Some("owned-thread".into()),
+                project_id: "project".into(),
+                project_path: "/project".into(),
+                cwd: "/project".into(),
+                model: None,
+                permission_mode: "default".into(),
+                effort: None,
+                collaboration_mode: None,
+                profile: None,
+                title: Some("Owned orphan".into()),
+                state: "dormant".into(),
+                origin: "app".into(),
+                created_at: "2026-09-13T00:00:00Z".into(),
+                last_active_at: "2026-09-13T00:00:00Z".into(),
+                last_spoke_at: None,
+            })
+            .await
+            .unwrap();
+
+        // The ACP adapter is the group leader and its provider is a member.
+        // The registry process is the adapter's parent, exactly as in production.
+        let mut adapter = OwnedGroup(
+            std::process::Command::new("sh")
+                .args(["-c", "sleep 60 & echo $!; wait"])
+                .env(external::OWNER_ENV, external::owner_token())
+                .process_group(0)
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let mut line = String::new();
+        std::io::BufReader::new(adapter.0.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let provider_pid: u32 = line.trim().parse().unwrap();
+        let token_ready = std::time::Instant::now() + Duration::from_secs(1);
+        while !external::owned_by_this_process(provider_pid, Path::new("/proc"))
+            && std::time::Instant::now() < token_ready
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(external::owned_by_this_process(
+            provider_pid,
+            Path::new("/proc")
+        ));
+        // The in-memory driver is absent, while both adapter and provider
+        // processes remain: the exact shape of the reported failure.
+        let stat = std::fs::read_to_string(format!("/proc/{provider_pid}/stat")).unwrap();
+        let close = stat.rfind(')').unwrap();
+        let proc_start = stat[close + 1..].split_whitespace().nth(19).unwrap();
+        std::fs::write(
+            claude.join("sessions").join(format!("{provider_pid}.json")),
+            serde_json::to_vec(&json!({
+                "sessionId":"owned-thread", "pid":provider_pid, "cwd":"/project",
+                "startedAt":1, "procStart":proc_start, "entrypoint":"sdk-ts",
+                "kind":"interactive", "status":"idle"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let registry = WorkbenchRegistry::new(
+            database,
+            RegistryPaths {
+                home: root.path().into(),
+                claude_config: claude,
+                codex_home: root.path().join("codex"),
+                profiles: root.path().join("profiles"),
+                media: root.path().join("media"),
+            },
+            Arc::new(FakeFactory {
+                calls: calls.clone(),
+            }),
+        );
+
+        let ownership = registry.provider_ownership(Path::new("/proc"), 1_000);
+        assert_eq!(ownership.ours.len(), 1);
+        assert!(ownership.external.is_empty());
+        let sent = registry
+            .execute(&command(
+                CommandKind::PromptSend,
+                json!({"sessionId":"session-1", "brand":"claude", "text":"continue"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(sent, json!({"ok":true,"messageId":"message-1"}));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(!external::pid_alive(provider_pid, Path::new("/proc")));
+        registry.shutdown().await;
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
     async fn prompt_takeover_stops_only_the_exact_external_holder_before_launch() {
         struct OwnedChild(std::process::Child);
         impl Drop for OwnedChild {
@@ -1716,6 +1947,17 @@ mod tests {
                 calls: calls.clone(),
             }),
         );
+        let refused = registry
+            .execute(&command(
+                CommandKind::PromptSend,
+                json!({"sessionId":"session-1", "brand":"claude", "text":"continue"}),
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(refused, "Another program has this chat open");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(external::pid_alive(pid, Path::new("/proc")));
+
         registry
             .execute(&command(
                 CommandKind::PromptSend,
@@ -1807,14 +2049,13 @@ mod tests {
             .expect("a dead provider is released promptly")
             .unwrap();
         let events = database.events_since("session-1".into(), 0).await.unwrap();
-        assert_eq!(
-            events
-                .iter()
-                .map(|event| event.fields["seq"].as_i64().unwrap())
-                .collect::<Vec<_>>(),
-            vec![1]
-        );
+        assert_eq!(events.len(), 2);
         assert_eq!(events[0].fields["text"], "before drop");
+        assert_eq!(events[1].kind, crate::workbench::protocol::EventKind::Error);
+        assert!(events[1].fields["message"]
+            .as_str()
+            .unwrap()
+            .contains("Provider stream closed: stream dropped; cleanup completed"));
         drop(send);
     }
 

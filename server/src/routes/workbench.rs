@@ -36,9 +36,8 @@ use crate::workbench::{
 pub type EventStream = Pin<Box<dyn Stream<Item = Result<SseEvent, Infallible>> + Send>>;
 
 /// One usage connection per Claude account, keyed by profile id.
-type ClaudeReaders = Arc<
-    tokio::sync::Mutex<HashMap<String, crate::workbench::claude::transport::ClaudeTransport>>,
->;
+type ClaudeReaders =
+    Arc<tokio::sync::Mutex<HashMap<String, crate::workbench::claude::transport::ClaudeTransport>>>;
 
 /// One Codex app-server per working directory and account directory.
 type CodexReaders = Arc<
@@ -84,7 +83,14 @@ pub struct WorkbenchState {
     /// and it is the first thing a reader sees on every reload and project
     /// switch. The hold beat already takes this reading every two seconds, so
     /// the fast path can have the last one for free (bw-t26l.22).
-    last_holds: Arc<tokio::sync::RwLock<Option<(std::time::Instant, Vec<crate::workbench::external::ProviderHold>)>>>,
+    last_holds: Arc<
+        tokio::sync::RwLock<
+            Option<(
+                std::time::Instant,
+                Vec<crate::workbench::external::ProviderHold>,
+            )>,
+        >,
+    >,
 }
 
 #[derive(Default)]
@@ -217,9 +223,7 @@ impl WorkbenchState {
         }
         accounts
             .into_iter()
-            .map(|(id, directory)| {
-                (id != crate::workbench::profiles::SYSTEM).then_some(directory)
-            })
+            .map(|(id, directory)| (id != crate::workbench::profiles::SYSTEM).then_some(directory))
             .collect()
     }
     /// The rollout file for one Codex chat, looked for under the account that
@@ -673,7 +677,10 @@ impl WorkbenchState {
     ) {
         let mut worked_in = HashSet::new();
         for hold in holds {
-            let Ok(Some(session)) = self.database().session_by_external_id(hold.id.clone()).await
+            let Ok(Some(session)) = self
+                .database()
+                .session_by_external_id(hold.id.clone())
+                .await
             else {
                 continue;
             };
@@ -717,35 +724,10 @@ impl WorkbenchState {
             .list_sessions(None)
             .await
             .unwrap_or_default();
-        // Provider marker files are written by Atelier's own drivers too.
-        // Remove those before publishing the provider-neutral "elsewhere"
-        // set; explicit registry ownership is stronger than a process trace
-        // on disk and avoids locking our own composer.
-        let mut attached = std::collections::HashSet::new();
-        for session in &sessions {
-            if self.registry.has_driver(&session.id).await {
-                if let Some(id) = &session.external_id {
-                    attached.insert(id.to_lowercase());
-                }
-            }
-        }
-        holds.retain(|hold| !attached.contains(&hold.id.to_lowercase()));
-        // And the ones the registry has not written down YET: a provider process
-        // this app spawned seconds ago, still connecting, whose driver is not
-        // registered and whose id is not on any row. The process table already
-        // knows it is ours (external.rs, in_a_group_this_process_started), and
-        // a chat opened while it was starting was drawn as somebody else's for
-        // want of asking it (bw-cwap). A hold is somebody else's only while a
-        // process that is not ours is in it.
-        for hold in &mut holds {
-            hold.pids.retain(|pid| {
-                !crate::workbench::external::in_a_group_this_process_started(
-                    *pid,
-                    std::path::Path::new("/proc"),
-                )
-            });
-        }
-        holds.retain(|hold| !hold.pids.is_empty());
+        // Process provenance is classified once inside WorkbenchRegistry.
+        // `holds` is therefore external by construction; this presentation
+        // layer must not keep a second ownership rule that command guards can
+        // drift away from.
         let by_external: HashMap<_, _> = sessions
             .iter()
             .filter_map(|s| s.external_id.as_ref().map(|id| (id.to_lowercase(), s)))
@@ -1217,7 +1199,10 @@ async fn checkouts_of<'a>(
         (cwd, found)
     }))
     .await;
-    answers.into_iter().filter_map(|(cwd, found)| Some((cwd, found?))).collect()
+    answers
+        .into_iter()
+        .filter_map(|(cwd, found)| Some((cwd, found?)))
+        .collect()
 }
 
 fn restore_row(
@@ -1227,7 +1212,9 @@ fn restore_row(
     checkouts: &HashMap<String, crate::routes::git::Checkout>,
 ) -> Value {
     let checkout = checkouts.get(&session.cwd);
-    let folder = checkout.map(|it| it.folder.clone()).or_else(|| folder_of(&session.cwd));
+    let folder = checkout
+        .map(|it| it.folder.clone())
+        .or_else(|| folder_of(&session.cwd));
     let branch = checkout.and_then(|it| it.branch.clone());
     let held = session
         .external_id
@@ -1422,9 +1409,7 @@ async fn provider_sessions(state: &WorkbenchState, project: Option<&str>) -> Vec
             Ok(sessions) => {
                 let mut recorded: std::collections::HashMap<String, Value> = recorded
                     .into_iter()
-                    .filter_map(|row| {
-                        Some((row["externalId"].as_str()?.to_lowercase(), row))
-                    })
+                    .filter_map(|row| Some((row["externalId"].as_str()?.to_lowercase(), row)))
                     .collect();
                 for session in sessions {
                     let known = recorded.remove(&session.session_id.to_lowercase());
@@ -1765,7 +1750,12 @@ async fn restore(
                 project_path: query.path.clone().unwrap_or_else(|| cwd.to_string()),
                 cwd: cwd.to_string(),
                 model: None,
-                permission_mode: if brand == "claude" { "default" } else { "on-request" }.into(),
+                permission_mode: if brand == "claude" {
+                    "default"
+                } else {
+                    "on-request"
+                }
+                .into(),
                 effort: None,
                 collaboration_mode: None,
                 profile: None,
@@ -1824,8 +1814,7 @@ async fn restore(
     // — the worktree it is in is git's answer, not the folder's own name
     // (bw-ov7a.4). Asked once here for every row, rather than by each of the
     // three places above that sets a folder.
-    let checkouts =
-        checkouts_of(rows.iter().filter_map(|row| row["cwdHint"].as_str())).await;
+    let checkouts = checkouts_of(rows.iter().filter_map(|row| row["cwdHint"].as_str())).await;
     for row in &mut rows {
         let Some(checkout) = row["cwdHint"].as_str().and_then(|cwd| checkouts.get(cwd)) else {
             continue;
@@ -1917,7 +1906,10 @@ async fn session(
     // branch (bw-ov7a.4). What the provider's own record says is the fallback,
     // for a directory git cannot answer for.
     let checkout = crate::routes::git::checkout_at(std::path::Path::new(&cwd)).await;
-    let folder = checkout.as_ref().map(|it| it.folder.clone()).or_else(|| folder_of(&cwd));
+    let folder = checkout
+        .as_ref()
+        .map(|it| it.folder.clone())
+        .or_else(|| folder_of(&cwd));
     let mut linked = state
         .database()
         .beads_for_sessions(vec![found.id.clone()])
@@ -2357,7 +2349,10 @@ struct UploadedRequest {
     ephemeral: bool,
 }
 
-fn presentation_directory(state: &WorkbenchState, ephemeral: bool) -> Result<std::path::PathBuf, String> {
+fn presentation_directory(
+    state: &WorkbenchState,
+    ephemeral: bool,
+) -> Result<std::path::PathBuf, String> {
     if ephemeral {
         Ok(state.registry.media_directory().to_path_buf())
     } else {
@@ -2467,13 +2462,16 @@ async fn screen_check(
         let after_bytes = files
             .get(after)
             .ok_or_else(|| format!("no upload for {after}"))?;
-        let before_stored = state
-            .registry
-            .store_capture(before_bytes, "Before", "image", &media)?;
+        let before_stored =
+            state
+                .registry
+                .store_capture(before_bytes, "Before", "image", &media)?;
         let after_stored = state
             .registry
             .store_capture(after_bytes, "After", "image", &media)?;
-        let comparison = state.registry.compare_captures(before_bytes, after_bytes, &media)?;
+        let comparison = state
+            .registry
+            .compare_captures(before_bytes, after_bytes, &media)?;
         captures.push(
             json!({"asset":before_stored.asset,"label":"Before","evidence":before_stored.evidence}),
         );
@@ -3050,7 +3048,9 @@ mod tests {
             ),
         );
         assert!(
-            fresh_discovery(&state.discovery_cache, &key).await.is_none(),
+            fresh_discovery(&state.discovery_cache, &key)
+                .await
+                .is_none(),
             "an answer past its window is asked again"
         );
         // And the folder is part of what makes an answer this reader's.

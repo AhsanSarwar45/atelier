@@ -1524,3 +1524,12 @@ the bypass: `bd update bw-p61.17 --assignee s-dc8ce99c --force --actor
 s-dc8ce99c`. Either `board-actor` should stamp a `bd` call wherever it sits on
 the line, or the gate should let a card assigned to the git user be claimed by
 a session.
+
+## Edit still resolves an absolute job-worktree target as the landing checkout (bw-8lbp.1)
+
+The Edit-compatible `apply_patch` tool refused an absolute target under
+`worktrees/bw-8lbp` while child `bw-8lbp.1` was claimed in that job copy. The
+refusal again reported the resolved target as `/home/ahsan/dev/beads-web`, not
+the named worktree file. This is the same failure §18 records as resolved by
+`bw-mslg.1`, reproduced on 2026-09-13. Running `apply_patch` from the worktree
+with the documented per-job bypass succeeded.

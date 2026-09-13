@@ -112,7 +112,10 @@ fn launch_config_at(
     provider: Option<&Path>,
     config_dir: Option<&Path>,
 ) -> Option<AcpAgentConfig> {
-    let mut config = AcpAgentConfig::new(&executable);
+    let mut config = AcpAgentConfig::new(&executable).env(
+        super::super::external::OWNER_ENV,
+        super::super::external::owner_token(),
+    );
     if brand == super::super::local::BRAND {
         let (runtime, model) = super::super::local::decode_model(model?)?;
         let root = crate::identity::data_dir()?.join("goose");
@@ -191,7 +194,13 @@ pub fn launch_config(
         ),
         _ => None,
     };
-    launch_config_at(adapter, brand, model, provider.as_deref(), directory.as_deref())
+    launch_config_at(
+        adapter,
+        brand,
+        model,
+        provider.as_deref(),
+        directory.as_deref(),
+    )
 }
 
 /// Whether this installation contains the complete pinned ACP runtime.
@@ -329,8 +338,7 @@ mod tests {
             std::fs::write(&installed, b"current user provider").unwrap();
 
             let config =
-                launch_config_at(adapter, runtime.brand, None, Some(&installed), None)
-                    .unwrap();
+                launch_config_at(adapter, runtime.brand, None, Some(&installed), None).unwrap();
             let expected = installed.to_string_lossy().to_string();
             assert_eq!(
                 config.environment().get(runtime.adapter_variable),
@@ -339,6 +347,14 @@ mod tests {
             assert_ne!(
                 config.environment().get(runtime.adapter_variable),
                 Some(&bundled_shadow.to_string_lossy().to_string())
+            );
+            assert_eq!(
+                config
+                    .environment()
+                    .get(super::super::super::external::OWNER_ENV),
+                Some(&super::super::super::external::owner_token().to_string()),
+                "{} provider lacks this Atelier instance's ownership token",
+                runtime.brand
             );
         }
     }
@@ -383,7 +399,11 @@ mod tests {
             let installed = root.path().join(format!("{}-runtime", runtime.brand));
             std::fs::write(&adapter, b"adapter").unwrap();
             std::fs::write(&installed, b"provider").unwrap();
-            let account = root.path().join("profiles").join(runtime.brand).join("work");
+            let account = root
+                .path()
+                .join("profiles")
+                .join(runtime.brand)
+                .join("work");
             std::fs::create_dir_all(&account).unwrap();
 
             let named = launch_config_at(
