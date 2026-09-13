@@ -10,10 +10,13 @@
  *
  * Two pages, so the cursor is followed rather than assumed.
  */
-const readline = require('node:readline');
 const { spawn, spawnSync } = require('node:child_process');
 const { existsSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
+const readline = require('node:readline');
+
+const MISSING_CODEX_ROLLOUT = process.env.BEADS_E2E_ACP_MISSING_ROLLOUT === '1'
+  && !process.env.CLAUDE_CODE_EXECUTABLE;
 
 function providerModels() {
   const provider = process.env.CLAUDE_CODE_EXECUTABLE ?? process.env.CODEX_PATH;
@@ -45,6 +48,12 @@ const PAGES = (cwd) => ({
         title: 'A chat only ACP knows about',
         updatedAt: '2026-09-02T05:00:02.000Z',
       },
+      ...(MISSING_CODEX_ROLLOUT ? [{
+        sessionId: 'acp-session-missing-rollout',
+        cwd,
+        title: 'A Codex chat whose rollout is gone',
+        updatedAt: '2026-09-02T05:10:02.000Z',
+      }] : []),
     ],
     nextCursor: 'page-two',
   },
@@ -117,6 +126,10 @@ const REPLAY = {
     ['user_message_chunk', 'And this one?'],
     ['agent_message_chunk', 'The second chat answered over ACP.'],
   ],
+  'acp-session-missing-rollout': [
+    ['user_message_chunk', 'Can this saved chat continue?'],
+    ['agent_message_chunk', 'Its transcript is still readable.'],
+  ],
 };
 
 function say(message) {
@@ -146,7 +159,10 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
         agentCapabilities: {
           loadSession: true,
           promptCapabilities: {},
-          sessionCapabilities: { list: {} },
+          sessionCapabilities: {
+            list: {},
+            ...(MISSING_CODEX_ROLLOUT ? { resume: {} } : {}),
+          },
         },
         authMethods: [],
       },
@@ -167,6 +183,20 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     const sessionId = `acp-session-new-${process.pid}-${started}`;
     selectedModels.set(sessionId, undefined);
     say({ id, result: { sessionId, configOptions: configOptions() } });
+    return;
+  }
+  if (method === 'session/resume') {
+    if (params?.sessionId === 'acp-session-missing-rollout') {
+      say({
+        id,
+        error: {
+          code: -32603,
+          message: `Internal error: {"details":"no rollout found for thread id ${params.sessionId}"}`,
+        },
+      });
+      return;
+    }
+    say({ id, result: { sessionId: params?.sessionId, configOptions: configOptions() } });
     return;
   }
   if (method === 'session/set_config_option') {
@@ -262,6 +292,20 @@ async function dropOnceWithOwnedProvider(sessionId) {
 }
 
 async function turn(id, params) {
+  if (MISSING_CODEX_ROLLOUT) {
+    say({
+      method: 'session/update',
+      params: {
+        sessionId: params.sessionId,
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'The replacement Codex thread answered.' },
+        },
+      },
+    });
+    say({ id, result: { stopReason: 'end_turn' } });
+    return;
+  }
   if (await dropOnceWithOwnedProvider(params?.sessionId)) return;
   asking += 1;
   const reply = await ask({

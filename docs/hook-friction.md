@@ -257,3 +257,19 @@ The target was actually
 and accept it as part of the owned worktree. The false refusal cost two patch
 attempts plus an ownership audit; the documented bypass was used for the one
 patch that records this report and the intended change.
+
+## 8. An existing job branch cannot restore its missing per-job worktree
+
+`bw-jknr` already existed from seven completed children, but its worktree had
+been removed while one child remained open. The documented new-branch command
+therefore failed because the branch existed. The correct existing-branch form,
+`git worktree add worktrees/bw-jknr bw-jknr`, was refused because the child had
+to be claimed inside the worktree that did not yet exist; claiming the child
+from the landing checkout was refused for the same reason. After the manager
+approved the bypass, the child was claimed and the one per-job worktree was
+restored.
+
+The restored branch then needed `git rebase main`, but the hook resolved the
+named `main` ref as a write to the landing checkout even though rebase writes
+the current worktree and its checked-out branch. It should judge the repository
+being changed, not a revision argument.

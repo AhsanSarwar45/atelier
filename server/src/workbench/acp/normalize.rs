@@ -91,6 +91,7 @@ impl TokenTally {
 
 pub struct AcpNormalizer {
     serial: u64,
+    namespace_generated_ids: bool,
     turn_finished: bool,
     waiting_for_agents: bool,
     outcome: Value,
@@ -154,6 +155,7 @@ impl Default for AcpNormalizer {
     fn default() -> Self {
         Self {
             serial: 0,
+            namespace_generated_ids: false,
             turn_finished: false,
             waiting_for_agents: false,
             outcome: json!({"state":"idle","label":"Ready"}),
@@ -222,6 +224,13 @@ impl AcpNormalizer {
         }
     }
 
+    /// A fresh provider thread can continue an already-stored transcript
+    /// without replaying it. Its first generated ID must not collide with the
+    /// first generated ID in that older transcript.
+    pub fn namespace_generated_ids(&mut self) {
+        self.namespace_generated_ids = true;
+    }
+
     fn turn_usage(raw: &Value) -> Option<(TokenTally, &'static str)> {
         let model_usage = raw
             .pointer("/_meta/quota/model_usage")
@@ -279,7 +288,11 @@ impl AcpNormalizer {
 
     fn next_id(&mut self, stem: &str) -> String {
         self.serial += 1;
-        format!("acp-{stem}-{}", self.serial)
+        if self.namespace_generated_ids {
+            format!("acp-{stem}-{}-{}", self.stream_id, self.serial)
+        } else {
+            format!("acp-{stem}-{}", self.serial)
+        }
     }
 
     fn opaque_note(

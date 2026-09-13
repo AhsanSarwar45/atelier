@@ -31,6 +31,16 @@ type Reply = oneshot::Sender<Result<Value, String>>;
 
 const MAX_SESSION_LIST_PAGES: usize = 100;
 
+/// A Codex thread can remain readable after its local rollout was removed.
+/// Resuming that thread is impossible; only this exact provider answer should
+/// turn the next message into a fresh writable continuation.
+fn codex_rollout_is_gone(brand: &str, error: &str) -> bool {
+    brand == "codex"
+        && error
+            .to_ascii_lowercase()
+            .contains("no rollout found for thread id")
+}
+
 /// How long a chat must be silent before its turn is read as held rather than
 /// working. Everything a working chat does says so in events well inside this:
 /// a model mid-sentence, a tool's progress beats, a helper's own output.
@@ -2341,12 +2351,29 @@ impl AcpDriver {
                                         PathBuf::from(&task_session.cwd),
                                     ).meta(session_meta.clone()))
                                     .block_task()
-                                    .await?;
-                                (
-                                    remote,
-                                    serde_json::to_value(response.modes).map_err(acp_error)?,
-                                    serde_json::to_value(response.config_options).map_err(acp_error)?,
-                                )
+                                    .await;
+                                match response {
+                                    Ok(response) => (
+                                        remote,
+                                        serde_json::to_value(response.modes).map_err(acp_error)?,
+                                        serde_json::to_value(response.config_options).map_err(acp_error)?,
+                                    ),
+                                    Err(error) if codex_rollout_is_gone(brand, &error.to_string()) => {
+                                        let response = connection
+                                            .send_request(NewSessionRequest::new(PathBuf::from(
+                                                &task_session.cwd,
+                                            )).meta(session_meta.clone()))
+                                            .block_task()
+                                            .await?;
+                                        normalizer.lock().await.namespace_generated_ids();
+                                        (
+                                            response.session_id.to_string(),
+                                            serde_json::to_value(response.modes).map_err(acp_error)?,
+                                            serde_json::to_value(response.config_options).map_err(acp_error)?,
+                                        )
+                                    },
+                                    Err(error) => return Err(error),
+                                }
                             } else if initialized.pointer("/agentCapabilities/loadSession") == Some(&Value::Bool(true)) {
                                 replaying.store(true, Ordering::Release);
                                 let response = connection
@@ -3165,6 +3192,19 @@ pub async fn note_adapter_answer(brand: &str, refused: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_missing_codex_rollout_becomes_a_new_thread() {
+        assert!(codex_rollout_is_gone(
+            "codex",
+            r#"Internal error: {\"details\":\"no rollout found for thread id 01abc\"}"#,
+        ));
+        assert!(!codex_rollout_is_gone(
+            "claude",
+            "no rollout found for thread id 01abc",
+        ));
+        assert!(!codex_rollout_is_gone("codex", "Authentication required"));
+    }
 
     /// One refusal answers for every endpoint that would have found it out.
     ///
