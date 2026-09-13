@@ -6,13 +6,77 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub fn run(name: &str, rest: &[String]) -> Option<Result<i32, String>> {
-    Some(match name {
+    let tool = match name {
+        "board/job" | "board/land" | "checks" | "review" => name,
+        _ => return None,
+    };
+    if asks_for_help(rest) {
+        println!("{}", usage(tool));
+        return Some(Ok(0));
+    }
+    Some(match tool {
         "board/job" => job(rest),
         "board/land" => land(rest),
         "checks" => checks(rest),
-        "review" => review(rest),
-        _ => return None,
+        _ => review(rest),
     })
+}
+
+/// Is this a request to be told what the flags are, rather than to act?
+///
+/// `atelier tool checks --help` ran the project's whole declared suite —
+/// minutes of it — and recorded the result on the surrounding job's card, and
+/// `board/job new --help` created a real epic that then had to be cancelled.
+/// There was no way to ask what the flags were without paying for the command
+/// (`docs/hook-friction-2.md` §8 of the tooling entries, bw-e3dw.7).
+fn asks_for_help(rest: &[String]) -> bool {
+    rest.iter().any(|word| matches!(word.as_str(), "--help" | "-h"))
+}
+
+fn usage(tool: &str) -> &'static str {
+    match tool {
+        "board/job" => "usage: atelier tool board/job <action> [options]
+
+  new --what TEXT --done TEXT [options]     open a job and its spine
+  epic --what TEXT --done TEXT [options]    open a container of jobs
+  under ID --do 'WHAT|DONE' ...             add work items to an open job
+  upgrade ID [options]                      give an existing card a job's spine
+  cancel ID --reason TEXT                   drop a job and everything under it
+
+options for new, epic and upgrade:
+  --what TEXT        the outcome, which becomes the title
+  --done TEXT        the acceptance criterion; may not be empty
+  --do 'WHAT|DONE'   one work item; repeat for each. Defaults to the job itself
+  --evidence TEXT    what shows the fault is real
+  --not TEXT         what this job does not cover
+  --area NAME        area label (default: board)
+  --kind NAME        bug, feature or chore (default: feature)
+  --priority N, -p N 0 to 4 (default: 2)
+  --parent ID        file this job under an existing card
+  --steps LIST       extra spine steps from ground,design,benchmark,review,record
+  --judge NAME       who reads the finished job (default: agent)",
+        "board/land" => "usage: atelier tool board/land CARD-ID
+
+Rebases the card's branch onto the landing branch, takes the merge slot,
+fast-forwards the landing branch and releases the slot, then closes the work
+items the landed commits name. Run it from the card's own worktree.
+
+Safe to run twice: if the commits already landed it says so and finishes the
+close. The actor is the card's own assignee, or BEADS_ACTOR when that is set.",
+        "checks" => "usage: atelier tool checks [CARD-ID] [options]
+
+Runs the project's declared verification suites against the current tree,
+records the result on the card, and closes it when everything passed.
+
+  --all              run every declared suite, not only those matching changes
+  --dry              say which suites would run, and run none of them
+  --record NAME=PASSED|FAILED
+                     record a result without running the suite; repeatable",
+        _ => "usage: atelier tool review JOB-ID [--provider claude|codex]
+
+Sends a finished job — its work and checks steps closed — to an external
+reader. Given a step:review card, reads the job from its `of:` label.",
+    }
 }
 
 fn root() -> Result<PathBuf, String> {
@@ -656,6 +720,25 @@ mod tests {
         .unwrap();
         unsafe { std::env::remove_var(crate::hook_bypass::TOKEN) };
         assert_eq!(String::from_utf8_lossy(&out.stdout), "none");
+    }
+
+    /// Asking what the flags are ran the suite, or created a real epic that
+    /// had to be cancelled afterwards (`docs/hook-friction-2.md` bw-e3dw.7).
+    #[test]
+    fn native_machinery_asking_for_help_is_not_asking_for_the_work() {
+        assert!(asks_for_help(&["--help".to_string()]));
+        assert!(asks_for_help(&["new".to_string(), "-h".to_string()]));
+        assert!(!asks_for_help(&["new".to_string(), "--what".to_string(), "a fault".to_string()]));
+        // A card whose own text says `--help` is still a card, not a question.
+        assert!(!asks_for_help(&["bw-1".to_string()]));
+
+        for tool in ["board/job", "board/land", "checks", "review"] {
+            let answer = usage(tool);
+            assert!(answer.starts_with("usage: atelier tool "), "{tool}");
+            let run = run(tool, &["--help".to_string()]).expect("a known tool");
+            assert_eq!(run.unwrap(), 0, "{tool} answers and does nothing");
+        }
+        assert!(run("board/nonsense", &["--help".to_string()]).is_none());
     }
 
     #[test]
