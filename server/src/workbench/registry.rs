@@ -1796,6 +1796,7 @@ mod tests {
                 created_at: "2026-09-13T00:00:00Z".into(),
                 last_active_at: "2026-09-13T00:00:00Z".into(),
                 last_spoke_at: None,
+                begun_by: None,
             })
             .await
             .unwrap();
