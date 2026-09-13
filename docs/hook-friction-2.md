@@ -1210,11 +1210,15 @@ cost this job its only red (below). If one thing here is worth tuning, it is
 this: `git worktree add worktrees/<job>` for a job the session owns should be
 allowed outright.
 
-**Already answered.** The one refusal this entry records —
+**Resolved** by `bw-9hcz.1`. The refusal this entry records —
 `git worktree add worktrees/bw-axtp` from the main checkout — is the bare `add`
-with no `-b`. The documented shape, `git worktree add worktrees/<job> -b <job>`,
-has passed since §3 and is what cuts a job's copy. The red it cost is fixed by
-`bw-mslg.7` below.
+with no `-b`, and it is now accepted: a bare `add` names the new branch after
+the directory, so it puts the card's own branch at the card's own path exactly
+as the `-b` shape does. The earlier note here answered it by pointing at the
+`-b` shape, which is the right advice for a fresh card and no advice at all for
+a released one, where `-b` cannot be used; that is the deadlock recorded under
+bw-p61.17 below. The §3 test asserted the bare form refused, and `bw-9hcz.1`
+flips that assertion. The red it cost is fixed by `bw-mslg.7` below.
 
 ## 7. `ATELIER_BYPASS` in the environment turns a declared suite red
 
@@ -1512,6 +1516,16 @@ the opening carve-out recognises only the `-b <ID>` shape, and `-b` cannot be
 used on a branch that already exists. Carried through with the per-command
 bypass. The carve-out should also accept the branch named for the card as the
 checkout source, since that is how any released card is resumed.
+
+**Resolved** by `bw-9hcz.1`. With no `-b`, the third operand is read as the
+commit-ish it is: the card's own branch is accepted, and so is a bare `add`,
+which names the new branch after the directory. A `-b` must still name the
+card, and any other source at the card's path is still a repository change.
+`native_machinery_a_card_is_re_cut_from_the_branch_that_survived_it` covers all
+four shapes. This was a total deadlock, not a detour — git rejects `-b` for a
+branch that exists, the gate rejected the checkout form git accepts, and the
+claim that would earn the copy is only allowed from inside the copy that could
+not be made.
 
 ## A compound cd-and-claim line is not stamped with the session actor (bw-p61.17)
 

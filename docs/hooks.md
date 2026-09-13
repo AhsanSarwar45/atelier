@@ -91,6 +91,14 @@ What it does **not** count, each of which used to cost a round trip:
   on the line that writes something, and the line is judged normally
   (`docs/hook-friction-2.md` §3).
 
+  Resuming a released card works the same way. Its branch still carries its
+  commits, and `-b` cannot name a branch that already exists, so
+  `git worktree add worktrees/<ID> <ID>` is accepted — as is a bare
+  `git worktree add worktrees/<ID>`, which names the new branch after the
+  directory. What is judged is where the card's branch ends up: a different
+  branch at the card's path, or the card's branch somewhere else, is a
+  repository change like any other.
+
   A copy belongs to a job and is reused by every child under it, so the card
   being claimed need only be work inside the job the copy is named for.
   Claiming `<JOB>.2` inside `worktrees/<JOB>` passes, and so does every later
