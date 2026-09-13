@@ -5,10 +5,15 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+
+use super::provider_defaults::atomic_write;
+use super::provider_settings::backup_of;
 
 const MAX_FILES: usize = 2_000;
 const MAX_READ: u64 = 2 * 1024 * 1024;
+/// The largest file a write accepts; the same ceiling a read shows whole.
+const MAX_WRITE: usize = 2 * 1024 * 1024;
 const SKIP: &[&str] = &[".git", "node_modules", ".next", "target", "dist", "build"];
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -376,12 +381,7 @@ pub fn discover(
     claude_config: Option<&Path>,
     codex_home: Option<&Path>,
 ) -> Vec<AgentFile> {
-    let claude = claude_config
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| home.join(".claude"));
-    let codex = codex_home
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| home.join(".codex"));
+    let (claude, codex) = account_dirs(home, claude_config, codex_home);
     let mut seen = HashSet::new();
     let mut files = Vec::new();
     for location in locations(project, home, &claude, &codex) {
@@ -463,6 +463,162 @@ pub fn read(
     ))
 }
 
+/// A well-known file that is not there yet but may be made: the one place a
+/// person can start a new `CLAUDE.md` or `config.toml` from the app.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Creatable {
+    pub provider: Provider,
+    pub scope: Scope,
+    pub category: Category,
+    pub name: String,
+    pub path: PathBuf,
+    pub format: &'static str,
+}
+
+fn account_dirs(home: &Path, claude: Option<&Path>, codex: Option<&Path>) -> (PathBuf, PathBuf) {
+    (
+        claude
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| home.join(".claude")),
+        codex
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| home.join(".codex")),
+    )
+}
+
+/// The well-known files this scope could hold but does not yet.
+pub fn creatable(
+    project: Option<&Path>,
+    home: &Path,
+    claude_config: Option<&Path>,
+    codex_home: Option<&Path>,
+) -> Vec<Creatable> {
+    let (claude, codex) = account_dirs(home, claude_config, codex_home);
+    let mut rows = vec![
+        (
+            Provider::Claude,
+            Scope::Personal,
+            Category::Instructions,
+            claude.join("CLAUDE.md"),
+        ),
+        (
+            Provider::Claude,
+            Scope::Personal,
+            Category::Settings,
+            claude.join("settings.json"),
+        ),
+        (
+            Provider::Codex,
+            Scope::Personal,
+            Category::Instructions,
+            codex.join("AGENTS.md"),
+        ),
+        (
+            Provider::Codex,
+            Scope::Personal,
+            Category::Settings,
+            codex.join("config.toml"),
+        ),
+    ];
+    if let Some(project) = project {
+        let project = fs::canonicalize(project).unwrap_or_else(|_| project.to_path_buf());
+        rows.extend([
+            (
+                Provider::Claude,
+                Scope::Project,
+                Category::Instructions,
+                project.join("CLAUDE.md"),
+            ),
+            (
+                Provider::Claude,
+                Scope::Project,
+                Category::Settings,
+                project.join(".claude/settings.json"),
+            ),
+            (
+                Provider::Claude,
+                Scope::ProjectLocal,
+                Category::Settings,
+                project.join(".claude/settings.local.json"),
+            ),
+            (
+                Provider::Codex,
+                Scope::Project,
+                Category::Instructions,
+                project.join("AGENTS.md"),
+            ),
+            (
+                Provider::Codex,
+                Scope::Project,
+                Category::Settings,
+                project.join(".codex/config.toml"),
+            ),
+        ]);
+    }
+    rows.into_iter()
+        .filter(|(_, _, _, path)| !path.exists())
+        .map(|(provider, scope, category, path)| Creatable {
+            provider,
+            scope,
+            category,
+            name: path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            format: format_of(&path),
+            path,
+        })
+        .collect()
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    a == b
+        || match (fs::canonicalize(a), fs::canonicalize(b)) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        }
+}
+
+/// Replace one discovered file, or make one of the well-known ones, keeping
+/// the previous contents beside it as `.bak`. Anything outside what
+/// `discover` and `creatable` name for this scope is refused.
+pub fn write(
+    path: &Path,
+    content: &str,
+    project: Option<&Path>,
+    home: &Path,
+    claude: Option<&Path>,
+    codex: Option<&Path>,
+) -> Result<u64, String> {
+    if content.len() > MAX_WRITE {
+        return Err("That file is over 2 MiB, which is more than this editor saves".into());
+    }
+    if !path.is_absolute()
+        || path
+            .components()
+            .any(|part| matches!(part, Component::ParentDir | Component::CurDir))
+    {
+        return Err("That file is not part of the discovered agent configuration".into());
+    }
+    let allowed = discover(project, home, claude, codex)
+        .into_iter()
+        .any(|file| same_file(&file.path, path))
+        || creatable(project, home, claude, codex)
+            .into_iter()
+            .any(|file| same_file(&file.path, path));
+    if !allowed {
+        return Err("That file is not part of the discovered agent configuration".into());
+    }
+    if path.is_file() {
+        fs::copy(path, backup_of(path))
+            .map_err(|error| format!("{} could not be backed up: {error}", path.display()))?;
+    }
+    atomic_write(path, content.as_bytes())?;
+    Ok(content.len() as u64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -500,5 +656,69 @@ mod tests {
             None
         )
         .is_err());
+    }
+
+    #[test]
+    fn native_workbench_services_agent_files_write_stays_inside_the_allowlist() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        fs::create_dir_all(home.path().join(".claude")).unwrap();
+        fs::write(home.path().join(".claude/CLAUDE.md"), "hello").unwrap();
+        fs::write(project.path().join("package.json"), "{}").unwrap();
+        let claude_md = home.path().join(".claude/CLAUDE.md");
+        assert_eq!(
+            write(
+                &claude_md,
+                "hi",
+                Some(project.path()),
+                home.path(),
+                None,
+                None
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(fs::read_to_string(&claude_md).unwrap(), "hi");
+        assert_eq!(fs::read_to_string(backup_of(&claude_md)).unwrap(), "hello");
+        // Outside the allowlist: an ordinary project file, and a stranger.
+        for path in [
+            project.path().join("package.json"),
+            project.path().join("notes.md"),
+            project.path().join("../CLAUDE.md"),
+        ] {
+            assert!(
+                write(&path, "x", Some(project.path()), home.path(), None, None).is_err(),
+                "{}",
+                path.display()
+            );
+        }
+        assert!(!project.path().join("notes.md").exists());
+        // A well-known file that is not there yet may be made, and then it
+        // stops being listed as creatable.
+        let listed = creatable(Some(project.path()), home.path(), None, None);
+        let local = project.path().join(".claude/settings.local.json");
+        assert!(listed
+            .iter()
+            .any(|c| c.path == local && c.scope == Scope::ProjectLocal));
+        assert!(!listed.iter().any(|c| c.path == claude_md));
+        write(
+            &local,
+            "{}\n",
+            Some(project.path()),
+            home.path(),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(fs::read_to_string(&local).unwrap(), "{}\n");
+        assert!(!backup_of(&local).exists());
+        assert!(!creatable(Some(project.path()), home.path(), None, None)
+            .iter()
+            .any(|c| c.path == local));
+        assert!(discover(Some(project.path()), home.path(), None, None)
+            .iter()
+            .any(|f| f.path == local));
+        let big = "x".repeat(MAX_WRITE + 1);
+        assert!(write(&local, &big, Some(project.path()), home.path(), None, None).is_err());
     }
 }

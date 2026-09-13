@@ -26,6 +26,7 @@ pub mod provider;
 pub mod provider_defaults;
 pub mod provider_messages;
 pub mod provider_reconciliation;
+pub mod provider_settings;
 pub mod registry;
 pub mod screen_check;
 pub mod session_policy;

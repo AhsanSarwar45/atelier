@@ -20,7 +20,7 @@ pub struct OwnerSettings {
     pub effort: Option<String>,
 }
 
-fn managed_claude_settings() -> PathBuf {
+pub(crate) fn managed_claude_settings() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
         return PathBuf::from("/Library/Application Support/ClaudeCode/managed-settings.json");

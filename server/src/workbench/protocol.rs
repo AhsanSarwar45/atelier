@@ -42,8 +42,11 @@ macro_rules! wire_kinds {
 wire_kinds!(CommandKind {
     AgentFilesList => "agent-files.list",
     AgentFilesRead => "agent-files.read",
+    AgentFilesWrite => "agent-files.write",
     ProviderDefaultsRead => "provider-defaults.read",
     ProviderDefaultsWrite => "provider-defaults.write",
+    ProviderSettingsRead => "provider-settings.read",
+    ProviderSettingsWrite => "provider-settings.write",
     ProvidersList => "providers.list",
     ProfilesList => "profiles.list",
     ProfileCreate => "profile.create",

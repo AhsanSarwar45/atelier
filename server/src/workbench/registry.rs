@@ -8,6 +8,7 @@ use super::media;
 use super::profiles::Profiles;
 use super::protocol::{Command, CommandKind};
 use super::provider_defaults::ProviderDefaultFiles;
+use super::provider_settings;
 use super::screen_check::{self, StoredCapture, StoredComparison};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -354,6 +355,27 @@ impl WorkbenchRegistry {
         }
     }
 
+    /// One account's own config directory for a brand: the directory the
+    /// server booted with for the system account, the profile's own otherwise.
+    fn account_dir(&self, brand: &str, profile: Option<&str>) -> PathBuf {
+        match profile.filter(|id| *id != super::profiles::SYSTEM) {
+            None => match brand {
+                "codex" => self.paths.codex_home.clone(),
+                _ => self.paths.claude_config.clone(),
+            },
+            Some(id) => self.profiles.chat_dir(brand, Some(id)),
+        }
+    }
+
+    /// The Claude and Codex directories an agent-files command reads, for the
+    /// account it names or the one the server booted with.
+    fn agent_dirs(&self, profile: Option<&str>) -> (PathBuf, PathBuf) {
+        (
+            self.account_dir("claude", profile),
+            self.account_dir("codex", profile),
+        )
+    }
+
     pub fn media_directory(&self) -> &Path {
         &self.paths.media
     }
@@ -620,6 +642,13 @@ impl WorkbenchRegistry {
     /// A field the caller may leave out. Absent and empty read the same, so a
     /// screen that has nothing to put there can omit it or send "" and get the
     /// same answer either way.
+    /// The `scope`, `profileId` and `projectPath` fields as one scope.
+    fn settings_scope(command: &Command) -> Result<provider_settings::Scope, String> {
+        serde_json::from_value(Value::Object(command.fields.clone())).map_err(|_| {
+            "scope must be account, or project with an absolute projectPath".to_string()
+        })
+    }
+
     fn maybe<'a>(command: &'a Command, name: &str) -> Option<&'a str> {
         command
             .fields
@@ -965,25 +994,77 @@ impl WorkbenchRegistry {
             // first look at the screen showed no files at all (bw-03gc.1).
             CommandKind::AgentFilesList => {
                 let project = Self::maybe(command, "projectPath");
+                let (claude, codex) = self.agent_dirs(Self::maybe(command, "profileId"));
                 let files = agent_files::discover(
                     project.map(Path::new),
                     &self.paths.home,
-                    Some(&self.paths.claude_config),
-                    Some(&self.paths.codex_home),
+                    Some(&claude),
+                    Some(&codex),
                 );
-                Ok(json!({"files":files}))
+                let creatable = agent_files::creatable(
+                    project.map(Path::new),
+                    &self.paths.home,
+                    Some(&claude),
+                    Some(&codex),
+                );
+                Ok(json!({"files":files,"creatable":creatable}))
             }
             CommandKind::AgentFilesRead => {
                 let project = Self::maybe(command, "projectPath");
                 let path = Self::field(command, "path")?;
+                let (claude, codex) = self.agent_dirs(Self::maybe(command, "profileId"));
                 let (content, truncated) = agent_files::read(
                     Path::new(path),
                     project.map(Path::new),
                     &self.paths.home,
-                    Some(&self.paths.claude_config),
-                    Some(&self.paths.codex_home),
+                    Some(&claude),
+                    Some(&codex),
                 )?;
                 Ok(json!({"content":content,"truncated":truncated}))
+            }
+            CommandKind::AgentFilesWrite => {
+                let project = Self::maybe(command, "projectPath");
+                let path = Self::field(command, "path")?;
+                let content = command
+                    .fields
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .ok_or("content is required")?;
+                let (claude, codex) = self.agent_dirs(Self::maybe(command, "profileId"));
+                let size = agent_files::write(
+                    Path::new(path),
+                    content,
+                    project.map(Path::new),
+                    &self.paths.home,
+                    Some(&claude),
+                    Some(&codex),
+                )?;
+                Ok(json!({"ok":true,"path":path,"size":size}))
+            }
+            CommandKind::ProviderSettingsRead => {
+                let brand = Self::field(command, "brand")?;
+                let scope = Self::settings_scope(command)?;
+                let dir = self.account_dir(brand, Self::maybe(command, "profileId"));
+                serde_json::to_value(provider_settings::read(brand, &scope, &dir)?)
+                    .map_err(|e| e.to_string())
+            }
+            CommandKind::ProviderSettingsWrite => {
+                let brand = Self::field(command, "brand")?;
+                let scope = Self::settings_scope(command)?;
+                let layer: provider_settings::Layer = command
+                    .fields
+                    .get("layer")
+                    .cloned()
+                    .and_then(|value| serde_json::from_value(value).ok())
+                    .ok_or("layer must be user, project or local")?;
+                let patch = command
+                    .fields
+                    .get("patch")
+                    .and_then(Value::as_object)
+                    .ok_or("patch must be an object of dotted keys")?;
+                let dir = self.account_dir(brand, Self::maybe(command, "profileId"));
+                serde_json::to_value(provider_settings::write(brand, &scope, &dir, layer, patch)?)
+                    .map_err(|e| e.to_string())
             }
             CommandKind::ProviderDefaultsRead => {
                 let brand = Self::field(command, "brand")?;
