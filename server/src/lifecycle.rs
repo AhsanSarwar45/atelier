@@ -1198,10 +1198,27 @@ fn isolates(call: &GitCall<'_>) -> bool {
     if project_root(&destination) != project_root(&call.cwd) {
         return false;
     }
-    arguments
-        .windows(2)
-        .filter(|pair| matches!(pair[0].text.as_str(), "-b" | "-B"))
-        .any(|pair| pair[1].text == issue)
+    // `-b`/`-B` names the branch to create, so when one is given it has to be
+    // the card's own.
+    if arguments
+        .iter()
+        .any(|word| matches!(word.text.as_str(), "-b" | "-B"))
+    {
+        return arguments
+            .windows(2)
+            .filter(|pair| matches!(pair[0].text.as_str(), "-b" | "-B"))
+            .any(|pair| pair[1].text == issue);
+    }
+    // With no `-b`, the third operand is the commit-ish to check out. A
+    // released card is resumed from the branch that still carries its commits,
+    // and `-b` cannot name a branch that already exists, so the checkout form
+    // is the only command git will accept for it; a bare `add` names the new
+    // branch after the directory, which is the card either way. Both put the
+    // card's own branch at the card's own path, which is what the `-b` shape
+    // was accepted for (`docs/hook-friction-2.md`, "A card's worktree cannot be
+    // re-cut from its surviving branch" and the bare-`add` refusal under
+    // bw-axtp). Any other source is a different branch at that path.
+    words.get(2).is_none_or(|source| *source == issue)
 }
 
 fn worktree_issue(path: &Path) -> Option<String> {
@@ -2271,13 +2288,17 @@ mod tests {
         assert!(isolating("git -C . worktree add worktrees/bw-1 -b bw-1"));
         assert!(isolating("git worktree add worktrees/bw-1 -b bw-1"));
         assert!(isolating("git worktree add .worktrees/bd-bw-1 -b bw-1"));
+        // A bare `add` names the new branch after the destination, so it is
+        // the same card at the same path; refusing it cost bw-axtp its only
+        // red. `native_machinery_a_card_is_re_cut_from_the_branch_that_survived_it`
+        // owns this case.
+        assert!(isolating("git worktree add worktrees/bw-1"));
 
         // The branch must be the card the destination is named for, the
         // destination must be the project's own worktree directory, and no
         // other subcommand is the rule being obeyed.
         assert!(!isolating("git worktree add worktrees/bw-1 -b other"));
         assert!(!isolating("git worktree add worktrees/sneaky -b bw-1"));
-        assert!(!isolating("git worktree add worktrees/bw-1"));
         assert!(!isolating("git worktree remove worktrees/bw-1"));
         assert!(!isolating("git worktree add /elsewhere/worktrees/bw-1 -b bw-1"));
     }
@@ -2584,6 +2605,65 @@ mod tests {
         assert!(!tidying("git worktree prune"));
         assert!(!tidying("git branch --list"));
         assert!(!tidying("git branch bw-new"));
+    }
+
+    /// A released card is resumed from the branch that still holds its
+    /// commits, but `-b` cannot name a branch that already exists, so the only
+    /// command git accepts is the checkout form — and the carve-out took the
+    /// `-b` shape alone. The card could then be worked from nowhere: its copy
+    /// could not be cut, and its claim is only allowed from inside that copy
+    /// (`docs/hook-friction-2.md`, "A card's worktree cannot be re-cut from
+    /// its surviving branch", bw-p61.17, and the bare-`add` refusal recorded
+    /// under bw-axtp).
+    #[test]
+    fn native_machinery_a_card_is_re_cut_from_the_branch_that_survived_it() {
+        let home = tempfile::tempdir().unwrap();
+        let repo = home.path().join("project");
+        std::fs::create_dir(&repo).unwrap();
+        let git = |args: &[&str]| {
+            assert!(Command::new("git")
+                .args(args)
+                .current_dir(&repo)
+                .status()
+                .unwrap()
+                .success());
+        };
+        git(&["init", "-q", "-b", "ours"]);
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(repo.join("a"), "one").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "first"]);
+        // The card was released: its branch survived, its worktree did not.
+        git(&["branch", "bw-p61.17"]);
+
+        let opening = |command: &str| {
+            shell_segments(command)
+                .iter()
+                .filter_map(|segment| git_call(segment, &repo))
+                .any(|call| isolates(&call))
+        };
+
+        // Every shape that puts the card's own branch at the card's own path.
+        assert!(
+            opening("git worktree add worktrees/bw-p61.17 bw-p61.17"),
+            "the checkout form is the only one git accepts for a branch that \
+             already exists"
+        );
+        assert!(
+            opening("git worktree add worktrees/bw-p61.17"),
+            "a bare add names the new branch after the directory, which is the \
+             card"
+        );
+        assert!(opening("git worktree add worktrees/bw-p61.17 -b bw-p61.17"));
+        assert!(opening("git -C . worktree add worktrees/bw-p61.17 bw-p61.17"));
+
+        // A different branch at the card's path is still a repository change,
+        // and so is the card's path built for somebody else's card.
+        assert!(!opening("git worktree add worktrees/bw-p61.17 ours"));
+        assert!(!opening("git worktree add worktrees/bw-p61.17 -b bw-other"));
+        assert!(!opening("git worktree add worktrees/bw-p61.17 --detach HEAD"));
+        assert!(!opening("git worktree add scratch/bw-p61.17 bw-p61.17"));
     }
 
     /// `~` and `$HOME` were joined onto the repository root, so a delete of
