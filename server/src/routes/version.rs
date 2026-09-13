@@ -156,7 +156,7 @@ async fn check_github_release() -> VersionCheckResponse {
                 .map(|a| a.browser_download_url.clone())
         })
     };
-    let asset_url = asset_named(&current_platform_asset());
+    let asset_url = current_platform_asset().and_then(|name| asset_named(name));
     let checksums_url = asset_named(crate::published::CHECKSUMS_ASSET);
 
     VersionCheckResponse {
@@ -204,29 +204,21 @@ fn fallback_response() -> VersionCheckResponse {
 
 /// The release archive this platform downloads to update itself.
 ///
-/// A release publishes one single-program archive per platform. The updater
-/// fetches this archive and unpacks the program out of it, so the name here
-/// must be one the build actually uploads. `.github/workflows/release.yml` names each with its
-/// matrix `artifact` and appends `.tar.gz`:
-/// - `atelier-darwin-arm64.tar.gz` (macOS ARM)
-/// - `atelier-darwin-x64.tar.gz` (macOS Intel)
-/// - `atelier-linux-x64.tar.gz` (Linux)
-/// - `atelier-win-x64.tar.gz` (Windows)
-fn current_platform_asset() -> String {
+/// A release publishes one single-program archive for each supported platform.
+/// The updater must return `None` on platforms the release workflow does not
+/// publish rather than advertising an archive that cannot exist.
+fn current_platform_asset() -> Option<&'static str> {
     asset_for(std::env::consts::OS, std::env::consts::ARCH)
 }
 
 /// The archive name for a named platform, split out so every target the build
 /// releases can be proved against the names the workflow uploads, not just the
 /// one this test binary happens to run on.
-fn asset_for(target_os: &str, target_arch: &str) -> String {
-    let platform = match (target_os, target_arch) {
-        ("windows", _) => "win-x64",
-        ("macos", "aarch64") => "darwin-arm64",
-        ("macos", _) => "darwin-x64",
-        _ => "linux-x64",
-    };
-    format!("atelier-{platform}.tar.gz")
+fn asset_for(target_os: &str, target_arch: &str) -> Option<&'static str> {
+    match (target_os, target_arch) {
+        ("linux", "x86_64") => Some("atelier-linux-x64.tar.gz"),
+        _ => None,
+    }
 }
 
 /// POST /api/update
@@ -297,7 +289,15 @@ pub async fn perform_update(
         .and_then(|path| path.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| current_dir.join("atelier-adapters"));
 
-    let archive_name = current_platform_asset();
+    let archive_name = match current_platform_asset() {
+        Some(name) => name,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "No binary available for this platform"})),
+            )
+        }
+    };
     let archive_path = current_dir.join("atelier-update-archive");
 
     info!("Downloading update from: {}", asset_url);
@@ -829,13 +829,21 @@ mod tests {
             ("macos", "x86_64"),
             ("windows", "x86_64"),
         ] {
-            let asset = asset_for(os, arch);
-            assert!(
-                uploaded.contains(&asset),
-                "the updater asks for {asset} on {os}/{arch}, which release.yml does not \
-                 upload; it uploads {uploaded:?}"
-            );
+            if let Some(asset) = asset_for(os, arch) {
+                assert!(
+                    uploaded.iter().any(|uploaded| uploaded == asset),
+                    "the updater asks for {asset} on {os}/{arch}, which release.yml does not \
+                     upload; it uploads {uploaded:?}"
+                );
+            }
         }
+        assert_eq!(
+            asset_for("linux", "x86_64"),
+            uploaded.first().map(String::as_str)
+        );
+        assert_eq!(asset_for("macos", "aarch64"), None);
+        assert_eq!(asset_for("macos", "x86_64"), None);
+        assert_eq!(asset_for("windows", "x86_64"), None);
     }
 
     /// An update, run against a fixture release, ends as a runnable program at

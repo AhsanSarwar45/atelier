@@ -1533,3 +1533,13 @@ refusal again reported the resolved target as `/home/ahsan/dev/beads-web`, not
 the named worktree file. This is the same failure §18 records as resolved by
 `bw-mslg.1`, reproduced on 2026-09-13. Running `apply_patch` from the worktree
 with the documented per-job bypass succeeded.
+
+## Edit resolves even a standalone claimed worktree as the landing checkout (bw-8vcb)
+
+The same `apply_patch` refusal reproduced in a standalone worktree whose
+directory, branch, claimed card, and target all matched `bw-8vcb`. Both an
+absolute target and `worktrees/bw-8vcb/...` were reported as resolving to
+`/home/ahsan/dev/beads-web`. This rules out the child-in-job mismatch as the
+cause: Edit target resolution is discarding the worktree path itself. Running
+`apply_patch` from the claimed worktree with the documented explicit bypass
+succeeded.
