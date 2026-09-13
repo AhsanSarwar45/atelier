@@ -7,6 +7,37 @@ hooks should read both.
 
 Kept by the agent working `bw-t26l.20`, from 2026-09-03.
 
+## What `bw-mslg` answered, 2026-09-13
+
+Every entry below that was still costing a bypass now carries a **Resolved**
+paragraph naming the card that answered it and the test that holds it. Nine
+refusals went, in `server/src/lifecycle.rs` and `server/src/board_tools.rs`:
+
+| What went | Entries |
+| --- | --- |
+| A job's copy holds the work underneath it | §18, bw-e3dw.*, bw-axtp.1, bw-5gax, bw-wk5u, bw-8qrr, bw-fpuk.1 |
+| A board-only write needs no worktree | §11, §15, 2026-09-07, bw-t9no, bw-b0m4.6 |
+| A spent workspace can be thrown away | §8, §13, §15, §17, bw-gr8y.8, bw-g3o3.8 |
+| A home path is read where it points | §9, bw-5gax |
+| Residue git never carried is not a change | §12, §14, bw-g3o3.12 |
+| The checks tool signs its own close | §10, tooling §9 |
+| A suite inherits no standing bypass | tooling §7, bw-e3dw.19 |
+| `--help` answers instead of acting | tooling §8, bw-e3dw.7 |
+| A digitless id can be landed | §5 |
+
+Three entries still stand, and they are one fix rather than three: §16, §19 and
+`bw-gr8y.6` are all a land blocked by somebody's uncommitted work in the
+landing checkout, and `board/land` still neither names those paths nor offers
+to park them. Two others stand in part: a compound command is still refused
+whole (`bw-5gax`), and a target whose path comes from a shell variable other
+than `$HOME` is still matched on its literal text (`bw-l4fr.1`).
+
+**A fix here is not a fix on this machine until the binary is reinstalled.**
+The gates run `atelier` from the path, which is the copy the reader installed,
+not the one built from the tree the change is in — the point `§7` makes at its
+own cost. Everything above is landed and tested; none of it is in force for a
+session until `atelier` is replaced.
+
 ## 1. Confirmed fixed, by measurement rather than by reading the diff
 
 The first book's §1 through §4 are all in effect now that the binary has been
@@ -256,6 +287,11 @@ the card landed by hand with the fast-forward merge the gate allows.
 **Worked around.** `git merge --ff-only bw-uxoe` from the `ours` checkout, then
 `bd close`.
 
+**Resolved** (`bw-mslg.9`). The lander asks whether a subject holds the id it
+was given, as a whole word, instead of guessing that an id carries a digit. A
+miss quotes the subjects it read.
+`native_machinery_commit_subjects_name_exact_cards_only`.
+
 ## 6. A checks card cannot close while a suite unrelated to it is red
 
 **Attempted.** `bd close bw-oion.2`, the checks step of a card whose whole
@@ -420,6 +456,16 @@ its own card — including the `bd show` that would have told it why. Four more
 bypasses on the one reason, which is the shape section 8 describes and bw-xksa
 still holds.
 
+**Resolved** (`bw-mslg.3`, `bw-mslg.2`, `bw-mslg.6`), as three pieces. The two
+removals pass from the landing checkout when the branch is already an ancestor
+of the landing branch — the test `board/land` itself makes — so no session has
+to stand where it is deleting. The `bd close` that ends the card is a write to
+the board's own database and is no longer judged by the directory it was typed
+in. And the actor outlives the worktree, because the close is signed as the
+card's own assignee.
+`native_machinery_a_spent_workspace_can_be_thrown_away`,
+`native_machinery_a_board_only_write_needs_no_worktree`.
+
 ## 9. A path the shell would have expanded is resolved against the repository
 
 **Attempted.** Deleting one scratch directory in Atelier's own data dir, from a
@@ -458,6 +504,12 @@ the true thing.
 session's own test litter. The literal absolute path went through first time.
 
 **Worked around.** Wrote the path out in full: `/home/ahsan/.local/share/…`.
+
+**Resolved** (`bw-mslg.4`). A leading `~/`, `$HOME/` or `${HOME}/` expands
+before the target is resolved, and a refusal on one stops claiming it was
+resolved against the repository it was typed in. Nothing else expands: those
+are the two spellings with one meaning, and guessing at another variable would
+be guessing. `native_machinery_a_home_path_is_read_where_it_points`.
 
 ## How to add to this file
 
@@ -508,6 +560,11 @@ compilation and 767 tests — was not itself wasted, but the manual
 workflow says nothing about, and an agent that stopped reading at
 `checks=PASSED` would leave the card open.
 
+**Resolved** (`bw-mslg.6`). §4's fix, in the second tool: `atelier tool checks`
+signs its comment and its close as the card's own assignee, falling back to
+`atelier-checks` for an unassigned card, with `BEADS_ACTOR` still overriding.
+`native_machinery_the_lander_acts_as_the_card_it_was_given`.
+
 ## 11. A finished epic's status move has nowhere it is allowed to be made from
 
 **Attempted.** The handoff at the end of an epic: every child closed, every
@@ -556,6 +613,13 @@ warning about, and — because writing this section is itself a repository chang
 — a card and a worktree raised for the sole purpose of being allowed to describe
 the refusal.
 
+**Resolved** (`bw-mslg.2`), as the wider and truer form. `bd` writes its own
+database, which no repository tracks, so a status move, a note, a comment and a
+close are not judged by the directory they were typed in at all. The claim is
+the one exception, and not because of a file: taking a card is the moment a
+session says which copy it is working in.
+`native_machinery_a_board_only_write_needs_no_worktree`.
+
 ## 12. A closed card's worktree cannot throw away its own ignored scratch
 
 **What happened.** bw-cwap.1's e2e runs left three git-ignored scratch
@@ -571,6 +635,11 @@ not a repository change and should pass regardless of the card's state.
 
 **Cost.** One refusal, one `ATELIER_BYPASS`, and this section written from a
 different card's worktree because the one that owns the mess may not touch it.
+
+**Resolved** (`bw-mslg.5`). A path `.gitignore` matches, with nothing tracked
+underneath it, is not a repository change whatever the card's state. A path git
+ignores but has been force-added is still tracked, and stays gated.
+`native_machinery_residue_git_never_carried_is_not_a_change`.
 
 ## 13. The land step cannot remove the worktree it exists to remove
 
@@ -602,6 +671,11 @@ card, so the information is on hand.
 worktree raised for the sole purpose of being allowed to write this section,
 which will itself end in a land step with the same problem.
 
+**Resolved** (`bw-mslg.3`). `git worktree remove worktrees/<ID>` and
+`git branch -d/-D` pass when the branch is an ancestor of the landing branch,
+so the removal loses nothing the repository holds. A branch with work still on
+it stays gated. `native_machinery_a_spent_workspace_can_be_thrown_away`.
+
 ## 14. Ignored residue of a deleted directory is treated as a repository change
 
 **Happened.** The release run failed at step 4/7 with
@@ -621,6 +695,10 @@ removed without a card, exactly as `/dev/null` is already exempt.
 **Cost.** One refusal, one `ATELIER_BYPASS`, and a release blocked by a
 directory that the removal commit could not have deleted, because git never
 carried it.
+
+**Resolved** (`bw-mslg.5`), as this entry asked: the gate consults
+`git check-ignore` and `git ls-files` on the target it already resolved.
+`native_machinery_residue_git_never_carried_is_not_a_change`.
 
 ## 15. A land card can be neither claimed, worked, nor closed from anywhere
 
@@ -642,6 +720,12 @@ branch and its work item is closed.
 pour the tool itself opened, plus this uncommitted edit to the friction book,
 which no card can own either.
 
+**Resolved** (`bw-mslg.2`, `bw-mslg.3`). The close and the claim are board
+writes and need no worktree; the two git verbs pass on the ancestry test
+`board/land` already makes.
+`native_machinery_a_board_only_write_needs_no_worktree`,
+`native_machinery_a_spent_workspace_can_be_thrown_away`.
+
 ## 2026-09-07 — bd update --append-notes refused in the main checkout
 
 workflow-gate refused `bd update bw-rx1y --append-notes=...` from the main
@@ -649,6 +733,9 @@ checkout ("Changes require an owned Beads work item in its isolated worktree")
 seconds after `atelier tool board/job new` had created that epic from the same
 place. Writing a card's notes is board metadata, the same kind of write job
 new just made; it needs no worktree. Bypassed with a reason.
+
+**Resolved** (`bw-mslg.2`). Writing a card's notes reaches no tracked file and
+is no longer judged by the directory it was typed in.
 
 ## 16. Landing cannot clear the main checkout it is required to merge into
 
@@ -672,6 +759,12 @@ must be cleared and by whom.
 **Cost.** Two refused land attempts, one `ATELIER_BYPASS` to reset two files
 that the landing commit overwrote a second later, and a manual copy to `/tmp`
 in case the gate was right and the worker was not.
+
+**Still standing.** Nothing in `bw-mslg` touches this: `board/land` still
+neither names the paths its merge would overwrite nor offers to park them. It
+is the same shape as §19 and `bw-gr8y.6` below, and the three of them are one
+fix — landing's own housekeeping in the landing checkout — which this job did
+not take on.
 
 ## 17. A step:land card, met for a fourth time, plus a close it could not sign
 
@@ -697,6 +790,10 @@ And a close should be signable by whoever the card says owns it, without
 **Cost.** Three `ATELIER_BYPASS` invocations — the removals, the close of the
 land card, and the close of the epic behind it — plus `BEADS_ACTOR` on the last
 two, and this entry, which no card can own either.
+
+**Resolved** (`bw-mslg.2`, `bw-mslg.3`, `bw-mslg.6`). The removals pass on the
+ancestry test, the claim and the close are board writes, and the close is
+signed as the card's own assignee without `BEADS_ACTOR` restored by hand.
 
 ## 18. A worktree belongs to a job, but the gate only knows cards
 
@@ -729,6 +826,13 @@ copy per step mandatory and makes removing it impossible.
 **Cost.** 271 GiB of worktrees, a btrfs metadata exhaustion on the manager's
 machine, fifty worktrees removed by hand, and one `ATELIER_BYPASS` to claim the
 child of the very card that writes this rule down.
+
+**Resolved** (`bw-mslg.1`), as this entry asked. The copy names the unit of
+isolation and a card names the unit of work, so a claim passes when the card is
+the job the copy is named for or any card under it, and a write passes when
+this session holds such a card open. Beads ids are hierarchical, so `bw-x.1`
+and `bw-x.1.2` are work in `bw-x` and `bw-xy` is not.
+`native_machinery_a_job_copy_holds_the_work_underneath_it`.
 
 ## 19. A land is blocked by work abandoned in the landing checkout
 
@@ -773,6 +877,8 @@ second `ATELIER_BYPASS`, before the land that would have hit it. The landing
 checkout still carries ninety-odd regenerated `tests/results/*.png` from that
 session, left alone for now because no pending land touches them.
 
+**Still standing**, with §16 and `bw-gr8y.6`. See §16.
+
 ## bw-gr8y.8 — removing a landed worktree is refused from the main checkout
 
 The last step of a job is `git worktree remove worktrees/<job>` run from the
@@ -784,6 +890,8 @@ main checkout, and the gate answers:
 By then the card is landed and closed and the worktree it names is the thing
 being deleted, so there is no worktree left to be inside. Re-run under
 `ATELIER_BYPASS` with that reason. Appending this note was refused the same way.
+
+**Resolved** (`bw-mslg.3`). See §13.
 
 ## bw-g3o3.12 — the workflow gate follows a `node_modules` symlink out of the worktree
 
@@ -815,6 +923,14 @@ that checkout had eighty uncommitted lines in THIS file. The merge refused
 card that records its friction here cannot land until whoever owns those lines
 commits them. The note was moved out of the commit and appended by hand instead.
 
+**Resolved** (`bw-mslg.5`), as this entry asked, and by both halves of it. The
+walk up to a target's repository stops at the first real directory, and a
+symlink is not one, so a borrowed `node_modules` is judged where the link sits
+rather than where it points; and a gitignored path is not the repository's
+anyway. The second, smaller half — a land blocked by uncommitted lines in this
+very file — is §16, still standing.
+`native_machinery_residue_git_never_carried_is_not_a_change`.
+
 ## bw-g3o3.8 — the workflow's own last step needs a bypass
 
 The card's finishing instructions say, in as many words, to remove the spent
@@ -841,6 +957,8 @@ job id>` through, or that stayed satisfied for the moments after a land, would
 turn a standing bypass back into a real refusal.
 
 The same refusal then covered appending this note, for the same reason.
+
+**Resolved** (`bw-mslg.3`). See §13.
 
 ## bw-gr8y.6 — landing is blocked by the landing checkout's own screenshot churn
 
@@ -876,6 +994,8 @@ So the job took the bypass, having first parked their diff at
 `/tmp/bw-gr8y.6-parked-landing-screenshots.patch`. The friction is not really
 the gate: it is that runs keep leaving regenerated pictures uncommitted in the
 landing checkout, where every later land trips over them.
+
+**Still standing**, with §16 and §19. See §16.
 
 ## bw-t9no — a job cannot close itself once its land step has run
 
@@ -914,6 +1034,10 @@ command was issued from. `board/land bw-2xjd.3` also cannot substitute for the
 cleanup: it requires a commit named after a card the workflow itself marks
 `no-code`.
 
+**Resolved** (`bw-mslg.2`, `bw-mslg.3`). A job's close is a board write and
+needs no worktree; the land card's own copy is removable on the ancestry
+test.
+
 ## bw-e3dw.9 / bw-e3dw.2: a child working in its epic's worktree
 
 The epic `bw-e3dw` keeps one worktree, `worktrees/bw-e3dw`, reused by every
@@ -930,6 +1054,8 @@ The claim was refused first, for the same reason, and so was every subsequent
 Edit and Write in the copy — one bypass per tool call for the whole card. A
 gate that accepted a claimed child of the card the worktree is named after
 would leave the standing refusals intact and cost this job nothing.
+
+**Resolved** (`bw-mslg.1`). See §18.
 
 ## bw-e3dw.6: the same refusal, now on a shell command that moves a file
 
@@ -955,6 +1081,8 @@ same reason as bw-e3dw.9 and bw-e3dw.2 above; the Edit and Write tools were not
 attempted at all, since the previous worker recorded that they are refused
 outright here and a heredoc through Bash carries the bypass.
 
+**Resolved** (`bw-mslg.1`). See §18.
+
 ## bw-e3dw.3 / bw-e3dw.5 — the epic copy refuses every write, including `cat > file`
 
 The worktree is named for the epic (`worktrees/bw-e3dw`), so the gate reads the
@@ -971,6 +1099,9 @@ all and are simply unusable in a job copy, so every line of this card's work had
 to go through Bash heredocs. A child claimed in its parent's copy has no
 unrefused way to write a file.
 
+**Resolved** (`bw-mslg.1`). See §18. The Edit and Write tools are usable in a
+job copy again, because there is nothing left for them to need a prefix for.
+
 ## bw-e3dw.14/.15/.4 — the epic worktree refuses every write
 
 The job copy is named `bw-e3dw`, so the workflow gate matches the child cards
@@ -984,6 +1115,9 @@ Deleting a scratch directory that the E2E run itself created a minute earlier
 is not a write to the card's work, but the gate cannot tell the difference,
 so the Edit and Write tools are unusable here and every line has to go through
 a Bash heredoc with `ATELIER_BYPASS` welded on.
+
+**Resolved** (`bw-mslg.1`), and the scratch removal by `bw-mslg.5` as well.
+See §18 and §12.
 
 ## bw-axtp.1 — the workflow gate reads the directory name as the card
 
@@ -1005,6 +1139,8 @@ Beads issue bw-axtp must be claimed and in_progress before this worktree is chan
 
 Both carried through with
 `ATELIER_BYPASS='a worktree is per job; this child is claimed in its job copy'`.
+
+**Resolved** (`bw-mslg.1`). See §18.
 
 ## bw-5gax — a refused command does not run its safe half either
 
@@ -1037,6 +1173,14 @@ The `~` was never expanded — the shell had not run yet — so the gate treated
 as a relative path and joined it onto the repo root, then refused a path that
 does not exist. An absolute path would have read better in the message, but the
 refusal is the same; it went through with the bypass and a reason of its own.
+
+**Resolved in part** (`bw-mslg.1`, `bw-mslg.4`). The claim and the writes in a
+job copy pass (§18), and `~` expands before the target is resolved (§9). The
+first half stands: a compound command is still judged whole, so a line whose
+refused half sits beside a harmless one does not run either. That is what
+judging a command before it runs costs, and no entry here has yet shown it is
+worth paying to change.
+
 ## bw-axtp.3/.2 — the gate let this job through, and the bypass was the thing that broke a suite
 
 Same shape of job as bw-axtp.1 above: one worktree named for the epic
@@ -1065,6 +1209,12 @@ teaches them to reach for the bypass on every command after it. That is what
 cost this job its only red (below). If one thing here is worth tuning, it is
 this: `git worktree add worktrees/<job>` for a job the session owns should be
 allowed outright.
+
+**Already answered.** The one refusal this entry records —
+`git worktree add worktrees/bw-axtp` from the main checkout — is the bare `add`
+with no `-b`. The documented shape, `git worktree add worktrees/<job> -b <job>`,
+has passed since §3 and is what cuts a job's copy. The red it cost is fixed by
+`bw-mslg.7` below.
 
 ## 7. `ATELIER_BYPASS` in the environment turns a declared suite red
 
@@ -1097,12 +1247,21 @@ quietly re-run away. Worth fixing at the source: the checks runner could strip
 `ATELIER_BYPASS` from the environment it hands its subprocesses, since a suite
 is never the thing the bypass is for.
 
+**Resolved** (`bw-mslg.7`), at the source this entry names: the checks runner
+strips `ATELIER_BYPASS` from the environment it hands its suites, because a
+suite is never the thing a bypass is for.
+`native_machinery_a_declared_suite_inherits_no_standing_bypass`.
+
 ## 8. `atelier tool checks --help` runs the checks
 
 `atelier tool checks --help` does not print usage; it runs the project's whole
 declared suite — `npm test && (cd server && cargo test)`, minutes of it —
 against the current tree. There is no way to ask what the flags are without
 paying for a full run.
+
+**Resolved** (`bw-mslg.8`). `--help` and `-h` answer with usage and do nothing
+else, on all four tools.
+`native_machinery_asking_for_help_is_not_asking_for_the_work`.
 
 ## 9. The checks tool closes the card as the human, and cannot
 
@@ -1143,6 +1302,10 @@ worktree has, by its nature, no code to commit, so the only way to satisfy it
 is to write something and name the land card in the subject. This commit is
 that: honest about it rather than dressed up.
 
+**Resolved** (`bw-mslg.6`). See §10. The land card's claim, which the
+subsection below records, is `bw-mslg.1`; a land card with no code to commit is
+still a land card with no code to commit.
+
 ## bw-e3dw.7 / bw-e3dw.18 — the same refusal, one card later
 
 Nothing has changed: the copy is `worktrees/bw-e3dw`, the cards worked in it
@@ -1164,6 +1327,9 @@ Two tool-shaped traps met on the same cards, neither of them a hook:
   epic**. Two throwaway cards (`bw-ikda`, `bw-z7wg`) had to be cancelled after
   probing for the flag names. A `--help` that answers, or a `--dry-run` that is
   honoured, would cost the board nothing.
+
+**Resolved** (`bw-mslg.1` for the refusals, `bw-mslg.8` for both `--help`
+traps). See §18 and the `--help` entry above.
 
 ## bw-e3dw.19 — the bypass the worktree forces on the worker turns a test red
 
@@ -1194,6 +1360,10 @@ what you get" — produce a red that belongs to neither the change nor the app.
 `npm test && (cd server && cargo test)`, and a note on the card so the red is
 not read as the epic's.
 
+**Resolved twice over** (`bw-mslg.1`, `bw-mslg.7`). The copy no longer forces
+a bypass on the worker at all, and a declared suite no longer inherits one if
+something else does.
+
 ## bw-wk5u — the claim of a child in its epic's worktree
 
 **What happened.** The worktree for this job is cut once and named for the
@@ -1212,6 +1382,9 @@ carry `ATELIER_BYPASS` to get past it.
 
 **Cost.** A refusal on every claim and every land in this job — three cards,
 plus the spine's checks and land cards.
+
+**Resolved** (`bw-mslg.1`), as this entry asked, in exactly its words: the
+question is whether this card is in the job the copy is named for. See §18.
 
 ## bw-8qrr — the Edit and Write tools cannot carry a bypass
 
@@ -1266,6 +1439,13 @@ bw-8qrr and bw-ad3r entries above describe, for the same reason: a tool call
 has nowhere to put a per-command reason. Worth adding only because the count
 keeps climbing and the fix has not moved: four jobs now (bw-wk5u, bw-8qrr,
 bw-ad3r, and this one) have paid the same price in the same way.
+
+**Resolved** (`bw-mslg.1`), by the first of the two routes this entry offers:
+the gate accepts a claimed descendant of the card the copy is named for, so
+there is nothing left for Edit and Write to need a prefix for. The four jobs
+that paid in patch scripts — bw-wk5u, bw-8qrr, bw-ad3r, bw-oamr — were the
+count that made the case.
+
 ## Reopening a reported regression after job cleanup (bw-b0m4.6)
 
 The workflow gate refused `bd update bw-b0m4 --status open` in the landing
@@ -1275,6 +1455,9 @@ worktree, then used the explicit per-job bypass to reopen the epic, add its
 regression child, and claim that child. Tracker-only reopening must be allowed
 before ownership of a new child can exist; repository edits still need the
 owned job worktree. No installed app or live chat state was modified.
+
+**Resolved** (`bw-mslg.2`). Reopening a card is a board write and needs no
+worktree; repository edits still need the owned job copy.
 
 ## Edit resolves a job worktree as the landing checkout (bw-fpuk.1)
 
@@ -1286,6 +1469,8 @@ when the documented per-job bypass was prefixed to the `apply_patch` command.
 
 The gate should resolve absolute patch targets to their containing worktree and
 accept the claimed descendant of the epic that names that worktree.
+
+**Resolved** (`bw-mslg.1`), as this entry asked. See §18.
 
 ## The gate reads the pre-expansion text of a path (bw-l4fr.1)
 
@@ -1301,3 +1486,12 @@ the argument, not on the path the shell will actually open. That cuts both
 ways and the second way is the bad one: a refusal can name a path that does not
 exist, and a write can be judged against a string that is not where the bytes
 land.
+
+**Resolved in part** (`bw-mslg.1`, `bw-mslg.4`). The job-copy refusal this entry
+opens with is gone (§18), so the count stops at five. The new detail stands: a
+target is still matched on the literal text of the argument, and only a leading
+`~/`, `$HOME/` or `${HOME}/` expands (§9). Expanding an arbitrary variable
+means knowing what the shell holds, which a gate that runs before the shell
+does not; the honest half-fix would be for a target that survives expansion as
+a literal `$` to be named as unresolvable rather than judged, and nothing here
+has done that yet.

@@ -91,12 +91,35 @@ What it does **not** count, each of which used to cost a round trip:
   on the line that writes something, and the line is judged normally
   (`docs/hook-friction-2.md` §3).
 
-  The carve-out reads `<ID>` off the directory name and requires the claimed
-  card to match it. That is narrower than the rule a worktree is meant to serve:
-  a copy belongs to a job and is reused by every child under it, so claiming
-  `<JOB>.2` inside `worktrees/<JOB>` is refused even though the change belongs
-  there. Claim the child through `ATELIER_BYPASS` until the gate accepts a
-  claimed child of the job the directory names (`docs/hook-friction-2.md` §18).
+  A copy belongs to a job and is reused by every child under it, so the card
+  being claimed need only be work inside the job the copy is named for.
+  Claiming `<JOB>.2` inside `worktrees/<JOB>` passes, and so does every later
+  write there while this session holds `<JOB>` or a card under it open. Beads
+  ids are hierarchical, so `<JOB>.2` and `<JOB>.2.1` are work in `<JOB>` and a
+  neighbour whose id merely starts with the same letters is not
+  (`docs/hook-friction-2.md` §18).
+
+- **Board writes.** `bd` writes its own database, which no repository tracks, so
+  a status move, a note, a comment and a close are not judged by the directory
+  they were typed in — which is what left the end of a job with nowhere it could
+  be finished from. The claim is the one exception, and not because of a file:
+  taking a card is the moment a session says which copy it is working in
+  (`docs/hook-friction-2.md` §11, §15).
+
+- **Throwing a spent workspace away.** `git worktree remove worktrees/<ID>` and
+  `git branch -d/-D <ID>` pass when the branch is already an ancestor of the
+  landing branch — the test `board/land` itself makes, so the removal loses
+  nothing the repository holds. A branch with work still on it stays gated.
+  This is the last step of every job, and it can only be run from the landing
+  checkout: the copy being deleted cannot be stood in while it goes
+  (`docs/hook-friction-2.md` §13, §15).
+
+- **Residue git never carried.** A path `.gitignore` matches, with nothing
+  tracked underneath it, cannot reach a commit: scratch an end-to-end run left
+  behind, the leftovers of a directory whose tracked files a commit already
+  removed, a `node_modules` the owner's checkout lent. A path git ignores but
+  which has been force-added is still tracked, and stays gated
+  (`docs/hook-friction-2.md` §12, §14).
 
 - **Anything that is not a real file.** `/dev/null`, `/dev/tcp/host/port`,
   `/proc`, `/sys`, `>&2`, and process substitution are not writes. Silencing a
@@ -105,7 +128,13 @@ What it does **not** count, each of which used to cost a round trip:
   heredoc bodies, quoted strings and commit messages are data. Writing a
   document that discusses `/etc/passwd` is writing a document (§3).
 - **Anywhere outside a Git worktree.** A path in no repository is not a change
-  to anybody's work; scratch directories and `/tmp` are free.
+  to anybody's work; scratch directories and `/tmp` are free. A leading `~/`,
+  `$HOME/` or `${HOME}/` expands first, so a path under the home directory is
+  judged where it points rather than joined onto the repository root — the gate
+  reads a command before the shell has run, and those two spellings have one
+  meaning (`docs/hook-friction-2.md` §9). The walk up to a target's repository
+  stops at the first real directory, and a symlink is not one, so a borrowed
+  `node_modules` is judged where the link sits (bw-g3o3.12).
 
 A refusal names the target as the command wrote it, the directory it was
 resolved against, and where it landed — the resolution is usually the whole
@@ -198,6 +227,13 @@ next round of tuning; the bypass log is only evidence that something happened.
 ## Changing a gate
 
 The gates live in `server/src/lifecycle.rs`, the bypass in
-`server/src/hook_bypass.rs`, and the dispatch in `server/src/rules.rs`. They run
+`server/src/hook_bypass.rs`, the dispatch in `server/src/rules.rs`, and the
+public workflow commands in `server/src/board_tools.rs`. They run
 from the **installed** `atelier`, not from a worktree build, so a fix is not in
 effect until `scripts/install-local.sh` is run from a terminal outside Atelier.
+
+Every tool answers `--help` and `-h` with its own usage and does nothing else,
+and the checks runner hands its suites an environment with no `ATELIER_BYPASS`
+in it — a suite is never the thing a bypass is for, and an exported one made
+the gate stand down out loud into a case that asserts it says nothing
+(`docs/hook-friction-2.md`, the tooling entries §7 and §8).
