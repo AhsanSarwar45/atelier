@@ -471,9 +471,26 @@ async fn import_claude_history(
     let opened = std::time::Instant::now();
     let history = super::claude::history::read_history(&record);
     let read_ms = opened.elapsed().as_millis();
+    // A record that names no model or effort is not a record saying the chat
+    // has none; it is a record that does not say. Reading it as a clearing
+    // wiped whatever the chat had been set to, and took the effort menu with it
+    // — the menu's efforts are built from this one value, so an emptied effort
+    // leaves no picker to put it back with. The permission mode has always been
+    // read this way, as an Option that patches nothing when the record is
+    // silent; the other two now are too (bw-l4fr.2).
+    let imported_model = history
+        .settings
+        .model
+        .clone()
+        .or_else(|| session.model.clone());
+    let imported_effort = history
+        .settings
+        .effort
+        .clone()
+        .or_else(|| session.effort.clone());
     let mut historical_session = session.clone();
-    historical_session.model = history.settings.model.clone();
-    historical_session.effort = history.settings.effort.clone();
+    historical_session.model = imported_model.clone();
+    historical_session.effort = imported_effort.clone();
     let menu = claude_import_menu(&historical_session);
     let reset =
         !history.events.is_empty() && database.timeline_count(session.id.clone()).await? > 0;
@@ -481,9 +498,9 @@ async fn import_claude_history(
         .update_session(
             session.id.clone(),
             SessionPatch {
-                model: Some(history.settings.model.clone()),
+                model: Some(imported_model.clone()),
                 permission_mode: history.settings.permission_mode.clone(),
-                effort: Some(history.settings.effort.clone()),
+                effort: Some(imported_effort.clone()),
                 ..SessionPatch::default()
             },
             None,
@@ -491,8 +508,8 @@ async fn import_claude_history(
         .await?;
     let mut pinned = json!({"type":"session.pinned"});
     let pinned_fields = [
-        ("model", json!(history.settings.model)),
-        ("effort", json!(history.settings.effort)),
+        ("model", json!(imported_model)),
+        ("effort", json!(imported_effort)),
     ]
     .into_iter()
     .chain(
@@ -1151,6 +1168,75 @@ mod tests {
             last_spoke_at: None,
             begun_by: None,
         }
+    }
+
+    /// A record that says nothing about the effort is not a record saying there
+    /// is none.
+    ///
+    /// Reading its silence as a clearing wiped what the chat had been set to,
+    /// and emptied the effort menu with it — the menu's efforts are built from
+    /// that one value, so there was no picker left to put it back with. The
+    /// permission mode was always read the other way; this proves the effort
+    /// and the model are too (bw-l4fr.2).
+    #[tokio::test]
+    async fn a_silent_record_does_not_clear_what_the_chat_was_set_to() {
+        let root = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+
+        let external = "11111111-2222-3333-4444-555555555555";
+        let project = config.path().join("projects").join("a-project");
+        std::fs::create_dir_all(&project).unwrap();
+        // One ordinary turn. It names a model, because a record always does,
+        // and says nothing at all about the effort or the permission mode.
+        std::fs::write(
+            project.join(format!("{external}.jsonl")),
+            format!(
+                "{}\n{}\n",
+                json!({"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"What is the effort here?"}}),
+                json!({"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"id":"turn-1","model":"claude-from-the-record","content":[{"type":"text","text":"It is whatever you set."}]}}),
+            ),
+        )
+        .unwrap();
+
+        let mut session = imported_session();
+        session.brand = "claude".into();
+        session.external_id = Some(external.into());
+        session.permission_mode = "bypassPermissions".into();
+        session.effort = Some("high".into());
+        session.model = Some("a-model-he-picked".into());
+        database.create_session(session.clone()).await.unwrap();
+
+        import_claude_history(&database, config.path(), &session)
+            .await
+            .unwrap();
+
+        let after = database
+            .get_session(session.id.clone())
+            .await
+            .unwrap()
+            .expect("the chat is still there after its record is read");
+        assert_eq!(
+            after.effort.as_deref(),
+            Some("high"),
+            "a record that names no effort cleared the one the chat was set to"
+        );
+        assert_eq!(
+            after.permission_mode, "bypassPermissions",
+            "a record that names no mode cleared the one the chat was set to"
+        );
+        // The record does name a model, and that is the one thing here it is
+        // entitled to have the last word on.
+        assert_eq!(after.model.as_deref(), Some("claude-from-the-record"));
+
+        // And the chips are told the same, rather than being sent a null that
+        // leaves them reading the default until something else corrects them.
+        let events = database.events_since(session.id.clone(), 0).await.unwrap();
+        let pinned = events
+            .iter()
+            .find(|event| event.kind == crate::workbench::protocol::EventKind::SessionPinned)
+            .expect("reading a record pins what the chat runs as");
+        assert_eq!(pinned.fields["effort"], "high");
     }
 
     #[test]
