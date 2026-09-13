@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { apiUrl } from '@/lib/api-base';
+import { request } from '@/lib/api';
 
 interface MemoryReport { totalBytes: number; appBytes: number; processes: number; chats: Array<{ sessionId: string; title: string; bytes: number; processes: number }> }
 function isMemoryReport(value: unknown): value is MemoryReport {
@@ -20,7 +20,7 @@ export function memoryWords(bytes: number): string {
 }
 export function MemoryBadge() {
   const [report, setReport] = useState<MemoryReport | null>(null);
-  const read = useCallback(() => { void fetch(apiUrl('/api/workbench/memory'), { cache: 'no-store' })
+  const read = useCallback(() => { void request('/api/workbench/memory', { cache: 'no-store' })
     .then(async response => { if (!response.ok) throw new Error(await response.text()); return response.json() as Promise<unknown>; })
     .then(value => { if (isMemoryReport(value)) setReport(value); }).catch(() => {}); }, []);
   useEffect(() => { read(); const timer = window.setInterval(read, 3_000); return () => window.clearInterval(timer); }, [read]);
