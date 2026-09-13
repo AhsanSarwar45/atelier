@@ -2109,7 +2109,7 @@ impl AcpDriver {
             session.model.as_deref(),
             session.profile.as_deref(),
         ) {
-            Some(config) => config,
+            Some(config) => config.env(super::super::memory::CHAT_ENV, session.id.clone()),
             None => {
                 let message = format!("bundled {brand} ACP adapter is incomplete or unavailable");
                 record_transport_failure(&database, &session, &message).await;

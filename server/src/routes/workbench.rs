@@ -922,6 +922,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/tool", get(tool))
         .route("/spend", get(spend))
         .route("/usage", get(usage))
+        .route("/memory", get(memory))
         .route("/tokens", get(tokens))
         .route("/links/bead/:id", get(chats_for_bead))
         .route("/links/session/:id", get(beads_for_chat))
@@ -948,6 +949,11 @@ pub fn router(state: WorkbenchState) -> Router {
 
 async fn health() -> Json<Value> {
     Json(json!({"status":"ok","workbench":"native"}))
+}
+
+async fn memory(State(state): State<WorkbenchState>) -> Result<Json<Value>, ApiError> {
+    Ok(Json(serde_json::to_value(crate::workbench::memory::report(state.database()).await?)
+        .map_err(|error| error.to_string())?))
 }
 
 #[derive(Deserialize)]

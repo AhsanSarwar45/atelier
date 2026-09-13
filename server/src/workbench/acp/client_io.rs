@@ -228,6 +228,7 @@ impl ClientIo {
         command
             .args(&request.args)
             .current_dir(cwd)
+            .env(super::super::memory::CHAT_ENV, request.session_id.0.as_ref())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

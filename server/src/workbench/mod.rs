@@ -17,6 +17,7 @@ pub mod kit_words;
 pub mod lifecycle;
 pub mod local;
 pub mod media;
+pub mod memory;
 pub mod metadata;
 pub mod profiles;
 pub mod projection;

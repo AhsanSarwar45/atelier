@@ -78,6 +78,7 @@ tempfile = "3"
 # only `log`, `once_cell`, `scopeguard` and `urlencoding` beyond what is already
 # here: no dbus, no gio.
 trash = "5"
+sysinfo = "0.33"
 
 [dev-dependencies]
 # `test-util` gives the tests a pausable clock, so the supervisor's growing

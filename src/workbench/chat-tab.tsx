@@ -108,6 +108,7 @@ import { AttachmentViewer } from '@/workbench/attachment-viewer';
 import { useEpicChecklist } from '@/workbench/epic-checklist';
 import { firstAvailableProvider, providerIsAvailable, useProviders, whyUnavailable } from '@/workbench/providers';
 import { ModelIcon } from '@/workbench/model-icon';
+import { MemoryBadge } from '@/workbench/memory-badge';
 import { DEFAULT_PANEL_WIDTH, ResizeDivider, rememberedPanelWidth } from '@/workbench/resize-divider';
 import * as api from '@/lib/api';
 import { WhereToWork, type Where } from '@/workbench/where-to-work';
@@ -740,6 +741,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [newProfile, setNewProfile] = useState<Partial<Record<Brand, string>>>({});
   const [modelDefaults, setModelDefaults] = useState<Partial<Record<Brand, string>>>({});
   const [effortDefaults, setEffortDefaults] = useState<Partial<Record<Brand, string>>>({});
+  const [permissionDefaults, setPermissionDefaults] = useState<Partial<Record<Brand, string>>>({});
   const [composerSettingsOpen, setComposerSettingsOpen] = useState(false);
   const availableBrand = firstAvailableProvider(providers);
   const newBrandAvailable = providerIsAvailable(providers, newBrand);
@@ -1341,22 +1343,24 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   useEffect(() => {
     let current = true;
     if (sessionBrand === 'local') return () => { current = false; };
-    void sendCommand<{ model: string | null; effort: string | null }>({ type: 'provider-defaults.read', brand: sessionBrand })
+    void sendCommand<{ model: string | null; effort: string | null; permissionMode: string | null }>({ type: 'provider-defaults.read', brand: sessionBrand })
       .then((defaults) => {
         if (!current) return;
         setModelDefaults((was) => ({ ...was, [sessionBrand]: defaults.model ?? undefined }));
         setEffortDefaults((was) => ({ ...was, [sessionBrand]: defaults.effort ?? undefined }));
+        setPermissionDefaults((was) => ({ ...was, [sessionBrand]: defaults.permissionMode ?? undefined }));
       })
       .catch((e: unknown) => current && setSteerError(e instanceof Error ? e.message : String(e)));
     return () => { current = false; };
   }, [sessionBrand]);
-  const makeProviderDefault = useCallback((kind: 'model' | 'effort', value: string) => {
+  const makeProviderDefault = useCallback((kind: 'model' | 'effort' | 'permission', value: string) => {
     setSteerError(null);
-    void sendCommand<{ model: string | null; effort: string | null }>({
+    void sendCommand<{ model: string | null; effort: string | null; permissionMode: string | null }>({
       type: 'provider-defaults.write', brand: sessionBrand, kind, value,
     }).then((defaults) => {
       setModelDefaults((was) => ({ ...was, [sessionBrand]: defaults.model ?? undefined }));
       setEffortDefaults((was) => ({ ...was, [sessionBrand]: defaults.effort ?? undefined }));
+      setPermissionDefaults((was) => ({ ...was, [sessionBrand]: defaults.permissionMode ?? undefined }));
     }).catch((e: unknown) => setSteerError(e instanceof Error ? e.message : String(e)));
   }, [sessionBrand]);
   /** The selected provider account's allowance, never the other provider's. */
@@ -2107,6 +2111,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           providers={view.menu.providers}
           className="hidden md:flex"
         />
+        <MemoryBadge />
         {facts?.folder && (
           <Tooltip label={[facts.cwd, facts.branch].filter(Boolean).join(' · ')}>
             <Badge
@@ -2444,6 +2449,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 value: m,
                 label: PERMISSION_MODE[m]?.label ?? inWords(m),
               }))}
+              defaultValue={sessionBrand === 'local' ? null : permissionDefaults[sessionBrand] ?? null}
+              onDefault={sessionBrand === 'local' ? undefined : (mode) => makeProviderDefault('permission', mode)}
               onPick={(mode) => {
                 setSteerError(null);
                 void sendCommand({ type: 'session.mode', sessionId, mode }).catch((e: unknown) =>
@@ -2642,6 +2649,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                   value: mode,
                   label: PERMISSION_MODE[mode]?.label ?? inWords(mode),
                 }))}
+                defaultValue={sessionBrand === 'local' ? null : permissionDefaults[sessionBrand] ?? null}
+                onDefault={sessionBrand === 'local' ? undefined : (mode) => makeProviderDefault('permission', mode)}
                 onPick={(mode) => {
                   setSteerError(null);
                   void sendCommand({ type: 'session.mode', sessionId, mode }).catch((error: unknown) =>
