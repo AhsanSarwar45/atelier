@@ -107,6 +107,14 @@ const LEGACY_MIGRATIONS: &[&str] = &[
          'at', at
        )
        WHERE type = 'session.menu';"#,
+    r#"CREATE TABLE IF NOT EXISTS session_external_alias (
+         brand TEXT NOT NULL,
+         external_id TEXT NOT NULL,
+         session_id TEXT NOT NULL,
+         PRIMARY KEY (brand, external_id)
+       );
+       CREATE INDEX IF NOT EXISTS session_external_alias_by_session
+         ON session_external_alias(session_id);"#,
 ];
 
 /// The native owner of the existing workbench database.
@@ -316,6 +324,7 @@ impl Store {
         transaction.execute("DELETE FROM event WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM bead_link WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM session_handoff WHERE session_id = ?1", [id])?;
+        transaction.execute("DELETE FROM session_external_alias WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM session WHERE id = ?1", [id])?;
         transaction.commit()
     }
@@ -412,11 +421,31 @@ impl Store {
     pub fn session_by_external_id(&self, external_id: &str) -> rusqlite::Result<Option<Session>> {
         self.connection
             .query_row(
-                "SELECT * FROM session WHERE external_id = ?1 ORDER BY last_active_at DESC LIMIT 1",
+                r#"SELECT session.* FROM session
+                     LEFT JOIN session_external_alias AS alias
+                       ON alias.session_id = session.id
+                    WHERE session.external_id = ?1 OR alias.external_id = ?1
+                    ORDER BY session.last_active_at DESC LIMIT 1"#,
                 [external_id],
                 session_from_row,
             )
             .optional()
+    }
+
+    pub fn remember_external_alias(
+        &self,
+        session_id: &str,
+        brand: &str,
+        external_id: &str,
+    ) -> rusqlite::Result<()> {
+        self.connection.execute(
+            r#"INSERT INTO session_external_alias (brand, external_id, session_id)
+               VALUES (?1, ?2, ?3)
+               ON CONFLICT (brand, external_id)
+               DO UPDATE SET session_id = excluded.session_id"#,
+            params![brand, external_id, session_id],
+        )?;
+        Ok(())
     }
 
     /// The model this brand was last started on anywhere in this app.
@@ -2430,6 +2459,50 @@ fn columns(transaction: &Transaction<'_>, table: &str) -> rusqlite::Result<Vec<S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_replaced_provider_id_still_resolves_to_its_original_chat() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(&root.path().join("workbench.db")).unwrap();
+        store
+            .create_session(&session(
+                "chat",
+                "codex",
+                Some("rollout-gone"),
+                "2026-09-13T00:00:00Z",
+            ))
+            .unwrap();
+        store
+            .remember_external_alias("chat", "codex", "rollout-gone")
+            .unwrap();
+        store
+            .update_session(
+                "chat",
+                SessionPatch {
+                    external_id: Some(Some("replacement".into())),
+                    ..SessionPatch::default()
+                },
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(
+            store
+                .session_by_external_id("rollout-gone")
+                .unwrap()
+                .unwrap()
+                .id,
+            "chat"
+        );
+        assert_eq!(
+            store
+                .session_by_external_id("replacement")
+                .unwrap()
+                .unwrap()
+                .id,
+            "chat"
+        );
+    }
 
     #[test]
     fn recovering_connections_preserves_stopped_and_failed_outcomes() {

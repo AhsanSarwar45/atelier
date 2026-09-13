@@ -1732,6 +1732,27 @@ async fn restore(
         if !everything && known["begunBy"] != "person" {
             continue;
         }
+        // A provider thread whose writable rollout disappeared can remain in
+        // session/list after this chat has continued on a replacement thread.
+        // Its durable alias resolves to the already-drawn local row; never
+        // adopt that abandoned provider ID as a second dead conversation.
+        if let (Some(external_id), Some(brand)) =
+            (known["externalId"].as_str(), known["brand"].as_str())
+        {
+            if let Some(cached) = state
+                .database()
+                .session_by_external_id(external_id.to_string())
+                .await?
+                .filter(|session| session.brand == brand)
+            {
+                if rows
+                    .iter()
+                    .any(|row| row["sessionId"].as_str() == Some(cached.id.as_str()))
+                {
+                    continue;
+                }
+            }
+        }
         let durable_id = if let (Some(project_id), Some(external_id), Some(brand), Some(cwd)) = (
             query.project.as_deref(),
             known["externalId"].as_str(),

@@ -65,6 +65,22 @@ test('a Codex chat whose rollout is gone continues in a new provider thread', as
     ).toHaveCount(1);
     await expect(page.getByText(/no rollout found for thread id/i)).toHaveCount(0);
 
+    const rediscovered = page.waitForResponse((response) => (
+      response.url().includes('/api/workbench/restore?')
+      && !response.url().includes('local=1')
+      && response.ok()
+    ));
+    await page.reload();
+    await rediscovered;
+    const showAgents = page.getByRole('button', { name: 'Show the agents\' own chats' });
+    if (await showAgents.isVisible()) await showAgents.click();
+    await expect(page.locator(`[data-testid="restore-row"][data-row-key="${sessionId}"]`)).toHaveCount(1);
+    await expect(page.locator(
+      `[data-testid="restore-row"][data-brand="codex"][data-external-id="${THREAD}"]`,
+    )).toHaveCount(0);
+    await page.locator(`[data-testid="restore-row"][data-row-key="${sessionId}"]`).getByTestId('row-name').click();
+    await expect(page.getByText('The replacement Codex thread answered.', { exact: true })).toBeVisible();
+
     if (process.env.WORKBENCH_E2E_SHOT) {
       await page.getByTestId('transcript-rows').screenshot({ path: process.env.WORKBENCH_E2E_SHOT });
     }

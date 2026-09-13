@@ -2365,6 +2365,14 @@ impl AcpDriver {
                                             )).meta(session_meta.clone()))
                                             .block_task()
                                             .await?;
+                                        task_database
+                                            .remember_external_alias(
+                                                task_session.id.clone(),
+                                                brand.to_string(),
+                                                remote,
+                                            )
+                                            .await
+                                            .map_err(acp_error)?;
                                         normalizer.lock().await.namespace_generated_ids();
                                         (
                                             response.session_id.to_string(),
