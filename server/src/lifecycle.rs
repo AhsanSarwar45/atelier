@@ -2591,7 +2591,7 @@ mod tests {
     /// repository change (`docs/hook-friction-2.md` §9, bw-5gax).
     #[test]
     fn native_machinery_a_home_path_is_read_where_it_points() {
-        let home = std::env::var("HOME").expect("a home directory");
+        let home = home().expect("a home directory");
         let repo = Path::new("/repo");
         for spelling in ["~/scratch/x", "$HOME/scratch/x", "${HOME}/scratch/x"] {
             assert_eq!(
@@ -2614,7 +2614,7 @@ mod tests {
         let target = Target::named(repo, "~/scratch/x");
         assert_eq!(
             target.spelled(),
-            format!("resolved target: {home}/scratch/x")
+            format!("resolved target: {}/scratch/x", home.display())
         );
     }
 
