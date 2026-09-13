@@ -204,6 +204,8 @@ export interface ChatRightRailProps {
    */
   diffOpen?: boolean;
   onFlipDiff?: () => void;
+  /** Opening the diff on one of the Git panel's files (bw-pstm.1). */
+  onShowFile?: (file: string) => void;
   /**
    * Shutting it. The button that opens it is on the bar above (bw-81wt.5), and
    * on a phone that bar is behind this sheet — so the same call is what the
@@ -228,6 +230,7 @@ export function ChatRightRail({
   resizing = false,
   diffOpen = false,
   onFlipDiff,
+  onShowFile,
   onToggle,
 }: ChatRightRailProps) {
   const jobs = useMemo(() => byJob(cards), [cards]);
@@ -306,7 +309,13 @@ export function ChatRightRail({
               project to the worktree, and the project's answers must go with
               the old mount rather than sit on screen under the new path. */}
           {view === 'git' && (
-            <GitView key={gitPath ?? ''} path={gitPath} diffOpen={diffOpen} onFlipDiff={onFlipDiff} />
+            <GitView
+              key={gitPath ?? ''}
+              path={gitPath}
+              diffOpen={diffOpen}
+              onFlipDiff={onFlipDiff}
+              onShowFile={onShowFile}
+            />
           )}
 
           {view === 'chat' && (

@@ -250,6 +250,7 @@ function FileLine({
   busy,
   onAct,
   extra,
+  showsDiff = false,
 }: {
   path: string;
   /** Where the file is on disk, so the row opens like every other path. */
@@ -266,6 +267,12 @@ function FileLine({
    * because what it does is the view's business and not the row's.
    */
   extra?: React.ReactNode;
+  /**
+   * Whether a plain click on the name opens this file's section of the diff
+   * rather than the file itself (bw-pstm.1). Alt-click and the right-click menu
+   * still reach the file, so nothing the name used to do is lost.
+   */
+  showsDiff?: boolean;
 }) {
   const { word, tone, said } = STATUS_LOOK[state];
   const cut = path.lastIndexOf('/');
@@ -300,9 +307,17 @@ function FileLine({
           right-click (bw-g3o3.9). It keeps the row's own type and weight rather
           than becoming a capsule, because a rail of twelve capsules is a rail
           nobody can read down. */}
-      <Tooltip label={from ? `${from} → ${path}` : `${path} — click to open in the Files tab`}>
+      <Tooltip
+        label={
+          from
+            ? `${from} → ${path}`
+            : `${path} — click to ${showsDiff ? 'show its diff' : 'open in the Files tab'}`
+        }
+      >
         <span
           className="flex min-w-0 flex-1 cursor-pointer items-baseline gap-1 hover:text-foreground"
+          data-testid="git-file-name"
+          data-git-show={showsDiff ? path : undefined}
           data-path-mention={absolute}
           data-path-look="link"
         >
@@ -343,9 +358,15 @@ export interface GitViewProps {
    */
   diffOpen?: boolean;
   onFlipDiff?: () => void;
+  /**
+   * Opening the diff on one file (bw-pstm.1). Given, a plain click on a file's
+   * name asks for that file's section of the diff; not given, the name opens
+   * the file like every other path in the app.
+   */
+  onShowFile?: (file: string) => void;
 }
 
-export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
+export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitViewProps) {
   // The rail's file names are file chips, answered by the one set of handlers
   // every other file chip in the app is answered by (bw-g3o3.9).
   const paths = usePathActions();
@@ -627,6 +648,30 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
    * is a tick and a press rather than retyping a line that is on the screen
    * already. Anything the writer has typed is left exactly as it is.
    */
+  /**
+   * A plain click on a file's name, answered before the chip listeners hear it.
+   * Capture runs from the outside in, so this is the only place the diff can
+   * take the click ahead of the Files tab; anything else goes on to them.
+   */
+  const { onClickCapture: openChip } = paths.chips;
+  const clicked = useCallback(
+    (event: React.MouseEvent) => {
+      const named =
+        onShowFile && !event.altKey && event.target instanceof Element
+          ? event.target.closest('[data-git-show]')
+          : null;
+      const file = named?.getAttribute('data-git-show');
+      if (!onShowFile || !file) {
+        openChip(event);
+        return;
+      }
+      event.stopPropagation();
+      event.preventDefault();
+      onShowFile(file);
+    },
+    [onShowFile, openChip],
+  );
+
   const wantAmend = useCallback(
     (wanted: boolean) => {
       setAmend(wanted);
@@ -655,7 +700,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
     conflicted.length === 0;
 
   return (
-    <div className="flex min-h-0 flex-col divide-y divide-border/60" data-testid="git-view" {...paths.chips}>
+    <div className="flex min-h-0 flex-col divide-y divide-border/60" data-testid="git-view" {...paths.chips} onClickCapture={clicked}>
       {paths.menu}
       {/* The line of work, and how far it is from the shared copy. Both counts
           are drawn whether or not there is anything in them: "0 ahead, 0
@@ -1006,6 +1051,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
           <div className="flex flex-col">
             {conflicted.map((file) => (
               <FileLine
+                showsDiff={Boolean(onShowFile)}
                 key={file.path}
                 path={file.path}
                 absolute={under(path, file.path)}
@@ -1051,6 +1097,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
           <div className="flex flex-col">
             {staged.map((file) => (
               <FileLine
+                showsDiff={Boolean(onShowFile)}
                 key={file.path}
                 path={file.path}
                 absolute={under(path, file.path)}
@@ -1117,6 +1164,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
           <div className="flex flex-col">
             {unstaged.map((file) => (
               <FileLine
+                showsDiff={Boolean(onShowFile)}
                 key={file.path}
                 path={file.path}
                 absolute={under(path, file.path)}
@@ -1182,6 +1230,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff }: GitViewProps) {
           <div className="flex flex-col">
             {untracked.map((file) => (
               <FileLine
+                showsDiff={Boolean(onShowFile)}
                 key={file.path}
                 path={file.path}
                 absolute={under(path, file.path)}

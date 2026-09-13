@@ -145,7 +145,16 @@ function firstShape(files: GitDiffFile[]): Record<string, boolean> {
   return shape;
 }
 
-export function GitDiffView({ path }: { path: string | null }) {
+/**
+ * A file the reader picked in the Git panel. `asked` tells a second click on
+ * the same file from the first, so it scrolls there again.
+ */
+export interface DiffFocus {
+  path: string;
+  asked: number;
+}
+
+export function GitDiffView({ path, focus = null }: { path: string | null; focus?: DiffFocus | null }) {
   // Every file name in here is a chip like any other, so the one set of
   // handlers that answers a chip anywhere in the app answers these too.
   const { chips, menu } = usePathActions();
@@ -160,6 +169,11 @@ export function GitDiffView({ path }: { path: string | null }) {
   const [said, setSaid] = useState<Record<string, boolean>>({});
   /** What the reader was shown before, so a new file is opened by the rule. */
   const shape = useRef<Record<string, boolean>>({});
+  /** The last pick already answered, so a re-read does not scroll again. */
+  const reached = useRef<number | null>(null);
+  /** The section to bring into view once it has been drawn open. */
+  const [bringing, setBringing] = useState<string | null>(null);
+  const column = useRef<HTMLDivElement>(null);
 
   const read = useCallback(
     async (signal?: AbortSignal) => {
@@ -199,12 +213,35 @@ export function GitDiffView({ path }: { path: string | null }) {
   }, [read]);
   useRepositoryReads(path, quietly);
 
+  // A pick is answered once the file is on screen: the diff may still be on
+  // its first read when the panel's click arrives. A file the reader shut, or
+  // one long enough to start shut, is opened, because they asked to read it.
+  useEffect(() => {
+    if (!focus || reached.current === focus.asked) return;
+    if (!files?.some((file) => file.path === focus.path)) return;
+    reached.current = focus.asked;
+    setSaid((before) => ({ ...before, [focus.path]: true }));
+    setBringing(focus.path);
+  }, [focus, files]);
+
+  // Runs after the render that opened the section, so the scroll lands on
+  // where the heading is with its lines drawn and not where it was before.
+  useEffect(() => {
+    if (bringing === null) return;
+    const section = [...(column.current?.querySelectorAll<HTMLElement>('[data-testid="git-diff-file"]') ?? [])].find(
+      (one) => one.dataset.path === bringing,
+    );
+    section?.scrollIntoView?.({ block: 'start' });
+    setBringing(null);
+  }, [bringing]);
+
   const flip = useCallback((file: string, now: boolean) => {
     setSaid((before) => ({ ...before, [file]: !now }));
   }, []);
 
   return (
     <div
+      ref={column}
       data-testid="git-diff-view"
       // One set of listeners for every file badge under it, exactly as the
       // transcript does it: the chip carries the address and these answer the

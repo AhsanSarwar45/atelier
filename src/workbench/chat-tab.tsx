@@ -71,7 +71,7 @@ import { imageIds, imageMarker, promptFromDraft, promptParts, whyNot } from '@/w
 import type { DraftPicture } from '@/workbench/composer-attachments';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
-import { GitDiffView } from '@/workbench/git-diff-view';
+import { GitDiffView, type DiffFocus } from '@/workbench/git-diff-view';
 import { useKnownCards, useKnownCardStatuses } from '@/workbench/known-cards';
 import { drawnRows } from '@/workbench/machine-lines';
 import { inWords, PERMISSION_MODE } from '@/workbench/machine-words';
@@ -974,6 +974,26 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     if (phone && !diffOpen && rightOpen) flipRight();
     rememberDiff();
   }, [phone, diffOpen, rightOpen, flipRight, rememberDiff]);
+  /** The file the Git panel last asked the diff to show (bw-pstm.1). */
+  const [diffFocus, setDiffFocus] = useState<DiffFocus | null>(null);
+  // Put away, the pick is spent: the diff opened later by its own button must
+  // not jump to a file clicked before.
+  useEffect(() => {
+    if (!showDiff) setDiffFocus(null);
+  }, [showDiff]);
+  /**
+   * A file's name in the Git panel, clicked: the diff comes up if it was put
+   * away, and scrolls to that file. On a phone the sheet is shut on the way in
+   * for the same reason `showTheDiff` shuts it.
+   */
+  const showFileInDiff = useCallback(
+    (file: string) => {
+      if (phone && rightOpen) flipRight();
+      if (!diffOpen) rememberDiff();
+      setDiffFocus({ path: file, asked: Date.now() });
+    },
+    [phone, diffOpen, rightOpen, flipRight, rememberDiff],
+  );
   /**
    * The way into the Git view.
    *
@@ -1929,6 +1949,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             resizing={resizingRight}
             diffOpen={diffOpen}
             onFlipDiff={showTheDiff}
+            onShowFile={showFileInDiff}
             onToggle={flipRight}
           />
         </>
@@ -2168,7 +2189,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           {/* One diff per worktree, and never the last chat's: the open-and-shut
               state inside is kept by file path, which means nothing in another
               checkout. */}
-          <GitDiffView key={facts?.cwd ?? projectPath ?? ''} path={facts?.cwd ?? projectPath} />
+          <GitDiffView key={facts?.cwd ?? projectPath ?? ''} path={facts?.cwd ?? projectPath} focus={diffFocus} />
         </div>
       )}
       {/* The conversation and the one way back to it, which floats over its
