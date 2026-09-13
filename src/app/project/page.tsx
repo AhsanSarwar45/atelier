@@ -1,12 +1,13 @@
 'use client';
 
-import { type MouseEvent, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { ArrowLeft, EllipsisVertical, Folder, Home, MessageSquare, SquareKanban } from 'lucide-react';
+import { EllipsisVertical, Folder, Home, MessageSquare, SquareKanban } from 'lucide-react';
 
+import { BackLink } from '@/components/back-link';
 import { CardPanel } from '@/components/card-panel';
 import { ProjectSettingsDialog } from '@/components/project-settings-dialog';
 import { Shell } from '@/components/shell';
@@ -20,7 +21,6 @@ import {
   cardCameFromHere,
   cardWasClosed,
   cardWasPushed,
-  somewhereBehind,
   whereFrom,
 } from '@/lib/address';
 import { PRODUCT_NAME } from '@/lib/identity';
@@ -114,21 +114,6 @@ function ProjectTabs() {
     router.replace(addressWith(params, { card: null }));
   }, [router, params]);
 
-  // The bar's arrow gives back whatever he was on last — the chat a report was
-  // named in, the board he opened a report from — the same as the browser's own
-  // arrow, rather than throwing away the whole visit for the project list. A
-  // held key or a middle click is him asking for a second tab, so those are left
-  // to the link underneath, as is a screen with nothing of ours behind it.
-  const stepBack = useCallback(
-    (e: MouseEvent<HTMLAnchorElement>) => {
-      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-      if (!somewhereBehind()) return;
-      e.preventDefault();
-      router.back();
-    },
-    [router],
-  );
-
   // However the panel went — his Back, its own close, a link — the count of
   // entries we added comes down when the card leaves the address, so it cannot
   // drift upwards over a long visit.
@@ -147,29 +132,7 @@ function ProjectTabs() {
       barClassName={terminal ? 'terminal-header' : undefined}
       bar={
         <>
-          {/* Ink and strength named from the app's own text scale: the quiet
-              button style is written in the borrowed colour names, and three
-              skins paint that the same colour as the bar itself, so the arrow
-              disappeared on them. The picture also carries its own strength,
-              because the button dims any picture inside it to 60%. */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="shrink-0 text-t-tertiary hover:bg-surface-overlay hover:text-t-primary"
-            asChild
-          >
-            {/* A link, not a fresh document: the list is a step back in the same
-                app, so the history keeps what was open on this screen. Written
-                as a link to the list and turned into a step back at the moment
-                it is pressed, so it draws the same before and after the browser
-                takes it over, a middle-click still opens the list in its own
-                tab, and a screen with nothing of ours behind it still has a way
-                out. */}
-            <Link href="/" data-testid="back-arrow" onClick={stepBack}>
-              <ArrowLeft className="h-4 w-4 opacity-100" />
-              <span className="sr-only">Back</span>
-            </Link>
-          </Button>
+          <BackLink href="/" />
           {/* The way out that is always the same one. The arrow beside it is
               where the reader came from, which is a different question and by
               now a different answer, so the project list has a control of its
