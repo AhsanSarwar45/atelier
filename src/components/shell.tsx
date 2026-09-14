@@ -15,11 +15,19 @@
 
 import { createContext, forwardRef, useContext, useEffect, useState, type ReactNode } from 'react';
 
-import { Loader2, SquareTerminal } from 'lucide-react';
+import Link from 'next/link';
+
+import { Loader2, Menu, Settings, SquareTerminal } from 'lucide-react';
 import { createPortal } from 'react-dom';
 
 import { GlobalSettingsButton } from '@/components/global-settings-button';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Tooltip } from '@/components/ui/tooltip';
 import { watchKeyboard } from '@/lib/keyboard-inset';
 import { cn } from '@/lib/utils';
@@ -58,6 +66,36 @@ const BAR = 'flex h-12 shrink-0 items-center gap-2 border-b border-border/40 bg-
 function TerminalButton() {
   const { show } = useTerminalShells();
   return <ToolButton icon={<SquareTerminal />} label="Terminal" onClick={show} data-testid="open-terminal" />;
+}
+
+/**
+ * The same two ways out, folded into one button on a phone.
+ *
+ * A phone's first bar has to hold the project's name, and two buttons at the
+ * end of it were taking eighty points off a row that had none to spare
+ * (bw-rpgh.3). Folded, they cost forty and the name reads. On a wide screen
+ * there is room for both and the pair stays in plain sight, so this is drawn
+ * only under the `md` break and the pair only above it.
+ */
+function ShellMenu() {
+  const { show } = useTerminalShells();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <ToolButton icon={<Menu />} label="Menu" data-testid="shell-menu" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44" data-testid="shell-menu-items">
+        <DropdownMenuItem data-testid="shell-menu-terminal" onSelect={() => show()}>
+          <SquareTerminal aria-hidden="true" /> Terminal
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild data-testid="shell-menu-settings">
+          <Link href="/settings">
+            <Settings aria-hidden="true" /> Settings
+          </Link>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 export function Shell({
@@ -110,8 +148,13 @@ export function Shell({
             them would share out the free space and leave the two buttons at
             opposite ends of the bar. */}
         <div className="ml-auto flex shrink-0 items-center gap-1">
-          <TerminalButton />
-          <GlobalSettingsButton />
+          <div className="hidden items-center gap-1 md:flex">
+            <TerminalButton />
+            <GlobalSettingsButton />
+          </div>
+          <div className="md:hidden">
+            <ShellMenu />
+          </div>
         </div>
       </div>
       {/* One line on a wide screen. On a phone the tab selector alone fills it,

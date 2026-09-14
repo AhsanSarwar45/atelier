@@ -232,7 +232,9 @@ test('a phone can stop a running command from the strip', async ({ page, request
   try {
     await page.goto('/');
     await expect(page.getByTestId('shell')).toBeVisible({ timeout: WAIT });
-    await page.getByTestId('open-terminal').tap();
+    // On a phone the Terminal lives behind the bar's hamburger (bw-rpgh.3).
+    await page.getByTestId('shell-menu').tap();
+    await page.getByTestId('shell-menu-terminal').click();
     await expect(page.getByTestId('terminal-window'), 'the button did not open the window').toBeVisible({ timeout: SHELL_MS });
     const pane = page.getByTestId('terminal-pane').first();
     await expect(pane).toBeVisible({ timeout: SHELL_MS });
