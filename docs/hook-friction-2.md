@@ -1564,3 +1564,10 @@ The Edit-compatible `apply_patch` tool refused an absolute target under
 `worktrees/bw-1kpq` while child `bw-1kpq.1` was claimed in that job copy. It
 reported `/home/ahsan/dev/beads-web` as the resolved target. Running
 `apply_patch` from the worktree with the documented per-job bypass succeeded.
+
+## Edit resolves the bw-57ei job worktree as the landing checkout
+
+The Edit-compatible `apply_patch` tool refused an absolute target under
+`worktrees/bw-57ei` while child `bw-57ei.1` was claimed in that job copy. It
+reported `/home/ahsan/dev/beads-web` as the resolved target. Running
+`apply_patch` from the worktree with the documented per-job bypass succeeded.

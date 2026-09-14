@@ -683,6 +683,52 @@ fn view_with_live_menu(mut events: Vec<Event>, live: Option<&Event>) -> Vec<Even
     events
 }
 
+/// The installed provider's current steering choices for a saved chat.
+///
+/// Menus are deliberately not durable: models and modes can change when the
+/// provider is upgraded. They are provider facts, though, rather than facts of
+/// one conversation. Reopening a dormant chat used to show no picker until its
+/// first prompt woke that exact session, even when another session on the same
+/// provider had just advertised the current catalogue. Reuse only those
+/// provider-wide choices; commands, skills, agents and config values remain
+/// owned by the session that announced them.
+fn live_steering_menu(
+    store: &Store,
+    live_menus: &HashMap<String, Event>,
+    session_id: &str,
+) -> Option<Event> {
+    if let Some(menu) = live_menus.get(session_id) {
+        return Some(menu.clone());
+    }
+    let brand = store.get_session(session_id).ok().flatten()?.brand;
+    let (_, source) = live_menus
+        .iter()
+        .filter(|(id, _)| {
+            store
+                .get_session(id)
+                .ok()
+                .flatten()
+                .is_some_and(|session| session.brand == brand)
+        })
+        .max_by_key(|(_, menu)| {
+            menu.fields
+                .get("at")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string()
+        })?;
+    let mut menu = source.clone();
+    menu.fields.retain(|field, _| {
+        matches!(
+            field.as_str(),
+            "type" | "sessionId" | "seq" | "at" | "models" | "efforts"
+                | "permissionModes" | "collaborationModes" | "providers"
+        )
+    });
+    menu.fields.insert("sessionId".into(), serde_json::json!(session_id));
+    Some(menu)
+}
+
 fn steering_menu(
     store: &Store,
     live_menus: &HashMap<String, Event>,
@@ -980,7 +1026,10 @@ fn run(
             Command::ViewEvents(session_id, reply) => {
                 let result = store
                     .view_events(&session_id)
-                    .map(|events| view_with_live_menu(events, live_menus.get(&session_id)));
+                    .map(|events| {
+                        let live = live_steering_menu(&store, &live_menus, &session_id);
+                        view_with_live_menu(events, live.as_ref())
+                    });
                 respond(reply, result)
             }
             Command::SteeringMenu(session_id, reply) => {
@@ -989,10 +1038,8 @@ fn run(
             Command::Snapshot(session_id, reply) => {
                 let result = (|| {
                     let started = std::time::Instant::now();
-                    let history = view_with_live_menu(
-                        store.view_events(&session_id)?,
-                        live_menus.get(&session_id),
-                    );
+                    let live = live_steering_menu(&store, &live_menus, &session_id);
+                    let history = view_with_live_menu(store.view_events(&session_id)?, live.as_ref());
                     let after_history = started.elapsed();
                     let page = store.transcript_items(&session_id, None, 40)?;
                     let after_page = started.elapsed();
@@ -1050,6 +1097,43 @@ mod tests {
             SessionUpdate::Event(event) => event,
             SessionUpdate::ReplayCommitted { .. } => panic!("expected a live event"),
         }
+    }
+
+    #[test]
+    fn a_saved_chat_reuses_only_its_providers_live_steering_catalogue() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let session = |id: &str, brand: &str| Session {
+            id: id.into(), brand: brand.into(), external_id: Some(format!("thread-{id}")),
+            project_id: "project".into(), project_path: "/project".into(), cwd: "/project".into(),
+            model: None, permission_mode: "on-request".into(), effort: None,
+            collaboration_mode: None, profile: None, title: None, state: "dormant".into(),
+            origin: "app".into(), created_at: "2026-09-14T00:00:00Z".into(),
+            last_active_at: "2026-09-14T00:00:00Z".into(), last_spoke_at: None, begun_by: None,
+        };
+        for row in [session("open", "codex"), session("saved", "codex"), session("other", "claude")] {
+            store.create_session(&row).unwrap();
+        }
+        let menu: Event = serde_json::from_value(json!({
+            "type":"session.menu", "sessionId":"open", "seq":7, "at":"2026-09-14T01:00:00Z",
+            "models":[{"value":"gpt-5.6-sol","displayName":"GPT 5.6 Sol"}],
+            "efforts":[{"value":"high","displayName":"High"}],
+            "permissionModes":["on-request","never"],
+            "collaborationModes":[{"value":"default","displayName":"Default"}],
+            "commands":[{"name":"project-only"}], "skills":["private"],
+            "agentDefinitions":[{"name":"worker"}],
+            "configOptions":[{"id":"fast","currentValue":true}]
+        })).unwrap();
+        let live = HashMap::from([("open".to_string(), menu)]);
+
+        let restored = live_steering_menu(&store, &live, "saved").unwrap();
+        assert_eq!(restored.fields["sessionId"], "saved");
+        assert_eq!(restored.fields["models"][0]["value"], "gpt-5.6-sol");
+        assert_eq!(restored.fields["efforts"][0]["value"], "high");
+        for private in ["commands", "skills", "agentDefinitions", "configOptions"] {
+            assert!(restored.fields.get(private).is_none(), "{private} leaked between chats");
+        }
+        assert!(live_steering_menu(&store, &live, "other").is_none());
     }
 
     /// Everything ever said, in the table the search reads.

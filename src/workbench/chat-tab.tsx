@@ -99,10 +99,10 @@ import { drawnAsSent, stillPending, transcriptMark, worthDrawing, type PendingSe
 import { WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
-import { CHIP_GAP, ModeMark, modelName, modelWords, modeWords, WhatItRuns } from '@/workbench/what-it-runs';
+import { CHIP_GAP, ModeMark, modelName, modelWords, modeWords } from '@/workbench/what-it-runs';
 import { isBusy, readAndKeep, sendCommand, useSession, useSessionFactsRead, type TranscriptItem } from '@/workbench/use-session';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
-import { BrandIcon, ProfileBadge, ProviderBadge, brandName } from '@/workbench/brand-icon';
+import { BrandIcon, ProfileBadge, brandName } from '@/workbench/brand-icon';
 import { workingLine } from '@/workbench/working-line';
 import { AttachmentViewer } from '@/workbench/attachment-viewer';
 import { useEpicChecklist } from '@/workbench/epic-checklist';
@@ -2090,29 +2090,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           CHIP_GAP,
         )}
       >
-        <ProviderBadge brand={sessionBrand} model={view.model} icon={sessionBrand === 'local' ? <ModelIcon brand={sessionBrand} model={view.model} identity={selectedModel?.family ?? selectedModel?.publisher} className="size-3" /> : undefined} className="hidden md:inline-flex" />
         {sessionProfileName && <ProfileBadge name={sessionProfileName} brand={sessionBrand} className="hidden md:inline-flex" />}
-        {/* The one thing on this line allowed to give way when the line runs
-            short, and the only one that can: the model and the permission mode
-            are both named again on the writing box below, while every chip
-            beside it is a number or a name that means nothing half-drawn. Left
-            to itself it kept its full width and the chips shrank under their
-            own words, so what the chat was running printed straight across the
-            folder chip (bw-7ks.22.15). It used to print the tool's own spelling
-            as grey text — `claude · claude-opus-5 · permission mode:
-            bypassPermissions` — an inch from a picker calling that same setting
-            "Skip all checks" (bw-ja9l.1). */}
-        <WhatItRuns
-          model={view.model}
-          permissionMode={view.permissionMode}
-          models={view.menu.models}
-          effort={view.effort}
-          efforts={view.menu.efforts}
-          collaborationMode={view.collaborationMode}
-          collaborationModes={view.menu.collaborationModes}
-          providers={view.menu.providers}
-          className="hidden md:flex"
-        />
         <MemoryBadge />
         {facts?.folder && (
           <Tooltip label={[facts.cwd, facts.branch].filter(Boolean).join(' · ')}>

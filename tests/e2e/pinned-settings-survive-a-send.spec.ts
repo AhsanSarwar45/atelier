@@ -187,4 +187,46 @@ test.describe('what a chat is set to survives sending a message', () => {
       `the resumed agent was never told the effort: ${JSON.stringify(after)}`,
     ).toBe(true);
   });
+
+  test('a previous chat can change effort before its first new message', async ({ page, request }) => {
+    const api = backend();
+    const project = await pinnedProject(request);
+    const command = async (data: Record<string, unknown>) => {
+      const response = await request.post(`${api}/api/workbench/command`, { data });
+      expect(response.ok(), await response.text()).toBe(true);
+      return response.json() as Promise<Record<string, unknown>>;
+    };
+
+    // One chat asks the installed provider for its current catalogue.
+    const awake = (await command({
+      type: 'session.start', projectId: project.id, projectPath: project.path, brand: 'claude',
+    })) as { id: string };
+    await command({ type: 'prompt.send', sessionId: awake.id, text: 'Advertise the current controls.' });
+
+    // This saved chat has never sent anything, so it owns no menu and opening
+    // it must not wake an agent merely to draw the composer controls.
+    const saved = (await command({
+      type: 'session.start', projectId: project.id, projectPath: project.path, brand: 'claude',
+    })) as { id: string };
+    await command({ type: 'session.close', sessionId: saved.id });
+    const launchesBeforeOpen = wire().filter((asked) => asked.method === 'session/new').length;
+
+    await page.goto(`/project?id=${project.id}&tab=chat&chat=${saved.id}`);
+    await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+    const mode = page.getByTestId('mode-picker');
+    const effort = page.getByTestId('effort-picker');
+    await expect(mode).toBeVisible({ timeout: 60_000 });
+    await expect(effort).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('chat-model-chip')).toHaveCount(0);
+    await expect(page.getByTestId('chat-mode-chip')).toHaveCount(0);
+    await expect(page.getByTestId('chat-effort-chip')).toHaveCount(0);
+
+    await effort.click();
+    await page.getByTestId('effort-picker-option').filter({ hasText: 'High' }).click();
+    await expect(effort).toHaveAttribute('data-current', EFFORT);
+    expect(wire().filter((asked) => asked.method === 'session/new')).toHaveLength(launchesBeforeOpen);
+
+    const shot = process.env.PINNED_ACP_SHOT;
+    if (shot) await page.screenshot({ path: shot, fullPage: true });
+  });
 });
