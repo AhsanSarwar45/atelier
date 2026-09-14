@@ -12,8 +12,10 @@ import { useEffect, useState } from 'react';
 
 import { useRouter } from 'next/navigation';
 
+import { Bell } from 'lucide-react';
+
+import { ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { Row } from '@/components/ui/row';
 import * as api from '@/lib/api';
@@ -60,25 +62,47 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
 
   return (
     <div className="relative">
-      <Button
-        size="xs"
-        variant="outline"
+      {/*
+        A bell with a count on it, the same on every width. It used to be the
+        words "Waiting on you" on an outlined button, which is a sentence in a
+        bar of pictures — and on a phone that sentence took the room the bar
+        needed for the project's own name (bw-rpgh.2). The words are not lost:
+        they are the button's label, so the tooltip says them and a screen
+        reader hears them along with the count.
+      */}
+      <ToolButton
+        icon={<Bell />}
+        label={`Waiting on you: ${waiting.length}`}
         data-testid="tray-badge"
         data-count={waiting.length}
+        data-open={open}
         onClick={() => setOpen((v) => !v)}
+      />
+      {/*
+        Sat on the button's corner rather than beside it, so the count costs no
+        width at all. It ignores the pointer: the whole button under it is the
+        one thing to press.
+      */}
+      <Badge
+        variant="warning"
+        appearance="light"
+        size="xs"
+        shape="circle"
+        data-testid="tray-count"
+        className="pointer-events-none absolute -right-1 -top-1 min-w-4 justify-center px-1"
       >
-        Waiting on you
-        <Badge variant="warning" appearance="light" size="xs" shape="circle" className="ml-1.5">
-          {waiting.length}
-        </Badge>
-      </Button>
+        {waiting.length}
+      </Badge>
 
       {open && (
         <Panel
           tone="overlay"
           inset="none"
           data-testid="tray-panel"
-          className="absolute right-0 z-50 mt-1 w-96 overflow-hidden"
+          // Never wider than the screen it drops onto: 384px is most of a
+          // phone, and pinned to the bar's right end the overflow would have
+          // hung off the left edge (bw-rpgh.2).
+          className="absolute right-0 z-50 mt-1 w-96 max-w-[calc(100vw-1rem)] overflow-hidden"
         >
           {waiting.map((s) => (
             <Row
