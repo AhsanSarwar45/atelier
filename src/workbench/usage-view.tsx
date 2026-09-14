@@ -1,5 +1,5 @@
 /**
- * The whole usage picture, behind the chip on the chat's top line.
+ * Plan usage details, behind the chip on the chat's top line.
  *
  * The chip answers one question — how much of the five-hour window is gone —
  * because that is the one that decides whether to start another agent in the
@@ -240,7 +240,7 @@ export function PlanChip({ usage, onOpen }: { usage: PlanUsage; onOpen: () => vo
               data-testid="plan-chip"
               data-percent={five.percent ?? ''}
               data-severity={five.severity}
-              aria-label={`Plan usage — this session: ${windowReads(five, now)}. Opens the whole usage picture.`}
+              aria-label={`Session usage: ${windowReads(five, now)}`}
               onClick={onOpen}
             >
               {sessionChipReads(five)}
@@ -259,7 +259,7 @@ export function PlanChip({ usage, onOpen }: { usage: PlanUsage; onOpen: () => vo
               data-testid="plan-chip-week"
               data-percent={week.percent ?? ''}
               data-severity={week.severity}
-              aria-label={`Plan usage — this week: ${windowReads(week, now)}. Opens the whole usage picture.`}
+              aria-label={`Weekly usage: ${windowReads(week, now)}`}
               onClick={onOpen}
             >
               {weekChipReads(week)}

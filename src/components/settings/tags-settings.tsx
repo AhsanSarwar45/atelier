@@ -72,7 +72,6 @@ export function TagsSettings() {
   return (
     <SettingsGroup
       title="Tags"
-      description="Labels a project can carry on the project list."
       actions={
         !adding && (
           <Button size="sm" onClick={() => setAdding(true)}>

@@ -107,7 +107,7 @@ export function AttachmentGrid({ files, onLook }: AttachmentGridProps): JSX.Elem
         if (look === 'picture') {
           return (
             // eslint-disable-next-line @next/next/no-img-element
-            <Tooltip key={i} label="Click to see it full size">
+            <Tooltip key={i} label="Open full size">
               <img
                 data-testid="message-image"
                 src={attachmentSrc(file)}

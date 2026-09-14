@@ -106,15 +106,15 @@ export function ProjectCard({
     try {
       await api.fs.openExternal(fsPath, target);
       toast({
-        title: "Opening project",
+        title: "Opening",
         description: target === 'finder'
-          ? `Opening in ${getFileManagerName()}...`
-          : `Opening in ${target === 'vscode' ? 'VS Code' : 'Cursor'}...`,
+          ? getFileManagerName()
+          : target === 'vscode' ? 'VS Code' : 'Cursor',
       });
     } catch (err) {
       console.error("Error opening project:", err);
       toast({
-        title: "Failed to open",
+        title: "Could not open project",
         description: err instanceof Error ? err.message : "Could not open the project. Make sure the application is installed.",
         variant: "destructive",
       });
@@ -137,7 +137,7 @@ export function ProjectCard({
       onClick={handleCardClick}
       role="link"
       tabIndex={0}
-      aria-label={`View ${formatProjectName(name)} project`}
+      aria-label={`Open ${formatProjectName(name)}`}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();

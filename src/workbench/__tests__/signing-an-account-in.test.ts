@@ -26,7 +26,7 @@ describe('the accounts screen', () => {
     // Claude's page signs the person in by itself and hands nothing back, so
     // a code box drawn up front sends them looking for a code.
     expect(screen).toContain("state === 'paste-the-code' && !typing");
-    expect(screen).toContain('That page gave me a code');
+    expect(screen).toContain('Enter a sign-in code');
   });
 });
 

@@ -148,7 +148,7 @@ export function ProjectSettingsDialog({
 
       toast({
         title: "Project updated",
-        description: "Settings saved successfully.",
+        description: "Settings saved.",
       });
 
       onOpenChange(false);

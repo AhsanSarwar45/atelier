@@ -55,7 +55,7 @@ export interface ProviderPageDef {
 const yesNo = { kind: 'toggle' } as const;
 
 export const CLAUDE_MODELS: Choice[] = [
-  { value: 'default', label: 'Default', hint: 'What the account recommends' },
+  { value: 'default', label: 'Default', hint: 'Account default' },
   { value: 'fable', label: 'Fable', hint: 'Latest Fable' },
   { value: 'opus', label: 'Opus', hint: 'Latest Opus' },
   { value: 'sonnet', label: 'Sonnet', hint: 'Latest Sonnet' },
@@ -73,12 +73,12 @@ export const CLAUDE_EFFORT: Choice[] = [
 ];
 
 export const CLAUDE_PERMISSION_MODES: Choice[] = [
-  { value: 'default', label: 'Ask', hint: 'Every tool asks the first time' },
-  { value: 'acceptEdits', label: 'Accept edits', hint: 'File edits go through; commands still ask' },
-  { value: 'plan', label: 'Plan', hint: 'Read only until a plan is approved' },
-  { value: 'auto', label: 'Auto', hint: 'A classifier decides; not honoured from a project file' },
-  { value: 'dontAsk', label: "Don't ask", hint: 'Anything that would ask is refused' },
-  { value: 'bypassPermissions', label: 'Bypass', hint: 'Nothing asks; not honoured from a project file' },
+  { value: 'default', label: 'Ask', hint: 'Ask before new tools' },
+  { value: 'acceptEdits', label: 'Accept edits', hint: 'Allow edits; ask for commands' },
+  { value: 'plan', label: 'Plan', hint: 'Read only until approved' },
+  { value: 'auto', label: 'Auto', hint: 'Decide automatically' },
+  { value: 'dontAsk', label: "Don't ask", hint: 'Refuse actions that need approval' },
+  { value: 'bypassPermissions', label: 'Bypass', hint: 'Allow without asking' },
 ];
 
 export const CLAUDE_PAGES: ProviderPageDef[] = [
@@ -90,10 +90,10 @@ export const CLAUDE_PAGES: ProviderPageDef[] = [
         id: 'model',
         title: 'Model',
         settings: [
-          { key: 'model', label: 'Model', description: 'What a new chat starts on. A full model id is also accepted.', control: { kind: 'choice', choices: CLAUDE_MODELS, free: true } },
-          { key: 'effortLevel', label: 'Effort', description: 'How hard the model thinks by default.', control: { kind: 'choice', choices: CLAUDE_EFFORT } },
-          { key: 'maxEffortLevel', label: 'Effort ceiling', description: 'The most a chat may raise effort to. The lowest ceiling across files wins.', control: { kind: 'choice', choices: [...CLAUDE_EFFORT, { value: 'max', label: 'Max' }] } },
-          { key: 'alwaysThinkingEnabled', label: 'Extended thinking', description: 'Off turns thinking off; on is the built-in default.', control: yesNo },
+          { key: 'model', label: 'Model', description: 'Default for new chats.', control: { kind: 'choice', choices: CLAUDE_MODELS, free: true } },
+          { key: 'effortLevel', label: 'Effort', description: '', control: { kind: 'choice', choices: CLAUDE_EFFORT } },
+          { key: 'maxEffortLevel', label: 'Maximum effort', description: '', control: { kind: 'choice', choices: [...CLAUDE_EFFORT, { value: 'max', label: 'Max' }] } },
+          { key: 'alwaysThinkingEnabled', label: 'Extended thinking', description: '', control: yesNo },
           { key: 'fallbackModel', label: 'Fallback models', description: 'Tried in order when the model above is unavailable.', control: { kind: 'list', placeholder: 'sonnet' } },
         ],
       },
@@ -101,10 +101,10 @@ export const CLAUDE_PAGES: ProviderPageDef[] = [
         id: 'behaviour',
         title: 'Behaviour',
         settings: [
-          { key: 'outputStyle', label: 'Output style', description: 'Default, Proactive, Concise, Explanatory, Learning, or a style of your own.', control: { kind: 'choice', free: true, choices: [
+          { key: 'outputStyle', label: 'Output style', description: '', control: { kind: 'choice', free: true, choices: [
             { value: 'Default', label: 'Default' }, { value: 'Proactive', label: 'Proactive' }, { value: 'Concise', label: 'Concise' }, { value: 'Explanatory', label: 'Explanatory' }, { value: 'Learning', label: 'Learning' },
           ] } },
-          { key: 'language', label: 'Language', description: 'The language replies are written in.', control: { kind: 'text', placeholder: 'English' } },
+          { key: 'language', label: 'Language', description: '', control: { kind: 'text', placeholder: 'English' } },
           { key: 'autoCompactEnabled', label: 'Compact automatically', description: 'Compact the conversation as it nears the context limit.', control: yesNo },
           { key: 'autoCompactWindow', label: 'Compact at', description: 'Tokens before compaction, 100,000 to 1,000,000.', control: { kind: 'number', min: 100000, max: 1000000, step: 10000 } },
           { key: 'autoMemoryEnabled', label: 'Auto memory', description: 'Let the model keep notes between sessions.', control: yesNo },
@@ -115,8 +115,7 @@ export const CLAUDE_PAGES: ProviderPageDef[] = [
       },
       {
         id: 'terminal',
-        title: 'In the terminal',
-        description: 'Only the command-line tool reads these; chats here draw themselves.',
+        title: 'Terminal',
         settings: [
           { key: 'theme', label: 'Theme', description: '', control: { kind: 'choice', free: true, choices: [
             { value: 'auto', label: 'Auto' }, { value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }, { value: 'dark-daltonized', label: 'Dark, colour-blind' }, { value: 'light-daltonized', label: 'Light, colour-blind' }, { value: 'dark-ansi', label: 'Dark ANSI' }, { value: 'light-ansi', label: 'Light ANSI' },
@@ -146,8 +145,8 @@ export const CLAUDE_PAGES: ProviderPageDef[] = [
         id: 'mode',
         title: 'Mode',
         settings: [
-          { key: 'permissions.defaultMode', label: 'Starting mode', description: 'How a new chat treats tool use.', control: { kind: 'choice', choices: CLAUDE_PERMISSION_MODES } },
-          { key: 'permissions.disableBypassPermissionsMode', label: 'Forbid bypass', description: 'When set, bypass mode cannot be entered at all.', control: { kind: 'choice', choices: [{ value: 'disable', label: 'Forbidden' }] } },
+          { key: 'permissions.defaultMode', label: 'Default mode', description: '', control: { kind: 'choice', choices: CLAUDE_PERMISSION_MODES } },
+          { key: 'permissions.disableBypassPermissionsMode', label: 'Disable bypass mode', description: '', control: { kind: 'choice', choices: [{ value: 'disable', label: 'Disabled' }] } },
           { key: 'skipDangerousModePermissionPrompt', label: 'Skip the bypass warning', description: 'Do not confirm before entering bypass mode.', control: yesNo, scopes: ['account'] },
           { key: 'permissions.blockReadsOutsideWorkingDirectories', label: 'Block reads outside the project', description: 'Even in auto and bypass modes.', control: yesNo },
         ],
@@ -155,7 +154,7 @@ export const CLAUDE_PAGES: ProviderPageDef[] = [
       {
         id: 'rules',
         title: 'Rules',
-        description: 'One rule per line, written as the tool sees it: Bash(git *), Read(~/.zshrc), WebFetch(domain:example.com), mcp__server__tool.',
+        description: 'One tool rule per line.',
         settings: [
           { key: 'permissions.allow', label: 'Always allow', description: 'Goes through without asking.', control: { kind: 'list', placeholder: 'Bash(npm test)' } },
           { key: 'permissions.ask', label: 'Always ask', description: 'Asks every time, whatever the mode.', control: { kind: 'list', placeholder: 'Bash(git push *)' } },
@@ -166,7 +165,7 @@ export const CLAUDE_PAGES: ProviderPageDef[] = [
       {
         id: 'sandbox',
         title: 'Sandbox',
-        description: 'Runs commands inside an operating-system sandbox on macOS and Linux.',
+        description: 'Limit command access on macOS and Linux.',
         settings: [
           { key: 'sandbox.enabled', label: 'Sandbox commands', description: '', control: yesNo },
           { key: 'sandbox.autoAllowBashIfSandboxed', label: 'Allow sandboxed commands without asking', description: '', control: yesNo },
@@ -208,15 +207,15 @@ export const CODEX_PAGES: ProviderPageDef[] = [
         id: 'model',
         title: 'Model',
         settings: [
-          { key: 'model', label: 'Model', description: 'What a new chat starts on. Another model id is also accepted.', control: { kind: 'choice', choices: CODEX_MODELS, free: true } },
+          { key: 'model', label: 'Model', description: 'Default for new chats.', control: { kind: 'choice', choices: CODEX_MODELS, free: true } },
           { key: 'model_reasoning_effort', label: 'Reasoning effort', description: '', control: { kind: 'choice', choices: CODEX_EFFORT } },
           { key: 'plan_mode_reasoning_effort', label: 'Reasoning effort in plan mode', description: '', control: { kind: 'choice', choices: [{ value: 'none', label: 'None' }, ...CODEX_EFFORT] } },
           { key: 'model_reasoning_summary', label: 'Reasoning summary', description: 'How much of its reasoning the model shows.', control: { kind: 'choice', choices: [{ value: 'auto', label: 'Auto' }, { value: 'concise', label: 'Concise' }, { value: 'detailed', label: 'Detailed' }, { value: 'none', label: 'None' }] } },
           { key: 'model_verbosity', label: 'Verbosity', description: '', control: { kind: 'choice', choices: [{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }] } },
           { key: 'personality', label: 'Personality', description: '', control: { kind: 'choice', choices: [{ value: 'none', label: 'None' }, { value: 'friendly', label: 'Friendly' }, { value: 'pragmatic', label: 'Pragmatic' }] } },
           { key: 'review_model', label: 'Review model', description: 'Used by /review.', control: { kind: 'choice', choices: CODEX_MODELS, free: true } },
-          { key: 'model_context_window', label: 'Context window', description: 'Tokens. Leave unset to use what the model reports.', control: { kind: 'number', min: 1000 } },
-          { key: 'model_auto_compact_token_limit', label: 'Compact at', description: 'Tokens before the conversation is compacted.', control: { kind: 'number', min: 1000 } },
+          { key: 'model_context_window', label: 'Context window', description: 'Token limit.', control: { kind: 'number', min: 1000 } },
+          { key: 'model_auto_compact_token_limit', label: 'Compact at', description: 'Token threshold.', control: { kind: 'number', min: 1000 } },
         ],
       },
       {
@@ -264,13 +263,13 @@ export const CODEX_PAGES: ProviderPageDef[] = [
         title: 'Approvals',
         settings: [
           { key: 'approval_policy', label: 'When to ask', description: '', control: { kind: 'choice', choices: [{ value: 'on-request', label: 'When the model asks' }, { value: 'never', label: 'Never' }] } },
-          { key: 'approvals_reviewer', label: 'Who answers', description: '', control: { kind: 'choice', choices: [{ value: 'user', label: 'You' }, { value: 'auto_review', label: 'An automatic review' }] } },
+          { key: 'approvals_reviewer', label: 'Approval reviewer', description: '', control: { kind: 'choice', choices: [{ value: 'user', label: 'You' }, { value: 'auto_review', label: 'Automatic review' }] } },
         ],
       },
       {
         id: 'sandbox',
         title: 'Sandbox',
-        description: 'Either these, or a permission profile below — Codex ignores the profile when these are set.',
+        description: 'Overrides the permission profile below.',
         settings: [
           { key: 'sandbox_mode', label: 'Sandbox', description: '', control: { kind: 'choice', choices: [{ value: 'read-only', label: 'Read only' }, { value: 'workspace-write', label: 'Write in the workspace' }, { value: 'danger-full-access', label: 'Full access' }] } },
           { key: 'sandbox_workspace_write.network_access', label: 'Network access', description: 'While writing in the workspace.', control: yesNo },

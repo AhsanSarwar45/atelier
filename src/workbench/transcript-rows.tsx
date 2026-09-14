@@ -1047,7 +1047,7 @@ function AttachmentChip({ image, onLook }: { image: ImagePayload; onLook: (image
   const kind = fileKind(image.alt);
   const Icon = FILE_KINDS[kind].icon;
   return (
-    <Tooltip label="Click to see it full size">
+    <Tooltip label="Open full size">
       <Badge
         asChild
         variant="primary"

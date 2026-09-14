@@ -1571,3 +1571,11 @@ The Edit-compatible `apply_patch` tool refused an absolute target under
 `worktrees/bw-57ei` while child `bw-57ei.1` was claimed in that job copy. It
 reported `/home/ahsan/dev/beads-web` as the resolved target. Running
 `apply_patch` from the worktree with the documented per-job bypass succeeded.
+
+## Job-worktree Git writes resolve as the landing checkout (bw-89z8.2)
+
+After `bw-89z8.2` was claimed in `worktrees/bw-89z8`, a compound `git status &&
+git diff && git add && git commit` was refused as a write to
+`/home/ahsan/dev/beads-web`. The command's working directory was the job
+worktree and every path was relative to it. Prefixing the writing Git commands
+with the documented per-job bypass allowed the commit.

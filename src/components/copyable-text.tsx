@@ -43,7 +43,7 @@ export function CopyableText({ children, copyText, className }: CopyableTextProp
   }
 
   return (
-    <Tooltip label={`Click to copy: ${copyText}`}>
+    <Tooltip label={`Copy ${copyText}`}>
       <span
         onClick={handleCopy}
         className={cn("cursor-copy hover:text-t-secondary transition-colors", className)}

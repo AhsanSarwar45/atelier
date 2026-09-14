@@ -205,7 +205,7 @@ export function AddProjectDialog({
 
       toast({
         title: "Project added",
-        description: `"${projectName}" has been added successfully.`,
+        description: `Added ${projectName}.`,
       });
 
       resetState();

@@ -230,7 +230,7 @@ export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
   if (widget.type === 'image') return (
     <WidgetFrame kind="image" title={widget.title}>
       <figure>
-        <Tooltip label="Click to see it full size">
+        <Tooltip label="Open full size">
         <Button type="button" variant="foreground" aria-label={`Open ${widget.alt} to zoom`}
           className="group relative block h-auto w-full whitespace-normal p-0" onClick={() => setLooking({ mime: 'image/*', dataUrl: presentationAssetUrl(widget.asset), alt: widget.alt })}>
           {/* eslint-disable-next-line @next/next/no-img-element */}

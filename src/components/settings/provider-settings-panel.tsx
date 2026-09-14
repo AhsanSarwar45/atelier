@@ -321,8 +321,8 @@ export function ProviderSettingsPanel({
       )}
       {target && (
         <p className="mb-4 text-xs text-t-muted">
-          Written to <span className="font-mono">{target.path}</span>
-          {!target.exists && ' (not there yet; it is created on the first change)'}
+          File: <span className="font-mono">{target.path}</span>
+          {!target.exists && ' (created when you save)'}
         </p>
       )}
       {drawn.groups.map((group) => {
@@ -354,7 +354,7 @@ export function ProviderSettingsPanel({
                       {elsewhere && (
                         <span className="mt-1 block">
                           <Badge variant="secondary" size="sm">
-                            in force: {asText(inForce.value)} from {layerName(inForce.layer!)}
+                            Inherited: {asText(inForce.value)} from {layerName(inForce.layer!)}
                           </Badge>
                         </span>
                       )}

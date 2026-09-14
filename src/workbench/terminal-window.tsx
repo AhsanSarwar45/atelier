@@ -440,7 +440,7 @@ export function TerminalWindow({
           {!phone && (
             <ToolButton
               icon={filled ? <Minimize2 /> : <Maximize2 />}
-              label={filled ? `Put ${title} back` : `Fill the screen with ${title}`}
+              label={filled ? `Restore ${title}` : `Maximize ${title}`}
               onClick={toggleFill}
               data-testid="terminal-window-fill"
             />

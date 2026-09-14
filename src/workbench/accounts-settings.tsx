@@ -251,14 +251,14 @@ export function AccountsSettings() {
   if (unread) {
     return (
       <ReadFailed
-        what="the accounts on this computer"
+        what="Accounts could not be loaded."
         why={unread}
         onRetry={() => setAttempt((n) => n + 1)}
       />
     );
   }
   if (!held) {
-    return <p className="text-sm text-t-muted">Reading the accounts on this computer…</p>;
+    return <p className="text-sm text-t-muted">Loading accounts…</p>;
   }
 
   return (
@@ -406,7 +406,7 @@ export function AccountsSettings() {
               onClick={() => setTyping(true)}
               data-testid="account-signin-has-code"
             >
-              That page gave me a code
+              Enter a sign-in code
             </Button>
           )}
           {signing?.progress.state === 'paste-the-code' && typing && (
@@ -418,13 +418,13 @@ export function AccountsSettings() {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') void hand();
                   }}
-                  placeholder="Paste the code from the page"
-                  aria-label="The code the page gave you"
+                  placeholder="Paste sign-in code"
+                  aria-label="Sign-in code"
                   className="flex-1 font-mono"
                   data-testid="account-signin-code"
                 />
                 <Button size="sm" disabled={busy !== null || !code.trim()} onClick={() => void hand()}>
-                  Hand it over
+                  Submit
                 </Button>
               </div>
             </div>
@@ -456,7 +456,7 @@ function SignInSteps({ brand, progress }: { brand: Brand; progress: SignInProgre
       <div data-testid="account-signin-state">
         <p className="flex items-center gap-2 text-sm text-danger">
           <TriangleAlert className="h-4 w-4" />
-          That sign-in did not finish.
+          Sign-in failed.
         </p>
         {/* What the program printed, as it printed it. It is the only party
             that knows what went wrong, and a wording of our own here would be

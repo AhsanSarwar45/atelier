@@ -27,14 +27,14 @@ import { DependenciesSettings } from '@/workbench/dependencies-settings';
 import { TerminalSettings } from '@/workbench/terminal-settings';
 
 const SECTIONS: SettingsSectionDef[] = [
-  { id: 'appearance', label: 'Appearance', hint: 'Theme and type', icon: <Palette /> },
-  { id: 'accounts', label: 'Accounts', hint: 'Claude and Codex sign-ins', icon: <Users /> },
-  { id: 'claude', label: 'Claude Code', hint: 'Defaults, permissions, MCP, extensions', icon: <BrandIcon brand="claude" /> },
-  { id: 'codex', label: 'Codex', hint: 'Defaults, permissions, MCP, extensions', icon: <BrandIcon brand="codex" /> },
-  { id: 'files', label: 'Agent files', hint: 'Instructions, settings, skills', icon: <FileCode2 /> },
-  { id: 'terminal', label: 'Terminal', hint: 'The shell a terminal opens', icon: <SquareTerminal /> },
-  { id: 'dependencies', label: 'Dependencies', hint: 'The tools the app runs', icon: <Puzzle /> },
-  { id: 'tags', label: 'Tags', hint: 'Labels for projects', icon: <Tag /> },
+  { id: 'appearance', label: 'Appearance', hint: 'Theme and text', icon: <Palette /> },
+  { id: 'accounts', label: 'Accounts', hint: 'Provider accounts', icon: <Users /> },
+  { id: 'claude', label: 'Claude Code', hint: 'Defaults and permissions', icon: <BrandIcon brand="claude" /> },
+  { id: 'codex', label: 'Codex', hint: 'Defaults and permissions', icon: <BrandIcon brand="codex" /> },
+  { id: 'files', label: 'Agent files', hint: 'Instructions and skills', icon: <FileCode2 /> },
+  { id: 'terminal', label: 'Terminal', hint: 'Shell settings', icon: <SquareTerminal /> },
+  { id: 'dependencies', label: 'Dependencies', hint: 'Required tools', icon: <Puzzle /> },
+  { id: 'tags', label: 'Tags', hint: 'Project labels', icon: <Tag /> },
 ];
 
 function Settings() {
@@ -76,7 +76,7 @@ function Settings() {
     <SettingsScreen title="Settings" backHref="/" sections={SECTIONS} section={known} onOpen={open}>
       {(known ?? 'appearance') === 'appearance' && <AppearanceSettings />}
       {known === 'accounts' && (
-        <SettingsGroup title="Accounts" description="Who each provider runs as. A chat picks one of these when it starts.">
+        <SettingsGroup title="Accounts">
           <div className="p-3">
             <AccountsSettings />
           </div>
@@ -108,7 +108,7 @@ function Settings() {
         </SettingsGroup>
       )}
       {known === 'dependencies' && (
-        <SettingsGroup title="Dependencies" description="The command-line tools the app runs on your behalf.">
+        <SettingsGroup title="Dependencies">
           <div className="p-3">
             <DependenciesSettings />
           </div>

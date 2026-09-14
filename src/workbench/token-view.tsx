@@ -1,5 +1,5 @@
 /**
- * The whole token picture for one chat, behind the gauge on its top line.
+ * Token details for one chat, behind the gauge on its top line.
  *
  * The gauge says how full the window is and nothing else, and it answers the
  * wrong question twice over. First, "128k/200k" does not say what the 128k IS —
@@ -210,12 +210,12 @@ function Weights({ title, rows, of }: { title: string; rows: Weight[]; of: numbe
 /** What the conversation band itself is made of, when the kit will say. */
 function Conversation({ inside }: { inside: Inside }) {
   const parts = [
-    { name: 'What the tools answered', tokens: inside.answers },
-    { name: 'What the models wrote', tokens: inside.written },
-    { name: 'Pictures and pasted files', tokens: inside.attachments },
-    { name: 'The calls themselves', tokens: inside.calls },
-    { name: 'What was typed', tokens: inside.typed },
-    { name: 'Carried in from elsewhere', tokens: inside.carried },
+    { name: 'Tool results', tokens: inside.answers },
+    { name: 'Model output', tokens: inside.written },
+    { name: 'Attachments', tokens: inside.attachments },
+    { name: 'Tool calls', tokens: inside.calls },
+    { name: 'Prompts', tokens: inside.typed },
+    { name: 'Previous context', tokens: inside.carried },
     { name: 'Unattributed', tokens: inside.rest },
   ]
     .filter((p) => p.tokens > 0)
@@ -224,9 +224,9 @@ function Conversation({ inside }: { inside: Inside }) {
   return (
     <div className="mt-3 border-t border-border/60 pt-3" data-testid="token-inside">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Weights title="The conversation is made of" rows={parts} of={inside.total} />
-        <Weights title="Costliest tools" rows={inside.byTool} of={inside.total} />
-        <Weights title="Costliest attachments" rows={inside.byAttachment} of={inside.total} />
+        <Weights title="Conversation" rows={parts} of={inside.total} />
+        <Weights title="Tools" rows={inside.byTool} of={inside.total} />
+        <Weights title="Attachments" rows={inside.byAttachment} of={inside.total} />
       </div>
     </div>
   );
@@ -304,7 +304,7 @@ function Window({ window: w }: { window: WindowNow }) {
 function Spent({ spent }: { spent: TaskSpend }) {
   const rows = splitRows(spent.total);
   return (
-    <Card title="Total task usage" testId="token-spent">
+    <Card title="Total usage" testId="token-spent">
       <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="font-mono text-2xl text-foreground" data-testid="token-spent-total" data-total={spent.total.total}>
           {big(spent.total.total)}
@@ -342,7 +342,7 @@ function Spent({ spent }: { spent: TaskSpend }) {
           of={spent.total.total}
         />
         <Weights
-          title="Per model"
+          title="By model"
           rows={spent.models.map((m) => ({ name: m.model, tokens: m.spend.total }))}
           of={spent.total.total}
         />
@@ -441,7 +441,7 @@ export function ContextChip({
     // reports a box a padding narrower than the one that is actually painted —
     // which would hide the very overlap that check exists to catch (bw-3ug7.9).
     // The button carries its own hook, as the plan chips do.
-    <Tooltip label={`${used.toLocaleString()} of ${room.toLocaleString()} tokens of this conversation are in use — click for the whole token picture`}>
+    <Tooltip label={`${used.toLocaleString()} of ${room.toLocaleString()} context tokens used`}>
       <Badge
         variant={used / room >= TIGHT ? 'warning' : 'secondary'}
         appearance="light"
@@ -456,7 +456,7 @@ export function ContextChip({
           variant="foreground"
           size="inherit"
           data-testid="context-chip-open"
-          aria-label={`Context — ${used.toLocaleString()} of ${room.toLocaleString()} tokens in use. Opens the whole token picture.`}
+          aria-label={`Context usage: ${used.toLocaleString()} of ${room.toLocaleString()} tokens`}
           className="gap-1 p-0"
           onClick={onOpen}
         >

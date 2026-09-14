@@ -105,5 +105,5 @@ export const CHIP_CLASS =
  */
 export const TITLE = (line: number | null): string =>
   line === null
-    ? 'Click to open this file in the Files tab — Alt-click to open your editor, right-click for more'
-    : `Click to open this file in the Files tab at line ${line} — Alt-click to open your editor, right-click for more`;
+    ? 'Open file · Alt-click for editor · Right-click for options'
+    : `Open line ${line} · Alt-click for editor · Right-click for options`;

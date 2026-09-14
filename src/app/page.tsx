@@ -84,19 +84,8 @@ export default function ProjectsPage() {
       <main className="flex flex-col items-center px-6 pt-8 sm:pt-32">
         {/* Centered Heading with Space Grotesk */}
         <h1 className="mb-2 text-center text-balance font-heading text-2xl font-bold tracking-tight text-t-primary sm:mb-4 sm:text-5xl">
-          Manage Your Projects
+          Projects
         </h1>
-        <p className="text-center text-t-tertiary text-xs mb-4 sm:text-sm sm:mb-8">
-          Highly recommended to use with the{" "}
-          <a
-            href="https://github.com/weselow/claude-protocol"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-info hover:text-info underline"
-          >
-            Claude Protocol orchestration skill
-          </a>
-        </p>
 
         <div className="w-full max-w-[1200px]">
           {/* Add Project button: full-width on a phone, since a lone
@@ -117,7 +106,7 @@ export default function ProjectsPage() {
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-t-muted" aria-hidden="true" />
                 <Input
                   type="search"
-                  placeholder="Search projects..."
+                  placeholder="Search projects…"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-10"

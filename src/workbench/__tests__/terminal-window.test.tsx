@@ -170,16 +170,16 @@ describe('the floating terminal window', () => {
     const before = shape();
     expect(before, 'the test needs a shape that is nobody default').toEqual({ x: 140, y: 216, width: 815, height: 420 });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Fill the screen with Terminal' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Maximize Terminal' }));
     expect(shape(), 'filled means the whole screen, corner to corner').toEqual({ x: 0, y: 0, width: 1200, height: 800 });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Put Terminal back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Terminal' }));
     expect(shape(), 'coming back means the shape it had, not a fresh default').toEqual(before);
   });
 
   it('has nothing to drag while it is filling the screen', () => {
     draw();
-    fireEvent.click(screen.getByRole('button', { name: 'Fill the screen with Terminal' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Maximize Terminal' }));
     expect(
       screen.queryByTestId('terminal-window-handle'),
       'a filled window has nowhere to be dragged to',
@@ -214,7 +214,7 @@ describe('the floating terminal window', () => {
 
   it('grows with the screen while it is filled', () => {
     draw();
-    fireEvent.click(screen.getByRole('button', { name: 'Fill the screen with Terminal' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Maximize Terminal' }));
     setViewport(1400, 900);
     fireEvent(window, new Event('resize'));
     expect(shape(), 'filled means filled, whatever size the screen becomes').toEqual({

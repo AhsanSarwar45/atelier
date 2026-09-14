@@ -18,7 +18,7 @@ import './globals.css';
 export const metadata: Metadata = {
   // Read from the one place the product's name is written down, never typed.
   title: PRODUCT_NAME,
-  description: `${PRODUCT_NAME} — a visual board for your work: cards, epics and projects, across every repository you track`,
+  description: `${PRODUCT_NAME} project board`,
   icons: [{ rel: 'icon', url: '/favicon.svg', type: 'image/svg+xml' }],
 };
 
