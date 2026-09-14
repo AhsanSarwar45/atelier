@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { ReadFailed } from '@/components/ui/read-failed';
+import { Tooltip } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import type { Brand, ExtensionItem, ExtensionKind, ExtensionKindList } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
@@ -183,9 +184,9 @@ export function ExtensionsPanel({ brand, scope }: { brand: Brand; scope: Scope }
                       {busy === key && <Loader2 className="size-3 animate-spin text-t-muted" />}
                     </div>
                     {detail && (
-                      <p className="truncate text-xs text-t-muted" title={detail}>
-                        {detail}
-                      </p>
+                      <Tooltip label={detail}>
+                        <p className="truncate text-xs text-t-muted">{detail}</p>
+                      </Tooltip>
                     )}
                   </div>
                   {kind !== 'hooks' && (

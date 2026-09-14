@@ -14,9 +14,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { Panel } from '@/components/ui/panel';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import type { Brand, McpServer, McpSource, SettingsScope } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
@@ -109,7 +111,7 @@ function AddServer({ brand, scope, onAdded }: { brand: Brand; scope: Scope; onAd
     );
   }
   return (
-    <div className="space-y-3 rounded-md border border-border/60 p-3" data-testid="mcp-add-form">
+    <Panel className="space-y-3" data-testid="mcp-add-form">
       <div className="flex flex-col gap-2 sm:flex-row">
         <Input aria-label="Server name" placeholder="name" value={id} onChange={(e) => setId(e.target.value)} className="font-mono text-xs sm:w-48" data-testid="mcp-add-id" />
         <Select value={how} onValueChange={(v) => setHow(v as typeof how)}>
@@ -158,7 +160,7 @@ function AddServer({ brand, scope, onAdded }: { brand: Brand; scope: Scope; onAd
           Cancel
         </Button>
       </div>
-    </div>
+    </Panel>
   );
 }
 
@@ -250,9 +252,9 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
                   )}
                   {busy === key && <Loader2 className="size-3 animate-spin text-t-muted" />}
                 </div>
-                <p className="truncate font-mono text-xs text-t-muted" title={target}>
-                  {target}
-                </p>
+                <Tooltip label={target}>
+                  <p className="truncate font-mono text-xs text-t-muted">{target}</p>
+                </Tooltip>
               </div>
               {(s.transport === 'http' || s.transport === 'sse') && (
                 <Button

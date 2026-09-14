@@ -363,15 +363,16 @@ export function AccountsSettings() {
                       <p className="flex items-center gap-1 truncate text-sm text-t-primary">
                         {profile.name}
                         {!profile.system && (
-                          <button
-                            type="button"
+                          <Button
+                            variant="ghost"
+                            size="xs"
                             aria-label={`Rename ${profile.name}`}
-                            className="text-t-muted hover:text-t-secondary"
+                            className="h-5 w-5 p-0 text-t-muted"
                             onClick={() => setRenaming({ brand, id: profile.id, name: profile.name })}
                             data-testid={`account-rename-${brand}-${profile.id}`}
                           >
                             <Pencil className="h-3 w-3" />
-                          </button>
+                          </Button>
                         )}
                       </p>
                     )}
