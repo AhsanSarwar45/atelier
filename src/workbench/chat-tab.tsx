@@ -1343,7 +1343,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   useEffect(() => {
     let current = true;
     if (sessionBrand === 'local') return () => { current = false; };
-    void sendCommand<{ model: string | null; effort: string | null; permissionMode: string | null }>({ type: 'provider-defaults.read', brand: sessionBrand })
+    void sendCommand<{ model: string | null; effort: string | null; permissionMode: string | null }>({
+      type: 'provider-defaults.read', brand: sessionBrand, profileId: view.profile ?? undefined,
+    })
       .then((defaults) => {
         if (!current) return;
         setModelDefaults((was) => ({ ...was, [sessionBrand]: defaults.model ?? undefined }));
@@ -1352,17 +1354,17 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       })
       .catch((e: unknown) => current && setSteerError(e instanceof Error ? e.message : String(e)));
     return () => { current = false; };
-  }, [sessionBrand]);
+  }, [sessionBrand, view.profile]);
   const makeProviderDefault = useCallback((kind: 'model' | 'effort' | 'permission', value: string) => {
     setSteerError(null);
     void sendCommand<{ model: string | null; effort: string | null; permissionMode: string | null }>({
-      type: 'provider-defaults.write', brand: sessionBrand, kind, value,
+      type: 'provider-defaults.write', brand: sessionBrand, kind, value, profileId: view.profile ?? undefined,
     }).then((defaults) => {
       setModelDefaults((was) => ({ ...was, [sessionBrand]: defaults.model ?? undefined }));
       setEffortDefaults((was) => ({ ...was, [sessionBrand]: defaults.effort ?? undefined }));
       setPermissionDefaults((was) => ({ ...was, [sessionBrand]: defaults.permissionMode ?? undefined }));
     }).catch((e: unknown) => setSteerError(e instanceof Error ? e.message : String(e)));
-  }, [sessionBrand]);
+  }, [sessionBrand, view.profile]);
   /** The selected provider account's allowance, never the other provider's. */
   // The allowance of the account this chat runs on, not of whichever account
   // the server booted with (bw-5ihw.8).
