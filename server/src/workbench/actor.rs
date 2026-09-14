@@ -700,7 +700,7 @@ fn live_steering_menu(
     if let Some(menu) = live_menus.get(session_id) {
         return Some(menu.clone());
     }
-    let brand = store.get_session(session_id).ok().flatten()?.brand;
+    let target = store.get_session(session_id).ok().flatten()?;
     let (_, source) = live_menus
         .iter()
         .filter(|(id, _)| {
@@ -708,7 +708,12 @@ fn live_steering_menu(
                 .get_session(id)
                 .ok()
                 .flatten()
-                .is_some_and(|session| session.brand == brand)
+                .is_some_and(|session| {
+                    session.brand == target.brand
+                        && session.profile == target.profile
+                        && session.project_id == target.project_id
+                        && session.project_path == target.project_path
+                })
         })
         .max_by_key(|(_, menu)| {
             menu.fields
