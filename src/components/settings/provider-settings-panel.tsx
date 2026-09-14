@@ -27,6 +27,7 @@ import {
 import { SettingRow, SettingsGroup } from '@/components/settings/section';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Panel } from '@/components/ui/panel';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -314,9 +315,9 @@ export function ProviderSettingsPanel({
   return (
     <div data-testid={`provider-settings-${brand}-${page}`}>
       {refused && (
-        <p role="alert" className="mb-4 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+        <Panel tone="danger" role="alert" className="mb-4 text-sm text-danger">
           {refused}
-        </p>
+        </Panel>
       )}
       {target && (
         <p className="mb-4 text-xs text-t-muted">

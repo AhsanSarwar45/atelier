@@ -53,8 +53,11 @@ vi.mock('@/components/shell', () => ({
 }));
 
 const replaceMock = vi.fn();
+// Settings is one screen of sections, the open one named in the address
+// (bw-2t1c.2), so a case that reads a section has to open it.
+let address = 'id=p1';
 vi.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams('id=p1'),
+  useSearchParams: () => new URLSearchParams(address),
   useRouter: () => ({ push: vi.fn(), replace: replaceMock, back: vi.fn() }),
 }));
 
@@ -168,12 +171,14 @@ describe('the settings screen', () => {
   const aShellSetting = { shell: null, default: '/bin/bash', available: ['/bin/bash'] };
 
   beforeEach(() => {
+    address = 'id=p1';
     terminalSettingsMock.mockReset();
     terminalSettingsMock.mockResolvedValue(aShellSetting);
   });
 
   it('says the tags could not be read rather than that there are none', async () => {
     getTagsMock.mockRejectedValue(new Error('the server did not answer'));
+    address = 'section=tags';
 
     render(<SettingsPage />);
 
@@ -192,6 +197,7 @@ describe('the settings screen', () => {
   it("says the terminal's shell setting could not be read rather than showing a blank form", async () => {
     getTagsMock.mockResolvedValue([]);
     terminalSettingsMock.mockRejectedValue(new Error('the server did not answer'));
+    address = 'section=terminal';
 
     render(<SettingsPage />);
 
