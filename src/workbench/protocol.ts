@@ -15,8 +15,8 @@
 
 /** Brands we can drive. One string per driver. */
 import type { HeldChat } from './chat-state';
-import type { PlanUsage } from './plan-usage';
 import type { ChatWidget } from './chat-widgets';
+import type { PlanUsage } from './plan-usage';
 import type { ProviderMessageSignal } from './provider-messages';
 
 export type Brand = 'claude' | 'codex' | 'local';
@@ -894,9 +894,18 @@ export interface SignInProgress {
   standing: ProfileStanding | null;
 }
 
+/** Whose provider settings a command is about: one account's directory or one checkout. */
+export type SettingsScope = { scope: 'account'; profileId?: string } | { scope: 'project'; projectPath: string };
+
+/** Which file inside a scope a value is in. `managed` is read only. */
+export type SettingsLayer = 'managed' | 'user' | 'project' | 'local';
+
 export type WbpCommand =
-  | { type: 'agent-files.list'; projectPath?: string }
-  | { type: 'agent-files.read'; path: string; projectPath?: string }
+  | { type: 'agent-files.list'; projectPath?: string; profileId?: string }
+  | { type: 'agent-files.read'; path: string; projectPath?: string; profileId?: string }
+  | { type: 'agent-files.write'; path: string; content: string; projectPath?: string; profileId?: string }
+  | ({ type: 'provider-settings.read'; brand: Brand } & SettingsScope)
+  | ({ type: 'provider-settings.write'; brand: Brand; layer: SettingsLayer; patch: Record<string, unknown> } & SettingsScope)
   | { type: 'provider-defaults.read'; brand: Brand; profileId?: string }
   | {
       type: 'provider-defaults.write';
