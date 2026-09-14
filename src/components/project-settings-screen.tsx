@@ -230,7 +230,7 @@ export function ProjectSettingsScreen({
   );
 
   const provider = (brand: Brand): ReactNode => {
-    const tabs = providerTabs(brand).filter((t) => t.id !== 'files');
+    const tabs = providerTabs(brand);
     const known = tabs.some((t) => t.id === tab) ? tab! : tabs[0].id;
     const isPage = pagesFor(brand).some((p) => p.id === known);
     const layer: Layer = brand === 'claude' ? claudeLayer : 'project';
@@ -271,6 +271,7 @@ export function ProjectSettingsScreen({
       sections={PROJECT_SETTINGS_SECTIONS}
       section={section}
       onOpen={onOpen}
+      wide={open === 'files'}
       bar={dirty || saving ? saveButton : null}
     >
       {open === 'project' && (
@@ -425,7 +426,7 @@ export function ProjectSettingsScreen({
       {open === 'codex' && provider('codex')}
       {open === 'files' && (
         <div className="-m-4 flex h-[calc(100dvh-3rem)] flex-col sm:-m-6">
-          <AgentFilesBrowser projects={[]} projectPath={folder} />
+          <AgentFilesBrowser projectPath={folder} />
         </div>
       )}
     </SettingsScreen>

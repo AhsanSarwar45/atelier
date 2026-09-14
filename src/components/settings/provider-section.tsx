@@ -1,7 +1,7 @@
 /**
  * One provider's settings section: the account it is about, then the pages
  * for that account — its defaults, its permissions, its MCP servers, its
- * extensions and its files.
+ * plugins. Its files are under Agent files.
  *
  * The same pages are drawn inside a project's settings with the project as the
  * scope; there the account picker is the project's own, so this component
@@ -11,7 +11,6 @@
 
 import type { ReactNode } from 'react';
 
-import { AgentFilesBrowser } from '@/components/agent-files-browser';
 import { AccountPicker, useProfiles } from '@/components/settings/account-picker';
 import { CopyToAccounts } from '@/components/settings/copy-to-accounts';
 import { ExtensionsPanel } from '@/components/settings/extensions-panel';
@@ -21,7 +20,6 @@ import type { Scope } from '@/components/settings/provider-settings-api';
 import { ProviderSettingsPanel } from '@/components/settings/provider-settings-panel';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useProjects } from '@/hooks/use-projects';
 import { brandName } from '@/workbench/brand-icon';
 import { SYSTEM_PROFILE } from '@/workbench/protocol';
 
@@ -35,9 +33,9 @@ export function providerTabs(brand: Brand): ProviderTabDef[] {
   return [
     ...pagesFor(brand).map((p) => ({ id: p.id, label: p.label })),
     { id: 'mcp', label: 'MCP servers' },
-    // Codex has no plugin system; its skills, hooks and rules are files.
+    // Codex has no plugin system; its skills, hooks and rules are files,
+    // and files of every kind are under Agent files, not here.
     ...(brand === 'claude' ? [{ id: 'plugins', label: 'Plugins' }] : []),
-    { id: 'files', label: 'Files' },
   ];
 }
 
@@ -92,7 +90,6 @@ export function ProviderSection({
   pages?: (scope: Scope, tab: string) => ReactNode;
 }) {
   const { profiles, unread } = useProfiles(brand);
-  const { projects } = useProjects();
   const scope: Scope = { kind: 'account', profileId: account ?? undefined };
   const known = providerTabs(brand).some((t) => t.id === tab) ? tab : providerTabs(brand)[0].id;
   const isPage = pagesFor(brand).some((p) => p.id === known);
@@ -114,16 +111,6 @@ export function ProviderSection({
       <ProviderTabs brand={brand} tab={known} onOpen={onTab}>
         {isPage ? (
           <ProviderSettingsPanel brand={brand} scope={scope} page={known} layer="user" />
-        ) : known === 'files' ? (
-          <div className="-mx-4 flex h-[70dvh] flex-col sm:-mx-6">
-            <AgentFilesBrowser
-              brand={brand}
-              profileId={account}
-              projects={projects
-                .filter((project) => !project.archivedAt)
-                .map(({ id, name, localPath, path }) => ({ id, name, path: localPath || path }))}
-            />
-          </div>
         ) : known === 'mcp' ? (
           <McpServersPanel brand={brand} scope={scope} />
         ) : known === 'plugins' ? (

@@ -32,6 +32,13 @@ test('reads provider files, edits one in place and creates a missing one', async
   await expect(page.getByRole('heading', { name: 'Codex', exact: true })).toBeVisible();
   await expect(page.getByTestId('agent-file-editor')).toContainText('# Personal instructions');
   await expect(page.getByTestId('agent-file-save')).toBeDisabled();
+  // One place, one choice: the account above, the search box, and no scope chips
+  // or project dropdown; the list and the editor share the whole width (bw-76eu).
+  await expect(page.getByLabel('Filter by scope')).toHaveCount(0);
+  await expect(page.getByLabel('Project scope')).toHaveCount(0);
+  const list = (await page.getByRole('complementary', { name: 'Agent files' }).boundingBox())!;
+  const editor = (await page.getByTestId('agent-file-editor').boundingBox())!;
+  expect(editor.width).toBeGreaterThanOrEqual(list.width);
   await page.screenshot({ path: join(results, 'desktop.png'), fullPage: true });
 
   // Typing marks the file unsaved; Save writes exactly what is in the editor.
@@ -50,6 +57,16 @@ test('reads provider files, edits one in place and creates a missing one', async
   await page.getByTestId('agent-file-create-AGENTS.md').click();
   await expect.poll(() => existsSync(join(codex, 'AGENTS.md'))).toBe(true);
   await expect(page.getByTestId('agent-file-AGENTS.md')).toBeVisible();
+});
+
+test('a provider has no Files tab; its files are under Agent files', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/settings?section=claude');
+  await expect(page.getByTestId('provider-tab-mcp')).toBeVisible();
+  await expect(page.getByTestId('provider-tab-files')).toHaveCount(0);
+  await page.goto('/settings?section=codex');
+  await expect(page.getByTestId('provider-tab-mcp')).toBeVisible();
+  await expect(page.getByTestId('provider-tab-files')).toHaveCount(0);
 });
 
 test('uses file-list then reader navigation on a phone', async ({ page }) => {

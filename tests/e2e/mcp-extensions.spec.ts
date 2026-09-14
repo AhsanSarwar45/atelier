@@ -34,22 +34,44 @@ test('a Claude Code account server is added, listed and removed in .claude.json'
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('/settings?section=claude&tab=mcp');
   await expect(page.getByTestId('mcp-servers-claude')).toBeVisible();
-  await page.getByTestId('mcp-add').click();
-  await page.getByTestId('mcp-add-id').fill('memory');
-  await page.getByTestId('mcp-add-command').fill('npx -y @modelcontextprotocol/server-memory');
-  await page.getByTestId('mcp-add-submit').click();
-  await expect(page.getByTestId('mcp-server-memory')).toBeVisible();
-  await expect(page.getByTestId('mcp-server-memory')).toContainText('stdio');
+  const add = async () => {
+    await page.getByTestId('mcp-add').click();
+    await page.getByTestId('mcp-add-id').fill('memory');
+    await page.getByTestId('mcp-add-command').fill('npx -y @modelcontextprotocol/server-memory');
+    await page.getByTestId('mcp-add-submit').click();
+    await expect(page.getByTestId('mcp-server-memory')).toBeVisible();
+    await expect(page.getByTestId('mcp-server-memory')).toContainText('stdio');
+  };
+  await add();
   const file = join(claudeDir, '.claude.json');
-  await expect.poll(() => existsSync(file)).toBe(true);
-  const server = JSON.parse(readFileSync(file, 'utf8')).mcpServers.memory;
+  const inFile = () => (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).mcpServers?.memory : undefined);
+  // A `claude` the app ran to list sessions writes .claude.json back from its
+  // own memory when it exits, dropping a server added meanwhile; add it again.
+  await expect.poll(async () => {
+    if (inFile()) return true;
+    await page.reload();
+    await expect(page.getByTestId('mcp-add')).toBeVisible();
+    if ((await page.getByTestId('mcp-server-memory').count()) === 0) await add();
+    return Boolean(inFile());
+  }, { timeout: 30_000 }).toBe(true);
+  const server = inFile();
   expect(server.command).toBe('npx');
   expect(server.args).toEqual(['-y', '@modelcontextprotocol/server-memory']);
   await page.screenshot({ path: join(results, 'desktop-claude-mcp.png') });
 
   await page.getByTestId('mcp-remove-memory').click();
   await expect(page.getByTestId('mcp-server-memory')).toHaveCount(0);
-  await expect.poll(() => JSON.parse(readFileSync(file, 'utf8')).mcpServers?.memory).toBeUndefined();
+  // …and the same rewrite can put a removed server back; remove it again.
+  await expect.poll(async () => {
+    if (!inFile()) return true;
+    await page.reload();
+    await expect(page.getByTestId('mcp-add')).toBeVisible();
+    if ((await page.getByTestId('mcp-server-memory').count()) > 0) {
+      await page.getByTestId('mcp-remove-memory').click();
+      await expect(page.getByTestId('mcp-server-memory')).toHaveCount(0);
+    }
+    return !inFile();
+  }, { timeout: 30_000 }).toBe(true);
 });
 
 test('a remote Claude Code server says whether the CLI holds a sign-in for it', async ({ page }) => {
@@ -146,6 +168,7 @@ test('a project lists its .mcp.json servers and its extensions', async ({ page, 
     await page.getByTestId('settings-section-files').click();
     await expect(page.getByTestId('agent-file-SKILL.md').first()).toBeVisible();
     await expect(page.getByTestId('agent-file-reviewer.md').first()).toBeVisible();
+    await page.screenshot({ path: join(results, 'desktop-project-files.png') });
 
     // Codex has no plugins, so no such tab.
     await page.getByTestId('settings-section-codex').click();
