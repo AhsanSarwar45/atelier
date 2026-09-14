@@ -3,6 +3,7 @@
 use super::actor::ChatDb;
 use super::agent_files;
 use super::browser::{self, BrowserCapture, BrowserRecipe};
+use super::extensions;
 use super::external::{self, ProviderHold};
 use super::media;
 use super::profiles::Profiles;
@@ -657,6 +658,73 @@ impl WorkbenchRegistry {
             .filter(|value| !value.is_empty())
     }
 
+    /// The account behind an extensions command: its brand, scope, config
+    /// directory, and the directory to hand a spawned CLI (`None` for the
+    /// system account, which is run with the environment as the server has
+    /// it, as `signin` does).
+    fn extension_account(
+        &self,
+        command: &Command,
+    ) -> Result<(String, provider_settings::Scope, PathBuf, Option<PathBuf>), String> {
+        let brand = Self::field(command, "brand")?;
+        let scope = Self::settings_scope(command)?;
+        let profile = Self::maybe(command, "profileId");
+        let dir = self.account_dir(brand, profile);
+        let spawn_dir = profile
+            .filter(|id| *id != super::profiles::SYSTEM)
+            .map(|_| dir.clone());
+        Ok((brand.to_string(), scope, dir, spawn_dir))
+    }
+
+    fn extensions_list(
+        &self,
+        brand: &str,
+        scope: &provider_settings::Scope,
+        dir: &Path,
+    ) -> Result<Value, String> {
+        Ok(json!({"kinds": extensions::list(brand, scope, dir, &self.paths.home)?}))
+    }
+
+    /// Run Claude's own CLI for a plugin or marketplace command and answer
+    /// its outcome with the list as it now reads.
+    async fn claude_plugin_cli(
+        &self,
+        command: &Command,
+        words: Vec<String>,
+        within: Duration,
+    ) -> Result<Value, String> {
+        let (brand, scope, dir, spawn_dir) = self.extension_account(command)?;
+        if brand != "claude" {
+            return Err("plugins and marketplaces are a Claude Code feature".into());
+        }
+        let program = crate::routes::find_tool("claude", &[])
+            .ok_or("claude is not installed on this machine")?;
+        let (cwd, scope_word) = match &scope {
+            provider_settings::Scope::Project { path } => (Some(path.clone()), "project"),
+            provider_settings::Scope::Account { .. } => (None, "user"),
+        };
+        let mut args: Vec<&str> = words.iter().map(String::as_str).collect();
+        let scope_flag = if args.first() == Some(&"plugin") && args.get(1) == Some(&"marketplace") {
+            "--scope"
+        } else {
+            "-s"
+        };
+        args.push(scope_flag);
+        args.push(scope_word);
+        let outcome = extensions::run_cli(
+            &program,
+            "CLAUDE_CONFIG_DIR",
+            spawn_dir.as_deref(),
+            cwd.as_deref(),
+            &args,
+            within,
+        )
+        .await?;
+        let mut answer = serde_json::to_value(&outcome).map_err(|e| e.to_string())?;
+        answer["kinds"] = json!(extensions::list(&brand, &scope, &dir, &self.paths.home)?);
+        Ok(answer)
+    }
+
     async fn driver_command(&self, command: &Command) -> Result<Value, String> {
         let session_id = Self::field(command, "sessionId")?;
         let closing = command.kind == CommandKind::SessionClose;
@@ -1066,6 +1134,90 @@ impl WorkbenchRegistry {
                 serde_json::to_value(provider_settings::write(brand, &scope, &dir, layer, patch)?)
                     .map_err(|e| e.to_string())
             }
+            CommandKind::ExtensionsList => {
+                let (brand, scope, dir, _) = self.extension_account(command)?;
+                self.extensions_list(&brand, &scope, &dir)
+            }
+            CommandKind::ExtensionRemove => {
+                let (brand, scope, dir, _) = self.extension_account(command)?;
+                let kind: extensions::Kind = command
+                    .fields
+                    .get("kind")
+                    .cloned()
+                    .and_then(|value| serde_json::from_value(value).ok())
+                    .ok_or("kind must be skills, agents, outputStyles or rules")?;
+                let id = Self::field(command, "id")?;
+                extensions::remove(&brand, &scope, &dir, &self.paths.home, kind, id)?;
+                self.extensions_list(&brand, &scope, &dir)
+            }
+            CommandKind::PluginSetEnabled => {
+                let id = Self::field(command, "id")?.to_string();
+                let enabled = command
+                    .at("enabled")
+                    .as_bool()
+                    .ok_or("enabled must be true or false")?;
+                let verb = if enabled { "enable" } else { "disable" };
+                let words = vec!["plugin".to_string(), verb.to_string(), id.clone()];
+                match self.claude_plugin_cli(command, words, extensions::QUICK_CLI).await {
+                    Ok(answer) if answer["ok"] == json!(true) => Ok(answer),
+                    // The CLI is not there or refused: the switch is one key
+                    // in settings.json, so it is set there directly.
+                    Ok(_) | Err(_) => {
+                        let (brand, scope, dir, _) = self.extension_account(command)?;
+                        if brand != "claude" {
+                            return Err("plugins are a Claude Code feature".into());
+                        }
+                        let settings = match &scope {
+                            provider_settings::Scope::Project { path } => {
+                                path.join(".claude/settings.json")
+                            }
+                            provider_settings::Scope::Account { .. } => dir.join("settings.json"),
+                        };
+                        extensions::set_enabled_in_settings(&settings, &id, enabled)?;
+                        let mut answer = self.extensions_list(&brand, &scope, &dir)?;
+                        answer["ok"] = json!(true);
+                        answer["output"] = json!(format!(
+                            "{} was set in {}",
+                            if enabled { "enabled" } else { "disabled" },
+                            settings.display()
+                        ));
+                        Ok(answer)
+                    }
+                }
+            }
+            CommandKind::PluginInstall | CommandKind::PluginUninstall => {
+                let id = Self::field(command, "id")?.to_string();
+                let verb = if command.kind == CommandKind::PluginInstall {
+                    "install"
+                } else {
+                    "uninstall"
+                };
+                let words = vec!["plugin".to_string(), verb.to_string(), id];
+                self.claude_plugin_cli(command, words, extensions::SLOW_CLI)
+                    .await
+            }
+            CommandKind::MarketplaceAdd => {
+                let source = Self::field(command, "source")?.to_string();
+                let words = vec![
+                    "plugin".to_string(),
+                    "marketplace".to_string(),
+                    "add".to_string(),
+                    source,
+                ];
+                self.claude_plugin_cli(command, words, extensions::SLOW_CLI)
+                    .await
+            }
+            CommandKind::MarketplaceRemove => {
+                let name = Self::field(command, "name")?.to_string();
+                let words = vec![
+                    "plugin".to_string(),
+                    "marketplace".to_string(),
+                    "remove".to_string(),
+                    name,
+                ];
+                self.claude_plugin_cli(command, words, extensions::QUICK_CLI)
+                    .await
+            }
             CommandKind::ProviderDefaultsRead => {
                 let brand = Self::field(command, "brand")?;
                 let files = self.defaults_for(brand, Self::maybe(command, "profileId"));
@@ -1378,6 +1530,97 @@ mod tests {
             kind,
             fields: fields.as_object().cloned().unwrap_or_else(Map::new),
         }
+    }
+
+    #[tokio::test]
+    async fn extensions_commands_read_and_change_the_named_accounts_files() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let registry = WorkbenchRegistry::new(
+            database,
+            RegistryPaths {
+                home: root.path().join("home"),
+                claude_config: root.path().join("claude"),
+                codex_home: root.path().join("codex"),
+                profiles: root.path().join("profiles"),
+                media: root.path().join("media"),
+            },
+            Arc::new(FakeFactory { calls: Arc::new(AtomicUsize::new(0)) }),
+        );
+        let skill = root.path().join("claude/skills/mine/SKILL.md");
+        std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
+        std::fs::write(&skill, "---\nname: mine\ndescription: Mine.\n---\n").unwrap();
+        let rule = root.path().join("codex/rules/default.rules");
+        std::fs::create_dir_all(rule.parent().unwrap()).unwrap();
+        std::fs::write(&rule, "prefix_rule(pattern=[\"bd\"], decision=\"allow\")\n").unwrap();
+
+        // The system account reads the directory the server booted with.
+        let listed = registry
+            .execute(&command(CommandKind::ExtensionsList, json!({"brand":"claude","scope":"account"})))
+            .await
+            .unwrap();
+        assert_eq!(listed["kinds"][2]["kind"], json!("skills"));
+        assert_eq!(listed["kinds"][2]["items"][0]["id"], json!("mine"));
+        assert_eq!(listed["kinds"][2]["items"][0]["description"], json!("Mine."));
+        let listed = registry
+            .execute(&command(CommandKind::ExtensionsList, json!({"brand":"codex","scope":"account","profileId":"system"})))
+            .await
+            .unwrap();
+        assert_eq!(listed["kinds"][0]["shared"], json!(true));
+        assert_eq!(listed["kinds"][2]["items"][0]["id"], json!("default.rules"));
+
+        // A created account reads its own directory, which starts empty.
+        let made = registry
+            .execute(&command(CommandKind::ProfileCreate, json!({"brand":"claude","name":"Work"})))
+            .await
+            .unwrap();
+        let profile = made["profile"]["id"].as_str().unwrap().to_string();
+        let listed = registry
+            .execute(&command(CommandKind::ExtensionsList, json!({"brand":"claude","scope":"account","profileId":profile})))
+            .await
+            .unwrap();
+        assert_eq!(listed["kinds"][2]["items"], json!([]));
+
+        // Switching a plugin on lands in that account's settings.json, whether
+        // Claude's CLI did it or the fallback edit did.
+        let answer = registry
+            .execute(&command(
+                CommandKind::PluginSetEnabled,
+                json!({"brand":"claude","scope":"account","profileId":profile,"id":"notion@official","enabled":true}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(answer["ok"], json!(true), "{answer}");
+        let settings: Value = serde_json::from_str(
+            &std::fs::read_to_string(registry.profile_directory("claude", &profile).join("settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(settings["enabledPlugins"]["notion@official"], json!(true));
+        assert_eq!(answer["kinds"][0]["items"][0]["id"], json!("notion@official"));
+        assert_eq!(answer["kinds"][0]["items"][0]["enabled"], json!(true));
+        assert!(!root.path().join("claude/settings.json").exists(), "the system account was left alone");
+
+        // Removing names a listed item only, and refuses anything else.
+        let refused = registry
+            .execute(&command(CommandKind::ExtensionRemove, json!({"brand":"claude","scope":"account","kind":"skills","id":"../settings.json"})))
+            .await
+            .unwrap_err();
+        assert!(refused.contains("not"), "{refused}");
+        let refused = registry
+            .execute(&command(CommandKind::ExtensionRemove, json!({"brand":"claude","scope":"account","kind":"hooks","id":"Stop/0/0"})))
+            .await
+            .unwrap_err();
+        assert_eq!(refused, "hooks cannot be removed here");
+        let after = registry
+            .execute(&command(CommandKind::ExtensionRemove, json!({"brand":"claude","scope":"account","kind":"skills","id":"mine"})))
+            .await
+            .unwrap();
+        assert_eq!(after["kinds"][2]["items"], json!([]));
+        assert!(!skill.exists());
+        assert!(registry
+            .execute(&command(CommandKind::ExtensionsList, json!({"brand":"claude","scope":"project","projectPath":"relative"})))
+            .await
+            .is_err());
     }
 
     #[tokio::test]
