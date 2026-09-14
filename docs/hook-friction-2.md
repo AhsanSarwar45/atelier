@@ -1587,3 +1587,7 @@ After the work commit had landed and the generated checks card had closed,
 land card. The card is labelled `no-code` and exists only to land changes that
 are already on main, so it has no product change to name. This note is the
 otherwise unnecessary commit the land gate requires.
+
+Reproduced on `bw-q50n.3`: after `bw-q50n.1` landed and the generated checks
+card closed green, `atelier tool board/land bw-q50n.3` again refused solely
+because no commit subject named the generated `no-code` teardown card.
