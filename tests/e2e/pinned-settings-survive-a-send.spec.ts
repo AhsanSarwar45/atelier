@@ -230,7 +230,7 @@ test.describe('what a chat is set to survives sending a message', () => {
     if (shot) await page.screenshot({ path: shot, fullPage: true });
   });
 
-  test('a cold old Codex chat draws all five settings with no live menu', async ({ page, request }) => {
+  test('a cold old Codex chat draws its four controls with no live menu', async ({ page, request }) => {
     const api = backend();
     const project = await pinnedProject(request);
     const response = await request.post(`${api}/api/workbench/command`, { data: {
@@ -251,7 +251,7 @@ test.describe('what a chat is set to survives sending a message', () => {
     await page.goto(`/project?id=${project.id}&tab=chat&chat=${saved.id}`);
     await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
     const controls = page.getByTestId('desktop-composer-settings');
-    await expect(controls.getByTestId('session-brand')).toHaveAttribute('data-brand', 'codex');
+    await expect(controls.getByTestId('session-brand')).toHaveCount(0);
     await expect(controls.getByTestId('model-picker')).toBeVisible();
     await expect(controls.getByTestId('mode-picker')).toBeVisible();
     await expect(controls.getByTestId('effort-picker')).toBeVisible();

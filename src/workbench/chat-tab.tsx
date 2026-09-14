@@ -103,7 +103,7 @@ import { PlanChip, UsageView } from '@/workbench/usage-view';
 import { CHIP_GAP, ModeMark, modelName, modelWords, modeWords } from '@/workbench/what-it-runs';
 import { isBusy, readAndKeep, sendCommand, useSession, useSessionFactsRead, type TranscriptItem } from '@/workbench/use-session';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
-import { BrandIcon, ProfileBadge, ProviderBadge, brandName } from '@/workbench/brand-icon';
+import { BrandIcon, ProfileBadge, brandName } from '@/workbench/brand-icon';
 import { workingLine } from '@/workbench/working-line';
 import { AttachmentViewer } from '@/workbench/attachment-viewer';
 import { useEpicChecklist } from '@/workbench/epic-checklist';
@@ -2456,7 +2456,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             {/* Both act on THIS chat, and are kept in his own settings so the
                 next one opens on them too (§8.2.3). */}
             <div className="hidden items-center gap-1 composer-wide:flex" data-testid="desktop-composer-settings">
-            <ProviderBadge brand={sessionBrand} model={view.model} />
             <Picker
               icon={<ModeMark mode={view.permissionMode} className="h-3.5 w-3.5" />}
               label="Permission mode"
@@ -2660,7 +2659,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               <DialogTitle>Chat settings</DialogTitle>
             </DialogHeader>
             <div className="flex flex-col gap-2 [&_[data-testid$='-picker']]:h-10 [&_[data-testid$='-picker']]:w-full [&_[data-testid$='-picker']]:justify-start [&_[data-testid$='-picker']]:rounded-md">
-              <ProviderBadge brand={sessionBrand} model={view.model} />
               <Picker
                 icon={<ModeMark mode={view.permissionMode} className="h-4 w-4" />}
                 label="Permission mode"
