@@ -167,18 +167,23 @@ const RAIL_TAB: Record<RailView, string> = { chat: 'Agents', git: 'Git' };
 
 export interface ChatRightRailProps {
   projectId: string | null;
+  /*
+   * Everything the Agents view is drawn from. All of it is optional, because
+   * the Files tab mounts this same column with the Git tab alone and has no
+   * chat behind it to have touched a card or sent anything away (bw-rpgh.5).
+   */
   /** Every card this chat has touched, in the order it touched them. */
-  cards: string[];
+  cards?: string[];
   /** Everything it handed to something else, oldest first (§8.2.7). */
-  agents: SentAway[];
+  agents?: SentAway[];
   /** The conversation's own rows; a helper's card reads its live line from them. */
-  items: readonly TranscriptItem[];
+  items?: readonly TranscriptItem[];
   /** Whose chat these belong to; the steering on a row acts on it. */
-  sessionId: string;
+  sessionId?: string;
   /** Which steering controls this chat's brand has for them. None is a real answer. */
-  agentControls: AgentControl[];
+  agentControls?: AgentControl[];
   /** Opening one of them onto its own conversation. */
-  onOpenAgent: (id: string) => void;
+  onOpenAgent?: (id: string) => void;
   open: boolean;
   /** Which view is drawn. What this chat has touched, unless Git was asked for. */
   view?: RailView;
@@ -224,14 +229,16 @@ export interface ChatRightRailProps {
   onPickView?: (view: RailView) => void;
 }
 
+const NOTHING: never[] = [];
+
 export function ChatRightRail({
   projectId,
-  cards,
-  agents,
-  items,
-  sessionId,
-  agentControls,
-  onOpenAgent,
+  cards = NOTHING,
+  agents = NOTHING,
+  items = NOTHING,
+  sessionId = '',
+  agentControls = NOTHING,
+  onOpenAgent = () => {},
   open,
   view = 'chat',
   projectPath = null,

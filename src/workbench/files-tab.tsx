@@ -32,18 +32,20 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
-import { PanelLeft } from 'lucide-react';
+import { FileText, PanelLeft, PanelRight, PanelRightClose } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { TabLead, ToolButton } from '@/components/shell';
+import { TabLead, TabTrail, ToolButton } from '@/components/shell';
 import { Button } from '@/components/ui/button';
 import { Picker } from '@/components/ui/picker';
 import { addressWith } from '@/lib/address';
 import * as api from '@/lib/api';
 import type { GitTree } from '@/lib/api';
-import { isPhoneScreen } from '@/lib/screen-width';
+import { isPhoneScreen, usePhoneScreen } from '@/lib/screen-width';
 import { cn } from '@/lib/utils';
+import { ChatRightRail, useGitDiff, useRightRail } from '@/workbench/chat-right-rail';
 import { FilePreview, PREVIEWS_NEEDING_TEXT, previewKind } from '@/workbench/file-preview';
+import { GitDiffView, type DiffFocus } from '@/workbench/git-diff-view';
 import FileTree from '@/workbench/file-tree';
 import { FileViewer, type ViewedFile } from '@/workbench/file-viewer';
 import {
@@ -70,6 +72,9 @@ export function filesRootKey(projectId: string | null): string {
 
 /** Narrower than this and there is no viewer left to speak of. */
 const MIN_VIEWER_WIDTH = 320;
+
+/** The one view this tab's right column offers. Hoisted so it is one array. */
+const GIT_ONLY = ['git'] as const;
 
 export interface FilesTabProps {
   /** The project whose remembered root this is. Null while it is being read. */
@@ -130,6 +135,26 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
   // rail is a sheet; above it the rail is a column and the CSS keeps it drawn
   // whatever this says.
   const [railOpen, setRailOpen] = useState(false);
+  /*
+   * The column on the other edge, which is the chat's own — the same switch,
+   * the same width, the same remembered diff (bw-rpgh.5). Only the Git tab is
+   * offered here: there is no chat behind this tab to have sent anything away,
+   * so an Agents tab would be a tab onto an empty panel. What the reader has
+   * open is one thing about the app rather than one thing about a tab, so
+   * crossing from the chat to the files does not shut it.
+   */
+  const [rightOpen, flipRight] = useRightRail();
+  const { diffOpen, flipDiff } = useGitDiff();
+  const phone = usePhoneScreen();
+  /** The file the Git panel last asked the diff to show (bw-pstm.1). */
+  const [diffFocus, setDiffFocus] = useState<DiffFocus | null>(null);
+  /*
+   * The same rule the chat reads by: on a wide screen the diff and the panel
+   * that asked for it stand side by side, and on a phone the panel is a sheet
+   * OVER the diff, so the diff is only readable with the sheet shut
+   * (bw-e3dw.14).
+   */
+  const showDiff = diffOpen && (phone || rightOpen);
   // The file the tab was opened on, read once: putting `file` in the effect
   // below would throw the sheet open again on every file the reader picks.
   const openedOn = useRef(file);
@@ -196,6 +221,28 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
       router.push(addressWith(params, { tab: 'files', file: path, line: null }));
     },
     [router, params],
+  );
+
+  // Put away, the pick is spent: the diff opened later by its own button must
+  // not jump to a file clicked before.
+  useEffect(() => {
+    if (!showDiff) setDiffFocus(null);
+  }, [showDiff]);
+
+  /** The diff button, with the phone's door shut behind it — chat-tab's rule. */
+  const showTheDiff = useCallback(() => {
+    if (phone && !diffOpen && rightOpen) flipRight();
+    flipDiff();
+  }, [phone, diffOpen, rightOpen, flipRight, flipDiff]);
+
+  /** A file's name in the Git panel, clicked: the diff comes up on that file. */
+  const showFileInDiff = useCallback(
+    (file: string) => {
+      if (phone && rightOpen) flipRight();
+      if (!diffOpen) flipDiff();
+      setDiffFocus({ path: file, asked: Date.now() });
+    },
+    [phone, diffOpen, rightOpen, flipRight, flipDiff],
   );
 
   const chooseRoot = useCallback(
@@ -360,6 +407,30 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
           onClick={() => setRailOpen((showing) => !showing)}
         />
       </TabLead>
+      {/* The far right of the bar, mirroring the chat's own: the door to the
+          column that says what this checkout has changed (bw-rpgh.5). */}
+      <TabTrail tab="files">
+        {/* The one press back to the file, and only on a phone, for the same
+            reason the chat carries one: a phone shut the column to read the
+            diff at all, so the way back cannot be inside it. */}
+        {showDiff && (
+          <ToolButton
+            icon={<FileText />}
+            label="Back to the file"
+            className="md:hidden"
+            data-testid="files-diff-back"
+            onClick={showTheDiff}
+          />
+        )}
+        <ToolButton
+          icon={rightOpen ? <PanelRightClose /> : <PanelRight />}
+          label={rightOpen ? 'Hide Git' : 'Show Git'}
+          emphasis={rightOpen ? 'loud' : 'quiet'}
+          data-testid="files-right-rail-toggle"
+          data-open={rightOpen}
+          onClick={flipRight}
+        />
+      </TabTrail>
       <div
         data-testid="files-rail"
         data-open={railOpen}
@@ -435,7 +506,15 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
           onCloseCurrent={closeCurrent}
           dirty={dirty}
         />
-        {!file || !kind ? (
+        {/* What this checkout has changed, standing where the file stands —
+            the same swap the chat makes with its transcript (bw-rx1y.4). Keyed
+            on the root, because the open-and-shut state inside is kept by file
+            path and a path means nothing in another checkout. */}
+        {showDiff ? (
+          <div data-testid="files-diff-pane" className="flex min-h-0 flex-1 flex-col">
+            <GitDiffView key={root ?? ''} path={root} focus={diffFocus} />
+          </div>
+        ) : !file || !kind ? (
           <div className="flex min-h-0 flex-1 items-center justify-center">
             <p className="text-sm text-muted-foreground">Pick a file</p>
           </div>
@@ -460,6 +539,36 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
           />
         )}
       </div>
+      <ChatRightRail
+        projectId={projectId}
+        open={rightOpen}
+        view="git"
+        views={GIT_ONLY}
+        projectPath={root}
+        workingIn={root}
+        desktopWidth={DEFAULT_PANEL_WIDTH}
+        diffOpen={diffOpen}
+        onFlipDiff={showTheDiff}
+        onShowFile={showFileInDiff}
+        onToggle={flipRight}
+      />
+      {/* The sheet's scrim, as the tree's is: mounted either way and faded, so
+          the darkening arrives with the sheet rather than in front of it. */}
+      <Button
+        type="button"
+        variant="foreground"
+        aria-hidden={!rightOpen}
+        tabIndex={rightOpen ? 0 : -1}
+        aria-label="Close Git"
+        data-testid="files-right-rail-scrim"
+        data-open={rightOpen}
+        className={cn(
+          'absolute inset-0 z-40 h-auto rounded-none bg-black/80 p-0 md:hidden',
+          'transition-opacity duration-200 ease-out motion-reduce:transition-none',
+          rightOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
+        )}
+        onClick={flipRight}
+      />
     </div>
   );
 }
