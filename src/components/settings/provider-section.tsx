@@ -13,6 +13,8 @@ import type { ReactNode } from 'react';
 
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
 import { AccountPicker, useProfiles } from '@/components/settings/account-picker';
+import { ExtensionsPanel } from '@/components/settings/extensions-panel';
+import { McpServersPanel } from '@/components/settings/mcp-servers-panel';
 import { pagesFor, type Brand } from '@/components/settings/provider-schema';
 import type { Scope } from '@/components/settings/provider-settings-api';
 import { ProviderSettingsPanel } from '@/components/settings/provider-settings-panel';
@@ -116,6 +118,10 @@ export function ProviderSection({
                 .map(({ id, name, localPath, path }) => ({ id, name, path: localPath || path }))}
             />
           </div>
+        ) : known === 'mcp' ? (
+          <McpServersPanel brand={brand} scope={scope} />
+        ) : known === 'extensions' ? (
+          <ExtensionsPanel brand={brand} scope={scope} />
         ) : (
           pages?.(scope, known)
         )}

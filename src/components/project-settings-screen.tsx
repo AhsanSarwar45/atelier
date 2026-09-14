@@ -16,6 +16,8 @@ import { Archive, ArchiveRestore, FolderSearch, GitBranch, Hammer, Loader2, Scro
 
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
 import { FolderBrowser } from '@/components/folder-browser';
+import { ExtensionsPanel } from '@/components/settings/extensions-panel';
+import { McpServersPanel } from '@/components/settings/mcp-servers-panel';
 import { pagesFor, type Brand } from '@/components/settings/provider-schema';
 import { ProviderTabs, providerTabs } from '@/components/settings/provider-section';
 import type { Layer, Scope } from '@/components/settings/provider-settings-api';
@@ -237,18 +239,24 @@ export function ProjectSettingsScreen({
           <div className="flex items-center gap-3">
             <span className="text-xs font-medium text-t-tertiary">File</span>
             <Select value={claudeLayer} onValueChange={(v) => setClaudeLayer(v as Layer)}>
-              <SelectTrigger className="w-52" aria-label="Which file" data-testid="claude-layer">
+              <SelectTrigger className="w-36" aria-label="Which file" data-testid="claude-layer">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="project">Shared (.claude/settings.json)</SelectItem>
-                <SelectItem value="local">Only me (settings.local.json)</SelectItem>
+                <SelectItem value="project">Shared</SelectItem>
+                <SelectItem value="local">Only me</SelectItem>
               </SelectContent>
             </Select>
           </div>
         )}
         <ProviderTabs brand={brand} tab={known} onOpen={onTab} tabs={tabs}>
-          {isPage ? <ProviderSettingsPanel brand={brand} scope={projectScope} page={known} layer={layer} /> : null}
+          {isPage ? (
+            <ProviderSettingsPanel brand={brand} scope={projectScope} page={known} layer={layer} />
+          ) : known === 'mcp' ? (
+            <McpServersPanel brand={brand} scope={projectScope} />
+          ) : known === 'extensions' ? (
+            <ExtensionsPanel brand={brand} scope={projectScope} />
+          ) : null}
         </ProviderTabs>
       </div>
     );

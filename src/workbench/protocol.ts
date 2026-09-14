@@ -900,11 +900,67 @@ export type SettingsScope = { scope: 'account'; profileId?: string } | { scope: 
 /** Which file inside a scope a value is in. `managed` is read only. */
 export type SettingsLayer = 'managed' | 'user' | 'project' | 'local';
 
+/** Which file an MCP server is written in: the account's, the project's shared one, or the account's entry for that project. */
+export type McpSource = 'user' | 'project' | 'local';
+
+export interface McpServer {
+  id: string;
+  source: McpSource;
+  path: string;
+  enabled: boolean;
+  /** Claude's answer on a project server: whether the reader has approved it. */
+  approval?: 'approved' | 'pending' | 'rejected';
+  transport: 'stdio' | 'http' | 'sse' | 'ws';
+  command?: string;
+  args?: string[];
+  url?: string;
+  env?: Record<string, unknown>;
+  headers?: Record<string, unknown>;
+  /** The entry exactly as the file has it. */
+  config: Record<string, unknown>;
+}
+
+export type ExtensionKind = 'plugins' | 'marketplaces' | 'skills' | 'agents' | 'hooks' | 'outputStyles' | 'rules';
+
+export interface ExtensionItem {
+  id: string;
+  name: string;
+  description?: string;
+  path: string;
+  enabled?: boolean;
+  version?: string;
+  marketplace?: string;
+  source?: 'user' | 'project';
+  event?: string;
+  matcher?: string;
+  command?: string;
+}
+
+export interface ExtensionKindList {
+  kind: ExtensionKind;
+  /** The same for every account of this provider. */
+  shared?: boolean;
+  items: ExtensionItem[];
+}
+
 export type WbpCommand =
   | { type: 'agent-files.list'; projectPath?: string; profileId?: string }
   | { type: 'agent-files.read'; path: string; projectPath?: string; profileId?: string }
   | { type: 'agent-files.write'; path: string; content: string; projectPath?: string; profileId?: string }
   | ({ type: 'provider-settings.read'; brand: Brand } & SettingsScope)
+  | ({ type: 'mcp.list'; brand: Brand } & SettingsScope)
+  | ({ type: 'mcp.add'; brand: Brand; source: McpSource; id: string; config: Record<string, unknown> } & SettingsScope)
+  | ({ type: 'mcp.remove'; brand: Brand; source: McpSource; id: string } & SettingsScope)
+  | ({ type: 'mcp.set-enabled'; brand: Brand; source: McpSource; id: string; enabled: boolean } & SettingsScope)
+  | ({ type: 'mcp.login'; brand: Brand; id: string } & SettingsScope)
+  | ({ type: 'mcp.logout'; brand: Brand; id: string } & SettingsScope)
+  | ({ type: 'extensions.list'; brand: Brand } & SettingsScope)
+  | ({ type: 'extension.remove'; brand: Brand; kind: ExtensionKind; id: string } & SettingsScope)
+  | ({ type: 'plugin.set-enabled'; brand: Brand; id: string; enabled: boolean } & SettingsScope)
+  | ({ type: 'plugin.install'; brand: Brand; id: string } & SettingsScope)
+  | ({ type: 'plugin.uninstall'; brand: Brand; id: string } & SettingsScope)
+  | ({ type: 'marketplace.add'; brand: Brand; source: string } & SettingsScope)
+  | ({ type: 'marketplace.remove'; brand: Brand; name: string } & SettingsScope)
   | ({ type: 'provider-settings.write'; brand: Brand; layer: SettingsLayer; patch: Record<string, unknown> } & SettingsScope)
   | { type: 'provider-defaults.read'; brand: Brand; profileId?: string }
   | {
