@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from 'react';
+
 import { Download, ExternalLink, Loader2, RefreshCw } from 'lucide-react';
+
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { request } from '@/lib/api';
@@ -82,7 +84,7 @@ export function DependenciesSettings() {
     {tools.map((tool) => <div key={tool.tool} className="border-b border-b-default pb-4 last:border-0 last:pb-0">
       <div className="flex items-start justify-between gap-3">
         <div><p className="font-medium capitalize text-t-secondary">{tool.tool}</p><p className="text-xs text-t-muted">For {tool.requiredFor} · {tool.version ?? (tool.found ? 'Found' : 'Not found')}</p></div>
-        <a className="text-xs text-accent hover:underline" href={docs[tool.tool]} target="_blank" rel="noreferrer">Install guide <ExternalLink className="inline size-3" /></a>
+        <Button variant="primary" mode="link" underline="solid" size="sm" className="text-xs" asChild><a href={docs[tool.tool]} target="_blank" rel="noreferrer">Install guide <ExternalLink className="size-3" /></a></Button>
       </div>
       <div className="mt-2 flex gap-2">
         <Input className="flex-1 font-mono" aria-label={`${tool.tool} path`} value={paths[tool.tool] ?? ''} placeholder="Search PATH automatically" onChange={(e) => setPaths((old) => ({ ...old, [tool.tool]: e.target.value }))} />
