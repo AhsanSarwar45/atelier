@@ -440,8 +440,8 @@ test('every screen at a phone width, and what it does there', async ({ page, req
           'the bar buttons that open the rail — [chat-git-toggle] and [chat-right-rail-toggle] — are UNDER the open sheet, because it is inset-y-0 over the whole height including the bar',
         );
       }
-      const railClose = page.getByTestId('chat-right-rail-close');
-      if (await railClose.count()) await railClose.click();
+      const railScrim = page.getByTestId('chat-right-rail-scrim');
+      if (await railScrim.count()) await railScrim.click({ position: { x: 20, y: 400 } });
       await page.waitForTimeout(800);
 
       const gitToggle = page.getByTestId('chat-git-toggle');
@@ -491,8 +491,8 @@ test('every screen at a phone width, and what it does there', async ({ page, req
         }
       }
       // Shut again, or the sheet lies over the writing box on every screen after.
-      const shutAgain = page.getByTestId('chat-right-rail-close');
-      if ((await shutAgain.count()) && (await shutAgain.isVisible())) await shutAgain.click();
+      const shutAgain = page.getByTestId('chat-right-rail-scrim');
+      if ((await shutAgain.count()) && (await shutAgain.isVisible())) await shutAgain.click({ position: { x: 20, y: 400 } });
       await page.waitForTimeout(800);
     }
 

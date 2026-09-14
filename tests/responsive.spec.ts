@@ -538,11 +538,15 @@ test.describe('chat', () => {
     await page.waitForTimeout(400);
     await fillsTheHeight('chat-rail');
     await dimsTheScreen('chat-rail-scrim');
-    const listCross = page.locator('[data-testid="chat-rail-close"]').first();
-    await expect(listCross, 'the chat list drawer has no way out inside it').toBeVisible();
-    await listCross.click();
+    // No cross inside it: the button on the bar that opened the sheet is the
+    // way out, and the dimmed screen beside it is the other (bw-rpgh.6).
+    await expect(
+      page.locator('[data-testid="chat-rail-close"]'),
+      'the chat list drawer still carries a cross',
+    ).toHaveCount(0);
+    await page.locator('[data-testid="chat-rail-toggle"]').first().click();
     await page.waitForTimeout(400);
-    expect(await shut('chat-rail'), 'the cross did not shut the chat list').toBe('false');
+    expect(await shut('chat-rail'), 'the bar button did not shut the chat list').toBe('false');
 
     // And again, shut by tapping the dimmed screen beside it.
     await page.locator('[data-testid="chat-rail-toggle"]').first().click();
@@ -568,11 +572,13 @@ test.describe('chat', () => {
     await fillsTheHeight('chat-right-rail');
     await dimsTheScreen('chat-right-rail-scrim');
     await judge(page, 'chat-rail-open-390');
-    const railCross = page.locator('[data-testid="chat-right-rail-close"]').first();
-    await expect(railCross, "the chat's own column has no way out inside it").toBeVisible();
-    await railCross.click();
+    await expect(
+      page.locator('[data-testid="chat-right-rail-close"]'),
+      "the chat's own column still carries a cross",
+    ).toHaveCount(0);
+    await door.click();
     await page.waitForTimeout(400);
-    expect(await shut('chat-right-rail'), "the cross did not shut the chat's own column").toBe('false');
+    expect(await shut('chat-right-rail'), "the bar button did not shut the chat's own column").toBe('false');
 
     await door.click();
     await page.waitForTimeout(400);

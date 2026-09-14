@@ -287,8 +287,10 @@ test('a thumb reaches every control, and the @ menu stays out from under the key
       note(`the amend row is ${Math.round(wordsBox.height)}px tall; pressed at its far end the tick went ${before} -> ${after}`);
       expect(after, 'the words beside the amend tick do not toggle it').not.toBe(before);
     }
-    const close = page.getByTestId('chat-right-rail-close');
-    if ((await close.count()) && (await close.isVisible())) await close.click();
+    // The sheet has no cross of its own any more; the scrim beside it is the
+    // way out that is never under the sheet (bw-rpgh.6).
+    const scrim = page.getByTestId('chat-right-rail-scrim');
+    if ((await scrim.count()) && (await scrim.isVisible())) await scrim.click({ position: { x: 20, y: 400 } });
     await page.waitForTimeout(700);
 
     // The Files tab, which has a toolbar of its own.

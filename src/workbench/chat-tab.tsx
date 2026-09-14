@@ -1928,10 +1928,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           // sit over the transcript it just created (bw-81wt.5).
           onNewChat={newChat}
           startingNewChat={starting}
-          // The cross inside the drawer: the sheet's own way out, beside the
-          // scrim and the toggle on the bar above it, which stays in reach
-          // while the sheet is open (bw-81wt.30, bw-e3dw.9).
-          onClose={() => setRailOpen(false)}
         />
       </div>
       <ResizeDivider

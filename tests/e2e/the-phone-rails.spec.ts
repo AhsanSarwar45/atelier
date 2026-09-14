@@ -231,9 +231,7 @@ test('the phone rails: the bar stays reachable, one breakpoint decides, and the 
 
     // The chat list's own sheet, from the other edge.
     if ((await page.getByTestId('chat-right-rail').getAttribute('data-open')) === 'true') {
-      const close = page.getByTestId('chat-right-rail-close');
-      if ((await close.count()) && (await close.isVisible())) await close.click();
-      else await page.getByTestId('chat-right-rail-scrim').click();
+      await page.getByTestId('chat-right-rail-scrim').click();
       await page.waitForTimeout(700);
     }
     await page.getByTestId('chat-rail-toggle').click();

@@ -32,10 +32,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { X } from 'lucide-react';
-
 import { BeadChip } from '@/components/bead-chip-row';
-import { Button } from '@/components/ui/button';
 import { NOT_PHONE_SCREEN } from '@/lib/screen-width';
 import { cn } from '@/lib/utils';
 import { byJob, jobTitle } from '@/workbench/cards-by-job';
@@ -287,21 +284,16 @@ export function ChatRightRail({
         )}
       >
           {/* Only on a phone: on a wide screen this is a column of the row and
-              the button on the bar is in plain sight above it (bw-81wt.30). */}
-          <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2 md:hidden">
+              the button on the bar names it above (bw-81wt.30). The cross that
+              used to sit on the other end of this line is gone: the button on
+              the bar that opened the sheet shuts it again, and the tap outside
+              shuts it too, so the cross was a third way out of a sheet that
+              already had two (bw-rpgh.6).
+            */}
+          <div className="flex shrink-0 items-center gap-2 px-3 py-2 md:hidden">
             <h2 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               {view === 'git' ? 'Git' : 'This chat'}
             </h2>
-            <Button
-              size="sm"
-              mode="icon"
-              variant="ghost"
-              aria-label="Close details"
-              data-testid="chat-right-rail-close"
-              onClick={onToggle}
-            >
-              <X aria-hidden="true" />
-            </Button>
           </div>
           {/* Keyed on the folder: the view holds a repository's status, its log
               and a half-written commit message, and none of that survives a
