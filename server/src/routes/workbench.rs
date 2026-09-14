@@ -427,6 +427,9 @@ impl WorkbenchState {
             permission_mode: Some("default".into()),
             effort: None,
             instructions: String::new(),
+            // Reading the plan window needs no tools; starting every
+            // configured MCP server for it would be slow and noisy.
+            without_mcp_servers: true,
         };
         let mut config =
             crate::workbench::claude::transport::ClaudeTransportConfig::session(&options);

@@ -40,6 +40,11 @@ pub struct ClaudeSessionOptions {
     pub permission_mode: Option<String>,
     pub effort: Option<String>,
     pub instructions: String,
+    /// Start with no MCP servers at all (`--strict-mcp-config` with nothing
+    /// named). Only for a process that never runs a turn, such as the usage
+    /// reader: a chat must load what the account and project configured, and
+    /// this flag used to make every chat ignore all of it (bw-2t1c.7).
+    pub without_mcp_servers: bool,
 }
 
 impl ClaudeSessionOptions {
@@ -59,9 +64,11 @@ impl ClaudeSessionOptions {
             "--allow-dangerously-skip-permissions".into(),
             "--include-partial-messages".into(),
             "--include-hook-events".into(),
-            "--strict-mcp-config".into(),
             "--setting-sources=user,project,local".into(),
         ];
+        if self.without_mcp_servers {
+            args.push("--strict-mcp-config".into());
+        }
         if !self.instructions.is_empty() {
             args.push("--append-system-prompt".into());
             args.push(self.instructions.clone());
@@ -592,6 +599,7 @@ mod tests {
             permission_mode: Some("plan".into()),
             effort: Some("high".into()),
             instructions: "Follow the project rules".into(),
+            without_mcp_servers: false,
         }
         .command_args();
         for expected in [
@@ -601,7 +609,6 @@ mod tests {
             "--allow-dangerously-skip-permissions",
             "--include-partial-messages",
             "--include-hook-events",
-            "--strict-mcp-config",
             "--resume",
             "--model",
             "--permission-mode",
@@ -612,6 +619,21 @@ mod tests {
         }
         assert!(!args.iter().any(|arg| arg == "--bare"));
         assert!(!args.iter().any(|arg| arg == "--fork-session"));
+        // A chat loads the MCP servers its account and project configured, so
+        // it must not be told to use only the (empty) list named on the line.
+        assert!(!args.iter().any(|arg| arg == "--strict-mcp-config"));
+        assert!(!args.iter().any(|arg| arg == "--mcp-config"));
+    }
+
+    #[test]
+    fn native_claude_transport_starts_without_mcp_servers_only_when_asked() {
+        let args = ClaudeSessionOptions {
+            cwd: PathBuf::from("/project"),
+            without_mcp_servers: true,
+            ..ClaudeSessionOptions::default()
+        }
+        .command_args();
+        assert!(args.iter().any(|arg| arg == "--strict-mcp-config"));
     }
 
     #[tokio::test]
