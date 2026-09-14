@@ -23,7 +23,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { Check, ExternalLink, Loader2, LogIn, Plus, Trash2, TriangleAlert } from 'lucide-react';
+import { Check, ExternalLink, Loader2, LogIn, Pencil, Plus, Star, Trash2, TriangleAlert } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -37,6 +37,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
+import { NO_DEFAULTS, readNewChatDefaults, saveNewChatProfile, type NewChatDefaults } from '@/workbench/new-chat-defaults';
 import type { Brand, ProfileChoice, ProfileStanding, SignInProgress } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -76,6 +77,22 @@ export function AccountsSettings() {
   const [code, setCode] = useState('');
   /** Whether the person said their page handed them a code. */
   const [typing, setTyping] = useState(false);
+  const [defaults, setDefaults] = useState<NewChatDefaults>(NO_DEFAULTS);
+  /** The account being renamed, and the name typed so far. */
+  const [renaming, setRenaming] = useState<{ brand: Brand; id: string; name: string } | null>(null);
+
+  useEffect(() => {
+    readNewChatDefaults().then(setDefaults).catch(() => setDefaults(NO_DEFAULTS));
+  }, []);
+
+  const star = useCallback(async (brand: Brand, profileId: string) => {
+    setRefused(null);
+    try {
+      setDefaults(await saveNewChatProfile(brand, profileId));
+    } catch (e: unknown) {
+      setRefused(said(e));
+    }
+  }, []);
 
   const read = useCallback(async () => {
     const next: Record<string, Held> = {};
@@ -229,6 +246,26 @@ export function AccountsSettings() {
     [refresh],
   );
 
+  const rename = useCallback(async () => {
+    if (!renaming) return;
+    const called = renaming.name.trim();
+    if (!called) {
+      setRenaming(null);
+      return;
+    }
+    setRefused(null);
+    setBusy(renaming.id);
+    try {
+      await sendCommand({ type: 'profile.rename', brand: renaming.brand, profileId: renaming.id, name: called });
+      setRenaming(null);
+      refresh();
+    } catch (e: unknown) {
+      setRefused(said(e));
+    } finally {
+      setBusy(null);
+    }
+  }, [renaming, refresh]);
+
   const hand = useCallback(async () => {
     if (!signing || !code.trim()) return;
     setBusy('code');
@@ -296,8 +333,48 @@ export function AccountsSettings() {
                   className="flex items-center gap-3 px-3 py-2"
                   data-testid={`account-${brand}-${profile.id}`}
                 >
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Open new chats on ${profile.name}`}
+                    aria-pressed={(defaults.profiles[brand] ?? 'system') === profile.id}
+                    disabled={busy !== null}
+                    onClick={() => void star(brand, profile.id)}
+                    data-testid={`account-default-${brand}-${profile.id}`}
+                  >
+                    <Star className={(defaults.profiles[brand] ?? 'system') === profile.id ? 'h-3.5 w-3.5 fill-current text-warning' : 'h-3.5 w-3.5 text-t-muted'} />
+                  </Button>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm text-t-primary">{profile.name}</p>
+                    {renaming?.brand === brand && renaming.id === profile.id ? (
+                      <Input
+                        value={renaming.name}
+                        autoFocus
+                        aria-label="Account name"
+                        className="h-7 text-sm"
+                        onChange={(e) => setRenaming({ ...renaming, name: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') void rename();
+                          if (e.key === 'Escape') setRenaming(null);
+                        }}
+                        onBlur={() => void rename()}
+                        data-testid={`account-rename-input-${brand}-${profile.id}`}
+                      />
+                    ) : (
+                      <p className="flex items-center gap-1 truncate text-sm text-t-primary">
+                        {profile.name}
+                        {!profile.system && (
+                          <button
+                            type="button"
+                            aria-label={`Rename ${profile.name}`}
+                            className="text-t-muted hover:text-t-secondary"
+                            onClick={() => setRenaming({ brand, id: profile.id, name: profile.name })}
+                            data-testid={`account-rename-${brand}-${profile.id}`}
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                        )}
+                      </p>
+                    )}
                     <p className="truncate text-xs text-t-muted" data-testid={`account-standing-${brand}-${profile.id}`}>
                       {standingWords(group.standing[profile.id])}
                     </p>

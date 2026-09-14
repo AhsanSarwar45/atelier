@@ -13,6 +13,7 @@ import type { ReactNode } from 'react';
 
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
 import { AccountPicker, useProfiles } from '@/components/settings/account-picker';
+import { CopyToAccounts } from '@/components/settings/copy-to-accounts';
 import { ExtensionsPanel } from '@/components/settings/extensions-panel';
 import { McpServersPanel } from '@/components/settings/mcp-servers-panel';
 import { pagesFor, type Brand } from '@/components/settings/provider-schema';
@@ -22,6 +23,7 @@ import { ReadFailed } from '@/components/ui/read-failed';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useProjects } from '@/hooks/use-projects';
 import { brandName } from '@/workbench/brand-icon';
+import { SYSTEM_PROFILE } from '@/workbench/protocol';
 
 export interface ProviderTabDef {
   id: string;
@@ -100,7 +102,10 @@ export function ProviderSection({
         {unread ? (
           <ReadFailed what={`${brandName(brand)}'s accounts could not be listed.`} why={unread} />
         ) : profiles ? (
-          <AccountPicker brand={brand} profiles={profiles} value={account} onChange={onAccount} />
+          <div className="flex items-center gap-2">
+            <AccountPicker brand={brand} profiles={profiles} value={account} onChange={onAccount} />
+            {isPage && <CopyToAccounts brand={brand} from={account ?? SYSTEM_PROFILE} profiles={profiles} page={known} />}
+          </div>
         ) : (
           <span className="text-sm text-t-tertiary">Reading accounts…</span>
         )}
