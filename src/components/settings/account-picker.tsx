@@ -52,7 +52,6 @@ export function AccountPicker({
         {profiles.map((p) => (
           <SelectItem key={p.id} value={p.id}>
             {p.name}
-            {p.system && <span className="ml-2 text-xs text-t-muted">default sign-in</span>}
           </SelectItem>
         ))}
       </SelectContent>

@@ -8,33 +8,36 @@
  */
 'use client';
 
-import { Suspense, useCallback } from 'react';
+import { Suspense, useCallback, useMemo } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { FileCode2, Palette, Puzzle, SquareTerminal, Tag, Users } from 'lucide-react';
 
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
+import { useProfiles } from '@/components/settings/account-picker';
 import { AppearanceSettings } from '@/components/settings/appearance-settings';
 import { ProviderSection } from '@/components/settings/provider-section';
 import { SettingsGroup } from '@/components/settings/section';
 import { SettingsScreen, type SettingsSectionDef } from '@/components/settings/settings-screen';
 import { TagsSettings } from '@/components/settings/tags-settings';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useProjects } from '@/hooks/use-projects';
 import { AccountsSettings } from '@/workbench/accounts-settings';
-import { BrandIcon } from '@/workbench/brand-icon';
+import { BrandIcon, brandName } from '@/workbench/brand-icon';
 import { DependenciesSettings } from '@/workbench/dependencies-settings';
+import { SYSTEM_PROFILE } from '@/workbench/protocol';
 import { TerminalSettings } from '@/workbench/terminal-settings';
 
 const SECTIONS: SettingsSectionDef[] = [
-  { id: 'appearance', label: 'Appearance', hint: 'Theme and text', icon: <Palette /> },
-  { id: 'accounts', label: 'Accounts', hint: 'Provider accounts', icon: <Users /> },
-  { id: 'claude', label: 'Claude Code', hint: 'Defaults and permissions', icon: <BrandIcon brand="claude" /> },
-  { id: 'codex', label: 'Codex', hint: 'Defaults and permissions', icon: <BrandIcon brand="codex" /> },
-  { id: 'files', label: 'Agent files', hint: 'Instructions and skills', icon: <FileCode2 /> },
-  { id: 'terminal', label: 'Terminal', hint: 'Shell settings', icon: <SquareTerminal /> },
-  { id: 'dependencies', label: 'Dependencies', hint: 'Required tools', icon: <Puzzle /> },
-  { id: 'tags', label: 'Tags', hint: 'Project labels', icon: <Tag /> },
+  { id: 'appearance', label: 'Appearance', hint: 'Theme, type', icon: <Palette /> },
+  { id: 'accounts', label: 'Accounts', hint: 'Sign-ins', icon: <Users /> },
+  { id: 'claude', label: 'Claude Code', hint: 'Per account', icon: <BrandIcon brand="claude" /> },
+  { id: 'codex', label: 'Codex', hint: 'Per account', icon: <BrandIcon brand="codex" /> },
+  { id: 'files', label: 'Agent files', hint: 'Per account', icon: <FileCode2 /> },
+  { id: 'terminal', label: 'Terminal', hint: 'Shell', icon: <SquareTerminal /> },
+  { id: 'dependencies', label: 'Dependencies', hint: 'Tools', icon: <Puzzle /> },
+  { id: 'tags', label: 'Tags', hint: 'Projects', icon: <Tag /> },
 ];
 
 function Settings() {
@@ -60,6 +63,18 @@ function Settings() {
   const known = SECTIONS.some((s) => s.id === section) ? section : null;
   const account = params.get('account');
   const tab = params.get('tab') ?? 'defaults';
+  const claude = useProfiles('claude');
+  const codex = useProfiles('codex');
+  /** Every account of either provider, for the files section: the system one once, then each named one. */
+  const accounts = useMemo(
+    () => [
+      { id: SYSTEM_PROFILE, label: 'System', brand: undefined },
+      ...(claude.profiles ?? []).filter((p) => !p.system).map((p) => ({ id: p.id, label: `${brandName('claude')} · ${p.name}`, brand: 'claude' as const })),
+      ...(codex.profiles ?? []).filter((p) => !p.system).map((p) => ({ id: p.id, label: `${brandName('codex')} · ${p.name}`, brand: 'codex' as const })),
+    ],
+    [claude.profiles, codex.profiles],
+  );
+  const filesAccount = accounts.find((a) => a.id === (account ?? SYSTEM_PROFILE)) ?? accounts[0];
 
   /** Changes one part of the address, keeping the rest; pushed so Back undoes it. */
   const set = useCallback(
@@ -93,7 +108,24 @@ function Settings() {
       )}
       {known === 'files' && (
         <div className="-m-4 flex h-[calc(100dvh-3rem)] flex-col sm:-m-6">
+          <div className="flex items-center gap-3 px-4 py-2">
+            <span className="text-xs font-medium text-t-tertiary">Account</span>
+            <Select value={filesAccount.id} onValueChange={(id) => set('account', id === SYSTEM_PROFILE ? null : id)}>
+              <SelectTrigger className="w-64" aria-label="Account" data-testid="files-account">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {accounts.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>
+                    {a.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <AgentFilesBrowser
+            profileId={filesAccount.id === SYSTEM_PROFILE ? null : filesAccount.id}
+            brand={filesAccount.brand}
             projects={projects
               .filter((project) => !project.archivedAt)
               .map(({ id, name, localPath, path }) => ({ id, name, path: localPath || path }))}

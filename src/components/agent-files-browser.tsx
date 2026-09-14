@@ -1,7 +1,15 @@
+/**
+ * The files an agent reads: instructions, settings, skills, agents, rules —
+ * for one account (or the system one), with a project's files alongside when
+ * a project is chosen. Each file opens in an editor and is saved back to
+ * where it came from; well-known files that do not exist yet can be created
+ * (bw-2t1c.9).
+ */
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { ChevronRight, Copy, ExternalLink, FileCode2, FolderOpen, Search } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+
+import { ChevronRight, Copy, ExternalLink, FileCode2, FilePlus2, FolderOpen, Loader2, Search } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,6 +20,7 @@ import { useToast } from '@/hooks/use-toast';
 import { fs } from '@/lib/api';
 import { NOT_PHONE_SCREEN } from '@/lib/screen-width';
 import { cn } from '@/lib/utils';
+import { CodeEditor } from '@/workbench/code-editor';
 import { sendCommand } from '@/workbench/use-session';
 
 export interface AgentFileRow {
@@ -29,59 +38,129 @@ export interface AgentFileRow {
   symlinkTarget?: string;
 }
 
+/** A well-known file that is not there yet and can be made from here. */
+export interface CreatableFile {
+  provider: 'claude' | 'codex';
+  scope: 'personal' | 'project' | 'project-local';
+  category: 'instructions' | 'settings';
+  name: string;
+  path: string;
+  format: 'markdown' | 'json' | 'toml';
+}
+
 const CATEGORY: Record<AgentFileRow['category'], string> = {
   instructions: 'Instructions', settings: 'Settings', agents: 'Agents', commands: 'Commands',
   skills: 'Skills', 'output-styles': 'Output styles', rules: 'Rules',
 };
+
+function scopeName(scope: AgentFileRow['scope']): string {
+  return scope === 'project-local' ? 'Project local' : scope[0].toUpperCase() + scope.slice(1);
+}
 
 function parentOf(path: string): string {
   const slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
   return slash <= 0 ? path : path.slice(0, slash);
 }
 
-export function AgentFilesBrowser({ projects }: { projects: { id: string; name: string; path: string }[] }) {
+function said(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason);
+}
+
+export function AgentFilesBrowser({
+  projects,
+  profileId,
+  brand,
+  projectPath: fixedProject,
+}: {
+  projects: { id: string; name: string; path: string }[];
+  /** Whose files. Nothing means the account the server booted with. */
+  profileId?: string | null;
+  /** Only this provider's files, when the browser is inside a provider's section. */
+  brand?: 'claude' | 'codex';
+  /** Always this project, with no picker, when the browser is inside a project's settings. */
+  projectPath?: string;
+}) {
   const [projectId, setProjectId] = useState('none');
   const [files, setFiles] = useState<AgentFileRow[]>([]);
+  const [creatable, setCreatable] = useState<CreatableFile[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [content, setContent] = useState('');
+  const [draft, setDraft] = useState('');
   const [truncated, setTruncated] = useState(false);
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<'all' | AgentFileRow['scope']>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const { toast } = useToast();
-  const projectPath = projects.find((project) => project.id === projectId)?.path;
+  const projectPath = fixedProject ?? projects.find((project) => project.id === projectId)?.path;
+  const dirty = draft !== content;
+  const scoped = useMemo(
+    () => ({ ...(projectPath ? { projectPath } : {}), ...(profileId ? { profileId } : {}) }),
+    [projectPath, profileId],
+  );
 
   useEffect(() => {
     let live = true;
     setLoading(true);
     setError(null);
-    void sendCommand<{ files: AgentFileRow[] }>({ type: 'agent-files.list', ...(projectPath ? { projectPath } : {}) })
-      .then(({ files: found }) => {
+    void sendCommand<{ files: AgentFileRow[]; creatable?: CreatableFile[] }>({ type: 'agent-files.list', ...scoped })
+      .then(({ files: found, creatable: missing }) => {
         if (!live) return;
-        setFiles(found);
+        const mine = brand ? found.filter((file) => file.provider === brand) : found;
+        setFiles(mine);
+        setCreatable((missing ?? []).filter((file) => !brand || file.provider === brand));
         setSelected((before) => {
-          if (found.some((file) => file.id === before)) return before;
+          if (mine.some((file) => file.id === before)) return before;
           const wide = typeof window.matchMedia !== 'function' || window.matchMedia(NOT_PHONE_SCREEN).matches;
-          return wide ? (found.find((file) => file.category === 'instructions') ?? found[0])?.id ?? null : null;
+          return wide ? (mine.find((file) => file.category === 'instructions') ?? mine[0])?.id ?? null : null;
         });
       })
-      .catch((reason: unknown) => live && setError(reason instanceof Error ? reason.message : String(reason)))
+      .catch((reason: unknown) => live && setError(said(reason)))
       .finally(() => live && setLoading(false));
     return () => { live = false; };
-  }, [projectPath, attempt]);
+  }, [scoped, brand, attempt]);
 
   const chosen = files.find((file) => file.id === selected) ?? null;
   useEffect(() => {
-    if (!chosen) { setContent(''); return; }
+    if (!chosen) { setContent(''); setDraft(''); return; }
     let live = true;
     setError(null);
-    void sendCommand<{ content: string; truncated: boolean }>({ type: 'agent-files.read', path: chosen.path, ...(projectPath ? { projectPath } : {}) })
-      .then((read) => { if (live) { setContent(read.content); setTruncated(read.truncated); } })
-      .catch((reason: unknown) => live && setError(reason instanceof Error ? reason.message : String(reason)));
+    void sendCommand<{ content: string; truncated: boolean }>({ type: 'agent-files.read', path: chosen.path, ...scoped })
+      .then((read) => { if (live) { setContent(read.content); setDraft(read.content); setTruncated(read.truncated); } })
+      .catch((reason: unknown) => live && setError(said(reason)));
     return () => { live = false; };
-  }, [chosen?.id, chosen?.path, projectPath]);
+  }, [chosen?.id, chosen?.path, scoped]);
+
+  const save = useCallback(async () => {
+    if (!chosen || !dirty || truncated) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await sendCommand({ type: 'agent-files.write', path: chosen.path, content: draft, ...scoped });
+      setContent(draft);
+      toast({ title: `Saved ${chosen.name}` });
+    } catch (reason) {
+      setError(said(reason));
+    } finally {
+      setSaving(false);
+    }
+  }, [chosen, dirty, truncated, draft, scoped, toast]);
+
+  const create = useCallback(
+    async (file: CreatableFile) => {
+      setError(null);
+      try {
+        await sendCommand({ type: 'agent-files.write', path: file.path, content: '', ...scoped });
+        setAttempt((n) => n + 1);
+        toast({ title: `Created ${file.name}` });
+      } catch (reason) {
+        setError(said(reason));
+      }
+    },
+    [scoped, toast],
+  );
 
   const shown = useMemo(() => {
     const wanted = query.trim().toLowerCase();
@@ -91,35 +170,40 @@ export function AgentFilesBrowser({ projects }: { projects: { id: string; name: 
   const grouped = useMemo(() => ['claude', 'codex'].map((provider) => ({
     provider: provider as AgentFileRow['provider'],
     categories: Object.keys(CATEGORY).map((category) => ({ category: category as AgentFileRow['category'], files: shown.filter((file) => file.provider === provider && file.category === category) })).filter((group) => group.files.length),
-  })).filter((group) => group.categories.length), [shown]);
+    missing: creatable.filter((file) => file.provider === provider && (scope === 'all' || file.scope === scope)),
+  })).filter((group) => group.categories.length || group.missing.length), [shown, creatable, scope]);
 
   async function outside(path: string, target: 'finder' | 'vscode' | 'cursor', success: string) {
     try { await fs.openExternal(path, target); toast({ title: success }); }
-    catch (reason) { toast({ title: 'Could not open the file', description: reason instanceof Error ? reason.message : String(reason), variant: 'destructive' }); }
+    catch (reason) { toast({ title: 'Could not open the file', description: said(reason), variant: 'destructive' }); }
   }
 
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden border-t border-border/50 md:grid-cols-[22rem_minmax(0,1fr)]">
+    <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden border-t border-border/50 md:grid-cols-[22rem_minmax(0,1fr)]" data-testid="agent-files">
       <aside className={cn('min-h-0 overflow-y-auto border-r border-border/50 bg-surface-base', chosen && 'hidden md:block')} aria-label="Agent files">
         <div className="sticky top-0 z-10 space-y-3 border-b border-border/50 bg-surface-base/95 p-4 backdrop-blur">
-          <Select value={projectId} onValueChange={setProjectId}>
-            <SelectTrigger aria-label="Project scope"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="none">Personal files only</SelectItem>{projects.map((project) => <SelectItem key={project.id} value={project.id}>Personal + {project.name}</SelectItem>)}</SelectContent>
-          </Select>
+          {!fixedProject && (
+            <Select value={projectId} onValueChange={setProjectId}>
+              <SelectTrigger aria-label="Project scope"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="none">Personal files only</SelectItem>{projects.map((project) => <SelectItem key={project.id} value={project.id}>Personal + {project.name}</SelectItem>)}</SelectContent>
+            </Select>
+          )}
           <div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-t-muted" /><Input aria-label="Search agent files" placeholder="Search files…" value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" /></div>
           <div className="flex gap-1" aria-label="Filter by scope">{(['all', 'personal', 'project', 'project-local'] as const).map((value) => <Button key={value} size="xs" variant={scope === value ? 'mono' : 'ghost'} onClick={() => setScope(value)}>{value === 'all' ? 'All' : value === 'project-local' ? 'Local' : value[0].toUpperCase() + value.slice(1)}</Button>)}</div>
         </div>
-        {loading ? <p className="p-6 text-sm text-t-muted">Loading…</p> : error && files.length === 0 ? <ReadFailed className="m-4" what="Could not load agent files." why={error} onRetry={() => setAttempt((n) => n + 1)} /> : shown.length === 0 ? <div className="p-8 text-center"><FileCode2 className="mx-auto mb-3 size-7 text-t-muted" /><p className="text-sm text-t-secondary">No agent files</p></div> : (
-          <div className="p-2">{grouped.map((provider) => <section key={provider.provider} className="mb-4"><h2 className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-t-muted">{provider.provider === 'claude' ? 'Claude' : 'Codex'}</h2>{provider.categories.map((group) => <div key={group.category} className="mb-2"><div className="flex items-center gap-2 px-2 py-1 text-xs font-medium text-t-tertiary"><span>{CATEGORY[group.category]}</span>{group.category === 'commands' && <span className="rounded bg-surface-overlay px-1.5 py-0.5 text-[10px]">Legacy</span>}<span className="ml-auto tabular-nums text-t-muted">{group.files.length}</span></div>{group.files.map((file) => <Button key={file.id} type="button" variant="ghost" onClick={() => setSelected(file.id)} className={cn('h-auto w-full justify-start gap-3 px-2 py-2 text-left', selected === file.id && 'bg-surface-overlay text-t-primary')}><FileCode2 className="size-4 shrink-0 text-t-muted" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{file.name}</span><span className="block truncate text-xs text-t-muted">{file.scope === 'project-local' ? 'Project local' : file.scope[0].toUpperCase() + file.scope.slice(1)} · {file.relativePath}</span></span><ChevronRight className="size-4 shrink-0 text-t-muted" /></Button>)}</div>)}</section>)}</div>
+        {loading ? <p className="p-6 text-sm text-t-muted">Loading…</p> : error && files.length === 0 ? <ReadFailed className="m-4" what="Could not load agent files." why={error} onRetry={() => setAttempt((n) => n + 1)} /> : grouped.length === 0 ? <div className="p-8 text-center"><FileCode2 className="mx-auto mb-3 size-7 text-t-muted" /><p className="text-sm text-t-secondary">No agent files</p></div> : (
+          <div className="p-2">{grouped.map((provider) => <section key={provider.provider} className="mb-4">{!brand && <h2 className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-t-muted">{provider.provider === 'claude' ? 'Claude' : 'Codex'}</h2>}{provider.categories.map((group) => <div key={group.category} className="mb-2"><div className="flex items-center gap-2 px-2 py-1 text-xs font-medium text-t-tertiary"><span>{CATEGORY[group.category]}</span>{group.category === 'commands' && <span className="rounded bg-surface-overlay px-1.5 py-0.5 text-[10px]">Legacy</span>}<span className="ml-auto tabular-nums text-t-muted">{group.files.length}</span></div>{group.files.map((file) => <Button key={file.id} type="button" variant="ghost" data-testid={`agent-file-${file.name}`} onClick={() => setSelected(file.id)} className={cn('h-auto w-full justify-start gap-3 px-2 py-2 text-left', selected === file.id && 'bg-surface-overlay text-t-primary')}><FileCode2 className="size-4 shrink-0 text-t-muted" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{file.name}</span><span className="block truncate text-xs text-t-muted">{scopeName(file.scope)} · {file.relativePath}</span></span><ChevronRight className="size-4 shrink-0 text-t-muted" /></Button>)}</div>)}
+            {provider.missing.length > 0 && <div className="mb-2"><div className="px-2 py-1 text-xs font-medium text-t-tertiary">Not there yet</div>{provider.missing.map((file) => <Button key={file.path} type="button" variant="ghost" data-testid={`agent-file-create-${file.name}`} onClick={() => void create(file)} className="h-auto w-full justify-start gap-3 px-2 py-2 text-left text-t-secondary"><FilePlus2 className="size-4 shrink-0 text-t-muted" /><span className="min-w-0 flex-1"><span className="block truncate text-sm">{file.name}</span><span className="block truncate text-xs text-t-muted">Create · {scopeName(file.scope)}</span></span></Button>)}</div>}
+          </section>)}</div>
         )}
       </aside>
       <main className={cn('min-h-0 flex-col overflow-hidden bg-surface-base', chosen ? 'flex' : 'hidden md:flex')}>
-        {!chosen ? <div className="m-auto text-center text-t-muted"><FileCode2 className="mx-auto mb-3 size-8" /><p className="text-sm">Select a file to read it.</p></div> : <>
-          <header className="flex flex-wrap items-start gap-3 border-b border-border/50 px-4 py-3 sm:px-6"><Button variant="ghost" size="sm" className="md:hidden" onClick={() => setSelected(null)}>Files</Button><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><h2 className="truncate text-base font-semibold text-t-primary">{chosen.name}</h2><span className="rounded border border-border/60 px-1.5 py-0.5 text-[10px] uppercase text-t-muted">{chosen.format}</span></div><Tooltip label={chosen.path}><p className="mt-1 truncate font-mono text-xs text-t-muted">{chosen.path}</p></Tooltip>{chosen.symlinkTarget && <p className="mt-1 truncate text-xs text-t-muted">Links to {chosen.symlinkTarget}</p>}</div><div className="flex shrink-0 gap-1"><Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(chosen.path).then(() => toast({ title: 'Path copied' }))}><Copy /> Copy path</Button><Button size="sm" variant="outline" aria-label="Reveal in file manager" onClick={() => void outside(parentOf(chosen.path), 'finder', 'Opened file location')}><FolderOpen /></Button><Button size="sm" onClick={() => void outside(chosen.path, 'finder', 'Opened in external editor')}><ExternalLink /> Open in editor</Button></div></header>
+        {!chosen ? <div className="m-auto text-center text-t-muted"><FileCode2 className="mx-auto mb-3 size-8" /><p className="text-sm">No file selected</p></div> : <>
+          <header className="flex flex-wrap items-start gap-3 border-b border-border/50 px-4 py-3 sm:px-6"><Button variant="ghost" size="sm" className="md:hidden" onClick={() => setSelected(null)}>Files</Button><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><h2 className="truncate text-base font-semibold text-t-primary">{chosen.name}</h2><span className="rounded border border-border/60 px-1.5 py-0.5 text-[10px] uppercase text-t-muted">{chosen.format}</span>{dirty && <span className="text-xs text-amber-500" data-testid="agent-file-dirty">Unsaved</span>}</div><Tooltip label={chosen.path}><p className="mt-1 truncate font-mono text-xs text-t-muted">{chosen.path}</p></Tooltip>{chosen.symlinkTarget && <p className="mt-1 truncate text-xs text-t-muted">Links to {chosen.symlinkTarget}</p>}</div><div className="flex shrink-0 gap-1"><Button size="sm" variant="outline" aria-label="Copy path" onClick={() => void navigator.clipboard.writeText(chosen.path).then(() => toast({ title: 'Path copied' }))}><Copy /></Button><Button size="sm" variant="outline" aria-label="Reveal in file manager" onClick={() => void outside(parentOf(chosen.path), 'finder', 'Opened file location')}><FolderOpen /></Button><Button size="sm" variant="outline" aria-label="Open in external editor" onClick={() => void outside(chosen.path, 'finder', 'Opened in external editor')}><ExternalLink /></Button><Button size="sm" data-testid="agent-file-save" disabled={!dirty || saving || truncated} onClick={() => void save()}>{saving ? <Loader2 className="animate-spin" /> : null} Save</Button></div></header>
           {error && <div className="border-b border-danger/30 bg-danger/10 px-6 py-2 text-sm text-danger">{error}</div>}
-          {truncated && <div className="border-b border-amber-500/30 bg-amber-500/10 px-6 py-2 text-xs text-t-secondary">Showing first 2 MB</div>}
-          <div className="min-h-0 flex-1 overflow-auto"><pre className="min-h-full p-5 font-mono text-[13px] leading-6 text-t-secondary sm:p-7"><code>{content}</code></pre></div>
-          <footer className="flex items-center justify-between border-t border-border/50 px-4 py-2 text-xs text-t-muted"><span>{CATEGORY[chosen.category]} · {chosen.scope === 'project-local' ? 'Project local' : chosen.scope}</span><span>{chosen.size.toLocaleString()} bytes · {new Date(chosen.modifiedAt).toLocaleString()}</span></footer>
+          {truncated && <div className="border-b border-amber-500/30 bg-amber-500/10 px-6 py-2 text-xs text-t-secondary">First 2 MB, read only</div>}
+          <div className="min-h-0 flex-1 overflow-auto" data-testid="agent-file-editor"><CodeEditor text={content} path={chosen.path} editable={!truncated} onChange={setDraft} onSave={() => void save()} className="min-h-full" /></div>
+          <footer className="flex items-center justify-between border-t border-border/50 px-4 py-2 text-xs text-t-muted"><span>{CATEGORY[chosen.category]} · {scopeName(chosen.scope)}</span><span>{chosen.size.toLocaleString()} bytes · {new Date(chosen.modifiedAt).toLocaleString()}</span></footer>
         </>}
       </main>
     </div>

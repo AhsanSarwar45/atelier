@@ -319,12 +319,6 @@ export function ProviderSettingsPanel({
           {refused}
         </Panel>
       )}
-      {target && (
-        <p className="mb-4 text-xs text-t-muted">
-          File: <span className="font-mono">{target.path}</span>
-          {!target.exists && ' (created when you save)'}
-        </p>
-      )}
       {drawn.groups.map((group) => {
         const rows = group.settings.filter((s) => !s.scopes || s.scopes.includes(scope.kind));
         if (rows.length === 0) return null;
@@ -353,8 +347,8 @@ export function ProviderSettingsPanel({
                       {def.description}
                       {elsewhere && (
                         <span className="mt-1 block">
-                          <Badge variant="secondary" size="sm">
-                            Inherited: {asText(inForce.value)} from {layerName(inForce.layer!)}
+                          <Badge variant="secondary" size="sm" >
+                            {layerName(inForce.layer!)}: {asText(inForce.value)}
                           </Badge>
                         </span>
                       )}

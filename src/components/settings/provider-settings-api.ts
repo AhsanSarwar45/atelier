@@ -77,12 +77,12 @@ export function effective(view: SettingsView, key: string): { value: unknown; la
 export function layerName(layer: Layer): string {
   switch (layer) {
     case 'managed':
-      return 'managed by the machine';
+      return 'Managed';
     case 'user':
-      return 'the account';
+      return 'Account';
     case 'project':
-      return 'the project';
+      return 'Project';
     case 'local':
-      return 'this computer only';
+      return 'Local';
   }
 }

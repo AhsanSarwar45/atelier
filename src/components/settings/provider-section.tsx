@@ -11,12 +11,14 @@
 
 import type { ReactNode } from 'react';
 
+import { AgentFilesBrowser } from '@/components/agent-files-browser';
 import { AccountPicker, useProfiles } from '@/components/settings/account-picker';
 import { pagesFor, type Brand } from '@/components/settings/provider-schema';
 import type { Scope } from '@/components/settings/provider-settings-api';
 import { ProviderSettingsPanel } from '@/components/settings/provider-settings-panel';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useProjects } from '@/hooks/use-projects';
 import { brandName } from '@/workbench/brand-icon';
 
 export interface ProviderTabDef {
@@ -83,6 +85,7 @@ export function ProviderSection({
   pages?: (scope: Scope, tab: string) => ReactNode;
 }) {
   const { profiles, unread } = useProfiles(brand);
+  const { projects } = useProjects();
   const scope: Scope = { kind: 'account', profileId: account ?? undefined };
   const known = providerTabs(brand).some((t) => t.id === tab) ? tab : providerTabs(brand)[0].id;
   const isPage = pagesFor(brand).some((p) => p.id === known);
@@ -97,12 +100,23 @@ export function ProviderSection({
         ) : (
           <span className="text-sm text-t-tertiary">Reading accounts…</span>
         )}
-        <p className="text-xs text-t-muted">
-          Each account keeps its own settings, servers, extensions and files. Nothing here changes another account.
-        </p>
       </div>
       <ProviderTabs brand={brand} tab={known} onOpen={onTab}>
-        {isPage ? <ProviderSettingsPanel brand={brand} scope={scope} page={known} layer="user" /> : pages?.(scope, known)}
+        {isPage ? (
+          <ProviderSettingsPanel brand={brand} scope={scope} page={known} layer="user" />
+        ) : known === 'files' ? (
+          <div className="-mx-4 flex h-[70dvh] flex-col sm:-mx-6">
+            <AgentFilesBrowser
+              brand={brand}
+              profileId={account}
+              projects={projects
+                .filter((project) => !project.archivedAt)
+                .map(({ id, name, localPath, path }) => ({ id, name, path: localPath || path }))}
+            />
+          </div>
+        ) : (
+          pages?.(scope, known)
+        )}
       </ProviderTabs>
     </div>
   );
