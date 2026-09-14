@@ -708,7 +708,7 @@ impl WorkbenchRegistry {
         scope: &provider_settings::Scope,
         dir: &Path,
     ) -> Result<Value, String> {
-        Ok(json!({"kinds": extensions::list(brand, scope, dir, &self.paths.home)?}))
+        Ok(json!({"kinds": extensions::list(brand, scope, dir)?}))
     }
 
     /// Run Claude's own CLI for a plugin or marketplace command and answer
@@ -747,7 +747,7 @@ impl WorkbenchRegistry {
         )
         .await?;
         let mut answer = serde_json::to_value(&outcome).map_err(|e| e.to_string())?;
-        answer["kinds"] = json!(extensions::list(&brand, &scope, &dir, &self.paths.home)?);
+        answer["kinds"] = json!(extensions::list(&brand, &scope, &dir)?);
         Ok(answer)
     }
 
@@ -1162,18 +1162,6 @@ impl WorkbenchRegistry {
             }
             CommandKind::ExtensionsList => {
                 let (brand, scope, dir, _) = self.extension_account(command)?;
-                self.extensions_list(&brand, &scope, &dir)
-            }
-            CommandKind::ExtensionRemove => {
-                let (brand, scope, dir, _) = self.extension_account(command)?;
-                let kind: extensions::Kind = command
-                    .fields
-                    .get("kind")
-                    .cloned()
-                    .and_then(|value| serde_json::from_value(value).ok())
-                    .ok_or("kind must be skills, agents, outputStyles or rules")?;
-                let id = Self::field(command, "id")?;
-                extensions::remove(&brand, &scope, &dir, &self.paths.home, kind, id)?;
                 self.extensions_list(&brand, &scope, &dir)
             }
             CommandKind::PluginSetEnabled => {
@@ -1662,27 +1650,25 @@ mod tests {
             },
             Arc::new(FakeFactory { calls: Arc::new(AtomicUsize::new(0)) }),
         );
-        let skill = root.path().join("claude/skills/mine/SKILL.md");
-        std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
-        std::fs::write(&skill, "---\nname: mine\ndescription: Mine.\n---\n").unwrap();
-        let rule = root.path().join("codex/rules/default.rules");
-        std::fs::create_dir_all(rule.parent().unwrap()).unwrap();
-        std::fs::write(&rule, "prefix_rule(pattern=[\"bd\"], decision=\"allow\")\n").unwrap();
+        let market = root.path().join("claude/plugins/known_marketplaces.json");
+        std::fs::create_dir_all(market.parent().unwrap()).unwrap();
+        std::fs::write(&market, r#"{"official":{"source":{"source":"github","repo":"anthropics/official"}}}"#).unwrap();
 
         // The system account reads the directory the server booted with.
         let listed = registry
             .execute(&command(CommandKind::ExtensionsList, json!({"brand":"claude","scope":"account"})))
             .await
             .unwrap();
-        assert_eq!(listed["kinds"][2]["kind"], json!("skills"));
-        assert_eq!(listed["kinds"][2]["items"][0]["id"], json!("mine"));
-        assert_eq!(listed["kinds"][2]["items"][0]["description"], json!("Mine."));
+        assert_eq!(listed["kinds"][0]["kind"], json!("plugins"));
+        assert_eq!(listed["kinds"][1]["kind"], json!("marketplaces"));
+        assert_eq!(listed["kinds"][1]["items"][0]["id"], json!("official"));
+        assert_eq!(listed["kinds"][1]["items"][0]["description"], json!("github anthropics/official"));
+        // Codex has no plugin system, so it lists nothing.
         let listed = registry
             .execute(&command(CommandKind::ExtensionsList, json!({"brand":"codex","scope":"account","profileId":"system"})))
             .await
             .unwrap();
-        assert_eq!(listed["kinds"][0]["shared"], json!(true));
-        assert_eq!(listed["kinds"][2]["items"][0]["id"], json!("default.rules"));
+        assert_eq!(listed["kinds"], json!([]));
 
         // A created account reads its own directory, which starts empty.
         let made = registry
@@ -1694,7 +1680,7 @@ mod tests {
             .execute(&command(CommandKind::ExtensionsList, json!({"brand":"claude","scope":"account","profileId":profile})))
             .await
             .unwrap();
-        assert_eq!(listed["kinds"][2]["items"], json!([]));
+        assert_eq!(listed["kinds"][1]["items"], json!([]));
 
         // Switching a plugin on lands in that account's settings.json, whether
         // Claude's CLI did it or the fallback edit did.
@@ -1715,23 +1701,6 @@ mod tests {
         assert_eq!(answer["kinds"][0]["items"][0]["enabled"], json!(true));
         assert!(!root.path().join("claude/settings.json").exists(), "the system account was left alone");
 
-        // Removing names a listed item only, and refuses anything else.
-        let refused = registry
-            .execute(&command(CommandKind::ExtensionRemove, json!({"brand":"claude","scope":"account","kind":"skills","id":"../settings.json"})))
-            .await
-            .unwrap_err();
-        assert!(refused.contains("not"), "{refused}");
-        let refused = registry
-            .execute(&command(CommandKind::ExtensionRemove, json!({"brand":"claude","scope":"account","kind":"hooks","id":"Stop/0/0"})))
-            .await
-            .unwrap_err();
-        assert_eq!(refused, "hooks cannot be removed here");
-        let after = registry
-            .execute(&command(CommandKind::ExtensionRemove, json!({"brand":"claude","scope":"account","kind":"skills","id":"mine"})))
-            .await
-            .unwrap();
-        assert_eq!(after["kinds"][2]["items"], json!([]));
-        assert!(!skill.exists());
         assert!(registry
             .execute(&command(CommandKind::ExtensionsList, json!({"brand":"claude","scope":"project","projectPath":"relative"})))
             .await

@@ -911,6 +911,8 @@ export interface McpServer {
   /** Claude's answer on a project server: whether the reader has approved it. */
   approval?: 'approved' | 'pending' | 'rejected';
   transport: 'stdio' | 'http' | 'sse' | 'ws';
+  /** Whether the CLI holds a usable sign-in for a remote server. Absent for stdio. */
+  auth?: 'signedIn' | 'notSignedIn' | 'expired';
   command?: string;
   args?: string[];
   url?: string;
@@ -920,7 +922,7 @@ export interface McpServer {
   config: Record<string, unknown>;
 }
 
-export type ExtensionKind = 'plugins' | 'marketplaces' | 'skills' | 'agents' | 'hooks' | 'outputStyles' | 'rules';
+export type ExtensionKind = 'plugins' | 'marketplaces';
 
 export interface ExtensionItem {
   id: string;
@@ -931,9 +933,6 @@ export interface ExtensionItem {
   version?: string;
   marketplace?: string;
   source?: 'user' | 'project';
-  event?: string;
-  matcher?: string;
-  command?: string;
 }
 
 export interface ExtensionKindList {
@@ -955,7 +954,6 @@ export type WbpCommand =
   | ({ type: 'mcp.login'; brand: Brand; id: string } & SettingsScope)
   | ({ type: 'mcp.logout'; brand: Brand; id: string } & SettingsScope)
   | ({ type: 'extensions.list'; brand: Brand } & SettingsScope)
-  | ({ type: 'extension.remove'; brand: Brand; kind: ExtensionKind; id: string } & SettingsScope)
   | ({ type: 'plugin.set-enabled'; brand: Brand; id: string; enabled: boolean } & SettingsScope)
   | ({ type: 'plugin.install'; brand: Brand; id: string } & SettingsScope)
   | ({ type: 'plugin.uninstall'; brand: Brand; id: string } & SettingsScope)

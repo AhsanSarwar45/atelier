@@ -35,7 +35,8 @@ export function providerTabs(brand: Brand): ProviderTabDef[] {
   return [
     ...pagesFor(brand).map((p) => ({ id: p.id, label: p.label })),
     { id: 'mcp', label: 'MCP servers' },
-    { id: 'extensions', label: 'Extensions' },
+    // Codex has no plugin system; its skills, hooks and rules are files.
+    ...(brand === 'claude' ? [{ id: 'plugins', label: 'Plugins' }] : []),
     { id: 'files', label: 'Files' },
   ];
 }
@@ -125,7 +126,7 @@ export function ProviderSection({
           </div>
         ) : known === 'mcp' ? (
           <McpServersPanel brand={brand} scope={scope} />
-        ) : known === 'extensions' ? (
+        ) : known === 'plugins' ? (
           <ExtensionsPanel brand={brand} scope={scope} />
         ) : (
           pages?.(scope, known)

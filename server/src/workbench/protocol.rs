@@ -54,7 +54,6 @@ wire_kinds!(CommandKind {
     ProviderSettingsRead => "provider-settings.read",
     ProviderSettingsWrite => "provider-settings.write",
     ExtensionsList => "extensions.list",
-    ExtensionRemove => "extension.remove",
     PluginSetEnabled => "plugin.set-enabled",
     PluginInstall => "plugin.install",
     PluginUninstall => "plugin.uninstall",

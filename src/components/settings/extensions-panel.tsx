@@ -1,6 +1,7 @@
 /**
- * One scope's extensions, by kind: plugins and their marketplaces, skills,
- * agents, hooks, output styles and rules (bw-2t1c.8).
+ * One scope's Claude plugins and the marketplaces they come from (bw-2t1c.8,
+ * bw-nin9.2). Skills, agents, hooks, output styles and rules are files, and
+ * live under Agent files.
  */
 'use client';
 
@@ -28,11 +29,6 @@ function said(e: unknown): string {
 const KIND_NAME: Record<ExtensionKind, string> = {
   plugins: 'Plugins',
   marketplaces: 'Marketplaces',
-  skills: 'Skills',
-  agents: 'Agents',
-  hooks: 'Hooks',
-  outputStyles: 'Output styles',
-  rules: 'Rules',
 };
 
 type Kinds = { kinds: ExtensionKindList[] };
@@ -133,8 +129,7 @@ export function ExtensionsPanel({ brand, scope }: { brand: Brand; scope: Scope }
   const remove = (kind: ExtensionKind, item: ExtensionItem) => {
     const key = `${kind}:${item.id}`;
     if (kind === 'plugins') return act(key, () => sendCommand({ type: 'plugin.uninstall', brand, ...wire, id: item.id }), 'Uninstalled');
-    if (kind === 'marketplaces') return act(key, () => sendCommand({ type: 'marketplace.remove', brand, ...wire, name: item.id }), 'Removed');
-    return act(key, () => sendCommand({ type: 'extension.remove', brand, ...wire, kind, id: item.id }), 'Removed');
+    return act(key, () => sendCommand({ type: 'marketplace.remove', brand, ...wire, name: item.id }), 'Removed');
   };
 
   return (
@@ -143,15 +138,15 @@ export function ExtensionsPanel({ brand, scope }: { brand: Brand; scope: Scope }
         const actions =
           kind === 'plugins' ? (
             <AddOne placeholder="name@marketplace" testid="plugin-install" onAdd={(id) => act(`plugins:${id}`, () => sendCommand({ type: 'plugin.install', brand, ...wire, id }), 'Installed')} />
-          ) : kind === 'marketplaces' ? (
+          ) : (
             <AddOne placeholder="owner/repo or URL" testid="marketplace-add" onAdd={(source) => act(`marketplaces:${source}`, () => sendCommand({ type: 'marketplace.add', brand, ...wire, source }), 'Added')} />
-          ) : undefined;
+          );
         return (
           <SettingsGroup key={kind} title={KIND_NAME[kind]} actions={actions} data-testid={`extensions-${kind}`}>
             {items.length === 0 && <p className="p-3 text-sm text-t-tertiary">None</p>}
             {items.map((item) => {
               const key = `${kind}:${item.id}`;
-              const detail = kind === 'hooks' ? [item.event, item.matcher, item.command].filter(Boolean).join(' · ') : item.description ?? '';
+              const detail = item.description ?? '';
               return (
                 <div key={key} className="flex items-center gap-3 px-3 py-2" data-testid={`extension-${kind}-${item.id}`}>
                   {kind === 'plugins' && (
@@ -189,11 +184,9 @@ export function ExtensionsPanel({ brand, scope }: { brand: Brand; scope: Scope }
                       </Tooltip>
                     )}
                   </div>
-                  {kind !== 'hooks' && (
-                    <Button variant="ghost" size="sm" aria-label={`Remove ${item.name}`} disabled={busy !== null} onClick={() => void remove(kind, item)} data-testid={`extension-remove-${item.id}`}>
-                      <Trash2 />
-                    </Button>
-                  )}
+                  <Button variant="ghost" size="sm" aria-label={`Remove ${item.name}`} disabled={busy !== null} onClick={() => void remove(kind, item)} data-testid={`extension-remove-${item.id}`}>
+                    <Trash2 />
+                  </Button>
                 </div>
               );
             })}

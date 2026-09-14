@@ -1,21 +1,19 @@
-//! What one account or one project loads beyond its settings.
+//! What one account or one project loads beyond its settings: Claude's
+//! plugins and the marketplaces they come from.
 //!
-//! Claude reads plugins, marketplaces, skills, subagents, hooks and output
-//! styles from its config directory and the project's `.claude/`; Codex reads
-//! skills from `~/.agents/skills` (per home, so shared across its accounts),
-//! plus hooks and rules from its home and the project's `.codex/`. Each kind
-//! is listed from where the provider itself keeps it, so the screen shows
-//! what a chat would actually load.
-//!
-//! Plugins and marketplaces are moved by Claude's own CLI so its records stay
-//! consistent with each other; a skill, agent, style or rule is a file the
-//! person put there and is removed as a file. Hooks live inside the settings
-//! file and are only listed here — `provider_settings` edits the `hooks` key.
+//! Skills, subagents, hooks, output styles and rules are files, and the Agent
+//! files screen lists and edits them; Codex has no plugin system, so it has
+//! nothing here. Plugins and marketplaces are listed from Claude's own
+//! records (`plugins/installed_plugins.json`, `plugins/known_marketplaces.json`)
+//! and from the settings files that switch them on, so the screen shows what
+//! a chat would actually load. They are moved by Claude's own CLI so its
+//! records stay consistent with each other; `set_enabled_in_settings` is the
+//! fallback edit for when the CLI is not there.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -35,25 +33,6 @@ const MAX_OUTPUT: usize = 16 * 1024;
 pub enum Kind {
     Plugins,
     Marketplaces,
-    Skills,
-    Agents,
-    Hooks,
-    OutputStyles,
-    Rules,
-}
-
-impl Kind {
-    fn wire(self) -> &'static str {
-        match self {
-            Kind::Plugins => "plugins",
-            Kind::Marketplaces => "marketplaces",
-            Kind::Skills => "skills",
-            Kind::Agents => "agents",
-            Kind::Hooks => "hooks",
-            Kind::OutputStyles => "outputStyles",
-            Kind::Rules => "rules",
-        }
-    }
 }
 
 /// Which settings file declared an item: the account's own or the project's.
@@ -80,35 +59,20 @@ pub struct Item {
     pub marketplace: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<Source>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub event: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub matcher: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub command: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KindList {
     pub kind: Kind,
-    /// True when the directory is per home rather than per account, so the
-    /// same items show for every account of the brand.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub shared: Option<bool>,
     pub items: Vec<Item>,
 }
 
 /// Every kind the brand has in this scope, each with what is there now.
 ///
-/// `account_dir` is the account's own config directory; `home` is the home
-/// directory, for the one Codex location that is per home.
-pub fn list(
-    brand: &str,
-    scope: &Scope,
-    account_dir: &Path,
-    home: &Path,
-) -> Result<Vec<KindList>, String> {
+/// `account_dir` is the account's own config directory. Codex has no plugins,
+/// so it lists nothing.
+pub fn list(brand: &str, scope: &Scope, account_dir: &Path) -> Result<Vec<KindList>, String> {
     if let Scope::Project { path } = scope {
         if !path.is_absolute() {
             return Err("projectPath must be absolute".into());
@@ -118,24 +82,14 @@ pub fn list(
         ("claude", Scope::Account { .. }) => {
             let settings = account_dir.join("settings.json");
             vec![
-                plain(Kind::Plugins, installed_plugins(account_dir, &settings)),
-                plain(
-                    Kind::Marketplaces,
-                    known_marketplaces(account_dir, &settings),
-                ),
-                plain(
-                    Kind::Skills,
-                    skills(&account_dir.join("skills"), Source::User),
-                ),
-                plain(
-                    Kind::Agents,
-                    markdown(&account_dir.join("agents"), Source::User),
-                ),
-                plain(Kind::Hooks, hooks(&[(settings, Source::User)])),
-                plain(
-                    Kind::OutputStyles,
-                    markdown(&account_dir.join("output-styles"), Source::User),
-                ),
+                KindList {
+                    kind: Kind::Plugins,
+                    items: installed_plugins(account_dir, &settings),
+                },
+                KindList {
+                    kind: Kind::Marketplaces,
+                    items: known_marketplaces(account_dir, &settings),
+                },
             ]
         }
         ("claude", Scope::Project { path }) => {
@@ -144,139 +98,19 @@ pub fn list(
                 path.join(".claude/settings.local.json"),
             ];
             vec![
-                plain(Kind::Plugins, declared_plugins(&files, account_dir)),
-                plain(
-                    Kind::Marketplaces,
-                    declared_marketplaces(&files, account_dir),
-                ),
-                plain(
-                    Kind::Skills,
-                    skills(&path.join(".claude/skills"), Source::Project),
-                ),
-                plain(
-                    Kind::Agents,
-                    markdown(&path.join(".claude/agents"), Source::Project),
-                ),
-                plain(
-                    Kind::Hooks,
-                    hooks(&files.map(|file| (file, Source::Project))),
-                ),
-                plain(
-                    Kind::Rules,
-                    markdown(&path.join(".claude/rules"), Source::Project),
-                ),
+                KindList {
+                    kind: Kind::Plugins,
+                    items: declared_plugins(&files, account_dir),
+                },
+                KindList {
+                    kind: Kind::Marketplaces,
+                    items: declared_marketplaces(&files, account_dir),
+                },
             ]
         }
-        ("codex", Scope::Account { .. }) => vec![
-            KindList {
-                kind: Kind::Skills,
-                shared: Some(true),
-                items: skills(&home.join(".agents/skills"), Source::User),
-            },
-            plain(
-                Kind::Hooks,
-                hooks(&[(account_dir.join("hooks.json"), Source::User)]),
-            ),
-            plain(
-                Kind::Rules,
-                rule_files(&account_dir.join("rules"), Source::User),
-            ),
-        ],
-        ("codex", Scope::Project { path }) => vec![
-            plain(
-                Kind::Skills,
-                skills(&path.join(".agents/skills"), Source::Project),
-            ),
-            plain(
-                Kind::Hooks,
-                hooks(&[(path.join(".codex/hooks.json"), Source::Project)]),
-            ),
-            plain(
-                Kind::Rules,
-                rule_files(&path.join(".codex/rules"), Source::Project),
-            ),
-        ],
+        ("codex", _) => Vec::new(),
         _ => return Err("brand must be claude or codex".into()),
     })
-}
-
-fn plain(kind: Kind, items: Vec<Item>) -> KindList {
-    KindList {
-        kind,
-        shared: None,
-        items,
-    }
-}
-
-/// The directory a removable kind is listed from in this scope, or `None`
-/// when the kind is not a file the person put there.
-fn removable_root(
-    brand: &str,
-    scope: &Scope,
-    account_dir: &Path,
-    home: &Path,
-    kind: Kind,
-) -> Option<PathBuf> {
-    Some(match (brand, scope, kind) {
-        ("claude", Scope::Account { .. }, Kind::Skills) => account_dir.join("skills"),
-        ("claude", Scope::Account { .. }, Kind::Agents) => account_dir.join("agents"),
-        ("claude", Scope::Account { .. }, Kind::OutputStyles) => account_dir.join("output-styles"),
-        ("claude", Scope::Project { path }, Kind::Skills) => path.join(".claude/skills"),
-        ("claude", Scope::Project { path }, Kind::Agents) => path.join(".claude/agents"),
-        ("claude", Scope::Project { path }, Kind::Rules) => path.join(".claude/rules"),
-        ("codex", Scope::Account { .. }, Kind::Skills) => home.join(".agents/skills"),
-        ("codex", Scope::Account { .. }, Kind::Rules) => account_dir.join("rules"),
-        ("codex", Scope::Project { path }, Kind::Skills) => path.join(".agents/skills"),
-        ("codex", Scope::Project { path }, Kind::Rules) => path.join(".codex/rules"),
-        _ => return None,
-    })
-}
-
-/// Delete one listed skill, agent, output style or rule.
-///
-/// Only something the listing found, under the directory it was found in, is
-/// deleted: an id that walks elsewhere is refused before anything is touched.
-/// A symlinked skill loses the link, never what it pointed at.
-pub fn remove(
-    brand: &str,
-    scope: &Scope,
-    account_dir: &Path,
-    home: &Path,
-    kind: Kind,
-    id: &str,
-) -> Result<(), String> {
-    let root = removable_root(brand, scope, account_dir, home, kind)
-        .ok_or_else(|| format!("{} cannot be removed here", kind.wire()))?;
-    if id.is_empty()
-        || Path::new(id)
-            .components()
-            .any(|part| !matches!(part, Component::Normal(_)))
-    {
-        return Err(format!(
-            "\"{id}\" is not the id of a listed {}",
-            kind.wire()
-        ));
-    }
-    let listed = list(brand, scope, account_dir, home)?
-        .into_iter()
-        .find(|row| row.kind == kind)
-        .and_then(|row| row.items.into_iter().find(|item| item.id == id))
-        .ok_or_else(|| format!("\"{id}\" is not among the listed {}", kind.wire()))?;
-    if !listed.path.starts_with(&root) || listed.path == root {
-        return Err(format!(
-            "{} is outside {}, so it was left alone",
-            listed.path.display(),
-            root.display()
-        ));
-    }
-    let meta = fs::symlink_metadata(&listed.path)
-        .map_err(|error| format!("{} could not be read: {error}", listed.path.display()))?;
-    let result = if meta.file_type().is_symlink() || meta.is_file() {
-        fs::remove_file(&listed.path)
-    } else {
-        fs::remove_dir_all(&listed.path)
-    };
-    result.map_err(|error| format!("{} could not be removed: {error}", listed.path.display()))
 }
 
 // ----- Claude plugins and marketplaces -----
@@ -371,7 +205,6 @@ fn plugin_item(
             .and_then(string_of),
         marketplace,
         source: Some(source),
-        ..Item::default()
     }
 }
 
@@ -529,184 +362,6 @@ fn declared_marketplaces(files: &[PathBuf], account_dir: &Path) -> Vec<Item> {
     items
 }
 
-// ----- Files: skills, agents, output styles, rules -----
-
-/// The `name` and `description` a markdown file's YAML frontmatter gives it.
-fn frontmatter(path: &Path) -> (Option<String>, Option<String>) {
-    let Ok(text) = fs::read_to_string(path) else {
-        return (None, None);
-    };
-    let Some(rest) = text
-        .strip_prefix("---")
-        .and_then(|rest| rest.strip_prefix(['\n', '\r']))
-    else {
-        return (None, None);
-    };
-    let Some(end) = rest.find("\n---") else {
-        return (None, None);
-    };
-    let Ok(serde_yaml::Value::Mapping(map)) =
-        serde_yaml::from_str::<serde_yaml::Value>(&rest[..end])
-    else {
-        return (None, None);
-    };
-    let field = |key: &str| {
-        map.get(serde_yaml::Value::String(key.to_string()))
-            .and_then(serde_yaml::Value::as_str)
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-            .map(str::to_string)
-    };
-    (field("name"), field("description"))
-}
-
-fn sorted_entries(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut paths: Vec<PathBuf> = entries.flatten().map(|entry| entry.path()).collect();
-    paths.sort();
-    paths
-}
-
-fn file_name(path: &Path) -> String {
-    path.file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned()
-}
-
-/// One skill per directory holding a `SKILL.md`, named by its frontmatter.
-fn skills(dir: &Path, source: Source) -> Vec<Item> {
-    sorted_entries(dir)
-        .into_iter()
-        .filter(|path| path.is_dir() && path.join("SKILL.md").is_file())
-        .map(|path| {
-            let id = file_name(&path);
-            let (name, description) = frontmatter(&path.join("SKILL.md"));
-            Item {
-                id: id.clone(),
-                name: name.unwrap_or(id),
-                description,
-                path,
-                source: Some(source),
-                ..Item::default()
-            }
-        })
-        .collect()
-}
-
-/// Every `.md` under `dir`, including subdirectories, as an item whose id is
-/// its path inside `dir`.
-fn markdown(dir: &Path, source: Source) -> Vec<Item> {
-    files_with(dir, "md", source)
-}
-
-/// Every `.rules` under `dir`.
-fn rule_files(dir: &Path, source: Source) -> Vec<Item> {
-    files_with(dir, "rules", source)
-}
-
-fn files_with(dir: &Path, extension: &str, source: Source) -> Vec<Item> {
-    let mut items = Vec::new();
-    walk(dir, dir, extension, source, &mut items, 0);
-    items
-}
-
-fn walk(
-    root: &Path,
-    dir: &Path,
-    extension: &str,
-    source: Source,
-    items: &mut Vec<Item>,
-    depth: usize,
-) {
-    if depth > 8 {
-        return;
-    }
-    for path in sorted_entries(dir) {
-        if path.is_dir() {
-            walk(root, &path, extension, source, items, depth + 1);
-            continue;
-        }
-        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some(extension) {
-            continue;
-        }
-        let id = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .components()
-            .map(|part| part.as_os_str().to_string_lossy().into_owned())
-            .collect::<Vec<_>>()
-            .join("/");
-        let (name, description) = if extension == "md" {
-            frontmatter(&path)
-        } else {
-            (None, None)
-        };
-        let stem = path
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned();
-        items.push(Item {
-            id,
-            name: name.unwrap_or(stem),
-            description,
-            path,
-            source: Some(source),
-            ..Item::default()
-        });
-    }
-}
-
-// ----- Hooks -----
-
-/// Every hook in each settings file's `hooks` key, flattened: `{ "<Event>":
-/// [ { matcher?, hooks: [ { type, command } ] } ] }` becomes one item per
-/// innermost hook, with the id naming where it sits.
-fn hooks(files: &[(PathBuf, Source)]) -> Vec<Item> {
-    let mut items = Vec::new();
-    for (file, source) in files {
-        let Some(Value::Object(events)) = read_object(file).get("hooks").cloned() else {
-            continue;
-        };
-        for (event, groups) in &events {
-            let Some(groups) = groups.as_array() else {
-                continue;
-            };
-            for (gi, group) in groups.iter().enumerate() {
-                let matcher = group.get("matcher").and_then(string_of);
-                let inner = group.get("hooks").and_then(Value::as_array);
-                let Some(inner) = inner else {
-                    continue;
-                };
-                for (hi, hook) in inner.iter().enumerate() {
-                    let command = hook.get("command").and_then(string_of);
-                    let kind = hook.get("type").and_then(string_of);
-                    let prompt = hook.get("prompt").and_then(string_of);
-                    items.push(Item {
-                        id: format!("{event}/{gi}/{hi}"),
-                        name: command
-                            .clone()
-                            .or(prompt)
-                            .or_else(|| kind.clone())
-                            .unwrap_or_else(|| event.clone()),
-                        description: kind,
-                        path: file.clone(),
-                        source: Some(*source),
-                        event: Some(event.clone()),
-                        matcher: matcher.clone(),
-                        command,
-                        ..Item::default()
-                    });
-                }
-            }
-        }
-    }
-    items
-}
-
 // ----- Writes -----
 
 /// Switch one plugin on or off in a settings file directly, for when Claude's
@@ -823,7 +478,6 @@ pub async fn run_cli(
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::os::unix::fs::symlink;
 
     fn account() -> Scope {
         Scope::Account { profile_id: None }
@@ -841,7 +495,6 @@ mod tests {
     #[test]
     fn native_workbench_services_extensions_lists_a_claude_account() {
         let cfg = tempfile::tempdir().unwrap();
-        let home = tempfile::tempdir().unwrap();
         let cache = cfg.path().join("plugins/cache/official/notion/0.1.0");
         write(
             &cache.join(".claude-plugin/plugin.json"),
@@ -870,31 +523,18 @@ mod tests {
             })
             .to_string(),
         );
+        // Files the Agent files screen owns are not extensions.
         write(
             &cfg.path().join("skills/report/SKILL.md"),
-            "---\nname: report\ndescription: Writes the report.\n---\nBody\n",
+            "---\nname: report\n---\nBody\n",
         );
-        write(&cfg.path().join("skills/notes.md"), "not a skill");
-        write(
-            &cfg.path().join("agents/reviewer.md"),
-            "---\nname: reviewer\ndescription: >\n  Reviews\n  code.\nmodel: opus\n---\n",
-        );
-        write(
-            &cfg.path().join("output-styles/terse.md"),
-            "---\nname: Terse\n---\n",
-        );
+        write(&cfg.path().join("agents/reviewer.md"), "---\nname: reviewer\n---\n");
+        write(&cfg.path().join("output-styles/terse.md"), "---\nname: Terse\n---\n");
 
-        let kinds = list("claude", &account(), cfg.path(), home.path()).unwrap();
+        let kinds = list("claude", &account(), cfg.path()).unwrap();
         assert_eq!(
             kinds.iter().map(|row| row.kind).collect::<Vec<_>>(),
-            [
-                Kind::Plugins,
-                Kind::Marketplaces,
-                Kind::Skills,
-                Kind::Agents,
-                Kind::Hooks,
-                Kind::OutputStyles
-            ]
+            [Kind::Plugins, Kind::Marketplaces]
         );
         let plugins = &kind(&kinds, Kind::Plugins).items;
         assert_eq!(
@@ -936,33 +576,11 @@ mod tests {
             cfg.path().join("plugins/marketplaces/mine")
         );
 
-        let skills = &kind(&kinds, Kind::Skills).items;
-        assert_eq!(skills.len(), 1);
-        assert_eq!(skills[0].id, "report");
-        assert_eq!(skills[0].description.as_deref(), Some("Writes the report."));
-        assert_eq!(skills[0].path, cfg.path().join("skills/report"));
-
-        let agents = &kind(&kinds, Kind::Agents).items;
-        assert_eq!(agents[0].id, "reviewer.md");
-        assert_eq!(agents[0].name, "reviewer");
-        assert_eq!(agents[0].description.as_deref(), Some("Reviews code."));
-
-        let hooks = &kind(&kinds, Kind::Hooks).items;
-        assert_eq!(hooks.len(), 1);
-        assert_eq!(hooks[0].id, "Stop/0/0");
-        assert_eq!(hooks[0].event.as_deref(), Some("Stop"));
-        assert_eq!(hooks[0].matcher.as_deref(), Some("Bash"));
-        assert_eq!(hooks[0].command.as_deref(), Some("say done"));
-        assert_eq!(hooks[0].path, cfg.path().join("settings.json"));
-
-        let styles = &kind(&kinds, Kind::OutputStyles).items;
-        assert_eq!(styles[0].name, "Terse");
-        assert_eq!(styles[0].id, "terse.md");
-
         let wire = serde_json::to_value(&kinds).unwrap();
         assert_eq!(wire[0]["kind"], json!("plugins"));
-        assert_eq!(wire[5]["kind"], json!("outputStyles"));
+        assert_eq!(wire[1]["kind"], json!("marketplaces"));
         assert_eq!(wire[0]["items"][2]["marketplace"], json!("official"));
+        assert_eq!(wire[0]["items"][2]["source"], json!("user"));
         assert!(wire[0].get("shared").is_none());
     }
 
@@ -970,7 +588,6 @@ mod tests {
     fn native_workbench_services_extensions_lists_a_claude_project() {
         let cfg = tempfile::tempdir().unwrap();
         let project = tempfile::tempdir().unwrap();
-        let home = tempfile::tempdir().unwrap();
         write(
             &project.path().join(".claude/settings.json"),
             &json!({"enabledPlugins": {"a@m": true}, "extraKnownMarketplaces": {"m": {"source": {"source": "github", "repo": "o/m"}}},
@@ -989,24 +606,13 @@ mod tests {
             &project.path().join(".claude/skills/deploy/SKILL.md"),
             "---\nname: deploy\n---\n",
         );
-        write(
-            &project.path().join(".claude/agents/tester.md"),
-            "no frontmatter",
-        );
         let scope = Scope::Project {
             path: project.path().to_path_buf(),
         };
-        let kinds = list("claude", &scope, cfg.path(), home.path()).unwrap();
+        let kinds = list("claude", &scope, cfg.path()).unwrap();
         assert_eq!(
             kinds.iter().map(|row| row.kind).collect::<Vec<_>>(),
-            [
-                Kind::Plugins,
-                Kind::Marketplaces,
-                Kind::Skills,
-                Kind::Agents,
-                Kind::Hooks,
-                Kind::Rules
-            ]
+            [Kind::Plugins, Kind::Marketplaces]
         );
         let plugins = &kind(&kinds, Kind::Plugins).items;
         assert_eq!(
@@ -1019,221 +625,46 @@ mod tests {
                 ("b@m", Some(true), Some(Source::Project))
             ]
         );
-        assert_eq!(kind(&kinds, Kind::Marketplaces).items[0].id, "m");
-        let rules = &kind(&kinds, Kind::Rules).items;
-        assert_eq!(rules[0].id, "style/rust.md");
-        assert_eq!(rules[0].name, "rust");
-        assert_eq!(rules[0].description.as_deref(), Some("Rust style"));
-        assert_eq!(kind(&kinds, Kind::Skills).items[0].id, "deploy");
-        assert_eq!(kind(&kinds, Kind::Agents).items[0].name, "tester");
         assert_eq!(
-            kind(&kinds, Kind::Hooks).items[0].command.as_deref(),
-            Some("lint")
+            plugins[0].path,
+            project.path().join(".claude/settings.json")
         );
-        assert_eq!(kind(&kinds, Kind::Hooks).items[0].matcher, None);
+        let markets = &kind(&kinds, Kind::Marketplaces).items;
+        assert_eq!(markets.len(), 1);
+        assert_eq!(markets[0].id, "m");
+        assert_eq!(markets[0].description.as_deref(), Some("github o/m"));
+        assert_eq!(markets[0].source, Some(Source::Project));
         assert!(list(
             "claude",
             &Scope::Project {
                 path: "relative".into()
             },
-            cfg.path(),
-            home.path()
+            cfg.path()
         )
         .is_err());
-        assert!(list("gemini", &account(), cfg.path(), home.path()).is_err());
+        assert!(list("gemini", &account(), cfg.path()).is_err());
     }
 
     #[test]
-    fn native_workbench_services_extensions_lists_a_codex_account_and_project() {
+    fn native_workbench_services_extensions_lists_nothing_for_codex() {
         let codex = tempfile::tempdir().unwrap();
-        let home = tempfile::tempdir().unwrap();
         let project = tempfile::tempdir().unwrap();
-        write(
-            &home.path().join(".agents/skills/composio/SKILL.md"),
-            "---\nname: composio-cli\ndescription: Drives composio.\n---\n",
-        );
-        write(
-            &codex.path().join("hooks.json"),
-            r#"{"hooks":{"SessionStart":[],"Stop":[{"hooks":[{"type":"command","command":"notify"}]}]}}"#,
-        );
         write(
             &codex.path().join("rules/default.rules"),
             "prefix_rule(pattern=[\"bd\"], decision=\"allow\")\n",
         );
-        write(&codex.path().join("rules/readme.txt"), "not a rule");
-        let kinds = list("codex", &account(), codex.path(), home.path()).unwrap();
-        assert_eq!(
-            kinds.iter().map(|row| row.kind).collect::<Vec<_>>(),
-            [Kind::Skills, Kind::Hooks, Kind::Rules]
-        );
-        assert_eq!(kinds[0].shared, Some(true));
-        assert_eq!(kinds[0].items[0].id, "composio");
-        assert_eq!(kinds[0].items[0].name, "composio-cli");
-        assert_eq!(kinds[1].shared, None);
-        assert_eq!(kinds[1].items.len(), 1);
-        assert_eq!(kinds[1].items[0].id, "Stop/0/0");
-        assert_eq!(kinds[2].items.len(), 1);
-        assert_eq!(kinds[2].items[0].id, "default.rules");
-        assert_eq!(
-            kinds[2].items[0].path,
-            codex.path().join("rules/default.rules")
-        );
-        let wire = serde_json::to_value(&kinds).unwrap();
-        assert_eq!(wire[0]["shared"], json!(true));
-
-        write(&project.path().join(".codex/rules/team.rules"), "");
         write(&project.path().join(".codex/hooks.json"), r#"{"hooks":{}}"#);
-        write(
-            &project.path().join(".agents/skills/local/SKILL.md"),
-            "---\nname: local\n---\n",
-        );
+        assert_eq!(list("codex", &account(), codex.path()).unwrap(), []);
         let scope = Scope::Project {
             path: project.path().to_path_buf(),
         };
-        let kinds = list("codex", &scope, codex.path(), home.path()).unwrap();
-        assert_eq!(kinds[0].items[0].source, Some(Source::Project));
-        assert_eq!(kinds[0].shared, None);
-        assert!(kinds[1].items.is_empty());
-        assert_eq!(kinds[2].items[0].id, "team.rules");
-    }
-
-    #[test]
-    fn native_workbench_services_extensions_remove_deletes_only_what_was_listed() {
-        let cfg = tempfile::tempdir().unwrap();
-        let home = tempfile::tempdir().unwrap();
-        let elsewhere = tempfile::tempdir().unwrap();
-        write(
-            &cfg.path().join("skills/mine/SKILL.md"),
-            "---\nname: mine\n---\n",
-        );
-        write(
-            &elsewhere.path().join("linked/SKILL.md"),
-            "---\nname: linked\n---\n",
-        );
-        symlink(
-            elsewhere.path().join("linked"),
-            cfg.path().join("skills/linked"),
-        )
-        .unwrap();
-        write(&cfg.path().join("agents/a.md"), "");
-        write(&cfg.path().join("secret.md"), "");
-        write(
-            &cfg.path().join("settings.json"),
-            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"x"}]}]}}"#,
-        );
-
-        for bad in [
-            "../secret.md",
-            "/etc/passwd",
-            "",
-            "..",
-            "mine/../../secret.md",
-        ] {
-            let error = remove(
-                "claude",
-                &account(),
-                cfg.path(),
-                home.path(),
-                Kind::Agents,
-                bad,
-            )
-            .unwrap_err();
-            assert!(error.contains("not"), "{bad}: {error}");
-        }
-        assert!(cfg.path().join("secret.md").is_file());
-        assert!(remove(
-            "claude",
-            &account(),
-            cfg.path(),
-            home.path(),
-            Kind::Skills,
-            "nope"
-        )
-        .is_err());
-        assert!(remove(
-            "claude",
-            &account(),
-            cfg.path(),
-            home.path(),
-            Kind::Hooks,
-            "Stop/0/0"
-        )
-        .is_err());
-        assert!(remove(
-            "claude",
-            &account(),
-            cfg.path(),
-            home.path(),
-            Kind::Plugins,
-            "a@b"
-        )
-        .is_err());
-        assert!(remove(
-            "claude",
-            &account(),
-            cfg.path(),
-            home.path(),
-            Kind::Rules,
-            "a.md"
-        )
-        .is_err());
-        assert!(cfg.path().join("settings.json").is_file());
-
-        remove(
-            "claude",
-            &account(),
-            cfg.path(),
-            home.path(),
-            Kind::Skills,
-            "linked",
-        )
-        .unwrap();
-        assert!(!cfg.path().join("skills/linked").exists());
-        assert!(
-            elsewhere.path().join("linked/SKILL.md").is_file(),
-            "the link's target is kept"
-        );
-        remove(
-            "claude",
-            &account(),
-            cfg.path(),
-            home.path(),
-            Kind::Skills,
-            "mine",
-        )
-        .unwrap();
-        assert!(!cfg.path().join("skills/mine").exists());
-        remove(
-            "claude",
-            &account(),
-            cfg.path(),
-            home.path(),
-            Kind::Agents,
-            "a.md",
-        )
-        .unwrap();
-        assert!(!cfg.path().join("agents/a.md").exists());
-        assert!(cfg.path().join("agents").is_dir());
-
-        let codex = tempfile::tempdir().unwrap();
-        write(&codex.path().join("rules/x.rules"), "");
-        remove(
+        assert_eq!(list("codex", &scope, codex.path()).unwrap(), []);
+        assert!(list(
             "codex",
-            &account(),
-            codex.path(),
-            home.path(),
-            Kind::Rules,
-            "x.rules",
-        )
-        .unwrap();
-        assert!(!codex.path().join("rules/x.rules").exists());
-        assert!(remove(
-            "codex",
-            &account(),
-            codex.path(),
-            home.path(),
-            Kind::Agents,
-            "a.md"
+            &Scope::Project {
+                path: "relative".into()
+            },
+            codex.path()
         )
         .is_err());
     }

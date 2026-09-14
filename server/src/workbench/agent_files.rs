@@ -252,6 +252,14 @@ fn locations(project: Option<&Path>, home: &Path, claude: &Path, codex: &Path) -
         loc(
             Provider::Codex,
             Scope::Personal,
+            Category::Settings,
+            codex.into(),
+            existing([codex.join("hooks.json")]),
+            false,
+        ),
+        loc(
+            Provider::Codex,
+            Scope::Personal,
             Category::Agents,
             codex.join("agents"),
             below(&codex.join("agents"), Some(&["toml"])),
@@ -336,9 +344,25 @@ fn locations(project: Option<&Path>, home: &Path, claude: &Path, codex: &Path) -
         loc(
             Provider::Codex,
             Scope::Project,
+            Category::Settings,
+            project.join(".codex"),
+            existing([project.join(".codex/hooks.json")]),
+            false,
+        ),
+        loc(
+            Provider::Codex,
+            Scope::Project,
             Category::Agents,
             project.join(".codex/agents"),
             below(&project.join(".codex/agents"), Some(&["toml"])),
+            false,
+        ),
+        loc(
+            Provider::Codex,
+            Scope::Project,
+            Category::Rules,
+            project.join(".codex/rules"),
+            below(&project.join(".codex/rules"), Some(&["rules"])),
             false,
         ),
         loc(
