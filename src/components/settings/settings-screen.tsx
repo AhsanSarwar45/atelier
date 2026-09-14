@@ -44,8 +44,11 @@ export function SettingsScreen({
   onOpen,
   children,
   bar,
+  backSteps,
 }: {
   title: string;
+  /** How many history entries the arrow steps over; see BackLink. */
+  backSteps?: number | (() => number);
   /** Where the bar's arrow goes when nothing of ours is behind this screen. */
   backHref: string;
   sections: SettingsSectionDef[];
@@ -82,7 +85,7 @@ export function SettingsScreen({
             <span className="sr-only">All sections</span>
           </Button>
         ) : (
-          <BackLink href={backHref} />
+          <BackLink href={backHref} steps={backSteps} />
         )}
         <h1 className="truncate text-lg font-semibold text-t-primary">
           {phone && open ? open.label : title}

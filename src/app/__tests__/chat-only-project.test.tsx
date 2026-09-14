@@ -23,7 +23,7 @@ vi.mock('@/app/project/board-cards', () => ({
   BoardCards: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 vi.mock('@/components/card-panel', () => ({ CardPanel: () => <div data-testid="card-panel" /> }));
-vi.mock('@/components/project-settings-dialog', () => ({ ProjectSettingsDialog: () => null }));
+vi.mock('@/components/project-settings-screen', () => ({ ProjectSettingsScreen: () => null }));
 vi.mock('@/workbench/globals', () => ({ WorkbenchStatus: () => null }));
 vi.mock('@/components/shell', () => ({
   Shell: ({ tabs, toolbar, children }: { tabs?: React.ReactNode; toolbar?: boolean; children: React.ReactNode }) => (

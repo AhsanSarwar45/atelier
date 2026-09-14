@@ -6,6 +6,7 @@
  *
  *   /project?id=<project>&tab=chat|board|files&chat=<sessionId>&card=<cardId>
  *   …&file=<absolute path>&line=<1-based line>
+ *   …&settings=<section>&ptab=<provider tab>   the project's settings, over the top
  *
  * Design: docs/designs/app-shell.md §1.7.
  */
@@ -24,6 +25,10 @@ export interface Where {
   file: string | null;
   /** The line of that file to scroll to and mark, counted from one. */
   line: number | null;
+  /** The project settings section drawn over the screen, or nothing. */
+  settings: string | null;
+  /** The provider tab inside a settings section. */
+  ptab: string | null;
 }
 
 /**
@@ -71,6 +76,8 @@ export function whereFrom(params: URLSearchParams): Where {
     card: params.get('card') ?? params.get(OLD_CARD),
     file,
     line: lineFrom(params.get('line')),
+    settings: params.get('settings'),
+    ptab: params.get('ptab'),
   };
 }
 
@@ -138,4 +145,33 @@ export function somewhereBehind(): boolean {
   const nav = (window as { navigation?: { currentEntry?: { index: number } } }).navigation;
   if (nav?.currentEntry) return nav.currentEntry.index > 0;
   return window.history.length > 1;
+}
+
+/**
+ * How many entries back the nearest one that `leaves` says is outside a
+ * screen is — the arrow that closes a screen drawn over the address steps over
+ * every section and tab it pushed, wherever the reader has since stepped to.
+ *
+ * The Navigation API is asked first: it knows every entry of ours and their
+ * addresses. Without it the caller's own count is used, which is right until
+ * the reader presses Back inside the screen and then the arrow.
+ */
+export function stepsOut(leaves: (url: URL) => boolean, counted: number): number {
+  if (typeof window === 'undefined') return counted;
+  const nav = (window as { navigation?: { currentEntry?: { index: number }; entries(): { url: string | null }[] } }).navigation;
+  if (!nav?.currentEntry) return counted;
+  const entries = nav.entries();
+  for (let i = nav.currentEntry.index - 1; i >= 0; i -= 1) {
+    const url = entries[i]?.url;
+    if (!url) continue;
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      continue;
+    }
+    if (parsed.origin !== window.location.origin) return 0;
+    if (leaves(parsed)) return nav.currentEntry.index - i;
+  }
+  return 0;
 }

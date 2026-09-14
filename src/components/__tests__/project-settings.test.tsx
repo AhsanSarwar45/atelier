@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { ProjectSettingsDialog } from '../project-settings-dialog';
+import { ProjectSettingsScreen } from '../project-settings-screen';
 
 const mocks = vi.hoisted(() => ({ manifest: {
   schema_version: 1,
@@ -24,18 +24,27 @@ vi.mock('@/lib/api', () => ({
   git: { branches: vi.fn().mockResolvedValue({ current: 'ours', branches: [{ name: 'ours' }, { name: 'main' }] }) },
 }));
 vi.mock('@/lib/db', () => ({ updateProject: vi.fn().mockResolvedValue({}) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 describe('project settings', () => {
   it('shows and saves the policy values that drive the project', async () => {
-    render(<ProjectSettingsDialog open onOpenChange={vi.fn()} projectId="p1" projectName="Keystone"
-      projectPath="/dev/keystone" onUpdated={vi.fn()} />);
+    const shared = { projectId: 'p1', projectName: 'Keystone', projectPath: '/dev/keystone', tab: null, onOpen: vi.fn(), onTab: vi.fn(), backHref: '/', onUpdated: vi.fn() };
+    const { rerender } = render(<ProjectSettingsScreen {...shared} section="workflow" />);
 
     expect(await screen.findByDisplayValue('A workbench')).toBeVisible();
     expect(screen.getByLabelText('Use task tracking for project work')).toBeChecked();
+
+    rerender(<ProjectSettingsScreen {...shared} section="review" />);
     expect(screen.getByRole('combobox', { name: 'External review' })).toHaveTextContent('Never');
-    expect(screen.getByDisplayValue('deploy atelier')).toBeVisible();
     expect(screen.getByDisplayValue('UI | npm test | src/')).toBeVisible();
 
+    rerender(<ProjectSettingsScreen {...shared} section="development" />);
+    expect(screen.getByDisplayValue('deploy atelier')).toBeVisible();
+
+    rerender(<ProjectSettingsScreen {...shared} section="workflow" />);
     fireEvent.change(screen.getByDisplayValue('A workbench'), { target: { value: 'Updated summary' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(mocks.updateSettings).toHaveBeenCalledWith('p1', expect.objectContaining({

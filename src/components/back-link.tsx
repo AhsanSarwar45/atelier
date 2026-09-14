@@ -30,10 +30,17 @@ export function BackLink({
   href,
   label = 'Back',
   className,
+  steps = 1,
   ...rest
 }: {
   /** Where the link goes when there is nothing of ours behind this screen. */
   href: string;
+  /**
+   * How many entries back "where the reader came from" is. A screen that
+   * pushed an entry for each of its own sections steps over all of them;
+   * zero means nothing of ours was pushed and the link is simply followed.
+   */
+  steps?: number | (() => number);
   /** What a screen reader hears. */
   label?: string;
   className?: string;
@@ -43,11 +50,13 @@ export function BackLink({
   const stepBack = useCallback(
     (e: MouseEvent<HTMLAnchorElement>) => {
       if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-      if (!somewhereBehind()) return;
+      const n = typeof steps === 'function' ? steps() : steps;
+      if (n < 1 || !somewhereBehind()) return;
       e.preventDefault();
-      router.back();
+      if (n === 1) router.back();
+      else window.history.go(-n);
     },
-    [router],
+    [router, steps],
   );
   return (
     // Ink named from the app's own text scale: the quiet button style is written

@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef } from 'react';
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -9,7 +9,7 @@ import { EllipsisVertical, Folder, Home, MessageSquare, SquareKanban } from 'luc
 
 import { BackLink } from '@/components/back-link';
 import { CardPanel } from '@/components/card-panel';
-import { ProjectSettingsDialog } from '@/components/project-settings-dialog';
+import { ProjectSettingsScreen } from '@/components/project-settings-screen';
 import { Shell } from '@/components/shell';
 import { Button } from '@/components/ui/button';
 import { ReadFailed } from '@/components/ui/read-failed';
@@ -21,6 +21,7 @@ import {
   cardCameFromHere,
   cardWasClosed,
   cardWasPushed,
+  stepsOut,
   whereFrom,
 } from '@/lib/address';
 import { PRODUCT_NAME } from '@/lib/identity';
@@ -67,7 +68,7 @@ function ProjectTabs() {
   // The address decides which tab is showing, which chat is drawn in it and
   // which card is over the top, so every one of them survives a link, a fresh
   // tab and the Back button (docs/designs/app-shell.md §1.7).
-  const { id: projectId, tab, chat: openChat, card: openCard, file: openFile, line: openLine } = whereFrom(params);
+  const { id: projectId, tab, chat: openChat, card: openCard, file: openFile, line: openLine, settings: openSettings, ptab } = whereFrom(params);
   const { project, error: projectError, refetch } = useProject(projectId);
   // The folder this screen is showing, which is where a shell opened from
   // its bar starts. `projectDir` and not `project.path`, because a
@@ -75,7 +76,6 @@ function ProjectTabs() {
   useShowingFolder(projectDir(project));
   const { theme } = useTheme();
   const terminal = theme.headerVariant === 'terminal';
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const usesBeads = project?.usesBeads !== false;
   // The board is the one tab a project can opt out of. Files are files whether
   // or not anybody keeps cards here, so opting out of the board sends the board
@@ -122,6 +122,21 @@ function ProjectTabs() {
   // entries we added comes down when the card leaves the address, so it cannot
   // drift upwards over a long visit.
   const cardBefore = useRef(openCard);
+
+  // The settings are pushed one entry per section and tab, so the arrow that
+  // closes them has to step over every entry this visit added; a pasted
+  // address added none and is simply left for the project (bw-2t1c.10).
+  const settingsPushes = useRef(0);
+  useEffect(() => {
+    if (!openSettings) settingsPushes.current = 0;
+  }, [openSettings]);
+  const goSettings = useCallback(
+    (patch: Parameters<typeof addressWith>[1]) => {
+      settingsPushes.current += 1;
+      go(patch);
+    },
+    [go],
+  );
   useEffect(() => {
     if (cardBefore.current && !openCard) cardWasClosed();
     cardBefore.current = openCard;
@@ -172,7 +187,7 @@ function ProjectTabs() {
             className="h-7 w-7 shrink-0 text-t-tertiary hover:bg-surface-overlay hover:text-t-primary"
             aria-label="Project settings"
             data-testid="project-menu"
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => goSettings({ settings: 'project', ptab: null })}
           >
             <EllipsisVertical className="h-3.5 w-3.5 opacity-100" />
           </Button>
@@ -276,16 +291,23 @@ function ProjectTabs() {
         </BoardCards>
       )}
 
-      {project && (
-        <ProjectSettingsDialog
-          open={settingsOpen}
-          onOpenChange={setSettingsOpen}
-          projectId={project.id}
-          projectName={project.name}
-          projectPath={project.path}
-          projectLocalPath={project.localPath}
-          onUpdated={refetch}
-        />
+      {project && openSettings && (
+        <div className="fixed inset-0 z-40" data-testid="project-settings">
+          <ProjectSettingsScreen
+            projectId={project.id}
+            projectName={project.name}
+            projectPath={project.path}
+            projectLocalPath={project.localPath}
+            archivedAt={project.archivedAt ?? undefined}
+            section={openSettings === 'list' ? null : openSettings}
+            tab={ptab}
+            onOpen={(id) => goSettings({ settings: id ?? 'list', ptab: null })}
+            onTab={(id) => goSettings({ ptab: id })}
+            backHref={addressWith(params, { settings: null, ptab: null })}
+            backSteps={() => stepsOut((url) => !url.searchParams.has('settings'), settingsPushes.current)}
+            onUpdated={refetch}
+          />
+        </div>
       )}
     </Shell>
   );

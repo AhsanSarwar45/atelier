@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 
 import { AlertTriangle, Archive, ArchiveRestore, Code, FolderOpen, Loader2, Settings } from "lucide-react";
 
-import { ProjectSettingsDialog } from "@/components/project-settings-dialog";
 import { StatusDonut } from "@/components/status-donut";
 import { TagPicker } from "@/components/tag-picker";
 import { Badge } from "@/components/ui/badge";
@@ -84,14 +83,10 @@ export function ProjectCard({
   usesBeads = true,
   archivedAt,
   onTagsChange,
-  onUpdated,
-  onArchive,
   onUnarchive,
-  onDelete,
 }: ProjectCardProps) {
   const router = useRouter();
   const [isOpening, setIsOpening] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const { toast } = useToast();
 
   // For dolt projects, use localPath for filesystem operations; for regular projects use path
@@ -275,7 +270,7 @@ export function ProjectCard({
                   aria-label="Project settings"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setSettingsOpen(true);
+                    router.push(`/project?id=${encodeURIComponent(id)}&settings=project`);
                   }}
                 >
                   <Settings className="h-4 w-4" />
@@ -340,18 +335,6 @@ export function ProjectCard({
       </div>
 
     </RoiuiCard>
-    <ProjectSettingsDialog
-      open={settingsOpen}
-      onOpenChange={setSettingsOpen}
-      projectId={id}
-      projectName={name}
-      projectPath={path}
-      projectLocalPath={localPath}
-      archivedAt={archivedAt}
-      onUpdated={onUpdated ?? (() => {})}
-      onArchive={onArchive}
-      onDelete={onDelete}
-    />
     </>
   );
 }

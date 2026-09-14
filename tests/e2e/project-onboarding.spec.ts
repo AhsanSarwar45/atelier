@@ -35,14 +35,17 @@ test('a new project reviews inferred settings and can edit the saved policy', as
       .find((row) => row.name === 'Onboarding Proof') ?? null;
     expect(project).not.toBeNull();
 
-    await page.getByRole('button', { name: 'Project settings' }).click();
-    await expect(page.getByRole('heading', { name: 'Project Settings' })).toBeVisible();
+    await page.getByRole('link', { name: 'View Onboarding Proof project' }).getByLabel('Project settings').click();
+    await expect(page).toHaveURL(/settings=project/);
+    await expect(page.getByTestId('project-settings')).toBeVisible();
+    await page.getByTestId('settings-section-workflow').click();
     await page.getByLabel('Project summary').fill('The settings screen owns this project policy.');
+    await page.getByTestId('settings-section-review').click();
     await page.getByRole('combobox', { name: 'External review' }).click();
     await page.getByRole('option', { name: 'Never' }).click();
     await page.screenshot({ path: join(process.cwd(), 'tests/results/project-settings.png'), fullPage: true });
-    await page.getByRole('button', { name: 'Save' }).click();
-    await expect(page.getByRole('heading', { name: 'Project Settings' })).toBeHidden();
+    await page.getByTestId('project-settings-save').click();
+    await expect(page.getByTestId('project-settings-save')).toBeHidden();
 
     const saved = await (await request.get(`/api/projects/${project!.id}/settings`)).json();
     expect(saved.manifest.project.summary).toBe('The settings screen owns this project policy.');

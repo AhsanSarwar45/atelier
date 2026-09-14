@@ -41,13 +41,15 @@ export function ProviderTabs({
   tab,
   onOpen,
   children,
+  tabs = providerTabs(brand),
 }: {
   brand: Brand;
   tab: string;
   onOpen: (tab: string) => void;
   children?: ReactNode;
+  /** A narrower set of tabs than the provider's full list. */
+  tabs?: ProviderTabDef[];
 }) {
-  const tabs = providerTabs(brand);
   return (
     <Tabs value={tab} onValueChange={onOpen}>
       <TabsList className="flex h-auto w-full flex-wrap justify-start sm:h-9 sm:w-auto" data-testid={`provider-tabs-${brand}`}>
