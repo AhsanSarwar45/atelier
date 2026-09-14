@@ -2,6 +2,12 @@
   "commands": [
     { "type": "agent-files.list", "projectPath": "/project" },
     { "type": "agent-files.read", "path": "/project/AGENTS.md", "projectPath": "/project" },
+    { "type": "mcp.list", "brand": "claude", "scope": "project", "projectPath": "/project", "profileId": "work" },
+    { "type": "mcp.add", "brand": "codex", "scope": "account", "source": "user", "id": "docs", "config": { "command": "npx", "args": ["-y", "docs"] } },
+    { "type": "mcp.remove", "brand": "claude", "scope": "account", "source": "user", "id": "docs" },
+    { "type": "mcp.set-enabled", "brand": "claude", "scope": "project", "projectPath": "/project", "source": "project", "id": "shared", "enabled": false },
+    { "type": "mcp.login", "brand": "claude", "scope": "project", "projectPath": "/project", "id": "sentry" },
+    { "type": "mcp.logout", "brand": "codex", "scope": "account", "profileId": "work", "id": "linear" },
     { "type": "provider-defaults.read", "brand": "claude" },
     { "type": "provider-defaults.write", "brand": "codex", "kind": "model", "value": "gpt-5" },
     { "type": "provider.authenticate", "brand": "claude", "methodId": "subscription" },

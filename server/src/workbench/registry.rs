@@ -5,6 +5,7 @@ use super::agent_files;
 use super::browser::{self, BrowserCapture, BrowserRecipe};
 use super::extensions;
 use super::external::{self, ProviderHold};
+use super::mcp_servers;
 use super::media;
 use super::profiles::Profiles;
 use super::protocol::{Command, CommandKind};
@@ -368,6 +369,25 @@ impl WorkbenchRegistry {
         }
     }
 
+    /// One account's MCP files. Claude keeps `.claude.json` inside a profile's
+    /// own directory, but for the system account it is `~/.claude.json` unless
+    /// `CLAUDE_CONFIG_DIR` was set when the server started — the same rule the
+    /// `claude` program applies, so both read the same file.
+    fn mcp_account(&self, brand: &str, profile: Option<&str>) -> super::mcp_servers::Account {
+        let system = profile.is_none_or(|id| id == super::profiles::SYSTEM);
+        let dir = self.account_dir(brand, profile);
+        let claude_json = if system && std::env::var_os("CLAUDE_CONFIG_DIR").is_none() {
+            self.paths.home.join(".claude.json")
+        } else {
+            dir.join(".claude.json")
+        };
+        super::mcp_servers::Account {
+            dir,
+            claude_json,
+            system,
+        }
+    }
+
     /// The Claude and Codex directories an agent-files command reads, for the
     /// account it names or the one the server booted with.
     fn agent_dirs(&self, profile: Option<&str>) -> (PathBuf, PathBuf) {
@@ -648,6 +668,12 @@ impl WorkbenchRegistry {
         serde_json::from_value(Value::Object(command.fields.clone())).map_err(|_| {
             "scope must be account, or project with an absolute projectPath".to_string()
         })
+    }
+
+    /// The `source` field of an MCP command.
+    fn mcp_source(command: &Command) -> Result<mcp_servers::Source, String> {
+        serde_json::from_value(command.at("source").clone())
+            .map_err(|_| "source must be user, project or local".to_string())
     }
 
     fn maybe<'a>(command: &'a Command, name: &str) -> Option<&'a str> {
@@ -1217,6 +1243,62 @@ impl WorkbenchRegistry {
                 ];
                 self.claude_plugin_cli(command, words, extensions::QUICK_CLI)
                     .await
+            }
+            CommandKind::McpList => {
+                let brand = Self::field(command, "brand")?;
+                let scope = Self::settings_scope(command)?;
+                let account = self.mcp_account(brand, Self::maybe(command, "profileId"));
+                serde_json::to_value(mcp_servers::list(brand, &scope, &account)?)
+                    .map_err(|e| e.to_string())
+            }
+            CommandKind::McpAdd => {
+                let brand = Self::field(command, "brand")?;
+                let scope = Self::settings_scope(command)?;
+                let source = Self::mcp_source(command)?;
+                let id = Self::field(command, "id")?;
+                let config = command
+                    .fields
+                    .get("config")
+                    .and_then(Value::as_object)
+                    .ok_or("config must be an object")?;
+                let account = self.mcp_account(brand, Self::maybe(command, "profileId"));
+                serde_json::to_value(mcp_servers::add(
+                    brand, &scope, &account, source, id, config,
+                )?)
+                .map_err(|e| e.to_string())
+            }
+            CommandKind::McpRemove => {
+                let brand = Self::field(command, "brand")?;
+                let scope = Self::settings_scope(command)?;
+                let source = Self::mcp_source(command)?;
+                let id = Self::field(command, "id")?;
+                let account = self.mcp_account(brand, Self::maybe(command, "profileId"));
+                serde_json::to_value(mcp_servers::remove(brand, &scope, &account, source, id)?)
+                    .map_err(|e| e.to_string())
+            }
+            CommandKind::McpSetEnabled => {
+                let brand = Self::field(command, "brand")?;
+                let scope = Self::settings_scope(command)?;
+                let source = Self::mcp_source(command)?;
+                let id = Self::field(command, "id")?;
+                let enabled = command
+                    .at("enabled")
+                    .as_bool()
+                    .ok_or("enabled must be true or false")?;
+                let account = self.mcp_account(brand, Self::maybe(command, "profileId"));
+                serde_json::to_value(mcp_servers::set_enabled(
+                    brand, &scope, &account, source, id, enabled,
+                )?)
+                .map_err(|e| e.to_string())
+            }
+            CommandKind::McpLogin | CommandKind::McpLogout => {
+                let brand = Self::field(command, "brand")?;
+                let scope = Self::settings_scope(command)?;
+                let id = Self::field(command, "id")?;
+                let account = self.mcp_account(brand, Self::maybe(command, "profileId"));
+                let out = command.kind == CommandKind::McpLogout;
+                serde_json::to_value(mcp_servers::login(brand, &scope, &account, id, out).await?)
+                    .map_err(|e| e.to_string())
             }
             CommandKind::ProviderDefaultsRead => {
                 let brand = Self::field(command, "brand")?;

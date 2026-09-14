@@ -189,6 +189,76 @@ pub fn write(
     read(brand, scope, account_dir)
 }
 
+/// Change one JSON object file in place, with the same backup and atomic
+/// replacement a settings write gets. `edit` sees the parsed object (empty
+/// when the file is missing) and may refuse with a sentence.
+pub(crate) fn rewrite_json(
+    path: &Path,
+    edit: impl FnOnce(&mut Map<String, Value>) -> Result<(), String>,
+) -> Result<(), String> {
+    let existing = read_existing(path)?;
+    let mut object = match existing.as_deref() {
+        Some(text) => parse_json(path, text)?,
+        None => Map::new(),
+    };
+    edit(&mut object)?;
+    let mut bytes =
+        serde_json::to_vec_pretty(&Value::Object(object)).map_err(|error| error.to_string())?;
+    bytes.push(b'\n');
+    replace_file(path, existing.is_some(), &bytes)
+}
+
+/// Change one TOML file in place, keeping comments and unrelated tables, with
+/// the same backup and atomic replacement a settings write gets.
+pub(crate) fn rewrite_toml(
+    path: &Path,
+    edit: impl FnOnce(&mut DocumentMut) -> Result<(), String>,
+) -> Result<(), String> {
+    let existing = read_existing(path)?;
+    let mut document = match existing.as_deref() {
+        Some(text) => parse_toml(path, text)?,
+        None => DocumentMut::new(),
+    };
+    edit(&mut document)?;
+    let mut text = document.to_string();
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    replace_file(path, existing.is_some(), text.as_bytes())
+}
+
+/// One JSON object file as it is, `{}` when missing.
+pub(crate) fn load_json(path: &Path) -> Result<Map<String, Value>, String> {
+    match read_existing(path)? {
+        Some(text) => parse_json(path, &text),
+        None => Ok(Map::new()),
+    }
+}
+
+/// One TOML file as it is, empty when missing.
+pub(crate) fn load_toml(path: &Path) -> Result<DocumentMut, String> {
+    match read_existing(path)? {
+        Some(text) => parse_toml(path, &text),
+        None => Ok(DocumentMut::new()),
+    }
+}
+
+fn read_existing(path: &Path) -> Result<Option<String>, String> {
+    match fs::read_to_string(path) {
+        Ok(text) => Ok(Some(text)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("{} could not be read: {error}", path.display())),
+    }
+}
+
+fn replace_file(path: &Path, existed: bool, bytes: &[u8]) -> Result<(), String> {
+    if existed {
+        fs::copy(path, backup_of(path))
+            .map_err(|error| format!("{} could not be backed up: {error}", path.display()))?;
+    }
+    atomic_write(path, bytes)
+}
+
 /// `settings.json.bak` beside `settings.json`: the previous contents, kept
 /// until the next write replaces it.
 pub(crate) fn backup_of(path: &Path) -> PathBuf {
@@ -316,7 +386,7 @@ fn patch_toml(
 /// on the way when setting and pruning emptied ones on the way back when
 /// deleting. An inline table only holds values, so what gets inserted below
 /// one is shaped by the container, not by the patch.
-fn set_toml(item: &mut Item, parts: &[&str], value: &Value) -> Result<(), String> {
+pub(crate) fn set_toml(item: &mut Item, parts: &[&str], value: &Value) -> Result<(), String> {
     let inline = item.is_inline_table();
     let Some(table) = item.as_table_like_mut() else {
         return Err("the key above it is not a table".into());
@@ -402,11 +472,11 @@ fn json_to_value(value: &Value) -> toml_edit::Value {
     }
 }
 
-fn document_to_json(document: &DocumentMut) -> Value {
+pub(crate) fn document_to_json(document: &DocumentMut) -> Value {
     item_to_json(document.as_item())
 }
 
-fn item_to_json(item: &Item) -> Value {
+pub(crate) fn item_to_json(item: &Item) -> Value {
     match item {
         Item::None => Value::Null,
         Item::Value(value) => value_to_json(value),
