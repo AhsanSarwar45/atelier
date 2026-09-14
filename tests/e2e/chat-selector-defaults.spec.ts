@@ -15,8 +15,8 @@ async function fixtureProject(request: APIRequestContext): Promise<{ id: string;
   return (await made.json()) as { id: string; path: string };
 }
 
-async function setAndProve(page: Page, request: APIRequestContext, brand: 'claude' | 'codex', pickerName: 'model-picker' | 'effort-picker'): Promise<void> {
-  const kind = pickerName === 'model-picker' ? 'model' : 'effort';
+async function setAndProve(page: Page, request: APIRequestContext, brand: 'claude' | 'codex', pickerName: 'model-picker' | 'effort-picker' | 'mode-picker'): Promise<void> {
+  const kind = pickerName === 'model-picker' ? 'model' : pickerName === 'effort-picker' ? 'effort' : 'permissionMode';
   await page.getByTestId(pickerName).click();
   const controls = page.locator(`[data-testid^="${pickerName}-default-"]:not([disabled])`);
   const count = await controls.count();
@@ -33,14 +33,14 @@ async function setAndProve(page: Page, request: APIRequestContext, brand: 'claud
       const body = sent.postDataJSON() as { type?: string };
       return body.type === 'provider-defaults.write';
     }),
-    control.dispatchEvent('pointerdown', { pointerType: 'mouse', button: 0 }),
+    control.click(),
   ]);
   const writeResponse = await writeRequest.response();
   expect(writeResponse?.ok(), await writeResponse?.text()).toBeTruthy();
   await expect(page.getByTestId(`${pickerName}-default-${value}`)).toHaveAttribute('data-default', 'true');
   await expect.poll(async () => {
     const response = await request.post('/api/workbench/command', { data: { type: 'provider-defaults.read', brand } });
-    const defaults = await response.json() as { model: string | null; effort: string | null };
+    const defaults = await response.json() as { model: string | null; effort: string | null; permissionMode: string | null };
     return defaults[kind];
   }).toBe(value);
   await page.getByTestId(`${pickerName}-menu`).screenshot({ path: join(SHOTS, `${brand}-${pickerName}-default.png`) });
@@ -50,7 +50,7 @@ async function setAndProve(page: Page, request: APIRequestContext, brand: 'claud
   await page.keyboard.press('Escape');
 }
 
-test('Claude and Codex model and effort defaults use provider-native configuration', async ({ page, request }) => {
+test('Claude and Codex selector defaults use provider-native configuration', async ({ page, request }) => {
   test.setTimeout(300_000);
   rmSync(FIXTURE, { recursive: true, force: true });
   mkdirSync(FIXTURE, { recursive: true });
@@ -74,6 +74,7 @@ test('Claude and Codex model and effort defaults use provider-native configurati
     await page.waitForTimeout(2_000);
     await setAndProve(page, request, brand, 'model-picker');
     await setAndProve(page, request, brand, 'effort-picker');
+    await setAndProve(page, request, brand, 'mode-picker');
     await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId: started.id } });
   }
 

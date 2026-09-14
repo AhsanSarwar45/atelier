@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 pub struct ProviderDefaults {
     pub model: Option<String>,
     pub effort: Option<String>,
+    #[serde(rename = "permissionMode")]
     pub permission_mode: Option<String>,
 }
 
@@ -267,6 +268,19 @@ impl ProviderDefaultFiles {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn defaults_use_the_browser_protocol_name_for_permission_mode() {
+        let value = serde_json::to_value(ProviderDefaults {
+            model: None,
+            effort: None,
+            permission_mode: Some("never".into()),
+        })
+        .unwrap();
+
+        assert_eq!(value["permissionMode"], "never");
+        assert!(value.get("permission_mode").is_none());
+    }
 
     #[test]
     fn native_workbench_services_registry_preserves_provider_configuration() {
