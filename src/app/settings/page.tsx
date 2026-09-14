@@ -23,6 +23,7 @@ import { SettingsScreen, type SettingsSectionDef } from '@/components/settings/s
 import { TagsSettings } from '@/components/settings/tags-settings';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useProjects } from '@/hooks/use-projects';
+import { stepsOut } from '@/lib/address';
 import { AccountsSettings } from '@/workbench/accounts-settings';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
 import { DependenciesSettings } from '@/workbench/dependencies-settings';
@@ -88,7 +89,16 @@ function Settings() {
   );
 
   return (
-    <SettingsScreen title="Settings" backHref="/" sections={SECTIONS} section={known} onOpen={open}>
+    <SettingsScreen
+      title="Settings"
+      backHref="/"
+      // Every section and tab pushed an entry; the arrow steps over all of
+      // them to the page the reader opened settings from.
+      backSteps={() => stepsOut((url) => url.pathname !== '/settings' && !url.pathname.startsWith('/settings/'), 1)}
+      sections={SECTIONS}
+      section={known}
+      onOpen={open}
+    >
       {(known ?? 'appearance') === 'appearance' && <AppearanceSettings />}
       {known === 'accounts' && (
         <SettingsGroup title="Accounts">

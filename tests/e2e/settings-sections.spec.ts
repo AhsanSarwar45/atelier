@@ -56,10 +56,16 @@ test('a phone shows the list, then the section over it, with a way back to the l
   await expect(page.getByTestId('settings-nav')).toBeVisible();
 });
 
-test('the arrow gives back the page the reader came from', async ({ page }) => {
+test('the arrow gives back the page the reader came from, however many sections were opened', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('link', { name: 'Settings' }).click();
   await expect(page).toHaveURL(/\/settings/);
+  await page.getByTestId('settings-section-codex').click();
+  await expect(page).toHaveURL(/section=codex/);
+  await page.getByTestId('provider-tab-permissions').click();
+  await expect(page).toHaveURL(/tab=permissions/);
+  await page.getByTestId('settings-section-accounts').click();
+  await expect(page).toHaveURL(/section=accounts/);
   await page.getByTestId('back-arrow').click();
   await expect(page).toHaveURL(/\/$/);
 });
