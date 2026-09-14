@@ -8,9 +8,9 @@ describe('the provider-neutral collaboration mode control', () => {
   const picker = source.slice(source.indexOf('testid="collaboration-mode-picker"'));
   const block = picker.slice(0, picker.indexOf('/>') + 2);
 
-  it('is offered only from modes announced by this session', () => {
-    expect(source).toContain('view.menu.collaborationModes.length > 0');
-    expect(block).toContain('view.menu.collaborationModes.map');
+  it('uses live modes when announced and provider fallbacks for a cold chat', () => {
+    expect(source).toContain('composer.collaborationModes.length > 0');
+    expect(block).toContain('composer.collaborationModes.map');
     expect(block).toContain('value: mode.value');
     expect(block).toContain('label: mode.displayName');
     expect(block).toContain('hint: mode.description');

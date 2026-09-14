@@ -8,8 +8,8 @@ describe('the composer effort picker', () => {
   const picker = source.slice(source.indexOf('testid="effort-picker"'));
   const block = picker.slice(0, picker.indexOf('/>') + 2);
 
-  it('lists the choices announced by this session instead of a guessed global list', () => {
-    expect(block).toContain('view.menu.efforts.map');
+  it('lists the live choices, or the provider fallback while a cold chat has no menu', () => {
+    expect(block).toContain('composer.efforts.map');
     expect(block).toContain('value: effort.value');
     expect(block).toContain('label: effort.displayName');
     expect(block).toContain('hint: effort.description');
