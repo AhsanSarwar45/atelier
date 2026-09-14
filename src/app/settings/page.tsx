@@ -22,7 +22,6 @@ import { SettingsGroup } from '@/components/settings/section';
 import { SettingsScreen, type SettingsSectionDef } from '@/components/settings/settings-screen';
 import { TagsSettings } from '@/components/settings/tags-settings';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useProjects } from '@/hooks/use-projects';
 import { stepsOut } from '@/lib/address';
 import { AccountsSettings } from '@/workbench/accounts-settings';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
@@ -45,7 +44,6 @@ function Settings() {
   const router = useRouter();
   const params = useSearchParams();
   const section = params.get('section');
-  const { projects } = useProjects();
 
   const open = useCallback(
     (id: string | null) => {
@@ -98,6 +96,7 @@ function Settings() {
       sections={SECTIONS}
       section={known}
       onOpen={open}
+      wide={known === 'files'}
     >
       {(known ?? 'appearance') === 'appearance' && <AppearanceSettings />}
       {known === 'accounts' && (
@@ -133,13 +132,7 @@ function Settings() {
               </SelectContent>
             </Select>
           </div>
-          <AgentFilesBrowser
-            profileId={filesAccount.id === SYSTEM_PROFILE ? null : filesAccount.id}
-            brand={filesAccount.brand}
-            projects={projects
-              .filter((project) => !project.archivedAt)
-              .map(({ id, name, localPath, path }) => ({ id, name, path: localPath || path }))}
-          />
+          <AgentFilesBrowser profileId={filesAccount.id === SYSTEM_PROFILE ? null : filesAccount.id} brand={filesAccount.brand} />
         </div>
       )}
       {known === 'terminal' && (

@@ -45,10 +45,13 @@ export function SettingsScreen({
   children,
   bar,
   backSteps,
+  wide,
 }: {
   title: string;
   /** How many history entries the arrow steps over; see BackLink. */
   backSteps?: number | (() => number);
+  /** The open section fills the body instead of a reading column (the file browser). */
+  wide?: boolean;
   /** Where the bar's arrow goes when nothing of ours is behind this screen. */
   backHref: string;
   sections: SettingsSectionDef[];
@@ -129,7 +132,7 @@ export function SettingsScreen({
           data-testid="settings-body"
           className={cn('min-h-0 min-w-0 flex-1 overflow-y-auto', phone && !open && 'hidden')}
         >
-          {open && <div className="mx-auto max-w-3xl p-4 sm:p-6">{children}</div>}
+          {open && <div className={cn('mx-auto p-4 sm:p-6', !wide && 'max-w-3xl')}>{children}</div>}
         </main>
       </div>
     </div>
