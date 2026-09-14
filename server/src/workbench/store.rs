@@ -1054,6 +1054,7 @@ fn held_in_its_project(
     /// onto the provider's newly advertised definitions.
     pub fn steering_menu(&self, session_id: &str) -> rusqlite::Result<Value> {
         let mut selected = HashMap::<String, Value>::new();
+        let mut title = None;
         let mut statement = self.connection.prepare(
             r#"SELECT json FROM event
                WHERE session_id=?1 AND type='session.pinned'
@@ -1062,6 +1063,9 @@ fn held_in_its_project(
         let rows = statement.query_map([session_id], |row| row.get::<_, String>(0))?;
         for row in rows {
             let event: Value = serde_json::from_str(&row?).map_err(json_error)?;
+            if title.is_none() {
+                title = event["title"].as_str().map(str::to_string);
+            }
             for patch in event["configOptions"].as_array().into_iter().flatten() {
                 if let Some(id) = patch["id"].as_str() {
                     selected
@@ -1075,7 +1079,7 @@ fn held_in_its_project(
             .map(|(id, current)| json!({"id": id, "currentValue": current}))
             .collect::<Vec<_>>();
         options.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
-        Ok(json!({"configOptions": options}))
+        Ok(json!({"configOptions": options, "title": title}))
     }
 
     pub fn open_message(

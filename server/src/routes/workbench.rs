@@ -1660,9 +1660,17 @@ async fn restore(
                 row["externalId"].as_str().unwrap_or_default()
             ) == key
         }) {
-            if let Some(title) = known["name"]
+            let pinned_title = row["sessionId"]
                 .as_str()
-                .filter(|title| !title.trim().is_empty())
+                .map(str::to_string)
+                .map(|session_id| state.database().steering_menu(session_id));
+            let pinned_title = match pinned_title {
+                Some(answer) => answer.await?["title"].as_str().map(str::to_string),
+                None => None,
+            };
+            if let Some(title) = pinned_title.as_deref().or_else(|| known["name"]
+                .as_str()
+                .filter(|title| !title.trim().is_empty()))
             {
                 if row["title"].as_str() != Some(title) {
                     row["title"] = json!(title);

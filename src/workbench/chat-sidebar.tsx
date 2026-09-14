@@ -23,11 +23,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Bot, ChevronDown, ExternalLink, Loader2, Plus, Power, Search, X } from 'lucide-react';
+import { Bot, ChevronDown, Copy, ExternalLink, Loader2, Pencil, Plus, Power, Search, X } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,7 +36,9 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
 import { Tooltip } from '@/components/ui/tooltip';
+import { toast } from '@/hooks/use-toast';
 import { git, request } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { chatState, holderOnly, HOLDER_WORD, type HeldChat } from '@/workbench/chat-state';
@@ -55,6 +58,7 @@ import { sendCommand } from '@/workbench/use-session';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
 import { useProviders, whyUnavailable } from '@/workbench/providers';
 import { ModelIcon } from '@/workbench/model-icon';
+import { PointerAnchor, type PointerAt } from '@/workbench/menu-anchor';
 
 /**
  * How many rows are drawn before the reader asks for more. A 288px rail shows
@@ -400,6 +404,9 @@ export function ChatSidebar({
   const [busy, setBusy] = useState<string | null>(null);
   const [ending, setEnding] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ row: RestoreRow; at: PointerAt } | null>(null);
+  const [renaming, setRenaming] = useState<RestoreRow | null>(null);
+  const [title, setTitle] = useState('');
   const loadGeneration = useRef(0);
 
   const load = useCallback(async () => {
@@ -561,6 +568,32 @@ export function ChatSidebar({
     },
     [load],
   );
+
+  const askRename = useCallback((row: RestoreRow) => {
+    setTitle(row.title ?? '');
+    setRenaming(row);
+  }, []);
+
+  const rename = useCallback(async () => {
+    const sessionId = renaming?.sessionId;
+    const called = title.trim();
+    if (!sessionId || !called) return;
+    setFailed(null);
+    try {
+      await sendCommand({ type: 'session.rename', sessionId, title: called });
+      setFetched((known) => known.map((row) => row.sessionId === sessionId ? { ...row, title: called } : row));
+      setRenaming(null);
+    } catch (e) {
+      setFailed(e instanceof Error ? e.message : String(e));
+    }
+  }, [renaming, title]);
+
+  const copyId = useCallback((row: RestoreRow) => {
+    const id = row.sessionId ?? row.externalId;
+    if (!id) return;
+    const copied = navigator.clipboard?.writeText(id);
+    if (copied) void copied.then(() => toast({ title: 'Chat ID copied' }));
+  }, []);
 
   // A screenful, then more as it is pulled: a project with hundreds of chats
   // would otherwise draw every one of them before the first is on screen
@@ -754,6 +787,10 @@ export function ChatSidebar({
                   // and its branch, so drawing it here too spent a line of a
                   // two-line row saying what the next screen says anyway.
                   data-folder={row.folder ?? ''}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setMenu({ row, at: { left: event.clientX, top: event.clientY } });
+                  }}
                   // Two lines, never three: the name, then what it is doing.
                   // Everything else — the time, whoever else is in there — rides
                   // on one of those two lines, because a rail this narrow turns
@@ -947,6 +984,48 @@ export function ChatSidebar({
           </div>
         )}
       </div>
+
+      <DropdownMenu open={menu !== null} onOpenChange={(open) => { if (!open) setMenu(null); }}>
+        <PointerAnchor at={menu?.at ?? null} />
+        <DropdownMenuContent data-testid="chat-context-menu" className="w-48" align="start">
+          <DropdownMenuItem
+            data-testid="chat-menu-rename"
+            disabled={!menu?.row.sessionId}
+            onSelect={() => { if (menu) askRename(menu.row); }}
+          >
+            <Pencil aria-hidden="true" /> Rename…
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-testid="chat-menu-copy-id"
+            disabled={!menu || !(menu.row.sessionId ?? menu.row.externalId)}
+            onSelect={() => { if (menu) copyId(menu.row); }}
+          >
+            <Copy aria-hidden="true" /> Copy ID
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <Dialog open={renaming !== null} onOpenChange={(open) => { if (!open) setRenaming(null); }}>
+        <DialogContent className="sm:max-w-md" data-testid="chat-rename-dialog">
+          <DialogHeader>
+            <DialogTitle>Rename chat</DialogTitle>
+            <DialogDescription>Give this chat a name that is easy to find in the sidebar.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={(event) => { event.preventDefault(); void rename(); }}>
+            <Input
+              autoFocus
+              value={title}
+              maxLength={200}
+              aria-label="Chat name"
+              onChange={(event) => setTitle(event.target.value)}
+            />
+            <DialogFooter className="mt-4">
+              <Button type="button" variant="outline" onClick={() => setRenaming(null)}>Cancel</Button>
+              <Button type="submit" disabled={!title.trim()}>Rename</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </aside>
   );
 }

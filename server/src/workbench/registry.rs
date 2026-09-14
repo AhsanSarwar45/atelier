@@ -1392,6 +1392,39 @@ impl WorkbenchRegistry {
                 Ok(json!({"ok":true}))
             }
             CommandKind::SessionProfile => self.switch_profile(command).await,
+            CommandKind::SessionRename => {
+                let session_id = Self::field(command, "sessionId")?;
+                let title = Self::field(command, "title")?.trim();
+                if title.is_empty() {
+                    return Err("a chat title cannot be empty".into());
+                }
+                if title.chars().count() > 200 {
+                    return Err("a chat title cannot be longer than 200 characters".into());
+                }
+                self.database
+                    .get_session(session_id.to_string())
+                    .await?
+                    .ok_or_else(|| format!("no session {session_id}"))?;
+                self.database
+                    .update_session(
+                        session_id.to_string(),
+                        crate::workbench::store::SessionPatch {
+                            title: Some(Some(title.to_string())),
+                            ..Default::default()
+                        },
+                        None,
+                    )
+                    .await?;
+                let event: crate::workbench::protocol::Event = serde_json::from_value(json!({
+                    "type":"session.pinned", "sessionId":session_id, "seq":0,
+                    "at":chrono::Utc::now().to_rfc3339(), "permissionMode":Value::Null,
+                    "model":Value::Null, "effort":Value::Null, "collaborationMode":Value::Null,
+                    "title":title
+                }))
+                .map_err(|error| error.to_string())?;
+                self.database.append(event).await?;
+                Ok(json!({"ok":true,"title":title}))
+            }
             CommandKind::ProvidersList => {
                 let mut providers = [
                     (

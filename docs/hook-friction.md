@@ -273,3 +273,12 @@ The restored branch then needed `git rebase main`, but the hook resolved the
 named `main` ref as a write to the landing checkout even though rebase writes
 the current worktree and its checked-out branch. It should judge the repository
 being changed, not a revision argument.
+
+## 9. `apply_patch` resolves a claimed child in its job copy as the landing checkout
+
+While `bw-ehjb.1` was claimed in the required one-per-job copy at
+`worktrees/bw-ehjb`, `apply_patch` refused an absolute path under that copy and
+reported `resolved target: /home/ahsan/dev/beads-web`. The child cannot have a
+second copy, and the epic deliberately remains open while its child runs. The
+gate should accept a claimed descendant of the job named by the worktree. The
+documented per-job bypass was used for the intended patch and this report.

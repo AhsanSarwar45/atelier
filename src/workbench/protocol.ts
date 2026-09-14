@@ -1020,6 +1020,7 @@ export type WbpCommand =
    * flight and leaves the agent standing.
    */
   | { type: 'session.close'; sessionId: string }
+  | { type: 'session.rename'; sessionId: string; title: string }
   | { type: 'session.delete'; sessionId: string }
   | { type: 'session.fork'; sessionId: string }
   /**
