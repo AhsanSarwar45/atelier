@@ -81,7 +81,9 @@ async function shoot(page: Page, name: string): Promise<void> {
 }
 
 test.describe('the navigation on a phone', () => {
-  test.describe.configure({ timeout: 300_000 });
+  // Serial: the two cases share one seeded repository and one project, and two
+  // workers racing on `beforeAll` tore the fixture out from under each other.
+  test.describe.configure({ timeout: 300_000, mode: 'serial' });
 
   test.beforeAll(() => {
     mkdirSync(SHOTS, { recursive: true });
@@ -189,12 +191,28 @@ test.describe('the navigation on a phone', () => {
       await panelFile.click();
       await expect(page.getByTestId('files-diff-pane')).toBeVisible({ timeout: 60_000 });
       await expect(page.getByTestId('files-diff-back')).toBeVisible();
+      // Both of a phone's sheets are out of the way: the diff is what was
+      // asked for, so nothing may be standing over it.
+      await expect(page.getByTestId('files-rail')).toHaveAttribute('data-open', 'false');
+      await expect(rail).toHaveAttribute('data-open', 'false');
+      await expect(page.locator('[data-testid="git-diff-file"][data-path="beta.txt"]')).toBeInViewport();
       await shoot(page, '08-files-tab-diff');
 
       // ---- 5. and the same screens on a desktop ----------------------------
       await page.setViewportSize(DESKTOP);
       await page.waitForTimeout(800);
-      await expect(page.getByTestId('open-terminal')).toBeVisible();
+      await expect(
+        page.getByTestId('open-terminal'),
+        'above the md break the pair is back in plain sight',
+      ).toBeVisible();
+      await expect(page.getByTestId('shell-menu')).toBeHidden();
+      // Side by side, which is what a wide screen is for: the column of
+      // changes and the diff of the file picked out of it.
+      if ((await rail.getAttribute('data-open')) !== 'true') await door.click();
+      await expect(rail).toHaveAttribute('data-open', 'true', { timeout: 60_000 });
+      await expect(panelFile).toBeVisible({ timeout: 60_000 });
+      await panelFile.click();
+      await expect(page.getByTestId('files-diff-pane')).toBeVisible({ timeout: 60_000 });
       await shoot(page, '09-files-tab-git-desktop');
 
       await page.goto(`/project?id=${project.id}&tab=chat&chat=${chat.id}`);

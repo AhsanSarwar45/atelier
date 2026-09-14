@@ -1008,7 +1008,14 @@ export function ChatSidebar({
 
       <DropdownMenu open={menu !== null} onOpenChange={(open) => { if (!open) setMenu(null); }}>
         <PointerAnchor at={menu?.at ?? null} />
-        <DropdownMenuContent data-testid="chat-context-menu" className="w-48" align="start">
+        {/* Kept off the edge: a 192px menu hung at the button's left edge on a
+            390px screen ran two points past the side of it (bw-rpgh.1). */}
+        <DropdownMenuContent
+          data-testid="chat-context-menu"
+          className="w-48"
+          align="start"
+          collisionPadding={8}
+        >
           <DropdownMenuItem
             data-testid="chat-menu-rename"
             disabled={!menu?.row.sessionId}

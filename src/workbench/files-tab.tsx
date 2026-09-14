@@ -45,9 +45,9 @@ import { isPhoneScreen, usePhoneScreen } from '@/lib/screen-width';
 import { cn } from '@/lib/utils';
 import { ChatRightRail, useGitDiff, useRightRail } from '@/workbench/chat-right-rail';
 import { FilePreview, PREVIEWS_NEEDING_TEXT, previewKind } from '@/workbench/file-preview';
-import { GitDiffView, type DiffFocus } from '@/workbench/git-diff-view';
 import FileTree from '@/workbench/file-tree';
 import { FileViewer, type ViewedFile } from '@/workbench/file-viewer';
+import { GitDiffView, type DiffFocus } from '@/workbench/git-diff-view';
 import {
   closing,
   closingCurrent,
@@ -229,16 +229,29 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
     if (!showDiff) setDiffFocus(null);
   }, [showDiff]);
 
-  /** The diff button, with the phone's door shut behind it — chat-tab's rule. */
+  /**
+   * The diff button, with both of a phone's doors shut behind it.
+   *
+   * The chat shuts the sheet the button was pressed in (bw-e3dw.14); this tab
+   * has a second sheet, the tree, and on a phone that one was left standing
+   * over the diff it had just asked for — a reader who pressed a file in Git
+   * got a tree where the answer should have been.
+   */
   const showTheDiff = useCallback(() => {
-    if (phone && !diffOpen && rightOpen) flipRight();
+    if (phone && !diffOpen) {
+      if (rightOpen) flipRight();
+      setRailOpen(false);
+    }
     flipDiff();
   }, [phone, diffOpen, rightOpen, flipRight, flipDiff]);
 
   /** A file's name in the Git panel, clicked: the diff comes up on that file. */
   const showFileInDiff = useCallback(
     (file: string) => {
-      if (phone && rightOpen) flipRight();
+      if (phone) {
+        if (rightOpen) flipRight();
+        setRailOpen(false);
+      }
       if (!diffOpen) flipDiff();
       setDiffFocus({ path: file, asked: Date.now() });
     },
