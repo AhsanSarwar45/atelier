@@ -59,7 +59,7 @@ import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { isPhoneScreen, usePhoneScreen } from '@/lib/screen-width';
-import { ChatRightRail, useGitDiff, useGitPanel, useRightRail } from '@/workbench/chat-right-rail';
+import { ChatRightRail, useGitDiff, useGitPanel, useRightRail, type RailView } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { ComposerEditor, type ComposerHandle } from '@/workbench/composer-editor';
 import { fileCompletions } from '@/workbench/composer-files';
@@ -1037,21 +1037,19 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     [phone, diffOpen, rightOpen, flipRight, rememberDiff],
   );
   /**
-   * The way into the Git view.
+   * Choosing which of the rail's two views is drawn.
    *
-   * A shut rail always opens ON Git: the button is a door, and a door that
-   * opens onto the other room did nothing the reader pressed it for. With the
-   * rail already open the same press swaps the two views, so this is also the
-   * way back to what the chat has touched.
+   * The remembered switch underneath is a flip rather than a setter, so this
+   * flips it only when the strip asks for the view it is not on — pressing the
+   * tab you are already reading changes nothing, which is what a tab strip
+   * means.
    */
-  const showGit = useCallback(() => {
-    if (!rightOpen) {
-      flipRight();
-      if (!gitOpen) flipGit();
-      return;
-    }
-    flipGit();
-  }, [rightOpen, gitOpen, flipRight, flipGit]);
+  const pickView = useCallback(
+    (next: RailView) => {
+      if ((next === 'git') !== gitOpen) flipGit();
+    },
+    [gitOpen, flipGit],
+  );
   /** The ways in that live in this tab, each a full-screen panel. */
   const [showing, setShowing] = useState<'search' | 'usage' | 'tokens' | 'new-chat' | null>(null);
   /**
@@ -1747,19 +1745,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             onClick={showTheDiff}
           />
         )}
-        {/* What the project has changed, which is the chat's other subject: the
-            agents in this transcript write those files, so the way to look at
-            them belongs on this bar and not in a screen of its own (bw-8dp8). */}
-        {sessionId && projectPath && (
-          <ToolButton
-            icon={<GitBranch />}
-            label={gitOpen && rightOpen ? 'Hide Git' : 'Show Git'}
-            emphasis={gitOpen && rightOpen ? 'loud' : 'quiet'}
-            data-testid="chat-git-toggle"
-            data-open={gitOpen && rightOpen}
-            onClick={showGit}
-          />
-        )}
+        {/* The Git button used to stand here, beside the rail's own door. It
+            opened the rail AND chose what was in it, which is two jobs on a bar
+            with room for neither — what the project has changed is a view of
+            that column, so it is now a tab inside it (bw-rpgh.4). */}
         {sessionId && (
           <ToolButton
             icon={rightOpen ? <PanelRightClose /> : <PanelRight />}
@@ -1997,6 +1986,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             onFlipDiff={showTheDiff}
             onShowFile={showFileInDiff}
             onToggle={flipRight}
+            onPickView={pickView}
           />
         </>
       )}

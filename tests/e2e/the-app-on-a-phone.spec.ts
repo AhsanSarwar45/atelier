@@ -776,11 +776,12 @@ test('every screen at a phone width, judged', async ({ page, request }) => {
     await expect(page.getByTestId('chat-right-rail')).toBeVisible({ timeout: WAIT });
     await page.waitForTimeout(1000);
     await judge(page, "the chat's right rail, its Chat view", '06-right-rail-chat');
-    expect(await pressable(page, 'chat-git-toggle'), 'the Git button on the bar must not be under the open sheet').toBe(true);
+    // Git is a tab inside the rail now, not a button on the bar, so the one
+    // bar button that must stay out from under the open sheet is this one.
     expect(await pressable(page, 'chat-right-rail-toggle'), 'the button that opened the rail must still be pressable').toBe(true);
 
-    // ---- 6. The same rail, its Git view. ---------------------------------
-    await page.getByTestId('chat-git-toggle').click();
+    // ---- 6. The same rail, its Git view, reached by its tab. -------------
+    await page.getByTestId('rail-tab-git').click();
     await expect(page.getByTestId('git-view')).toBeVisible({ timeout: WAIT });
     await page.waitForTimeout(3000);
     await judge(page, "the chat's right rail, its Git view", '07-right-rail-git');

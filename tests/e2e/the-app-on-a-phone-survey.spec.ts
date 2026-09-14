@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { bd } from './fixture-board';
+import { gitViewExists, openGitView } from './open-git-view';
 import { foldAll } from '../../src/workbench/fold';
 import type { WbpEvent } from '../../src/workbench/protocol';
 
@@ -423,13 +424,13 @@ test('every screen at a phone width, and what it does there', async ({ page, req
       );
       await survey(page, "the chat's right rail (Chat view)", '04-right-rail-chat');
 
-      // 5. The same rail, its Git view.
+      // 5. The same rail, its Git view, which is a tab inside the rail now.
       //
-      // The two rail buttons live on the top bar, and the phone sheet is
-      // `inset-y-0` — so while the rail is open it lies over both of them and
-      // neither can be pressed. The rail has to be shut from inside itself
-      // before Git can be asked for, which is a finding in its own right.
-      const buried = await page.getByTestId('chat-git-toggle').evaluate((el) => {
+      // The bar button that opens the rail lives on the top bar, and the phone
+      // sheet is `inset-y-0` — so while the rail is open it can lie over that
+      // button and it cannot be pressed, which is a finding in its own right.
+      // Git itself no longer depends on it: the Git tab is inside the sheet.
+      const buried = await page.getByTestId('chat-right-rail-toggle').evaluate((el) => {
         const box = el.getBoundingClientRect();
         const on = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
         return on?.closest('[data-testid="chat-right-rail"]') !== null;
@@ -437,16 +438,12 @@ test('every screen at a phone width, and what it does there', async ({ page, req
       if (buried) {
         note(
           "the chat's right rail (Chat view)",
-          'the bar buttons that open the rail — [chat-git-toggle] and [chat-right-rail-toggle] — are UNDER the open sheet, because it is inset-y-0 over the whole height including the bar',
+          'the bar button that opens the rail — [chat-right-rail-toggle] — is UNDER the open sheet, because it is inset-y-0 over the whole height including the bar; Git is reached by [rail-tab-git] inside the sheet instead',
         );
       }
-      const railScrim = page.getByTestId('chat-right-rail-scrim');
-      if (await railScrim.count()) await railScrim.click({ position: { x: 20, y: 400 } });
-      await page.waitForTimeout(800);
 
-      const gitToggle = page.getByTestId('chat-git-toggle');
-      if (await gitToggle.count()) {
-        await gitToggle.click();
+      if (await gitViewExists(page)) {
+        await openGitView(page);
         await expect(page.getByTestId('git-view')).toBeVisible({ timeout: WAIT });
         await page.waitForTimeout(3000);
         await survey(page, "the chat's right rail (Git view)", '05-right-rail-git');

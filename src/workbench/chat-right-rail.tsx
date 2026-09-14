@@ -33,6 +33,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { BeadChip } from '@/components/bead-chip-row';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { NOT_PHONE_SCREEN } from '@/lib/screen-width';
 import { cn } from '@/lib/utils';
 import { byJob, jobTitle } from '@/workbench/cards-by-job';
@@ -161,6 +162,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
  */
 export type RailView = 'chat' | 'git';
 
+/** What each view is called on the strip that chooses it. */
+const RAIL_TAB: Record<RailView, string> = { chat: 'Agents', git: 'Git' };
+
 export interface ChatRightRailProps {
   projectId: string | null;
   /** Every card this chat has touched, in the order it touched them. */
@@ -209,6 +213,15 @@ export interface ChatRightRailProps {
    * cross inside the sheet does (bw-81wt.30).
    */
   onToggle: () => void;
+  /**
+   * Which views this rail offers, in the order the strip draws them. Two in a
+   * chat; one on the Files tab, which has no chat to have sent anything away
+   * (bw-rpgh.4). A rail offering one view draws the strip anyway, so the
+   * column is labelled on both tabs and reads the same on each.
+   */
+  views?: readonly RailView[];
+  /** Choosing one of them. Without it the strip is drawn but does nothing. */
+  onPickView?: (view: RailView) => void;
 }
 
 export function ChatRightRail({
@@ -229,6 +242,8 @@ export function ChatRightRail({
   onFlipDiff,
   onShowFile,
   onToggle,
+  views = ['chat', 'git'],
+  onPickView,
 }: ChatRightRailProps) {
   const jobs = useMemo(() => byJob(cards), [cards]);
   const cardStatuses = useKnownCardStatuses(projectPath);
@@ -254,9 +269,9 @@ export function ChatRightRail({
             //
             // `absolute` inside the work area rather than `fixed` over the
             // whole window: fixed put the sheet on top of the bar it was
-            // opened from, so [chat-git-toggle] and [chat-right-rail-toggle]
-            // were buried under it and the only way from the Chat view to the
-            // Git view on a phone was to shut the sheet first (bw-e3dw.9). It
+            // opened from, so [chat-right-rail-toggle] was buried under it and
+            // the only way from one of the rail's views to the other on a phone
+            // was to shut the sheet first (bw-e3dw.9). It
             // ends flush with the bars, so there is no gap and no stray box —
             // the door simply stays in the hand that opened it.
             cn(
@@ -283,17 +298,32 @@ export function ChatRightRail({
           open ? 'opacity-100' : 'pointer-events-none opacity-0',
         )}
       >
-          {/* Only on a phone: on a wide screen this is a column of the row and
-              the button on the bar names it above (bw-81wt.30). The cross that
-              used to sit on the other end of this line is gone: the button on
-              the bar that opened the sheet shuts it again, and the tap outside
-              shuts it too, so the cross was a third way out of a sheet that
-              already had two (bw-rpgh.6).
-            */}
-          <div className="flex shrink-0 items-center gap-2 px-3 py-2 md:hidden">
-            <h2 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              {view === 'git' ? 'Git' : 'This chat'}
-            </h2>
+          {/*
+            The strip that says what this column is and chooses between its two
+            views. It replaces both the phone-only title that used to sit here
+            and the Git button that used to sit on the tab bar: Git is a view of
+            this column, not a third thing on a bar that was already full, and a
+            reader who has the column open should be able to change what is in
+            it without leaving it (bw-rpgh.4).
+
+            Drawn at every width, unlike the title it replaces — the desktop
+            needs it too now that the bar no longer carries the Git button.
+          */}
+          <div className="shrink-0 px-2 py-1.5">
+            <Tabs value={view} onValueChange={(next) => onPickView?.(next as RailView)}>
+              <TabsList data-testid="rail-tabs" className="w-full">
+                {views.map((name) => (
+                  <TabsTrigger
+                    key={name}
+                    value={name}
+                    data-testid={`rail-tab-${name}`}
+                    className="flex-1"
+                  >
+                    {RAIL_TAB[name]}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
           </div>
           {/* Keyed on the folder: the view holds a repository's status, its log
               and a half-written commit message, and none of that survives a

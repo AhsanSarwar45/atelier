@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 import { aChatSomebodyElseIsIn } from './fixture-held';
+import { openGitView } from './open-git-view';
 
 /**
  * The Git panel keeping up with a repository that moves without it (bw-8nwh.2).
@@ -149,12 +150,7 @@ test.describe('the Git panel and a repository that moves without it', () => {
       await row.getByTestId('row-name').click();
       await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
 
-      const toggle = page.getByTestId('chat-git-toggle');
-      await expect(toggle).toBeVisible({ timeout: WAY_IN_MS });
-      const rail = page.locator('[data-testid="chat-right-rail"]');
-      if ((await rail.getAttribute('data-open')) !== 'true' || !(await page.getByTestId('git-view').isVisible())) {
-        await toggle.click();
-      }
+      await openGitView(page);
       await expect(page.getByTestId('git-view')).toBeVisible({ timeout: 30_000 });
 
       // Where it starts: one saved change of ours that the shared copy has not

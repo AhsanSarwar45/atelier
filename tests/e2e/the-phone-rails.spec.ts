@@ -207,27 +207,24 @@ test('the phone rails: the bar stays reachable, one breakpoint decides, and the 
     const barBottom = await page
       .getByTestId('tab-bar')
       .evaluate((el) => Math.round(el.getBoundingClientRect().bottom));
-    const gitReachable = await pressable(page, 'chat-git-toggle');
+    // Git is a tab inside the rail now, so the only bar button the sheet could
+    // bury is the one that opened it.
     const toggleReachable = await pressable(page, 'chat-right-rail-toggle');
     note(
       `chat right rail open at 390px: ${railBox.width}px ${railBox.position} starting at y=${railBox.top}, the bar ends at y=${barBottom}; ` +
-        `[chat-git-toggle] ${gitReachable ? 'IS' : 'is NOT'} pressable, [chat-right-rail-toggle] ${toggleReachable ? 'IS' : 'is NOT'} pressable`,
+        `[chat-right-rail-toggle] ${toggleReachable ? 'IS' : 'is NOT'} pressable`,
     );
     await shoot(page, '01-chat-right-rail-open');
-    expect(gitReachable, 'the sheet is over [chat-git-toggle]').toBe(true);
     expect(toggleReachable, 'the sheet is over [chat-right-rail-toggle]').toBe(true);
     expect(railBox.top, 'the sheet starts above the bottom of the bars').toBeGreaterThanOrEqual(barBottom - 1);
 
     // The whole point: Git from Chat in one tap, without shutting the sheet.
-    if (gitReachable) {
-      await page.getByTestId('chat-git-toggle').click();
-      await expect(page.getByTestId('git-view')).toBeVisible({ timeout: WAIT });
-      await page.waitForTimeout(2500);
-      note('with the sheet open, one tap on [chat-git-toggle] reached the Git view');
-      await shoot(page, '02-chat-git-in-one-tap');
-    } else {
-      note('the Git view could NOT be reached without shutting the sheet first');
-    }
+    // That tap lands on the rail's own Git tab.
+    await page.getByTestId('rail-tab-git').click();
+    await expect(page.getByTestId('git-view')).toBeVisible({ timeout: WAIT });
+    await page.waitForTimeout(2500);
+    note('with the sheet open, one tap on [rail-tab-git] reached the Git view');
+    await shoot(page, '02-chat-git-in-one-tap');
 
     // The chat list's own sheet, from the other edge.
     if ((await page.getByTestId('chat-right-rail').getAttribute('data-open')) === 'true') {

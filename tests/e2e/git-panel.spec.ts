@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { aChatSomebodyElseIsIn } from './fixture-held';
+import { openGitView } from './open-git-view';
 
 /**
  * The Git view in the chat's right rail, driven against a real repository
@@ -213,19 +214,23 @@ test.describe('the Git view in the chat’s rail', () => {
       await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
 
       // ---- the door ---------------------------------------------------------
-      // Shut the rail first, so what the Git button does is opening it and not
-      // merely swapping the view of a column that was already there.
+      // Shut the rail first, so the way into Git is proved from a shut column
+      // and not merely as a swap of a view on a column that was already there.
+      // Git is a tab inside the rail now, so that way is two steps: the bar
+      // button opens the column, the tab chooses Git.
       const rail = page.locator('[data-testid="chat-right-rail"]');
-      const toggle = page.getByTestId('chat-git-toggle');
-      await expect(toggle, 'the chat’s bar carries no way into Git').toBeVisible({ timeout: WAY_IN_MS });
+      await expect(
+        page.getByTestId('chat-right-rail-toggle'),
+        'the chat’s bar carries no way into the rail',
+      ).toBeVisible({ timeout: WAY_IN_MS });
       if ((await rail.getAttribute('data-open')) === 'true') {
         await page.getByTestId('chat-right-rail-toggle').click();
       }
       await expect(rail).toHaveAttribute('data-open', 'false');
 
-      await toggle.click();
-      await expect(rail, 'the Git button did not open the rail').toHaveAttribute('data-open', 'true');
-      await expect(toggle, 'the button does not say it is showing Git').toHaveAttribute('data-open', 'true');
+      await openGitView(page);
+      await expect(rail, 'the rail did not open').toHaveAttribute('data-open', 'true');
+      await expect(rail, 'the rail does not say it is showing Git').toHaveAttribute('data-view', 'git');
       const view = page.getByTestId('git-view');
       await expect(view, 'the rail opened on something other than Git').toBeVisible({ timeout: 30_000 });
 

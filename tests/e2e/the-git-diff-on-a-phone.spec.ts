@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
+import { openGitView } from './open-git-view';
 import { foldAll } from '../../src/workbench/fold';
 import type { WbpEvent } from '../../src/workbench/protocol';
 
@@ -243,7 +244,7 @@ test('the git diff on a phone: one column of readable lines, and side by side le
       await page.getByTestId('chat-right-rail-toggle').click();
       await page.waitForTimeout(800);
     }
-    await page.getByTestId('chat-git-toggle').click();
+    await openGitView(page);
     await expect(page.getByTestId('git-view')).toBeVisible({ timeout: WAIT });
     await page.waitForTimeout(2500);
     await page.getByTestId('git-diff-toggle').click();

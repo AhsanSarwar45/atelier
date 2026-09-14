@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
+import { openGitView } from './open-git-view';
 import { foldAll } from '../../src/workbench/fold';
 import type { WbpEvent } from '../../src/workbench/protocol';
 
@@ -131,7 +132,7 @@ async function openTheDiff(page: Page): Promise<void> {
     await page.waitForTimeout(800);
   }
   if ((await page.getByTestId('git-view').count()) === 0) {
-    await page.getByTestId('chat-git-toggle').click();
+    await openGitView(page);
   }
   await expect(page.getByTestId('git-view')).toBeVisible({ timeout: WAIT });
   await page.waitForTimeout(2500);

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 import { aChatSomebodyElseIsIn } from './fixture-held';
+import { openGitView } from './open-git-view';
 
 /**
  * Changing the line of work from the Git rail (bw-ov7a.8).
@@ -117,7 +118,7 @@ test.describe('moving to another line of work from the rail', () => {
       if ((await rail.getAttribute('data-open')) === 'true') {
         await page.getByTestId('chat-right-rail-toggle').click();
       }
-      await page.getByTestId('chat-git-toggle').click();
+      await openGitView(page);
       await expect(page.getByTestId('git-view')).toBeVisible({ timeout: 30_000 });
 
       const name = page.getByTestId('git-branch-name');

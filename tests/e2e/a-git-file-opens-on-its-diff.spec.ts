@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 import { aChatSomebodyElseIsIn } from './fixture-held';
+import { openGitView } from './open-git-view';
 
 /**
  * Clicking a file in the Git panel opens the diff scrolled to that file
@@ -108,9 +109,7 @@ test.describe('a Git panel file opens on its diff', () => {
       await row.getByTestId('row-name').click();
       await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
 
-      const gitToggle = page.getByTestId('chat-git-toggle');
-      await expect(gitToggle).toBeVisible({ timeout: WAY_IN_MS });
-      if ((await gitToggle.getAttribute('data-open')) !== 'true') await gitToggle.click();
+      await openGitView(page);
       await expect(page.getByTestId('git-view')).toBeVisible({ timeout: 60_000 });
 
       const pane = page.getByTestId('git-diff-pane');

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
+import { openGitView } from './open-git-view';
 import { foldAll } from '../../src/workbench/fold';
 import type { WbpEvent } from '../../src/workbench/protocol';
 
@@ -262,7 +263,7 @@ test('a thumb reaches every control, and the @ menu stays out from under the key
     }
 
     // The Git view, where [git-amend] is a 16px painted box.
-    await page.getByTestId('chat-git-toggle').click();
+    await openGitView(page);
     await expect(page.getByTestId('git-view')).toBeVisible({ timeout: WAIT });
     await page.waitForTimeout(2500);
     {

@@ -6,6 +6,7 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 
 import { aChatSomebodyElseIsIn } from './fixture-held';
 import { quadrantPng } from './fixture-png';
+import { openGitView } from './open-git-view';
 
 /**
  * The diff standing in for the conversation, on a real repository (bw-rx1y.6).
@@ -185,9 +186,7 @@ test.describe('the diff standing where the conversation stands', () => {
       await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
 
       // ---- the rail, on Git ------------------------------------------------
-      const gitToggle = page.getByTestId('chat-git-toggle');
-      await expect(gitToggle).toBeVisible({ timeout: WAY_IN_MS });
-      if ((await gitToggle.getAttribute('data-open')) !== 'true') await gitToggle.click();
+      await openGitView(page);
       await expect(page.getByTestId('git-view')).toBeVisible({ timeout: 60_000 });
 
       // ---- the swap --------------------------------------------------------
@@ -322,11 +321,11 @@ test.describe('the diff standing where the conversation stands', () => {
       await expect(diffToggle).toHaveAttribute('aria-pressed', 'false');
       await page.screenshot({ path: `${SHOTS}/bw-rx1y-back-to-chat.png` });
 
-      // Taking the rail off Git is the same answer: the reader put the whole
+      // Shutting the rail on Git is the same answer: the reader put the whole
       // subject away, and must not have to remember a switch two panels deep.
       await diffToggle.click();
       await expect(pane).toBeVisible({ timeout: 30_000 });
-      await gitToggle.click();
+      await page.getByTestId('chat-right-rail-toggle').click();
       await expect(page.getByTestId('git-view')).toHaveCount(0);
       await expect(pane).toHaveCount(0);
       await expect(transcript, 'shutting Git left the conversation away').toBeVisible();
@@ -335,7 +334,7 @@ test.describe('the diff standing where the conversation stands', () => {
       await page.reload();
       await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
       await expect(page.getByTestId('transcript')).toBeVisible({ timeout: 60_000 });
-      await page.getByTestId('chat-git-toggle').click();
+      await openGitView(page);
       await expect(
         page.getByTestId('git-diff-pane'),
         'the diff was forgotten over a reload',
