@@ -1397,6 +1397,20 @@ async fn provider_sessions(state: &WorkbenchState, project: Option<&str>) -> Vec
     // else on the machine, and the record scan beside this one has always kept
     // the folder whichever way the switch was set (bw-t9no.1).
     let filter = project_path;
+    // Every checkout of the project, not only its own folder: git may keep a
+    // worktree anywhere, and a chat held in one is this project's (bw-ggbj.1).
+    let folders = match project {
+        Some(project) => {
+            let named = std::path::PathBuf::from(project);
+            let asked = named.clone();
+            Some(
+                tokio::task::spawn_blocking(move || crate::workbench::provider::folders_of(&asked))
+                    .await
+                    .unwrap_or_else(|_| vec![named]),
+            )
+        }
+        None => None,
+    };
     let ask = |brand: &'static str| async move {
         match tokio::time::timeout(ANSWER_WITHIN, ask_provider_to_list(state, brand, filter)).await
         {
@@ -1410,7 +1424,7 @@ async fn provider_sessions(state: &WorkbenchState, project: Option<&str>) -> Vec
     let (claude_acp, codex_acp) = tokio::join!(ask("claude"), ask("codex"));
     let mut rows = Vec::new();
     for (brand, result) in [("claude", claude_acp), ("codex", codex_acp)] {
-        let recorded = recorded_sessions(state, brand, project, project_path).await;
+        let recorded = recorded_sessions(state, brand, project_path).await;
         match result {
             Ok(sessions) => {
                 let mut recorded: std::collections::HashMap<String, Value> = recorded
@@ -1469,7 +1483,7 @@ async fn provider_sessions(state: &WorkbenchState, project: Option<&str>) -> Vec
     // held in other checkouts, in /tmp and in the home folder, and each one
     // was adopted into that project on sight. The folder a chat says it is in
     // is the only thing that decides which project lists it (bw-t9no.1).
-    only_in_this_folder(&mut rows, project_path);
+    only_in_this_folder(&mut rows, folders.as_deref());
     // Everyone's, whichever way the switch is set, each saying who began it.
     // The switch is applied by `restore`, after the saved rows have been
     // corrected by what is listed here: applied any earlier, a saved row an
@@ -1477,30 +1491,32 @@ async fn provider_sessions(state: &WorkbenchState, project: Option<&str>) -> Vec
     rows
 }
 
-/// Drop every listed chat that is not held in this project's folder.
+/// Drop every listed chat that is not held in one of this project's checkouts.
 ///
 /// A chat placed nowhere at all is dropped with them: an unplaceable chat
 /// belongs to no project, and the reader asked for one.
-fn only_in_this_folder(rows: &mut Vec<Value>, project_path: Option<&std::path::Path>) {
-    let Some(project_path) = project_path else {
+fn only_in_this_folder(rows: &mut Vec<Value>, folders: Option<&[std::path::PathBuf]>) {
+    let Some(folders) = folders else {
         return;
     };
     rows.retain(|row| {
-        row["cwd"]
-            .as_str()
-            .is_some_and(|cwd| std::path::Path::new(cwd).starts_with(project_path))
+        row["cwd"].as_str().is_some_and(|cwd| {
+            crate::workbench::provider::held_in(std::path::Path::new(cwd), folders)
+        })
     });
 }
 
-/// What the provider's own record says about the saved chats in a folder.
+/// What the provider's own record says about the saved chats.
+///
+/// Neither scan is narrowed to the project's folder here. A worktree outside
+/// that folder is still the project's, and `provider_sessions` drops what is
+/// held in none of its checkouts once, for every source (bw-ggbj.1).
 async fn recorded_sessions(
     state: &WorkbenchState,
     brand: &str,
-    project: Option<&str>,
     project_path: Option<&std::path::Path>,
 ) -> Vec<Value> {
     if brand == "claude" {
-        let project_owned = project.map(std::path::PathBuf::from);
         // Every account's record directory. A chat saved on the work account
         // lives under the work account and was simply missing from this list
         // before (bw-5ihw.8).
@@ -1511,7 +1527,7 @@ async fn recorded_sessions(
             .flat_map(|claude_config| {
                 crate::workbench::claude::history::list_sessions(
                     claude_config,
-                    project_owned.as_deref(),
+                    None,
                     // Everyone's, each saying who began it. The switch is
                     // applied once by the caller, after the adapter's answer
                     // is merged in: a chat that is out of the list still has
@@ -1545,7 +1561,7 @@ async fn recorded_sessions(
         // Every source kind, for the same reason as the Claude record above:
         // a subagent's thread left unlisted is a thread the adapter's answer
         // then adopts as a person's (bw-p61.17).
-        match crate::workbench::codex::history::list_threads(&transport, project_path, true)
+        match crate::workbench::codex::history::list_threads(&transport, None, true)
             .await
         {
             Ok(listed) => threads.extend(listed),
@@ -2978,18 +2994,24 @@ mod tests {
         let mut rows = vec![
             json!({"externalId":"here","cwd":"/home/ahsan/dev/corsetta"}),
             json!({"externalId":"worktree","cwd":"/home/ahsan/dev/corsetta/worktrees/c-1"}),
+            json!({"externalId":"worktree-beside","cwd":"/home/ahsan/dev/worktrees/corsetta/c-2/server"}),
             json!({"externalId":"another-checkout","cwd":"/home/ahsan/dev/aspen"}),
             json!({"externalId":"the-home-folder","cwd":"/home/ahsan"}),
             json!({"externalId":"a-scratch-folder","cwd":"/tmp/bench"}),
             json!({"externalId":"a-name-that-starts-the-same","cwd":"/home/ahsan/dev/corsetta-old"}),
             json!({"externalId":"placed-nowhere","cwd":Value::Null}),
         ];
-        only_in_this_folder(&mut rows, Some(project));
+        // Git keeps this project's second worktree outside its folder.
+        let folders = [
+            project.to_path_buf(),
+            std::path::PathBuf::from("/home/ahsan/dev/worktrees/corsetta/c-2"),
+        ];
+        only_in_this_folder(&mut rows, Some(&folders));
         let listed: Vec<&str> = rows
             .iter()
             .map(|row| row["externalId"].as_str().unwrap())
             .collect();
-        assert_eq!(listed, ["here", "worktree"]);
+        assert_eq!(listed, ["here", "worktree", "worktree-beside"]);
 
         // Asked about no project at all — the machine-wide sweep — nothing is
         // dropped, because there is no folder to be outside of.

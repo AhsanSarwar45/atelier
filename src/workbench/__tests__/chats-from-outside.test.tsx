@@ -85,6 +85,8 @@ class FakeFoot {
 let list: RestoreRow[] = [];
 /** Every url asked for, so a fetch nobody wanted is visible. */
 let asked: string[] = [];
+/** The project's checkouts, as git answers for them. */
+let trees: { trees: { path: string }[]; place: string } = { trees: [], place: '' };
 
 const restores = () => asked.filter((u) => u.includes('/api/workbench/restore') && !u.includes('local=1'));
 const localRestores = () => asked.filter((u) => u.includes('/api/workbench/restore') && u.includes('local=1'));
@@ -119,6 +121,7 @@ beforeEach(() => {
   opened = [];
   feet = [];
   asked = [];
+  trees = { trees: [], place: '' };
   list = [row()];
   vi.stubGlobal('WebSocket', FakeStream);
   vi.stubGlobal('IntersectionObserver', FakeFoot);
@@ -126,8 +129,8 @@ beforeEach(() => {
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       asked.push(String(input));
-      const answer = list;
-      return { ok: true, json: async () => answer } as unknown as Response;
+      const answer = String(input).includes('/api/git/trees') ? trees : list;
+      return { ok: true, status: 200, headers: new Headers(), json: async () => answer } as unknown as Response;
     }),
   );
 });
@@ -348,6 +351,24 @@ describe('whose work the word is about', () => {
 
     act(() => opened[0].saysOutside([`${PATH}/worktrees/some-job`]));
     await waitFor(() => expect(restores()).toHaveLength(2));
+  });
+
+  it('and so does one begun in a worktree git keeps outside the project folder', async () => {
+    // keystone's worktrees live in ~/dev/worktrees/keystone/…, nowhere under
+    // ~/dev/keystone, and are the project's all the same (bw-ggbj.1).
+    trees = { trees: [{ path: PATH }, { path: '/home/me/worktrees/project/job' }], place: '/home/me/worktrees/project' };
+    const ChatSidebar = await freshSidebar();
+    render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={() => {}} />);
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    await waitFor(() => expect(asked.some((u) => u.includes('/api/git/trees'))).toBe(true));
+    await act(async () => {});
+
+    act(() => opened[0].saysOutside(['/home/me/worktrees/project/job/apps/web']));
+    await waitFor(() => expect(restores()).toHaveLength(2));
+    act(() => opened[0].saysOutside(['/home/me/worktrees/project/job-old']));
+    act(() => opened[0].saysOutside([PATH]));
+    await waitFor(() => expect(restores()).toHaveLength(3));
+    expect(restores(), 'a neighbouring folder rebuilt this list').toHaveLength(3);
   });
 
   it('a word the sidecar could not place is for everyone', async () => {

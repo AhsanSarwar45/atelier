@@ -185,6 +185,29 @@ fn checkouts_of(project: &Path) -> Vec<PathBuf> {
     found
 }
 
+/// Every folder a chat of this project can be held in: the project as it was
+/// named, and every checkout git knows it by.
+///
+/// The name as given is kept beside the real path, because a saved chat and a
+/// provider's record write a folder the way they were handed it, and a project
+/// opened through a symlink would otherwise disown its own root. A worktree
+/// git keeps outside the project's folder — `~/dev/worktrees/keystone/…` for
+/// `~/dev/keystone` — is the project's all the same (bw-ggbj.1).
+pub(crate) fn folders_of(project: &Path) -> Vec<PathBuf> {
+    let mut folders = vec![project.to_path_buf()];
+    for checkout in checkouts_of(project) {
+        if !folders.contains(&checkout) {
+            folders.push(checkout);
+        }
+    }
+    folders
+}
+
+/// Whether `cwd` is one of `folders`, or somewhere inside one of them.
+pub(crate) fn held_in(cwd: &Path, folders: &[PathBuf]) -> bool {
+    folders.iter().any(|folder| cwd.starts_with(folder))
+}
+
 /// Where a chat the app starts is allowed to work.
 ///
 /// The browser sends the directory the person picked, and it has to be the

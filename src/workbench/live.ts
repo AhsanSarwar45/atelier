@@ -200,6 +200,14 @@ let mismatched = false;
 const heardOutside = new Map<string, number>();
 
 /**
+ * The checkouts each counted project keeps, as its list last read them. Git may
+ * keep a worktree outside the project's folder, and a chat begun there is the
+ * project's all the same, so its word is too (bw-ggbj.1).
+ */
+const checkoutsOf = new Map<string, readonly string[]>();
+const NO_CHECKOUTS: readonly string[] = [];
+
+/**
  * What the account has spent of its plan, as the sidecar last said it.
  *
  * Pushed down the same stream as everything else here and never asked for: the
@@ -299,7 +307,8 @@ function inside(project: string, where: string): boolean {
 function heard(folders: string[] | undefined): void {
   const bare = !folders || folders.length === 0;
   for (const project of Array.from(heardOutside.keys())) {
-    if (bare || folders.some((where) => inside(project, where))) {
+    const roots = [project, ...(checkoutsOf.get(project) ?? NO_CHECKOUTS)];
+    if (bare || folders.some((where) => roots.some((root) => inside(root, where)))) {
       heardOutside.set(project, countFor(project) + 1);
     }
   }
@@ -761,13 +770,17 @@ export function useHeldFactsAreOld(): boolean {
  * been away and come back counts once for every project, because nothing was
  * heard while it was gone (bw-uivp.5).
  */
-export function useHeardFromOutside(project: string): number {
+export function useHeardFromOutside(
+  project: string,
+  checkouts: readonly string[] = NO_CHECKOUTS,
+): number {
   const watch = useMemo(
     () => (fn: () => void) => {
       if (!heardOutside.has(project)) heardOutside.set(project, 0);
+      if (checkouts.length > 0) checkoutsOf.set(project, checkouts);
       return subscribe(fn);
     },
-    [project],
+    [project, checkouts],
   );
   return useSyncExternalStore(
     watch,

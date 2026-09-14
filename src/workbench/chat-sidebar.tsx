@@ -36,7 +36,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip } from '@/components/ui/tooltip';
-import { request } from '@/lib/api';
+import { git, request } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { chatState, holderOnly, HOLDER_WORD, type HeldChat } from '@/workbench/chat-state';
 import { ChatStateChip } from '@/workbench/chat-state-chip';
@@ -458,7 +458,18 @@ export function ChatSidebar({
    * in twelve idle seconds, for work nothing on this screen was showing
    * (bw-uivp.4).
    */
-  const heardOutside = useHeardFromOutside(projectPath);
+  const [checkouts, setCheckouts] = useState<readonly string[]>([]);
+  useEffect(() => {
+    // Where git keeps this project's worktrees, which may be nowhere under its
+    // folder: a chat begun in one of those is this list's too (bw-ggbj.1).
+    const stop = new AbortController();
+    Promise.resolve()
+      .then(() => git.trees(projectPath, stop.signal))
+      .then((answer) => setCheckouts(answer.trees.map((tree) => tree.path)))
+      .catch(() => undefined);
+    return () => stop.abort();
+  }, [projectPath]);
+  const heardOutside = useHeardFromOutside(projectPath, checkouts);
   const heardAt = useRef(heardOutside);
 
   useEffect(() => {

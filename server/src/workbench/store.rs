@@ -475,9 +475,21 @@ impl Store {
 /// the store rewritten under a running app (bw-t9no.2).
 ///
 /// A project with no folder of its own claims nothing, so nothing is dropped.
-fn held_in_its_project(session: &Session) -> bool {
-    let project = std::path::Path::new(&session.project_path);
-    project.as_os_str().is_empty() || std::path::Path::new(&session.cwd).starts_with(project)
+/// Every checkout git knows the project by counts as its folder, wherever git
+/// keeps it; `folders` holds each project's once per listing (bw-ggbj.1).
+fn held_in_its_project(
+    session: &Session,
+    folders: &mut std::collections::HashMap<String, Vec<std::path::PathBuf>>,
+) -> bool {
+    if session.project_path.is_empty() {
+        return true;
+    }
+    let folders = folders
+        .entry(session.project_path.clone())
+        .or_insert_with(|| {
+            crate::workbench::provider::folders_of(std::path::Path::new(&session.project_path))
+        });
+    crate::workbench::provider::held_in(std::path::Path::new(&session.cwd), folders)
 }
 
     pub fn list_sessions(&self, project_id: Option<&str>) -> rusqlite::Result<Vec<Session>> {
@@ -531,7 +543,8 @@ fn held_in_its_project(session: &Session) -> bool {
     ) -> rusqlite::Result<Vec<Session>> {
         if everything {
             let mut found = self.list_sessions(project_id)?;
-            found.retain(Self::held_in_its_project);
+            let mut folders = std::collections::HashMap::new();
+            found.retain(|session| Self::held_in_its_project(session, &mut folders));
             return Ok(found);
         }
         let visible = r#"(COALESCE(begun_by, '') <> 'agent'
@@ -555,7 +568,8 @@ fn held_in_its_project(session: &Session) -> bool {
                 .query_map([], session_from_row)?
                 .collect::<rusqlite::Result<_>>()?,
         };
-        found.retain(Self::held_in_its_project);
+        let mut folders = std::collections::HashMap::new();
+        found.retain(|session| Self::held_in_its_project(session, &mut folders));
         Ok(found)
     }
 
@@ -2978,6 +2992,63 @@ mod tests {
             assert_eq!(
                 listed,
                 std::collections::HashSet::from(["here".to_string(), "worktree".to_string()]),
+                "showing the agents' own chats: {everything}"
+            );
+        }
+    }
+
+    /// A worktree git keeps outside the project's own folder is still the
+    /// project's, so a saved chat held there stays on its list (bw-ggbj.1).
+    #[test]
+    fn restore_sessions_keep_a_chat_held_in_a_worktree_outside_the_project_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("keystone");
+        let beside = root.path().join("worktrees").join("keystone").join("key-1");
+        std::fs::create_dir(&project).unwrap();
+        let git = |args: &[&str]| {
+            let done = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&project)
+                .output()
+                .expect("git is on the path");
+            assert!(
+                done.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&done.stderr)
+            );
+        };
+        git(&["init", "-q", "-b", "main", "."]);
+        git(&["config", "user.name", "Atelier Tester"]);
+        git(&["config", "user.email", "tester@atelier.test"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "seed"]);
+        git(&["worktree", "add", "-q", &beside.display().to_string(), "-b", "key-1"]);
+        let beside = beside.canonicalize().unwrap();
+
+        let store = Store::open(&root.path().join("workbench.db")).unwrap();
+        for (id, cwd) in [
+            ("here", project.clone()),
+            ("beside", beside.join("apps").join("web")),
+            ("another-checkout", root.path().join("aspen")),
+            ("a-name-that-starts-the-same", root.path().join("worktrees").join("keystone").join("key-1-old")),
+        ] {
+            let mut row = session(id, "claude", None, "2026-08-20T00:00:00Z");
+            row.origin = "terminal".into();
+            row.project_path = project.display().to_string();
+            row.cwd = cwd.display().to_string();
+            store.create_session(&row).unwrap();
+        }
+
+        for everything in [false, true] {
+            let listed = store
+                .list_restore_sessions(Some("project-1"), everything)
+                .unwrap()
+                .into_iter()
+                .map(|row| row.id)
+                .collect::<std::collections::HashSet<_>>();
+            assert_eq!(
+                listed,
+                std::collections::HashSet::from(["here".to_string(), "beside".to_string()]),
                 "showing the agents' own chats: {everything}"
             );
         }
