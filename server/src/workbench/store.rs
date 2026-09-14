@@ -1079,7 +1079,11 @@ fn held_in_its_project(
             .map(|(id, current)| json!({"id": id, "currentValue": current}))
             .collect::<Vec<_>>();
         options.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
-        Ok(json!({"configOptions": options, "title": title}))
+        let mut answer = json!({"configOptions": options});
+        if let Some(title) = title {
+            answer["title"] = json!(title);
+        }
+        Ok(answer)
     }
 
     pub fn open_message(
