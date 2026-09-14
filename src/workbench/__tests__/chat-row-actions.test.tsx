@@ -96,3 +96,39 @@ it('copies the provider ID for a chat not imported into Atelier yet', async () =
   fireEvent.click(screen.getByTestId('chat-menu-copy-id'));
   await waitFor(() => expect(clipboard).toHaveBeenCalledWith('provider-session-1'));
 });
+
+it('opens the same menu from the row button, for a thumb that cannot right-click', async () => {
+  await draw();
+  fireEvent.click(screen.getByTestId('row-menu'));
+  await waitFor(() => expect(screen.queryByTestId('chat-context-menu')).not.toBeNull());
+
+  const menu = within(screen.getByTestId('chat-context-menu'));
+  expect(menu.getByText('Rename…')).toBeVisible();
+  expect(menu.getByText('Copy ID')).toBeVisible();
+  expect(menu.getByText('Close chat')).toBeVisible();
+});
+
+it('closes a running chat from the row menu', async () => {
+  const running = { ...chat, state: 'idle' as const, title: 'Running chat' };
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { method?: string; body?: string }) => {
+    if (init?.method === 'POST') {
+      commands.push(JSON.parse(init.body ?? '{}') as Record<string, unknown>);
+      return { ok: true, json: async () => ({ ok: true }) } as Response;
+    }
+    return { ok: true, json: async () => [running] } as Response;
+  }));
+  await draw('Running chat');
+  fireEvent.click(screen.getByTestId('row-menu'));
+  await waitFor(() => expect(screen.queryByTestId('chat-context-menu')).not.toBeNull());
+
+  await act(async () => void fireEvent.click(screen.getByTestId('chat-menu-close')));
+  await waitFor(() => expect(commands).toContainEqual({ type: 'session.close', sessionId: 'atelier-session-1' }));
+});
+
+it('greys the close item on a chat with nothing of ours attached', async () => {
+  await draw();
+  fireEvent.click(screen.getByTestId('row-menu'));
+  await waitFor(() => expect(screen.queryByTestId('chat-context-menu')).not.toBeNull());
+
+  expect(screen.getByTestId('chat-menu-close')).toHaveAttribute('data-disabled');
+});

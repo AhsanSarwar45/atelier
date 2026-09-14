@@ -23,7 +23,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Bot, ChevronDown, Copy, ExternalLink, Loader2, Pencil, Plus, Power, Search, X } from 'lucide-react';
+import { Bot, ChevronDown, Copy, ExternalLink, Loader2, MoreVertical, Pencil, Plus, Power, Search, X } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
@@ -34,6 +34,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
@@ -144,6 +145,17 @@ export function groupRows(rows: RestoreRow[], now = new Date()): { heading: stri
 
 function rowKey(row: RestoreRow): string {
   return row.sessionId ?? `ext:${row.externalId}`;
+}
+
+/**
+ * Something of ours is attached to this chat and can be taken away. Anything
+ * else has nothing to close, so neither the row's own control nor the menu
+ * item offers one. Read in two places now — the row draws the control from it
+ * and the menu greys its Close chat item by it — so it is a function rather
+ * than a line inside the loop.
+ */
+function canClose(row: RestoreRow): boolean {
+  return Boolean(row.sessionId) && row.state !== 'dormant' && !row.runningElsewhere;
 }
 
 /** A row as the list last drew it: which row, and which block it was in. */
@@ -734,10 +746,7 @@ export function ChatSidebar({
             </div>
             {group.rows.map((row) => {
               const key = rowKey(row);
-              const live = row.state !== 'dormant';
-              // Something of ours is attached and can be taken away. Anything
-              // else has nothing to close, so it is not offered one.
-              const closable = Boolean(row.sessionId) && live && !row.runningElsewhere;
+              const closable = canClose(row);
               const ownership = sessionOwnership(row.state, row.externalId, row.runningElsewhere === true);
               const state = chatState({
                 state: row.state,
@@ -913,6 +922,37 @@ export function ChatSidebar({
                         </Tooltip>
                       )}
                     </span>
+                    {/*
+                      The same menu the desktop reaches by right-clicking, on a
+                      button, because a phone has no right click and the close
+                      control above only appears under a pointer that hovers
+                      (bw-rpgh.1). Drawn on every row rather than on hover: a
+                      thumb has nothing to hover with, so a control it cannot
+                      summon is a control it does not have.
+
+                      Phone only. On a desktop the rail is already crowded by
+                      forty of these, and the right click is there.
+                    */}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      mode="icon"
+                      size="xs"
+                      data-testid="row-menu"
+                      aria-label={`Actions for ${row.title ?? 'Untitled chat'}`}
+                      className="-mr-1.5 shrink-0 md:hidden"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        // Anchored under the button rather than at the finger:
+                        // a tap reports a point somewhere inside the button,
+                        // and a menu hung off that lands under the thumb that
+                        // opened it.
+                        const box = event.currentTarget.getBoundingClientRect();
+                        setMenu({ row, at: { left: box.left, top: box.bottom } });
+                      }}
+                    >
+                      <MoreVertical className="size-4" aria-hidden="true" />
+                    </Button>
                   </div>
                   {/*
                     What it is doing is the second line, and the whole of it. It
@@ -1001,6 +1041,19 @@ export function ChatSidebar({
             onSelect={() => { if (menu) copyId(menu.row); }}
           >
             <Copy aria-hidden="true" /> Copy ID
+          </DropdownMenuItem>
+          {/*
+            Last and behind a rule, because it is the one item here that takes
+            something away. Greyed rather than hidden on a row with nothing of
+            ours attached, so the menu reads the same on every row.
+          */}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            data-testid="chat-menu-close"
+            disabled={!menu || !canClose(menu.row)}
+            onSelect={() => { if (menu) end(menu.row); }}
+          >
+            <Power aria-hidden="true" /> Close chat
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
