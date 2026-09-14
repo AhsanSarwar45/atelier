@@ -42,6 +42,7 @@ test('a sidebar chat can be renamed and its ID copied from the pointer menu', as
 
     await page.reload();
     await expect(page.locator(`[data-testid="restore-row"][data-external-id="${external.id}"]`).getByText('Release planning')).toBeVisible({ timeout: 60_000 });
+    await page.screenshot({ path: join(process.env.WORKBENCH_E2E_RUN!, 'rename-persists-after-reload.png') });
   } finally {
     external.forget();
     await request.delete(`${backend()}/api/projects/${project.id}`);

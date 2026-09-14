@@ -115,6 +115,48 @@ const LEGACY_MIGRATIONS: &[&str] = &[
        );
        CREATE INDEX IF NOT EXISTS session_external_alias_by_session
          ON session_external_alias(session_id);"#,
+    r#"UPDATE session
+       SET title = (
+         SELECT json_extract(event.json, '$.title')
+         FROM event
+         WHERE event.session_id = session.id
+           AND event.type = 'session.pinned'
+           AND json_type(event.json, '$.title') = 'text'
+           AND (
+             json_extract(event.json, '$.titleSource') = 'user'
+             OR (
+               json_type(event.json, '$.titleSource') IS NULL
+               AND json_type(event.json, '$.acp') IS NULL
+               AND json_type(event.json, '$.providerEvent') IS NULL
+               AND json_type(event.json, '$.configOptions') IS NULL
+               AND json_type(event.json, '$.permissionMode') = 'null'
+               AND json_type(event.json, '$.model') = 'null'
+               AND json_type(event.json, '$.effort') = 'null'
+               AND json_type(event.json, '$.collaborationMode') = 'null'
+             )
+           )
+         ORDER BY event.seq DESC
+         LIMIT 1
+       )
+       WHERE EXISTS (
+         SELECT 1 FROM event
+         WHERE event.session_id = session.id
+           AND event.type = 'session.pinned'
+           AND json_type(event.json, '$.title') = 'text'
+           AND (
+             json_extract(event.json, '$.titleSource') = 'user'
+             OR (
+               json_type(event.json, '$.titleSource') IS NULL
+               AND json_type(event.json, '$.acp') IS NULL
+               AND json_type(event.json, '$.providerEvent') IS NULL
+               AND json_type(event.json, '$.configOptions') IS NULL
+               AND json_type(event.json, '$.permissionMode') = 'null'
+               AND json_type(event.json, '$.model') = 'null'
+               AND json_type(event.json, '$.effort') = 'null'
+               AND json_type(event.json, '$.collaborationMode') = 'null'
+             )
+           )
+       );"#,
 ];
 
 /// The native owner of the existing workbench database.
@@ -1064,7 +1106,7 @@ fn held_in_its_project(
         for row in rows {
             let event: Value = serde_json::from_str(&row?).map_err(json_error)?;
             if title.is_none() {
-                title = event["title"].as_str().map(str::to_string);
+                title = explicit_title_from_event(&event).map(str::to_string);
             }
             for patch in event["configOptions"].as_array().into_iter().flatten() {
                 if let Some(id) = patch["id"].as_str() {
@@ -1084,6 +1126,27 @@ fn held_in_its_project(
             answer["title"] = json!(title);
         }
         Ok(answer)
+    }
+
+    /// The title the person explicitly chose, distinct from the provider's
+    /// generated session title. Old rename events predate `titleSource`; their
+    /// exact app-written shape remains recognizable so the first shipped
+    /// version of Rename is repaired on upgrade rather than asking for another
+    /// rename.
+    pub(crate) fn explicit_title(&self, session_id: &str) -> rusqlite::Result<Option<String>> {
+        let mut statement = self.connection.prepare(
+            r#"SELECT json FROM event
+               WHERE session_id=?1 AND type='session.pinned'
+               ORDER BY seq DESC"#,
+        )?;
+        let rows = statement.query_map([session_id], |row| row.get::<_, String>(0))?;
+        for row in rows {
+            let event: Value = serde_json::from_str(&row?).map_err(json_error)?;
+            if let Some(title) = explicit_title_from_event(&event) {
+                return Ok(Some(title.to_string()));
+            }
+        }
+        Ok(None)
     }
 
     pub fn open_message(
@@ -2258,6 +2321,20 @@ fn event_string<'a>(event: &'a Event, field: &str) -> rusqlite::Result<&'a str> 
         .ok_or_else(|| rusqlite::Error::InvalidParameterName(format!("event.{field}")))
 }
 
+fn explicit_title_from_event(event: &Value) -> Option<&str> {
+    let marked = event.get("titleSource").and_then(Value::as_str) == Some("user");
+    let legacy = event.get("titleSource").is_none()
+        && event.get("acp").is_none()
+        && event.get("providerEvent").is_none()
+        && event.get("configOptions").is_none()
+        && ["permissionMode", "model", "effort", "collaborationMode"]
+            .into_iter()
+            .all(|field| event.get(field) == Some(&Value::Null));
+    (marked || legacy)
+        .then(|| event.get("title").and_then(Value::as_str))
+        .flatten()
+}
+
 fn json_error(error: serde_json::Error) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(error))
 }
@@ -2926,6 +3003,33 @@ mod tests {
             .unwrap();
         assert!(menu.fields.get("models").is_none());
         assert!(menu.fields.get("configOptions").is_none());
+    }
+
+    #[test]
+    fn migration_repairs_a_rename_overwritten_by_a_provider_title() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        let store = Store::open(&path).unwrap();
+        store.create_session(&session("chat", "codex", Some("thread"), "2026-09-15T00:00:00Z")).unwrap();
+        let rename: Event = serde_json::from_value(json!({
+            "type":"session.pinned", "sessionId":"chat", "seq":1, "at":"then",
+            "permissionMode":null, "model":null, "effort":null,
+            "collaborationMode":null, "title":"My title"
+        })).unwrap();
+        assert!(store.append_event(&rename).unwrap());
+        store.update_session("chat", SessionPatch {
+            title: Some(Some("Generated title".into())), ..SessionPatch::default()
+        }, None).unwrap();
+        drop(store);
+
+        let connection = Connection::open(&path).unwrap();
+        connection.execute(
+            "UPDATE schema_version SET version=?1",
+            [(LEGACY_MIGRATIONS.len() - 1) as i64],
+        ).unwrap();
+        drop(connection);
+
+        assert_eq!(Store::open(&path).unwrap().get_session("chat").unwrap().unwrap().title.as_deref(), Some("My title"));
     }
 
     #[test]

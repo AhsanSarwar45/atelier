@@ -450,7 +450,7 @@ export type WbpEvent = EventBase &
      * ends plan mode). A field that is `null` is one this message says nothing
      * about, and the reader keeps what it had (bw-1u1.43).
      */
-    | { type: 'session.pinned'; permissionMode: string | null; model: string | null; effort?: string | null; collaborationMode?: string | null; title?: string | null; configOptions?: Array<{ id: string; currentValue: boolean | string }> }
+    | { type: 'session.pinned'; permissionMode: string | null; model: string | null; effort?: string | null; collaborationMode?: string | null; title?: string | null; titleSource?: 'user'; configOptions?: Array<{ id: string; currentValue: boolean | string }> }
     | { type: 'session.ended'; reason: string }
     /**
      * `parentToolCallId` is set when a SENT-OFF agent said this, and names the

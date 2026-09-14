@@ -508,7 +508,13 @@ fn apply_session_fact(store: &Store, session_id: &str, event: &Event) -> rusqlit
                 said_at = Some(updated);
             }
             if let Some(title) = string(event, "title") {
-                patch.title = Some(Some(title));
+                // Provider titles remain useful until the person names the
+                // chat. Once they do, later session-info refreshes cannot take
+                // ownership of that choice back.
+                let chosen = store.explicit_title(session_id)?;
+                if chosen.as_deref().is_none_or(|saved| saved == title) {
+                    patch.title = Some(Some(title));
+                }
             }
             if let Some(model) = string(event, "model") {
                 patch.model = Some(Some(model));
@@ -1464,6 +1470,40 @@ mod tests {
         assert_eq!(session.permission_mode, "on-request");
         assert_eq!(session.effort.as_deref(), Some("high"));
         assert_eq!(session.collaboration_mode.as_deref(), Some("default"));
+    }
+
+    #[tokio::test]
+    async fn explicit_rename_survives_a_later_provider_title_and_reopen() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        let database = ChatDb::open(&path).unwrap();
+        database.create_session(Session {
+            id: "chat-1".into(), brand: "codex".into(), external_id: Some("thread-1".into()),
+            project_id: "project-1".into(), project_path: "/project".into(), cwd: "/project".into(),
+            model: Some("gpt-5".into()), permission_mode: "on-request".into(), effort: Some("high".into()),
+            collaboration_mode: Some("default".into()), profile: None, title: Some("Generated title".into()),
+            state: "idle".into(), origin: "app".into(), created_at: "now".into(), last_active_at: "now".into(),
+            last_spoke_at: None, begun_by: None,
+        }).await.unwrap();
+        for value in [
+            json!({
+                "type":"session.pinned","sessionId":"chat-1","seq":0,"at":"later",
+                "permissionMode":null,"model":null,"effort":null,"collaborationMode":null,
+                "title":"My title","titleSource":"user"
+            }),
+            json!({
+                "type":"session.pinned","sessionId":"chat-1","seq":0,"at":"latest",
+                "permissionMode":null,"model":null,"effort":null,"collaborationMode":null,
+                "title":"Generated title","acp":{"sessionUpdate":"session_info_update"}
+            }),
+        ] {
+            database.append(serde_json::from_value(value).unwrap()).await.unwrap();
+        }
+
+        assert_eq!(database.get_session("chat-1".into()).await.unwrap().unwrap().title.as_deref(), Some("My title"));
+        assert_eq!(database.steering_menu("chat-1".into()).await.unwrap()["title"], "My title");
+        drop(database);
+        assert_eq!(ChatDb::open(&path).unwrap().get_session("chat-1".into()).await.unwrap().unwrap().title.as_deref(), Some("My title"));
     }
 
     #[tokio::test]

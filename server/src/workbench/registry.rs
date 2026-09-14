@@ -1407,7 +1407,7 @@ impl WorkbenchRegistry {
                     "type":"session.pinned", "sessionId":session_id, "seq":0,
                     "at":chrono::Utc::now().to_rfc3339(), "permissionMode":Value::Null,
                     "model":Value::Null, "effort":Value::Null, "collaborationMode":Value::Null,
-                    "title":title
+                    "title":title, "titleSource":"user"
                 }))
                 .map_err(|error| error.to_string())?;
                 self.database.append(event).await?;
