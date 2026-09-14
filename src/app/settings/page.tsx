@@ -30,6 +30,7 @@ const SECTIONS: SettingsSectionDef[] = [
   { id: 'appearance', label: 'Appearance', hint: 'Theme and type', icon: <Palette /> },
   { id: 'accounts', label: 'Accounts', hint: 'Claude and Codex sign-ins', icon: <Users /> },
   { id: 'claude', label: 'Claude Code', hint: 'Defaults, permissions, MCP, extensions', icon: <BrandIcon brand="claude" /> },
+  { id: 'codex', label: 'Codex', hint: 'Defaults, permissions, MCP, extensions', icon: <BrandIcon brand="codex" /> },
   { id: 'files', label: 'Agent files', hint: 'Instructions, settings, skills', icon: <FileCode2 /> },
   { id: 'terminal', label: 'Terminal', hint: 'The shell a terminal opens', icon: <SquareTerminal /> },
   { id: 'dependencies', label: 'Dependencies', hint: 'The tools the app runs', icon: <Puzzle /> },

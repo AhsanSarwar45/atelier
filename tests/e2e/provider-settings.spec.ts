@@ -50,6 +50,23 @@ test('a Claude Code default is written to the account settings file', async ({ p
     .toBeUndefined();
 });
 
+test('a Codex default is written to config.toml, and the file is created on first change', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/settings?section=codex');
+  await expect(page.getByTestId('provider-settings-codex-defaults')).toBeVisible();
+
+  await page.locator('#setting-codex-model_reasoning_effort').click();
+  await page.getByRole('option', { name: /^High/ }).click();
+  await expect.poll(() => existsSync(join(codexHome, 'config.toml'))).toBe(true);
+  await expect.poll(() => readFileSync(join(codexHome, 'config.toml'), 'utf8')).toMatch(/model_reasoning_effort = "high"/);
+
+  await page.getByTestId('provider-tab-permissions').click();
+  await page.locator('#setting-codex-approval_policy').click();
+  await page.getByRole('option', { name: /Never/ }).click();
+  await expect.poll(() => readFileSync(join(codexHome, 'config.toml'), 'utf8')).toMatch(/approval_policy = "never"/);
+  await page.screenshot({ path: join(results, 'codex-desktop.png') });
+});
+
 test('a phone gets the account, the tabs and the rows in one column', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto('/settings?section=claude&tab=permissions');
