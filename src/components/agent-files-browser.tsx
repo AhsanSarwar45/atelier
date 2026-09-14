@@ -1,9 +1,9 @@
 /**
- * The files an agent reads: instructions, settings, skills, agents, rules —
- * for one account (or the system one), with a project's files alongside when
- * a project is chosen. Each file opens in an editor and is saved back to
- * where it came from; well-known files that do not exist yet can be created
- * (bw-2t1c.9).
+ * The files an agent reads: instructions, settings, skills, agents, rules.
+ * Under Settings it shows one account's own files; under a project's settings
+ * it shows that project's files. Each file opens in an editor and is saved
+ * back to where it came from; well-known files that do not exist yet can be
+ * created (bw-2t1c.9, bw-76eu.3).
  */
 'use client';
 
@@ -14,7 +14,6 @@ import { ChevronRight, Copy, ExternalLink, FileCode2, FilePlus2, FolderOpen, Loa
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ReadFailed } from '@/components/ui/read-failed';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { fs } from '@/lib/api';
@@ -67,20 +66,17 @@ function said(reason: unknown): string {
 }
 
 export function AgentFilesBrowser({
-  projects,
   profileId,
   brand,
-  projectPath: fixedProject,
+  projectPath,
 }: {
-  projects: { id: string; name: string; path: string }[];
   /** Whose files. Nothing means the account the server booted with. */
   profileId?: string | null;
   /** Only this provider's files, when the browser is inside a provider's section. */
   brand?: 'claude' | 'codex';
-  /** Always this project, with no picker, when the browser is inside a project's settings. */
+  /** This project's files, and only those, when the browser is inside a project's settings. */
   projectPath?: string;
 }) {
-  const [projectId, setProjectId] = useState('none');
   const [files, setFiles] = useState<AgentFileRow[]>([]);
   const [creatable, setCreatable] = useState<CreatableFile[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -88,13 +84,11 @@ export function AgentFilesBrowser({
   const [draft, setDraft] = useState('');
   const [truncated, setTruncated] = useState(false);
   const [query, setQuery] = useState('');
-  const [scope, setScope] = useState<'all' | AgentFileRow['scope']>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const { toast } = useToast();
-  const projectPath = fixedProject ?? projects.find((project) => project.id === projectId)?.path;
   const dirty = draft !== content;
   const scoped = useMemo(
     () => ({ ...(projectPath ? { projectPath } : {}), ...(profileId ? { profileId } : {}) }),
@@ -108,9 +102,12 @@ export function AgentFilesBrowser({
     void sendCommand<{ files: AgentFileRow[]; creatable?: CreatableFile[] }>({ type: 'agent-files.list', ...scoped })
       .then(({ files: found, creatable: missing }) => {
         if (!live) return;
-        const mine = brand ? found.filter((file) => file.provider === brand) : found;
+        // A project's browser is about the project; the account's files have their own screen.
+        const here = (file: { provider: string; scope: string }) =>
+          (!brand || file.provider === brand) && (projectPath ? file.scope !== 'personal' : file.scope === 'personal');
+        const mine = found.filter(here);
         setFiles(mine);
-        setCreatable((missing ?? []).filter((file) => !brand || file.provider === brand));
+        setCreatable((missing ?? []).filter(here));
         setSelected((before) => {
           if (mine.some((file) => file.id === before)) return before;
           const wide = typeof window.matchMedia !== 'function' || window.matchMedia(NOT_PHONE_SCREEN).matches;
@@ -120,7 +117,7 @@ export function AgentFilesBrowser({
       .catch((reason: unknown) => live && setError(said(reason)))
       .finally(() => live && setLoading(false));
     return () => { live = false; };
-  }, [scoped, brand, attempt]);
+  }, [scoped, brand, projectPath, attempt]);
 
   const chosen = files.find((file) => file.id === selected) ?? null;
   useEffect(() => {
@@ -164,14 +161,14 @@ export function AgentFilesBrowser({
 
   const shown = useMemo(() => {
     const wanted = query.trim().toLowerCase();
-    return files.filter((file) => (scope === 'all' || file.scope === scope) && (!wanted || `${file.name} ${file.relativePath} ${file.path} ${CATEGORY[file.category]}`.toLowerCase().includes(wanted)));
-  }, [files, query, scope]);
+    return files.filter((file) => !wanted || `${file.name} ${file.relativePath} ${file.path} ${CATEGORY[file.category]}`.toLowerCase().includes(wanted));
+  }, [files, query]);
 
   const grouped = useMemo(() => ['claude', 'codex'].map((provider) => ({
     provider: provider as AgentFileRow['provider'],
     categories: Object.keys(CATEGORY).map((category) => ({ category: category as AgentFileRow['category'], files: shown.filter((file) => file.provider === provider && file.category === category) })).filter((group) => group.files.length),
-    missing: creatable.filter((file) => file.provider === provider && (scope === 'all' || file.scope === scope)),
-  })).filter((group) => group.categories.length || group.missing.length), [shown, creatable, scope]);
+    missing: creatable.filter((file) => file.provider === provider),
+  })).filter((group) => group.categories.length || group.missing.length), [shown, creatable]);
 
   async function outside(path: string, target: 'finder' | 'vscode' | 'cursor', success: string) {
     try { await fs.openExternal(path, target); toast({ title: success }); }
@@ -181,19 +178,12 @@ export function AgentFilesBrowser({
   return (
     <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden border-t border-border/50 md:grid-cols-[22rem_minmax(0,1fr)]" data-testid="agent-files">
       <aside className={cn('min-h-0 overflow-y-auto border-r border-border/50 bg-surface-base', chosen && 'hidden md:block')} aria-label="Agent files">
-        <div className="sticky top-0 z-10 space-y-3 border-b border-border/50 bg-surface-base/95 p-4 backdrop-blur">
-          {!fixedProject && (
-            <Select value={projectId} onValueChange={setProjectId}>
-              <SelectTrigger aria-label="Project scope"><SelectValue /></SelectTrigger>
-              <SelectContent><SelectItem value="none">Personal files only</SelectItem>{projects.map((project) => <SelectItem key={project.id} value={project.id}>Personal + {project.name}</SelectItem>)}</SelectContent>
-            </Select>
-          )}
+        <div className="sticky top-0 z-10 border-b border-border/50 bg-surface-base/95 p-4 backdrop-blur">
           <div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-t-muted" /><Input aria-label="Search agent files" placeholder="Search files…" value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" /></div>
-          <div className="flex gap-1" aria-label="Filter by scope">{(['all', 'personal', 'project', 'project-local'] as const).map((value) => <Button key={value} size="xs" variant={scope === value ? 'mono' : 'ghost'} onClick={() => setScope(value)}>{value === 'all' ? 'All' : value === 'project-local' ? 'Local' : value[0].toUpperCase() + value.slice(1)}</Button>)}</div>
         </div>
         {loading ? <p className="p-6 text-sm text-t-muted">Loading…</p> : error && files.length === 0 ? <ReadFailed className="m-4" what="Could not load agent files." why={error} onRetry={() => setAttempt((n) => n + 1)} /> : grouped.length === 0 ? <div className="p-8 text-center"><FileCode2 className="mx-auto mb-3 size-7 text-t-muted" /><p className="text-sm text-t-secondary">No agent files</p></div> : (
-          <div className="p-2">{grouped.map((provider) => <section key={provider.provider} className="mb-4">{!brand && <h2 className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-t-muted">{provider.provider === 'claude' ? 'Claude' : 'Codex'}</h2>}{provider.categories.map((group) => <div key={group.category} className="mb-2"><div className="flex items-center gap-2 px-2 py-1 text-xs font-medium text-t-tertiary"><span>{CATEGORY[group.category]}</span>{group.category === 'commands' && <span className="rounded bg-surface-overlay px-1.5 py-0.5 text-[10px]">Legacy</span>}<span className="ml-auto tabular-nums text-t-muted">{group.files.length}</span></div>{group.files.map((file) => <Button key={file.id} type="button" variant="ghost" data-testid={`agent-file-${file.name}`} onClick={() => setSelected(file.id)} className={cn('h-auto w-full justify-start gap-3 px-2 py-2 text-left', selected === file.id && 'bg-surface-overlay text-t-primary')}><FileCode2 className="size-4 shrink-0 text-t-muted" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{file.name}</span><span className="block truncate text-xs text-t-muted">{scopeName(file.scope)} · {file.relativePath}</span></span><ChevronRight className="size-4 shrink-0 text-t-muted" /></Button>)}</div>)}
-            {provider.missing.length > 0 && <div className="mb-2"><div className="px-2 py-1 text-xs font-medium text-t-tertiary">Not there yet</div>{provider.missing.map((file) => <Button key={file.path} type="button" variant="ghost" data-testid={`agent-file-create-${file.name}`} onClick={() => void create(file)} className="h-auto w-full justify-start gap-3 px-2 py-2 text-left text-t-secondary"><FilePlus2 className="size-4 shrink-0 text-t-muted" /><span className="min-w-0 flex-1"><span className="block truncate text-sm">{file.name}</span><span className="block truncate text-xs text-t-muted">Create · {scopeName(file.scope)}</span></span></Button>)}</div>}
+          <div className="p-2">{grouped.map((provider) => <section key={provider.provider} className="mb-4">{!brand && <h2 className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-t-muted">{provider.provider === 'claude' ? 'Claude' : 'Codex'}</h2>}{provider.categories.map((group) => <div key={group.category} className="mb-2"><div className="flex items-center gap-2 px-2 py-1 text-xs font-medium text-t-tertiary"><span>{CATEGORY[group.category]}</span>{group.category === 'commands' && <span className="rounded bg-surface-overlay px-1.5 py-0.5 text-[10px]">Legacy</span>}<span className="ml-auto tabular-nums text-t-muted">{group.files.length}</span></div>{group.files.map((file) => <Button key={file.id} type="button" variant="ghost" data-testid={`agent-file-${file.name}`} onClick={() => setSelected(file.id)} className={cn('h-auto w-full justify-start gap-3 px-2 py-2 text-left', selected === file.id && 'bg-surface-overlay text-t-primary')}><FileCode2 className="size-4 shrink-0 text-t-muted" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{file.name}</span>{(projectPath || file.relativePath !== file.name) && <span className="block truncate text-xs text-t-muted">{projectPath ? `${scopeName(file.scope)} · ` : ''}{file.relativePath}</span>}</span><ChevronRight className="size-4 shrink-0 text-t-muted" /></Button>)}</div>)}
+            {provider.missing.length > 0 && <div className="mb-2"><div className="px-2 py-1 text-xs font-medium text-t-tertiary">Not there yet</div>{provider.missing.map((file) => <Button key={file.path} type="button" variant="ghost" data-testid={`agent-file-create-${file.name}`} onClick={() => void create(file)} className="h-auto w-full justify-start gap-3 px-2 py-2 text-left text-t-secondary"><FilePlus2 className="size-4 shrink-0 text-t-muted" /><span className="min-w-0 flex-1"><span className="block truncate text-sm">{file.name}</span><span className="block truncate text-xs text-t-muted">{projectPath ? `Create · ${scopeName(file.scope)}` : 'Create'}</span></span></Button>)}</div>}
           </section>)}</div>
         )}
       </aside>

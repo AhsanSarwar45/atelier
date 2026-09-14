@@ -23,7 +23,7 @@ describe('Agent files browser', () => {
   });
 
   it('lists and reads discovered files, and saves only once the text has changed', async () => {
-    render(<AgentFilesBrowser projects={[{ id: 'p', name: 'beads-web', path: '/repo' }]} />);
+    render(<AgentFilesBrowser />);
     expect((await screen.findAllByText('CLAUDE.md')).length).toBe(2);
     expect(await screen.findByDisplayValue('# Hello')).toBeInTheDocument();
     expect(screen.getByTestId('agent-file-save')).toBeDisabled();
@@ -37,13 +37,13 @@ describe('Agent files browser', () => {
   });
 
   it('asks for one account\'s files when told the account', async () => {
-    render(<AgentFilesBrowser projects={[]} profileId="work" brand="claude" />);
+    render(<AgentFilesBrowser profileId="work" brand="claude" />);
     await screen.findByDisplayValue('# Hello');
     expect(sendCommand).toHaveBeenCalledWith({ type: 'agent-files.list', profileId: 'work' });
   });
 
   it('opens the file and its containing folder only after explicit clicks', async () => {
-    render(<AgentFilesBrowser projects={[]} />);
+    render(<AgentFilesBrowser />);
     await screen.findByDisplayValue('# Hello');
     fireEvent.click(screen.getByRole('button', { name: /open in external editor/i }));
     fireEvent.click(screen.getByRole('button', { name: /reveal in file manager/i }));
@@ -52,7 +52,7 @@ describe('Agent files browser', () => {
   });
 
   it('filters files by the words the reader types', async () => {
-    render(<AgentFilesBrowser projects={[]} />);
+    render(<AgentFilesBrowser />);
     await screen.findByText('CLAUDE.md');
     fireEvent.change(screen.getByLabelText('Search agent files'), { target: { value: 'nothing-here' } });
     expect(screen.getByText('No agent files')).toBeInTheDocument();
