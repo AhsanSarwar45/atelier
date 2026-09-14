@@ -2866,15 +2866,15 @@ mod tests {
 
         assert_eq!(
             store.steering_menu("migrated").unwrap(),
-            json!({"configOptions": []})
+            json!({"configOptions": [], "title": null})
         );
         assert_eq!(
             store.steering_menu("catalog").unwrap(),
-            json!({"configOptions": []})
+            json!({"configOptions": [], "title": null})
         );
         assert_eq!(
             store.steering_menu("other").unwrap(),
-            json!({"configOptions": []})
+            json!({"configOptions": [], "title": null})
         );
     }
 
