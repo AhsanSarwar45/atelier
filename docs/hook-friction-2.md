@@ -1579,3 +1579,11 @@ git diff && git add && git commit` was refused as a write to
 `/home/ahsan/dev/beads-web`. The command's working directory was the job
 worktree and every path was relative to it. Prefixing the writing Git commands
 with the documented per-job bypass allowed the commit.
+
+## A generated no-code land card still requires its own commit (bw-89z8.5)
+
+After the work commit had landed and the generated checks card had closed,
+`atelier tool board/land bw-89z8.5` refused because no commit subject named the
+land card. The card is labelled `no-code` and exists only to land changes that
+are already on main, so it has no product change to name. This note is the
+otherwise unnecessary commit the land gate requires.
