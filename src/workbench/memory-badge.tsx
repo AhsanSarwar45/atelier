@@ -1,17 +1,26 @@
 'use client';
-import { MemoryStick } from 'lucide-react';
+
 import { useCallback, useEffect, useState } from 'react';
+
+import { MemoryStick } from 'lucide-react';
+
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { request } from '@/lib/api';
 
-interface MemoryReport { totalBytes: number; appBytes: number; processes: number; chats: Array<{ sessionId: string; title: string; bytes: number; processes: number }> }
+interface MemoryReport {
+  totalBytes: number;
+  metric: 'pss';
+  processCount: number;
+  chats: Array<{ sessionId: string; title: string; bytes: number; processes: number }>;
+  processDetails: Array<{ pid: number; parentPid: number | null; name: string; bytes: number; sessionId: string | null; chatTitle: string | null }>;
+}
 function isMemoryReport(value: unknown): value is MemoryReport {
   if (!value || typeof value !== 'object') return false;
   const report = value as Partial<MemoryReport>;
-  return typeof report.totalBytes === 'number' && typeof report.appBytes === 'number'
-    && typeof report.processes === 'number' && Array.isArray(report.chats);
+  return typeof report.totalBytes === 'number' && report.metric === 'pss'
+    && typeof report.processCount === 'number' && Array.isArray(report.chats) && Array.isArray(report.processDetails);
 }
 export function memoryWords(bytes: number): string {
   if (bytes < 1024 ** 2) return `${Math.max(0, Math.round(bytes / 1024))} KB`;
@@ -34,11 +43,17 @@ export function MemoryBadge() {
         </Button>
       </Badge>
     </PopoverTrigger>
-    <PopoverContent align="start" className="w-80 p-0" data-testid="memory-popup">
-      <div className="border-b px-3 py-2"><p className="text-sm font-medium">RAM usage</p><p className="text-xs text-muted-foreground">Atelier and all {report.processes} processes</p></div>
-      <div className="max-h-72 overflow-y-auto p-2 text-sm">
-        {report.chats.map(chat => <div key={chat.sessionId} className="flex items-center gap-3 rounded px-2 py-1.5" data-testid="memory-chat-row"><span className="min-w-0 flex-1 truncate">{chat.title}</span><span className="shrink-0 tabular-nums text-muted-foreground">{memoryWords(chat.bytes)}</span></div>)}
-        <div className="flex items-center gap-3 rounded px-2 py-1.5"><span className="min-w-0 flex-1 truncate">App and shared services</span><span className="shrink-0 tabular-nums text-muted-foreground">{memoryWords(report.appBytes)}</span></div>
+    <PopoverContent align="start" className="w-96 p-0" data-testid="memory-popup">
+      <div className="border-b px-3 py-2"><p className="text-sm font-medium">RAM usage</p><p className="text-xs text-muted-foreground">Proportional memory across {report.processCount} processes</p></div>
+      <div className="max-h-80 overflow-y-auto p-2 text-sm">
+        {report.chats.length > 0 && <><p className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Active chats</p>
+          {report.chats.map(chat => <div key={chat.sessionId} className="flex items-center gap-3 rounded px-2 py-1.5" data-testid="memory-chat-row"><span className="min-w-0 flex-1 truncate">{chat.title}<span className="ml-1 text-xs text-muted-foreground">({chat.processes})</span></span><span className="shrink-0 tabular-nums text-muted-foreground">{memoryWords(chat.bytes)}</span></div>)}
+          <div className="my-1 border-t" /></>}
+        <p className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Processes</p>
+        {report.processDetails.map(process => <div key={process.pid} className="flex items-center gap-3 rounded px-2 py-1.5" data-testid="memory-process-row">
+          <span className="min-w-0 flex-1"><span className="block truncate">{process.name || 'Process'}</span><span className="block truncate text-xs text-muted-foreground">PID {process.pid}{process.chatTitle ? ` · ${process.chatTitle}` : ' · Atelier'}</span></span>
+          <span className="shrink-0 tabular-nums text-muted-foreground">{memoryWords(process.bytes)}</span>
+        </div>)}
       </div>
       <div className="flex items-center justify-between border-t px-4 py-2 text-sm font-medium"><span>Total</span><span className="tabular-nums">{memoryWords(report.totalBytes)}</span></div>
     </PopoverContent>
