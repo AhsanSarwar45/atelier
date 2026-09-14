@@ -16,6 +16,7 @@ import { Archive, ArchiveRestore, FolderSearch, GitBranch, Hammer, Loader2, Scro
 
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
 import { FolderBrowser } from '@/components/folder-browser';
+import { BranchSelect, BranchesPicker } from '@/components/settings/branch-picker';
 import { ExtensionsPanel } from '@/components/settings/extensions-panel';
 import { McpServersPanel } from '@/components/settings/mcp-servers-panel';
 import { pagesFor, type Brand } from '@/components/settings/provider-schema';
@@ -254,7 +255,7 @@ export function ProjectSettingsScreen({
             <ProviderSettingsPanel brand={brand} scope={projectScope} page={known} layer={layer} />
           ) : known === 'mcp' ? (
             <McpServersPanel brand={brand} scope={projectScope} />
-          ) : known === 'extensions' ? (
+          ) : known === 'plugins' ? (
             <ExtensionsPanel brand={brand} scope={projectScope} />
           ) : null}
         </ProviderTabs>
@@ -352,18 +353,13 @@ export function ProjectSettingsScreen({
                 <Input id="settings-areas" value={manifest.beads.work_areas.join(', ')} onChange={(e) => patch('beads', { work_areas: commaList(e.target.value) })} className="w-full sm:w-72" />
               </SettingRow>
               <SettingRow label="Completed-work branch" htmlFor="settings-branch">
-                <Input id="settings-branch" list="settings-branches" value={manifest.git.completed_work_branch} onChange={(e) => patch('git', { completed_work_branch: e.target.value })} className="w-full font-mono text-xs sm:w-72" />
-                <datalist id="settings-branches">
-                  {branches.map((b) => (
-                    <option key={b} value={b} />
-                  ))}
-                </datalist>
+                <BranchSelect id="settings-branch" value={manifest.git.completed_work_branch} branches={branches} onChange={(name) => patch('git', { completed_work_branch: name })} testid="settings-branch" />
               </SettingRow>
               <SettingRow label="Agents may merge" htmlFor="settings-merge">
                 <Checkbox id="settings-merge" checked={manifest.git.agents_may_merge_completed_work} onCheckedChange={(c) => patch('git', { agents_may_merge_completed_work: c === true })} />
               </SettingRow>
-              <SettingRow label="Protected branches" htmlFor="settings-protected" description="Comma separated">
-                <Input id="settings-protected" value={manifest.git.protected_branches.join(', ')} onChange={(e) => patch('git', { protected_branches: commaList(e.target.value) })} className="w-full font-mono text-xs sm:w-72" />
+              <SettingRow label="Protected branches" htmlFor="settings-protected">
+                <BranchesPicker id="settings-protected" value={manifest.git.protected_branches} branches={branches} onChange={(names) => patch('git', { protected_branches: names })} testid="settings-protected" />
               </SettingRow>
             </>
           )}

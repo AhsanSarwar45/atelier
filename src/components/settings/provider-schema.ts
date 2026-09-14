@@ -20,7 +20,14 @@ export interface Choice {
 }
 
 export type Control =
-  | { kind: 'choice'; choices: Choice[]; /** Also accept a value not in the list. */ free?: boolean }
+  | {
+      kind: 'choice';
+      choices: Choice[];
+      /** Also accept a value not in the list. */
+      free?: boolean;
+      /** Choices read from the scope's own files and added to the list. */
+      plus?: 'outputStyles';
+    }
   | { kind: 'toggle' }
   | { kind: 'text'; placeholder?: string; mono?: boolean }
   | { kind: 'number'; min?: number; max?: number; step?: number }
@@ -53,6 +60,8 @@ export interface ProviderPageDef {
 }
 
 const yesNo = { kind: 'toggle' } as const;
+
+export const LANGUAGES: Choice[] = ['English', 'Spanish', 'French', 'German', 'Portuguese', 'Italian', 'Dutch', 'Japanese', 'Chinese', 'Korean', 'Russian', 'Arabic', 'Hindi', 'Urdu'].map((name) => ({ value: name, label: name }));
 
 export const CLAUDE_MODELS: Choice[] = [
   { value: 'default', label: 'Default' },
@@ -101,10 +110,10 @@ export const CLAUDE_PAGES: ProviderPageDef[] = [
         id: 'behaviour',
         title: 'Behaviour',
         settings: [
-          { key: 'outputStyle', label: 'Output style', description: '', control: { kind: 'choice', free: true, choices: [
+          { key: 'outputStyle', label: 'Output style', description: '', control: { kind: 'choice', free: true, plus: 'outputStyles', choices: [
             { value: 'Default', label: 'Default' }, { value: 'Proactive', label: 'Proactive' }, { value: 'Concise', label: 'Concise' }, { value: 'Explanatory', label: 'Explanatory' }, { value: 'Learning', label: 'Learning' },
           ] } },
-          { key: 'language', label: 'Language', description: '', control: { kind: 'text', placeholder: 'English' } },
+          { key: 'language', label: 'Language', description: '', control: { kind: 'choice', free: true, choices: LANGUAGES } },
           { key: 'autoCompactEnabled', label: 'Compact automatically', description: '', control: yesNo },
           { key: 'autoCompactWindow', label: 'Compact at', description: 'Tokens', control: { kind: 'number', min: 100000, max: 1000000, step: 10000 } },
           { key: 'autoMemoryEnabled', label: 'Auto memory', description: '', control: yesNo },

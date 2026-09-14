@@ -318,6 +318,15 @@ pub fn branch_exists(root: &Path, branch: &str) -> bool {
     existing_branches(root).iter().any(|existing| existing == branch)
 }
 
+/// Make the branch the reader named in the picker, at the current head.
+pub fn create_branch(root: &Path, branch: &str) -> Result<(), String> {
+    let out = Command::new("git").arg("-C").arg(root).args(["branch", "--", branch]).output()
+        .map_err(|error| format!("git could not be run: {error}"))?;
+    if out.status.success() { return Ok(()); }
+    let why = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    Err(if why.is_empty() { format!("branch {branch} could not be created") } else { why })
+}
+
 pub fn infer(root: &Path) -> ProjectManifest {
     let name = root.file_name().and_then(|name| name.to_str()).unwrap_or("Project").to_string();
     let current = git(root, &["branch", "--show-current"]);

@@ -32,6 +32,7 @@ import { ReadFailed } from '@/components/ui/read-failed';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { sendCommand } from '@/workbench/use-session';
 
 const UNSET = '__unset__';
 
@@ -58,19 +59,45 @@ function pairsOf(value: unknown): string {
     .join('\n');
 }
 
+/** The names of the scope's own output styles, without `.md`. */
+function useOutputStyles(scope: Scope, wanted: boolean): string[] {
+  const [names, setNames] = useState<string[]>([]);
+  const scopeKey = JSON.stringify(scope);
+  useEffect(() => {
+    if (!wanted) return;
+    let live = true;
+    const where = scope.kind === 'account' ? { profileId: scope.profileId } : { projectPath: scope.projectPath };
+    sendCommand<{ files: { provider: string; category: string; name: string }[] }>({ type: 'agent-files.list', ...where })
+      .then(({ files }) => {
+        if (!live) return;
+        setNames(files.filter((f) => f.provider === 'claude' && f.category === 'output-styles').map((f) => f.name.replace(/\.md$/, '')));
+      })
+      .catch(() => live && setNames([]));
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeKey, wanted]);
+  return names;
+}
+
 function ChoiceControl({
   control,
   value,
   onChange,
   id,
+  scope,
 }: {
   control: Extract<Control, { kind: 'choice' }>;
   value: unknown;
   onChange: (v: unknown) => void;
   id: string;
+  scope: Scope;
 }) {
   const text = asText(value);
-  const listed = control.choices.some((c) => c.value === text);
+  const own = useOutputStyles(scope, control.plus === 'outputStyles');
+  const choices = [...control.choices, ...own.filter((name) => !control.choices.some((c) => c.value === name)).map((name) => ({ value: name, label: name, hint: 'Yours' }))];
+  const listed = choices.some((c) => c.value === text);
   const [custom, setCustom] = useState(false);
   const [draft, setDraft] = useState(text);
   useEffect(() => setDraft(text), [text]);
@@ -108,7 +135,7 @@ function ChoiceControl({
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={UNSET}>Not set</SelectItem>
-        {control.choices.map((c) => (
+        {choices.map((c) => (
           <SelectItem key={c.value} value={c.value}>
             {c.label}
             {c.hint && <span className="ml-2 text-xs text-t-muted">{c.hint}</span>}
@@ -229,15 +256,17 @@ function SettingControl({
   value,
   onChange,
   id,
+  scope,
 }: {
   def: SettingDef;
   value: unknown;
   onChange: (v: unknown) => void;
   id: string;
+  scope: Scope;
 }) {
   switch (def.control.kind) {
     case 'choice':
-      return <ChoiceControl control={def.control} value={value} onChange={onChange} id={id} />;
+      return <ChoiceControl control={def.control} value={value} onChange={onChange} id={id} scope={scope} />;
     case 'toggle':
       return <ToggleControl value={value} onChange={onChange} id={id} />;
     case 'text':
@@ -355,7 +384,7 @@ export function ProviderSettingsPanel({
                     </>
                   }
                 >
-                  <SettingControl def={def} value={own} onChange={(v) => change(def.key, v)} id={id} />
+                  <SettingControl def={def} value={own} onChange={(v) => change(def.key, v)} id={id} scope={scope} />
                 </SettingRow>
               );
             })}

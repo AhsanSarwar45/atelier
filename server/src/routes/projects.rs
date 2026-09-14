@@ -229,7 +229,8 @@ pub async fn update_project_settings(
         .ok_or_else(|| manifest_error("project has no manifest; initialize it first".into()))?;
     if !virtual_project && manifest.project.use_beads
         && !project_manifest::branch_exists(root.as_ref().unwrap(), &manifest.git.completed_work_branch) {
-        return Err(manifest_error("Completed-work branch must be an existing project branch".into()));
+        // The picker offers "New branch…", so a name the repo lacks is a branch to make, not a slip.
+        project_manifest::create_branch(root.as_ref().unwrap(), &manifest.git.completed_work_branch).map_err(manifest_error)?;
     }
     if !virtual_project && located.manifest.beads.issue_id_prefix != manifest.beads.issue_id_prefix && board_has_issues(root.as_ref().unwrap()) {
         return Err(manifest_error("Issue ID prefix cannot change after the board has issued IDs".into()));
