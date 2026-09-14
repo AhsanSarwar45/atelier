@@ -52,6 +52,45 @@ test('a Claude Code account server is added, listed and removed in .claude.json'
   await expect.poll(() => JSON.parse(readFileSync(file, 'utf8')).mcpServers?.memory).toBeUndefined();
 });
 
+test('a remote Claude Code server says whether the CLI holds a sign-in for it', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  // What `claude mcp` leaves behind after an OAuth sign-in, for one of two servers.
+  writeFileSync(
+    join(claudeDir, '.credentials.json'),
+    JSON.stringify({ mcpOAuth: { 'linear|0000000000000000': { serverName: 'linear', serverUrl: 'https://mcp.linear.test/mcp', accessToken: 'x', refreshToken: 'y', clientId: 'c' } } }),
+  );
+  await page.goto('/settings?section=claude&tab=mcp');
+  const names = ['linear', 'notion'];
+  const add = async (name: string) => {
+    await page.getByTestId('mcp-add').click();
+    await page.getByTestId('mcp-add-id').fill(name);
+    await page.getByRole('combobox', { name: 'Kind' }).click();
+    await page.getByRole('option', { name: 'URL' }).click();
+    await page.getByTestId('mcp-add-url').fill(`https://mcp.${name}.test/mcp`);
+    await page.getByTestId('mcp-add-submit').click();
+    await expect(page.getByTestId(`mcp-server-${name}`)).toBeVisible();
+  };
+  for (const name of names) await add(name);
+  // A `claude` the app ran to list sessions writes .claude.json back from its
+  // own memory when it exits, dropping a server added meanwhile. Put back
+  // whatever it dropped until a fresh read shows both.
+  await expect.poll(async () => {
+    await page.reload();
+    await expect(page.getByTestId('mcp-add')).toBeVisible();
+    const missing: string[] = [];
+    for (const name of names) if ((await page.getByTestId(`mcp-server-${name}`).count()) === 0) missing.push(name);
+    for (const name of missing) await add(name);
+    return missing.length;
+  }, { timeout: 30_000 }).toBe(0);
+  await expect(page.getByTestId('mcp-auth-linear')).toHaveText('Signed in');
+  await expect(page.getByTestId('mcp-logout-linear')).toBeVisible();
+  await expect(page.getByTestId('mcp-auth-notion')).toHaveText('Not signed in');
+  await expect(page.getByTestId('mcp-login-notion')).toBeVisible();
+  await page.screenshot({ path: join(results, 'desktop-claude-signin.png') });
+  for (const name of ['linear', 'notion']) await page.getByTestId(`mcp-remove-${name}`).click();
+  rmSync(join(claudeDir, '.credentials.json'), { force: true });
+});
+
 test('a Codex account server is added as a URL and switched off in config.toml', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/settings?section=codex&tab=mcp');
@@ -93,17 +132,25 @@ test('a project lists its .mcp.json servers and its extensions', async ({ page, 
     await expect.poll(() => existsSync(join(repo, '.mcp.json'))).toBe(true);
     expect(JSON.parse(readFileSync(join(repo, '.mcp.json'), 'utf8')).mcpServers.fs.command).toBe('npx');
 
-    await page.getByTestId('provider-tab-extensions').click();
-    await expect(page).toHaveURL(/ptab=extensions/);
+    await page.getByTestId('provider-tab-plugins').click();
+    await expect(page).toHaveURL(/ptab=plugins/);
     await expect(page.getByTestId('extensions-claude')).toBeVisible();
-    await expect(page.getByTestId('extension-skills-deploy')).toContainText('Ship it');
-    await expect(page.getByTestId('extension-agents-reviewer.md')).toBeVisible();
-    await expect(page.getByTestId('provider-tab-extensions')).toHaveAttribute('data-state', 'active');
-    await page.screenshot({ path: join(results, 'desktop-project-extensions.png') });
+    await expect(page.getByTestId('extensions-plugins')).toBeVisible();
+    await expect(page.getByTestId('extensions-marketplaces')).toBeVisible();
+    // Skills and agents are files, so they are not here…
+    await expect(page.getByText('Ship it')).toHaveCount(0);
+    await expect(page.getByTestId('provider-tab-plugins')).toHaveAttribute('data-state', 'active');
+    await page.screenshot({ path: join(results, 'desktop-project-plugins.png') });
 
-    await page.getByTestId('extension-remove-reviewer.md').click();
-    await expect(page.getByTestId('extension-agents-reviewer.md')).toHaveCount(0);
-    await expect.poll(() => existsSync(join(repo, '.claude', 'agents', 'reviewer.md'))).toBe(false);
+    // …but under Agent files.
+    await page.getByTestId('settings-section-files').click();
+    await expect(page.getByTestId('agent-file-SKILL.md').first()).toBeVisible();
+    await expect(page.getByTestId('agent-file-reviewer.md').first()).toBeVisible();
+
+    // Codex has no plugins, so no such tab.
+    await page.getByTestId('settings-section-codex').click();
+    await expect(page.getByTestId('provider-tab-mcp')).toBeVisible();
+    await expect(page.getByTestId('provider-tab-plugins')).toHaveCount(0);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

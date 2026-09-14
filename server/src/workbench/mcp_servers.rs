@@ -29,11 +29,24 @@
 //!
 //! `[mcp_servers.<id>]` in `<CODEX_HOME>/config.toml`, or in a trusted
 //! project's `.codex/config.toml`. `enabled = false` switches one off.
+//!
+//! ## Where each CLI keeps a remote server's sign-in (read, never written)
+//!
+//! Claude Code puts its OAuth tokens in `<cfg>/.credentials.json` under
+//! `mcpOAuth`, where `<cfg>` is `CLAUDE_SECURESTORAGE_CONFIG_DIR` when set and
+//! the account's config directory otherwise; each entry names its server in
+//! `serverName`, so it is matched by name rather than by the hashed key. Codex
+//! keeps its tokens in the OS keyring (service "Codex MCP Credentials") and
+//! falls back to `<CODEX_HOME>/.credentials.json`, keyed by server, with
+//! `server_name` inside. When the file has no entry the keyring may still, so
+//! `codex mcp list --json` is asked for its `auth_status`, on demand and with
+//! a short deadline. Token values are never logged or answered.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use super::provider_settings::{
@@ -43,6 +56,13 @@ use super::provider_settings::{
 /// How long a login is watched for the address it prints before the browser
 /// is answered. The flow itself keeps running after that.
 const URL_WITHIN: Duration = Duration::from_secs(3);
+
+/// How long `codex mcp list --json` is given to answer for the sign-ins the
+/// file could not tell.
+const CODEX_LIST_WITHIN: Duration = Duration::from_secs(5);
+
+/// Codex treats a token due to expire this soon as already expired.
+const CODEX_EXPIRY_SLACK_MS: u64 = 30_000;
 
 /// Which file a server is defined in.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -79,6 +99,21 @@ pub struct Account {
     pub system: bool,
 }
 
+/// Whether a remote server's sign-in is usable, as the CLI's own credential
+/// store says.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Auth {
+    SignedIn,
+    NotSignedIn,
+    Expired,
+}
+
+/// Answers a Codex account's `codex mcp list --json` as server id to
+/// `auth_status`, or `None` when the command could not be run. Injectable so
+/// tests need no `codex` program.
+pub type CodexStatus<'a> = &'a dyn Fn(&Account, &Scope) -> Option<HashMap<String, String>>;
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Server {
@@ -102,6 +137,9 @@ pub struct Server {
     pub env: Option<Map<String, Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub headers: Option<Map<String, Value>>,
+    /// Remote servers only: whether the CLI holds a usable sign-in for it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth: Option<Auth>,
     /// The entry exactly as the file holds it.
     pub config: Value,
 }
@@ -125,8 +163,24 @@ pub struct Started {
 
 /// Every server this scope of this brand can see.
 pub fn list(brand: &str, scope: &Scope, account: &Account) -> Result<Listing, String> {
+    // Unit tests hand in their own answer through `list_with`, so none of
+    // them runs the real program.
+    #[cfg(not(test))]
+    let status: CodexStatus = &codex_status_by_cli;
+    #[cfg(test)]
+    let status: CodexStatus = &|_, _| None;
+    list_with(brand, scope, account, status)
+}
+
+/// `list`, with the Codex CLI step supplied.
+pub fn list_with(
+    brand: &str,
+    scope: &Scope,
+    account: &Account,
+    status: CodexStatus,
+) -> Result<Listing, String> {
     check(brand, scope)?;
-    let servers = match (brand, scope) {
+    let mut servers = match (brand, scope) {
         ("claude", Scope::Account { .. }) => claude_user(account)?,
         ("claude", Scope::Project { path }) => claude_project(account, path)?,
         ("codex", Scope::Account { .. }) => {
@@ -137,6 +191,34 @@ pub fn list(brand: &str, scope: &Scope, account: &Account) -> Result<Listing, St
         }
         _ => unreachable!("checked above"),
     };
+    match brand {
+        "claude" => {
+            let store = claude_credentials(account);
+            for server in servers.iter_mut().filter(|s| s.transport != "stdio") {
+                server.auth = Some(claude_auth(&store, &server.id));
+            }
+        }
+        _ => {
+            let store = codex_credentials(account);
+            let mut asked = None;
+            for server in servers.iter_mut().filter(|s| s.transport != "stdio") {
+                server.auth = Some(match codex_auth(&store, &server.id) {
+                    Some(auth) => auth,
+                    None => {
+                        let answers = asked.get_or_insert_with(|| status(account, scope));
+                        match answers
+                            .as_ref()
+                            .and_then(|by_id| by_id.get(&server.id))
+                            .map(String::as_str)
+                        {
+                            Some("o_auth") => Auth::SignedIn,
+                            _ => Auth::NotSignedIn,
+                        }
+                    }
+                });
+            }
+        }
+    }
     Ok(Listing { servers })
 }
 
@@ -561,6 +643,7 @@ fn claude_server(
         url: text(config, "url"),
         env: config.get("env").and_then(Value::as_object).cloned(),
         headers: config.get("headers").and_then(Value::as_object).cloned(),
+        auth: None,
         config: config.clone(),
     }
 }
@@ -597,10 +680,158 @@ fn codex_file(path: &Path, source: Source) -> Result<Vec<Server>, String> {
                     .get("http_headers")
                     .and_then(Value::as_object)
                     .cloned(),
+                auth: None,
                 config,
             }
         })
         .collect())
+}
+
+// ----- sign-ins -----
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|since| since.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// A file read for its shape only; missing or unreadable counts as empty, and
+/// nothing of what it holds is logged.
+fn read_credentials(path: &Path) -> Map<String, Value> {
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default()
+}
+
+fn filled(value: Option<&Value>) -> bool {
+    value.and_then(Value::as_str).is_some_and(|s| !s.is_empty())
+}
+
+fn epoch_ms(value: Option<&Value>) -> Option<u64> {
+    value.and_then(Value::as_f64).map(|ms| ms.max(0.0) as u64)
+}
+
+/// The `mcpOAuth` entries of the account's `.credentials.json`.
+fn claude_credentials(account: &Account) -> Vec<Value> {
+    let dir = std::env::var_os("CLAUDE_SECURESTORAGE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| account.dir.clone());
+    read_credentials(&dir.join(".credentials.json"))
+        .get("mcpOAuth")
+        .and_then(Value::as_object)
+        .map(|entries| entries.values().cloned().collect())
+        .unwrap_or_default()
+}
+
+fn claude_auth(store: &[Value], id: &str) -> Auth {
+    let Some(entry) = store
+        .iter()
+        .find(|entry| entry.get("serverName").and_then(Value::as_str) == Some(id))
+    else {
+        return Auth::NotSignedIn;
+    };
+    if !filled(entry.get("accessToken")) {
+        return Auth::NotSignedIn;
+    }
+    let refreshable = filled(entry.get("refreshToken"));
+    match epoch_ms(entry.get("expiresAt")) {
+        Some(expires_at) if !refreshable && expires_at <= now_ms() => Auth::Expired,
+        _ => Auth::SignedIn,
+    }
+}
+
+/// The entries of the account's `.credentials.json`, Codex's keyring fallback.
+fn codex_credentials(account: &Account) -> Vec<Value> {
+    read_credentials(&account.dir.join(".credentials.json"))
+        .values()
+        .cloned()
+        .collect()
+}
+
+/// What the file says about one server, or `None` when it has no entry and
+/// the keyring must be asked through the CLI.
+fn codex_auth(store: &[Value], id: &str) -> Option<Auth> {
+    let entry = store
+        .iter()
+        .find(|entry| entry.get("server_name").and_then(Value::as_str) == Some(id))?;
+    if !filled(entry.get("client_id")) {
+        return Some(Auth::NotSignedIn);
+    }
+    let due = epoch_ms(entry.get("expires_at"))
+        .is_some_and(|expires_at| expires_at.saturating_sub(CODEX_EXPIRY_SLACK_MS) <= now_ms());
+    Some(if due {
+        if filled(entry.get("issuer")) && filled(entry.get("refresh_token")) {
+            Auth::SignedIn
+        } else {
+            Auth::Expired
+        }
+    } else if filled(entry.get("access_token")) {
+        Auth::SignedIn
+    } else {
+        Auth::NotSignedIn
+    })
+}
+
+/// `codex mcp list --json` for this account, in the project when one is
+/// named, as server name to `auth_status`. `None` when the program is
+/// missing, fails, or is not done within `CODEX_LIST_WITHIN`.
+fn codex_status_by_cli(account: &Account, scope: &Scope) -> Option<HashMap<String, String>> {
+    let program = crate::routes::find_tool("codex", &[])?;
+    let mut command = std::process::Command::new(program);
+    command.args(["mcp", "list", "--json"]);
+    if let Scope::Project { path } = scope {
+        command.current_dir(path);
+    }
+    if !account.system {
+        if let Some(variable) = super::profiles::variable("codex") {
+            command.env(variable, &account.dir);
+        }
+    }
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    let mut child = command.spawn().ok()?;
+    let stdout = child.stdout.take()?;
+    let reader = std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let _ = std::io::Read::read_to_end(&mut std::io::BufReader::new(stdout), &mut out);
+        out
+    });
+    let deadline = std::time::Instant::now() + CODEX_LIST_WITHIN;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+    if !status.success() {
+        return None;
+    }
+    let out = reader.join().ok()?;
+    let value = serde_json::from_slice::<Value>(&out).ok()?;
+    Some(
+        value
+            .as_array()?
+            .iter()
+            .filter_map(|entry| {
+                Some((
+                    entry.get("name")?.as_str()?.to_string(),
+                    entry.get("auth_status")?.as_str()?.to_string(),
+                ))
+            })
+            .collect(),
+    )
 }
 
 // ----- shared -----
@@ -1416,12 +1647,21 @@ mod tests {
                 url: Some("https://a".into()),
                 env: None,
                 headers: None,
+                auth: Some(Auth::Expired),
                 config: json!({"type": "http", "url": "https://a"}),
             }],
         };
         assert_eq!(
             serde_json::to_value(&listing).unwrap(),
-            json!({"servers": [{"id": "a", "source": "project", "path": "/p/.mcp.json", "enabled": true, "approval": "pending", "transport": "http", "url": "https://a", "config": {"type": "http", "url": "https://a"}}]})
+            json!({"servers": [{"id": "a", "source": "project", "path": "/p/.mcp.json", "enabled": true, "approval": "pending", "transport": "http", "url": "https://a", "auth": "expired", "config": {"type": "http", "url": "https://a"}}]})
+        );
+        assert_eq!(
+            serde_json::to_value(Auth::SignedIn).unwrap(),
+            json!("signedIn")
+        );
+        assert_eq!(
+            serde_json::to_value(Auth::NotSignedIn).unwrap(),
+            json!("notSignedIn")
         );
         assert_eq!(
             serde_json::to_value(Started {
@@ -1441,6 +1681,139 @@ mod tests {
         );
         assert_eq!(first_url("nothing here"), None);
         assert_eq!(first_url("https://"), None);
+    }
+
+    fn auth_of(listing: &Listing, id: &str) -> Option<Auth> {
+        listing.servers.iter().find(|s| s.id == id).unwrap().auth
+    }
+
+    #[test]
+    fn native_workbench_services_mcp_claude_sign_ins_are_read_from_the_credentials_file() {
+        let home = tempfile::tempdir().unwrap();
+        let account_files = account_in(home.path());
+        fs::create_dir_all(&account_files.dir).unwrap();
+        let far = now_ms() + 3_600_000;
+        fs::write(
+            &account_files.claude_json,
+            serde_json::to_string(&json!({"mcpServers": {
+                "fresh": {"type": "http", "url": "https://f"},
+                "renewable": {"type": "sse", "url": "https://r"},
+                "forever": {"type": "http", "url": "https://v"},
+                "stale": {"type": "http", "url": "https://s"},
+                "blank": {"type": "http", "url": "https://b"},
+                "unknown": {"type": "http", "url": "https://u"},
+                "local": {"type": "stdio", "command": "x"}
+            }}))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            account_files.dir.join(".credentials.json"),
+            serde_json::to_string(&json!({"mcpOAuth": {
+                "fresh|h1": {"serverName": "fresh", "serverUrl": "https://f", "accessToken": "t", "expiresAt": far},
+                "renewable|h2": {"serverName": "renewable", "serverUrl": "https://r", "accessToken": "t", "refreshToken": "r", "expiresAt": 1},
+                "forever|h3": {"serverName": "forever", "serverUrl": "https://v", "accessToken": "t"},
+                "stale|h4": {"serverName": "stale", "serverUrl": "https://s", "accessToken": "t", "expiresAt": 1},
+                "blank|h5": {"serverName": "blank", "serverUrl": "https://b", "accessToken": ""}
+            }}))
+            .unwrap(),
+        )
+        .unwrap();
+        let listing = list("claude", &account(), &account_files).unwrap();
+        assert_eq!(auth_of(&listing, "fresh"), Some(Auth::SignedIn));
+        assert_eq!(auth_of(&listing, "renewable"), Some(Auth::SignedIn));
+        assert_eq!(auth_of(&listing, "forever"), Some(Auth::SignedIn));
+        assert_eq!(auth_of(&listing, "stale"), Some(Auth::Expired));
+        assert_eq!(auth_of(&listing, "blank"), Some(Auth::NotSignedIn));
+        assert_eq!(auth_of(&listing, "unknown"), Some(Auth::NotSignedIn));
+        assert_eq!(auth_of(&listing, "local"), None, "stdio has no sign-in");
+        // Local servers of a project are read against the same file.
+        let project = tempfile::tempdir().unwrap();
+        let key = project.path().to_string_lossy().into_owned();
+        fs::write(
+            &account_files.claude_json,
+            serde_json::to_string(&json!({"projects": {key: {"mcpServers": {
+                "fresh": {"type": "http", "url": "https://f"}
+            }}}}))
+            .unwrap(),
+        )
+        .unwrap();
+        let scope = Scope::Project {
+            path: project.path().to_path_buf(),
+        };
+        let listing = list("claude", &scope, &account_files).unwrap();
+        assert_eq!(auth_of(&listing, "fresh"), Some(Auth::SignedIn));
+        // No credentials file at all: every remote server is not signed in.
+        fs::remove_file(account_files.dir.join(".credentials.json")).unwrap();
+        let listing = list("claude", &scope, &account_files).unwrap();
+        assert_eq!(auth_of(&listing, "fresh"), Some(Auth::NotSignedIn));
+    }
+
+    #[test]
+    fn native_workbench_services_mcp_codex_sign_ins_come_from_the_file_then_the_cli() {
+        let home = tempfile::tempdir().unwrap();
+        let account_files = account_in(home.path());
+        fs::create_dir_all(&account_files.dir).unwrap();
+        let now = now_ms();
+        fs::write(
+            account_files.dir.join("config.toml"),
+            "[mcp_servers.fresh]\nurl = \"https://f\"\n[mcp_servers.soon]\nurl = \"https://s\"\n[mcp_servers.renewable]\nurl = \"https://r\"\n[mcp_servers.noclient]\nurl = \"https://n\"\n[mcp_servers.keyring]\nurl = \"https://k\"\n[mcp_servers.unknown]\nurl = \"https://u\"\n[mcp_servers.local]\ncommand = \"x\"\n",
+        )
+        .unwrap();
+        fs::write(
+            account_files.dir.join(".credentials.json"),
+            serde_json::to_string(&json!({
+                "fresh": {"server_name": "fresh", "server_url": "https://f", "client_id": "c", "access_token": "t", "expires_at": now + 3_600_000},
+                "soon": {"server_name": "soon", "server_url": "https://s", "client_id": "c", "access_token": "t", "expires_at": now + 10_000},
+                "renewable": {"server_name": "renewable", "server_url": "https://r", "client_id": "c", "access_token": "t", "expires_at": 1, "refresh_token": "r", "issuer": "https://i"},
+                "noclient": {"server_name": "noclient", "server_url": "https://n", "client_id": "", "access_token": "t"}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let asked = std::cell::Cell::new(0);
+        let status: CodexStatus = &|account_seen: &Account, scope: &Scope| {
+            asked.set(asked.get() + 1);
+            assert_eq!(account_seen.dir, account_files.dir);
+            assert_eq!(*scope, account());
+            Some(HashMap::from([
+                ("keyring".to_string(), "o_auth".to_string()),
+                ("unknown".to_string(), "not_logged_in".to_string()),
+                ("local".to_string(), "o_auth".to_string()),
+            ]))
+        };
+        let listing = list_with("codex", &account(), &account_files, status).unwrap();
+        assert_eq!(auth_of(&listing, "fresh"), Some(Auth::SignedIn));
+        assert_eq!(
+            auth_of(&listing, "soon"),
+            Some(Auth::Expired),
+            "due within 30 s"
+        );
+        assert_eq!(auth_of(&listing, "renewable"), Some(Auth::SignedIn));
+        assert_eq!(auth_of(&listing, "noclient"), Some(Auth::NotSignedIn));
+        assert_eq!(auth_of(&listing, "keyring"), Some(Auth::SignedIn));
+        assert_eq!(auth_of(&listing, "unknown"), Some(Auth::NotSignedIn));
+        assert_eq!(auth_of(&listing, "local"), None, "stdio is never asked");
+        assert_eq!(asked.get(), 1, "the program is run once per listing");
+        // A program that cannot answer leaves the rest not signed in.
+        let listing = list_with("codex", &account(), &account_files, &|_, _| None).unwrap();
+        assert_eq!(auth_of(&listing, "fresh"), Some(Auth::SignedIn));
+        assert_eq!(auth_of(&listing, "keyring"), Some(Auth::NotSignedIn));
+        // Nothing to ask about: the program is not run at all.
+        asked.set(0);
+        fs::write(
+            account_files.dir.join("config.toml"),
+            "[mcp_servers.fresh]\nurl = \"https://f\"\n",
+        )
+        .unwrap();
+        let listing = list_with("codex", &account(), &account_files, status).unwrap();
+        assert_eq!(auth_of(&listing, "fresh"), Some(Auth::SignedIn));
+        assert_eq!(asked.get(), 0);
+        // The real program, when it is here, answers or is skipped in time.
+        if crate::routes::find_tool("codex", &[]).is_some() {
+            let answer = codex_status_by_cli(&account_files, &account());
+            assert!(answer.is_none() || answer.is_some_and(|by_id| by_id.len() <= 1));
+        }
     }
 
     #[tokio::test]

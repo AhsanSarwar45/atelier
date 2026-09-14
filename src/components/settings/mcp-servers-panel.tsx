@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { KeyRound, Loader2, Plus, Trash2 } from 'lucide-react';
+import { Loader2, LogIn, LogOut, Plus, Trash2 } from 'lucide-react';
 
 import type { Scope } from '@/components/settings/provider-settings-api';
 import { SettingsGroup } from '@/components/settings/section';
@@ -184,13 +184,24 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brand, scopeKey, attempt]);
 
+  // A sign-in finishes in the browser, so the list is read again when this
+  // window gets the focus back.
+  useEffect(() => {
+    const again = () => setAttempt((n) => n + 1);
+    window.addEventListener('focus', again);
+    return () => window.removeEventListener('focus', again);
+  }, []);
+
   const act = useCallback(
     async (key: string, run: () => Promise<{ servers: McpServer[] } | { started: boolean; url?: string }>, done?: string) => {
       setBusy(key);
       try {
         const r = await run();
         if ('servers' in r) setServers(r.servers);
-        else if (r.url) window.open(r.url, '_blank', 'noopener');
+        else {
+          if (r.url) window.open(r.url, '_blank', 'noopener');
+          setAttempt((n) => n + 1);
+        }
         if (done) toast({ title: done });
       } catch (e) {
         toast({ title: 'Not done', description: said(e), variant: 'destructive' });
@@ -250,23 +261,39 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
                       Not yet approved
                     </Badge>
                   )}
+                  {s.auth && (
+                    <Badge variant={s.auth === 'signedIn' ? 'success' : 'warning'} size="sm" data-testid={`mcp-auth-${s.id}`}>
+                      {s.auth === 'signedIn' ? 'Signed in' : s.auth === 'expired' ? 'Sign-in expired' : 'Not signed in'}
+                    </Badge>
+                  )}
                   {busy === key && <Loader2 className="size-3 animate-spin text-t-muted" />}
                 </div>
                 <Tooltip label={target}>
                   <p className="truncate font-mono text-xs text-t-muted">{target}</p>
                 </Tooltip>
               </div>
-              {(s.transport === 'http' || s.transport === 'sse') && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label={`Sign in to ${s.id}`}
-                  disabled={busy !== null}
-                  onClick={() => void act(key, () => sendCommand({ type: 'mcp.login', brand, ...wireScope(scope), id: s.id }), 'Sign-in started')}
-                >
-                  <KeyRound />
-                </Button>
-              )}
+              {s.transport !== 'stdio' &&
+                (s.auth === 'signedIn' ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy !== null}
+                    onClick={() => void act(key, () => sendCommand({ type: 'mcp.logout', brand, ...wireScope(scope), id: s.id }), 'Signed out')}
+                    data-testid={`mcp-logout-${s.id}`}
+                  >
+                    <LogOut /> Sign out
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy !== null}
+                    onClick={() => void act(key, () => sendCommand({ type: 'mcp.login', brand, ...wireScope(scope), id: s.id }), 'Sign-in opened in the browser')}
+                    data-testid={`mcp-login-${s.id}`}
+                  >
+                    <LogIn /> Sign in
+                  </Button>
+                ))}
               <Button
                 variant="ghost"
                 size="sm"
