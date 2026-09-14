@@ -1,4 +1,5 @@
 import { DevTools } from '@/components/dev-tools';
+import { ProjectTitleInitScript } from '@/components/project-title-init';
 import { ThemeInitScript } from '@/components/theme-init';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -30,6 +31,7 @@ export default function RootLayout({
     <html lang="en" className="dark" suppressHydrationWarning>
       <head>
         <ThemeInitScript />
+        <ProjectTitleInitScript />
       </head>
       <body className="flex min-h-screen flex-col bg-background antialiased transition-colors duration-300">
         {/* One for the whole app. Hover labels used to bring their own provider

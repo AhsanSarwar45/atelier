@@ -22,6 +22,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import type { Tag } from "@/lib/db";
+import { projectTitle } from "@/lib/project-title";
 import { deriveBeadPrefix } from "@/lib/utils";
 import { NO_COUNTS, type BeadCounts } from "@/types";
 
@@ -123,6 +124,9 @@ export function ProjectCard({
   };
 
   const handleCardClick = () => {
+    // Navigation reuses the current document. Name it before the project read
+    // begins, and retain the name for reloads in this browser tab.
+    document.title = projectTitle(id, name);
     router.push(`/project?id=${id}`);
   };
 
