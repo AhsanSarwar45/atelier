@@ -222,10 +222,50 @@ test.describe('what a chat is set to survives sending a message', () => {
     await expect(page.getByTestId('chat-effort-chip')).toHaveCount(0);
 
     await effort.click();
-    await page.getByTestId('effort-picker-option').filter({ hasText: 'High' }).click();
+    await page.locator('[data-testid="effort-picker-option"][data-value="high"]').click();
     await expect(effort).toHaveAttribute('data-current', EFFORT);
     expect(wire().filter((asked) => asked.method === 'session/new')).toHaveLength(launchesBeforeOpen);
 
+    const shot = process.env.PINNED_ACP_SHOT;
+    if (shot) await page.screenshot({ path: shot, fullPage: true });
+  });
+
+  test('a cold old Codex chat draws all five settings with no live menu', async ({ page, request }) => {
+    const api = backend();
+    const project = await pinnedProject(request);
+    const response = await request.post(`${api}/api/workbench/command`, { data: {
+      type: 'session.open',
+      externalId: `cold-old-${Date.now()}`,
+      projectId: project.id,
+      projectPath: project.path,
+      cwd: project.path,
+      brand: 'codex',
+      model: 'gpt-5.6-sol',
+      permissionMode: 'on-request',
+      effort: 'low',
+      collaborationMode: 'default',
+    } });
+    expect(response.ok(), await response.text()).toBe(true);
+    const saved = (await response.json()) as { id: string };
+
+    await page.goto(`/project?id=${project.id}&tab=chat&chat=${saved.id}`);
+    await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+    const controls = page.getByTestId('desktop-composer-settings');
+    await expect(controls.getByTestId('session-brand')).toHaveAttribute('data-brand', 'codex');
+    await expect(controls.getByTestId('model-picker')).toBeVisible();
+    await expect(controls.getByTestId('mode-picker')).toBeVisible();
+    await expect(controls.getByTestId('effort-picker')).toBeVisible();
+    await expect(controls.getByTestId('collaboration-mode-picker')).toBeVisible();
+
+    await controls.getByTestId('effort-picker').click();
+    await page.locator('[data-testid="effort-picker-option"][data-value="high"]').click();
+    await expect(controls.getByTestId('effort-picker')).toHaveAttribute('data-current', 'high');
+
+    const status = page.getByTestId('chat-status-line');
+    await expect(status.getByTestId('session-brand')).toHaveCount(0);
+    await expect(status.getByTestId('chat-model-chip')).toHaveCount(0);
+    await expect(status.getByTestId('chat-mode-chip')).toHaveCount(0);
+    await expect(status.getByTestId('chat-effort-chip')).toHaveCount(0);
     const shot = process.env.PINNED_ACP_SHOT;
     if (shot) await page.screenshot({ path: shot, fullPage: true });
   });

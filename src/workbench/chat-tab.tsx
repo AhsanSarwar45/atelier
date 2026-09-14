@@ -86,6 +86,7 @@ import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, sentAway, showing as stillShowing, type KindId } from '@/workbench/message-filter';
 import type { Brand, CommandInfo, LookableImage, ProfileChoice, SessionConfigOption, TodoItem } from '@/workbench/protocol';
+import type { SessionMenu } from '@/workbench/fold';
 
 /** The brands a chat can run on somebody's account. `local` has none. */
 const ACCOUNTED_BRANDS: readonly Brand[] = ['claude', 'codex'];
@@ -102,7 +103,7 @@ import { PlanChip, UsageView } from '@/workbench/usage-view';
 import { CHIP_GAP, ModeMark, modelName, modelWords, modeWords } from '@/workbench/what-it-runs';
 import { isBusy, readAndKeep, sendCommand, useSession, useSessionFactsRead, type TranscriptItem } from '@/workbench/use-session';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
-import { BrandIcon, ProfileBadge, brandName } from '@/workbench/brand-icon';
+import { BrandIcon, ProfileBadge, ProviderBadge, brandName } from '@/workbench/brand-icon';
 import { workingLine } from '@/workbench/working-line';
 import { AttachmentViewer } from '@/workbench/attachment-viewer';
 import { useEpicChecklist } from '@/workbench/epic-checklist';
@@ -128,6 +129,45 @@ const NO_MARK: ReadonlySet<string> = new Set<string>();
 const LEFT_PANEL_WIDTH = 'workbench.left-panel-width';
 const RIGHT_PANEL_WIDTH = 'workbench.right-panel-width';
 const MIN_CHAT_WIDTH = 320;
+
+const CODEX_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh'].map((value) => ({
+  value,
+  displayName: value === 'xhigh' ? 'Extra high' : inWords(value),
+}));
+
+/**
+ * Controls must exist before a dormant provider is woken by the next prompt.
+ * A live session menu remains authoritative. On a cold server, use only the
+ * stable vocabulary the app itself sends to that provider plus the chat's
+ * pinned model; the provider's eventual menu replaces these conservative rows.
+ */
+export function composerMenu(menu: SessionMenu, brand: Brand, model: string | null, collaborationMode: string | null): SessionMenu {
+  if (brand === 'local') return menu;
+  const permissionModes = menu.permissionModes.length
+    ? menu.permissionModes
+    : brand === 'codex'
+      ? ['on-request', 'never']
+      : ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto'];
+  const models = menu.models.length
+    ? menu.models
+    : [
+        { value: BRAND_DEFAULT_MODEL, displayName: 'Default' },
+        ...(model && model !== BRAND_DEFAULT_MODEL ? [{ value: model, displayName: modelName(model) ?? model }] : []),
+      ];
+  const efforts = menu.efforts.length
+    ? menu.efforts
+    : brand === 'codex'
+      ? CODEX_EFFORTS
+      : [];
+  const collaborationModes = menu.collaborationModes.length
+    ? menu.collaborationModes
+    : brand === 'codex'
+      ? [{ value: 'default', displayName: 'Default' }, { value: 'plan', displayName: 'Plan' }]
+      : collaborationMode
+        ? [{ value: collaborationMode, displayName: inWords(collaborationMode) }]
+        : [];
+  return { ...menu, permissionModes, models, efforts, collaborationModes };
+}
 
 /**
  * Everything one row of a conversation actually says, for going through once
@@ -1294,7 +1334,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // first frame it draws (live.ts, LiveSession.externalId).
   const live = useLiveSessions().find((s) => s.id === sessionId);
   const sessionBrand = live?.brand ?? facts?.brand ?? 'claude';
-  const selectedModel = view.menu.models.find((model) => model.value === view.model);
+  const composer = composerMenu(view.menu, sessionBrand, view.model, view.collaborationMode);
+  const selectedModel = composer.models.find((model) => model.value === view.model);
   // The chat's own accounts are needed even on the system account: that is the
   // row from which somebody switches to a named one. Names belong to the
   // account and move when it is renamed, so they are looked up rather than
@@ -2415,6 +2456,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             {/* Both act on THIS chat, and are kept in his own settings so the
                 next one opens on them too (§8.2.3). */}
             <div className="hidden items-center gap-1 composer-wide:flex" data-testid="desktop-composer-settings">
+            <ProviderBadge brand={sessionBrand} model={view.model} />
             <Picker
               icon={<ModeMark mode={view.permissionMode} className="h-3.5 w-3.5" />}
               label="Permission mode"
@@ -2425,7 +2467,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               // The setting's own spelling is not a label: `bypassPermissions`
               // is what he has to read to know whether this chat still asks
               // (src/workbench/machine-words.ts, bw-iiv6).
-              options={view.menu.permissionModes.map((m) => ({
+              options={composer.permissionModes.map((m) => ({
                 value: m,
                 label: PERMISSION_MODE[m]?.label ?? inWords(m),
               }))}
@@ -2438,15 +2480,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 );
               }}
             />
-            {view.menu.collaborationModes.length > 0 && (
+            {composer.collaborationModes.length > 0 && (
               <Picker
                 icon={<Workflow className="h-3.5 w-3.5" />}
                 label="Collaboration mode"
                 testid="collaboration-mode-picker"
                 current={view.collaborationMode}
-                currentLabel={view.menu.collaborationModes.find((mode) => mode.value === view.collaborationMode)?.displayName}
+                currentLabel={composer.collaborationModes.find((mode) => mode.value === view.collaborationMode)?.displayName}
                 asleep={asleep}
-                options={view.menu.collaborationModes.map((mode) => ({
+                options={composer.collaborationModes.map((mode) => ({
                   value: mode.value,
                   label: mode.displayName,
                   hint: mode.description,
@@ -2485,13 +2527,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               // A session that has not been given a model is on the brand's own
               // default, and the list has a row for exactly that.
               current={sessionBrand === 'local' ? view.model : view.model ?? BRAND_DEFAULT_MODEL}
-              currentLabel={sessionBrand === 'local' && !view.model ? 'Choose model' : modelWords(view.model ?? BRAND_DEFAULT_MODEL, view.menu.models)}
+              currentLabel={sessionBrand === 'local' && !view.model ? 'Choose model' : modelWords(view.model ?? BRAND_DEFAULT_MODEL, composer.models)}
               asleep={asleep}
               // The list announces ids as often as names — `claude-opus-5[1m]`
               // is what one chat calls the model it is running — and the chip a
               // few lines above this said something else about the same build.
               // One function names it for both (bw-ja9l.11).
-              options={view.menu.models.map((m) => ({
+              options={composer.models.map((m) => ({
                 value: m.value,
                 label: modelName(m.value, m.displayName) ?? m.displayName,
                 icon: <ModelIcon brand={sessionBrand} model={m.value} identity={m.family ?? m.publisher} className="h-3.5 w-3.5" />,
@@ -2514,7 +2556,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               testid="effort-picker"
               current={view.effort ?? null}
               asleep={asleep}
-              options={view.menu.efforts.map((effort) => ({
+              options={composer.efforts.map((effort) => ({
                 value: effort.value,
                 label: effort.displayName,
                 hint: effort.description,
@@ -2618,6 +2660,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               <DialogTitle>Chat settings</DialogTitle>
             </DialogHeader>
             <div className="flex flex-col gap-2 [&_[data-testid$='-picker']]:h-10 [&_[data-testid$='-picker']]:w-full [&_[data-testid$='-picker']]:justify-start [&_[data-testid$='-picker']]:rounded-md">
+              <ProviderBadge brand={sessionBrand} model={view.model} />
               <Picker
                 icon={<ModeMark mode={view.permissionMode} className="h-4 w-4" />}
                 label="Permission mode"
@@ -2625,7 +2668,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 current={view.permissionMode}
                 currentLabel={modeWords(view.permissionMode)?.label}
                 asleep={asleep}
-                options={view.menu.permissionModes.map((mode) => ({
+                options={composer.permissionModes.map((mode) => ({
                   value: mode,
                   label: PERMISSION_MODE[mode]?.label ?? inWords(mode),
                 }))}
@@ -2638,15 +2681,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                   );
                 }}
               />
-              {view.menu.collaborationModes.length > 0 && (
+              {composer.collaborationModes.length > 0 && (
                 <Picker
                   icon={<Workflow className="h-4 w-4" />}
                   label="Collaboration mode"
                   testid="mobile-collaboration-mode-picker"
                   current={view.collaborationMode}
-                  currentLabel={view.menu.collaborationModes.find((mode) => mode.value === view.collaborationMode)?.displayName}
+                  currentLabel={composer.collaborationModes.find((mode) => mode.value === view.collaborationMode)?.displayName}
                   asleep={asleep}
-                  options={view.menu.collaborationModes.map((mode) => ({
+                  options={composer.collaborationModes.map((mode) => ({
                     value: mode.value,
                     label: mode.displayName,
                     hint: mode.description,
@@ -2683,9 +2726,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 label="Model"
                 testid="mobile-model-picker"
                 current={sessionBrand === 'local' ? view.model : view.model ?? BRAND_DEFAULT_MODEL}
-                currentLabel={sessionBrand === 'local' && !view.model ? 'Choose model' : modelWords(view.model ?? BRAND_DEFAULT_MODEL, view.menu.models)}
+                currentLabel={sessionBrand === 'local' && !view.model ? 'Choose model' : modelWords(view.model ?? BRAND_DEFAULT_MODEL, composer.models)}
                 asleep={asleep}
-                options={view.menu.models.map((model) => ({
+                options={composer.models.map((model) => ({
                   value: model.value,
                   label: modelName(model.value, model.displayName) ?? model.displayName,
                   icon: <ModelIcon brand={sessionBrand} model={model.value} identity={model.family ?? model.publisher} className="h-3.5 w-3.5" />,
@@ -2708,7 +2751,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 testid="mobile-effort-picker"
                 current={view.effort ?? null}
                 asleep={asleep}
-                options={view.menu.efforts.map((effort) => ({
+                options={composer.efforts.map((effort) => ({
                   value: effort.value,
                   label: effort.displayName,
                   hint: effort.description,
