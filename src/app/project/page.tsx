@@ -9,6 +9,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { EllipsisVertical, Folder, Home, MessageSquare, SquareKanban } from 'lucide-react';
 
 import { BackLink } from '@/components/back-link';
+import { ModalLayer } from '@/components/modal-layer';
 // Only drawn once a card is opened, and it brings the markdown and code
 // highlighter with it, so the board draws without them (bw-fbzd.7).
 const CardPanel = dynamic(() => import('@/components/card-panel').then((m) => m.CardPanel), { ssr: false });
@@ -324,7 +325,7 @@ function ProjectTabs() {
       )}
 
       {project && openSettings && (
-        <div className="fixed inset-0 z-40" data-testid="project-settings">
+        <ModalLayer label={`${project.name} settings`} data-testid="project-settings">
           <ProjectSettingsScreen
             projectId={project.id}
             projectName={project.name}
@@ -339,7 +340,7 @@ function ProjectTabs() {
             backSteps={() => stepsOut((url) => !url.searchParams.has('settings'), settingsPushes.current)}
             onUpdated={refetch}
           />
-        </div>
+        </ModalLayer>
       )}
     </Shell>
   );

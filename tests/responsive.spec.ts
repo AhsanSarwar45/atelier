@@ -361,7 +361,7 @@ test.describe('project list', () => {
     // The heading used to eat the top 60% of the screen, so one and a half
     // cards were all a phone ever showed.
     const whole = await page.evaluate(() => {
-      const cards = Array.from(document.querySelectorAll('[role="link"][aria-label^="View "]'));
+      const cards = Array.from(document.querySelectorAll('[data-testid="project-card"]'));
       return cards.filter((c) => c.getBoundingClientRect().bottom <= window.innerHeight).length;
     });
     expect(whole, 'whole project cards visible on a phone without scrolling').toBeGreaterThanOrEqual(2);

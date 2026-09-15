@@ -29,13 +29,13 @@ test('a new project reviews inferred settings and can edit the saved policy', as
     const response = await initialized;
     expect(response.status(), await response.text()).toBe(201);
 
-    await expect(page.getByRole('link', { name: 'Open Onboarding Proof' })).toBeVisible();
+    await expect(page.getByTestId('project-card').filter({ hasText: 'Onboarding Proof' })).toBeVisible();
     expect(existsSync(join(repo, '.atelier/project.toml'))).toBe(true);
     project = ((await (await request.get('/api/projects')).json()) as { id: string; name: string }[])
       .find((row) => row.name === 'Onboarding Proof') ?? null;
     expect(project).not.toBeNull();
 
-    await page.getByRole('link', { name: 'Open Onboarding Proof' }).getByLabel('Project settings').click();
+    await page.getByTestId('project-card').filter({ hasText: 'Onboarding Proof' }).getByLabel('Project settings').click();
     await expect(page).toHaveURL(/settings=project/);
     await expect(page.getByTestId('project-settings')).toBeVisible();
     await page.getByTestId('settings-section-workflow').click();
