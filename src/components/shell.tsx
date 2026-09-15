@@ -80,19 +80,56 @@ function TerminalButton() {
 function ShellMenu() {
   const { show } = useTerminalShells();
   return (
+    <HamburgerMenu data-testid="shell-menu" contentTestId="shell-menu-items" className="w-44">
+      <DropdownMenuItem data-testid="shell-menu-terminal" onSelect={() => show()}>
+        <SquareTerminal aria-hidden="true" /> Terminal
+      </DropdownMenuItem>
+      <DropdownMenuItem asChild data-testid="shell-menu-settings">
+        <Link href="/settings">
+          <Settings aria-hidden="true" /> Settings
+        </Link>
+      </DropdownMenuItem>
+    </HamburgerMenu>
+  );
+}
+
+/**
+ * The app's one hamburger: whatever a narrow screen has no room to show sits
+ * behind this button, wherever in the app that happens. Its items are the
+ * caller's; the button, its picture and where the list opens are not, so every
+ * folded menu looks and behaves the same.
+ */
+export function HamburgerMenu({
+  label = 'Menu',
+  active = false,
+  className,
+  contentTestId,
+  onCloseAutoFocus,
+  children,
+  'data-testid': testId,
+}: {
+  label?: string;
+  /** Something folded inside is switched on, so the button shows it. */
+  active?: boolean;
+  /** Classes for the list that opens. */
+  className?: string;
+  contentTestId?: string;
+  onCloseAutoFocus?: (event: Event) => void;
+  children: ReactNode;
+  'data-testid'?: string;
+}) {
+  return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <ToolButton icon={<Menu />} label="Menu" data-testid="shell-menu" />
+        <ToolButton icon={<Menu />} label={label} selected={active} data-testid={testId} />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44" data-testid="shell-menu-items">
-        <DropdownMenuItem data-testid="shell-menu-terminal" onSelect={() => show()}>
-          <SquareTerminal aria-hidden="true" /> Terminal
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild data-testid="shell-menu-settings">
-          <Link href="/settings">
-            <Settings aria-hidden="true" /> Settings
-          </Link>
-        </DropdownMenuItem>
+      <DropdownMenuContent
+        align="end"
+        className={cn('w-56', className)}
+        data-testid={contentTestId}
+        onCloseAutoFocus={onCloseAutoFocus}
+      >
+        {children}
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -404,9 +404,10 @@ test.describe('board', () => {
     await page.setViewportSize(PHONE);
     await openProject(page, 'board');
     // The tool row held 155 pixels of a 289-pixel strip and did not scroll, so
-    // New and the filters were invisible and unclickable on a phone.
-    for (const label of ['New', 'Filter options']) {
-      const control = page.getByRole('button', { name: new RegExp(label, 'i') }).first();
+    // New and the filters were invisible and unclickable on a phone. Now the
+    // row holds New and the board's menu, which folds in everything else.
+    for (const label of ['New', 'Board options']) {
+      const control = page.getByRole('button', { name: new RegExp(`^${label}$`, 'i') }).first();
       await expect(control, `${label} is not on the board's tool row`).toBeAttached();
       await control.scrollIntoViewIfNeeded();
       await expect(control, `${label} cannot be clicked at 390 wide`).toBeVisible();
@@ -415,6 +416,12 @@ test.describe('board', () => {
       expect(box!.x + box!.width, `${label} is drawn off the right of a 390 screen`).toBeLessThanOrEqual(PHONE.width + 1);
       expect(Math.min(box!.width, box!.height), `${label} is smaller than a thumb`).toBeGreaterThanOrEqual(TAP);
     }
+    const row = await page.getByRole('toolbar', { name: 'Quick filters' }).evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+    expect(row.scroll, 'a control on the board row sits past the edge of a phone').toBeLessThanOrEqual(row.client + 1);
+    await page.getByRole('button', { name: /^board options$/i }).click();
+    await expect(page.getByTestId('board-menu-items').getByRole('menuitemcheckbox', { name: 'Today' })).toBeVisible();
+    await page.getByTestId('board-menu-items').getByRole('menuitem', { name: /^search/i }).click();
+    await expect(page.getByRole('textbox', { name: 'Search cards' })).toBeFocused();
     await shoot(page, 'board-tools-390');
   });
 
