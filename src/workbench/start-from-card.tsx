@@ -61,7 +61,9 @@ export function StartFromCard({ bead, projectId, projectPath, waiting = false }:
 
   return (
     <div className="mt-6">
-      <div className="mb-2 flex gap-2" role="group" aria-label="Coding agent">
+      <h3 id={`start-chat-${bead.id}`} className="mb-2 text-sm font-semibold text-t-secondary">Start a chat</h3>
+      <div className="mb-3 h-px bg-b-default" />
+      <div className="mb-2 flex flex-wrap gap-2" role="group" aria-labelledby={`start-chat-${bead.id}`}>
         {providers.map((provider) => (
           <Tooltip
             key={provider.brand}
@@ -78,6 +80,13 @@ export function StartFromCard({ bead, projectId, projectPath, waiting = false }:
           </Tooltip>
         ))}
       </div>
+      {/* A greyed-out choice says why, in plain sight: a reason kept in a hover
+          label is one a phone never shows. */}
+      {providers.filter((provider) => !provider.available && provider.availabilityReason).map((provider) => (
+        <p key={provider.brand} className="mb-2 break-words text-xs text-t-muted">
+          {brandName(provider.brand)}: {whyUnavailable(provider)}
+        </p>
+      ))}
       <Button
         size="sm"
         variant="primary"

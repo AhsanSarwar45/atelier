@@ -9,6 +9,7 @@ import {
   Flag,
   Link2,
   Plus,
+  X,
 } from "lucide-react";
 
 import { CopyableText } from "@/components/copyable-text";
@@ -30,7 +31,6 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { toast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import {
-  formatBeadId,
   formatShortDate,
   formatStatus,
   formatWorktreePath,
@@ -68,7 +68,6 @@ const INLINE_PICKER =
 
 export interface BeadDetailProps {
   bead: Bead;
-  ticketNumber?: number;
   worktreeStatus?: WorktreeStatus;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -95,7 +94,6 @@ export const PANEL_SLIDE_MS = 300;
  */
 export function BeadDetail({
   bead,
-  ticketNumber,
   worktreeStatus,
   open,
   onOpenChange,
@@ -220,6 +218,8 @@ export function BeadDetail({
       .filter((b): b is Bead => b !== undefined);
   }, [bead.relates_to, allBeads, beadById]);
 
+  const titleId = `bead-title-${bead.id}`;
+
   return (
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
@@ -230,6 +230,9 @@ export function BeadDetail({
           side="right"
           hideClose
           aria-describedby={undefined}
+          // Named by the card's title alone, not by everything inside the
+          // heading, which also holds the pen that edits it.
+          aria-labelledby={titleId}
           onOpenAutoFocus={(event) => {
             // Left to itself the sheet lands on Back, which then wears a focus
             // ring the instant the panel appears — a bright box around the way
@@ -254,25 +257,21 @@ export function BeadDetail({
               data-testid="bead-detail-close"
               aria-label="Close the card"
               onClick={() => onOpenChange(false)}
-              className="gap-1.5 -ml-2"
+              // A phone shows the card as a whole screen, left by going back;
+              // a wider screen shows it as a panel over the board, closed by
+              // the cross in its corner. One control, drawn for each.
+              className="-ml-2 gap-1.5 sm:-mr-2 sm:ml-auto sm:px-2"
             >
-              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-              Back
+              <ArrowLeft className="h-4 w-4 sm:hidden" aria-hidden="true" />
+              <span className="sm:hidden">Back</span>
+              <X className="hidden h-4 w-4 sm:block" aria-hidden="true" />
             </Button>
           </div>
 
           <div className="space-y-4">
-            {/* Ticket Number + Bead ID */}
+            {/* The card's ID, as the board stores it. */}
             <p className="text-xs font-mono text-t-muted">
-              {ticketNumber !== undefined && (
-                <CopyableText copyText={`#${ticketNumber}`} className="font-semibold text-t-secondary">
-                  #{ticketNumber}
-                </CopyableText>
-              )}
-              {ticketNumber !== undefined && " "}
-              <CopyableText copyText={bead.id}>
-                {formatBeadId(bead.id, 8)}
-              </CopyableText>
+              <CopyableText copyText={bead.id}>{bead.id}</CopyableText>
             </p>
 
             {/* Title */}
@@ -281,6 +280,8 @@ export function BeadDetail({
                 value={bead.title}
                 onSave={handleSaveTitle}
                 disabled={isReadOnly}
+                label="title"
+                valueId={titleId}
               />
             </SheetTitle>
 
@@ -298,7 +299,7 @@ export function BeadDetail({
           {/* Inline Metadata Row. It wraps: on a phone the four facts and the
               date are wider than the screen, and a row that will not wrap
               strings the date down the side three characters at a time. */}
-          <div className="mt-6 flex flex-wrap justify-center items-center gap-x-3 gap-y-2 text-sm text-t-tertiary">
+          <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-t-tertiary">
             <span className="flex items-center gap-1.5">
               <TypeIcon className="size-3.5" aria-hidden="true" />
               {isReadOnly ? (
@@ -316,7 +317,6 @@ export function BeadDetail({
                 </Select>
               )}
             </span>
-            <span className="text-t-faint" aria-hidden="true">•</span>
             <span className="flex items-center gap-1.5">
               <Circle className={cn("size-2 fill-current", getStatusDotColor(bead.status))} aria-hidden="true" />
               {isReadOnly ? (
@@ -334,7 +334,6 @@ export function BeadDetail({
                 </Select>
               )}
             </span>
-            <span className="text-t-faint" aria-hidden="true">•</span>
             <span className="flex items-center gap-1.5">
               <Flag className="size-3.5" aria-hidden="true" />
               {isReadOnly ? (
@@ -352,10 +351,9 @@ export function BeadDetail({
                 </Select>
               )}
             </span>
-            <span className="text-t-faint" aria-hidden="true">•</span>
             <span className="flex items-center gap-1.5">
               <Calendar className="size-3.5" aria-hidden="true" />
-              <span>{formatShortDate(bead.created_at)}</span>
+              <span>Created {formatShortDate(bead.created_at)}</span>
             </span>
           </div>
 
@@ -363,7 +361,7 @@ export function BeadDetail({
               work and an agent writes down why it dropped it, so asking for the
               finished state by name is what threw that reason away unread. */}
           {!standing(bead.status) && bead.close_reason && (
-            <div className="mt-2 text-center text-xs text-t-muted">
+            <div className="mt-2 text-xs text-t-muted">
               {formatStatus(bead.status as BeadStatus)}:{" "}
               <span className="text-t-tertiary">
                 {whyItStopped(bead.status as BeadStatus, bead.close_reason)}
@@ -382,6 +380,7 @@ export function BeadDetail({
                   onSave={handleSaveDescription}
                   disabled={isReadOnly}
                   multiline
+                  label="description"
                   placeholder="Add a description…"
                   renderValue={(v) => <MarkdownBody>{v}</MarkdownBody>}
                 />
@@ -436,7 +435,7 @@ export function BeadDetail({
                         aria-hidden="true"
                       />
                       <span className="text-[10px] font-mono text-t-muted flex-shrink-0">
-                        {formatBeadId(related.id)}
+                        {related.id}
                       </span>
                       {/* Struck through when nobody is waiting on it, finished
                           or dropped alike — the same reading as everywhere. */}

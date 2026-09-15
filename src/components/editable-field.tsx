@@ -24,11 +24,15 @@ interface EditableFieldProps {
   placeholder?: string;
   /** Optional renderer for the display value (e.g. Markdown). Plain text used if omitted. */
   renderValue?: (value: string) => React.ReactNode;
+  /** What is being edited, so the pen is "Edit title" rather than one of several "Edit"s. */
+  label?: string;
+  /** An id for the value itself, for a dialog that is named by it. */
+  valueId?: string;
 }
 
 /**
  * Editable field with auto-save on blur/Enter.
- * In display mode shows a small pen icon on hover; click swaps to input/textarea.
+ * In display mode shows a small pen beside the value; click swaps to input/textarea.
  * Layout adapts to renderValue: block (div) when provided, inline (span) when not.
  */
 export function EditableField({
@@ -39,6 +43,8 @@ export function EditableField({
   className,
   placeholder,
   renderValue,
+  label,
+  valueId,
 }: EditableFieldProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
@@ -102,7 +108,7 @@ export function EditableField({
     : <span className="text-t-faint italic">{placeholder}</span>;
 
   if (disabled) {
-    return <span className={className}>{displayBody}</span>;
+    return <span id={valueId} className={className}>{displayBody}</span>;
   }
 
   if (isSaving) {
@@ -149,10 +155,10 @@ export function EditableField({
       mode="icon"
       size="xs"
       onClick={() => setIsEditing(true)}
-      aria-label="Edit"
-      className={cn(
-        "size-5 opacity-0 transition-[color,box-shadow,opacity] group-hover:opacity-100 focus-visible:opacity-100",
-      )}
+      aria-label={label ? `Edit ${label}` : "Edit"}
+      // Always drawn: a pen that only appears under a pointer is one a phone,
+      // which has no pointer to hover, never shows at all.
+      className="size-5 text-t-muted transition-colors hover:text-t-primary"
     >
       <Pencil className="size-3.5" aria-hidden="true" />
     </Button>
@@ -171,7 +177,7 @@ export function EditableField({
   // Inline layout for plain text (e.g. title): pen sits inline after the value.
   return (
     <span className={cn("group inline-flex items-baseline gap-1.5", className)}>
-      <span>{displayBody}</span>
+      <span id={valueId}>{displayBody}</span>
       {editButton}
     </span>
   );
