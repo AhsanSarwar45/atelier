@@ -30,7 +30,6 @@ export interface KanbanColumnProps {
    */
   statusById: ReadonlyMap<string, string>;
   selectedBeadId?: string | null;
-  ticketNumbers?: Map<string, number>;
   onSelectBead: (bead: Bead) => void;
   onChildClick?: (child: Bead) => void;
   onNavigateToDependency?: (beadId: string) => void;
@@ -53,7 +52,6 @@ interface ColumnCardProps {
   bead: Bead;
   beadById: ReadonlyMap<string, Bead>;
   statusById: ReadonlyMap<string, string>;
-  ticketNumber?: number;
   isSelected: boolean;
   onSelectBead: (bead: Bead) => void;
   onChildClick?: (child: Bead) => void;
@@ -73,7 +71,6 @@ const ColumnCard = memo(function ColumnCard({
   bead,
   beadById,
   statusById,
-  ticketNumber,
   isSelected,
   onSelectBead,
   onChildClick,
@@ -87,7 +84,6 @@ const ColumnCard = memo(function ColumnCard({
       epic={bead}
       beadById={beadById}
       statusById={statusById}
-      ticketNumber={ticketNumber}
       isSelected={isSelected}
       onSelect={onSelectBead}
       onChildClick={onChildClick ?? onSelectBead}
@@ -99,7 +95,6 @@ const ColumnCard = memo(function ColumnCard({
     <BeadCard
       bead={bead}
       statusById={statusById}
-      ticketNumber={ticketNumber}
       isSelected={isSelected}
       onSelect={onSelectBead}
     />
@@ -128,7 +123,6 @@ export const KanbanColumn = memo(function KanbanColumn({
   beadById,
   statusById,
   selectedBeadId,
-  ticketNumbers,
   onSelectBead,
   onChildClick,
   onNavigateToDependency,
@@ -187,7 +181,6 @@ export const KanbanColumn = memo(function KanbanColumn({
                   bead={beads[index]}
                   beadById={beadById}
                   statusById={statusById}
-                  ticketNumber={ticketNumbers?.get(key)}
                   isSelected={selectedBeadId === key}
                   onSelectBead={onSelectBead}
                   onChildClick={onChildClick}

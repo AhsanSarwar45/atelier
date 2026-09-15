@@ -228,8 +228,7 @@ describe('what a card says it is made of', () => {
     // own header still says it, because that is what explains its extra rows.
     layout = shape;
     const { container } = render(<EpicCard {...withPieces('manager_review', 10, 4)} />);
-    const header = Array.from(container.querySelectorAll('button'))
-      .find(b => /Child Tasks/.test(b.textContent ?? ''));
+    const header = container.querySelector('[data-testid="child-tasks-heading"]');
     const aboveTheList = (container.textContent ?? '')
       .replace(header?.textContent ?? '', '');
     const said = aboveTheList.match(/dropped/g) ?? [];

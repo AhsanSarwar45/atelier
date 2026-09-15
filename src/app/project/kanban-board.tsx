@@ -453,7 +453,6 @@ export default function KanbanBoard() {
                 beadById={beadById}
                 statusById={statusById}
                 selectedBeadId={selectedId}
-                ticketNumbers={ticketNumbers}
                 onSelectBead={openBead}
                 onChildClick={openBead}
                 onNavigateToDependency={navigateToBead}

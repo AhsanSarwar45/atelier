@@ -11,7 +11,7 @@ import { Panel } from "@/components/ui/panel";
 import { useTheme } from "@/hooks/use-theme";
 import { tagFor } from "@/lib/bead-labels";
 import { commentCountOf } from "@/lib/beads-parser";
-import { formatBeadId, formatWorktreePath, isBlockedBy, truncate } from "@/lib/bead-utils";
+import { formatWorktreePath, isBlockedBy, truncate } from "@/lib/bead-utils";
 import { getIssueTypeMeta } from "@/lib/issue-types";
 import { cn } from "@/lib/utils";
 import { standing } from "@/types";
@@ -26,7 +26,6 @@ export interface BeadCardProps {
    * board per card, on every pass.
    */
   statusById: ReadonlyMap<string, string>;
-  ticketNumber?: number;
   /** Worktree status for the bead */
   worktreeStatus?: WorktreeStatus;
   isSelected?: boolean;
@@ -96,7 +95,7 @@ function getStatusBadgeClasses(variant: StatusBadgeInfo['variant']): string {
  * moves, and without this every card on the screen was built again to say
  * exactly what it already said.
  */
-export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, isSelected = false, onSelect }: BeadCardProps) {
+export const BeadCard = memo(function BeadCard({ bead, statusById, worktreeStatus, isSelected = false, onSelect }: BeadCardProps) {
   const { layout } = useTheme();
   const blocked = isBlockedBy(bead, statusById);
   const commentCount = commentCountOf(bead);
@@ -108,20 +107,25 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber,
 
   const hasWorktree = worktreeStatus?.exists ?? false;
 
-  // Shared interaction props
+  // Selecting the card is one real button, kept out of sight, with the card's
+  // ring drawn when it has focus. The whole card used to be the button, and a
+  // button may not hold others: the copy, dependency, child and chat controls
+  // inside it were read as part of its name, and a key pressed on any of them
+  // could open the card as well (bw-lf8i.4). A press anywhere else on the card
+  // still selects it.
   const interactionProps = {
     "data-bead-id": bead.id,
-    role: "button" as const,
-    tabIndex: 0,
-    "aria-label": `Select card: ${bead.title}`,
     onClick: () => onSelect(bead),
-    onKeyDown: (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        onSelect(bead);
-      }
-    },
   };
+  const selectButton = (
+    <button
+      type="button"
+      data-card-select
+      aria-label={`Select card: ${bead.title}`}
+      className="sr-only"
+      onClick={(e) => { e.stopPropagation(); onSelect(bead); }}
+    />
+  );
 
   // Shared worktree section
   const worktreeSection = hasWorktree && worktreeStatus?.worktree_path && (
@@ -148,14 +152,15 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber,
       <div
         {...interactionProps}
         className={cn(
-          "theme-card cursor-pointer p-2 flex items-start gap-2.5",
+          "theme-card relative cursor-pointer p-2 flex items-start gap-2.5",
           "bg-card border border-transparent",
           "hover:bg-surface-overlay/50",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "has-[[data-card-select]:focus-visible]:ring-2 has-[[data-card-select]:focus-visible]:ring-ring",
           isSettled && "opacity-40",
           isSelected && "bg-info/5 outline outline-1 outline-info/20"
         )}
       >
+        {selectButton}
         {/* Priority bar */}
         <div className={cn(
           "w-1 h-4 rounded-sm shrink-0 mt-0.5",
@@ -168,7 +173,7 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber,
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-xs text-t-muted font-mono shrink-0 tabular-nums">
-              {formatBeadId(bead.id)}
+              {bead.id}
             </span>
             <span className={cn(
               "text-[13px] font-medium text-t-primary truncate",
@@ -212,14 +217,15 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber,
       <div
         {...interactionProps}
         className={cn(
-          "theme-card cursor-pointer p-3 bg-card border border-b-default/60",
+          "theme-card relative cursor-pointer p-3 bg-card border border-b-default/60",
           "hover:bg-surface-inset/30",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "has-[[data-card-select]:focus-visible]:ring-2 has-[[data-card-select]:focus-visible]:ring-ring",
           blocked && "border-l-3 border-l-danger",
           isSettled && "opacity-45",
           isSelected && "ring-2 ring-ring ring-offset-2 ring-offset-surface-base"
         )}
       >
+        {selectButton}
         {/* Title first */}
         <div className={cn(
           "text-sm font-medium leading-snug text-t-primary mb-1.5",
@@ -238,7 +244,7 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber,
         {/* Property tags row */}
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge variant="secondary" appearance="light" size="xs" className="theme-badge font-mono">
-            {ticketNumber !== undefined && `#${ticketNumber} `}{formatBeadId(bead.id)}
+            {bead.id}
           </Badge>
           {blocked && (
             <Badge variant="destructive" appearance="light" size="xs" className="theme-badge font-semibold">
@@ -280,13 +286,14 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber,
     <div
       {...interactionProps}
       className={cn(
-        "theme-card cursor-pointer bg-card border border-border/40 flex",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        "theme-card relative cursor-pointer bg-card border border-border/40 flex",
+        "has-[[data-card-select]:focus-visible]:ring-2 has-[[data-card-select]:focus-visible]:ring-ring has-[[data-card-select]:focus-visible]:ring-offset-2 has-[[data-card-select]:focus-visible]:ring-offset-background",
         isSettled && "opacity-45",
         blocked ? "border-l-4 border-l-danger" : "",
         isSelected && "ring-2 ring-ring ring-offset-2 ring-offset-background"
       )}
     >
+      {selectButton}
       {/* Priority bar (visible when --priority-bar-w > 0, i.e. brutalist) */}
       <div
         className={cn(
@@ -303,14 +310,8 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber,
           {/* Row 1: ID (left) + Type Badge (right) */}
           <div className="flex items-center justify-between">
             <div className="text-xs font-mono text-muted-foreground">
-              {ticketNumber !== undefined && (
-                <CopyableText copyText={`#${ticketNumber}`} className="font-semibold text-foreground">
-                  #{ticketNumber}
-                </CopyableText>
-              )}
-              {ticketNumber !== undefined && " "}
               <CopyableText copyText={bead.id}>
-                {formatBeadId(bead.id)}
+                {bead.id}
               </CopyableText>
             </div>
             <div className="flex items-center gap-1.5">

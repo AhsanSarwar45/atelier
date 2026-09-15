@@ -47,7 +47,7 @@ export function CardPanel({
   /** A card named inside this one — a child, or something it depends on. */
   onOpenCard: (id: string) => void;
 }) {
-  const { beads, ticketNumbers, refresh } = useBoardCards();
+  const { beads, refresh } = useBoardCards();
   const listed = beads.find((b) => b.id === cardId) ?? null;
 
   // The whole card, once fetched; `bead: null` means the fetch failed and the
@@ -112,7 +112,6 @@ export function CardPanel({
     <ErrorBoundary label="Card panel">
       <BeadDetail
         bead={bead}
-        ticketNumber={ticketNumbers.get(bead.id)}
         worktreeStatus={isDoltOnly ? undefined : statuses[bead.id]}
         open={open}
         onOpenChange={change}

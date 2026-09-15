@@ -2,7 +2,7 @@
 
 import { memo, useState, useMemo } from "react";
 
-import { CheckCircle2, ChevronDown, ChevronRight, Layers, Loader2, MessageSquare } from "lucide-react";
+import { CheckCircle2, Layers, Loader2, MessageSquare } from "lucide-react";
 
 import { BeadTags } from "@/components/bead-tags";
 import { CopyableText } from "@/components/copyable-text";
@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useTheme } from "@/hooks/use-theme";
 import { toast } from "@/hooks/use-toast";
-import { formatBeadId, getStatusDotColor, isBlockedBy, truncate } from "@/lib/bead-utils";
+import { getStatusDotColor, isBlockedBy, truncate } from "@/lib/bead-utils";
 import { commentCountOf } from "@/lib/beads-parser";
 import { closeBead } from "@/lib/cli";
 import { computeEpicProgress, progressPercent } from "@/lib/epic-parser";
@@ -33,8 +33,6 @@ export interface EpicCardProps {
    * board on every pass.
    */
   statusById: ReadonlyMap<string, string>;
-  /** Ticket number for display */
-  ticketNumber?: number;
   /** Whether this epic is selected */
   isSelected?: boolean;
   /** Callback when selecting this epic */
@@ -71,7 +69,6 @@ export const EpicCard = memo(function EpicCard({
   epic,
   beadById,
   statusById,
-  ticketNumber,
   isSelected = false,
   onSelect,
   onChildClick,
@@ -138,12 +135,12 @@ export const EpicCard = memo(function EpicCard({
 
     setIsClosing(true);
     toast({
-      title: `Marking ${formatBeadId(epic.id)} done…`,
+      title: `Marking ${epic.id} done…`,
       description: 'Writing it to the board. This can take a moment while agents are working.',
     });
     try {
       await closeBead(epic.id, projectPath);
-      toast({ title: `${formatBeadId(epic.id)} is done`, description: truncate(epic.title, 80) });
+      toast({ title: `${epic.id} is done`, description: truncate(epic.title, 80) });
       onUpdate?.();
     } catch (error) {
       // Silent before this: the spinner stopped, the card stayed where it was,
@@ -152,7 +149,7 @@ export const EpicCard = memo(function EpicCard({
       // thirty seconds on a close that went on to succeed.
       toast({
         variant: 'destructive',
-        title: `Could not mark ${formatBeadId(epic.id)} done`,
+        title: `Could not mark ${epic.id} done`,
         description: error instanceof Error ? error.message : 'Unknown error',
       });
       onUpdate?.();
@@ -163,24 +160,29 @@ export const EpicCard = memo(function EpicCard({
 
   const { layout } = useTheme();
 
-  // Shared interaction props
+  // Selecting the card is one real button, kept out of sight, with the card's
+  // ring drawn when it has focus. The whole card used to be the button, and a
+  // button may not hold others: the copy, dependency, child and chat controls
+  // inside it were read as part of its name, and a key pressed on any of them
+  // could open the card as well (bw-lf8i.4). A press anywhere else on the card
+  // still selects it.
   const interactionProps = {
     "data-bead-id": epic.id,
     // Which card the press was about, for a reader with several jobs standing
     // in his column and for the checks that time the answer.
     "data-marking": isClosing ? "true" : undefined,
     "aria-busy": isClosing,
-    role: "button" as const,
-    tabIndex: 0,
-    "aria-label": `Select epic: ${epic.title}`,
     onClick: () => onSelect(epic),
-    onKeyDown: (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        onSelect(epic);
-      }
-    },
   };
+  const selectButton = (
+    <button
+      type="button"
+      data-card-select
+      aria-label={`Select epic: ${epic.title}`}
+      className="sr-only"
+      onClick={(e) => { e.stopPropagation(); onSelect(epic); }}
+    />
+  );
 
   /**
    * How much of the job is done: the count, the bar, and what stands behind
@@ -246,32 +248,25 @@ export const EpicCard = memo(function EpicCard({
 
   const progressSection = progressBlock(false);
 
-  // Shared children section
+  // Shared children section. The heading only names the list; the list opens
+  // from its own "more" line. The heading used to be the toggle, and its
+  // chevron and expanded state said "closed" over a list already showing its
+  // first three pieces.
   const childrenSection = (
     <div className="pt-2 border-t border-b-strong">
-      <Button
-        variant="ghost"
-        size="xs"
-        onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}
-        aria-expanded={isExpanded}
-        aria-label={`${isExpanded ? 'Collapse' : 'Expand'} child tasks`}
-        className="mb-2 h-auto p-0 font-semibold text-epic hover:bg-transparent hover:text-epic/80 focus-visible:ring-epic"
-      >
-        {/* Named its own colour so the library leaves it at full strength: a
-            ghost button dims an icon that says nothing, and this one is the
-            only thing saying the list opens. */}
-        {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-epic" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5 text-epic" aria-hidden="true" />}
+      <p data-testid="child-tasks-heading" className="mb-2 text-xs font-semibold text-epic">
         {/* What the job is made of, and what it dropped — never the two added
             together, which is the number the bar deliberately does not count. */}
         Child Tasks ({progress.dropped > 0
           ? `${progress.total} · ${progress.dropped} dropped`
           : children.length})
-      </Button>
+      </p>
       <SubtaskList
         childTasks={children}
         onChildClick={onChildClick}
         maxCollapsed={3}
         isExpanded={isExpanded}
+        onToggle={() => setIsExpanded((open) => !open)}
       />
     </div>
   );
@@ -299,18 +294,19 @@ export const EpicCard = memo(function EpicCard({
       <div
         {...interactionProps}
         className={cn(
-          "theme-card cursor-pointer p-2.5 bg-card border border-epic/20",
+          "theme-card relative cursor-pointer p-2.5 bg-card border border-epic/20",
           "hover:bg-surface-overlay/50",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-epic",
+          "has-[[data-card-select]:focus-visible]:ring-2 has-[[data-card-select]:focus-visible]:ring-epic",
           isSettled && "opacity-45",
           isSelected && "bg-epic/5 outline outline-1 outline-epic/20"
         )}
       >
+        {selectButton}
         <div className="flex items-start gap-2.5">
           <Layers className="h-4 w-4 text-epic shrink-0 mt-0.5" aria-hidden="true" />
           <div className="flex-1 min-w-0 space-y-2">
             <div className="flex items-center gap-2">
-              <span className="text-xs text-t-muted font-mono shrink-0">{formatBeadId(epic.id)}</span>
+              <span className="text-xs text-t-muted font-mono shrink-0">{epic.id}</span>
               <span className="text-[13px] font-semibold text-t-primary truncate">{epic.title}</span>
               <Badge variant="epic" appearance="light" size="xs" className="theme-badge font-semibold shrink-0">
                 Epic
@@ -333,13 +329,14 @@ export const EpicCard = memo(function EpicCard({
       <div
         {...interactionProps}
         className={cn(
-          "theme-card cursor-pointer p-3 bg-card border border-epic/30",
+          "theme-card relative cursor-pointer p-3 bg-card border border-epic/30",
           "hover:bg-surface-inset/30",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-epic",
+          "has-[[data-card-select]:focus-visible]:ring-2 has-[[data-card-select]:focus-visible]:ring-epic",
           isSettled && "opacity-45",
           isSelected && "ring-2 ring-epic ring-offset-2 ring-offset-surface-base"
         )}
       >
+        {selectButton}
         <div className="space-y-2">
           {/* Title */}
           <h3 className="font-semibold text-sm leading-tight text-t-primary">
@@ -353,7 +350,7 @@ export const EpicCard = memo(function EpicCard({
           {/* Property tags */}
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge variant="secondary" appearance="light" size="xs" className="theme-badge font-mono">
-              {ticketNumber !== undefined && `#${ticketNumber} `}{formatBeadId(epic.id)}
+              {epic.id}
             </Badge>
             <Badge variant="epic" appearance="light" size="xs" className="theme-badge font-semibold">
               Epic
@@ -383,27 +380,22 @@ export const EpicCard = memo(function EpicCard({
     <div
       {...interactionProps}
       className={cn(
-        "theme-card cursor-pointer p-4",
+        "theme-card relative cursor-pointer p-4",
         "bg-surface-raised/70",
         "border border-b-default/60 border-l-2 border-l-epic",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-epic focus-visible:ring-offset-2 focus-visible:ring-offset-surface-base",
+        "has-[[data-card-select]:focus-visible]:ring-2 has-[[data-card-select]:focus-visible]:ring-epic has-[[data-card-select]:focus-visible]:ring-offset-2 has-[[data-card-select]:focus-visible]:ring-offset-surface-base",
         isSettled && "opacity-45",
         isSelected && "ring-2 ring-epic ring-offset-2 ring-offset-surface-base"
       )}
     >
+      {selectButton}
       <div className="space-y-3">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Layers className="h-4 w-4 text-epic" aria-hidden="true" />
             <span className="text-xs font-mono text-t-tertiary">
-              {ticketNumber !== undefined && (
-                <CopyableText copyText={`#${ticketNumber}`} className="font-semibold text-t-primary">
-                  #{ticketNumber}
-                </CopyableText>
-              )}
-              {ticketNumber !== undefined && " "}
-              <CopyableText copyText={epic.id}>{formatBeadId(epic.id)}</CopyableText>
+              <CopyableText copyText={epic.id}>{epic.id}</CopyableText>
             </span>
           </div>
           <div className="flex items-center gap-1.5">

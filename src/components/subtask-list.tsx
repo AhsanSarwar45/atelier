@@ -17,6 +17,8 @@ export interface SubtaskListProps {
   maxCollapsed?: number;
   /** Whether the list is expanded */
   isExpanded?: boolean;
+  /** Opens or closes the rest of the list; without it the list only says how many more there are. */
+  onToggle?: () => void;
 }
 
 /**
@@ -56,6 +58,7 @@ export function SubtaskList({
   onChildClick,
   maxCollapsed = 3,
   isExpanded = false,
+  onToggle,
 }: SubtaskListProps) {
   if (childTasks.length === 0) {
     return (
@@ -116,7 +119,17 @@ export function SubtaskList({
           </div>
         </Button>
       ))}
-      {hasMore && (
+      {onToggle && childTasks.length > maxCollapsed ? (
+        <Button
+          variant="ghost"
+          size="xs"
+          onClick={(e) => { e.stopPropagation(); onToggle(); }}
+          aria-expanded={isExpanded}
+          className="h-auto w-full py-1 text-[10px] text-muted-foreground"
+        >
+          {isExpanded ? "Show fewer" : `Show ${childTasks.length - maxCollapsed} more`}
+        </Button>
+      ) : hasMore && (
         <p className="text-[10px] text-muted-foreground text-center py-1">
           +{childTasks.length - maxCollapsed} more
         </p>
