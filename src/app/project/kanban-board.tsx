@@ -31,7 +31,7 @@ import { useBoardCards } from "./board-cards";
  * own signature; final; dropped.
  */
 const COLUMNS: { status: BeadStatus; title: string }[] =
-  STATES.map((s) => ({ status: s.id, title: s.column }));
+  STATES.map((s) => ({ status: s.id, title: s.label }));
 
 /**
  * Main Kanban board component: one column per state in STATES, search, filter,

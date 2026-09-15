@@ -92,10 +92,9 @@ function listsStates(lines: string[]): string[] {
 }
 
 describe("one list decides the states", () => {
-  it("every state has a label, a column, a colour, an icon and a key", () => {
+  it("every state has a label, a colour, an icon and a key", () => {
     for (const s of STATES) {
       expect(s.label, `${s.id} needs a label`).toBeTruthy();
-      expect(s.column, `${s.id} needs a column heading`).toBeTruthy();
       expect(s.tone, `${s.id} needs a colour`).toBeTruthy();
       expect(s.icon, `${s.id} needs an icon`).toBeTruthy();
       expect(s.key, `${s.id} needs a keyboard key`).toBeTruthy();
@@ -107,14 +106,12 @@ describe("one list decides the states", () => {
     expect(new Set(keys).size, `duplicate key in ${keys.join(", ")}`).toBe(keys.length);
   });
 
-  it("no two states share a column heading or a name on screen", () => {
+  it("no two states share a name on screen", () => {
     // Two columns with one heading is a board nobody can read, and the screen
     // gives no hint which of them a card fell into.
-    for (const field of ["column", "label"] as const) {
-      const seen: string[] = STATES.map((s) => s[field]);
-      expect(new Set(seen).size, `two states share a ${field}: ${seen.join(", ")}`)
-        .toBe(seen.length);
-    }
+    const seen: string[] = STATES.map((s) => s.label);
+    expect(new Set(seen).size, `two states share a label: ${seen.join(", ")}`)
+      .toBe(seen.length);
   });
 
   it("every state says what writing it means", () => {

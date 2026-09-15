@@ -100,9 +100,9 @@ export interface Tag {
  * a place that silently keeps four states while the board holds six.
  * `board-columns-agree.py` and `state-list.test.ts` are what hold that line.
  *
- * `column` is the heading on the board, `label` the state's own name on a card;
- * they differ because the manager named the columns for what is happening in
- * them. `tone` names a colour token (`--status-<tone>`), `key` the second press
+ * `label` is the state's one name: the column heading, the card's status menu,
+ * the filters and an epic's piece list all say the same word, so a card in the
+ * Todo column is never also called "Open". `tone` names a colour token (`--status-<tone>`), `key` the second press
  * of the `g` shortcut, `live` whether work is still standing in this state.
  *
  * `settled` is a state only the board itself writes, and only once no piece is
@@ -115,12 +115,12 @@ export interface Tag {
  * ten, and it finishes when those ten are done. Manager's ruling, 2026-08-17.
  */
 export const STATES = [
-  { id: 'open',           label: 'Open',           column: 'Todo',           tone: 'open',      icon: 'circle',     key: 'o', live: true,  settled: false, counts: true  },
-  { id: 'in_progress',    label: 'In Progress',    column: 'In Progress',    tone: 'progress',  icon: 'clock',      key: 'p', live: true,  settled: false, counts: true  },
-  { id: 'inreview',       label: 'In Review',      column: 'Agent Review',   tone: 'review',    icon: 'file-check', key: 'r', live: true,  settled: true,  counts: true  },
-  { id: 'manager_review', label: 'Manager Review', column: 'Manager Review', tone: 'manager',   icon: 'eye',        key: 'm', live: true,  settled: true,  counts: true  },
-  { id: 'closed',         label: 'Closed',         column: 'Done',           tone: 'closed',    icon: 'check',      key: 'c', live: false, settled: true,  counts: true  },
-  { id: 'cancelled',      label: 'Cancelled',      column: 'Cancelled',      tone: 'cancelled', icon: 'ban',        key: 'x', live: false, settled: true,  counts: false },
+  { id: 'open',           label: 'Todo',           tone: 'open',      icon: 'circle',     key: 'o', live: true,  settled: false, counts: true  },
+  { id: 'in_progress',    label: 'In Progress',    tone: 'progress',  icon: 'clock',      key: 'p', live: true,  settled: false, counts: true  },
+  { id: 'inreview',       label: 'Agent Review',   tone: 'review',    icon: 'file-check', key: 'r', live: true,  settled: true,  counts: true  },
+  { id: 'manager_review', label: 'Manager Review', tone: 'manager',   icon: 'eye',        key: 'm', live: true,  settled: true,  counts: true  },
+  { id: 'closed',         label: 'Done',           tone: 'closed',    icon: 'check',      key: 'c', live: false, settled: true,  counts: true  },
+  { id: 'cancelled',      label: 'Cancelled',      tone: 'cancelled', icon: 'ban',        key: 'x', live: false, settled: true,  counts: false },
 ] as const;
 
 /**

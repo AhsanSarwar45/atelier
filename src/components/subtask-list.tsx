@@ -109,10 +109,10 @@ export function SubtaskList({
             </span>
           )}
           <div className={cn(
-            "flex-shrink-0 text-[9px] font-medium uppercase tracking-wide",
+            "flex-shrink-0 text-[10px] font-medium",
             getStatusColor(child.status)
           )}>
-            {child.status.replace('_', ' ')}
+            {STATE_BY_ID[child.status]?.label ?? child.status}
           </div>
         </Button>
       ))}

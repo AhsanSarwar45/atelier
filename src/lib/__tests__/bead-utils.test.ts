@@ -67,10 +67,10 @@ describe('formatBeadId', () => {
 
 describe('formatStatus', () => {
   it('formats known statuses', () => {
-    expect(formatStatus('open')).toBe('Open');
+    expect(formatStatus('open')).toBe('Todo');
     expect(formatStatus('in_progress')).toBe('In Progress');
-    expect(formatStatus('inreview')).toBe('In Review');
-    expect(formatStatus('closed')).toBe('Closed');
+    expect(formatStatus('inreview')).toBe('Agent Review');
+    expect(formatStatus('closed')).toBe('Done');
   });
 
   it('returns unknown status as-is', () => {
