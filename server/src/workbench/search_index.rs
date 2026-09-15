@@ -708,6 +708,107 @@ fn unmark(snippet: &str) -> (String, String) {
     (sentence.trim().to_string(), matched)
 }
 
+/// One chat as somebody deciding whether it is the one reads it: its title
+/// and where it was worked, then what was said, in the order it was said.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatWords {
+    pub session_id: String,
+    pub title: Option<String>,
+    pub project_id: String,
+    pub project_path: String,
+    pub brand: String,
+    pub last_active_at: String,
+    pub said: Vec<Said>,
+    /// The offset of the next page, when there is one.
+    pub next: Option<usize>,
+}
+
+/// One message or tool call, as the index holds it.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Said {
+    pub message_id: String,
+    pub field: String,
+    pub at: String,
+    pub text: String,
+}
+
+/// The most of one message a reading returns: enough to recognise it by, not
+/// a whole pasted log.
+const SAID_WORDS: usize = 1_500;
+
+impl SearchIndex {
+    /// A page of one chat's words, or nothing when there is no such chat.
+    pub fn chat_words(
+        &self,
+        session_id: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Option<ChatWords>, String> {
+        let mut reader = self.inner.reader.lock().unwrap();
+        if reader.is_none() {
+            *reader = Some(self.inner.open_reader()?);
+        }
+        let connection = reader.as_ref().unwrap();
+        let chat = connection
+            .query_row(
+                "SELECT s.id, COALESCE(s.title, (SELECT d.text FROM doc d WHERE d.session_id = s.id AND d.part = 'title')), \
+                        s.project_id, s.project_path, s.brand, s.last_active_at \
+                 FROM chats.session s WHERE s.id = ?1",
+                [session_id],
+                |row| {
+                    Ok(ChatWords {
+                        session_id: row.get(0)?,
+                        title: row.get(1)?,
+                        project_id: row.get(2)?,
+                        project_path: row.get(3)?,
+                        brand: row.get(4)?,
+                        last_active_at: row.get(5)?,
+                        said: Vec::new(),
+                        next: None,
+                    })
+                },
+            )
+            .optional()
+            .map_err(text)?;
+        let Some(mut chat) = chat else {
+            return Ok(None);
+        };
+        let mut said = connection
+            .prepare(
+                "SELECT part, field, at, text FROM doc WHERE session_id = ?1 AND field <> 'title' \
+                 ORDER BY at, id LIMIT ?2 OFFSET ?3",
+            )
+            .map_err(text)?
+            .query_map(
+                params![session_id, (limit + 1) as i64, offset as i64],
+                |row| {
+                    Ok(Said {
+                        message_id: row.get(0)?,
+                        field: row.get(1)?,
+                        at: row.get(2)?,
+                        text: row.get(3)?,
+                    })
+                },
+            )
+            .map_err(text)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(text)?;
+        if said.len() > limit {
+            said.truncate(limit);
+            chat.next = Some(offset + limit);
+        }
+        for part in &mut said {
+            if part.text.chars().count() > SAID_WORDS {
+                part.text = part.text.chars().take(SAID_WORDS).collect::<String>() + "…";
+            }
+        }
+        chat.said = said;
+        Ok(Some(chat))
+    }
+}
+
 impl Inner {
     fn open_reader(&self) -> Result<Connection, String> {
         let connection = Connection::open_with_flags(
@@ -1589,6 +1690,24 @@ mod tests {
             .expect("the search waited on the chat database's writer");
         assert_eq!(hits.unwrap(), 1);
         writer.execute_batch("ROLLBACK;").unwrap();
+    }
+
+    /// An agent looking for a chat reads it to be sure: the title first, then
+    /// what was said in order, a page at a time, and nothing for a made-up id.
+    #[test]
+    fn a_chat_is_read_in_the_order_it_was_said() {
+        let (_place, index) = seeded();
+        let chat = index.chat_words("chat-a", 0, 1).unwrap().unwrap();
+        assert_eq!(chat.title.as_deref(), Some("Loader crash"));
+        assert_eq!(chat.project_id, "project");
+        assert_eq!(chat.said.len(), 1);
+        assert_eq!(chat.said[0].message_id, "m1");
+        assert_eq!(chat.said[0].field, "me");
+        assert_eq!(chat.next, Some(1));
+        let rest = index.chat_words("chat-a", 1, 50).unwrap().unwrap();
+        assert!(rest.said.iter().any(|said| said.message_id == "m2"));
+        assert_eq!(rest.next, None);
+        assert!(index.chat_words("made-up", 0, 10).unwrap().is_none());
     }
 
     fn seeded() -> (Place, SearchIndex) {

@@ -25,6 +25,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};
 use tokio::sync::broadcast;
 
+mod ai_search;
+
 use crate::workbench::{
     actor::ChatDb,
     projection::fold_all,
@@ -944,6 +946,11 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/session/:id", get(session))
         .route("/search", get(search))
         .route("/search/chats", get(search_chats))
+        .route("/search/ask", post(ai_search::ask))
+        .route(
+            "/search/mcp",
+            post(ai_search::mcp).get(|| async { StatusCode::METHOD_NOT_ALLOWED }),
+        )
         .route("/tool", get(tool))
         .route("/spend", get(spend))
         .route("/usage", get(usage))

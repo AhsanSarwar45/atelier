@@ -13,15 +13,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useRouter } from 'next/navigation';
 
-import { ChevronDown, X } from 'lucide-react';
+import { ChevronDown, Search, Sparkles, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Overlay, overlayPanel } from '@/components/ui/overlay';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Row } from '@/components/ui/row';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import * as api from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { AiSearch } from '@/workbench/ai-search';
 import {
   type Filter,
   SCOPES,
@@ -193,6 +195,7 @@ export function SearchPanel({ onClose }: { onClose: () => void }) {
   const [searched, setSearched] = useState(false);
   const [active, setActive] = useState(0);
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
+  const [mode, setMode] = useState<'words' | 'ai'>('words');
   const box = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const asked = useRef(0);
@@ -289,10 +292,39 @@ export function SearchPanel({ onClose }: { onClose: () => void }) {
     change(withScopes(q, now));
   };
 
+  // One switch between the two ways of looking; a search in words is typed and
+  // answered as you go, a question for the AI is asked with Enter.
+  const modes = (
+    <>
+      <Tabs value={mode} onValueChange={(value) => setMode(value === 'ai' ? 'ai' : 'words')}>
+        <TabsList aria-label="Search mode" className="h-8 shrink-0 sm:h-8">
+          {(
+            [
+              { value: 'words', label: 'Search', icon: <Search className="h-3.5 w-3.5" aria-hidden="true" /> },
+              { value: 'ai', label: 'Ask AI', icon: <Sparkles className="h-3.5 w-3.5" aria-hidden="true" /> },
+            ] as const
+          ).map((choice) => (
+            <TabsTrigger key={choice.value} value={choice.value} data-testid={`search-mode-${choice.value}`} className="h-6 gap-1.5 px-2 text-xs sm:h-6">
+              {choice.icon}
+              {choice.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+      <Button size="xs" variant="ghost" data-testid="search-close" aria-label="Close" onClick={onClose}>
+        <X className="h-4 w-4" aria-hidden="true" />
+      </Button>
+    </>
+  );
+
   let index = -1;
   return (
     <Overlay testId="search-panel" label="Search every conversation" onClose={onClose}>
       <div className={cn(overlayPanel, 'max-w-3xl')}>
+        {mode === 'ai' ? (
+          <AiSearch onClose={onClose} aside={modes} named={(id, path) => names.get(id) ?? folderName(path)} />
+        ) : (
+        <>
         <div className="border-b border-border/60 p-3">
           <div className="flex items-center gap-2">
             {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
@@ -308,9 +340,7 @@ export function SearchPanel({ onClose }: { onClose: () => void }) {
               spellCheck={false}
               className="min-w-0 flex-1 font-mono text-sm"
             />
-            <Button size="xs" variant="ghost" data-testid="search-close" aria-label="Close" onClick={onClose}>
-              <X className="h-4 w-4" aria-hidden="true" />
-            </Button>
+            {modes}
           </div>
 
           {suggestions && (
@@ -475,6 +505,8 @@ export function SearchPanel({ onClose }: { onClose: () => void }) {
             <p data-testid="search-nothing" className="px-4 py-6 text-sm text-muted-foreground">No chats.</p>
           )}
         </div>
+        </>
+        )}
       </div>
     </Overlay>
   );

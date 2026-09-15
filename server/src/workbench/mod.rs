@@ -7,6 +7,7 @@
 pub mod acp;
 pub mod actor;
 pub mod agent_files;
+pub mod ai_search;
 pub mod beads_links;
 pub mod browser;
 pub mod claude;
