@@ -32,14 +32,6 @@ vi.mock('@/components/shell', () => ({
 }));
 
 describe('a chat-only project', () => {
-  it('names the open project in the browser tab', async () => {
-    const view = render(<ProjectPage />);
-
-    await waitFor(() => expect(document.title).toBe('Keystone | Atelier'));
-    view.unmount();
-    expect(document.title).toBe('Atelier');
-  });
-
   it('shows chat only and repairs a stale board address without mounting board readers', async () => {
     render(<ProjectPage />);
 

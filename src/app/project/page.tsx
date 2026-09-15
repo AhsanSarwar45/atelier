@@ -27,8 +27,6 @@ import {
   stepsOut,
   whereFrom,
 } from '@/lib/address';
-import { PRODUCT_NAME } from '@/lib/identity';
-import { projectTitle } from '@/lib/project-title';
 import { cn, projectDir } from '@/lib/utils';
 // Each tab's code is fetched when that tab is first shown, so a board does not
 // wait on the chat's editor and transcript or the files view (bw-fbzd.4).
@@ -92,14 +90,6 @@ function ProjectTabs() {
   // back to the chat and leaves the other two alone.
   const shownTab = usesBeads || tab !== 'board' ? tab : 'chat';
   const shownCard = usesBeads ? openCard : null;
-
-  useEffect(() => {
-    // Keep the last known project identity while a reload/refetch is in
-    // flight. Falling back to the product alone made identical project tabs
-    // look different depending on whether their fetch had finished.
-    document.title = projectTitle(projectId, project?.name);
-    return () => { document.title = PRODUCT_NAME; };
-  }, [projectId, project?.name]);
 
   // The chat is its own download so the board draws without it; once the
   // screen has nothing else to do it is fetched ahead, and switching to it

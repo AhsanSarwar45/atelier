@@ -1,12 +1,13 @@
 import { render, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import ProjectPage from '@/app/project/page';
+import ProjectLayout from '@/app/project/layout';
 import { rememberProjectName } from '@/lib/project-title';
 
+const route = vi.hoisted(() => ({ query: 'id=project-1&tab=board' }));
+
 vi.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams('id=project-1&tab=chat'),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(route.query),
 }));
 vi.mock('@/hooks/use-project', () => ({ useProject: () => ({
   project: null,
@@ -14,29 +15,19 @@ vi.mock('@/hooks/use-project', () => ({ useProject: () => ({
   error: null,
   refetch: vi.fn(),
 }) }));
-vi.mock('@/workbench/chat-tab', () => ({ default: () => <div /> }));
-vi.mock('@/app/project/kanban-board', () => ({ default: () => <div /> }));
-vi.mock('@/app/project/board-cards', () => ({
-  BoardCards: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
-vi.mock('@/components/card-panel', () => ({ CardPanel: () => null }));
-vi.mock('@/components/project-settings-screen', () => ({ ProjectSettingsScreen: () => null }));
-vi.mock('@/workbench/globals', () => ({ WorkbenchStatus: () => null }));
-vi.mock('@/components/shell', () => ({
-  Shell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
-
-describe('a project title while the project is loading', () => {
+describe('the project layout title while the project is loading', () => {
   beforeEach(() => {
     window.localStorage.clear();
     rememberProjectName('project-1', 'Aspen');
   });
 
-  afterEach(() => { document.title = 'Atelier'; });
+  it('keeps naming the project while child screens change underneath it', async () => {
+    const view = render(<ProjectLayout><div>Board</div></ProjectLayout>);
+    await waitFor(() => expect(document.title).toBe('Aspen | Atelier'));
 
-  it('keeps naming the project instead of falling back to the product', async () => {
-    render(<ProjectPage />);
-
+    document.title = 'Atelier';
+    route.query = 'id=project-1&tab=chat&chat=one';
+    view.rerender(<ProjectLayout><div>Chat</div></ProjectLayout>);
     await waitFor(() => expect(document.title).toBe('Aspen | Atelier'));
   });
 });

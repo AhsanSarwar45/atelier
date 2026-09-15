@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('a known project keeps its name in the browser title through a reload', async ({ page, request }) => {
+test('project and settings layouts keep their browser titles through child navigation', async ({ page, request }) => {
   await page.route(/\/api\/projects(\?[^/]*)?$/, async (route) => {
     if (route.request().method() !== 'GET') return route.continue();
     const url = new URL(route.request().url());
@@ -16,7 +16,7 @@ test('a known project keeps its name in the browser title through a reload', asy
 
   try {
     await page.goto('/');
-    await page.getByRole('link', { name: 'View Aspen project' }).click();
+    await page.getByRole('link', { name: 'Open Aspen' }).click();
     await expect(page).toHaveURL(new RegExp(`/project\\?id=${project.id}`));
     await expect(page).toHaveTitle('Aspen | Atelier');
 
@@ -33,7 +33,22 @@ test('a known project keeps its name in the browser title through a reload', asy
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page).toHaveTitle('Aspen | Atelier');
     await expect(page.getByRole('heading', { name: 'Aspen' })).toBeVisible();
-    await page.screenshot({ path: 'tests/results/bw-qgza-project-title.png' });
+
+    await page.getByRole('tab', { name: 'Chat' }).click();
+    await expect(page).toHaveURL(/tab=chat/);
+    await expect(page).toHaveTitle('Aspen | Atelier');
+    await page.screenshot({ path: 'tests/results/bw-5t45-project-title.png' });
+
+    await page.goto('/settings?section=appearance');
+    await expect(page).toHaveTitle('Settings | Atelier');
+    await page.getByRole('button', { name: /Agent files/ }).click();
+    await expect(page).toHaveURL(/section=files/);
+    await expect(page).toHaveTitle('Settings | Atelier');
+    await page.screenshot({ path: 'tests/results/bw-5t45-settings-title.png' });
+
+    await page.goto('/settings/agent-files');
+    await expect(page).toHaveURL(/\/settings\?section=files/);
+    await expect(page).toHaveTitle('Settings | Atelier');
   } finally {
     await request.delete(`/api/projects/${project.id}`);
   }
