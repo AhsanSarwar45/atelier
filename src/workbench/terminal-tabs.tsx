@@ -24,6 +24,7 @@
  */
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useCallback, useState, type ReactNode } from 'react';
 
 import { Plus, X } from 'lucide-react';
@@ -34,7 +35,10 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 import { HistoryButton, HistoryPanel } from './terminal-history';
-import { TerminalPane } from './terminal-pane';
+// The terminal itself (xterm and its renderer) is fetched when the first shell
+// opens, not with every screen: the tabs mount on every page and almost no
+// visit opens a shell (bw-fbzd.4).
+const TerminalPane = dynamic(() => import('./terminal-pane').then((m) => m.TerminalPane), { ssr: false });
 import { TerminalShells, useTerminalShells } from './terminal-shells';
 import { TerminalWindow } from './terminal-window';
 

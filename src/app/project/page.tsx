@@ -1,5 +1,6 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { Suspense, useCallback, useEffect, useRef } from 'react';
 
 import Link from 'next/link';
@@ -9,7 +10,7 @@ import { EllipsisVertical, Folder, Home, MessageSquare, SquareKanban } from 'luc
 
 import { BackLink } from '@/components/back-link';
 import { CardPanel } from '@/components/card-panel';
-import { ProjectSettingsScreen } from '@/components/project-settings-screen';
+const ProjectSettingsScreen = dynamic(() => import('@/components/project-settings-screen').then((m) => m.ProjectSettingsScreen), { ssr: false });
 import { Shell } from '@/components/shell';
 import { Button } from '@/components/ui/button';
 import { ReadFailed } from '@/components/ui/read-failed';
@@ -27,8 +28,13 @@ import {
 import { PRODUCT_NAME } from '@/lib/identity';
 import { projectTitle } from '@/lib/project-title';
 import { cn, projectDir } from '@/lib/utils';
-import ChatTab from '@/workbench/chat-tab';
-import FilesTab from '@/workbench/files-tab';
+// Each tab's code is fetched when that tab is first shown, so a board does not
+// wait on the chat's editor and transcript or the files view (bw-fbzd.4).
+// The chat is fetched ahead once the screen is idle, so switching to it is
+// still instant.
+const loadChatTab = () => import('@/workbench/chat-tab');
+const ChatTab = dynamic(loadChatTab, { ssr: false });
+const FilesTab = dynamic(() => import('@/workbench/files-tab'), { ssr: false });
 import { WorkbenchStatus } from '@/workbench/globals';
 import { PathsOpenProvider } from '@/workbench/open-path';
 import { useShowingFolder } from '@/workbench/terminal-shells';
@@ -90,6 +96,16 @@ function ProjectTabs() {
     document.title = projectTitle(projectId, project?.name);
     return () => { document.title = PRODUCT_NAME; };
   }, [projectId, project?.name]);
+
+  // The chat is its own download so the board draws without it; once the
+  // screen has nothing else to do it is fetched ahead, and switching to it
+  // does not wait on the network.
+  useEffect(() => {
+    const idle = window.requestIdleCallback ?? ((ahead: () => void) => window.setTimeout(ahead, 1_500));
+    const cancel = window.cancelIdleCallback ?? window.clearTimeout;
+    const ask = idle(() => { void loadChatTab(); });
+    return () => cancel(ask);
+  }, []);
 
   // Old bookmarks can still name the board for a project that has since opted
   // out. Draw chat immediately, then clean the address so refresh and Back do

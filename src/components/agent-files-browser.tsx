@@ -7,6 +7,7 @@
  */
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ChevronRight, Copy, ExternalLink, FileCode2, FilePlus2, FolderOpen, Loader2, Search } from 'lucide-react';
@@ -19,7 +20,8 @@ import { useToast } from '@/hooks/use-toast';
 import { fs } from '@/lib/api';
 import { NOT_PHONE_SCREEN } from '@/lib/screen-width';
 import { cn } from '@/lib/utils';
-import { CodeEditor } from '@/workbench/code-editor';
+// CodeMirror is fetched when a file is opened for editing, not with the list (bw-fbzd.4).
+const CodeEditor = dynamic(() => import('@/workbench/code-editor').then((m) => m.CodeEditor), { ssr: false });
 import { sendCommand } from '@/workbench/use-session';
 
 export interface AgentFileRow {

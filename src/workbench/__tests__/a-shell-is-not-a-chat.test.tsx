@@ -206,7 +206,7 @@ describe('the pane a command opens', () => {
     vi.restoreAllMocks();
   });
 
-  it('draws the terminal, and no conversation to have with a shell', () => {
+  it('draws the terminal, and no conversation to have with a shell', async () => {
     const written: string[] = [];
     vi.spyOn(Terminal.prototype, 'write').mockImplementation(function wrote(this: Terminal, data: string | Uint8Array) {
       written.push(typeof data === 'string' ? data : new TextDecoder().decode(data));
@@ -225,7 +225,8 @@ describe('the pane a command opens', () => {
     );
 
     expect(screen.getByTestId('agent-view-shell')).toBeTruthy();
-    expect(screen.getByTestId('ran-terminal-command').textContent).toBe('cargo test --lib');
+    // The terminal is its own download, so it is waited for rather than assumed.
+    expect((await screen.findByTestId('ran-terminal-command')).textContent).toBe('cargo test --lib');
     expect(screen.getByTestId('ran-terminal-cwd').textContent).toContain('/home/dev/app/server');
     expect(screen.getByTestId('ran-terminal-exit').textContent).toContain('exit 0');
     // What the command printed went to the parser, not to a paragraph.

@@ -19,6 +19,7 @@
  */
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Clock, Coins, Send, X } from 'lucide-react';
@@ -35,7 +36,8 @@ import { cn } from '@/lib/utils';
 import { commandRun } from '@/workbench/command-run';
 import type { SentAway, TranscriptItem } from '@/workbench/fold';
 import type { AgentControl } from '@/workbench/protocol';
-import { RanTerminal } from '@/workbench/ran-terminal';
+// A finished shell's output is drawn with xterm, fetched when one is shown (bw-fbzd.4).
+const RanTerminal = dynamic(() => import('@/workbench/ran-terminal').then((m) => m.RanTerminal), { ssr: false });
 import { AgentSteering, forHowLong, isOver, KINDS, liveSeconds, modelNamed, spend, STATES, useNow } from '@/workbench/sent-away';
 import { TranscriptRow } from '@/workbench/transcript-rows';
 import { sendCommand } from '@/workbench/use-session';

@@ -43,7 +43,7 @@ describe('a chat-only project', () => {
   it('shows chat only and repairs a stale board address without mounting board readers', async () => {
     render(<ProjectPage />);
 
-    expect(screen.getByTestId('chat-tab')).toBeVisible();
+    expect(await screen.findByTestId('chat-tab')).toBeVisible();
     expect(screen.queryByRole('tab', { name: 'Board' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('board')).not.toBeInTheDocument();
     expect(screen.queryByTestId('card-panel')).not.toBeInTheDocument();

@@ -183,6 +183,8 @@ async function open(folder: string | null = null) {
   fireEvent.click(screen.getByRole('button', { name: 'open the terminal' }));
   await screen.findByTestId('terminal-window');
   await waitFor(() => expect(screen.getAllByTestId('terminal-tab').length).toBeGreaterThan(0));
+  // The pane is its own download, so the tab in front attaches a moment later.
+  await waitFor(() => expect(Socket.made.length).toBeGreaterThan(0));
   return drawn;
 }
 

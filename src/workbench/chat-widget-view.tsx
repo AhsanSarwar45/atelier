@@ -1,5 +1,6 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useEffect, useState, type ReactNode } from 'react';
 
 import { ArrowDownRight, ArrowRight, ArrowUpRight, Check, ChevronRight, Circle, Clock, FileCode2, Pause, Play, ZoomIn } from 'lucide-react';
@@ -14,7 +15,9 @@ import type { ChartWidget, ChatWidget, ExplainerWidget } from '@/workbench/chat-
 import { ImageComparisonView } from '@/workbench/image-comparison';
 import { PictureViewer } from '@/workbench/picture-viewer';
 import type { LookableImage } from '@/workbench/protocol';
-import { VisualArtifactView } from '@/workbench/visual-artifact-view';
+// Diagrams bring mermaid, ELK, React Flow and motion — megabytes a chat with
+// no diagram in it never needs, fetched when one is drawn (bw-fbzd.4).
+const VisualArtifactView = dynamic(() => import('@/workbench/visual-artifact-view').then((m) => m.VisualArtifactView), { ssr: false });
 import { openLocalPath } from '@/workbench/open-local-path';
 import { presentationAssetUrl } from '@/workbench/attachment-store';
 
