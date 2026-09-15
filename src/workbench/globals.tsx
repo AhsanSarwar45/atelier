@@ -16,9 +16,11 @@ import { Bell } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
-import { Panel } from '@/components/ui/panel';
+import { panelVariants } from '@/components/ui/panel';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Row } from '@/components/ui/row';
 import * as api from '@/lib/api';
+import { cn } from '@/lib/utils';
 import { useLiveSessions, waitsOnYou, type LiveSession } from '@/workbench/live';
 
 /** Project ids to their names, fetched once — the tray names a project, not a path. */
@@ -61,74 +63,91 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
   if (!waiting.length) return null;
 
   return (
-    <div className="relative">
-      {/*
-        A bell with a count on it, the same on every width. It used to be the
-        words "Waiting on you" on an outlined button, which is a sentence in a
-        bar of pictures — and on a phone that sentence took the room the bar
-        needed for the project's own name (bw-rpgh.2). The words are not lost:
-        they are the button's label, so the tooltip says them and a screen
-        reader hears them along with the count.
-      */}
-      <ToolButton
-        icon={<Bell />}
-        label={`Waiting on you: ${waiting.length}`}
-        data-testid="tray-badge"
-        data-count={waiting.length}
-        data-open={open}
-        onClick={() => setOpen((v) => !v)}
-      />
-      {/*
-        Sat on the button's corner rather than beside it, so the count costs no
-        width at all. It ignores the pointer: the whole button under it is the
-        one thing to press.
-      */}
-      <Badge
-        variant="warning"
-        appearance="light"
-        size="xs"
-        shape="circle"
-        data-testid="tray-count"
-        className="pointer-events-none absolute -right-1 -top-1 min-w-4 justify-center px-1"
-      >
-        {waiting.length}
-      </Badge>
-
-      {open && (
-        <Panel
-          tone="overlay"
-          inset="none"
-          data-testid="tray-panel"
-          // Never wider than the screen it drops onto: 384px is most of a
-          // phone, and pinned to the bar's right end the overflow would have
-          // hung off the left edge (bw-rpgh.2).
-          className="absolute right-0 z-50 mt-1 w-96 max-w-[calc(100vw-1rem)] overflow-hidden"
+    /*
+      Radix owns when this is up and when it is gone. It used to be a bare
+      `open` flag over an absolutely placed box, which is the one anchored panel
+      in the app that was not a popover — and it showed: the only way out was to
+      find the bell again, because a press on the page behind it went to the
+      page and the tray stayed (bw-l6hd.1). A popover shuts on an outside press
+      and on Escape without being asked, the way every other panel here already
+      does, and the flag stays only because a row that navigates has to put the
+      tray away on its way out.
+    */
+    <Popover open={open} onOpenChange={setOpen}>
+      <div className="relative">
+        {/*
+          A bell with a count on it, the same on every width. It used to be the
+          words "Waiting on you" on an outlined button, which is a sentence in a
+          bar of pictures — and on a phone that sentence took the room the bar
+          needed for the project's own name (bw-rpgh.2). The words are not lost:
+          they are the button's label, so the tooltip says them and a screen
+          reader hears them along with the count.
+        */}
+        <PopoverTrigger asChild>
+          <ToolButton
+            icon={<Bell />}
+            label={`Waiting on you: ${waiting.length}`}
+            data-testid="tray-badge"
+            data-count={waiting.length}
+            data-open={open}
+          />
+        </PopoverTrigger>
+        {/*
+          Sat on the button's corner rather than beside it, so the count costs no
+          width at all. It ignores the pointer: the whole button under it is the
+          one thing to press.
+        */}
+        <Badge
+          variant="warning"
+          appearance="light"
+          size="xs"
+          shape="circle"
+          data-testid="tray-count"
+          className="pointer-events-none absolute -right-1 -top-1 min-w-4 justify-center px-1"
         >
-          {waiting.map((s) => (
-            <Row
-              key={s.id}
-              ruled
-              data-testid="tray-row"
-              data-session-id={s.id}
-              onClick={() => {
-                setOpen(false);
-                router.push(chatHref(s));
-              }}
-            >
-              <div className="truncate text-sm text-foreground">{s.title ?? 'Untitled chat'}</div>
-              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
-                <span data-testid="tray-project" className="truncate font-medium">
-                  {names.get(s.projectId) ?? 'Unknown project'}
-                </span>
-                <span data-testid="tray-waiting-for" className="truncate">
-                  · {whatItWaitsFor(s)}
-                </span>
-              </div>
-            </Row>
-          ))}
-        </Panel>
-      )}
-    </div>
+          {waiting.length}
+        </Badge>
+      </div>
+
+      <PopoverContent
+        align="end"
+        sideOffset={4}
+        data-testid="tray-panel"
+        // The frame is the app's overlay panel, borrowed by name rather than
+        // redrawn here, so the tray keeps the box it has always had now that
+        // Radix rather than a `relative` parent is placing it. Never wider than
+        // the screen it drops onto: 384px is most of a phone, and pinned to the
+        // bar's right end the overflow would have hung off the left edge
+        // (bw-rpgh.2).
+        className={cn(
+          panelVariants({ tone: 'overlay', inset: 'none' }),
+          'w-96 max-w-[calc(100vw-1rem)] overflow-hidden p-0',
+        )}
+      >
+        {waiting.map((s) => (
+          <Row
+            key={s.id}
+            ruled
+            data-testid="tray-row"
+            data-session-id={s.id}
+            onClick={() => {
+              setOpen(false);
+              router.push(chatHref(s));
+            }}
+          >
+            <div className="truncate text-sm text-foreground">{s.title ?? 'Untitled chat'}</div>
+            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span data-testid="tray-project" className="truncate font-medium">
+                {names.get(s.projectId) ?? 'Unknown project'}
+              </span>
+              <span data-testid="tray-waiting-for" className="truncate">
+                · {whatItWaitsFor(s)}
+              </span>
+            </div>
+          </Row>
+        ))}
+      </PopoverContent>
+    </Popover>
   );
 }
 
