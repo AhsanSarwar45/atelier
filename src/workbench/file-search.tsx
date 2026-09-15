@@ -17,6 +17,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import { addressWith } from '@/lib/address';
 import * as api from '@/lib/api';
+import { Heading, PLACE } from '@/search/parts';
 import { Marked, Search } from '@/search/search';
 import type { Choice, FilterSpec, Found, SearchSource, Segment } from '@/search/source';
 import type { Grammar } from '@/search/syntax';
@@ -73,7 +74,10 @@ export const FILE_GRAMMAR: Grammar = {
 
 const FILTERS: FilterSpec[] = [{ key: 'ext', label: 'Type', choices: KINDS }];
 
-const STARTERS = ['path:', 'name:', 'ext:', 'content:', 'file:'];
+const TIPS = [
+  { example: 'path:src/', meaning: 'In a folder' },
+  { example: 'name:main', meaning: 'File name' },
+];
 
 /** The checkout the Files tab shows: the one it remembers while it is still there, else the project. */
 function useFilesRoot(projectId: string | null, projectPath: string): string | null {
@@ -120,7 +124,7 @@ export function useFileSearch(root: string): SearchSource<FileMatch, FoundFile> 
         grammar: FILE_GRAMMAR,
         scopes: FILE_SCOPES,
         filters: FILTERS,
-        starters: STARTERS,
+        tips: TIPS,
         sorts: [
           { value: 'relevance', label: 'Best' },
           { value: 'path', label: 'Path' },
@@ -142,27 +146,31 @@ export function useFileSearch(root: string): SearchSource<FileMatch, FoundFile> 
               testId: 'search-file-open',
               open: () => go(file.abs, null),
               body: (
-                <div className="flex min-w-0 items-baseline gap-2">
-                  <span data-testid="search-file-path" className="min-w-0 truncate font-mono text-xs text-foreground">
-                    <PathText path={file.path} segments={file.pathSegments} />
-                  </span>
-                  {!!file.matches && (
-                    <span data-testid="search-file-matches" className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
-                      {file.matches}
-                    </span>
-                  )}
-                </div>
+                <Heading
+                  title={
+                    <>
+                      <span data-testid="search-file-path" className="min-w-0 break-all font-mono text-xs text-foreground sm:truncate">
+                        <PathText path={file.path} segments={file.pathSegments} />
+                      </span>
+                      {!!file.matches && (
+                        <span data-testid="search-file-matches" className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
+                          {file.matches}
+                        </span>
+                      )}
+                    </>
+                  }
+                />
               ),
             },
             places: file.lines.map((line) => ({
               key: `${file.path}:${line.line}`,
               testId: 'search-file-line',
               attrs: { 'data-path': file.path, 'data-line': String(line.line) },
-              className: 'py-1 pl-8',
+              className: PLACE,
               open: () => go(file.abs, line.line),
               body: (
                 <div className="flex min-w-0 gap-2">
-                  <span className="w-10 shrink-0 text-right font-mono text-[11px] leading-5 text-muted-foreground">{line.line}</span>
+                  <span className="w-8 shrink-0 text-right font-mono text-[11px] leading-5 text-muted-foreground">{line.line}</span>
                   <span className="min-w-0 break-all font-mono text-xs leading-5 text-foreground/90">
                     <Marked segments={line.segments} />
                   </span>
@@ -185,12 +193,14 @@ export function useFileSearch(root: string): SearchSource<FileMatch, FoundFile> 
             attrs: { 'data-path': file.path },
             open: () => go(file.abs, line),
             body: (
-              <div className="flex min-w-0 items-baseline gap-2">
-                <span className="min-w-0 truncate font-mono text-xs text-foreground">
-                  <PathText path={file.path} segments={null} />
-                </span>
-                {line && <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">line {line}</span>}
-              </div>
+              <Heading
+                title={
+                  <span className="min-w-0 break-all font-mono text-xs text-foreground sm:truncate">
+                    <PathText path={file.path} segments={null} />
+                  </span>
+                }
+                meta={line && <span className="font-mono">line {line}</span>}
+              />
             ),
           };
         },

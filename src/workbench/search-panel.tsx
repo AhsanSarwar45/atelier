@@ -16,7 +16,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import * as api from '@/lib/api';
-import { cn } from '@/lib/utils';
+import { Excerpt, Heading, PLACE, TITLE } from '@/search/parts';
 import { Marked, Search } from '@/search/search';
 import type { FilterSpec, Found, SearchSource, Segment } from '@/search/source';
 import { CHAT_GRAMMAR, SCOPES } from '@/workbench/search-syntax';
@@ -85,13 +85,13 @@ const FILTERS: FilterSpec[] = [
   },
 ];
 
-const STARTERS = ['title:', 'me:', 'agent:', 'tool:', 'project:', 'after:'];
+const TIPS = [{ example: 'after:2026-09-01', meaning: 'Active since a day' }];
 
 const folderName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) || path;
 
 function Meta({ project, brand, at, matches }: { project: string; brand: string; at: string; matches?: number }) {
   return (
-    <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+    <>
       <span data-testid="search-project" className="max-w-40 truncate">{project}</span>
       <span>·</span>
       <span className="capitalize">{brand}</span>
@@ -102,7 +102,7 @@ function Meta({ project, brand, at, matches }: { project: string; brand: string;
           {matches}
         </span>
       )}
-    </span>
+    </>
   );
 }
 
@@ -136,7 +136,7 @@ export function useChatSearch(): SearchSource<ChatMatch, FoundChat> {
           { key: 'project', label: 'Project', choices: projects.map((p) => ({ value: p.name, label: p.name })) },
           ...FILTERS,
         ],
-        starters: STARTERS,
+        tips: TIPS,
         sorts: [
           { value: 'relevance', label: 'Best' },
           { value: 'newest', label: 'Newest' },
@@ -158,32 +158,33 @@ export function useChatSearch(): SearchSource<ChatMatch, FoundChat> {
               testId: 'search-chat-open',
               open: () => go(chat.projectId, chat.sessionId, null),
               body: (
-                <div className="flex min-w-0 items-baseline gap-2">
-                  <span data-testid="search-chat-title" className="min-w-0 truncate text-sm font-medium text-foreground">
-                    {chat.titleSegments ? <Marked segments={chat.titleSegments} /> : (chat.title ?? 'Untitled chat')}
-                  </span>
-                  <Meta
-                    project={project(chat.projectId, chat.projectPath)}
-                    brand={chat.brand}
-                    at={chat.lastActiveAt}
-                    matches={chat.matches}
-                  />
-                </div>
+                <Heading
+                  title={
+                    <span data-testid="search-chat-title" className={TITLE}>
+                      {chat.titleSegments ? <Marked segments={chat.titleSegments} /> : (chat.title ?? 'Untitled chat')}
+                    </span>
+                  }
+                  meta={
+                    <Meta
+                      project={project(chat.projectId, chat.projectPath)}
+                      brand={chat.brand}
+                      at={chat.lastActiveAt}
+                      matches={chat.matches}
+                    />
+                  }
+                />
               ),
             },
             places: chat.snippets.map((snippet) => ({
               key: snippet.messageId,
               testId: 'search-hit',
               attrs: { 'data-session-id': chat.sessionId, 'data-message-id': snippet.messageId },
-              className: 'py-1 pl-8',
+              className: PLACE,
               open: () => go(chat.projectId, chat.sessionId, snippet.messageId),
               body: (
-                <div className="flex min-w-0 gap-2 text-sm">
-                  <span className="w-10 shrink-0 text-[11px] leading-5 text-muted-foreground">{SAID_BY[snippet.field]}</span>
-                  <span className={cn('min-w-0 break-words text-foreground/90', snippet.field === 'tool' && 'font-mono text-xs leading-5')}>
-                    <Marked segments={snippet.segments} />
-                  </span>
-                </div>
+                <Excerpt label={SAID_BY[snippet.field]} mono={snippet.field === 'tool'}>
+                  <Marked segments={snippet.segments} />
+                </Excerpt>
               ),
             })),
           })),
@@ -199,10 +200,10 @@ export function useChatSearch(): SearchSource<ChatMatch, FoundChat> {
           attrs: { 'data-session-id': chat.sessionId },
           open: () => go(chat.projectId, chat.sessionId, chat.at),
           body: (
-            <div className="flex min-w-0 items-baseline gap-2">
-              <span className="min-w-0 truncate text-sm font-medium text-foreground">{chat.title ?? 'Untitled chat'}</span>
-              <Meta project={project(chat.projectId, chat.projectPath)} brand={chat.brand} at={chat.lastActiveAt} />
-            </div>
+            <Heading
+              title={<span className={TITLE}>{chat.title ?? 'Untitled chat'}</span>}
+              meta={<Meta project={project(chat.projectId, chat.projectPath)} brand={chat.brand} at={chat.lastActiveAt} />}
+            />
           ),
         }),
       },

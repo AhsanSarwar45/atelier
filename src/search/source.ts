@@ -54,6 +54,12 @@ export interface Page<Item> {
   next: number | null;
 }
 
+/** Something to type, and what it does: `-word`, "Leave out". */
+export interface Tip {
+  example: string;
+  meaning: string;
+}
+
 export interface WordsSearch<Item> {
   /** What is searched, said to a screen reader: "Search every conversation". */
   label: string;
@@ -64,8 +70,8 @@ export interface WordsSearch<Item> {
   /** The parts `in:` can aim words at. */
   scopes: Choice[];
   filters: FilterSpec[];
-  /** Keys offered on an empty box. */
-  starters: string[];
+  /** What can be typed that no control writes, shown on an empty box. */
+  tips: Tip[];
   /** The orders offered, the first the default; none for a source with one order. */
   sorts: Choice[];
   find: (q: string, sort: string, cursor: number) => Promise<Page<Item>>;

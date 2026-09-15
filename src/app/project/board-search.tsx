@@ -18,6 +18,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { addressWith, cardWasPushed } from '@/lib/address';
 import * as api from '@/lib/api';
 import { ISSUE_TYPES } from '@/lib/issue-types';
+import { Excerpt, Heading, PLACE, TITLE } from '@/search/parts';
 import { Marked, Search } from '@/search/search';
 import type { Choice, FilterSpec, Found, SearchSource, Segment } from '@/search/source';
 import type { Grammar } from '@/search/syntax';
@@ -112,7 +113,10 @@ const FILTERS: FilterSpec[] = [
   },
 ];
 
-const STARTERS = ['title:', 'comment:', 'status:', 'type:', 'under:', 'after:'];
+const TIPS = [
+  { example: 'under:bw-12', meaning: 'Under a card' },
+  { example: 'after:2026-09-01', meaning: 'Changed since a day' },
+];
 
 const FIELD: Record<CardSnippet['field'], string> = {
   description: 'Description',
@@ -126,7 +130,7 @@ const stateLabel = (status: string) => STATES.find((s) => s.id === status)?.labe
 
 function Meta({ card, matches }: { card: { status: string; issueType: string | null; priority: number | null; updatedAt: string | null }; matches?: number }) {
   return (
-    <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+    <>
       <span data-testid="search-card-status">{stateLabel(card.status)}</span>
       {card.issueType && (
         <>
@@ -147,19 +151,23 @@ function Meta({ card, matches }: { card: { status: string; issueType: string | n
         </>
       )}
       {!!matches && <span className="rounded bg-muted px-1 font-mono">{matches}</span>}
-    </span>
+    </>
   );
 }
 
 function Head({ id, title, children }: { id: string; title: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="flex min-w-0 items-baseline gap-2">
-      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{id}</span>
-      <span data-testid="search-card-title" className="min-w-0 truncate text-sm font-medium text-foreground">
-        {title}
-      </span>
-      {children}
-    </div>
+    <Heading
+      title={
+        <>
+          <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{id}</span>
+          <span data-testid="search-card-title" className={TITLE}>
+            {title}
+          </span>
+        </>
+      }
+      meta={children}
+    />
   );
 }
 
@@ -181,7 +189,7 @@ export function useBoardSearch(projectPath: string): SearchSource<CardMatch, Fou
         grammar: BOARD_GRAMMAR,
         scopes: CARD_SCOPES,
         filters: FILTERS,
-        starters: STARTERS,
+        tips: TIPS,
         sorts: [
           { value: 'relevance', label: 'Best' },
           { value: 'newest', label: 'Newest' },
@@ -213,17 +221,12 @@ export function useBoardSearch(projectPath: string): SearchSource<CardMatch, Fou
               key: `${card.id}-${i}`,
               testId: 'search-card-hit',
               attrs: { 'data-card-id': card.id, 'data-field': snippet.field },
-              className: 'py-1 pl-8',
+              className: PLACE,
               open: () => go(card.id),
               body: (
-                <div className="flex min-w-0 gap-2 text-sm">
-                  <span className="w-20 shrink-0 truncate text-[11px] leading-5 text-muted-foreground">
-                    {snippet.field === 'comment' && snippet.author ? snippet.author : FIELD[snippet.field]}
-                  </span>
-                  <span className="min-w-0 break-words text-foreground/90">
-                    <Marked segments={snippet.segments} />
-                  </span>
-                </div>
+                <Excerpt label={snippet.field === 'comment' && snippet.author ? snippet.author : FIELD[snippet.field]}>
+                  <Marked segments={snippet.segments} />
+                </Excerpt>
               ),
             })),
           })),

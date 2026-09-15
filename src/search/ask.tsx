@@ -11,12 +11,12 @@
 
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
-import { CornerDownLeft, Loader2, Square } from 'lucide-react';
+import { CornerDownLeft, Loader2, Sparkles, Square } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Row } from '@/components/ui/row';
 import * as api from '@/lib/api';
+import { QueryBox } from '@/search/parts';
 import type { AskSearch, Found } from '@/search/source';
 
 export type AskEvent =
@@ -70,7 +70,7 @@ export function Ask<Thing extends Found>({
 }: {
   source: AskSearch<Thing>;
   onClose: () => void;
-  /** The panel's own buttons, drawn beside the box. */
+  /** The panel's own switch and close, drawn beside the box. */
   aside: ReactNode;
 }) {
   const [question, setQuestion] = useState('');
@@ -160,20 +160,20 @@ export function Ask<Thing extends Found>({
   return (
     <>
       <div className="border-b border-border/60 p-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
-          <Input
+          <QueryBox
             autoFocus
+            icon={<Sparkles aria-hidden="true" />}
             data-testid="ai-search-input"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={keyed}
             placeholder={source.placeholder}
             aria-label={source.label}
-            className="min-w-0 flex-1 text-sm"
           />
           {running ? (
-            <Button size="xs" variant="outline" data-testid="ai-search-stop" onClick={stop}>
+            <Button size="xs" variant="outline" data-testid="ai-search-stop" className="shrink-0" onClick={stop}>
               <Square className="h-3.5 w-3.5" aria-hidden="true" />
               Stop
             </Button>
@@ -182,6 +182,7 @@ export function Ask<Thing extends Found>({
               size="xs"
               variant="outline"
               data-testid="ai-search-ask"
+              className="shrink-0"
               aria-label="Ask"
               title="Ask (Enter)"
               disabled={!question.trim()}
