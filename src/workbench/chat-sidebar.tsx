@@ -412,14 +412,18 @@ export function ChatSidebar({
   const [renaming, setRenaming] = useState<RestoreRow | null>(null);
   const [title, setTitle] = useState('');
   const loadGeneration = useRef(0);
+  // Which list the last full answer was for. The local answer is only a
+  // stand-in until that answer exists; once it does, a later local answer is
+  // a smaller list and would drop every chat only discovery finds (bw-0nie).
+  const fullFor = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     const generation = ++loadGeneration.current;
     const q = new URLSearchParams({ project: projectId, path: projectPath });
     if (everything) q.set('all', '1');
+    const key = q.toString();
     const local = new URLSearchParams(q);
     local.set('local', '1');
-    let reconciled = false;
     // Rows already in the durable store do not wait behind provider process
     // startup or a scan of every external record. Provider discovery still
     // runs on the same load and replaces this local picture when it completes.
@@ -427,7 +431,7 @@ export function ChatSidebar({
       .then(async (res) => {
         if (!res.ok) return;
         const rows = (await res.json()) as RestoreRow[];
-        if (!reconciled && generation === loadGeneration.current) setFetched(rows);
+        if (fullFor.current !== key && generation === loadGeneration.current) setFetched(rows);
       })
       .catch(() => undefined);
     try {
@@ -435,7 +439,7 @@ export function ChatSidebar({
       if (res.ok && generation === loadGeneration.current) {
         const rows = (await res.json()) as RestoreRow[];
         if (generation !== loadGeneration.current) return;
-        reconciled = true;
+        fullFor.current = key;
         setFetched(rows);
       }
     } catch {
