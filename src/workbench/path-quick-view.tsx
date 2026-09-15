@@ -85,6 +85,12 @@ export function PathQuickView({
       <DialogContent
         hideClose
         aria-describedby={undefined}
+        // Focus lands on the way out, not on the first way onward: that one
+        // would open its tooltip over a file the reader has only just opened.
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          (event.currentTarget as HTMLElement).querySelector<HTMLElement>('[data-testid="path-quick-view-close"]')?.focus();
+        }}
         data-testid="path-quick-view"
         data-path={path}
         className="flex h-[80vh] w-[min(960px,95vw)] max-w-none flex-col gap-0 overflow-hidden p-0"
