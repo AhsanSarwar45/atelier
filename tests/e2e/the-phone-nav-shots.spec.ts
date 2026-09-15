@@ -282,8 +282,25 @@ test.describe('the navigation on a phone', () => {
 
       await bell.click();
       await expect(page.getByTestId('tray-panel')).toBeVisible();
+      await expect(bell).toHaveAttribute('data-open', 'true');
       await shoot(page, '12-bell-panel-phone');
+
+      // The tray puts itself away when the reader looks somewhere else. It
+      // used to sit there: the press went to the page underneath and the only
+      // way out was to find the bell a second time (bw-l6hd.1). The press
+      // lands on the conversation behind the tray, which is the thing a thumb
+      // reaches for and the thing that used to swallow it.
+      await page.getByTestId('chat-tab').click({ position: { x: 8, y: 8 } });
+      await expect(page.getByTestId('tray-panel')).toHaveCount(0);
+      await expect(bell).toHaveAttribute('data-open', 'false');
+      await shoot(page, '12b-bell-pressed-away-phone');
+
+      // And by key, for a desk. Radix answers both; neither was answered
+      // before.
+      await bell.click();
+      await expect(page.getByTestId('tray-panel')).toBeVisible();
       await page.keyboard.press('Escape');
+      await expect(page.getByTestId('tray-panel')).toHaveCount(0);
 
       await page.setViewportSize(DESKTOP);
       await page.waitForTimeout(800);
