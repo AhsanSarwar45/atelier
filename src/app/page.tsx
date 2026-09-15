@@ -88,21 +88,12 @@ export default function ProjectsPage() {
         </h1>
 
         <div className="w-full max-w-[1200px]">
-          {/* Add Project button: full-width on a phone, since a lone
-              right-aligned button above the search box reads as misplaced
-              when it's the only thing on its row at that width. */}
-          <div className="mb-4 flex sm:mb-6 sm:justify-end">
-            <Button variant="mono" size="md" onClick={() => setIsAddDialogOpen(true)} className="w-full sm:w-auto">
-              <Plus aria-hidden="true" />
-              Add Project
-            </Button>
-          </div>
-
-          {/* Search and Filter Bar */}
-          {projects.length > 0 && (
-            <div className="mb-4 space-y-3 sm:mb-6">
-              {/* Search Input */}
-              <div className="relative">
+          {/* Add Project shares the search's row, so its right edge lines up
+              with the search box beneath the title rather than floating above
+              it. On a phone it takes the full width, above the search. */}
+          <div className="mb-3 flex flex-col-reverse gap-3 sm:flex-row sm:items-center">
+            {projects.length > 0 && (
+              <div className="relative sm:flex-1">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-t-muted" aria-hidden="true" />
                 <Input
                   type="search"
@@ -113,6 +104,16 @@ export default function ProjectsPage() {
                   aria-label="Search projects"
                 />
               </div>
+            )}
+            <Button variant="mono" size="md" onClick={() => setIsAddDialogOpen(true)} className="w-full sm:ml-auto sm:w-auto">
+              <Plus aria-hidden="true" />
+              Add Project
+            </Button>
+          </div>
+
+          {/* Search and Filter Bar */}
+          {projects.length > 0 && (
+            <div className="mb-4 space-y-3 sm:mb-6">
 
               {/* Tag Filter Chips */}
               {allTags.length > 0 && (

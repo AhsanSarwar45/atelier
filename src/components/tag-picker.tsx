@@ -111,8 +111,9 @@ export function TagPicker({
         <Button
           variant="ghost"
           size="sm"
+          aria-label="Add tag"
           className={cn(
-            "h-6 w-6 p-0 rounded-full",
+            "h-6 gap-1 rounded-full px-2 text-xs text-t-tertiary",
             "hover:bg-surface-overlay",
             className
           )}
@@ -122,8 +123,8 @@ export function TagPicker({
             e.stopPropagation();
           }}
         >
-          <Plus className="h-4 w-4 text-t-tertiary" aria-hidden="true" />
-          <span className="sr-only">Add tag</span>
+          <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+          Tag
         </Button>
       </PopoverTrigger>
       <PopoverContent

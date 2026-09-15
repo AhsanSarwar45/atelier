@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { AlertTriangle, Archive, ArchiveRestore, Code, FolderOpen, Loader2, Settings } from "lucide-react";
@@ -24,16 +25,6 @@ import type { Tag } from "@/lib/db";
 import { projectTitle } from "@/lib/project-title";
 import { deriveBeadPrefix } from "@/lib/utils";
 import { NO_COUNTS, type BeadCounts } from "@/types";
-
-/**
- * Converts kebab-case, snake_case, camelCase to Title Case with spaces
- */
-function formatProjectName(name: string): string {
-  return name
-    .replace(/[-_]/g, ' ')  // Replace hyphens and underscores with spaces
-    .replace(/([a-z])([A-Z])/g, '$1 $2')  // Add space before capitals in camelCase
-    .replace(/\b\w/g, c => c.toUpperCase());  // Capitalize first letter of each word
-}
 
 /**
  * Returns the OS-appropriate file manager name
@@ -118,46 +109,33 @@ export function ProjectCard({
     }
   };
 
-  const handleCardClick = () => {
-    // Navigation reuses the current document. Name it before the project read
-    // begins, and retain the name for reloads in this browser tab.
-    document.title = projectTitle(id, name);
-    router.push(`/project?id=${id}`);
-  };
+  const total = Object.values(beadCounts ?? {}).reduce<number>((n, c) => n + (typeof c === "number" ? c : 0), 0);
+  const done = beadCounts?.closed ?? 0;
 
   return (
     <>
+    {/* One link, stretched over the whole card, with the card's own buttons
+        laid above it. The card used to be the link, and a link may not hold
+        buttons: a screen reader heard the tag, settings and open buttons as
+        part of a link's name, and a key pressed on them also opened the
+        project (bw-lf8i.4). */}
     <RoiuiCard
-      className={`cursor-pointer flex flex-col min-h-[155px]${archivedAt ? ' opacity-50' : ''}`}
-      onClick={handleCardClick}
-      role="link"
-      tabIndex={0}
-      aria-label={`Open ${formatProjectName(name)}`}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          handleCardClick();
-        }
-      }}
+      data-testid="project-card"
+      className={`relative flex flex-col gap-3 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring${archivedAt ? ' opacity-50' : ''}`}
     >
-      {/* Top row: Donut left, Tags right */}
-      <div className="flex items-start justify-between">
-        {!usesBeads ? (
-          <div className="h-9 w-9" aria-hidden="true" />
-        ) : beadError ? (
-          <Tooltip side="bottom" label={beadError}>
-            <div className="flex items-center gap-1.5 text-warning" style={{ width: 36, height: 36 }}>
-              <AlertTriangle className="h-5 w-5" aria-hidden="true" />
-            </div>
-          </Tooltip>
-        ) : (
-          <StatusDonut beadCounts={beadCounts} size={36} countsLoaded={countsLoaded} />
-        )}
-        <div
-          className="flex flex-wrap items-center gap-1.5"
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => e.stopPropagation()}
-        >
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="min-w-0 text-xl font-medium text-balance font-project-name">
+          <Link
+            href={`/project?id=${id}`}
+            // Navigation reuses the current document. Name it before the
+            // project read begins, and retain the name for reloads in this tab.
+            onClick={() => { document.title = projectTitle(id, name); }}
+            className="after:absolute after:inset-0 after:content-[''] focus-visible:outline-none"
+          >
+            {name}
+          </Link>
+        </h3>
+        <div className="relative flex flex-wrap items-center justify-end gap-1.5">
           {tags.map((tag) => (
             <Badge
               key={tag.id}
@@ -182,24 +160,25 @@ export function ProjectCard({
         </div>
       </div>
 
-      {/* Middle: Title (grows to fill space) */}
-      <div className="flex-1 flex items-center">
-        <h3 className="text-xl font-medium text-balance font-project-name">
-          {formatProjectName(name)}
-        </h3>
-      </div>
+      <p className="truncate text-sm text-t-muted" data-testid="project-path">
+        {path}
+      </p>
 
-      {/* Bottom row: Path left, actions right */}
       <div className="flex items-center justify-between gap-2">
-        {/* On a phone the badges beside the path are wider than the path, and
-            a path trimmed to "/.." is not a path. Below `sm` the path keeps
-            the line to itself and the badges drop underneath it. */}
-        <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
-          <Tooltip label={path}>
-            <p className="text-sm text-t-muted truncate min-w-0 basis-full sm:basis-auto" data-testid="project-path">
-              {path}
-            </p>
-          </Tooltip>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {usesBeads && (beadError ? (
+            <Tooltip side="bottom" label={beadError}>
+              <span className="relative flex items-center gap-1.5 text-sm text-warning">
+                <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                Board unreadable
+              </span>
+            </Tooltip>
+          ) : (
+            <span className="relative flex items-center gap-2 text-sm text-t-tertiary">
+              <StatusDonut beadCounts={beadCounts} size={24} countsLoaded={countsLoaded} />
+              {countsLoaded && (total === 0 ? "No tasks" : `${total} ${total === 1 ? "task" : "tasks"} · ${done} done`)}
+            </span>
+          ))}
           {archivedAt && (
             <Badge variant="secondary" appearance="light" size="sm" shape="circle" className="shrink-0 gap-1">
               <Archive className="h-3 w-3" aria-hidden="true" />
@@ -224,7 +203,7 @@ export function ProjectCard({
                 appearance="outline"
                 size="sm"
                 shape="circle"
-                className="shrink-0 gap-1"
+                className="relative shrink-0 gap-1"
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(e) => e.stopPropagation()}
                 role="note"
@@ -236,16 +215,8 @@ export function ProjectCard({
               </Badge>
             </Tooltip>
           )}
-          {!archivedAt && dataSource && dataSource !== 'jsonl' && (
-            <Badge variant="secondary" appearance="light" size="sm" shape="circle" className="shrink-0">
-              {dataSource === 'dolt-project' ? 'Dolt (project)' :
-               dataSource === 'dolt-central' ? 'Dolt (central)' :
-               dataSource === 'dolt-direct' ? 'Dolt (direct)' :
-               dataSource === 'cli' ? 'CLI' : dataSource}
-            </Badge>
-          )}
         </div>
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="relative flex items-center gap-1 shrink-0">
           {archivedAt ? (
             <Tooltip label="Restore project">
               <Button
@@ -333,7 +304,6 @@ export function ProjectCard({
           )}
         </div>
       </div>
-
     </RoiuiCard>
     </>
   );
