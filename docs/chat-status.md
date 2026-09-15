@@ -49,6 +49,24 @@ Two others were never written. The adapter held the turn open throughout, and
 the chat read Running · Terminal for hours. Reloading asked the same wrong
 question again. The decision no longer waits on those messages.
 
+## Browser proof
+
+`tests/e2e/fixture-held-background.py` is a deterministic Claude-shaped ACP peer
+for the bw-1fw6 shape. It holds the prompt open. It starts a real shell that
+holds its output file open until the test creates `finish-bg-N` for turn N. It writes a Claude
+record ending the reply, and it never sends a notice that the command ended.
+Run `chat-background-settles.spec.ts` through `scripts/workbench-e2e.sh` with
+`CHAT_HELD_BACKGROUND_FIXTURE=1` and `ATELIER_ACP_CLAUDE_PATH` set to the
+fixture. `CHAT_BACKGROUND_BASELINE=1`, with `ATELIER_BINARY` set to a build from
+before bw-1fw6, expects the old behaviour: still working, with the shell
+Running, fifteen seconds after the command ended. The fixed app reads
+Background working while the command runs, then Ready with the shell done,
+after a reload too. A message sent while the prompt is still held is steered
+into that turn, as the real adapter expects, and settles the same way.
+
+Evidence: `tests/results/bw-1fw6-before.png`, `tests/results/bw-1fw6-after.png`
+and `tests/results/bw-1fw6-background-working.png`.
+
 ## When it runs
 
 `WorkbenchRegistry::reconcile_status` applies the decision on open, snapshots,
