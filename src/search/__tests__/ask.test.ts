@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { type AskEvent, events } from '@/workbench/ai-search';
+import { type AskEvent, events } from '@/search/ask';
 
 function streamOf(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();

@@ -533,6 +533,12 @@ async fn serve(open_browser: bool) {
     // Build the router
     let app = Router::new()
         .route("/api/health", get(routes::health))
+        // Where an AI search's agent searches, whatever it is searching; the
+        // run's own token says which (search/agent.rs, bw-21a2.6).
+        .route(
+            "/api/search/mcp",
+            post(atelier::search::agent::mcp).get(|| async { StatusCode::METHOD_NOT_ALLOWED }),
+        )
         .route("/api/environment", get(routes::environment::read))
         .route(
             "/api/environment/:tool",

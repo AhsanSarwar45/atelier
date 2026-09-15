@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /**
- * Stands in for `claude -p` in the AI search test. Like a real agent it only
- * has the MCP tools the app hands it: it searches with the question, reads the
- * first chat found, and answers in Claude's stream-json with that chat and one
- * id nobody has, which the app must drop.
+ * Stands in for `claude -p` in the AI search tests, for whatever is being
+ * searched. Like a real agent it only has the MCP tools the app hands it: it
+ * searches with the question using the first tool, reads the first thing found
+ * with the second, and answers in Claude's stream-json naming that thing and
+ * one id nobody has, which the app must drop.
  */
 const args = process.argv.slice(2);
 const prompt = args[args.indexOf('-p') + 1];
-const { url, headers } = JSON.parse(args[args.indexOf('--mcp-config') + 1]).mcpServers.chats;
+const [[name, { url, headers }]] = Object.entries(JSON.parse(args[args.indexOf('--mcp-config') + 1]).mcpServers);
 const question = prompt.split('The person is looking for:')[1].trim();
 
 let asked = 0;
@@ -22,13 +23,15 @@ async function rpc(method, params) {
 }
 
 await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'fake', version: '1' } });
-const found = JSON.parse((await rpc('tools/call', { name: 'search_chats', arguments: { query: question } })).content[0].text);
-const chat = found.chats[0];
-if (chat) await rpc('tools/call', { name: 'read_chat', arguments: { id: chat.id } });
+const [search, read] = (await rpc('tools/list', {})).tools;
+const query = search.inputSchema.required[0];
+const found = JSON.parse((await rpc('tools/call', { name: search.name, arguments: { [query]: question } })).content[0].text);
+const first = found[name][0];
+if (first) await rpc('tools/call', { name: read.name, arguments: { [read.inputSchema.required[0]]: first.id } });
 const answer = {
-  chats: [
-    ...(chat ? [{ id: chat.id, reason: `It is where ${question} came up` }] : []),
-    { id: 'a-chat-nobody-had', reason: 'Made up' },
+  [name]: [
+    ...(first ? [{ id: first.id, reason: `It is where ${question} came up`, ...(first.line ? { line: first.line } : {}) }] : []),
+    { id: `a-${name.replace(/s$/, '')}-nobody-had`, reason: 'Made up' },
   ],
 };
 process.stdout.write(
