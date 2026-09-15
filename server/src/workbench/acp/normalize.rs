@@ -96,6 +96,9 @@ pub struct AcpNormalizer {
     waiting_for_agents: bool,
     outcome: Value,
     prompt_generation: u64,
+    /// When the person last sent this chat something. A provider record that
+    /// says the reply ended before then is about the reply before (bw-1fw6).
+    prompted_at: Option<chrono::DateTime<Utc>>,
     event_serial: Cell<u64>,
     stream_id: String,
     active_messages: HashMap<String, (String, String)>,
@@ -160,6 +163,7 @@ impl Default for AcpNormalizer {
             waiting_for_agents: false,
             outcome: json!({"state":"idle","label":"Ready"}),
             prompt_generation: 0,
+            prompted_at: None,
             event_serial: Cell::new(0),
             stream_id: uuid::Uuid::new_v4().to_string(),
             active_messages: HashMap::new(),
@@ -1378,6 +1382,7 @@ impl AcpNormalizer {
             connected,
             turn_open,
             pending_answer,
+            prompted_at: self.prompted_at,
             activity: self.standing_now().map(|(state, detail, call)| json!({
                 "state":state, "label":Value::Null, "detail":detail, "call":call
             })),
@@ -2715,6 +2720,7 @@ impl AcpNormalizer {
     }
 
     pub fn begin_local_prompt(&mut self) {
+        self.prompted_at = Some(Utc::now());
         self.suppress_local_user = true;
         self.turn_finished = false;
         self.waiting_for_agents = false;

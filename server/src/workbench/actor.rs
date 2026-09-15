@@ -55,6 +55,7 @@ enum Command {
     MarkBegunBy(String, String, Reply<()>),
     ListSessions(Option<String>, Reply<Vec<Session>>),
     ActiveSessionIds(Reply<Vec<String>>),
+    BackgroundOutputs(String, Vec<String>, Reply<Vec<(String, String)>>),
     LastModelForBrand(String, Reply<Option<String>>),
     ListRestoreSessions(Option<String>, bool, Reply<Vec<Session>>),
     MarkAllDormant(Reply<usize>),
@@ -224,6 +225,15 @@ impl ChatDb {
 
     pub async fn active_session_ids(&self) -> Result<Vec<String>, String> {
         self.request(Command::ActiveSessionIds).await
+    }
+
+    pub async fn background_outputs(
+        &self,
+        session_id: String,
+        tool_call_ids: Vec<String>,
+    ) -> Result<Vec<(String, String)>, String> {
+        self.request(|reply| Command::BackgroundOutputs(session_id, tool_call_ids, reply))
+            .await
     }
 
     pub async fn list_sessions(&self, project_id: Option<String>) -> Result<Vec<Session>, String> {
@@ -839,6 +849,9 @@ fn run(
                 respond(reply, store.last_model_for_brand(&brand))
             }
             Command::ActiveSessionIds(reply) => respond(reply, store.active_session_ids()),
+            Command::BackgroundOutputs(session_id, calls, reply) => {
+                respond(reply, store.background_outputs(&session_id, &calls))
+            }
             Command::ListSessions(project_id, reply) => {
                 respond(reply, store.list_sessions(project_id.as_deref()))
             }

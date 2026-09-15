@@ -542,10 +542,42 @@ fn held_in_its_project(
             .map(|state| format!("'{state}'"))
             .collect::<Vec<_>>()
             .join(",");
-        let mut statement = self
-            .connection
-            .prepare(&format!("SELECT id FROM session WHERE state IN ({placeholders})"))?;
+        // A row and its last status event can disagree — a chat put to sleep
+        // changes the row without an event — so either one being active puts
+        // the chat in front of the status decision (bw-1fw6).
+        let mut statement = self.connection.prepare(&format!(
+            r#"SELECT id FROM session WHERE state IN ({placeholders})
+               UNION
+               SELECT event.session_id FROM event
+                 JOIN (SELECT session_id, MAX(seq) AS seq FROM event
+                        WHERE type='session.state' GROUP BY session_id) AS latest
+                   ON latest.session_id=event.session_id AND latest.seq=event.seq
+                WHERE event.type='session.state'
+                  AND json_extract(event.json,'$.state') IN ({placeholders})"#
+        ))?;
         let found = statement.query_map([], |row| row.get(0))?.collect();
+        found
+    }
+
+    /// What these calls answered, for the ones that sent a command to the
+    /// background — the answer names the file the command writes to.
+    pub fn background_outputs(
+        &self,
+        session_id: &str,
+        tool_call_ids: &[String],
+    ) -> rusqlite::Result<Vec<(String, String)>> {
+        let ids = serde_json::to_string(tool_call_ids).unwrap_or_else(|_| "[]".into());
+        let mut statement = self.connection.prepare(
+            r#"SELECT json_extract(json,'$.toolCallId'), json_extract(json,'$.output') FROM event
+                WHERE session_id=?1 AND type IN ('tool.completed','tool.progress')
+                  AND json_extract(json,'$.toolCallId') IN (SELECT value FROM json_each(?2))
+                  AND json_extract(json,'$.output') LIKE '%Output is being written to: %'"#,
+        )?;
+        let found = statement
+            .query_map(rusqlite::params![session_id, ids], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
+            .collect();
         found
     }
 

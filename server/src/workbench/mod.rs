@@ -16,6 +16,7 @@ pub mod extensions;
 pub mod external;
 pub mod kit_words;
 pub mod lifecycle;
+pub mod liveness;
 pub mod local;
 pub mod mcp_servers;
 pub mod media;
