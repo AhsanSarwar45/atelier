@@ -14,16 +14,6 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { updateProject } from "@/lib/db";
 
-/**
- * Converts kebab-case, snake_case, camelCase to Title Case with spaces
- */
-function formatProjectName(name: string): string {
-  return name
-    .replace(/[-_]/g, ' ')  // Replace hyphens and underscores with spaces
-    .replace(/([a-z])([A-Z])/g, '$1 $2')  // Add space before capitals in camelCase
-    .replace(/\b\w/g, c => c.toUpperCase());  // Capitalize first letter of each word
-}
-
 interface EditableProjectNameProps {
   projectId: string;
   initialName: string;
@@ -109,7 +99,7 @@ export function EditableProjectName({
 
   return (
     <div className="flex items-center gap-2">
-      <h1 className="text-lg font-semibold text-t-primary">{formatProjectName(initialName)}</h1>
+      <h1 className="text-lg font-semibold text-t-primary">{initialName}</h1>
       <Popover open={isOpen} onOpenChange={setIsOpen}>
         <PopoverTrigger asChild>
           <Button
