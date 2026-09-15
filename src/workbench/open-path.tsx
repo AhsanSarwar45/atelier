@@ -14,8 +14,9 @@
  *
  * The Files tab reads a tree rooted at a checkout: the project's own folder, or
  * one of the worktrees git has cut from it. A path outside all of them —
- * `/etc/hosts`, a file in another project — has nothing the tab could show, so
- * it keeps the behaviour it always had and leaves for the desktop. Which is
+ * `/etc/hosts`, a file in another project — is not part of the project, so a
+ * click opens it in a quick view instead, with buttons onward to the Files tab,
+ * the editor and the file manager (`path-quick-view.tsx`, bw-lolf.2). Which is
  * why the checkouts are read once, here, rather than by each of the hundreds of
  * chips that ask.
  *
@@ -51,6 +52,7 @@ import { addressWith } from '@/lib/address';
 import * as api from '@/lib/api';
 import { openLocalPath } from '@/workbench/open-local-path';
 import { type OpenPath, type PathHow, type PathTarget } from '@/workbench/path-chip';
+import { PathQuickView } from '@/workbench/path-quick-view';
 
 /** A path with no trailing slashes, so two spellings of one folder compare. */
 function trimmed(root: string): string {
@@ -112,6 +114,8 @@ export function PathsOpenProvider({ projectPath, children }: { projectPath: stri
   const router = useRouter();
   const params = useSearchParams();
   const [worktrees, setWorktrees] = useState<string[]>([]);
+  /** A file outside the project, being looked at in the quick view. */
+  const [peeking, setPeeking] = useState<PathTarget | null>(null);
 
   useEffect(() => {
     setWorktrees([]);
@@ -143,8 +147,12 @@ export function PathsOpenProvider({ projectPath, children }: { projectPath: stri
       // file there is a push onto the history: Back gives the reader the
       // conversation they left, and what they are looking at is an address they
       // can paste to somebody else.
-      if (how === 'files' && insideCheckout(target.absolute, checkouts)) {
-        router.push(addressWith(params, { tab: 'files', file: target.absolute, line: target.line }));
+      if (how === 'files') {
+        if (insideCheckout(target.absolute, checkouts)) {
+          router.push(addressWith(params, { tab: 'files', file: target.absolute, line: target.line }));
+        } else {
+          setPeeking(target);
+        }
         return;
       }
       // The editor is the only program that can be told a line, which is why
@@ -158,8 +166,29 @@ export function PathsOpenProvider({ projectPath, children }: { projectPath: stri
     [router, params, checkouts],
   );
 
+  // The quick view's own "Open in Files" is the reader asking for the tab on
+  // purpose, so it goes there whether or not the file is in a checkout.
+  const goFrom = useCallback(
+    (target: PathTarget, how: PathHow) => {
+      if (how === 'files') router.push(addressWith(params, { tab: 'files', file: target.absolute, line: target.line }));
+      else open(target, how);
+    },
+    [router, params, open],
+  );
+
   const opening = useMemo(() => ({ checkouts, open }), [checkouts, open]);
-  return <Opening.Provider value={opening}>{children}</Opening.Provider>;
+  return (
+    <Opening.Provider value={opening}>
+      {children}
+      {peeking && (
+        <PathQuickView
+          target={peeking}
+          onGo={(how) => goFrom(peeking, how)}
+          onClose={() => setPeeking(null)}
+        />
+      )}
+    </Opening.Provider>
+  );
 }
 
 /** Every checkout of the project on screen. Empty until they have been read. */

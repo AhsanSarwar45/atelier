@@ -41,8 +41,16 @@ test('a file in a message is a badge, and one on a row stays a link', async ({ p
 
   const body = join(projectPath, 'PR_BODY.md');
   const renderer = join(projectPath, 'src', 'markdown-body.tsx');
+  writeFileSync(body, '# The pull request\n');
+  writeFileSync(renderer, Array.from({ length: 140 }, (_, i) => `// line ${i + 1}`).join('\n'));
+  // A file that is not part of the project: it opens in the quick view (bw-lolf.2).
+  const outside = join(run, 'elsewhere', 'outside-notes.txt');
+  mkdirSync(join(run, 'elsewhere'), { recursive: true });
+  writeFileSync(outside, 'kept outside the project\nsecond line\n');
   const text = [
     `Written outside the repo, so it stays out of git: ${body} is where it went.`,
+    '',
+    `Notes kept elsewhere: \`cat ${outside}\``,
     '',
     `Quoted on its own: \`${renderer}\` is the renderer.`,
     '',
@@ -123,12 +131,12 @@ test('a file in a message is a badge, and one on a row stays a link', async ({ p
       .toBeGreaterThan(0);
 
     if (!process.env.PATH_BADGE_BEFORE) {
-      // Four files named four different ways in one message, and all four are
-      // files. Only the one in the sentence is a badge; the three inside code
-      // are the dotted-underline link.
+      // Files named every way an agent writes them, and all are files. Only the
+      // one in the sentence is a badge; the four inside code are the
+      // dotted-underline link.
       await expect.poll(async () => message.locator('[data-path-look="badge"]').count(), { timeout: 30_000 }).toBe(1);
       await expect(message.locator('[data-path-look="badge"][data-file-kind="text"]')).toHaveCount(1);
-      await expect(message.locator('code [data-path-look="link"]')).toHaveCount(3);
+      await expect(message.locator('code [data-path-look="link"]')).toHaveCount(4);
       expect(await message.locator('code [data-path-look="badge"], pre [data-path-look="badge"]').count(), 'code drew a badge').toBe(0);
       // The quoted command is still a command: only the name became a link.
       const command = message.locator('code', { hasText: 'gh pr create' }).first();
@@ -145,6 +153,30 @@ test('a file in a message is a badge, and one on a row stays a link', async ({ p
       path: process.env.PATH_BADGE_SCREENSHOT || 'tests/results/bw-1e2e-after.png',
       fullPage: false,
     });
+
+    if (!process.env.PATH_BADGE_BEFORE) {
+      // A file outside the project opens in the quick view, not the desktop.
+      await message.locator(`[data-path-mention="${outside}"]`).click();
+      const quick = page.getByTestId('path-quick-view');
+      await expect(quick).toBeVisible();
+      await expect(quick).toHaveAttribute('data-path', outside);
+      await expect(quick.getByText('kept outside the project')).toBeVisible();
+      await page.screenshot({ path: process.env.PATH_QUICK_VIEW_SCREENSHOT || 'tests/results/bw-lolf-quick-view.png' });
+
+      // And its Files button takes it to the Files tab.
+      await quick.getByTestId('path-quick-view-files').click();
+      await expect(quick).toBeHidden();
+      await expect(page.getByTestId('files-viewer')).toHaveAttribute('data-file', outside);
+      await expect(page.getByText('kept outside the project')).toBeVisible();
+      await page.screenshot({ path: process.env.PATH_FILES_TAB_SCREENSHOT || 'tests/results/bw-lolf-outside-in-files.png' });
+
+      // A project file named inside code opens straight in the Files tab.
+      await page.goBack();
+      await expect(page.getByText('Written outside the repo')).toBeVisible();
+      await message.locator(`code [data-path-mention="${renderer}"]`).first().click();
+      await expect(page.getByTestId('files-viewer')).toHaveAttribute('data-file', renderer);
+      await expect(page.getByTestId('path-quick-view')).toHaveCount(0);
+    }
   } finally {
     if (project) await request.delete(`/api/projects/${project.id}`);
     discardFixture(run);

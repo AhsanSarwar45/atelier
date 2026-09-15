@@ -18,7 +18,7 @@ import type { LookableImage } from '@/workbench/protocol';
 // Diagrams bring mermaid, ELK, React Flow and motion — megabytes a chat with
 // no diagram in it never needs, fetched when one is drawn (bw-fbzd.4).
 const VisualArtifactView = dynamic(() => import('@/workbench/visual-artifact-view').then((m) => m.VisualArtifactView), { ssr: false });
-import { openLocalPath } from '@/workbench/open-local-path';
+import { useOpenPath } from '@/workbench/open-path';
 import { presentationAssetUrl } from '@/workbench/attachment-store';
 
 const COLORS = ['var(--color-primary)', 'var(--color-info)', 'var(--color-success)', 'var(--color-warning)'];
@@ -176,6 +176,8 @@ function ExplainerDiagram({ widget, active, playing }: { widget: ExplainerWidget
 }
 
 function Explainer({ widget }: { widget: ExplainerWidget }) {
+  // Evidence opens the way every file in the app opens (bw-lolf.2).
+  const openPath = useOpenPath();
   const [step, setStep] = useState(0);
   const [playing, setPlaying] = useState(false);
   const current = widget.steps[step]!;
@@ -213,7 +215,7 @@ function Explainer({ widget }: { widget: ExplainerWidget }) {
           className={`h-1.5 flex-1 rounded-full transition-colors motion-reduce:transition-none ${index === step ? '' : 'bg-muted hover:bg-muted-foreground/40'}`} />)}
       </div>
       {widget.evidence && widget.evidence.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5 border-t pt-3">
-        {widget.evidence.map((item) => <Button type="button" key={`${item.path}:${item.line ?? ''}`} variant="secondary" size="xs" onClick={() => openLocalPath(item.path, 'vscode', item.line)}
+        {widget.evidence.map((item) => <Button type="button" key={`${item.path}:${item.line ?? ''}`} variant="secondary" size="xs" onClick={() => openPath({ absolute: item.path, line: item.line ?? null, endLine: null }, 'files')}
           className="text-[11px] text-muted-foreground hover:text-foreground">
           <FileCode2 className="size-3" />{item.label}{item.line ? `:${item.line}` : ''}
         </Button>)}

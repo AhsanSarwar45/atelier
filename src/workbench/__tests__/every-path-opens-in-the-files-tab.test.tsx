@@ -26,8 +26,8 @@ vi.mock('@/workbench/open-local-path', () => ({ openLocalPath: desktop.open }));
 const said = vi.hoisted(() => ({ toast: vi.fn() }));
 vi.mock('@/hooks/use-toast', () => ({ toast: said.toast }));
 
-const asked = vi.hoisted(() => ({ trees: vi.fn() }));
-vi.mock('@/lib/api', () => ({ git: { trees: asked.trees } }));
+const asked = vi.hoisted(() => ({ trees: vi.fn(), read: vi.fn() }));
+vi.mock('@/lib/api', () => ({ git: { trees: asked.trees }, fs: { read: asked.read } }));
 
 const PROJECT = '/home/me/project';
 const TREE = '/home/me/project/worktrees/bw-1';
@@ -114,11 +114,34 @@ describe('clicking a path', () => {
     expect(went.to).not.toHaveBeenCalled();
   });
 
-  it('leaves for the desktop for a file the Files tab could not draw', async () => {
+  // A file that is not part of the project opens in a quick view, not the
+  // desktop, and the quick view is the way onward (bw-lolf.2).
+  it('opens a file outside the project in the quick view', async () => {
+    asked.read.mockResolvedValue({ kind: 'text', text: '127.0.0.1 localhost', size: 19 });
     draw('/etc/hosts');
     fireEvent.click(await readyChip());
 
+    const view = await screen.findByTestId('path-quick-view');
+    expect(view).toHaveAttribute('data-path', '/etc/hosts');
     expect(went.to).not.toHaveBeenCalled();
+    expect(desktop.open).not.toHaveBeenCalled();
+    await waitFor(() => expect(asked.read).toHaveBeenCalledWith('/etc/hosts', expect.anything()));
+  });
+
+  it('goes on from the quick view to the Files tab, the editor or the file manager', async () => {
+    asked.read.mockResolvedValue({ kind: 'text', text: '127.0.0.1 localhost', size: 19 });
+    draw('/etc/hosts');
+    fireEvent.click(await readyChip());
+    fireEvent.click(await screen.findByTestId('path-quick-view-files'));
+    expect(went.to).toHaveBeenCalledWith(`/project?id=p1&tab=files&file=${encodeURIComponent('/etc/hosts')}`);
+    await waitFor(() => expect(screen.queryByTestId('path-quick-view')).toBeNull());
+
+    fireEvent.click(screen.getByTestId('path-chip'));
+    fireEvent.click(await screen.findByTestId('path-quick-view-editor'));
+    expect(desktop.open).toHaveBeenCalledWith('/etc/hosts', 'vscode', null);
+
+    fireEvent.click(screen.getByTestId('path-chip'));
+    fireEvent.click(await screen.findByTestId('path-quick-view-reveal'));
     expect(desktop.open).toHaveBeenCalledWith('/etc/hosts', 'finder');
   });
 });
