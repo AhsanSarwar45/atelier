@@ -11,7 +11,13 @@
  * Nothing here decides anything about a language it does not know: a file with
  * no match is drawn plain, which is what it looked like before.
  */
-import hljs from 'highlight.js/lib/common';
+import hljs from 'highlight.js/lib/core';
+import { common } from 'lowlight';
+
+// The same grammar modules the markdown highlighter loads. `highlight.js/lib/common`
+// resolves to the CommonJS build of every grammar while lowlight takes the ES
+// build, so importing it put a second copy of all 37 in the bundle (bw-fbzd.8).
+for (const [name, grammar] of Object.entries(common)) hljs.registerLanguage(name, grammar);
 
 /** What a file's ending says its language is, for the languages hljs carries. */
 const BY_ENDING: Record<string, string> = {
