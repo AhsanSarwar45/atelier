@@ -929,6 +929,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/spend", get(spend))
         .route("/usage", get(usage))
         .route("/memory", get(memory))
+        .route("/memory/terminate", post(terminate_memory_process))
         .route("/tokens", get(tokens))
         .route("/links/bead/:id", get(chats_for_bead))
         .route("/links/session/:id", get(beads_for_chat))
@@ -960,6 +961,15 @@ async fn health() -> Json<Value> {
 async fn memory(State(state): State<WorkbenchState>) -> Result<Json<Value>, ApiError> {
     Ok(Json(serde_json::to_value(crate::workbench::memory::report(state.database()).await?)
         .map_err(|error| error.to_string())?))
+}
+
+async fn terminate_memory_process(
+    Json(request): Json<crate::workbench::memory::TerminateRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let stopped = tokio::task::spawn_blocking(move || crate::workbench::memory::terminate(request))
+        .await
+        .map_err(|error| format!("process termination failed: {error}"))??;
+    Ok(Json(json!({"stopped": stopped})))
 }
 
 #[derive(Deserialize)]

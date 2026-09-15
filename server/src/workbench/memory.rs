@@ -1,7 +1,7 @@
 //! Proportional memory owned by this Atelier process and its descendants.
 
 use super::actor::ChatDb;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
@@ -25,6 +25,9 @@ pub struct ProcessMemory {
     pub bytes: u64,
     pub session_id: Option<String>,
     pub chat_title: Option<String>,
+    pub role: &'static str,
+    pub killable: bool,
+    pub start_time: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -75,7 +78,7 @@ fn parse_pss(contents: &str) -> Option<u64> {
 }
 
 #[cfg(target_os = "linux")]
-fn process_bytes(pid: Pid, _resident_bytes: u64) -> Result<Option<u64>, String> {
+fn process_leader(pid: Pid) -> Result<Option<bool>, String> {
     let status_path = format!("/proc/{}/status", pid.as_u32());
     let status = match std::fs::read_to_string(&status_path) {
         Ok(contents) => contents,
@@ -86,7 +89,17 @@ fn process_bytes(pid: Pid, _resident_bytes: u64) -> Result<Option<u64>, String> 
         .lines()
         .find_map(|line| line.strip_prefix("Tgid:")?.trim().parse::<u32>().ok())
         .ok_or_else(|| format!("missing Tgid in {status_path}"))?;
-    if thread_group != pid.as_u32() {
+    Ok(Some(thread_group == pid.as_u32()))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_leader(_pid: Pid) -> Result<Option<bool>, String> {
+    Ok(Some(true))
+}
+
+#[cfg(target_os = "linux")]
+fn process_bytes(pid: Pid, _resident_bytes: u64) -> Result<Option<u64>, String> {
+    if process_leader(pid)? != Some(true) {
         return Ok(None);
     }
 
@@ -113,6 +126,93 @@ struct Found {
     parent: Option<Pid>,
     name: String,
     chat: Option<String>,
+    start_time: u64,
+}
+
+fn effective_chat(
+    pid: Pid,
+    processes: &HashMap<Pid, &Found>,
+    ignored: Option<&String>,
+) -> Option<String> {
+    let mut at = Some(pid);
+    let mut seen = HashSet::new();
+    while let Some(pid) = at {
+        if !seen.insert(pid) {
+            return None;
+        }
+        let process = processes.get(&pid)?;
+        if let Some(chat) = process.chat.as_ref().filter(|chat| Some(*chat) != ignored) {
+            return Some(chat.clone());
+        }
+        at = process.parent;
+    }
+    None
+}
+
+fn role_of(
+    found: &Found,
+    root: Pid,
+    processes: &HashMap<Pid, &Found>,
+    chat: Option<&str>,
+) -> &'static str {
+    if found.pid == root {
+        return "app";
+    }
+    if chat.is_none() {
+        return if found.parent == Some(root) && matches!(found.name.as_str(), "claude" | "codex") {
+            "accountReader"
+        } else {
+            "appService"
+        };
+    }
+    if found.parent == Some(root) && found.name.ends_with("-acp") {
+        return "chatAdapter";
+    }
+    if found
+        .parent
+        .and_then(|pid| processes.get(&pid))
+        .is_some_and(|parent| parent.parent == Some(root) && parent.name.ends_with("-acp"))
+        && matches!(found.name.as_str(), "claude" | "codex" | "goose")
+    {
+        return "provider";
+    }
+    "subprocess"
+}
+
+fn scan() -> Vec<Found> {
+    static KEPT: std::sync::OnceLock<std::sync::Mutex<System>> = std::sync::OnceLock::new();
+    let kept = KEPT.get_or_init(|| std::sync::Mutex::new(System::new()));
+    let mut system = kept.lock().unwrap_or_else(|e| e.into_inner());
+    system.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
+    let root = Pid::from_u32(std::process::id());
+    let parents: HashMap<Pid, Option<Pid>> = system
+        .processes()
+        .iter()
+        .map(|(pid, process)| (*pid, process.parent()))
+        .collect();
+    let pids: Vec<Pid> = parents
+        .keys()
+        .copied()
+        .filter(|pid| belongs_to(*pid, root, &parents))
+        .collect();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&pids),
+        false,
+        ProcessRefreshKind::nothing().with_environ(UpdateKind::OnlyIfNotSet),
+    );
+    pids.into_iter()
+        .filter(|pid| process_leader(*pid).ok().flatten() == Some(true))
+        .filter_map(|pid| {
+            let process = system.process(pid)?;
+            Some(Found {
+                pid,
+                parent: process.parent(),
+                name: process.name().to_string_lossy().into_owned(),
+                chat: chat_id(process),
+                start_time: process.start_time(),
+            })
+        })
+        .collect()
 }
 
 pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
@@ -123,46 +223,15 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
     // The table is kept between reports, so a process already known is not
     // built again, and it is file reading, so it runs off the request threads
     // (bw-fbzd.5).
-    let ours = tokio::task::spawn_blocking(|| {
-        static KEPT: std::sync::OnceLock<std::sync::Mutex<System>> = std::sync::OnceLock::new();
-        let kept = KEPT.get_or_init(|| std::sync::Mutex::new(System::new()));
-        let mut system = kept.lock().unwrap_or_else(|e| e.into_inner());
-        system.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
-        let root = Pid::from_u32(std::process::id());
-        let parents: HashMap<Pid, Option<Pid>> = system
-            .processes()
-            .iter()
-            .map(|(pid, process)| (*pid, process.parent()))
-            .collect();
-        let pids: Vec<Pid> = parents
-            .keys()
-            .copied()
-            .filter(|pid| belongs_to(*pid, root, &parents))
-            .collect();
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&pids),
-            false,
-            ProcessRefreshKind::nothing().with_environ(UpdateKind::OnlyIfNotSet),
-        );
-        pids.into_iter()
-            .filter_map(|pid| {
-                let process = system.process(pid)?;
-                Some(Found {
-                    pid,
-                    parent: process.parent(),
-                    name: process.name().to_string_lossy().into_owned(),
-                    chat: chat_id(process),
-                })
-            })
-            .collect::<Vec<_>>()
-    })
-    .await
-    .map_err(|e| format!("process scan failed: {e}"))?;
+    let ours = tokio::task::spawn_blocking(scan)
+        .await
+        .map_err(|e| format!("process scan failed: {e}"))?;
     let root = Pid::from_u32(std::process::id());
     let inherited_chat_id = ours
         .iter()
         .find(|found| found.pid == root)
         .and_then(|found| found.chat.clone());
+    let process_map: HashMap<Pid, &Found> = ours.iter().map(|found| (found.pid, found)).collect();
     let mut total = 0u64;
     let mut grouped: HashMap<String, (u64, usize)> = HashMap::new();
     let mut details = Vec::new();
@@ -170,8 +239,7 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
     // none; reading every chat ever held to name them was the costliest part.
     let running_chats: HashSet<String> = ours
         .iter()
-        .filter_map(|found| found.chat.clone())
-        .filter(|id| Some(id) != inherited_chat_id.as_ref())
+        .filter_map(|found| effective_chat(found.pid, &process_map, inherited_chat_id.as_ref()))
         .collect();
     let titles: HashMap<String, String> = if running_chats.is_empty() {
         HashMap::new()
@@ -189,12 +257,13 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
             })
             .collect()
     };
-    for found in ours {
+    for found in &ours {
         let Some(bytes) = process_bytes(found.pid, 0)? else {
             continue;
         };
         total = total.saturating_add(bytes);
-        let session_id = found.chat.filter(|id| Some(id) != inherited_chat_id.as_ref());
+        let session_id = effective_chat(found.pid, &process_map, inherited_chat_id.as_ref());
+        let role = role_of(&found, root, &process_map, session_id.as_deref());
         if let Some(id) = session_id.as_ref() {
             let entry = grouped.entry(id.clone()).or_default();
             entry.0 = entry.0.saturating_add(bytes);
@@ -203,10 +272,13 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
         details.push(ProcessMemory {
             pid: found.pid.as_u32(),
             parent_pid: found.parent.map(Pid::as_u32),
-            name: found.name,
+            name: found.name.clone(),
             bytes,
             chat_title: session_id.as_ref().and_then(|id| titles.get(id)).cloned(),
             session_id,
+            role,
+            killable: role == "subprocess",
+            start_time: found.start_time,
         });
     }
     let mut chats = grouped
@@ -232,6 +304,74 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
     })
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminateRequest {
+    pub pid: u32,
+    pub start_time: u64,
+    pub session_id: String,
+}
+
+/// Stop one chat-owned subprocess tree without stopping its provider or adapter.
+pub fn terminate(request: TerminateRequest) -> Result<usize, String> {
+    #[cfg(not(unix))]
+    return Err("subprocess termination is not supported on this operating system".into());
+    #[cfg(unix)]
+    {
+        let ours = scan();
+        let root = Pid::from_u32(std::process::id());
+        let process_map: HashMap<Pid, &Found> =
+            ours.iter().map(|found| (found.pid, found)).collect();
+        let inherited = process_map.get(&root).and_then(|found| found.chat.as_ref());
+        let target_pid = Pid::from_u32(request.pid);
+        let target = process_map
+            .get(&target_pid)
+            .ok_or_else(|| "process is no longer running".to_string())?;
+        let chat = effective_chat(target_pid, &process_map, inherited);
+        if chat.as_deref() != Some(request.session_id.as_str()) {
+            return Err("process no longer belongs to that chat".into());
+        }
+        if target.start_time != request.start_time {
+            return Err("process identity changed; refresh and try again".into());
+        }
+        if role_of(target, root, &process_map, chat.as_deref()) != "subprocess" {
+            return Err(
+                "Atelier can stop only a chat subprocess, not its provider or app services".into(),
+            );
+        }
+        let parents: HashMap<Pid, Option<Pid>> =
+            ours.iter().map(|found| (found.pid, found.parent)).collect();
+        let mut victims: Vec<&Found> = ours
+            .iter()
+            .filter(|found| belongs_to(found.pid, target_pid, &parents))
+            .collect();
+        victims.sort_by_key(|found| std::cmp::Reverse(depth(found.pid, &parents)));
+        let mut stopped = 0;
+        for victim in victims {
+            // The fresh snapshot and start-time match above make a recycled target
+            // fail closed. Descendants are signalled before their parent so they
+            // cannot be left running merely because the parent exits first.
+            if unsafe { libc::kill(victim.pid.as_u32() as i32, libc::SIGTERM) } == 0 {
+                stopped += 1;
+            }
+        }
+        Ok(stopped)
+    }
+}
+
+fn depth(mut pid: Pid, parents: &HashMap<Pid, Option<Pid>>) -> usize {
+    let mut depth = 0;
+    let mut seen = HashSet::new();
+    while seen.insert(pid) {
+        let Some(parent) = parents.get(&pid).copied().flatten() else {
+            break;
+        };
+        depth += 1;
+        pid = parent;
+    }
+    depth
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,5 +393,84 @@ mod tests {
     fn reads_pss_without_confusing_it_with_pss_anon() {
         let sample = "Rss:               12000 kB\nPss:                4321 kB\nPss_Anon:           4000 kB\n";
         assert_eq!(parse_pss(sample), Some(4_424_704));
+    }
+
+    #[test]
+    fn a_descendant_inherits_the_nearest_chat_and_only_tools_are_killable() {
+        let root = Pid::from_u32(10);
+        let adapter = Pid::from_u32(11);
+        let provider = Pid::from_u32(12);
+        let tool = Pid::from_u32(13);
+        let found = vec![
+            Found {
+                pid: root,
+                parent: None,
+                name: "atelier".into(),
+                chat: None,
+                start_time: 1,
+            },
+            Found {
+                pid: adapter,
+                parent: Some(root),
+                name: "claude-acp".into(),
+                chat: Some("chat-1".into()),
+                start_time: 2,
+            },
+            Found {
+                pid: provider,
+                parent: Some(adapter),
+                name: "claude".into(),
+                chat: Some("chat-1".into()),
+                start_time: 3,
+            },
+            Found {
+                pid: tool,
+                parent: Some(provider),
+                name: "cargo".into(),
+                chat: None,
+                start_time: 4,
+            },
+        ];
+        let processes: HashMap<Pid, &Found> = found.iter().map(|row| (row.pid, row)).collect();
+        assert_eq!(
+            effective_chat(tool, &processes, None).as_deref(),
+            Some("chat-1")
+        );
+        assert_eq!(
+            role_of(processes[&adapter], root, &processes, Some("chat-1")),
+            "chatAdapter"
+        );
+        assert_eq!(
+            role_of(processes[&provider], root, &processes, Some("chat-1")),
+            "provider"
+        );
+        assert_eq!(
+            role_of(processes[&tool], root, &processes, Some("chat-1")),
+            "subprocess"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn termination_stops_a_marked_tool_without_stopping_this_process() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .env(CHAT_ENV, "termination-test-chat")
+            .spawn()
+            .unwrap();
+        let pid = Pid::from_u32(child.id());
+        let mut system = System::new_all();
+        system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+        let start_time = system.process(pid).unwrap().start_time();
+        assert_eq!(
+            terminate(TerminateRequest {
+                pid: pid.as_u32(),
+                start_time,
+                session_id: "termination-test-chat".into(),
+            })
+            .unwrap(),
+            1
+        );
+        assert!(!child.wait().unwrap().success());
     }
 }
