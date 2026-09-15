@@ -67,7 +67,7 @@ import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
 import { AttachmentTile } from '@/workbench/attachment-tile';
 import { draftFiles, withoutFile } from '@/workbench/draft-files';
 import { FileDropTarget } from '@/workbench/file-drop';
-import { imageIds, imageMarker, promptFromDraft, promptParts, whyNot } from '@/workbench/composer-attachments';
+import { imageIds, imageMarker, pictureId, promptFromDraft, promptParts, whyNot } from '@/workbench/composer-attachments';
 import type { DraftPicture } from '@/workbench/composer-attachments';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
@@ -1676,7 +1676,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     let read: DraftPicture[];
     try {
       read = await Promise.all(
-        taking.map(async (file) => ({ ...(await readAndKeep(file)), id: crypto.randomUUID() })),
+        taking.map(async (file) => ({ ...(await readAndKeep(file)), id: pictureId() })),
       );
     } catch (e) {
       setSendError(`That could not be attached. ${e instanceof Error ? e.message : String(e)}`);

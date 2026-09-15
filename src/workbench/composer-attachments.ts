@@ -11,6 +11,16 @@ export function imageMarker(id: string): string {
   return `[[atelier-image:${id}]]`;
 }
 
+/**
+ * A fresh name for an attached picture. `crypto.randomUUID` exists only on a
+ * secure page, so a phone opening the app over the network by plain HTTP had
+ * none and every attach failed (bw-8ig7). `getRandomValues` is there on any page.
+ */
+export function pictureId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 export function imageIds(text: string): string[] {
   return Array.from(text.matchAll(MARKER), (match) => match[1]!);
 }
