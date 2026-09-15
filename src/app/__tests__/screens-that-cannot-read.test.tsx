@@ -50,6 +50,8 @@ vi.mock('@/components/shell', () => ({
   Shell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   TabTools: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Toolbar: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  // A closed menu draws none of its items.
+  HamburgerMenu: () => null,
 }));
 
 const replaceMock = vi.fn();
