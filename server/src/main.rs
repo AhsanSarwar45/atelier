@@ -592,6 +592,8 @@ async fn serve(open_browser: bool) {
         .route("/api/fs/media", get(routes::fs::media))
         .route("/api/fs/tree", get(routes::fs::tree))
         .route("/api/fs/find", get(routes::fs::find))
+        .route("/api/fs/search", get(routes::fs::search::search_files))
+        .route("/api/fs/search/ask", post(routes::fs::search::ask))
         .route("/api/fs/read", get(routes::fs::read_file))
         .route("/api/fs/write", axum::routing::put(routes::fs::write_file))
         // Changing the tree, not only reading it (bw-5gax). Confined to a

@@ -17,6 +17,8 @@ use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
 use tracing::warn;
 
+pub mod search;
+
 const PRESENTATION_ASSET: &str = "presentation asset";
 
 pub(crate) fn valid_presentation_asset(asset: &str) -> bool {

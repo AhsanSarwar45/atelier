@@ -32,7 +32,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
-import { FileText, PanelLeft, PanelRight, PanelRightClose } from 'lucide-react';
+import { FileText, PanelLeft, PanelRight, PanelRightClose, Search } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { TabLead, TabTrail, ToolButton } from '@/components/shell';
@@ -43,6 +43,7 @@ import * as api from '@/lib/api';
 import type { GitTree } from '@/lib/api';
 import { isPhoneScreen, usePhoneScreen } from '@/lib/screen-width';
 import { cn } from '@/lib/utils';
+import { useOpenSearch } from '@/search/opener';
 import { ChatRightRail, useGitDiff, useRightRail } from '@/workbench/chat-right-rail';
 import { FilePreview, PREVIEWS_NEEDING_TEXT, previewKind } from '@/workbench/file-preview';
 import FileTree from '@/workbench/file-tree';
@@ -127,6 +128,7 @@ export function rootShown(roots: GitTree[], remembered: string | null, projectPa
 export default function FilesTab({ projectId, projectPath, file, line }: FilesTabProps) {
   const router = useRouter();
   const params = useSearchParams();
+  const openSearch = useOpenSearch();
   const [width, setWidth] = useState(DEFAULT_PANEL_WIDTH);
   const [trees, setTrees] = useState<GitTree[]>([]);
   const [remembered, setRemembered] = useState<string | null>(null);
@@ -435,6 +437,8 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
             onClick={showTheDiff}
           />
         )}
+        {/* The files' own search, the one Ctrl+K opens here (bw-21a2.8). */}
+        <ToolButton icon={<Search />} label="Search files" data-testid="files-open-search" onClick={openSearch} />
         <ToolButton
           icon={rightOpen ? <PanelRightClose /> : <PanelRight />}
           label={rightOpen ? 'Hide Git' : 'Show Git'}

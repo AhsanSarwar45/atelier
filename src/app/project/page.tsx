@@ -41,6 +41,7 @@ const ChatTab = dynamic(loadChatTab, { ssr: false });
 const FilesTab = dynamic(() => import('@/workbench/files-tab'), { ssr: false });
 const SearchPanel = dynamic(() => import('@/workbench/search-panel').then((m) => m.SearchPanel), { ssr: false });
 const BoardSearchPanel = dynamic(() => import('./board-search').then((m) => m.BoardSearchPanel), { ssr: false });
+const FileSearchPanel = dynamic(() => import('@/workbench/file-search').then((m) => m.FileSearchPanel), { ssr: false });
 import { WorkbenchStatus } from '@/workbench/globals';
 import { PathsOpenProvider } from '@/workbench/open-path';
 import { useShowingFolder } from '@/workbench/terminal-shells';
@@ -361,6 +362,8 @@ function ProjectTabs() {
         {searching &&
           (shownTab === 'board' && project ? (
             <BoardSearchPanel projectPath={project.path} onClose={closeSearch} />
+          ) : shownTab === 'files' && project ? (
+            <FileSearchPanel projectId={projectId} projectPath={project.path} onClose={closeSearch} />
           ) : (
             <SearchPanel onClose={closeSearch} />
           ))}
