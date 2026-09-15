@@ -29,6 +29,7 @@ import {
   whereFrom,
 } from '@/lib/address';
 import { cn, projectDir } from '@/lib/utils';
+import { SearchOpener } from '@/search/opener';
 // Each tab's code is fetched when that tab is first shown, so a board does not
 // wait on the chat's editor and transcript or the files view (bw-fbzd.4).
 // The chat is fetched ahead once the screen is idle, so switching to it is
@@ -39,6 +40,7 @@ const PRELOAD_AFTER_MS = 4_000;
 const ChatTab = dynamic(loadChatTab, { ssr: false });
 const FilesTab = dynamic(() => import('@/workbench/files-tab'), { ssr: false });
 const SearchPanel = dynamic(() => import('@/workbench/search-panel').then((m) => m.SearchPanel), { ssr: false });
+const BoardSearchPanel = dynamic(() => import('./board-search').then((m) => m.BoardSearchPanel), { ssr: false });
 import { WorkbenchStatus } from '@/workbench/globals';
 import { PathsOpenProvider } from '@/workbench/open-path';
 import { useShowingFolder } from '@/workbench/terminal-shells';
@@ -161,9 +163,12 @@ function ProjectTabs() {
     cardBefore.current = openCard;
   }, [openCard]);
 
-  // Ctrl+K, or Cmd+K, searches every chat from anywhere on the screen — but a
-  // terminal keeps the keys its shell is owed.
+  // Ctrl+K, or Cmd+K, opens the showing tab's search from anywhere on the
+  // screen — but a terminal keeps the keys its shell is owed. A tab's own
+  // controls open the same search (src/search/opener.tsx).
   const [searching, setSearching] = useState(false);
+  const openSearch = useCallback(() => setSearching(true), []);
+  const closeSearch = useCallback(() => setSearching(false), []);
   useEffect(() => {
     const pressed = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() !== 'k' || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
@@ -350,10 +355,17 @@ function ProjectTabs() {
   // opens in the Files tab or leaves for the desktop (bw-g3o3.9). It is read
   // once, here, rather than by each of the hundreds of chips that ask.
   return (
-    <PathsOpenProvider projectPath={projectDir(project)}>
-      {screen}
-      {searching && <SearchPanel onClose={() => setSearching(false)} />}
-    </PathsOpenProvider>
+    <SearchOpener value={openSearch}>
+      <PathsOpenProvider projectPath={projectDir(project)}>
+        {screen}
+        {searching &&
+          (shownTab === 'board' && project ? (
+            <BoardSearchPanel projectPath={project.path} onClose={closeSearch} />
+          ) : (
+            <SearchPanel onClose={closeSearch} />
+          ))}
+      </PathsOpenProvider>
+    </SearchOpener>
   );
 }
 

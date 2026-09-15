@@ -421,7 +421,9 @@ test.describe('board', () => {
     await page.getByRole('button', { name: /^board options$/i }).click();
     await expect(page.getByTestId('board-menu-items').getByRole('menuitemcheckbox', { name: 'Today' })).toBeVisible();
     await page.getByTestId('board-menu-items').getByRole('menuitem', { name: /^search/i }).click();
-    await expect(page.getByRole('textbox', { name: 'Search cards' })).toBeFocused();
+    // The board's search is the shared one, over the screen (bw-21a2.7).
+    await expect(page.getByTestId('search-panel').getByTestId('search-input')).toBeFocused();
+    await page.getByTestId('search-close').click();
     await shoot(page, 'board-tools-390');
   });
 

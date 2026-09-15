@@ -10,4 +10,5 @@
 
 pub mod agent;
 pub mod named;
+pub mod text;
 pub mod words;

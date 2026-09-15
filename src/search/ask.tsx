@@ -32,6 +32,17 @@ const DEADLINE_MS = 20 * 60_000;
 /** The steps kept on screen: enough to see it working, not a log. */
 const STEPS_SHOWN = 6;
 
+/** What a refusal said: the words alone, whether it came as text or as `{"error": …}`. */
+function refusal(said: string): string {
+  try {
+    const read = JSON.parse(said) as { error?: unknown };
+    if (typeof read.error === 'string') return read.error;
+  } catch {
+    // Said as plain words.
+  }
+  return said;
+}
+
 /** The JSON objects a streamed reply carries, one per line, however the bytes arrive. */
 export async function* events(body: ReadableStream<Uint8Array>): AsyncGenerator<AskEvent> {
   const reader = body.getReader();
@@ -97,7 +108,7 @@ export function Ask<Thing extends Found>({
         signal: mine.signal,
         deadlineMs: DEADLINE_MS,
       });
-      if (!answer.ok || !answer.body) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+      if (!answer.ok || !answer.body) throw new Error(refusal(await answer.text()) || `the app answered ${answer.status}`);
       for await (const event of events(answer.body)) {
         if (event.type === 'started') setBy(event.model ? `${event.provider} · ${event.model}` : event.provider);
         else if (event.type === 'step') setSteps((had) => [...had, event.text]);

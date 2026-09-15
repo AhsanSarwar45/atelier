@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, RefObject } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { STATES, type Bead, type BeadStatus } from "@/types";
 
@@ -22,7 +22,8 @@ export interface KeyboardNavigationOptions {
   onSelect: (bead: Bead) => void;
   onOpen: (bead: Bead) => void;
   onClose: () => void;
-  searchInputRef: RefObject<HTMLInputElement | null>;
+  /** Opens the board's search. */
+  onSearch: () => void;
   isDetailOpen: boolean;
 }
 
@@ -42,7 +43,7 @@ export interface KeyboardNavigationResult {
  * - k or ArrowUp: Move selection up
  * - Enter: Open selected bead detail
  * - Escape: Close detail sheet / clear selection
- * - /: Focus search input
+ * - /: Open the search
  * - g then a column's key: jump to that column (the keys are in STATES)
  */
 export function useKeyboardNavigation({
@@ -52,7 +53,7 @@ export function useKeyboardNavigation({
   onSelect,
   onOpen,
   onClose,
-  searchInputRef,
+  onSearch,
   isDetailOpen,
 }: KeyboardNavigationOptions): KeyboardNavigationResult {
   const [internalSelectedId, setInternalSelectedId] = useState<string | null>(selectedId);
@@ -240,7 +241,7 @@ export function useKeyboardNavigation({
 
         case "/":
           event.preventDefault();
-          searchInputRef.current?.focus();
+          onSearch();
           break;
 
         case "g":
@@ -263,7 +264,7 @@ export function useKeyboardNavigation({
     jumpToColumn,
     onOpen,
     onClose,
-    searchInputRef,
+    onSearch,
   ]);
 
   return {

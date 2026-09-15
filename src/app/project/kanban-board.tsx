@@ -20,6 +20,7 @@ import { getUnknownStatusBeads, getUnknownStatusNames } from "@/lib/beads-parser
 import { getIssueTypeMeta } from "@/lib/issue-types";
 import type { IssueTypeFilter } from "@/lib/issue-types";
 import { cn } from "@/lib/utils";
+import { useOpenSearch } from "@/search/opener";
 import { STATES, type Bead, type BeadStatus } from "@/types";
 
 import { useBoardCards } from "./board-cards";
@@ -60,7 +61,7 @@ export default function KanbanBoard() {
     refresh: refreshBeads,
   } = useBoardCards();
 
-  // Use the bead filters hook with 300ms debounce
+  // The board's own filters
   const {
     filters,
     setFilters,
@@ -69,7 +70,7 @@ export default function KanbanBoard() {
     hasActiveFilters,
     availableOwners,
     availableTags,
-  } = useBeadFilters(beads, ticketNumbers, 300);
+  } = useBeadFilters(beads, ticketNumbers);
 
   // Issue type filter state ("all" or a specific issue type)
   const [typeFilter, setTypeFilter] = useState<IssueTypeFilter>("all");
@@ -189,8 +190,8 @@ export default function KanbanBoard() {
     },
     [router, searchParams],
   );
-  // Ref for search input (keyboard navigation)
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  // The board's search, over the screen (src/app/project/board-search.tsx).
+  const openSearch = useOpenSearch();
 
   /**
    * Which column a phone is showing, and how to get to another one.
@@ -260,7 +261,7 @@ export default function KanbanBoard() {
     // it lets go of the address. A second path here tore the panel out of the
     // page mid-slide, and only on this tab (bw-m8o.13).
     onClose: () => {},
-    searchInputRef,
+    onSearch: openSearch,
     isDetailOpen,
   });
 
@@ -326,9 +327,7 @@ export default function KanbanBoard() {
       <TabTools tab="board">
         <QuickFilterBar
           // Search
-          search={filters.search}
-          onSearchChange={(value) => setFilters({ search: value })}
-          searchInputRef={searchInputRef}
+          onSearch={openSearch}
           // Type filter
           typeFilter={typeFilter}
           onTypeFilterChange={setTypeFilter}

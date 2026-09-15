@@ -573,6 +573,8 @@ async fn serve(open_browser: bool) {
         )
         .route("/api/beads", get(routes::beads::read_beads))
         .route("/api/beads/card", get(routes::beads::read_card))
+        .route("/api/beads/search", get(routes::beads::search::search_cards))
+        .route("/api/beads/search/ask", post(routes::beads::search::ask))
         .route(
             "/api/beads/create",
             post(routes::beads::create_bead_handler),

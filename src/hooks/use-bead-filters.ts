@@ -1,10 +1,11 @@
 "use client";
 
 /**
- * Hook for filtering beads with debounced search and multi-criteria filtering.
+ * Hook for filtering beads by several criteria at once.
  *
- * Provides search (with 300ms debounce), status, priority, and owner filtering
- * with a clean API for the kanban board.
+ * Provides status, priority, owner, tag and today filtering with a clean API
+ * for the kanban board. Finding cards by what they say is the board's search
+ * (src/app/project/board-search.tsx), not a filter.
  */
 
 import { useState, useMemo, useCallback, useEffect } from "react";
@@ -27,8 +28,6 @@ export type SortDirection = "asc" | "desc";
  * Filter state for beads
  */
 export interface BeadFilters {
-  /** Search query for title and description (case-insensitive) */
-  search: string;
   /** Status filter - empty array means all statuses */
   statuses: BeadStatus[];
   /** Priority filter - empty array means all priorities (0-4) */
@@ -65,15 +64,12 @@ export interface UseBeadFiltersResult {
   availableOwners: string[];
   /** Tag values present on the beads, per namespace */
   availableTags: Record<LabelNamespace, string[]>;
-  /** Debounced search value (for display) */
-  debouncedSearch: string;
 }
 
 /**
  * Default/empty filter state
  */
 const DEFAULT_FILTERS: BeadFilters = {
-  search: "",
   statuses: [],
   priorities: [],
   owners: [],
@@ -84,10 +80,9 @@ const DEFAULT_FILTERS: BeadFilters = {
 };
 
 /**
- * Hook to filter beads with debounced search and multi-criteria filtering.
+ * Hook to filter beads by several criteria at once.
  *
  * @param beads - Array of beads to filter
- * @param debounceMs - Debounce delay for search input (default 300ms)
  * @returns Filter state, setters, and filtered beads
  *
  * @example
@@ -100,14 +95,10 @@ const DEFAULT_FILTERS: BeadFilters = {
  *     clearFilters,
  *     hasActiveFilters,
  *     activeFilterCount,
- *   } = useBeadFilters(beads);
+ *   } = useBeadFilters(beads, ticketNumbers);
  *
  *   return (
  *     <>
- *       <input
- *         value={filters.search}
- *         onChange={(e) => setFilters({ search: e.target.value })}
- *       />
  *       {hasActiveFilters && (
  *         <button onClick={clearFilters}>
  *           Clear ({activeFilterCount})
@@ -122,7 +113,6 @@ const DEFAULT_FILTERS: BeadFilters = {
 export function useBeadFilters(
   beads: Bead[],
   ticketNumbers: Map<string, number>,
-  debounceMs: number = 300
 ): UseBeadFiltersResult {
   // Filter state
   const [filters, setFiltersState] = useState<BeadFilters>(DEFAULT_FILTERS);
@@ -134,18 +124,6 @@ export function useBeadFilters(
   useEffect(() => {
     setTodayStr(new Date().toISOString().split("T")[0]);
   }, []);
-
-  // Debounced search value
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-
-  // Debounce the search input
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(filters.search);
-    }, debounceMs);
-
-    return () => clearTimeout(timer);
-  }, [filters.search, debounceMs]);
 
   /**
    * Update filters with partial state
@@ -162,7 +140,6 @@ export function useBeadFilters(
    */
   const clearFilters = useCallback(() => {
     setFiltersState(DEFAULT_FILTERS);
-    setDebouncedSearch("");
   }, []);
 
   /**
@@ -195,16 +172,6 @@ export function useBeadFilters(
 
     // Filter beads
     const filtered = beads.filter((bead) => {
-      // Search filter (uses debounced value for performance)
-      if (debouncedSearch) {
-        const searchLower = debouncedSearch.toLowerCase();
-        const matchesSearch =
-          bead.title.toLowerCase().includes(searchLower) ||
-          (bead.description &&
-            bead.description.toLowerCase().includes(searchLower));
-        if (!matchesSearch) return false;
-      }
-
       // Status filter
       if (filters.statuses.length > 0) {
         if (!filters.statuses.includes(bead.status)) return false;
@@ -248,14 +215,13 @@ export function useBeadFilters(
     });
 
     return sorted;
-  }, [beads, debouncedSearch, filters, ticketNumbers, todayStr]);
+  }, [beads, filters, ticketNumbers, todayStr]);
 
   /**
    * Check if any filters are active
    */
   const hasActiveFilters = useMemo(() => {
     return (
-      filters.search !== "" ||
       filters.statuses.length > 0 ||
       filters.priorities.length > 0 ||
       filters.owners.length > 0 ||
@@ -288,6 +254,5 @@ export function useBeadFilters(
     activeFilterCount,
     availableOwners,
     availableTags,
-    debouncedSearch,
   };
 }

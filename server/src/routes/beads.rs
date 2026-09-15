@@ -5,6 +5,8 @@
 //! - **Dolt** (preferred): reads via `bd list --json` + `bd sql` CLI commands
 //! - **JSONL** (fallback): reads from `.beads/issues.jsonl` if bd CLI is unavailable
 
+pub mod search;
+
 use axum::{
     extract::{Extension, Query},
     http::StatusCode,
@@ -419,6 +421,11 @@ async fn read_beads_from_cli(project_path: &Path) -> Result<Vec<Bead>, String> {
     let json_str = extract_json_array(&list_output)?;
     let mut beads: Vec<Bead> = serde_json::from_str(json_str)
         .map_err(|e| format!("Failed to parse bd list output: {}", e))?;
+    // Whether any card has a comment to find, so a board with none costs no
+    // second run looking for them.
+    let has_comments = serde_json::from_str::<Vec<Counted>>(json_str)
+        .map(|all| all.iter().any(|card| card.comment_count > 0))
+        .unwrap_or(true);
 
     // Get all comments. Try `bd sql` first; on any failure (notably "not yet
     // supported in embedded mode" for JSONL-only projects), fall back to
@@ -443,12 +450,16 @@ async fn read_beads_from_cli(project_path: &Path) -> Result<Vec<Bead>, String> {
                 }
                 Err(_) => {
                     tracing::warn!("Failed to parse comments from bd sql, falling back to JSONL");
-                    load_comments_from_jsonl(project_path, &mut comments_map);
+                    if !load_comments_from_jsonl(project_path, &mut comments_map) && has_comments {
+                        load_comments_from_export(project_path, &mut comments_map).await;
+                    }
                 }
             }
         }
         Err(_) => {
-            load_comments_from_jsonl(project_path, &mut comments_map);
+            if !load_comments_from_jsonl(project_path, &mut comments_map) && has_comments {
+                load_comments_from_export(project_path, &mut comments_map).await;
+            }
         }
     }
 
@@ -474,9 +485,56 @@ fn is_non_issue_record(line: &str) -> bool {
     )
 }
 
+/// A card as `bd list` counts its comments.
+#[derive(Deserialize)]
+struct Counted {
+    #[serde(default)]
+    comment_count: usize,
+}
+
+/// One line of `bd export`: an issue with its comments, or a record of
+/// another kind, which is skipped.
+#[derive(Deserialize)]
+struct Exported {
+    id: String,
+    #[serde(rename = "_type")]
+    kind: Option<String>,
+    #[serde(default)]
+    comments: Option<Vec<Comment>>,
+}
+
+/// The comments in `bd export`'s output, by the card they are on.
+fn comments_from_export(output: &str, comments_map: &mut HashMap<String, Vec<Comment>>) {
+    for line in output.lines() {
+        let Ok(record) = serde_json::from_str::<Exported>(line) else {
+            continue;
+        };
+        if record.kind.as_deref().is_some_and(|kind| kind != "issue") {
+            continue;
+        }
+        if let Some(comments) = record.comments.filter(|comments| !comments.is_empty()) {
+            comments_map.insert(record.id, comments);
+        }
+    }
+}
+
+/// Reads comments from `bd export`, which embeds them per issue.
+///
+/// A board kept in embedded Dolt — what `bd init` makes — refuses `bd sql` and
+/// has no issues file, so neither read above finds a comment on it, and every
+/// comment on such a board was missing from the board, the card panel and the
+/// search alike (bw-21a2.7). The export is one run for the whole board.
+async fn load_comments_from_export(project_path: &Path, comments_map: &mut HashMap<String, Vec<Comment>>) {
+    match run_bd(&["export"], project_path).await {
+        Ok(output) => comments_from_export(&output, comments_map),
+        Err(e) => tracing::warn!("Comments could not be exported ({}); continuing without comments", e),
+    }
+}
+
 /// Reads comments from the project's issues file and inserts them into
-/// `comments_map`. Used when `bd sql` is unavailable (embedded mode).
-fn load_comments_from_jsonl(project_path: &Path, comments_map: &mut HashMap<String, Vec<Comment>>) {
+/// `comments_map`. Used when `bd sql` is unavailable (embedded mode). Answers
+/// whether there was an issues file to read.
+fn load_comments_from_jsonl(project_path: &Path, comments_map: &mut HashMap<String, Vec<Comment>>) -> bool {
     // The same file the beads themselves are read from. This built the default
     // path by hand, so on a project whose `.beads/config.yaml` names a
     // sync-branch — where the real issues file lives in a beads worktree under
@@ -491,13 +549,13 @@ fn load_comments_from_jsonl(project_path: &Path, comments_map: &mut HashMap<Stri
     // (bw-t26l.20).
     if !issues_path.exists() {
         tracing::debug!("no {} to read comments from", issues_path.display());
-        return;
+        return false;
     }
     let jsonl_beads = match read_beads_from_jsonl(&issues_path) {
         Ok(b) => b,
         Err(e) => {
             tracing::warn!("Failed to load comments from JSONL ({}); continuing without comments", e);
-            return;
+            return true;
         }
     };
     for bead in jsonl_beads {
@@ -507,6 +565,7 @@ fn load_comments_from_jsonl(project_path: &Path, comments_map: &mut HashMap<Stri
             }
         }
     }
+    true
 }
 
 /// Reads beads from the JSONL file (fallback when bd CLI is unavailable).
@@ -2002,6 +2061,21 @@ mod tests {
             r#"{{"id":"{id}","title":"T","status":"open","description":"body","notes":"n","design":"d","close_reason":"r","comments":[{{"id":1,"issue_id":"{id}","author":"a","text":"one","created_at":"2026-08-20T09:00:00Z"}},{{"id":2,"issue_id":"{id}","author":"a","text":"two","created_at":"2026-08-20T09:00:00Z"}}],"updated_at":"2026-08-20T09:00:00Z"}}"#
         ))
         .unwrap()
+    }
+
+    #[test]
+    fn comments_are_read_from_an_export_and_records_of_other_kinds_are_skipped() {
+        let output = [
+            r#"{"_type":"issue","id":"sc-1","title":"T","status":"open","comments":[{"id":"26a3","issue_id":"sc-1","author":"sam","text":"the saffron cache","created_at":"2026-09-15T13:38:10Z"}]}"#,
+            r#"{"_type":"issue","id":"sc-2","title":"U","status":"open"}"#,
+            r#"{"_type":"memory","id":"m-1","comments":[{"id":"1","issue_id":"m-1","author":"a","text":"not a card","created_at":"2026-09-15T13:38:10Z"}]}"#,
+            "Warning: not json",
+        ]
+        .join("\n");
+        let mut comments = HashMap::new();
+        comments_from_export(&output, &mut comments);
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments["sc-1"][0].text, "the saffron cache");
     }
 
     #[test]

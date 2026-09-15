@@ -3,7 +3,7 @@
 import * as React from 'react';
 import type { CSSProperties } from 'react';
 
-import { Search, X, ArrowUpDown, SlidersHorizontal, AlertTriangle, Plus, Shapes, Tag } from 'lucide-react';
+import { Search, ArrowUpDown, SlidersHorizontal, AlertTriangle, Plus, Shapes, Tag } from 'lucide-react';
 
 import { HamburgerMenu, Toolbar } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
@@ -21,8 +21,6 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Input } from '@/components/ui/input';
-import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
 import { Tooltip } from '@/components/ui/tooltip';
 import { LABEL_NAMESPACES, LABEL_NAMESPACE_TITLES, parseLabel, tagHue } from '@/lib/bead-labels';
 import type { LabelNamespace } from '@/lib/bead-labels';
@@ -50,12 +48,8 @@ interface QuickFilterBarProps {
   sortDirection: SortDirection;
   /** Callback when sort changes */
   onSortChange: (field: SortField, direction: SortDirection) => void;
-  /** Search query */
-  search: string;
-  /** Callback when search changes */
-  onSearchChange: (value: string) => void;
-  /** Ref for the search input (keyboard navigation) */
-  searchInputRef?: React.RefObject<HTMLInputElement>;
+  /** Opens the board's search (src/app/project/board-search.tsx). */
+  onSearch: () => void;
   /** Active status filters */
   statuses: BeadStatus[];
   /** Callback when status filter toggles */
@@ -108,9 +102,7 @@ export function QuickFilterBar({
   sortField,
   sortDirection,
   onSortChange,
-  search,
-  onSearchChange,
-  searchInputRef,
+  onSearch,
   statuses,
   onStatusToggle,
   owners,
@@ -127,7 +119,6 @@ export function QuickFilterBar({
   onNewBead,
 }: QuickFilterBarProps) {
   const currentSortValue = `${sortField}_${sortDirection}`;
-  const [searchOpen, setSearchOpen] = React.useState(false);
   const searchPending = React.useRef(false);
 
   // Active issue-type filter metadata for the type dropdown trigger
@@ -296,35 +287,6 @@ export function QuickFilterBar({
     </Tooltip>
   );
 
-  const searchField = (autoFocus: boolean) => (
-    <div className="relative">
-      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-t-muted" aria-hidden="true" />
-      <Input
-        ref={autoFocus ? undefined : searchInputRef}
-        type="text"
-        aria-label="Search cards"
-        placeholder={autoFocus ? 'Search cards…' : 'Search… (/)'}
-        value={search}
-        autoFocus={autoFocus}
-        onChange={(e) => onSearchChange(e.target.value)}
-        className={cn('h-8 pl-8 pr-8', autoFocus ? 'w-full' : 'w-[180px]')}
-      />
-      {search && (
-        <Button
-          type="button"
-          variant="dim"
-          mode="icon"
-          size="sm"
-          onClick={() => onSearchChange('')}
-          aria-label="Clear search"
-          className="absolute right-0 top-1/2 h-11 w-11 -translate-y-1/2"
-        >
-          <X className="h-3.5 w-3.5" />
-        </Button>
-      )}
-    </div>
-  );
-
   return (
     // Nothing on this row is allowed to be squeezed: a flex child shrinks by
     // default, and a row that compresses instead of overflowing hid New and the
@@ -332,7 +294,20 @@ export function QuickFilterBar({
     // New and the app's one hamburger; everything else folds into that menu, so
     // no control on a phone sits off the edge of the screen.
     <Toolbar label="Quick filters" className="[&>*]:shrink-0">
-      <div className="hidden md:block">{searchField(false)}</div>
+      {/* The board's search is the one every tab shares, over the screen. */}
+      <Button
+        variant="outline"
+        size="sm"
+        data-testid="open-board-search"
+        aria-label="Search cards"
+        aria-keyshortcuts="/"
+        onClick={onSearch}
+        className="hidden h-8 w-[180px] justify-start gap-2 font-normal text-t-muted md:inline-flex"
+      >
+        <Search className="h-4 w-4" aria-hidden="true" />
+        <span>Search…</span>
+        <kbd className="ml-auto font-mono text-[10px]">/</kbd>
+      </Button>
 
       {onNewBead && (
         <Button
@@ -430,29 +405,26 @@ export function QuickFilterBar({
         </DropdownMenu>
       </div>
 
-      {/* A phone: the same controls, folded into the app's one hamburger. The
-          search opens as its own popup, anchored to the menu it came from. */}
-      <Popover open={searchOpen} onOpenChange={setSearchOpen}>
-        <PopoverAnchor asChild>
+      {/* A phone: the same controls, folded into the app's one hamburger. */}
           <div className="md:hidden">
             <HamburgerMenu
               label="Board options"
               data-testid="board-menu"
               contentTestId="board-menu-items"
-              active={!!search || !!activeType || tags.length > 0 || todayOnly || hasActiveFilters}
+              active={!!activeType || tags.length > 0 || todayOnly || hasActiveFilters}
               onCloseAutoFocus={(event: Event) => {
                 // Opening the search from the menu: focus goes to the search
                 // box, not back to the button the menu closed onto.
                 if (searchPending.current) {
                   event.preventDefault();
                   searchPending.current = false;
-                  setSearchOpen(true);
+                  onSearch();
                 }
               }}
             >
               <DropdownMenuItem onSelect={() => { searchPending.current = true; }}>
                 <Search aria-hidden="true" />
-                <span className="truncate">{search ? `Search: ${search}` : 'Search'}</span>
+                <span className="truncate">Search</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuSub>
@@ -501,11 +473,6 @@ export function QuickFilterBar({
               </DropdownMenuSub>
             </HamburgerMenu>
           </div>
-        </PopoverAnchor>
-        <PopoverContent align="end" className="w-[min(20rem,calc(100vw-1.5rem))] p-2">
-          {searchField(true)}
-        </PopoverContent>
-      </Popover>
     </Toolbar>
   );
 }
