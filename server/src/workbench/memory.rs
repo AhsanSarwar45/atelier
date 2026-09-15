@@ -82,7 +82,7 @@ fn process_leader(pid: Pid) -> Result<Option<bool>, String> {
     let status_path = format!("/proc/{}/status", pid.as_u32());
     let status = match std::fs::read_to_string(&status_path) {
         Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if process_vanished(&error) => return Ok(None),
         Err(error) => return Err(format!("could not read {status_path}: {error}")),
     };
     let thread_group = status
@@ -90,6 +90,11 @@ fn process_leader(pid: Pid) -> Result<Option<bool>, String> {
         .find_map(|line| line.strip_prefix("Tgid:")?.trim().parse::<u32>().ok())
         .ok_or_else(|| format!("missing Tgid in {status_path}"))?;
     Ok(Some(thread_group == pid.as_u32()))
+}
+
+#[cfg(target_os = "linux")]
+fn process_vanished(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ESRCH)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -108,7 +113,7 @@ fn process_bytes(pid: Pid, _resident_bytes: u64) -> Result<Option<u64>, String> 
         Ok(contents) => parse_pss(&contents)
             .map(Some)
             .ok_or_else(|| format!("missing Pss in {path}")),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) if process_vanished(&error) => Ok(None),
         Err(error) => Err(format!("could not read {path}: {error}")),
     }
 }
