@@ -16,14 +16,14 @@ test('a new project reviews inferred settings and can edit the saved policy', as
   try {
     await page.goto('/');
     await page.getByRole('button', { name: 'Add Project' }).click();
-    await page.getByLabel('Project Path').fill(repo);
+    await page.getByLabel('Folder', { exact: true }).fill(repo);
     await page.getByRole('button', { name: 'Continue' }).click();
 
     await expect(page.getByLabel('Project Name')).toBeVisible();
     await page.getByLabel('Project Name').fill('Onboarding Proof');
     await expect(page.getByLabel('Use task tracking for project work')).not.toBeChecked();
     await page.getByRole('combobox', { name: 'Store project settings' }).click();
-    await page.getByRole('option', { name: 'In .atelier/project.toml' }).click();
+    await page.getByRole('option', { name: 'In the repository' }).click();
     const initialized = page.waitForResponse((response) => response.url().endsWith('/api/projects/initialize'));
     await page.getByRole('button', { name: 'Add Project' }).click();
     const response = await initialized;

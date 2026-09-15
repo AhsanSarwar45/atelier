@@ -24,14 +24,13 @@ vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: mocks.toast }) }
 describe('project onboarding', () => {
   it('reviews the inferred essentials and saves the chosen manifest', async () => {
     render(<AddProjectDialog open onOpenChange={vi.fn()} onInitialized={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText('Project Path'), { target: { value: '/dev/keystone' } });
+    fireEvent.change(screen.getByLabelText('Folder'), { target: { value: '/dev/keystone' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
     expect(await screen.findByLabelText('Project Name')).toHaveValue('Keystone');
     expect(screen.getByLabelText('Use task tracking for project work')).toBeChecked();
-    expect(screen.getByLabelText('Issue ID prefix')).toHaveValue('key');
-    expect(screen.getByLabelText('Completed-work branch')).toHaveValue('ours');
-    expect(screen.getByText('1 verification command(s) inferred')).toBeVisible();
+    expect(screen.getByLabelText('Card ID prefix')).toHaveValue('key');
+    expect(screen.getByLabelText('Finished work lands on')).toHaveValue('ours');
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Project' }));
     await waitFor(() => expect(mocks.initialize).toHaveBeenCalledWith('/dev/keystone', 'personal', mocks.manifest));
@@ -48,7 +47,7 @@ describe('project onboarding', () => {
       new Error('API error: 409 Keystone is already on the home screen'),
     );
     render(<AddProjectDialog open onOpenChange={vi.fn()} onInitialized={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText('Project Path'), { target: { value: '/dev/keystone' } });
+    fireEvent.change(screen.getByLabelText('Folder'), { target: { value: '/dev/keystone' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     expect(await screen.findByLabelText('Project Name')).toHaveValue('Keystone');
 

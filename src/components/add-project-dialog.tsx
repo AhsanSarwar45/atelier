@@ -2,10 +2,9 @@
 
 import { useState, useEffect } from "react";
 
-import { Folder, Loader2, FolderSearch, Database, Server } from "lucide-react";
+import { Folder, Loader2, FolderSearch, Database } from "lucide-react";
 
 import { FolderBrowser } from "@/components/folder-browser";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -22,7 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
-import type { DoltDatabase, DoltServer, ManifestStorage, ProjectManifest } from "@/lib/api";
+import type { DoltDatabase, ManifestStorage, ProjectManifest } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 
@@ -61,8 +60,6 @@ export function AddProjectDialog({
   const [browserPath, setBrowserPath] = useState("");
   const [doltDatabases, setDoltDatabases] = useState<DoltDatabase[]>([]);
   const [doltLoading, setDoltLoading] = useState(false);
-  const [doltServers, setDoltServers] = useState<DoltServer[]>([]);
-  const [serversLoading, setServersLoading] = useState(false);
   const [manifest, setManifest] = useState<ProjectManifest | null>(null);
   // Whether this computer has bd. A board it cannot open is not offered
   // (bw-3tkl.2).
@@ -71,12 +68,11 @@ export function AddProjectDialog({
   const [branches, setBranches] = useState<string[]>([]);
   const { toast } = useToast();
 
-  // Fetch Dolt databases and per-project servers when dialog opens
+  // Fetch the boards this computer already holds when the dialog opens
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
     setDoltLoading(true);
-    setServersLoading(true);
     api.dolt.databases()
       .then((res) => {
         if (!cancelled) setDoltDatabases(res.databases || []);
@@ -86,16 +82,6 @@ export function AddProjectDialog({
       })
       .finally(() => {
         if (!cancelled) setDoltLoading(false);
-      });
-    api.dolt.servers()
-      .then((res) => {
-        if (!cancelled) setDoltServers(res.servers || []);
-      })
-      .catch(() => {
-        if (!cancelled) setDoltServers([]);
-      })
-      .finally(() => {
-        if (!cancelled) setServersLoading(false);
       });
     return () => { cancelled = true; };
   }, [isOpen]);
@@ -164,19 +150,6 @@ export function AddProjectDialog({
     (db) => !existingNamesLower.includes(db.project_name.toLowerCase())
   );
 
-  // Filter out per-project servers already added (by folder name or db_name)
-  const newDoltServers = doltServers.filter((s) => {
-    const folderName = s.project_path ? s.project_path.split(/[/\\]/).pop()?.toLowerCase() : "";
-    const dbName = s.db_name?.toLowerCase() || "";
-    return !existingNamesLower.includes(folderName || "") &&
-      (!dbName || !existingNamesLower.includes(dbName));
-  });
-
-  const handleServerQuickAdd = (server: DoltServer) => {
-    setProjectPath(server.project_path);
-    void validateAndProceed(server.project_path);
-  };
-
   const handleDoltQuickAdd = (db: DoltDatabase) => {
     const source = `dolt://${db.name}`;
     setProjectPath(source);
@@ -224,65 +197,29 @@ export function AddProjectDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogContent className={browsing ? "sm:max-w-lg" : (newDoltServers.length > 0 || newDoltDatabases.length > 0) ? "sm:max-w-lg" : "sm:max-w-md"}>
+      <DialogContent className={cn(
+        // On a phone: a sheet held to the bottom edge, where the thumb is, rather
+        // than a box floating mid-screen whose last row the window cut off.
+        "max-sm:bottom-0 max-sm:top-auto max-sm:translate-y-0 max-sm:rounded-t-lg max-sm:pb-[max(1.5rem,env(safe-area-inset-bottom))] max-sm:data-[state=open]:slide-in-from-top-[100%]",
+        browsing || newDoltDatabases.length > 0 ? "sm:max-w-lg" : "sm:max-w-md",
+      )}>
         <DialogHeader>
           <DialogTitle>Add Project</DialogTitle>
           <DialogDescription>
             {showNameInput
-              ? "Give your project a name."
-              : "Enter the path to a folder with a tracked project in it."}
+              ? "Check the details, then add it."
+              : "Choose your project's folder."}
           </DialogDescription>
         </DialogHeader>
 
         {!showNameInput ? (
           <div className="flex flex-col gap-4 py-4">
-            {/* Per-project Dolt servers discovery */}
-            {!browsing && !serversLoading && newDoltServers.length > 0 && (
-              <div className="space-y-2">
-                <label className="flex items-center gap-1.5 text-sm font-medium text-t-secondary">
-                  <Server className="size-3.5" />
-                  Per-project Dolt servers
-                </label>
-                <div className="space-y-1.5">
-                  {newDoltServers.map((server) => {
-                    const pathParts = server.project_path.split(/[/\\]/);
-                    const name = (server.project_path && pathParts[pathParts.length - 1])
-                      || server.db_name
-                      || `Port ${server.port}`;
-                    return (
-                      <Button
-                        key={`${server.pid}-${server.port}`}
-                        type="button"
-                        variant="ghost"
-                        onClick={() => handleServerQuickAdd(server)}
-                        disabled={isSubmitting}
-                        className={cn(
-                          panelVariants({ inset: 'sm' }),
-                          "h-auto w-full justify-between text-left text-sm font-normal",
-                        )}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <span className="font-medium text-t-primary">{name}</span>
-                          <span className="ml-2 truncate text-xs text-t-muted">{server.project_path}</span>
-                        </div>
-                        <Badge variant="success" appearance="light" size="xs" shape="circle" className="ml-2 shrink-0">
-                          :{server.port}
-                        </Badge>
-                      </Button>
-                    );
-                  })}
-                </div>
-                <p className="text-xs text-t-muted">
-                  Auto-discovered from running Dolt servers. Choose one to review its project settings.
-                </p>
-              </div>
-            )}
             {/* Dolt central server databases */}
             {!browsing && !doltLoading && newDoltDatabases.length > 0 && (
               <div className="space-y-2">
                 <label className="flex items-center gap-1.5 text-sm font-medium text-t-secondary">
                   <Database className="size-3.5" />
-                  Found in Dolt
+                  Boards on this computer
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {newDoltDatabases.map((db) => (
@@ -299,7 +236,7 @@ export function AddProjectDialog({
                   ))}
                 </div>
                 <p className="text-xs text-t-muted">
-                  Choose one to review its project settings. Memory and Agents still require a local folder.
+                  Choose one to add it.
                 </p>
               </div>
             )}
@@ -327,7 +264,7 @@ export function AddProjectDialog({
             ) : (
               <div className="space-y-2">
                 <label htmlFor="path" className="text-sm font-medium text-t-secondary">
-                  Project Path
+                  Folder
                 </label>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
@@ -358,9 +295,6 @@ export function AddProjectDialog({
                 {pathError && (
                   <p className="text-sm text-danger">{pathError}</p>
                 )}
-                <p className="text-xs text-t-muted">
-                  Enter the full path to any readable project folder.
-                </p>
               </div>
             )}
             {!browsing && (
@@ -384,6 +318,12 @@ export function AddProjectDialog({
         ) : (
           <form onSubmit={handleSubmit}>
             <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <span className="text-sm font-medium text-t-secondary">Folder</span>
+                <Panel inset="sm" className="truncate text-sm text-t-tertiary" title={projectPath}>
+                  {projectPath}
+                </Panel>
+              </div>
               <div className="space-y-2">
                 <label htmlFor="name" className="text-sm font-medium text-t-secondary">
                   Project Name
@@ -416,18 +356,18 @@ export function AddProjectDialog({
                       <SelectTrigger id="manifest-storage"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="personal">Only on this computer</SelectItem>
-                        <SelectItem value="repository">In .atelier/project.toml</SelectItem>
+                        <SelectItem value="repository">In the repository</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   {manifest.project.use_beads && (
                     <>
                       <div className="space-y-2">
-                        <label htmlFor="issue-prefix" className="text-sm font-medium text-t-secondary">Issue ID prefix</label>
+                        <label htmlFor="issue-prefix" className="text-sm font-medium text-t-secondary">Card ID prefix</label>
                         <Input id="issue-prefix" value={manifest.beads.issue_id_prefix} onChange={(event) => setManifest({ ...manifest, beads: { ...manifest.beads, issue_id_prefix: event.target.value } })} />
                       </div>
                       <div className="space-y-2">
-                        <label htmlFor="completed-branch" className="text-sm font-medium text-t-secondary">Completed-work branch</label>
+                        <label htmlFor="completed-branch" className="text-sm font-medium text-t-secondary">Finished work lands on</label>
                         <Input id="completed-branch" list="project-branches" value={manifest.git.completed_work_branch} onChange={(event) => setManifest({ ...manifest, git: { ...manifest.git, completed_work_branch: event.target.value } })} />
                         <datalist id="project-branches">{branches.map((branch) => <option key={branch} value={branch} />)}</datalist>
                       </div>
@@ -437,19 +377,8 @@ export function AddProjectDialog({
                       </label>
                     </>
                   )}
-                  <Panel inset="sm" className="space-y-1 text-xs text-t-muted">
-                    <p>{manifest.verification.commands.length} verification command(s) inferred</p>
-                    <p>{manifest.beads.work_areas.length} work area(s) inferred</p>
-                    <p>External review: {manifest.review.external_review.replace('_', ' ')}</p>
-                  </Panel>
                 </>
               )}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-t-secondary">Location</label>
-                <Panel inset="sm" className="truncate text-sm text-t-tertiary">
-                  {projectPath}
-                </Panel>
-              </div>
             </div>
             <DialogFooter className="gap-2">
               <Button
