@@ -178,8 +178,16 @@ fn carried(name: &str) -> Option<(EmbeddedFile, bool)> {
         .or_else(|| Assets::get(name).map(|file| (file, false)))
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    atelier::allocator::settle();
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("the runtime starts")
+        .block_on(run());
+}
+
+async fn run() {
     // An install made under the earlier name is carried across before anything
     // reads the settings, so a person who upgrades finds their projects where
     // they left them rather than an empty list (bw-8um.3.8).
@@ -325,6 +333,7 @@ async fn serve(open_browser: bool) {
         .with_max_level(Level::INFO)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
+    atelier::allocator::trim_now_and_then();
 
     // Where it listens, read the one way `atelier where` reads it too.
     let host = bind_host();
