@@ -12,7 +12,7 @@ import { Suspense, useCallback, useMemo } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { FileCode2, Palette, Puzzle, SquareTerminal, Tag, Users } from 'lucide-react';
+import { FileCode2, Palette, Puzzle, Search, SquareTerminal, Tag, Users } from 'lucide-react';
 
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
 import { useProfiles } from '@/components/settings/account-picker';
@@ -27,6 +27,7 @@ import { AccountsSettings } from '@/workbench/accounts-settings';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
 import { DependenciesSettings } from '@/workbench/dependencies-settings';
 import { SYSTEM_PROFILE } from '@/workbench/protocol';
+import { SearchSettings } from '@/workbench/search-settings';
 import { TerminalSettings } from '@/workbench/terminal-settings';
 
 const SECTIONS: SettingsSectionDef[] = [
@@ -35,6 +36,7 @@ const SECTIONS: SettingsSectionDef[] = [
   { id: 'claude', label: 'Claude Code', hint: 'Per account', icon: <BrandIcon brand="claude" /> },
   { id: 'codex', label: 'Codex', hint: 'Per account', icon: <BrandIcon brand="codex" /> },
   { id: 'files', label: 'Agent files', hint: 'Per account', icon: <FileCode2 /> },
+  { id: 'search', label: 'Search', hint: 'AI search', icon: <Search /> },
   { id: 'terminal', label: 'Terminal', hint: 'Shell', icon: <SquareTerminal /> },
   { id: 'dependencies', label: 'Dependencies', hint: 'Tools', icon: <Puzzle /> },
   { id: 'tags', label: 'Tags', hint: 'Projects', icon: <Tag /> },
@@ -135,6 +137,7 @@ function Settings() {
           <AgentFilesBrowser profileId={filesAccount.id === SYSTEM_PROFILE ? null : filesAccount.id} brand={filesAccount.brand} />
         </div>
       )}
+      {known === 'search' && <SearchSettings />}
       {known === 'terminal' && (
         <SettingsGroup title="Terminal">
           <div className="p-3">

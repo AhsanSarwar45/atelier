@@ -13,6 +13,7 @@ pub mod git;
 pub mod git_watch;
 pub mod live;
 pub mod new_chat;
+pub mod search_settings;
 pub mod projects;
 pub mod version;
 pub mod watch;

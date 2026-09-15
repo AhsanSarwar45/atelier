@@ -1249,6 +1249,32 @@ export async function saveTerminalSettings(shell: string | null): Promise<Termin
   return (await answer.json()) as TerminalShell;
 }
 
+export interface SearchSettings {
+  provider: 'claude' | 'codex' | 'local' | null;
+  profile: string | null;
+  model: string | null;
+  effort: string | null;
+  timeLimitSeconds: number;
+}
+
+/** How the AI search runs, as the server holds it (server/src/routes/search_settings.rs). */
+export async function searchSettings(): Promise<SearchSettings> {
+  const answer = await request('/api/settings/search');
+  if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+  return (await answer.json()) as SearchSettings;
+}
+
+/** Save every field as it now stands; answers what the server then holds. */
+export async function saveSearchSettings(settings: SearchSettings): Promise<SearchSettings> {
+  const answer = await request('/api/settings/search', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+  return (await answer.json()) as SearchSettings;
+}
+
 /**
  * File Watcher.
  *

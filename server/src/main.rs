@@ -560,6 +560,11 @@ async fn serve(open_browser: bool) {
             "/api",
             routes::new_chat::new_chat_routes().with_state(database.clone()),
         )
+        // How the AI search runs. Same table, same guard (routes/search_settings.rs).
+        .nest(
+            "/api",
+            routes::search_settings::search_settings_routes().with_state(database.clone()),
+        )
         .route("/api/beads", get(routes::beads::read_beads))
         .route("/api/beads/card", get(routes::beads::read_card))
         .route(
