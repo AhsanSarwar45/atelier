@@ -161,6 +161,9 @@ test('a file in a message is a badge, and one on a row stays a link', async ({ p
       await expect(quick).toBeVisible();
       await expect(quick).toHaveAttribute('data-path', outside);
       await expect(quick.getByText('kept outside the project')).toBeVisible();
+      // The dialog fades and zooms in; the picture is of where it lands.
+      await quick.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
+      await page.mouse.move(1, 1);
       await page.screenshot({ path: process.env.PATH_QUICK_VIEW_SCREENSHOT || 'tests/results/bw-lolf-quick-view.png' });
 
       // And its Files button takes it to the Files tab.
