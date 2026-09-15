@@ -116,10 +116,10 @@ export interface LoadProjectBeadsResult {
   source?: string;
 }
 
-export async function loadProjectBeads(projectPath: string, options?: { updatedAfter?: string }): Promise<Bead[]>;
-export async function loadProjectBeads(projectPath: string, options: { withSource: true; updatedAfter?: string }): Promise<LoadProjectBeadsResult>;
-export async function loadProjectBeads(projectPath: string, options?: { withSource?: true; updatedAfter?: string }): Promise<Bead[] | LoadProjectBeadsResult> {
-  const result = await api.beads.read(projectPath, options?.updatedAfter);
+export async function loadProjectBeads(projectPath: string, options?: { updatedAfter?: string; brief?: boolean }): Promise<Bead[]>;
+export async function loadProjectBeads(projectPath: string, options: { withSource: true; updatedAfter?: string; brief?: boolean }): Promise<LoadProjectBeadsResult>;
+export async function loadProjectBeads(projectPath: string, options?: { withSource?: true; updatedAfter?: string; brief?: boolean }): Promise<Bead[] | LoadProjectBeadsResult> {
+  const result = await api.beads.read(projectPath, options?.updatedAfter, { brief: options?.brief });
   // Map statuses, filter tombstones, ensure comments array
   const mapped: Bead[] = [];
   for (const bead of result.beads) {
@@ -133,6 +133,35 @@ export async function loadProjectBeads(projectPath: string, options?: { withSour
     return { beads: mapped, source: result.source };
   }
   return mapped;
+}
+
+export interface KnownCardStatus {
+  id: string;
+  status: BeadStatus;
+  updated_at?: string | null;
+}
+
+/**
+ * Each card's column status, without the cards: mapped the way the board maps
+ * them, tombstones left out (bw-fbzd.7).
+ */
+export async function loadCardStatuses(
+  projectPath: string,
+  options?: { updatedAfter?: string },
+): Promise<{ cards: KnownCardStatus[]; source?: string }> {
+  const result = await api.beads.statuses(projectPath, options?.updatedAfter);
+  const cards: KnownCardStatus[] = [];
+  for (const card of result.beads) {
+    // Only the status decides the column; the rest of a card is not needed.
+    const mapped = mapBeadStatus({ status: card.status, labels: card.dropped ? ['cancelled'] : [] } as unknown as Bead);
+    if (mapped !== null) cards.push({ id: card.id, status: mapped.status, updated_at: card.updated_at });
+  }
+  return { cards, source: result.source };
+}
+
+/** How many comments a card has, whether it was read whole or brief. */
+export function commentCountOf(bead: Pick<Bead, 'comments' | 'comment_count'>): number {
+  return bead.comment_count ?? (bead.comments ?? []).length;
 }
 
 /**

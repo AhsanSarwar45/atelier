@@ -5,7 +5,7 @@
 
 import { apiUrl } from '@/lib/api-base';
 import { onBoard, onFolder, onRepository, type WatchEvent } from '@/workbench/live-wire';
-import { BeadsResponseSchema, WorktreeStatusSchema } from '@/lib/api-schemas';
+import { BeadsResponseSchema, CardResponseSchema, CardStatusesResponseSchema, WorktreeStatusSchema } from '@/lib/api-schemas';
 import type { Project, Tag, Bead, WorktreeStatus, WorktreeEntry, CachedCounts } from '@/types';
 
 /**
@@ -456,6 +456,14 @@ export interface CreateBeadInput {
   parent_id?: string;
 }
 
+export interface CardStatus {
+  id: string;
+  status: string;
+  updated_at?: string | null;
+  /** Closed and labelled `cancelled`. */
+  dropped?: boolean;
+}
+
 export const beads = {
   /**
    * How many cards sit in each column of a board, without the cards.
@@ -471,13 +479,37 @@ export const beads = {
     return data;
   },
 
-  read: async (path: string, updatedAfter?: string) => {
+  /**
+   * The cards of a board. `brief` leaves out each card's notes, design, close
+   * reason and comments, carrying `comment_count` instead: the board draws none
+   * of that text and it was most of a 7 MiB answer (bw-fbzd.7). The card panel
+   * fetches it for the open card with `card` below.
+   */
+  read: async (path: string, updatedAfter?: string, options?: { brief?: boolean }) => {
     const params = new URLSearchParams({ path });
     if (updatedAfter) params.set('updated_after', updatedAfter);
+    if (options?.brief) params.set('brief', '1');
     const data = await fetchApi<{ beads: Bead[]; source?: string }>(
       `/api/beads?${params}`
     );
     BeadsResponseSchema.parse(data);
+    return data;
+  },
+
+  /** Each card's id and status, for a reader that only colours card names (bw-fbzd.7). */
+  statuses: async (path: string, updatedAfter?: string) => {
+    const params = new URLSearchParams({ path, ids: '1' });
+    if (updatedAfter) params.set('updated_after', updatedAfter);
+    const data = await fetchApi<{ beads: CardStatus[]; source?: string }>(`/api/beads?${params}`);
+    CardStatusesResponseSchema.parse(data);
+    return data;
+  },
+
+  /** One card whole, with the long text a brief read leaves out. */
+  card: async (path: string, id: string) => {
+    const params = new URLSearchParams({ path, id });
+    const data = await fetchApi<{ bead: Bead; source?: string }>(`/api/beads/card?${params}`);
+    CardResponseSchema.parse(data);
     return data;
   },
 

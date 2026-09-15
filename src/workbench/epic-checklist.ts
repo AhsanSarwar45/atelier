@@ -46,7 +46,7 @@ export function useEpicChecklist(reference: TodoItem[], projectPath: string | nu
       return;
     }
     let alive = true;
-    void loadProjectBeads(projectPath)
+    void loadProjectBeads(projectPath, { brief: true })
       .then((found) => { if (alive) setBeads(found); })
       .catch(() => { if (alive) setBeads([]); });
     return () => { alive = false; };

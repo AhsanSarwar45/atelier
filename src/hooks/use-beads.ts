@@ -122,7 +122,8 @@ export function useBeads(projectPath: string): UseBeadsResult {
       // Incremental fetch: pass updatedAfter on subsequent loads
       const updatedAfter = hasLoadedRef.current ? lastUpdatedRef.current ?? undefined : undefined;
       const { beads: fetchedBeads, source: fetchedSource } =
-        await loadProjectBeads(projectPath, { withSource: true, updatedAfter });
+        // Brief: the board draws no card's long text; the panel fetches it (bw-fbzd.7).
+        await loadProjectBeads(projectPath, { withSource: true, updatedAfter, brief: true });
       setSource(fetchedSource);
 
       // Compute max updated_at from fetched results

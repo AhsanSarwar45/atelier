@@ -258,6 +258,8 @@ export interface Bead {
   created_at: string;
   updated_at: string;
   comments: Comment[];
+  /** How many comments, when read brief: `comments` is then empty (bw-fbzd.7). */
+  comment_count?: number;
   // Epic support fields
   parent_id?: string;         // ID of parent epic (for child tasks)
   children?: string[];        // IDs of child tasks (for epics)

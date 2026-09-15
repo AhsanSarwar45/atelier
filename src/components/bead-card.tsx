@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Panel } from "@/components/ui/panel";
 import { useTheme } from "@/hooks/use-theme";
 import { tagFor } from "@/lib/bead-labels";
+import { commentCountOf } from "@/lib/beads-parser";
 import { formatBeadId, formatWorktreePath, isBlockedBy, truncate } from "@/lib/bead-utils";
 import { getIssueTypeMeta } from "@/lib/issue-types";
 import { cn } from "@/lib/utils";
@@ -98,7 +99,7 @@ function getStatusBadgeClasses(variant: StatusBadgeInfo['variant']): string {
 export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, isSelected = false, onSelect }: BeadCardProps) {
   const { layout } = useTheme();
   const blocked = isBlockedBy(bead, statusById);
-  const commentCount = (bead.comments ?? []).length;
+  const commentCount = commentCountOf(bead);
   const relatedCount = (bead.relates_to ?? []).length;
 
   // Issue-type metadata (icon + theme color) from the shared source of truth

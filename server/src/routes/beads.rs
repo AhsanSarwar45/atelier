@@ -110,6 +110,21 @@ pub struct BeadsParams {
     /// downloading a whole card database to count it cost the reader megabytes
     /// per project (bw-uiyz.2). Present at all means counts.
     pub counts: Option<String>,
+    /// Ask for the cards without their long text: no notes, design, close
+    /// reason or comments, only how many comments there are. A board of four
+    /// thousand cards was 7 MiB whole, and the board draws none of that text;
+    /// the card panel fetches it for the one card that opens (bw-fbzd.7).
+    pub brief: Option<String>,
+    /// Ask for each card's id and status only. A chat colours card names by
+    /// status and needs nothing else (bw-fbzd.7).
+    pub ids: Option<String>,
+}
+
+/// Query parameters for one card.
+#[derive(Debug, Deserialize)]
+pub struct CardParams {
+    pub path: String,
+    pub id: String,
 }
 
 /// A dependency relationship in the JSONL file (old format).
@@ -572,6 +587,20 @@ enum BoardAnswer {
         beads: SharedBoard,
         source: String,
     },
+    Brief {
+        #[serde(serialize_with = "serialize_brief_board")]
+        beads: SharedBoard,
+        source: String,
+    },
+    Statuses {
+        #[serde(serialize_with = "serialize_statuses")]
+        beads: SharedBoard,
+        source: String,
+    },
+    Card {
+        bead: Bead,
+        source: String,
+    },
     Counts {
         counts: CachedCounts,
         source: String,
@@ -592,18 +621,140 @@ where
     board.as_slice().serialize(serializer)
 }
 
-/// The answer to a read: the cards themselves, or only how many there are.
-fn board_answer(beads: SharedBoard, source: &str, counted: bool) -> Json<BoardAnswer> {
-    if counted {
-        return Json(BoardAnswer::Counts {
-            counts: counts_of(&beads, source),
-            source: source.to_string(),
-        });
+/// A card as the board list carries it: everything but the long text, which
+/// is serialized from the held board rather than copied out of it, because
+/// this answer is polled (bw-fbzd.7).
+#[derive(Serialize)]
+struct BriefBead<'a> {
+    id: &'a str,
+    title: &'a str,
+    description: &'a Option<String>,
+    status: &'a str,
+    priority: &'a Option<i32>,
+    issue_type: &'a Option<String>,
+    owner: &'a Option<String>,
+    created_at: &'a Option<String>,
+    created_by: &'a Option<String>,
+    updated_at: &'a Option<String>,
+    closed_at: &'a Option<String>,
+    comment_count: usize,
+    parent_id: &'a Option<String>,
+    children: &'a Option<Vec<String>>,
+    deps: &'a Option<Vec<String>>,
+    relates_to: &'a Option<Vec<String>>,
+    labels: &'a Option<Vec<String>>,
+}
+
+impl<'a> From<&'a Bead> for BriefBead<'a> {
+    fn from(bead: &'a Bead) -> Self {
+        BriefBead {
+            id: &bead.id,
+            title: &bead.title,
+            description: &bead.description,
+            status: &bead.status,
+            priority: &bead.priority,
+            issue_type: &bead.issue_type,
+            owner: &bead.owner,
+            created_at: &bead.created_at,
+            created_by: &bead.created_by,
+            updated_at: &bead.updated_at,
+            closed_at: &bead.closed_at,
+            comment_count: bead.comments.as_ref().map_or(0, Vec::len),
+            parent_id: &bead.parent_id,
+            children: &bead.children,
+            deps: &bead.deps,
+            relates_to: &bead.relates_to,
+            labels: &bead.labels,
+        }
     }
-    Json(BoardAnswer::Cards {
-        beads,
-        source: source.to_string(),
+}
+
+/// A card's id and status. The stamp rides along so a reader asking only for
+/// what changed knows what to ask after next; it is the same stamp
+/// `changed_since` compares. `dropped` marks a closed card labelled
+/// `cancelled`, which the screens colour apart from finished work, and is
+/// left out when false.
+#[derive(Serialize)]
+struct CardStatus<'a> {
+    id: &'a str,
+    status: &'a str,
+    updated_at: Option<&'a str>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    dropped: bool,
+}
+
+fn serialize_brief_board<S>(board: &SharedBoard, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.collect_seq(board.iter().map(BriefBead::from))
+}
+
+fn serialize_statuses<S>(board: &SharedBoard, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.collect_seq(board.iter().map(|bead| CardStatus {
+        id: &bead.id,
+        status: &bead.status,
+        updated_at: bead.updated_at.as_deref().or(bead.created_at.as_deref()),
+        dropped: bead.labels.as_ref().is_some_and(|labels| labels.iter().any(|l| l == "cancelled")),
+    }))
+}
+
+/// What a read asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Asked {
+    Cards,
+    Brief,
+    Statuses,
+    Counts,
+}
+
+impl Asked {
+    fn of(params: &BeadsParams) -> Self {
+        if params.counts.is_some() {
+            Asked::Counts
+        } else if params.ids.is_some() {
+            Asked::Statuses
+        } else if params.brief.is_some() {
+            Asked::Brief
+        } else {
+            Asked::Cards
+        }
+    }
+}
+
+/// The answer to a read: the cards, the cards without their long text, only
+/// their statuses, or only how many there are.
+fn board_answer(beads: SharedBoard, source: &str, asked: Asked) -> Json<BoardAnswer> {
+    let source = source.to_string();
+    Json(match asked {
+        Asked::Counts => BoardAnswer::Counts {
+            counts: counts_of(&beads, &source),
+            source,
+        },
+        Asked::Cards => BoardAnswer::Cards { beads, source },
+        Asked::Brief => BoardAnswer::Brief { beads, source },
+        Asked::Statuses => BoardAnswer::Statuses { beads, source },
     })
+}
+
+/// One card whole, out of the board already held.
+fn card_answer(beads: &SharedBoard, source: &str, id: &str) -> (StatusCode, Json<BoardAnswer>) {
+    match beads.iter().find(|bead| bead.id == id) {
+        Some(bead) => (
+            StatusCode::OK,
+            Json(BoardAnswer::Card {
+                bead: bead.clone(),
+                source: source.to_string(),
+            }),
+        ),
+        None => (
+            StatusCode::NOT_FOUND,
+            board_error(format!("No card {id} on this board")),
+        ),
+    }
 }
 
 /// The cards of a board that changed after a moment, or all of them if no
@@ -773,8 +924,44 @@ pub async fn read_beads(
     Extension(db): Extension<Arc<Database>>,
     Query(params): Query<BeadsParams>,
 ) -> impl IntoResponse {
+    let asked = Asked::of(&params);
+    // A count is always of the whole board: how many cards changed in the last
+    // minute is not a count of anything the screen shows.
+    let since = if asked == Asked::Counts {
+        None
+    } else {
+        params.updated_after.as_deref()
+    };
+    match shared_board(&dolt_manager, &db, &params.path).await {
+        Ok((beads, source)) => (
+            StatusCode::OK,
+            board_answer(changed_since(beads, since), &source, asked),
+        ),
+        Err(failed) => failed,
+    }
+}
+
+/// One card whole, for the card panel: the board list no longer carries a
+/// card's long text (bw-fbzd.7). Answered from the same held board.
+pub async fn read_card(
+    Extension(dolt_manager): Extension<Arc<DoltManager>>,
+    Extension(db): Extension<Arc<Database>>,
+    Query(params): Query<CardParams>,
+) -> impl IntoResponse {
+    match shared_board(&dolt_manager, &db, &params.path).await {
+        Ok((beads, source)) => card_answer(&beads, &source, &params.id),
+        Err(failed) => failed,
+    }
+}
+
+/// The whole board for a path, from wherever it is held or lives.
+async fn shared_board(
+    dolt_manager: &Arc<DoltManager>,
+    db: &Arc<Database>,
+    path: &str,
+) -> Result<(SharedBoard, String), (StatusCode, Json<BoardAnswer>)> {
     // Normalize Windows backslashes to forward slashes
-    let path = params.path.replace('\\', "/");
+    let path = path.replace('\\', "/");
 
     if let Ok(Some(project)) = db.get_project_by_path(&path) {
         let raw = project.local_path.as_deref().unwrap_or(&project.path);
@@ -786,30 +973,28 @@ pub async fn read_beads(
             }
         }).is_some_and(|found| found.manifest.project.use_beads);
         if !enabled {
-            return (StatusCode::NOT_FOUND, board_error("Beads is disabled for this project"));
+            return Err((StatusCode::NOT_FOUND, board_error("Beads is disabled for this project")));
         }
     }
-
-    let counted = params.counts.is_some();
 
     // Direct Dolt read for dolt:// paths (no filesystem needed)
     if let Some(db_name) = path.strip_prefix(DOLT_PATH_PREFIX) {
         if !dolt_manager.is_available() && !dolt_manager.check_server().await {
-            return (
+            return Err((
                 StatusCode::SERVICE_UNAVAILABLE,
                 board_error("Dolt server is not running"),
-            );
+            ));
         }
         return match dolt_manager.read_beads(db_name).await {
             Ok(beads) => {
                 let beads = Arc::new(post_process_beads(beads));
                 upsert_counts_cache(&db, &path, "dolt-direct", &beads);
-                (StatusCode::OK, board_answer(beads, "dolt-direct", counted))
+                Ok((beads, "dolt-direct".to_string()))
             }
-            Err(e) => (
+            Err(e) => Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 board_error(e.to_string()),
-            ),
+            )),
         };
     }
 
@@ -817,19 +1002,19 @@ pub async fn read_beads(
 
     // Security: Validate path is within allowed directories
     if let Err(e) = validate_path_security(&project_path) {
-        return (
+        return Err((
             StatusCode::FORBIDDEN,
             board_error(e),
-        );
+        ));
     }
 
     // Check that project has a .beads directory
     let beads_dir = project_path.join(".beads");
     if !beads_dir.exists() {
-        return (
+        return Err((
             StatusCode::NOT_FOUND,
             board_error("No .beads directory found at the specified path"),
-        );
+        ));
     }
 
     // Reading a whole board costs a `bd` run and about a second, and one screen
@@ -848,40 +1033,22 @@ pub async fn read_beads(
     // it is old enough to be worth reading again that read runs behind the
     // answer (bw-uiyz.17). Only a board nobody has ever read is worth waiting
     // for, and the screens are told when the read behind lands.
-    //
-    // A count is always of the whole board: how many cards changed in the last
-    // minute is not a count of anything the screen shows.
-    let since = if counted {
-        None
-    } else {
-        params.updated_after.as_deref()
-    };
     if let Some((beads, source, fresh)) = kept_board(&path) {
         if !fresh {
             read_behind(dolt_manager.clone(), db.clone(), path.clone());
         }
-        return (
-            StatusCode::OK,
-            board_answer(changed_since(beads, since), &source, counted),
-        );
+        return Ok((beads, source));
     }
     let gate = gate_for(&path);
     let _hold = gate.lock().await;
     // Whoever we waited behind has read it by now.
     if let Some((beads, source, _)) = kept_board(&path) {
-        return (
-            StatusCode::OK,
-            board_answer(changed_since(beads, since), &source, counted),
-        );
+        return Ok((beads, source));
     }
 
-    match read_board(&dolt_manager, &db, &path, &project_path, &beads_dir).await {
-        Ok((beads, source)) => (
-            StatusCode::OK,
-            board_answer(changed_since(beads, since), source, counted),
-        ),
-        Err(failed) => failed,
-    }
+    read_board(dolt_manager, db, &path, &project_path, &beads_dir)
+        .await
+        .map(|(beads, source)| (beads, source.to_string()))
 }
 
 /// Reads a board again with nobody waiting on it, and tells the screens
@@ -1828,6 +1995,87 @@ mod tests {
         assert_eq!(encoded["source"], "cli");
         assert_eq!(encoded["beads"][0]["id"], "large");
         assert_eq!(encoded.as_object().expect("object").len(), 2, "the API shape does not change");
+    }
+
+    fn with_long_text(id: &str) -> Bead {
+        serde_json::from_str(&format!(
+            r#"{{"id":"{id}","title":"T","status":"open","description":"body","notes":"n","design":"d","close_reason":"r","comments":[{{"id":1,"issue_id":"{id}","author":"a","text":"one","created_at":"2026-08-20T09:00:00Z"}},{{"id":2,"issue_id":"{id}","author":"a","text":"two","created_at":"2026-08-20T09:00:00Z"}}],"updated_at":"2026-08-20T09:00:00Z"}}"#
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_brief_board_leaves_out_the_long_text_and_counts_the_comments() {
+        let board = Arc::new(vec![with_long_text("a"), stamped("b", None)]);
+        let encoded = serde_json::to_value(board_answer(board, "cli", Asked::Brief).0).unwrap();
+        let first = encoded["beads"][0].as_object().expect("a card");
+        for gone in ["notes", "design", "close_reason", "comments"] {
+            assert!(!first.contains_key(gone), "{gone} is left out of a brief card");
+        }
+        assert_eq!(first["description"], "body", "the board searches descriptions");
+        assert_eq!(first["title"], "T");
+        assert_eq!(first["comment_count"], 2);
+        assert_eq!(encoded["beads"][1]["comment_count"], 0);
+        assert_eq!(encoded["source"], "cli");
+
+        let whole = serde_json::to_value(with_long_text("a")).unwrap();
+        let whole = whole.as_object().unwrap();
+        for (key, value) in first {
+            if key != "comment_count" {
+                assert_eq!(whole.get(key), Some(value), "{key} reads the same brief as whole");
+            }
+        }
+    }
+
+    #[test]
+    fn a_read_of_ids_carries_only_the_id_and_status() {
+        let board = Arc::new(vec![with_long_text("a"), stamped("b", None)]);
+        let encoded = serde_json::to_value(board_answer(board, "cli", Asked::Statuses).0).unwrap();
+        let first = encoded["beads"][0].as_object().expect("a card");
+        let mut keys = first.keys().map(String::as_str).collect::<Vec<_>>();
+        keys.sort();
+        assert_eq!(keys, vec!["id", "status", "updated_at"]);
+        assert_eq!(first["id"], "a");
+        assert_eq!(first["status"], "open");
+        assert_eq!(encoded["beads"][1]["updated_at"], serde_json::Value::Null);
+
+        let mut dropped = stamped("c", None);
+        dropped.status = "closed".into();
+        dropped.labels = Some(vec!["cancelled".into()]);
+        let encoded = serde_json::to_value(board_answer(Arc::new(vec![dropped]), "cli", Asked::Statuses).0).unwrap();
+        assert_eq!(encoded["beads"][0]["dropped"], true);
+        assert_eq!(encoded["source"], "cli");
+    }
+
+    #[test]
+    fn the_ask_decides_the_shape_and_a_count_wins() {
+        let params = |counts: bool, brief: bool, ids: bool| BeadsParams {
+            path: "/p".into(),
+            updated_after: None,
+            counts: counts.then(|| "1".into()),
+            brief: brief.then(|| "1".into()),
+            ids: ids.then(|| "1".into()),
+        };
+        assert_eq!(Asked::of(&params(false, false, false)), Asked::Cards);
+        assert_eq!(Asked::of(&params(false, true, false)), Asked::Brief);
+        assert_eq!(Asked::of(&params(false, true, true)), Asked::Statuses);
+        assert_eq!(Asked::of(&params(true, true, true)), Asked::Counts);
+    }
+
+    #[test]
+    fn one_card_is_found_whole_or_not_found() {
+        let board = Arc::new(vec![stamped("b", None), with_long_text("a")]);
+        let (status, Json(answer)) = card_answer(&board, "cli", "a");
+        assert_eq!(status, StatusCode::OK);
+        let encoded = serde_json::to_value(answer).unwrap();
+        assert_eq!(encoded["bead"]["notes"], "n");
+        assert_eq!(encoded["bead"]["comments"].as_array().map(Vec::len), Some(2));
+        assert_eq!(encoded["source"], "cli");
+
+        let (status, Json(answer)) = card_answer(&board, "cli", "missing");
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let encoded = serde_json::to_value(answer).unwrap();
+        assert!(encoded["error"].as_str().is_some_and(|e| e.contains("missing")));
     }
 
     #[test]

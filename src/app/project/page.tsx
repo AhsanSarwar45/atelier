@@ -9,7 +9,9 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { EllipsisVertical, Folder, Home, MessageSquare, SquareKanban } from 'lucide-react';
 
 import { BackLink } from '@/components/back-link';
-import { CardPanel } from '@/components/card-panel';
+// Only drawn once a card is opened, and it brings the markdown and code
+// highlighter with it, so the board draws without them (bw-fbzd.7).
+const CardPanel = dynamic(() => import('@/components/card-panel').then((m) => m.CardPanel), { ssr: false });
 const ProjectSettingsScreen = dynamic(() => import('@/components/project-settings-screen').then((m) => m.ProjectSettingsScreen), { ssr: false });
 import { Shell } from '@/components/shell';
 import { Button } from '@/components/ui/button';

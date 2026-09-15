@@ -24,6 +24,8 @@ export const BeadSchema = z.object({
   created_at: z.string().nullish(),
   updated_at: z.string().nullish(),
   comments: z.array(CommentSchema).nullish(),
+  // A brief board read carries how many comments a card has instead of them (bw-fbzd.7).
+  comment_count: z.number().nullish(),
   parent_id: z.string().nullish(),
   children: z.array(z.string()).nullish(),
   design: z.string().nullish(),
@@ -40,6 +42,21 @@ export const BeadSchema = z.object({
 
 export const BeadsResponseSchema = z.object({
   beads: z.array(BeadSchema),
+  source: z.string().optional(),
+});
+
+export const CardStatusesResponseSchema = z.object({
+  beads: z.array(z.object({
+    id: z.string(),
+    status: z.string(),
+    updated_at: z.string().nullish(),
+    dropped: z.boolean().optional(),
+  })),
+  source: z.string().optional(),
+});
+
+export const CardResponseSchema = z.object({
+  bead: BeadSchema,
   source: z.string().optional(),
 });
 

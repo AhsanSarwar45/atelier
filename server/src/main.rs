@@ -539,6 +539,7 @@ async fn serve(open_browser: bool) {
             routes::new_chat::new_chat_routes().with_state(database.clone()),
         )
         .route("/api/beads", get(routes::beads::read_beads))
+        .route("/api/beads/card", get(routes::beads::read_card))
         .route(
             "/api/beads/create",
             post(routes::beads::create_bead_handler),

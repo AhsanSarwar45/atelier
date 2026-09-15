@@ -41,9 +41,11 @@ interface StartFromCardProps {
   bead: Bead;
   projectId: string | null;
   projectPath: string;
+  /** The card's notes and design are still being fetched, so the brief would miss them. */
+  waiting?: boolean;
 }
 
-export function StartFromCard({ bead, projectId, projectPath }: StartFromCardProps) {
+export function StartFromCard({ bead, projectId, projectPath, waiting = false }: StartFromCardProps) {
   const providers = useProviders();
   const [starting, setStarting] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
@@ -81,7 +83,7 @@ export function StartFromCard({ bead, projectId, projectPath }: StartFromCardPro
         variant="primary"
         data-testid="start-chat-from-card"
         data-bead-id={bead.id}
-        disabled={starting || !brandAvailable}
+        disabled={starting || waiting || !brandAvailable}
         onClick={async () => {
           setStarting(true);
           setFailed(null);

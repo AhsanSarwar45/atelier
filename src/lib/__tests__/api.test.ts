@@ -95,6 +95,46 @@ describe('api.beads', () => {
       const [url] = mockFetch.mock.calls[0];
       expect(url).toContain('/api/beads?path=');
       expect(url).toContain(encodeURIComponent('/test/path'));
+      expect(url).not.toContain('brief');
+    });
+
+    it('asks for the board brief when told to', async () => {
+      mockFetch.mockResolvedValue(mockResponse({ beads: [{ id: 'a', title: 'A', status: 'open', comment_count: 3 }] }));
+
+      const data = await api.beads.read('/test/path', '2026-09-01T00:00:00Z', { brief: true });
+
+      const url = new URL(mockFetch.mock.calls[0][0], 'http://x');
+      expect(url.searchParams.get('brief')).toBe('1');
+      expect(url.searchParams.get('updated_after')).toBe('2026-09-01T00:00:00Z');
+      expect(data.beads[0].comment_count).toBe(3);
+    });
+  });
+
+  describe('statuses', () => {
+    it('asks for ids and statuses only', async () => {
+      mockFetch.mockResolvedValue(mockResponse({ beads: [{ id: 'a', status: 'open', updated_at: null }], source: 'cli' }));
+
+      const data = await api.beads.statuses('/test/path', '2026-09-01T00:00:00Z');
+
+      const url = new URL(mockFetch.mock.calls[0][0], 'http://x');
+      expect(url.pathname).toBe('/api/beads');
+      expect(url.searchParams.get('ids')).toBe('1');
+      expect(url.searchParams.get('updated_after')).toBe('2026-09-01T00:00:00Z');
+      expect(data.beads).toEqual([{ id: 'a', status: 'open', updated_at: null }]);
+    });
+  });
+
+  describe('card', () => {
+    it('asks for one card whole', async () => {
+      mockFetch.mockResolvedValue(mockResponse({ bead: { id: 'a', title: 'A', status: 'open', notes: 'n' }, source: 'cli' }));
+
+      const data = await api.beads.card('/test/path', 'a');
+
+      const url = new URL(mockFetch.mock.calls[0][0], 'http://x');
+      expect(url.pathname).toBe('/api/beads/card');
+      expect(url.searchParams.get('path')).toBe('/test/path');
+      expect(url.searchParams.get('id')).toBe('a');
+      expect(data.bead.notes).toBe('n');
     });
   });
 });

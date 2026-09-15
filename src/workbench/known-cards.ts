@@ -18,7 +18,7 @@
 import { useCallback, useSyncExternalStore } from 'react';
 
 import * as api from '@/lib/api';
-import { loadProjectBeads } from '@/lib/beads-parser';
+import { loadCardStatuses } from '@/lib/beads-parser';
 import { isDoltProject } from '@/lib/utils';
 import type { BeadStatus } from '@/types';
 
@@ -92,15 +92,16 @@ function read(projectPath: string, store: CardStore, force = false): Promise<voi
   if (!force && store.loadedAt && Date.now() - store.loadedAt < KEPT_MS) return Promise.resolve();
 
   const updatedAfter = store.loadedAt ? store.lastUpdated ?? undefined : undefined;
-  store.loading = loadProjectBeads(projectPath, { withSource: true, updatedAfter })
-    .then(({ beads, source }) => {
+  // Ids and statuses only: parsing whole cards held the chat back (bw-fbzd.7).
+  store.loading = loadCardStatuses(projectPath, { updatedAfter })
+    .then(({ cards, source }) => {
       // The first answer is the whole board; every later one is only what
       // moved since, folded into what was already known.
       const statuses = updatedAfter ? new Map(store.snapshot.statuses) : new Map<string, BeadStatus>();
       let newest = store.lastUpdated ?? '';
-      for (const bead of beads) {
-        statuses.set(bead.id, bead.status);
-        const stamp = bead.updated_at || bead.created_at || '';
+      for (const card of cards) {
+        statuses.set(card.id, card.status);
+        const stamp = card.updated_at || '';
         if (stamp > newest) newest = stamp;
       }
       store.snapshot = { ids: new Set(statuses.keys()), statuses };

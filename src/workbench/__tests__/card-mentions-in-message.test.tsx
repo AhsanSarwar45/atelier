@@ -8,11 +8,11 @@ import { MarkdownBody, type Mentions } from '@/components/markdown-body';
 import { BACKSTOP_POLL_MS, useKnownCardStatuses, useKnownCards } from '@/workbench/known-cards';
 import { addressedBy, mentionsIn } from '@/workbench/mentions';
 
-const loadProjectBeads = vi.fn();
+const loadCardStatuses = vi.fn();
 let boardChanged: (() => void) | undefined;
 
 vi.mock('@/lib/beads-parser', () => ({
-  loadProjectBeads: (...args: unknown[]) => loadProjectBeads(...args),
+  loadCardStatuses: (...args: unknown[]) => loadCardStatuses(...args),
 }));
 
 vi.mock('@/lib/api', () => ({
@@ -105,9 +105,9 @@ describe('card names in a rendered message', () => {
   });
 
   it('updates an already drawn chip from one shared board change', async () => {
-    loadProjectBeads
-      .mockResolvedValueOnce({ beads: [{ id: 'bw-1u1', status: 'open', updated_at: '2026-09-07T00:00:00Z' }], source: 'cli' })
-      .mockResolvedValueOnce({ beads: [{ id: 'bw-1u1', status: 'closed', updated_at: '2026-09-07T00:00:01Z' }], source: 'cli' });
+    loadCardStatuses
+      .mockResolvedValueOnce({ cards: [{ id: 'bw-1u1', status: 'open', updated_at: '2026-09-07T00:00:00Z' }], source: 'cli' })
+      .mockResolvedValueOnce({ cards: [{ id: 'bw-1u1', status: 'closed', updated_at: '2026-09-07T00:00:01Z' }], source: 'cli' });
 
     render(<LiveMention />);
     await waitFor(() => expect(screen.getByTestId('live-mention-card')).toHaveAttribute('data-bead-status', 'open'));
@@ -115,18 +115,18 @@ describe('card names in a rendered message', () => {
     act(() => boardChanged?.());
     await waitFor(() => expect(screen.getByTestId('live-mention-card')).toHaveAttribute('data-bead-status', 'closed'));
     expect(screen.getByTestId('live-mention-card')).toHaveClass('text-status-closed');
-    expect(loadProjectBeads).toHaveBeenCalledTimes(2);
+    expect(loadCardStatuses).toHaveBeenCalledTimes(2);
     // The second read asks only for what moved since the first, as the board page does.
-    expect(loadProjectBeads).toHaveBeenLastCalledWith('/project', { withSource: true, updatedAfter: '2026-09-07T00:00:00Z' });
+    expect(loadCardStatuses).toHaveBeenLastCalledWith('/project', { updatedAfter: '2026-09-07T00:00:00Z' });
   });
 
   it('asks a Dolt board again every backstop period, whether or not a change frame came', async () => {
     vi.useFakeTimers();
-    loadProjectBeads.mockClear();
+    loadCardStatuses.mockClear();
     try {
-      loadProjectBeads
-        .mockResolvedValueOnce({ beads: [{ id: 'bw-1u1', status: 'open', updated_at: '2026-09-07T00:00:00Z' }], source: 'dolt-project' })
-        .mockResolvedValueOnce({ beads: [{ id: 'bw-1u1', status: 'closed', updated_at: '2026-09-07T00:00:01Z' }], source: 'dolt-project' });
+      loadCardStatuses
+        .mockResolvedValueOnce({ cards: [{ id: 'bw-1u1', status: 'open', updated_at: '2026-09-07T00:00:00Z' }], source: 'dolt-project' })
+        .mockResolvedValueOnce({ cards: [{ id: 'bw-1u1', status: 'closed', updated_at: '2026-09-07T00:00:01Z' }], source: 'dolt-project' });
 
       render(<LiveMention project="dolt://board" />);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
@@ -134,7 +134,7 @@ describe('card names in a rendered message', () => {
 
       await act(async () => { await vi.advanceTimersByTimeAsync(BACKSTOP_POLL_MS); });
       expect(screen.getByTestId('live-mention-card')).toHaveAttribute('data-bead-status', 'closed');
-      expect(loadProjectBeads).toHaveBeenCalledTimes(2);
+      expect(loadCardStatuses).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }

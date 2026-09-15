@@ -14,6 +14,7 @@ import { Progress } from "@/components/ui/progress";
 import { useTheme } from "@/hooks/use-theme";
 import { toast } from "@/hooks/use-toast";
 import { formatBeadId, getStatusDotColor, isBlockedBy, truncate } from "@/lib/bead-utils";
+import { commentCountOf } from "@/lib/beads-parser";
 import { closeBead } from "@/lib/cli";
 import { computeEpicProgress, progressPercent } from "@/lib/epic-parser";
 import { cn } from "@/lib/utils";
@@ -98,7 +99,7 @@ export const EpicCard = memo(function EpicCard({
   );
   const progressPercentage = progressPercent(progress);
 
-  const commentCount = (epic.comments ?? []).length;
+  const commentCount = commentCountOf(epic);
 
   // Nobody is waiting on this job any more, so it is drawn back — the same
   // reading the plain cards beside it use. Without it a finished or dropped job
