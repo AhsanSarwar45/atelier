@@ -66,6 +66,7 @@ vi.mock('@/workbench/chat-right-rail', () => ({
     railGot(props);
     return null;
   },
+  useLeftRail: (): [boolean, () => void] => [true, () => {}],
   useRightRail: (): [boolean, () => void] => [switches.right, () => {}],
   useGitPanel: (): [boolean, () => void] => [switches.git, () => {}],
   useGitDiff: () => ({ diffOpen: switches.diff, flipDiff: () => {} }),

@@ -56,6 +56,7 @@ vi.mock('@/workbench/chat-right-rail', () => ({
     pointedAt(workingIn);
     return null;
   },
+  useLeftRail: (): [boolean, () => void] => [true, () => {}],
   useRightRail: (): [boolean, () => void] => [true, () => {}],
   useGitPanel: (): [boolean, () => void] => [true, () => {}],
   useGitDiff: () => ({ diffOpen: false, flipDiff: () => {} }),

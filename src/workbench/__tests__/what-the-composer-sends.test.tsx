@@ -47,6 +47,7 @@ vi.mock('@/workbench/live', () => ({
 vi.mock('@/workbench/chat-sidebar', () => ({ ChatSidebar: () => null }));
 vi.mock('@/workbench/chat-right-rail', () => ({
   ChatRightRail: () => null,
+  useLeftRail: (): [boolean, () => void] => [true, () => {}],
   useRightRail: (): [boolean, () => void] => [false, () => {}],
   useGitPanel: (): [boolean, () => void] => [false, () => {}],
   useGitDiff: () => ({ diffOpen: false, flipDiff: () => {} }),
