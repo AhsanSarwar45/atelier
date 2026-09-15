@@ -20,8 +20,11 @@
 //! a scan took. Here neither touches it: the chat database is only read, and
 //! reading a WAL database never waits on its writer.
 
+use super::search_query::{Field, Query, Term};
 use super::store::SearchHit;
+use rusqlite::types::Value as Sql;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -228,6 +231,443 @@ impl SearchIndex {
             })
             .map_err(text)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(text)
+    }
+}
+
+/// How a page of chats is ordered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sort {
+    /// Best match first; among equals, the chat worked in last.
+    Relevance,
+    /// The chat worked in last, first.
+    Newest,
+}
+
+/// A run of words in a snippet or title, marked when it matched.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Segment {
+    pub text: String,
+    #[serde(skip_serializing_if = "unmarked")]
+    pub mark: bool,
+}
+
+fn unmarked(mark: &bool) -> bool {
+    !*mark
+}
+
+/// One place in a chat that matched.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Snippet {
+    /// The message it was said in, or `tool:<call>` for a tool call.
+    pub message_id: String,
+    pub field: String,
+    pub at: String,
+    pub segments: Vec<Segment>,
+}
+
+/// One chat that matched, with the few places in it that matched best.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatMatch {
+    pub session_id: String,
+    pub title: Option<String>,
+    /// The title with the words that matched in it marked, when any did.
+    pub title_segments: Option<Vec<Segment>>,
+    pub project_id: String,
+    pub project_path: String,
+    pub brand: String,
+    pub origin: String,
+    pub last_active_at: String,
+    /// How many messages, tool calls and titles in the chat matched.
+    pub matches: usize,
+    pub snippets: Vec<Snippet>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatPage {
+    pub chats: Vec<ChatMatch>,
+    /// The offset of the next page, when there is one.
+    pub next: Option<usize>,
+}
+
+/// The places shown under each chat.
+const SNIPPETS: usize = 3;
+
+/// A title match counts for more than a word in passing, and what the person
+/// said for a little more than what the agent said: people search for what
+/// they asked. bm25 is negative, better when lower, so a weight above one
+/// raises a match.
+const WEIGHT: &str =
+    "(CASE d.field WHEN 'title' THEN 4.0 WHEN 'me' THEN 1.5 WHEN 'tool' THEN 0.6 ELSE 1.0 END)";
+
+/// When a row was said. A title has no moment of its own, so it takes the
+/// chat's last.
+const SAID_AT: &str = "COALESCE(NULLIF(d.at, ''), s.last_active_at)";
+
+fn bind(args: &mut Vec<Sql>, value: impl Into<Sql>) -> String {
+    args.push(value.into());
+    format!("?{}", args.len())
+}
+
+fn in_fields(fields: &[Field]) -> String {
+    if fields.is_empty() {
+        return String::new();
+    }
+    let names = fields
+        .iter()
+        .map(|field| format!("'{}'", field.name()))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(" AND d.field IN ({names})")
+}
+
+fn like_escaped(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+/// The rows one term matches, ranked, within the query's dates.
+fn matching_rows(args: &mut Vec<Sql>, term: &Term, query: &Query, within: &str) -> String {
+    let matching = bind(args, term.fts().unwrap_or_default());
+    let mut dates = String::new();
+    if let Some(after) = &query.after {
+        dates += &format!(" AND {SAID_AT} >= {}", bind(args, after.clone()));
+    }
+    if let Some(before) = &query.before {
+        dates += &format!(" AND {SAID_AT} < {}", bind(args, before.clone()));
+    }
+    // The rank is taken where FTS5 can give it: a LIMIT keeps SQLite from
+    // flattening the match into the grouping around it, which bm25 refuses.
+    format!(
+        "SELECT d.id AS id, d.session_id AS session_id, d.field AS field, m.rank * {WEIGHT} AS rank \
+         FROM (SELECT rowid, bm25(doc_fts) AS rank FROM doc_fts WHERE doc_fts MATCH {matching} LIMIT -1) m \
+         JOIN doc d ON d.id = m.rowid \
+         LEFT JOIN chats.session s ON s.id = d.session_id \
+         WHERE 1=1{fields}{dates}{within}",
+        fields = in_fields(&term.fields),
+    )
+}
+
+/// What narrows the chats themselves, as conditions on `s`.
+fn chat_conditions(args: &mut Vec<Sql>, query: &Query, project_ids: &[String]) -> String {
+    let mut conditions = String::new();
+    if !query.projects.is_empty() || !project_ids.is_empty() {
+        let mut any = Vec::new();
+        for id in project_ids {
+            any.push(format!("s.project_id = {}", bind(args, id.clone())));
+        }
+        // A project named in the box is also its folder's name, so a project
+        // the settings database has never heard of is still found by it.
+        for name in &query.projects {
+            let name = name.to_lowercase();
+            any.push(format!(
+                "lower(s.project_id) = {}",
+                bind(args, name.clone())
+            ));
+            any.push(format!(
+                "lower(s.project_path) LIKE {} ESCAPE '\\'",
+                bind(args, format!("%/{}", like_escaped(&name)))
+            ));
+        }
+        conditions += &format!(" AND ({})", any.join(" OR "));
+    }
+    for (column, values) in [("s.brand", &query.providers), ("s.origin", &query.origins)] {
+        if !values.is_empty() {
+            let listed = values
+                .iter()
+                .map(|value| bind(args, value.to_lowercase()))
+                .collect::<Vec<_>>()
+                .join(",");
+            conditions += &format!(" AND {column} IN ({listed})");
+        }
+    }
+    if !query.cards.is_empty() {
+        // A card names its steps too: `card:bw-7ks` finds a chat that worked
+        // on bw-7ks.13.
+        let mut any = Vec::new();
+        for card in &query.cards {
+            let card = card.to_lowercase();
+            any.push(format!("lower(b.bead_id) = {}", bind(args, card.clone())));
+            any.push(format!(
+                "lower(b.bead_id) LIKE {} ESCAPE '\\'",
+                bind(args, format!("{}.%", like_escaped(&card)))
+            ));
+        }
+        conditions += &format!(
+            " AND EXISTS (SELECT 1 FROM chats.bead_link b WHERE b.session_id = s.id AND ({}))",
+            any.join(" OR ")
+        );
+    }
+    for term in &query.none {
+        conditions += &format!(
+            " AND s.id NOT IN (SELECT d.session_id FROM doc_fts JOIN doc d ON d.id = doc_fts.rowid \
+               WHERE doc_fts MATCH {}{})",
+            bind(args, term.fts().unwrap_or_default()),
+            in_fields(&term.fields)
+        );
+    }
+    conditions
+}
+
+fn segments(marked: &str) -> Vec<Segment> {
+    let mut found = Vec::new();
+    let mut words = String::new();
+    let mut mark = false;
+    for c in marked.chars() {
+        match c {
+            '\u{2}' | '\u{3}' => {
+                if !words.is_empty() {
+                    found.push(Segment {
+                        text: std::mem::take(&mut words),
+                        mark,
+                    });
+                }
+                mark = c == '\u{2}';
+            }
+            _ => words.push(c),
+        }
+    }
+    if !words.is_empty() {
+        found.push(Segment { text: words, mark });
+    }
+    found
+}
+
+impl SearchIndex {
+    /// The chats a query finds, a page at a time.
+    ///
+    /// Every group of words must be found somewhere in a chat — not all in one
+    /// message: someone who remembers asking about the loader and the agent
+    /// answering about periwinkle is describing one chat, not one line.
+    pub fn search_chats(
+        &self,
+        query: &Query,
+        project_ids: &[String],
+        sort: Sort,
+        offset: usize,
+        limit: usize,
+    ) -> Result<ChatPage, String> {
+        if query.is_empty() && project_ids.is_empty() {
+            return Ok(ChatPage {
+                chats: Vec::new(),
+                next: None,
+            });
+        }
+        let mut reader = self.inner.reader.lock().unwrap();
+        if reader.is_none() {
+            *reader = Some(self.inner.open_reader()?);
+        }
+        let connection = reader.as_ref().unwrap();
+
+        let mut args = Vec::new();
+        let sql = if query.all.is_empty() {
+            // Nothing to match, only chats to narrow: the newest first.
+            let mut dates = String::new();
+            if let Some(after) = &query.after {
+                dates += &format!(
+                    " AND s.last_active_at >= {}",
+                    bind(&mut args, after.clone())
+                );
+            }
+            if let Some(before) = &query.before {
+                dates += &format!(" AND s.created_at < {}", bind(&mut args, before.clone()));
+            }
+            let conditions = chat_conditions(&mut args, query, project_ids);
+            format!(
+                "SELECT s.id, s.title, s.project_id, s.project_path, s.brand, s.origin, s.last_active_at, 0.0 \
+                 FROM chats.session s WHERE 1=1{dates}{conditions} \
+                 ORDER BY s.last_active_at DESC LIMIT {} OFFSET {}",
+                bind(&mut args, (limit + 1) as i64),
+                bind(&mut args, offset as i64),
+            )
+        } else {
+            let mut groups = Vec::new();
+            for (index, group) in query.all.iter().enumerate() {
+                let mut rows = Vec::new();
+                for term in group {
+                    rows.push(matching_rows(&mut args, term, query, ""));
+                }
+                groups.push(format!(
+                    "g{index} AS (SELECT session_id, MIN(rank) AS score FROM ({}) GROUP BY session_id)",
+                    rows.join(" UNION ALL ")
+                ));
+            }
+            let joins = (1..query.all.len())
+                .map(|index| format!(" JOIN g{index} ON g{index}.session_id = g0.session_id"))
+                .collect::<String>();
+            let score = (0..query.all.len())
+                .map(|index| format!("g{index}.score"))
+                .collect::<Vec<_>>()
+                .join(" + ");
+            let conditions = chat_conditions(&mut args, query, project_ids);
+            let order = match sort {
+                Sort::Relevance => "score ASC, s.last_active_at DESC",
+                Sort::Newest => "s.last_active_at DESC",
+            };
+            format!(
+                "WITH {} SELECT s.id, s.title, s.project_id, s.project_path, s.brand, s.origin, s.last_active_at, {score} AS score \
+                 FROM g0{joins} JOIN chats.session s ON s.id = g0.session_id \
+                 WHERE 1=1{conditions} ORDER BY {order} LIMIT {} OFFSET {}",
+                groups.join(", "),
+                bind(&mut args, (limit + 1) as i64),
+                bind(&mut args, offset as i64),
+            )
+        };
+        let mut chats = connection
+            .prepare(&sql)
+            .and_then(|mut statement| {
+                statement
+                    .query_map(rusqlite::params_from_iter(args.iter()), |row| {
+                        Ok(ChatMatch {
+                            session_id: row.get(0)?,
+                            title: row.get(1)?,
+                            title_segments: None,
+                            project_id: row.get(2)?,
+                            project_path: row.get(3)?,
+                            brand: row.get(4)?,
+                            origin: row.get(5)?,
+                            last_active_at: row.get(6)?,
+                            matches: 0,
+                            snippets: Vec::new(),
+                        })
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .map_err(text)?;
+        let next = (chats.len() > limit).then_some(offset + limit);
+        chats.truncate(limit);
+        if !query.all.is_empty() && !chats.is_empty() {
+            self.place_matches(connection, query, &mut chats)?;
+        }
+        Ok(ChatPage { chats, next })
+    }
+
+    /// Count each chat's matching rows and mark its best few.
+    fn place_matches(
+        &self,
+        connection: &Connection,
+        query: &Query,
+        chats: &mut [ChatMatch],
+    ) -> Result<(), String> {
+        let mut args = Vec::new();
+        let listed = chats
+            .iter()
+            .map(|chat| bind(&mut args, chat.session_id.clone()))
+            .collect::<Vec<_>>()
+            .join(",");
+        let within = format!(" AND d.session_id IN ({listed})");
+        let mut rows = Vec::new();
+        for term in query.all.iter().flatten() {
+            rows.push(matching_rows(&mut args, term, query, &within));
+        }
+        let mut found: HashMap<String, HashMap<i64, (String, f64)>> = HashMap::new();
+        connection
+            .prepare(&rows.join(" UNION ALL "))
+            .and_then(|mut statement| {
+                let mut matched = statement.query(rusqlite::params_from_iter(args.iter()))?;
+                while let Some(row) = matched.next()? {
+                    let rank: f64 = row.get(3)?;
+                    let place = found
+                        .entry(row.get(1)?)
+                        .or_default()
+                        .entry(row.get(0)?)
+                        .or_insert_with(|| (String::new(), f64::MAX));
+                    if rank < place.1 {
+                        *place = (row.get(2)?, rank);
+                    }
+                }
+                Ok(())
+            })
+            .map_err(text)?;
+
+        // Marked with every word of the query, so a snippet shows all it
+        // matched and not just the term that ranked it.
+        let every = query
+            .all
+            .iter()
+            .flatten()
+            .filter_map(Term::fts)
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let mut chosen = Vec::new();
+        for chat in chats.iter_mut() {
+            let Some(places) = found.get(&chat.session_id) else {
+                continue;
+            };
+            chat.matches = places.len();
+            let mut ranked = places.iter().collect::<Vec<_>>();
+            ranked.sort_by(|a, b| a.1 .1.total_cmp(&b.1 .1));
+            chosen.extend(
+                ranked
+                    .iter()
+                    .filter(|(_, (field, _))| field == "title")
+                    .map(|(id, _)| **id),
+            );
+            chosen.extend(
+                ranked
+                    .iter()
+                    .filter(|(_, (field, _))| field != "title")
+                    .take(SNIPPETS)
+                    .map(|(id, _)| **id),
+            );
+        }
+        if chosen.is_empty() {
+            return Ok(());
+        }
+        let mut args: Vec<Sql> = vec![
+            Sql::Text("\u{2}".into()),
+            Sql::Text("\u{3}".into()),
+            Sql::Text(every),
+        ];
+        let listed = chosen
+            .iter()
+            .map(|id| bind(&mut args, *id))
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut marked: HashMap<i64, (String, String, String, String)> = HashMap::new();
+        connection
+            .prepare(&format!(
+                "SELECT d.id, d.part, d.field, d.at, snippet(doc_fts, 0, ?1, ?2, '…', 24) \
+                 FROM doc_fts JOIN doc d ON d.id = doc_fts.rowid \
+                 WHERE doc_fts MATCH ?3 AND d.id IN ({listed})"
+            ))
+            .and_then(|mut statement| {
+                let mut rows = statement.query(rusqlite::params_from_iter(args.iter()))?;
+                while let Some(row) = rows.next()? {
+                    marked.insert(
+                        row.get(0)?,
+                        (row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?),
+                    );
+                }
+                Ok(())
+            })
+            .map_err(text)?;
+        for chat in chats.iter_mut() {
+            let Some(places) = found.get(&chat.session_id) else {
+                continue;
+            };
+            let mut ranked = places.iter().collect::<Vec<_>>();
+            ranked.sort_by(|a, b| a.1 .1.total_cmp(&b.1 .1));
+            for (id, _) in ranked {
+                let Some((part, field, at, snippet)) = marked.get(id) else {
+                    continue;
+                };
+                if field == "title" {
+                    chat.title_segments = Some(segments(snippet));
+                } else if chat.snippets.len() < SNIPPETS {
+                    chat.snippets.push(Snippet {
+                        message_id: part.clone(),
+                        field: field.clone(),
+                        at: at.clone(),
+                        segments: segments(snippet),
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1151,6 +1591,238 @@ mod tests {
         writer.execute_batch("ROLLBACK;").unwrap();
     }
 
+    fn seeded() -> (Place, SearchIndex) {
+        let place = place();
+        let store = Store::open(&place.chats).unwrap();
+        let chats = [
+            (
+                "chat-a",
+                "claude",
+                "/tmp/project",
+                "app",
+                Some("Loader crash"),
+                "2026-09-01T10:00:00.000Z",
+            ),
+            (
+                "chat-b",
+                "codex",
+                "/tmp/other",
+                "terminal",
+                None,
+                "2026-09-10T10:00:00.000Z",
+            ),
+            (
+                "chat-c",
+                "claude",
+                "/tmp/project",
+                "app",
+                Some("Unrelated"),
+                "2026-09-05T10:00:00.000Z",
+            ),
+        ];
+        for (id, brand, path, origin, title, at) in chats {
+            let mut row = session(id, brand, None, title);
+            row.project_path = path.to_string();
+            row.project_id = path.rsplit('/').next().unwrap().to_string();
+            row.origin = origin.to_string();
+            row.created_at = at.to_string();
+            row.last_active_at = at.to_string();
+            store.create_session(&row).unwrap();
+        }
+        let said = [
+            (
+                "chat-a",
+                "m1",
+                "user",
+                "the loader crashes on start",
+                "2026-09-01T10:00:00.000Z",
+            ),
+            (
+                "chat-a",
+                "m2",
+                "assistant",
+                "fixed it, a periwinkle flag was missing",
+                "2026-09-01T10:01:00.000Z",
+            ),
+            (
+                "chat-b",
+                "m1",
+                "user",
+                "periwinkle again in the build",
+                "2026-09-10T10:00:00.000Z",
+            ),
+            (
+                "chat-b",
+                "m2",
+                "assistant",
+                "the build uses sqlite",
+                "2026-09-10T10:01:00.000Z",
+            ),
+            (
+                "chat-c",
+                "m1",
+                "assistant",
+                "the loader is fine here",
+                "2026-09-05T10:00:00.000Z",
+            ),
+        ];
+        let mut seqs: HashMap<&str, i64> = HashMap::new();
+        let mut next = |id: &'static str| {
+            let seq = seqs.entry(id).or_default();
+            *seq += 1;
+            *seq
+        };
+        for (chat, message, role, words, at) in said {
+            for (kind, fields) in [
+                (
+                    "message.started",
+                    json!({"messageId":message,"role":role,"at":at}),
+                ),
+                (
+                    "text.delta",
+                    json!({"messageId":message,"text":words,"at":at}),
+                ),
+            ] {
+                store
+                    .append_event(&event(chat, next(chat), kind, fields))
+                    .unwrap();
+            }
+        }
+        store
+            .append_event(&event(
+                "chat-a",
+                next("chat-a"),
+                "tool.started",
+                json!({
+                "toolCallId":"t1","name":"Bash","input":{"command":"cargo test loader"},
+                "at":"2026-09-01T10:02:00.000Z"}),
+            ))
+            .unwrap();
+        store
+            .remember_bead_link("chat-a", "bw-7ks.13", "tool", "2026-09-01T10:00:00.000Z")
+            .unwrap();
+        let index = index(&place);
+        index.refresh().unwrap();
+        (place, index)
+    }
+
+    fn chats(index: &SearchIndex, typed: &str) -> Vec<String> {
+        let now = chrono::Local::now();
+        let query = crate::workbench::search_query::parse(typed, now);
+        index
+            .search_chats(&query, &[], Sort::Relevance, 0, 20)
+            .unwrap()
+            .chats
+            .into_iter()
+            .map(|chat| chat.session_id)
+            .collect()
+    }
+
+    fn sorted(mut ids: Vec<String>) -> Vec<String> {
+        ids.sort();
+        ids
+    }
+
+    #[test]
+    fn a_word_can_be_looked_for_in_one_part_of_a_chat() {
+        let (_place, index) = seeded();
+        assert_eq!(sorted(chats(&index, "periwinkle ")), ["chat-a", "chat-b"]);
+        assert_eq!(chats(&index, "title:loader "), ["chat-a"]);
+        assert_eq!(chats(&index, "me:periwinkle "), ["chat-b"]);
+        assert_eq!(chats(&index, "agent:periwinkle "), ["chat-a"]);
+        assert_eq!(chats(&index, "tool:cargo "), ["chat-a"]);
+        assert_eq!(
+            sorted(chats(&index, "periwinkle in:agent,me ")),
+            ["chat-a", "chat-b"]
+        );
+        assert!(chats(&index, "in:tool periwinkle ").is_empty());
+    }
+
+    #[test]
+    fn every_word_is_looked_for_across_the_whole_chat() {
+        let (_place, index) = seeded();
+        // Asked in one message, answered in another: still one chat.
+        assert_eq!(chats(&index, "crashes periwinkle "), ["chat-a"]);
+        assert_eq!(chats(&index, "periwinkle -sqlite "), ["chat-a"]);
+        assert_eq!(
+            sorted(chats(&index, "sqlite OR cargo ")),
+            ["chat-a", "chat-b"]
+        );
+        assert_eq!(chats(&index, "\"build uses\" "), ["chat-b"]);
+    }
+
+    #[test]
+    fn the_chats_themselves_are_narrowed_by_where_when_and_what_for() {
+        let (_place, index) = seeded();
+        assert_eq!(chats(&index, "provider:codex periwinkle "), ["chat-b"]);
+        assert_eq!(chats(&index, "project:other periwinkle "), ["chat-b"]);
+        assert_eq!(chats(&index, "from:terminal "), ["chat-b"]);
+        assert_eq!(chats(&index, "card:bw-7ks "), ["chat-a"]);
+        assert_eq!(chats(&index, "after:2026-09-05 periwinkle "), ["chat-b"]);
+        assert_eq!(chats(&index, "before:2026-09-05 periwinkle "), ["chat-a"]);
+        // Only narrowing, nothing to match: every chat that fits, newest first.
+        assert_eq!(chats(&index, "project:project "), ["chat-c", "chat-a"]);
+    }
+
+    #[test]
+    fn a_title_that_matches_ranks_above_a_word_in_passing() {
+        let (_place, index) = seeded();
+        assert_eq!(chats(&index, "loader "), ["chat-a", "chat-c"]);
+    }
+
+    #[test]
+    fn each_chat_says_how_often_and_where_it_matched() {
+        let (_place, index) = seeded();
+        let query = crate::workbench::search_query::parse("loader ", chrono::Local::now());
+        let page = index
+            .search_chats(&query, &[], Sort::Relevance, 0, 1)
+            .unwrap();
+        assert_eq!(page.next, Some(1));
+        let chat = &page.chats[0];
+        assert_eq!(chat.session_id, "chat-a");
+        assert_eq!(chat.matches, 3, "the title, a message and a command");
+        assert_eq!(
+            chat.title_segments.as_deref(),
+            Some(
+                &[
+                    Segment {
+                        text: "Loader".into(),
+                        mark: true
+                    },
+                    Segment {
+                        text: " crash".into(),
+                        mark: false
+                    }
+                ][..]
+            )
+        );
+        let fields = chat
+            .snippets
+            .iter()
+            .map(|snippet| snippet.field.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            sorted(fields.iter().map(|f| f.to_string()).collect()),
+            ["me", "tool"]
+        );
+        let said = chat
+            .snippets
+            .iter()
+            .find(|snippet| snippet.field == "me")
+            .unwrap();
+        assert_eq!(said.message_id, "m1");
+        assert!(said
+            .segments
+            .iter()
+            .any(|segment| segment.mark && segment.text == "loader"));
+
+        let second = index
+            .search_chats(&query, &[], Sort::Relevance, 1, 1)
+            .unwrap();
+        assert_eq!(second.chats[0].session_id, "chat-c");
+        assert_eq!(second.next, None);
+    }
+
     /// Not a check: how the index does over a real install, which it only
     /// reads. The index itself is written where `SEARCH_MEASURE_OUT` says.
     ///
@@ -1238,6 +1910,30 @@ mod tests {
             println!(
                 "search {query:?}: {} hits in {:?}",
                 hits.len(),
+                began.elapsed()
+            );
+        }
+        let now = chrono::Local::now();
+        for typed in [
+            "periwinkle",
+            "search panel",
+            "title:search",
+            "me:worktree agent:landed",
+            "cargo OR npm -playwright",
+            "tool:cargo after:30d",
+            "provider:codex search",
+            "a",
+            "from:terminal",
+        ] {
+            let query = super::super::search_query::parse(typed, now);
+            let began = std::time::Instant::now();
+            let page = index
+                .search_chats(&query, &[], Sort::Relevance, 0, 30)
+                .unwrap();
+            println!(
+                "chats {typed:?}: {} chats (more: {}) in {:?}",
+                page.chats.len(),
+                page.next.is_some(),
                 began.elapsed()
             );
         }

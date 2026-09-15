@@ -32,6 +32,7 @@ pub mod provider_settings;
 pub mod registry;
 pub mod screen_check;
 pub mod search_index;
+pub mod search_query;
 pub mod session_policy;
 pub mod signin;
 pub mod store;

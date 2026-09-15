@@ -95,6 +95,8 @@ pub struct WorkbenchState {
     /// no index was opened, as in most tests; search then reads the chat
     /// database's own message table as it always did.
     search: Option<crate::workbench::search_index::SearchIndex>,
+    /// The projects the board knows, so a search can name one by its name.
+    projects: Option<Arc<crate::db::Database>>,
 }
 
 #[derive(Default)]
@@ -162,7 +164,13 @@ impl WorkbenchState {
             published_holds: Arc::new(tokio::sync::Mutex::new(Value::Null)),
             chat_followers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             search: None,
+            projects: None,
         }
+    }
+
+    pub fn with_projects(mut self, projects: Arc<crate::db::Database>) -> Self {
+        self.projects = Some(projects);
+        self
     }
 
     pub fn with_search(mut self, index: crate::workbench::search_index::SearchIndex) -> Self {
@@ -935,6 +943,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/restore", get(restore))
         .route("/session/:id", get(session))
         .route("/search", get(search))
+        .route("/search/chats", get(search_chats))
         .route("/tool", get(tool))
         .route("/spend", get(spend))
         .route("/usage", get(usage))
@@ -1005,6 +1014,75 @@ async fn search(
         None => state.database().search(q.trim().to_string(), 100).await?,
     };
     Ok(Json(serde_json::to_value(hits).map_err(|e| e.to_string())?))
+}
+
+#[derive(Deserialize)]
+struct ChatSearchQuery {
+    q: Option<String>,
+    sort: Option<String>,
+    cursor: Option<usize>,
+    limit: Option<usize>,
+}
+
+/// Chats, each once, with the places in it that matched. The words typed are
+/// read for keys (`title:`, `me:`, `project:`, `after:` and the rest), so the
+/// panel's controls and the box are one query.
+async fn search_chats(
+    State(state): State<WorkbenchState>,
+    Query(query): Query<ChatSearchQuery>,
+) -> Result<Json<Value>, ApiError> {
+    use crate::workbench::search_index::Sort;
+    let Some(index) = state.search.clone() else {
+        return Err(ApiError::unavailable("the search index is not open".into()));
+    };
+    let typed = query.q.unwrap_or_default();
+    let parsed = crate::workbench::search_query::parse(typed.trim_start(), chrono::Local::now());
+    let sort = match query.sort.as_deref() {
+        Some("newest") => Sort::Newest,
+        _ => Sort::Relevance,
+    };
+    let offset = query.cursor.unwrap_or(0);
+    let limit = query.limit.unwrap_or(30).clamp(1, 100);
+    let projects = state.projects.clone();
+    let reply = tokio::task::spawn_blocking(move || -> Result<Value, String> {
+        let project_ids = match (&projects, parsed.projects.is_empty()) {
+            (Some(projects), false) => projects_named(projects, &parsed.projects),
+            _ => Vec::new(),
+        };
+        let page = index.search_chats(&parsed, &project_ids, sort, offset, limit)?;
+        let mut reply = serde_json::to_value(page).map_err(|e| e.to_string())?;
+        reply["ignored"] = json!(parsed.ignored);
+        Ok(reply)
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    Ok(Json(reply))
+}
+
+/// The ids of the projects a name picks out: its name exactly, or failing
+/// that, every project whose name starts with it.
+fn projects_named(projects: &crate::db::Database, names: &[String]) -> Vec<String> {
+    let Ok(known) = projects.get_projects_with_tags_filtered(true, true) else {
+        return Vec::new();
+    };
+    let mut ids = Vec::new();
+    for name in names {
+        let name = name.to_lowercase();
+        let exact = known
+            .iter()
+            .filter(|project| project.name.to_lowercase() == name)
+            .collect::<Vec<_>>();
+        let chosen = if exact.is_empty() {
+            known
+                .iter()
+                .filter(|project| project.name.to_lowercase().starts_with(&name))
+                .collect()
+        } else {
+            exact
+        };
+        ids.extend(chosen.into_iter().map(|project| project.id.clone()));
+    }
+    ids
 }
 
 #[derive(Deserialize)]
@@ -2554,6 +2632,13 @@ struct ApiError {
     message: String,
 }
 impl ApiError {
+    fn unavailable(message: String) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message,
+        }
+    }
+
     fn not_found(message: String) -> Self {
         Self {
             status: StatusCode::NOT_FOUND,

@@ -458,7 +458,8 @@ async fn serve(open_browser: bool) {
         }
         directories
     });
-    let mut workbench_state = routes::workbench::WorkbenchState::new(registry);
+    let mut workbench_state =
+        routes::workbench::WorkbenchState::new(registry).with_projects(database.clone());
     match workbench::search_index::SearchIndex::open(
         &data_dir.join("search.db"),
         &data_dir.join("workbench.db"),
