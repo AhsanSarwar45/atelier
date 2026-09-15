@@ -267,13 +267,13 @@ interface HastNode {
 const NOT_PROSE = new Set(['a']);
 
 /**
- * Where a card id is not a mention but a file still is: inside a fenced block.
- * Chipping a card id inside a command would break the command as something to
- * copy. Inline code is different: providers routinely use it merely to style
- * an identifier, so suppressing mentions there made provider prose render
- * differently even though both providers named the same card (bw-nlnq.1).
+ * Where a card id is not a mention but a file still is: inside code, fenced or
+ * inline. Chipping a card id inside a command would break the command as
+ * something to copy, and a badge of any kind inside code breaks the code as
+ * something to read across — the owner's rule is that nothing inside code is
+ * turned into a badge, anywhere (bw-lolf.1).
  */
-const ONLY_FILES = new Set(['pre']);
+const ONLY_FILES = new Set(['pre', 'code']);
 
 /**
  * The rendering step: every run of words in a message is looked at, and the
@@ -284,13 +284,12 @@ const ONLY_FILES = new Set(['pre']);
  * writer gave them: a paragraph, a bullet, a table cell, a heading.
  *
  * A file is a file wherever a message writes one — including inside a fenced
- * block and inside inline code, which is where an agent writes MOST of them. A
- * path quoted in backticks or shown in a block is the one being pointed at, and
- * drawing that one as plain words while badging the same name in the sentence
- * above it was exactly backwards (bw-1e2e.1). The plain underlined link is
- * still what a chip looks like elsewhere: the collapsed line of an activity row
- * and the file line of an edit card are built from painted HTML rather than
- * from this tree, and they keep it (`paths-in-html.ts`, `split-paths.tsx`).
+ * block and inside inline code, which is where an agent writes MOST of them, so
+ * it opens from there too (bw-1e2e.1). But inside code it is marked as being
+ * there, and drawn as the plain underlined link rather than a badge: a capsule
+ * through the middle of a command is a command nobody can read or copy
+ * (bw-lolf.1). That is the same link the collapsed line of an activity row and
+ * the file line of an edit card already draw (`paths-in-html.ts`).
  */
 export function rehypeMentions(split: (text: string) => Piece[]) {
   return (tree: HastNode): void => rewrite(tree, split, false);
@@ -306,18 +305,6 @@ function rewrite(node: HastNode, split: (text: string) => Piece[], filesOnly: bo
     if (kid.type === 'element') {
       const tag = kid.tagName ?? '';
       if (!NOT_PROSE.has(tag)) rewrite(kid, split, filesOnly || ONLY_FILES.has(tag));
-      // Providers often put a lone identifier in inline code. Once that
-      // identifier is a real badge, retaining the code element draws a second
-      // capsule around it. Fenced code arrives under `pre` with filesOnly set,
-      // and is deliberately never unwrapped.
-      //
-      // Only when the marker is the WHOLE of it. `gh pr create -F /home/…` is
-      // a command that happens to name a file; unwrapping that would strip the
-      // command of the one styling that says it is one (bw-un8y.1).
-      if (tag === 'code' && !filesOnly && onlyMarker(kid)) {
-        kid.tagName = 'span';
-        kid.properties = { 'data-inline-badges': '' };
-      }
       out.push(kid);
       continue;
     }
@@ -336,26 +323,15 @@ function rewrite(node: HastNode, split: (text: string) => Piece[], filesOnly: bo
         if (piece.text) out.push({ type: 'text', value: piece.text });
         continue;
       }
-      out.push(marker(piece));
+      out.push(marker(piece, filesOnly));
     }
   }
 
   if (changed) node.children = out;
 }
 
-/** Whether the whole of an element is one chip and nothing else. */
-function onlyMarker(node: HastNode): boolean {
-  const kids = node.children;
-  if (!kids || kids.length !== 1) return false;
-  const only = kids[0]!;
-  return only.type === 'element'
-    && Boolean(only.properties?.['data-card-mention']
-      || only.properties?.['data-path-mention']
-      || only.properties?.['data-attachment-mention']);
-}
-
 /** One piece, as the span the page then draws as a chip. */
-function marker(piece: Exclude<Piece, { kind: 'text' }>): HastNode {
+function marker(piece: Exclude<Piece, { kind: 'text' }>, inCode: boolean): HastNode {
   if (piece.kind === 'attachment') {
     return {
       type: 'element',
@@ -374,6 +350,7 @@ function marker(piece: Exclude<Piece, { kind: 'text' }>): HastNode {
         ...(piece.line === null || piece.endLine === null
           ? {}
           : { 'data-path-range': `${piece.line}-${piece.endLine}` }),
+        ...(inCode ? { 'data-path-in-code': '' } : {}),
       },
       children: [{ type: 'text', value: piece.raw }],
     };

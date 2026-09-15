@@ -42,8 +42,8 @@ export interface Mentions {
    * A file named in the words, drawn as the reader wrote it (bw-khe.13).
    *
    * Everything a message names is a file the same way, fenced blocks and inline
-   * code included; the plain link belongs to the rows built out of painted HTML
-   * and not to anything here (bw-1e2e.1).
+   * code included (bw-1e2e.1) — but one named inside code is told so, because
+   * nothing inside code is drawn as a badge (bw-lolf.1).
    */
   path?: (
     absolute: string,
@@ -51,6 +51,8 @@ export interface Mentions {
     line: number | null,
     /** The last line, when the words named a range — `@src/a.ts:3-9`. */
     endLine: number | null,
+    /** Whether it was written inside code, fenced or inline. */
+    inCode: boolean,
   ) => ReactNode;
   /**
    * A whole address, when it names a card or a report of this app's own — drawn
@@ -444,6 +446,7 @@ export function MarkdownBody({
                     written || path,
                     line ? Number(line) : null,
                     lastLineOf(marks['data-path-range']),
+                    marks['data-path-in-code'] !== undefined,
                   )}
                 </>
               );

@@ -925,8 +925,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           where,
           disk,
         ),
-      path: (absolute, raw, line, endLine) => (
-        <PathChip absolute={absolute} raw={raw} line={line} endLine={endLine} look="badge" />
+      // A badge in the words, the plain link inside code (bw-lolf.1).
+      path: (absolute, raw, line, endLine, inCode) => (
+        <PathChip absolute={absolute} raw={raw} line={line} endLine={endLine} look={inCode ? 'link' : 'badge'} />
       ),
       card,
       //

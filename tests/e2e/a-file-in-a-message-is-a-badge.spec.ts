@@ -8,16 +8,15 @@ import type { WbpEvent } from '../../src/workbench/protocol';
 import { discardFixture, makeFixtureProject } from './fixture-board';
 
 /**
- * A file named in a message is a badge; one on a row is a link
- * (bw-un8y.1, bw-1e2e.1).
+ * A file named in a message's words is a badge; one inside code, or on a row,
+ * is a link (bw-un8y.1, bw-1e2e.1, bw-lolf.1).
  *
  * One chat carries both sides, because the whole rule is where the line is
  * drawn. The message names files every way an agent writes them — in a
  * sentence, quoted in backticks, inside a command it quoted, and in a fenced
- * block — and all of them are files. The activity rows above it name files too,
- * on their collapsed line and inside the command behind it, and those stay the
- * plain link: a row is one dense already-coloured line to read across, not a
- * sentence.
+ * block — and all of them are files. Only the sentence draws a badge: nothing
+ * inside code is turned into one. The activity rows above it name files too,
+ * and those stay the plain link as well.
  *
  * Disk is answered here rather than by the machine running this, so the message
  * can name files without any of them having to exist on the runner — the same
@@ -125,28 +124,16 @@ test('a file in a message is a badge, and one on a row stays a link', async ({ p
 
     if (!process.env.PATH_BADGE_BEFORE) {
       // Four files named four different ways in one message, and all four are
-      // files: the sentence, the backticks, the quoted command, the block.
-      await expect.poll(async () => message.locator('[data-path-look="badge"]').count(), { timeout: 30_000 }).toBe(4);
-      // Drawn by kind, the same way a markdown link to a file is drawn.
-      // Two `.md` and two `.tsx`, each drawn as the kind it is.
-      await expect(message.locator('[data-path-look="badge"][data-file-kind="text"]')).toHaveCount(2);
-      await expect(message.locator('[data-path-look="badge"][data-file-kind="code"]')).toHaveCount(2);
-      // The quoted command is still a command: only the name became a chip.
+      // files. Only the one in the sentence is a badge; the three inside code
+      // are the dotted-underline link.
+      await expect.poll(async () => message.locator('[data-path-look="badge"]').count(), { timeout: 30_000 }).toBe(1);
+      await expect(message.locator('[data-path-look="badge"][data-file-kind="text"]')).toHaveCount(1);
+      await expect(message.locator('code [data-path-look="link"]')).toHaveCount(3);
+      expect(await message.locator('code [data-path-look="badge"], pre [data-path-look="badge"]').count(), 'code drew a badge').toBe(0);
+      // The quoted command is still a command: only the name became a link.
       const command = message.locator('code', { hasText: 'gh pr create' }).first();
       await expect(command).toHaveText(`gh pr create -F ${body}`);
-      await expect(command.locator('[data-path-look="badge"]')).toHaveCount(1);
-
-      // A long address wraps inside its badge rather than running off the
-      // side of the message, and the icon sits in the middle of however tall
-      // that leaves the badge — not pinned against its first line.
-      const wrapped = message.locator('[data-path-look="badge"]').first();
-      const box = (await wrapped.boundingBox())!;
-      const icon = (await wrapped.locator('svg').first().boundingBox())!;
-      expect(box.height, 'the badge under test did not wrap, so this proves nothing').toBeGreaterThan(24);
-      expect(
-        Math.abs(icon.y + icon.height / 2 - (box.y + box.height / 2)),
-        'the icon is not in the middle of the badge it marks',
-      ).toBeLessThanOrEqual(1);
+      await expect(command.locator('[data-path-look="link"]')).toHaveCount(1);
 
       // And the rows above it, which are not a sentence, keep the plain link.
       const rows = page.locator('[data-testid="tool-row"]');

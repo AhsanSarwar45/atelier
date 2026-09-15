@@ -78,12 +78,12 @@ describe('card names in a rendered message', () => {
     expect(chip).not.toHaveClass('align-baseline');
   });
 
-  it('draws a card chip when a provider writes the id as inline code', () => {
+  // Nothing inside code is turned into a badge, a card no more than a file
+  // (bw-lolf.1): the id stays the code it was written as.
+  it('leaves a card id written as inline code as code', () => {
     say('Landed `bw-1u1` today');
-    const chip = screen.getByTestId('mention-card');
-    expect(chip).toHaveTextContent('bw-1u1');
-    expect(chip.closest('code')).toBeNull();
-    expect(chip).toHaveClass('h-5');
+    expect(screen.queryByTestId('mention-card')).toBeNull();
+    expect(document.querySelector('code')).toHaveTextContent('bw-1u1');
   });
 
   it('does not consume a card id that is one directory inside a path', () => {
