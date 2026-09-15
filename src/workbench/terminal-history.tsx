@@ -128,6 +128,7 @@ export function HistoryPanel({
   const [looking, setLooking] = useState('');
   const [at, setAt] = useState(0);
   const box = useRef<HTMLDivElement | null>(null);
+  const panel = useRef<HTMLDivElement | null>(null);
   // Fixed at the moment the panel opened. A clock read during the render would
   // give every row a new answer on every keystroke, and "3m ago" does not need
   // to be right to the second it is read in.
@@ -199,6 +200,27 @@ export function HistoryPanel({
     box.current?.querySelector('[data-here="true"]')?.scrollIntoView({ block: 'nearest' });
   }, [here]);
 
+  /**
+   * A press anywhere but here puts the panel away, the way it does for every
+   * other panel in the app (bw-l6hd.2). Escape already did this; a reader who
+   * reaches for the screen rather than the keyboard had nothing to reach for,
+   * because the panel covers its terminal edge to edge and the only press that
+   * closed it was on the button it came out of.
+   *
+   * That button is the one place exempted. It toggles, so closing here on the
+   * way down would only have it open again on the way up.
+   */
+  useEffect(() => {
+    const away = (event: PointerEvent) => {
+      const at = event.target as Element | null;
+      if (!at || panel.current?.contains(at)) return;
+      if (at.closest?.('[data-testid="terminal-history-open"]')) return;
+      onClose();
+    };
+    document.addEventListener('pointerdown', away);
+    return () => document.removeEventListener('pointerdown', away);
+  }, [onClose]);
+
   const empty = (): string => {
     if (why) return why;
     if (!told) return 'Reading what you have run before…';
@@ -211,6 +233,7 @@ export function HistoryPanel({
 
   return (
     <div
+      ref={panel}
       data-testid="terminal-history-panel"
       role="dialog"
       aria-label="Command history"
