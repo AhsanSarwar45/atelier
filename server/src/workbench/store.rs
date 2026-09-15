@@ -570,27 +570,16 @@ fn held_in_its_project(
         found
     }
 
-    /// Restore-list rows: an untitled chat with nothing said in it is not an
-    /// offer to resume — unless the person started it here, by hand.
+    /// Restore-list rows: every saved chat held in the project, wherever it was
+    /// started, except the ones an agent started.
     ///
-    /// The old rule was title-or-a-message alone, and it was written against
-    /// the chats we did not start: the kit's index is full of unnamed review
-    /// agents, and offering those back is the fault §6.3.1 exists to prevent.
-    /// A chat begun at the New Chat button is the opposite case. It is the one
-    /// thing on that list the person definitely meant to have, and `origin`
-    /// already tells the two apart — only `CommandKind::SessionStart` writes
-    /// `app`, while everything discovered or opened from outside writes
-    /// `terminal`.
-    ///
-    /// Claude and Codex hid the gap. A chat of theirs with no title and no
-    /// message is still an ACP session the provider knows about, so provider
-    /// discovery hands it back and the row returns. Local has no such rescue —
-    /// `list_sessions` asks only claude and codex, and could not ask a local
-    /// runtime anyway, since that call passes no model and `launch_config` has
-    /// none without one. And a local chat is created with no title, no message
-    /// and no driver on purpose: it is waiting for the model to be chosen. So
-    /// the one chat that most needed the list was the one it dropped, at once
-    /// and for good (bw-u6cl.1).
+    /// This is the quick answer the list draws before provider discovery
+    /// finishes, so it must hold the same chats the full answer does. It used
+    /// to also require a title, a recorded message or an app origin — a guard
+    /// against the kit's unnamed review agents, which `begun_by` now keeps out
+    /// by who started them. That guard hid every untitled chat begun in a
+    /// terminal, which the full answer shows, so those rows dropped out on
+    /// every refresh and came back when discovery finished (bw-og6k).
     ///
     /// `everything` deliberately exposes every row for diagnosis.
     pub fn list_restore_sessions(
@@ -604,10 +593,7 @@ fn held_in_its_project(
             found.retain(|session| Self::held_in_its_project(session, &mut folders));
             return Ok(found);
         }
-        let visible = r#"(COALESCE(begun_by, '') <> 'agent'
-            AND (title IS NOT NULL OR origin='app' OR EXISTS (
-            SELECT 1 FROM event WHERE event.session_id=session.id
-              AND event.type='message.started' LIMIT 1)))"#;
+        let visible = "COALESCE(begun_by, '') <> 'agent'";
         let sql = match project_id {
             Some(_) => format!(
                 "SELECT * FROM session WHERE project_id=?1 AND {visible} ORDER BY COALESCE(last_spoke_at,last_active_at) DESC"
@@ -3230,14 +3216,16 @@ mod tests {
         assert_eq!(listed(true).len(), 3, "the switch brings the agent's own back");
     }
 
+    /// An untitled chat begun in a terminal is on the quick list, as it is on
+    /// the full one. Hiding it made it vanish on every refresh and come back
+    /// when discovery finished (bw-og6k).
     #[test]
-    fn restore_sessions_hide_only_unused_untitled_chats() {
+    fn restore_sessions_keep_untitled_chats_whoever_started_them() {
         let directory = tempfile::tempdir().unwrap();
         let store = Store::open(&directory.path().join("workbench.db")).unwrap();
         for id in ["empty", "spoken", "titled"] {
             let mut row = session(id, "claude", None, "2026-08-20T00:00:00Z");
             row.title = (id == "titled").then(|| "Kept title".into());
-            // The rule this test is about is for the chats we did not start.
             row.origin = "terminal".into();
             store.create_session(&row).unwrap();
         }
@@ -3256,7 +3244,7 @@ mod tests {
             .collect::<std::collections::HashSet<_>>();
         assert_eq!(
             normal,
-            std::collections::HashSet::from(["spoken".into(), "titled".into()])
+            std::collections::HashSet::from(["empty".into(), "spoken".into(), "titled".into()])
         );
         assert_eq!(
             store
@@ -3275,8 +3263,8 @@ mod tests {
     /// use. Under the old title-or-a-message rule it was dropped from the
     /// restore list at once, and unlike Claude and Codex nothing rediscovered
     /// it, so the chat the person had just asked for was never seen again
-    /// (bw-u6cl.1). A chat of the same shape that we did not start stays
-    /// hidden, which is the rule this one is carved out of.
+    /// (bw-u6cl.1). A chat of the same shape begun in a terminal is offered
+    /// too (bw-og6k).
     #[test]
     fn restore_sessions_offer_a_chat_the_person_started_here_before_anything_is_said() {
         let directory = tempfile::tempdir().unwrap();
@@ -3301,7 +3289,7 @@ mod tests {
             .collect::<std::collections::HashSet<_>>();
         assert_eq!(
             offered,
-            std::collections::HashSet::from(["local-new".to_string()])
+            std::collections::HashSet::from(["local-new".to_string(), "outside-new".to_string()])
         );
     }
 
