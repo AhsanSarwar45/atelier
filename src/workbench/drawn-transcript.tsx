@@ -8,7 +8,7 @@
  */
 'use client';
 
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { useVirtualizer } from '@tanstack/react-virtual';
 
@@ -31,6 +31,8 @@ interface DrawnTranscriptProps {
   onLook: (image: LookableImage) => void;
   pane: React.RefObject<HTMLElement | null>;
   onOlder?: (() => Promise<{ added: number; hasOlder: boolean }>) | null;
+  /** A message to open the chat at — one a search found — named by its id. */
+  target?: string | null;
 }
 
 const rowKey = (row: DrawnRow): string => row.row === 'machine'
@@ -46,6 +48,7 @@ export function DrawnTranscript({
   onLook,
   pane,
   onOlder = null,
+  target = null,
 }: DrawnTranscriptProps) {
   const loading = useRef(false);
   const historyRequest = useRef(0);
@@ -297,6 +300,71 @@ export function DrawnTranscript({
     };
   }, [sessionId, pane, onOlder]);
 
+  // Opening a chat at a message a search found. The message can be far back
+  // in a long chat, so older pages are fetched until it is among the rows,
+  // then it is brought to the middle of the pane and marked for a moment.
+  // Looked at again whenever rows arrive, since a chat that is still loading
+  // has neither its rows nor its way to older ones yet.
+  const [found, setFound] = useState<string | null>(null);
+  const [seek, setSeek] = useState<'looking' | 'found' | 'missing' | null>(null);
+  const seeking = useRef<{ target: string; busy: boolean; done: boolean } | null>(null);
+  const [pages, setPages] = useState(0);
+  useEffect(() => {
+    if (!target) return;
+    if (seeking.current?.target !== target) {
+      seeking.current = { target, busy: false, done: false };
+      setSeek('looking');
+    }
+    const state = seeking.current;
+    if (state.done || state.busy) return;
+    // A chat read straight from its record names a message by the record's
+    // own id; the same message replayed into this app's store carries an
+    // `acp-` in front. Either finds it.
+    const bare = target.replace(/^acp-/, '');
+    const keys = target.startsWith('tool:')
+      ? [target, `machine:${target.slice('tool:'.length)}`]
+      : [`message:${bare}`, `message:acp-${bare}`];
+    const index = rows.findIndex((row) => keys.includes(rowKey(row)));
+    if (index >= 0) {
+      state.done = true;
+      setFound(rowKey(rows[index]!));
+      setSeek('found');
+      // Aimed again while the rows around it are measured: each arrives as a
+      // guess and moves it as it is measured.
+      let again = 0;
+      const aim = () => {
+        if (seeking.current !== state) return;
+        const now = latest.current.findIndex((row) => keys.includes(rowKey(row)));
+        if (now >= 0) virtual.scrollToIndex(now, { align: 'center' });
+        if (++again < 10) setTimeout(aim, 40);
+      };
+      aim();
+      setTimeout(() => seeking.current === state && setFound(null), 6000);
+      return;
+    }
+    if (!onOlder) return;
+    state.busy = true;
+    void onOlder()
+      .then(({ added, hasOlder }) => {
+        state.busy = false;
+        if (!added && !hasOlder) {
+          state.done = true;
+          setSeek('missing');
+          return;
+        }
+        // Look again: the rows this page added were drawn while it was still
+        // marked busy, and a page already on its way added none of its own.
+        setTimeout(() => seeking.current === state && setPages((n) => n + 1), added ? 0 : 60);
+      })
+      .catch(() => {
+        state.busy = false;
+        state.done = true;
+        setSeek('missing');
+      });
+    // `virtual` is a fresh object each render and is read, not waited on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target, rows, onOlder, pages]);
+
   const draw = (row: DrawnRow) => row.row === 'machine' ? (
     <MachineLine row={row} />
   ) : (
@@ -311,6 +379,7 @@ export function DrawnTranscript({
       data-primary-items={primaryItems}
       data-mounted-items={virtual.getVirtualItems().length}
       data-can-load-older={Boolean(onOlder)}
+      data-seek={seek ?? undefined}
       className="relative w-full"
       style={{ height: `${virtual.getTotalSize()}px` }}
     >
@@ -333,7 +402,8 @@ export function DrawnTranscript({
             data-index={item.index}
             data-start={item.start}
             data-transcript-key={rowKey(row)}
-            className="absolute left-0 top-0 w-full pb-3"
+            data-found={found === rowKey(row) || undefined}
+            className="absolute left-0 top-0 w-full pb-3 transition-colors data-[found]:rounded-md data-[found]:bg-amber-400/10 data-[found]:ring-1 data-[found]:ring-amber-400/40"
             style={{ transform: `translateY(${item.start}px)` }}
           >
             {draw(row)}

@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { Suspense, useCallback, useEffect, useRef } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -37,6 +37,7 @@ const loadChatTab = () => import('@/workbench/chat-tab');
 const PRELOAD_AFTER_MS = 4_000;
 const ChatTab = dynamic(loadChatTab, { ssr: false });
 const FilesTab = dynamic(() => import('@/workbench/files-tab'), { ssr: false });
+const SearchPanel = dynamic(() => import('@/workbench/search-panel').then((m) => m.SearchPanel), { ssr: false });
 import { WorkbenchStatus } from '@/workbench/globals';
 import { PathsOpenProvider } from '@/workbench/open-path';
 import { useShowingFolder } from '@/workbench/terminal-shells';
@@ -158,6 +159,20 @@ function ProjectTabs() {
     if (cardBefore.current && !openCard) cardWasClosed();
     cardBefore.current = openCard;
   }, [openCard]);
+
+  // Ctrl+K, or Cmd+K, searches every chat from anywhere on the screen — but a
+  // terminal keeps the keys its shell is owed.
+  const [searching, setSearching] = useState(false);
+  useEffect(() => {
+    const pressed = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 'k' || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+      if (event.target instanceof Element && event.target.closest('.xterm')) return;
+      event.preventDefault();
+      setSearching((was) => !was);
+    };
+    window.addEventListener('keydown', pressed);
+    return () => window.removeEventListener('keydown', pressed);
+  }, []);
 
   const screen = (
     <Shell
@@ -333,7 +348,12 @@ function ProjectTabs() {
   // project or one of its worktrees, because that is what decides whether it
   // opens in the Files tab or leaves for the desktop (bw-g3o3.9). It is read
   // once, here, rather than by each of the hundreds of chips that ask.
-  return <PathsOpenProvider projectPath={projectDir(project)}>{screen}</PathsOpenProvider>;
+  return (
+    <PathsOpenProvider projectPath={projectDir(project)}>
+      {screen}
+      {searching && <SearchPanel onClose={() => setSearching(false)} />}
+    </PathsOpenProvider>
+  );
 }
 
 export default function ProjectPage() {

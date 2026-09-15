@@ -2284,6 +2284,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             onLook={setLooking}
             pane={pane}
             onOlder={view.loadOlder}
+            target={params.get('message')}
           />
         )}
         {view.error && <div className="text-sm text-red-500">{view.error}</div>}
