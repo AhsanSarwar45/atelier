@@ -340,6 +340,10 @@ pub(crate) async fn follow_native_record(
     });
     let mut codex_lines: VecDeque<String> = VecDeque::new();
     let mut record_tick = tokio::time::interval(Duration::from_millis(250));
+    // Where the record was last remembered as read to. A tick that read nothing
+    // new has nothing to remember, and writing the same number four times a
+    // second is a database write per chat per quarter second (bw-fbzd.5).
+    let mut remembered: Option<i64> = None;
 
     loop {
         tokio::select! {
@@ -379,7 +383,7 @@ pub(crate) async fn follow_native_record(
                         let _ = state.database().append(event).await;
                     }
                 }
-                if let Some(at)=claude_tail.as_ref().map(|tail|tail.through_line()){let _=state.database().remember_followed(session.id.clone(),at as i64).await;}
+                if let Some(at)=claude_tail.as_ref().map(|tail|tail.through_line() as i64).filter(|at|Some(*at)!=remembered){let _=state.database().remember_followed(session.id.clone(),at).await;remembered=Some(at);}
                 continue;
             }
             let mut fresh = if session.brand=="claude" {
@@ -394,8 +398,11 @@ pub(crate) async fn follow_native_record(
                     } else if let Some(tail)=claude_tail.as_mut(){tail.to_end()}
                     Vec::new()
                 } else {
+                    // A record that did not grow replays to what was already
+                    // appended, so only new lines are worth a replay.
+                    let grew=growth.as_ref().is_some_and(|growth|!growth.lines.is_empty());
                     if let Some(growth)=growth{for line in growth.lines{claude_lines.push_back(line)}}
-                    let fresh=crate::workbench::claude::history::replay_lines(claude_lines.make_contiguous());
+                    let fresh=if grew{crate::workbench::claude::history::replay_lines(claude_lines.make_contiguous())}else{Vec::new()};
                     while claude_lines.len()>256{claude_lines.pop_front();}
                     fresh
                 }
@@ -410,8 +417,9 @@ pub(crate) async fn follow_native_record(
                     }else if let Some(tail)=codex_tail.as_mut(){tail.to_end()}
                     Vec::new()
                 }else{
+                    let grew=growth.as_ref().is_some_and(|growth|!growth.lines.is_empty());
                     if let Some(growth)=growth{for line in growth.lines{codex_lines.push_back(line)}}
-                    let fresh=crate::workbench::codex::normalize::replay_rollout(&codex_lines.make_contiguous().join("\n"));
+                    let fresh=if grew{crate::workbench::codex::normalize::replay_rollout(&codex_lines.make_contiguous().join("\n"))}else{Vec::new()};
                     while codex_lines.len()>512{codex_lines.pop_front();}
                     fresh
                 }
@@ -437,7 +445,7 @@ pub(crate) async fn follow_native_record(
                     let _ = state.database().append(event).await;
                 }
             }
-            let at=if session.brand=="claude"{claude_tail.as_ref().map(|tail|tail.through_line())}else{codex_tail.as_ref().map(|tail|tail.through_line())};if let Some(at)=at{let _=state.database().remember_followed(session.id.clone(),at as i64).await;}
+            let at=if session.brand=="claude"{claude_tail.as_ref().map(|tail|tail.through_line())}else{codex_tail.as_ref().map(|tail|tail.through_line())};if let Some(at)=at.map(|at|at as i64).filter(|at|Some(*at)!=remembered){let _=state.database().remember_followed(session.id.clone(),at).await;remembered=Some(at);}
         }}
     }
     state.finish_chat_follow(&session_id, &control).await;

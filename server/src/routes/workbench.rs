@@ -722,11 +722,14 @@ impl WorkbenchState {
         for hold in &mut holds {
             self.enrich_unknown_codex_hold(hold);
         }
-        let sessions = self
-            .database()
-            .list_sessions(None)
-            .await
-            .unwrap_or_default();
+        // Only a hold needs its chat looked up, and on most beats nothing is
+        // held; reading every chat ever kept every two seconds to match none
+        // was most of what an idle server did (bw-fbzd.5).
+        let sessions = if holds.is_empty() {
+            Vec::new()
+        } else {
+            self.database().list_sessions(None).await.unwrap_or_default()
+        };
         // Process provenance is classified once inside WorkbenchRegistry.
         // `holds` is therefore external by construction; this presentation
         // layer must not keep a second ownership rule that command guards can

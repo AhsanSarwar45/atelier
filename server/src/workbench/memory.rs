@@ -3,7 +3,7 @@
 use super::actor::ChatDb;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use sysinfo::{Pid, ProcessesToUpdate, System};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
 pub const CHAT_ENV: &str = "ATELIER_CHAT_SESSION_ID";
 
@@ -107,48 +107,103 @@ fn process_bytes(_pid: Pid, _resident_bytes: u64) -> Result<Option<u64>, String>
 
 const MEMORY_METRIC: &str = "pss";
 
+/// One of this app's own processes, with what the report shows of it.
+struct Found {
+    pid: Pid,
+    parent: Option<Pid>,
+    name: String,
+    chat: Option<String>,
+}
+
 pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
-    let mut system = System::new_all();
-    system.refresh_processes(ProcessesToUpdate::All, true);
+    // Only what the report reads, and only from whom it reads it. Every process
+    // on the machine is asked for its parent, which is one short file each;
+    // only this app's own descendants are asked for their environment, which
+    // is long and was the costliest read of a badge asked every few seconds.
+    // The table is kept between reports, so a process already known is not
+    // built again, and it is file reading, so it runs off the request threads
+    // (bw-fbzd.5).
+    let ours = tokio::task::spawn_blocking(|| {
+        static KEPT: std::sync::OnceLock<std::sync::Mutex<System>> = std::sync::OnceLock::new();
+        let kept = KEPT.get_or_init(|| std::sync::Mutex::new(System::new()));
+        let mut system = kept.lock().unwrap_or_else(|e| e.into_inner());
+        system.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
+        let root = Pid::from_u32(std::process::id());
+        let parents: HashMap<Pid, Option<Pid>> = system
+            .processes()
+            .iter()
+            .map(|(pid, process)| (*pid, process.parent()))
+            .collect();
+        let pids: Vec<Pid> = parents
+            .keys()
+            .copied()
+            .filter(|pid| belongs_to(*pid, root, &parents))
+            .collect();
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&pids),
+            false,
+            ProcessRefreshKind::nothing().with_environ(UpdateKind::OnlyIfNotSet),
+        );
+        pids.into_iter()
+            .filter_map(|pid| {
+                let process = system.process(pid)?;
+                Some(Found {
+                    pid,
+                    parent: process.parent(),
+                    name: process.name().to_string_lossy().into_owned(),
+                    chat: chat_id(process),
+                })
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|e| format!("process scan failed: {e}"))?;
     let root = Pid::from_u32(std::process::id());
-    let parents = system
-        .processes()
+    let inherited_chat_id = ours
         .iter()
-        .map(|(pid, process)| (*pid, process.parent()))
-        .collect();
-    let inherited_chat_id = system.process(root).and_then(chat_id);
+        .find(|found| found.pid == root)
+        .and_then(|found| found.chat.clone());
     let mut total = 0u64;
     let mut grouped: HashMap<String, (u64, usize)> = HashMap::new();
     let mut details = Vec::new();
-    let titles: HashMap<String, String> = database
-        .list_sessions(None)
-        .await?
-        .into_iter()
-        .map(|session| {
-            (
-                session.id,
-                session.title.unwrap_or_else(|| "Untitled chat".into()),
-            )
-        })
+    // Titles are wanted only for the chats found running, and most reports find
+    // none; reading every chat ever held to name them was the costliest part.
+    let running_chats: HashSet<String> = ours
+        .iter()
+        .filter_map(|found| found.chat.clone())
+        .filter(|id| Some(id) != inherited_chat_id.as_ref())
         .collect();
-    for (pid, process) in system.processes() {
-        if !belongs_to(*pid, root, &parents) {
-            continue;
-        }
-        let Some(bytes) = process_bytes(*pid, process.memory())? else {
+    let titles: HashMap<String, String> = if running_chats.is_empty() {
+        HashMap::new()
+    } else {
+        database
+            .list_sessions(None)
+            .await?
+            .into_iter()
+            .filter(|session| running_chats.contains(&session.id))
+            .map(|session| {
+                (
+                    session.id,
+                    session.title.unwrap_or_else(|| "Untitled chat".into()),
+                )
+            })
+            .collect()
+    };
+    for found in ours {
+        let Some(bytes) = process_bytes(found.pid, 0)? else {
             continue;
         };
         total = total.saturating_add(bytes);
-        let session_id = chat_id(process).filter(|id| Some(id) != inherited_chat_id.as_ref());
+        let session_id = found.chat.filter(|id| Some(id) != inherited_chat_id.as_ref());
         if let Some(id) = session_id.as_ref() {
             let entry = grouped.entry(id.clone()).or_default();
             entry.0 = entry.0.saturating_add(bytes);
             entry.1 += 1;
         }
         details.push(ProcessMemory {
-            pid: pid.as_u32(),
-            parent_pid: process.parent().map(Pid::as_u32),
-            name: process.name().to_string_lossy().into_owned(),
+            pid: found.pid.as_u32(),
+            parent_pid: found.parent.map(Pid::as_u32),
+            name: found.name,
             bytes,
             chat_title: session_id.as_ref().and_then(|id| titles.get(id)).cloned(),
             session_id,

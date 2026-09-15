@@ -8,16 +8,18 @@ use std::{future::Future, pin::Pin, sync::Arc};
 pub type Reconciler =
     Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>> + Send + Sync>;
 
+/// Every state a chat is in while a turn is under way.
+pub const ACTIVE_STATES: [&str; 6] = [
+    "starting",
+    "thinking",
+    "streaming",
+    "running_tool",
+    "waiting_for_agents",
+    "waiting_permission",
+];
+
 pub fn is_active(state: &str) -> bool {
-    matches!(
-        state,
-        "starting"
-            | "thinking"
-            | "streaming"
-            | "running_tool"
-            | "waiting_for_agents"
-            | "waiting_permission"
-    )
+    ACTIVE_STATES.contains(&state)
 }
 
 /// Membership follows the actual prompt future's lifetime, including failure

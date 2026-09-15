@@ -285,13 +285,19 @@ impl WorkbenchRegistry {
                         if live.read().await.contains_key(&id) {
                             let _ = reconcile_session(&db, &live, &starts, &id).await;
                         }
-                    } else if let Ok(sessions) = db.list_sessions(None).await {
-                        for session in sessions {
-                            if super::status::is_active(&session.state)
-                                || live.read().await.contains_key(&session.id)
-                            {
-                                let _ = reconcile_session(&db, &live, &starts, &session.id).await;
+                    } else if let Ok(active) = db.active_session_ids().await {
+                        // The chats mid-turn and the ones with a runtime
+                        // attached; asking the store for the first by state
+                        // rather than loading every chat ever kept every five
+                        // seconds (bw-fbzd.5).
+                        let mut due: Vec<String> = live.read().await.keys().cloned().collect();
+                        for id in active {
+                            if !due.contains(&id) {
+                                due.push(id);
                             }
+                        }
+                        for id in due {
+                            let _ = reconcile_session(&db, &live, &starts, &id).await;
                         }
                     }
                 }

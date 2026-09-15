@@ -32,7 +32,15 @@ export function MemoryBadge() {
   const read = useCallback(() => { void request('/api/workbench/memory', { cache: 'no-store' })
     .then(async response => { if (!response.ok) throw new Error(await response.text()); return response.json() as Promise<unknown>; })
     .then(value => { if (isMemoryReport(value)) setReport(value); }).catch(() => {}); }, []);
-  useEffect(() => { read(); const timer = window.setInterval(read, 3_000); return () => window.clearInterval(timer); }, [read]);
+  // Nobody reads a badge on a hidden tab, so a hidden tab does not ask; it
+  // catches up the moment it is shown again.
+  useEffect(() => {
+    read();
+    const timer = window.setInterval(() => { if (!document.hidden) read(); }, 3_000);
+    const shown = () => { if (!document.hidden) read(); };
+    document.addEventListener('visibilitychange', shown);
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', shown); };
+  }, [read]);
   if (!report) return null;
   return <Popover onOpenChange={open => open && read()}>
     <PopoverTrigger asChild>

@@ -534,6 +534,21 @@ fn held_in_its_project(
     crate::workbench::provider::held_in(std::path::Path::new(&session.cwd), folders)
 }
 
+    /// The chats in the middle of a turn, by id — what the registry's sweep
+    /// looks for, without loading every chat ever kept to find them.
+    pub fn active_session_ids(&self) -> rusqlite::Result<Vec<String>> {
+        let placeholders = super::status::ACTIVE_STATES
+            .iter()
+            .map(|state| format!("'{state}'"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut statement = self
+            .connection
+            .prepare(&format!("SELECT id FROM session WHERE state IN ({placeholders})"))?;
+        let found = statement.query_map([], |row| row.get(0))?.collect();
+        found
+    }
+
     pub fn list_sessions(&self, project_id: Option<&str>) -> rusqlite::Result<Vec<Session>> {
         let (sql, parameter): (&str, Option<&str>) = match project_id {
             Some(project_id) => (
@@ -2791,7 +2806,15 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["newer", "older"]
         );
+        assert!(
+            store.active_session_ids().unwrap().contains(&"older".to_string()),
+            "a streaming chat was not found by the sweep's query"
+        );
         assert_eq!(store.mark_all_dormant().unwrap(), 2);
+        assert!(
+            store.active_session_ids().unwrap().is_empty(),
+            "a dormant chat was still offered to the sweep"
+        );
         assert!(store
             .list_sessions(None)
             .unwrap()
