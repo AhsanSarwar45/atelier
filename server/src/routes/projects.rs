@@ -89,6 +89,31 @@ fn located_for(path: &str, local_path: Option<&str>, data: &std::path::Path) -> 
     }
 }
 
+/// The project's settings file, made from what its folder shows when it has none.
+///
+/// A project added before settings files existed, or by a route that does not
+/// write one, used to open Workflow and Review onto a dead end. Its name stays
+/// the one on the home screen; everything else is inferred as the Add Project
+/// dialog would have inferred it, and kept on this computer only.
+fn located_or_created(project: &crate::db::Project, data: &std::path::Path) -> Result<LocatedManifest, String> {
+    if let Some(found) = located_for(&project.path, project.local_path.as_deref(), data) {
+        return Ok(found);
+    }
+    let raw = project.local_path.as_deref().unwrap_or(&project.path);
+    if raw.starts_with("dolt://") {
+        let mut manifest = project_manifest::infer_virtual(&project.name);
+        manifest.project.display_name = project.name.clone();
+        project_manifest::create_key(&project.path, data, &manifest)?;
+    } else {
+        let root = local_root(project)?;
+        let mut manifest = project_manifest::infer(&root);
+        manifest.project.display_name = project.name.clone();
+        project_manifest::create(&root, data, ManifestStorage::Personal, &manifest)?;
+    }
+    located_for(&project.path, project.local_path.as_deref(), data)
+        .ok_or_else(|| "the new settings file could not be read back".into())
+}
+
 fn data_dir() -> Result<std::path::PathBuf, String> {
     crate::identity::data_dir().ok_or_else(|| "Atelier has no personal data directory".into())
 }
@@ -214,8 +239,7 @@ pub async fn get_project_settings(
     State(db): State<AppState>, Path(id): Path<String>,
 ) -> Result<Json<ProjectSettingsAnswer>, (StatusCode, Json<ErrorResponse>)> {
     let project = db.get_project(&id).map_err(db_error_response)?;
-    let located = located_for(&project.path, project.local_path.as_deref(), &data_dir().map_err(manifest_error)?)
-        .ok_or_else(|| manifest_error("project has no manifest; initialize it first".into()))?;
+    let located = located_or_created(&project, &data_dir().map_err(manifest_error)?).map_err(manifest_error)?;
     Ok(Json(ProjectSettingsAnswer { located, beads_available: crate::routes::find_bd().is_some() }))
 }
 
@@ -225,8 +249,7 @@ pub async fn update_project_settings(
     let project = db.get_project(&id).map_err(db_error_response)?;
     let virtual_project = project.local_path.is_none() && project.path.starts_with("dolt://");
     let root = if virtual_project { None } else { Some(local_root(&project).map_err(manifest_error)?) };
-    let located = located_for(&project.path, project.local_path.as_deref(), &data_dir().map_err(manifest_error)?)
-        .ok_or_else(|| manifest_error("project has no manifest; initialize it first".into()))?;
+    let located = located_or_created(&project, &data_dir().map_err(manifest_error)?).map_err(manifest_error)?;
     if !virtual_project && manifest.project.use_beads
         && !project_manifest::branch_exists(root.as_ref().unwrap(), &manifest.git.completed_work_branch) {
         // The picker offers "New branch…", so a name the repo lacks is a branch to make, not a slip.
