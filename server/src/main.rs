@@ -448,7 +448,28 @@ async fn serve(open_browser: bool) {
             claude_config.clone(),
         )),
     );
-    let workbench_state = routes::workbench::WorkbenchState::new(registry);
+    // Every chat's words, the ones only a provider's record holds included,
+    // indexed in a file of their own by a thread of their own (bw-21a2.1).
+    let search_accounts: workbench::search_index::AccountDirs = Arc::new(|brand: &str| {
+        let mut directories: Vec<std::path::PathBuf> =
+            workbench::profiles::system_dir(brand).into_iter().collect();
+        if let Some(profiles) = workbench::profiles::ambient() {
+            directories.extend(profiles.everywhere(brand).into_iter().map(|(_, dir)| dir));
+        }
+        directories
+    });
+    let mut workbench_state = routes::workbench::WorkbenchState::new(registry);
+    match workbench::search_index::SearchIndex::open(
+        &data_dir.join("search.db"),
+        &data_dir.join("workbench.db"),
+        search_accounts,
+    ) {
+        Ok(index) => {
+            index.start(std::time::Duration::from_secs(30));
+            workbench_state = workbench_state.with_search(index);
+        }
+        Err(error) => tracing::warn!(%error, "search index unavailable; searching messages only"),
+    }
 
     // Initialize Dolt connection manager. Local boards already backed by Dolt
     // are brought up through bd before the read-ahead can fall back to stale

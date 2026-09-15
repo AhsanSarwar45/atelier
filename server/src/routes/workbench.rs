@@ -91,6 +91,10 @@ pub struct WorkbenchState {
             )>,
         >,
     >,
+    /// Every chat's words, indexed apart from the chat database. `None` where
+    /// no index was opened, as in most tests; search then reads the chat
+    /// database's own message table as it always did.
+    search: Option<crate::workbench::search_index::SearchIndex>,
 }
 
 #[derive(Default)]
@@ -157,7 +161,13 @@ impl WorkbenchState {
             watch_poll_wake: Arc::new(tokio::sync::Notify::new()),
             published_holds: Arc::new(tokio::sync::Mutex::new(Value::Null)),
             chat_followers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            search: None,
         }
+    }
+
+    pub fn with_search(mut self, index: crate::workbench::search_index::SearchIndex) -> Self {
+        self.search = Some(index);
+        self
     }
 
     async fn begin_claim_sweep(&self, cwd: &std::path::Path) -> bool {
@@ -980,12 +990,21 @@ async fn search(
     State(state): State<WorkbenchState>,
     Query(query): Query<SearchQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let q = query.q.unwrap_or_default().trim().to_string();
-    Ok(Json(if q.is_empty() {
-        json!([])
-    } else {
-        serde_json::to_value(state.database().search(q, 100).await?).map_err(|e| e.to_string())?
-    }))
+    // Trimmed at the start only: a space after the last word says the word
+    // is finished, and the index stops reading it as a prefix.
+    let q = query.q.unwrap_or_default().trim_start().to_string();
+    if q.trim().is_empty() {
+        return Ok(Json(json!([])));
+    }
+    let hits = match state.search.clone() {
+        // Off the async runtime and off the chat database's worker: a search
+        // is a read of its own file and waits on neither.
+        Some(index) => tokio::task::spawn_blocking(move || index.search(&q, 100))
+            .await
+            .map_err(|error| error.to_string())??,
+        None => state.database().search(q.trim().to_string(), 100).await?,
+    };
+    Ok(Json(serde_json::to_value(hits).map_err(|e| e.to_string())?))
 }
 
 #[derive(Deserialize)]

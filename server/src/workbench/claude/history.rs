@@ -237,6 +237,19 @@ fn record_files(config: &Path) -> Vec<PathBuf> {
     found
 }
 
+/// Every chat record under one account, for the search index, which reads
+/// them all and would otherwise list the folder once per chat.
+pub(crate) fn record_paths(config: &Path) -> Vec<PathBuf> {
+    record_files(config)
+}
+
+/// The words of a record as the events a stored chat holds, without the
+/// helper records, costs and notices `read_history` also gathers: the search
+/// index reads every record on the computer and wants only what was said.
+pub(crate) fn searchable_events(record: &Path) -> Vec<Value> {
+    transcript_events(&ordered_conversation(&jsonl(record), false), None)
+}
+
 pub fn find_record(config: &Path, session_id: &str) -> Option<PathBuf> {
     if !valid_session_id(session_id) {
         return None;

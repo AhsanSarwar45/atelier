@@ -31,6 +31,7 @@ pub mod provider_reconciliation;
 pub mod provider_settings;
 pub mod registry;
 pub mod screen_check;
+pub mod search_index;
 pub mod session_policy;
 pub mod signin;
 pub mod store;
