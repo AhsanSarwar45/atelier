@@ -18,8 +18,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fs } from '@/lib/api';
 
-/** How many questions are on the wire at once. */
-const AT_A_TIME = 6;
+/**
+ * How many addresses one question carries, and how many questions are on the
+ * wire at once. A chat names a hundred files; a request each was a hundred
+ * round trips for a device on the network, six at a time (bw-fbzd.9).
+ */
+const PER_QUESTION = 200;
+const AT_A_TIME = 2;
 
 /**
  * How long answers are gathered before the conversation is redrawn. A chat can
@@ -101,17 +106,21 @@ export function usePathsOnDisk(): Disk {
 
   const pump = useCallback(() => {
     while (running.current < AT_A_TIME && queue.current.length > 0) {
-      const path = queue.current.shift()!;
+      const paths = queue.current.splice(0, PER_QUESTION);
       running.current++;
       void fs
-        .exists(path)
-        .then((r) => answers.set(path, Boolean(r.exists)))
+        .existsMany(paths)
+        .then((r) => {
+          for (const path of paths) answers.set(path, r.exists?.[path] === true);
+        })
         // A question disk would not answer is a name that does not open, which
         // is the text drawn plainly — never an error in a conversation.
-        .catch(() => answers.set(path, false))
+        .catch(() => {
+          for (const path of paths) answers.set(path, false);
+        })
         .finally(() => {
           running.current--;
-          inFlight.delete(path);
+          for (const path of paths) inFlight.delete(path);
           settle();
           pump();
         });

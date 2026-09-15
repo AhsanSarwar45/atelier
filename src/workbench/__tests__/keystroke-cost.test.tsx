@@ -20,6 +20,7 @@ import { forgetDisk, usePathsOnDisk } from '@/workbench/paths-on-disk';
 vi.mock('@/lib/api', () => ({
   fs: {
     exists: () => Promise.resolve({ exists: false }),
+    existsMany: () => Promise.resolve({ exists: {} }),
     roots: () => Promise.resolve({ home: '/home/someone', roots: [] }),
   },
 }));

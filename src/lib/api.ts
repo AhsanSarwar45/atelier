@@ -994,6 +994,12 @@ export const fs = {
     `/api/fs/exists?path=${encodeURIComponent(path)}`
   ),
 
+  /** Whether each of many paths exists, in one request (bw-fbzd.9). */
+  existsMany: (paths: string[]) => fetchApi<{ exists: Record<string, boolean> }>(
+    '/api/fs/exists',
+    { method: 'POST', body: JSON.stringify({ paths }) },
+  ),
+
   roots: () => fetchApi<{ home: string; roots: string[] }>('/api/fs/roots'),
 
   /**

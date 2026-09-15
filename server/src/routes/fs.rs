@@ -100,6 +100,15 @@ pub struct FsExistsParams {
     pub path: String,
 }
 
+/// Body of a question about many paths at once.
+#[derive(Debug, Deserialize)]
+pub struct FsExistsManyBody {
+    pub paths: Vec<String>,
+}
+
+/// The most paths one question may carry.
+const EXISTS_AT_ONCE: usize = 500;
+
 fn media_origin_allowed(headers: &HeaderMap) -> bool {
     let Some(origin) = headers.get(header::ORIGIN).and_then(|value| value.to_str().ok()) else {
         return true;
@@ -1134,6 +1143,36 @@ pub async fn path_exists(Query(params): Query<FsExistsParams>) -> impl IntoRespo
     (StatusCode::OK, Json(serde_json::json!({ "exists": exists })))
 }
 
+/// POST /api/fs/exists with `{"paths": [...]}`
+///
+/// Whether each of many paths exists, as `{"exists": {path: bool}}`. A chat
+/// names a hundred files, and asking one request at a time put a hundred round
+/// trips on a device on the network, six at a time (bw-fbzd.9). A path outside
+/// what may be looked at answers `false`, the same as one that is not there:
+/// either way it is nothing that opens.
+pub async fn paths_exist(Json(body): Json<FsExistsManyBody>) -> impl IntoResponse {
+    if body.paths.len() > EXISTS_AT_ONCE {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(serde_json::json!({ "error": format!("At most {EXISTS_AT_ONCE} paths at once") })),
+        );
+    }
+    let answers = tokio::task::spawn_blocking(move || {
+        body.paths
+            .into_iter()
+            .map(|asked| {
+                let path = PathBuf::from(&asked);
+                let exists = validate_path_security(&path).is_ok() && path.exists();
+                (asked, serde_json::Value::Bool(exists))
+            })
+            .collect::<serde_json::Map<_, _>>()
+    })
+    .await
+    .unwrap_or_default();
+
+    (StatusCode::OK, Json(serde_json::json!({ "exists": answers })))
+}
+
 /// Runs launcher commands in order and stops at the first one that exits cleanly.
 ///
 /// [`open::that`] walks the same list but gives up as soon as a launcher
@@ -1708,6 +1747,7 @@ mod tests {
             .route("/api/fs/create", axum::routing::post(create_path))
             .route("/api/fs/duplicate", axum::routing::post(duplicate_path))
             .route("/api/fs/media", axum::routing::get(media))
+            .route("/api/fs/exists", axum::routing::post(paths_exist))
     }
 
     async fn get(uri: String) -> (StatusCode, HeaderMap, Vec<u8>) {
@@ -1721,6 +1761,42 @@ mod tests {
         let headers = answer.headers().clone();
         let bytes = axum::body::to_bytes(answer.into_body(), usize::MAX).await.unwrap();
         (status, headers, bytes.to_vec())
+    }
+
+    #[tokio::test]
+    async fn many_paths_are_answered_in_one_question() {
+        let root = scratch();
+        let there = root.path().join("there.md");
+        std::fs::write(&there, "here\n").unwrap();
+        let missing = root.path().join("missing.md");
+        let asked = serde_json::json!({ "paths": [there, missing, "/etc/passwd"] });
+        let (status, _, bytes) = answered(
+            axum::http::Request::post("/api/fs/exists")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(asked.to_string()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let answer: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let exists = &answer["exists"];
+        assert_eq!(exists[there.to_string_lossy().as_ref()], true);
+        assert_eq!(exists[missing.to_string_lossy().as_ref()], false);
+        // Outside the home directory is nothing that opens, not an error.
+        assert_eq!(exists["/etc/passwd"], false);
+    }
+
+    #[tokio::test]
+    async fn a_question_about_too_many_paths_is_refused() {
+        let paths = vec!["/nowhere"; EXISTS_AT_ONCE + 1];
+        let (status, _, _) = answered(
+            axum::http::Request::post("/api/fs/exists")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::json!({ "paths": paths }).to_string()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
     }
 
     async fn json_of(uri: String) -> (StatusCode, serde_json::Value) {

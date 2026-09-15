@@ -1,71 +1,132 @@
 /**
- * Zod schemas for validating critical API responses.
+ * Checks for critical API responses.
  * Only covers endpoints where malformed data causes silent runtime errors.
+ *
+ * Written out by hand. These were zod schemas, and zod was 56 KB of every
+ * screen's first download — the home screen and settings included — to check
+ * four answers, and it walked every field of every card on each board poll
+ * (bw-fbzd.9). A bad answer still throws, naming where it went wrong.
  */
 
-import { z } from "zod/v4";
+type Check = (value: unknown, at: string) => void;
 
-export const CommentSchema = z.object({
-  id: z.union([z.number(), z.string()]),
-  issue_id: z.string(),
-  author: z.string(),
-  text: z.string(),
-  created_at: z.string(),
+/** A check with the `parse` the callers use: it throws, or hands the value back. */
+export interface Schema {
+  parse<T>(value: T): T;
+}
+
+function fail(at: string, expected: string, value: unknown): never {
+  const got = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+  throw new TypeError(`Invalid API response at ${at || '(root)'}: expected ${expected}, got ${got}`);
+}
+
+const string: Check = (value, at) => { if (typeof value !== 'string') fail(at, 'string', value); };
+const number: Check = (value, at) => { if (typeof value !== 'number' || Number.isNaN(value)) fail(at, 'number', value); };
+const boolean: Check = (value, at) => { if (typeof value !== 'boolean') fail(at, 'boolean', value); };
+
+/** Absent, null or the thing itself. */
+const nullish = (check: Check): Check => (value, at) => { if (value != null) check(value, at); };
+/** Absent or the thing itself; null is refused. */
+const optional = (check: Check): Check => (value, at) => { if (value !== undefined) check(value, at); };
+/** Null or the thing itself; absent is refused. */
+const nullable = (check: Check): Check => (value, at) => { if (value !== null) check(value, at); };
+
+const array = (check: Check): Check => (value, at) => {
+  if (!Array.isArray(value)) fail(at, 'array', value);
+  for (let i = 0; i < value.length; i += 1) check(value[i], `${at}[${i}]`);
+};
+
+const either = (checks: Check[], expected: string): Check => (value, at) => {
+  for (const check of checks) {
+    try { check(value, at); return; } catch { /* the next one may fit */ }
+  }
+  fail(at, expected, value);
+};
+
+/** An object with these fields; fields not named are let through. */
+const object = (fields: Record<string, Check>): Check => {
+  const entries = Object.entries(fields);
+  return (value, at) => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) fail(at, 'object', value);
+    const record = value as Record<string, unknown>;
+    for (const [name, check] of entries) check(record[name], at ? `${at}.${name}` : name);
+  };
+};
+
+const schema = (check: Check): Schema => ({
+  parse<T>(value: T): T {
+    check(value, '');
+    return value;
+  },
 });
 
-export const BeadSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  description: z.string().nullish(),
-  status: z.string(),
-  priority: z.number().nullish(),
-  issue_type: z.string().nullish(),
-  owner: z.string().nullish(),
-  created_at: z.string().nullish(),
-  updated_at: z.string().nullish(),
-  comments: z.array(CommentSchema).nullish(),
+const comment = object({
+  id: either([number, string], 'number or string'),
+  issue_id: string,
+  author: string,
+  text: string,
+  created_at: string,
+});
+
+const strings = array(string);
+
+const bead = object({
+  id: string,
+  title: string,
+  description: nullish(string),
+  status: string,
+  priority: nullish(number),
+  issue_type: nullish(string),
+  owner: nullish(string),
+  created_at: nullish(string),
+  updated_at: nullish(string),
+  comments: nullish(array(comment)),
   // A brief board read carries how many comments a card has instead of them (bw-fbzd.7).
-  comment_count: z.number().nullish(),
-  parent_id: z.string().nullish(),
-  children: z.array(z.string()).nullish(),
-  design: z.string().nullish(),
-  notes: z.string().nullish(),
-  deps: z.array(z.string()).nullish(),
-  blockers: z.array(z.string()).nullish(),
-  relates_to: z.array(z.string()).nullish(),
-  labels: z.array(z.string()).nullish(),
-  _originalStatus: z.string().nullish(),
-  close_reason: z.string().nullish(),
-  closed_at: z.string().nullish(),
-  created_by: z.string().nullish(),
+  comment_count: nullish(number),
+  parent_id: nullish(string),
+  children: nullish(strings),
+  design: nullish(string),
+  notes: nullish(string),
+  deps: nullish(strings),
+  blockers: nullish(strings),
+  relates_to: nullish(strings),
+  labels: nullish(strings),
+  _originalStatus: nullish(string),
+  close_reason: nullish(string),
+  closed_at: nullish(string),
+  created_by: nullish(string),
 });
 
-export const BeadsResponseSchema = z.object({
-  beads: z.array(BeadSchema),
-  source: z.string().optional(),
-});
+export const CommentSchema = schema(comment);
 
-export const CardStatusesResponseSchema = z.object({
-  beads: z.array(z.object({
-    id: z.string(),
-    status: z.string(),
-    updated_at: z.string().nullish(),
-    dropped: z.boolean().optional(),
+export const BeadSchema = schema(bead);
+
+export const BeadsResponseSchema = schema(object({
+  beads: array(bead),
+  source: optional(string),
+}));
+
+export const CardStatusesResponseSchema = schema(object({
+  beads: array(object({
+    id: string,
+    status: string,
+    updated_at: nullish(string),
+    dropped: optional(boolean),
   })),
-  source: z.string().optional(),
-});
+  source: optional(string),
+}));
 
-export const CardResponseSchema = z.object({
-  bead: BeadSchema,
-  source: z.string().optional(),
-});
+export const CardResponseSchema = schema(object({
+  bead,
+  source: optional(string),
+}));
 
-export const WorktreeStatusSchema = z.object({
-  exists: z.boolean(),
-  worktree_path: z.nullable(z.string()),
-  branch: z.nullable(z.string()),
-  ahead: z.number(),
-  behind: z.number(),
-  dirty: z.boolean(),
-  last_modified: z.nullable(z.string()),
-});
+export const WorktreeStatusSchema = schema(object({
+  exists: boolean,
+  worktree_path: nullable(string),
+  branch: nullable(string),
+  ahead: number,
+  behind: number,
+  dirty: boolean,
+  last_modified: nullable(string),
+}));

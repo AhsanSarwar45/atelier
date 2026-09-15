@@ -35,6 +35,8 @@ import { cn, projectDir } from '@/lib/utils';
 // The chat is fetched ahead once the screen is idle, so switching to it is
 // still instant.
 const loadChatTab = () => import('@/workbench/chat-tab');
+/** How long a screen is left to its own reads before the chat is fetched ahead. */
+const PRELOAD_AFTER_MS = 4_000;
 const ChatTab = dynamic(loadChatTab, { ssr: false });
 const FilesTab = dynamic(() => import('@/workbench/files-tab'), { ssr: false });
 import { WorkbenchStatus } from '@/workbench/globals';
@@ -101,12 +103,19 @@ function ProjectTabs() {
 
   // The chat is its own download so the board draws without it; once the
   // screen has nothing else to do it is fetched ahead, and switching to it
-  // does not wait on the network.
+  // does not wait on the network. Idle alone came 70 ms into the load, while
+  // the board was still downloading, and a device on the network fetched
+  // 300 KiB of chat beside it; so it waits until the page's own reads are
+  // well past (bw-fbzd.9).
   useEffect(() => {
-    const idle = window.requestIdleCallback ?? ((ahead: () => void) => window.setTimeout(ahead, 1_500));
+    const idle = window.requestIdleCallback ?? ((ahead: () => void) => window.setTimeout(ahead, 0));
     const cancel = window.cancelIdleCallback ?? window.clearTimeout;
-    const ask = idle(() => { void loadChatTab(); });
-    return () => cancel(ask);
+    let ask: number | undefined;
+    const later = window.setTimeout(() => { ask = idle(() => { void loadChatTab(); }); }, PRELOAD_AFTER_MS);
+    return () => {
+      window.clearTimeout(later);
+      if (ask !== undefined) cancel(ask);
+    };
   }, []);
 
   // Old bookmarks can still name the board for a project that has since opted

@@ -553,7 +553,7 @@ async fn serve(open_browser: bool) {
         .route("/api/dolt/databases", get(routes::dolt::dolt_databases))
         .route("/api/dolt/servers", get(routes::dolt::dolt_servers))
         .route("/api/fs/list", get(routes::fs::list_directory))
-        .route("/api/fs/exists", get(routes::fs::path_exists))
+        .route("/api/fs/exists", get(routes::fs::path_exists).post(routes::fs::paths_exist))
         .route("/api/fs/media", get(routes::fs::media))
         .route("/api/fs/tree", get(routes::fs::tree))
         .route("/api/fs/find", get(routes::fs::find))
@@ -639,10 +639,11 @@ async fn serve(open_browser: bool) {
         // wait on it byte for byte (bw-fbzd.2). The screens are already carried
         // gzipped and say so, so this leaves them alone.
         .layer(
-            // The fastest level: a board or a chat list is polled over and over,
-            // and most of the saving is in the first pass anyway.
+            // Level 4: on a four-thousand-card board it sends 657 KiB where the
+            // fastest level sent 782, for 7 ms more work; level 6 saves 40 KiB
+            // more for twice that again (bw-fbzd.9).
             tower_http::compression::CompressionLayer::new()
-                .quality(tower_http::CompressionLevel::Fastest)
+                .quality(tower_http::CompressionLevel::Precise(4))
                 .compress_when(compressible),
         )
         .layer(cors);
@@ -676,8 +677,11 @@ async fn serve(open_browser: bool) {
         }
     }
 
-    // Start the server
+    // Start the server. Without no-delay a response written in pieces, as a
+    // compressed one is, waited on the browser's delayed acknowledgement and
+    // arrived 40 ms late about one read in two (bw-fbzd.9).
     axum::serve(listener, app)
+        .tcp_nodelay(true)
         .await
         .expect("Server failed to start");
 }

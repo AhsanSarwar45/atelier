@@ -193,13 +193,26 @@ async function load(browser, base, screen, profile) {
     bytes[kind] = (bytes[kind] ?? 0) + e.encodedDataLength;
     byEncoding[encoding] = (byEncoding[encoding] ?? 0) + 1;
   });
-  const began = Date.now();
+  // The page stamps the moment the screen first matches, measured from the
+  // navigation's own start. Timing the wait from outside counted Playwright's
+  // polling back-off (0, 20, 100, 100, 500 ms), which put a draw at 80 ms or
+  // 230 ms depending on which poll caught it.
+  await page.addInitScript((selector) => {
+    const stamp = () => {
+      if (window.__drawnAt == null && document.querySelector(selector)) {
+        window.__drawnAt = performance.now();
+        watcher.disconnect();
+      }
+    };
+    const watcher = new MutationObserver(stamp);
+    watcher.observe(document, { childList: true, subtree: true });
+  }, screen.drawn);
   await page.goto(base + screen.path, { waitUntil: 'commit' });
   let drawn = null;
   let untilDrawn = null;
   try {
-    await page.locator(screen.drawn).first().waitFor({ timeout: 90_000 });
-    drawn = Date.now() - began;
+    await page.waitForFunction(() => window.__drawnAt != null, null, { timeout: 90_000, polling: 'raf' });
+    drawn = Math.round(await page.evaluate(() => window.__drawnAt));
     untilDrawn = Object.values(bytes).reduce((a, b) => a + b, 0);
   } catch {}
   // What the screen fetches right after it draws is part of its cost.
