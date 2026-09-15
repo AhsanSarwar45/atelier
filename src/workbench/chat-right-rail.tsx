@@ -76,6 +76,31 @@ export function useRightRail(): [boolean, () => void] {
   return [open, flip];
 }
 
+/** Where the chat list's open-or-shut on a wide screen is remembered. */
+const LEFT_RAIL = 'workbench.left-rail';
+
+/**
+ * Whether the chat list stands beside the conversation on a wide screen: open
+ * unless he shut it, and remembered the same way as the rail above. A phone
+ * does not ask — there the list is a sheet opened for one pick.
+ */
+export function useLeftRail(): [boolean, () => void] {
+  const [open, setOpen] = useState(true);
+
+  useEffect(() => {
+    setOpen(localStorage.getItem(LEFT_RAIL) !== '0');
+  }, []);
+
+  const flip = useCallback(() => {
+    setOpen((was) => {
+      localStorage.setItem(LEFT_RAIL, was ? '0' : '1');
+      return !was;
+    });
+  }, []);
+
+  return [open, flip];
+}
+
 /** Where the rail's choice of view is remembered between visits. */
 const GIT_VIEW = 'workbench.git-panel';
 const GIT_DIFF = 'workbench.git-diff';

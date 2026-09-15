@@ -24,6 +24,7 @@ import {
   ListChecks,
   MessageSquare,
   PanelLeft,
+  PanelLeftClose,
   PanelRight,
   PanelRightClose,
   Paperclip,
@@ -59,7 +60,7 @@ import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { isPhoneScreen, usePhoneScreen } from '@/lib/screen-width';
-import { ChatRightRail, useGitDiff, useGitPanel, useRightRail, type RailView } from '@/workbench/chat-right-rail';
+import { ChatRightRail, useGitDiff, useGitPanel, useLeftRail, useRightRail, type RailView } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { ComposerEditor, type ComposerHandle } from '@/workbench/composer-editor';
 import { fileCompletions } from '@/workbench/composer-files';
@@ -975,8 +976,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [pick, setPick] = useState(0);
   /** The `/` menu, put away by hand until the next keystroke. */
   const [shut, setShut] = useState(false);
-  /** Only ever seen on a narrow screen; the rail is always there on a wide one. */
+  /** The sheet a narrow screen opens the chat list in. */
   const [railOpen, setRailOpen] = useState(false);
+  /** The chat list's column on a wide screen, remembered between visits. */
+  const [leftOpen, flipLeft] = useLeftRail();
   /** The chat's own column on the right, remembered between visits. */
   const [rightOpen, flipRight] = useRightRail();
   /** Which of the rail's two views it is on, remembered the same way (bw-8dp8.5). */
@@ -1708,11 +1711,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           not inside either pane (bw-81wt.5). */}
       <TabLead tab="chat">
         <ToolButton
-          icon={<PanelLeft />}
-          label="Chats"
-          className="md:hidden"
+          icon={phone || leftOpen ? <PanelLeftClose /> : <PanelLeft />}
+          label={phone ? 'Chats' : leftOpen ? 'Hide chats' : 'Show chats'}
           data-testid="chat-rail-toggle"
-          onClick={() => setRailOpen((v) => !v)}
+          data-collapsed={!leftOpen}
+          onClick={() => (phone ? setRailOpen((v) => !v) : flipLeft())}
         />
       </TabLead>
 
@@ -1903,6 +1906,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           'z-50 h-full shrink-0 bg-background transition-transform md:relative md:z-30 md:translate-x-0',
           'absolute inset-y-0 left-0 md:w-[var(--chat-left-rail-width)]',
           railOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full',
+          // Folded away by hand on a wide screen (bw-flq1.1).
+          !leftOpen && 'md:hidden',
         )}
       >
         <ChatSidebar
@@ -1920,12 +1925,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           startingNewChat={starting}
         />
       </div>
-      <ResizeDivider
-        side="left"
-        value={leftWidth}
-        onChange={changeLeftWidth}
-        maximum={() => (shellRef.current?.clientWidth ?? window.innerWidth) - (rightOpen && sessionId ? rightWidth : 0) - MIN_CHAT_WIDTH}
-      />
+      {leftOpen && (
+        <ResizeDivider
+          side="left"
+          value={leftWidth}
+          onChange={changeLeftWidth}
+          maximum={() => (shellRef.current?.clientWidth ?? window.innerWidth) - (rightOpen && sessionId ? rightWidth : 0) - MIN_CHAT_WIDTH}
+        />
+      )}
       {/* Mounted either way and faded, so the darkening arrives with the panel
           instead of snapping on in front of it (bw-7ks.22.12). */}
       <Button
@@ -1963,7 +1970,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               value={rightWidth}
               onChange={changeRightWidth}
               onDragging={setResizingRight}
-              maximum={() => (shellRef.current?.clientWidth ?? window.innerWidth) - leftWidth - MIN_CHAT_WIDTH}
+              maximum={() => (shellRef.current?.clientWidth ?? window.innerWidth) - (leftOpen ? leftWidth : 0) - MIN_CHAT_WIDTH}
             />
           )}
           <ChatRightRail
