@@ -78,9 +78,93 @@ pub fn already_held(offered: Option<&str>, tag: &str) -> bool {
         .any(|one| one == tag)
 }
 
+/// Whether the browser said it can take a gzipped answer.
+///
+/// Read token by token, so `gzip;q=0` — "anything but gzip" — is heard as the
+/// refusal it is rather than matched as a substring.
+pub fn accepts_gzip(offered: Option<&str>) -> bool {
+    let Some(offered) = offered else {
+        return false;
+    };
+    offered.split(',').any(|one| {
+        let mut parts = one.split(';');
+        let name = parts.next().unwrap_or("").trim();
+        let refused = parts.any(|param| {
+            param
+                .trim()
+                .strip_prefix("q=")
+                .and_then(|q| q.trim().parse::<f32>().ok())
+                .is_some_and(|q| q == 0.0)
+        });
+        (name.eq_ignore_ascii_case("gzip") || name == "*") && !refused
+    })
+}
+
+/// Whether an answer is worth compressing on its way out.
+///
+/// Only text is, and only when it is whole and big enough to repay the
+/// header. A live event stream would be held back until a buffer filled, a
+/// connection being upgraded has no body to compress, and a partial or
+/// seekable answer would stop matching the ranges it was asked for.
+pub fn worth_compressing(status: u16, content_type: Option<&str>, length: Option<u64>, ranged: bool) -> bool {
+    if matches!(status, 101 | 204 | 206 | 304) || ranged {
+        return false;
+    }
+    if length.is_some_and(|length| length < 1024) {
+        return false;
+    }
+    let Some(kind) = content_type.map(|kind| kind.split(';').next().unwrap_or("").trim().to_ascii_lowercase()) else {
+        return false;
+    };
+    if kind == "text/event-stream" {
+        return false;
+    }
+    kind.starts_with("text/")
+        || kind == "application/json"
+        || kind.ends_with("+json")
+        || kind == "application/javascript"
+        || kind == "application/xml"
+        || kind == "image/svg+xml"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gzip_is_taken_only_when_the_browser_offers_it() {
+        // What Chromium sends to a LAN address over http, and to loopback.
+        assert!(accepts_gzip(Some("gzip, deflate")));
+        assert!(accepts_gzip(Some("gzip, deflate, br, zstd")));
+        assert!(accepts_gzip(Some("GZIP;q=0.5")));
+        assert!(accepts_gzip(Some("*")));
+        assert!(!accepts_gzip(None), "no header means the bytes as they are");
+        assert!(!accepts_gzip(Some("identity")));
+        assert!(!accepts_gzip(Some("br, zstd")));
+        assert!(!accepts_gzip(Some("gzip;q=0, deflate")), "a refusal was read as an offer");
+        assert!(!accepts_gzip(Some("x-gzip-ish")), "a substring was read as the token");
+    }
+
+    #[test]
+    fn a_whole_text_answer_is_compressed() {
+        assert!(worth_compressing(200, Some("application/json"), Some(6_000_000), false));
+        assert!(worth_compressing(200, Some("application/json; charset=utf-8"), None, false));
+        assert!(worth_compressing(201, Some("text/html; charset=utf-8"), Some(4096), false));
+        assert!(worth_compressing(200, Some("image/svg+xml"), Some(8192), false));
+    }
+
+    #[test]
+    fn a_stream_an_upgrade_a_range_or_a_crumb_is_not() {
+        assert!(!worth_compressing(200, Some("text/event-stream"), None, false), "live events would be held back");
+        assert!(!worth_compressing(101, None, None, false), "an upgrade has no body");
+        assert!(!worth_compressing(206, Some("text/plain"), Some(1 << 20), true), "a range would stop matching");
+        assert!(!worth_compressing(200, Some("text/plain"), Some(1 << 20), true), "a seekable file would stop matching");
+        assert!(!worth_compressing(200, Some("application/json"), Some(40), false), "the header costs more than it saves");
+        assert!(!worth_compressing(200, Some("video/mp4"), Some(1 << 20), false));
+        assert!(!worth_compressing(200, Some("image/png"), Some(1 << 20), false));
+        assert!(!worth_compressing(200, None, Some(1 << 20), false), "an unnamed body may already be packed");
+        assert!(!worth_compressing(304, Some("text/html"), None, false));
+    }
 
     #[test]
     fn a_page_is_checked_with_us_on_every_visit() {

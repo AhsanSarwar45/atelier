@@ -53,6 +53,16 @@ fn every_folder_the_product_carries_is_one_the_build_watches() {
     );
     for folder in &carried {
         let named = folder.trim_end_matches('/');
+        // A folder under `$OUT_DIR` is written by the build script itself from
+        // a folder it watches, so it is the name it writes under that counts.
+        if let Some(made) = named.strip_prefix("$OUT_DIR/") {
+            assert!(
+                script.contains(&format!("\"{made}\"")),
+                "`{named}` travels inside the binary but the build script never \
+                 writes it, so the binary would carry nothing there"
+            );
+            continue;
+        }
         assert!(
             script.contains(named),
             "`{named}` travels inside the binary and the build script does not \

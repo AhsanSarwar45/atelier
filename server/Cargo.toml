@@ -12,7 +12,9 @@ path = "src/main.rs"
 [dependencies]
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
-tower-http = { version = "0.5", features = ["cors", "fs"] }
+# `compression-gzip` answers the API compressed. gzip and not brotli: a device
+# reaching this app over plain http on the LAN is offered only gzip and deflate.
+tower-http = { version = "0.5", features = ["cors", "fs", "compression-gzip"] }
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps a settings object's keys in the order they were written,
 # so the session-context hook `personal.rs` merges into a provider's settings is
@@ -27,7 +29,9 @@ toml = "0.8"
 toml_edit = "0.22"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-rust-embed = { version = "8", features = ["include-exclude", "debug-embed"] }
+# `interpolate-folder-path` lets the screens be embedded from `$OUT_DIR`, where
+# `build.rs` has already gzipped them (see `serve_static` in `main.rs`).
+rust-embed = { version = "8", features = ["include-exclude", "debug-embed", "interpolate-folder-path"] }
 open = "5"
 mime_guess = "2"
 # Git's own ignore rules, read the way git reads them. Two callers: one level
@@ -84,6 +88,10 @@ tempfile = "3"
 trash = "5"
 sysinfo = "0.33"
 
+[build-dependencies]
+# Gzips the screens once at build time, so they are carried and served compressed.
+flate2 = "1"
+
 [dev-dependencies]
 # `test-util` gives the tests a pausable clock, so the supervisor's growing
 # backoff can be watched go by without the wall-clock waits it names.
@@ -99,3 +107,13 @@ tower = { version = "0.4", features = ["util"] }
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# The installed program is the one a person downloads and keeps running, so it
+# is built for size and speed together: one codegen unit and whole-program LTO
+# let the optimiser see across crates, and symbols are left out of the file
+# (bw-fbzd.3). Panics still unwind, so one failed request does not take the
+# server down with it.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"

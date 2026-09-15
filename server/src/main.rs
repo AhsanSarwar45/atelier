@@ -26,9 +26,10 @@ use tower_http::cors::{Any, CorsLayer};
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
-/// Embedded static files from the Next.js build output.
+/// Embedded static files from the Next.js build output, as `build.rs` carries
+/// them: every file that shrinks is stored gzipped under `<name>.gz`.
 #[derive(Embed)]
-#[folder = "../out/"]
+#[folder = "$OUT_DIR/screens/"]
 #[allow_missing = true]
 struct Assets;
 
@@ -56,32 +57,23 @@ async fn serve_static(req: Request<Body>) -> impl IntoResponse {
         .and_then(|offered| offered.to_str().ok())
         .map(str::to_owned);
     let held = held.as_deref();
+    let gzip = serving::accepts_gzip(
+        req.headers()
+            .get(header::ACCEPT_ENCODING)
+            .and_then(|offered| offered.to_str().ok()),
+    );
 
-    // Try the exact path first
-    if let Some(content) = Assets::get(&path) {
-        let mime = mime_guess::from_path(&path).first_or_octet_stream();
-        return served(&path, content, mime.as_ref(), held);
-    }
-
-    // Try with .html extension (for Next.js static export)
-    let html_path = format!("{}.html", path);
-    if let Some(content) = Assets::get(&html_path) {
-        return served(&html_path, content, "text/html", held);
-    }
-
-    // Try index.html in subdirectory
+    // The exact path, then the Next.js export's `.html` and `index.html`
+    // spellings of it, then the root page for client-side routing.
     let index_path = if path.is_empty() {
         "index.html".to_string()
     } else {
         format!("{}/index.html", path)
     };
-    if let Some(content) = Assets::get(&index_path) {
-        return served(&index_path, content, "text/html", held);
-    }
-
-    // Fallback to root index.html for SPA client-side routing
-    if let Some(content) = Assets::get("index.html") {
-        return served("index.html", content, "text/html", held);
+    for name in [path.clone(), format!("{path}.html"), index_path, "index.html".into()] {
+        if let Some(found) = carried(&name) {
+            return served(&name, found, held, gzip);
+        }
     }
 
     // 404 if nothing found
@@ -114,28 +106,76 @@ async fn said_not_to_keep(req: Request<Body>, next: Next) -> Response<Body> {
 
 /// One embedded file, answered the same way whichever of the four routes above
 /// found it — which is what stops a rule being added to three of them.
-fn served(path: &str, file: EmbeddedFile, mime: &str, held: Option<&str>) -> Response<Body> {
-    let tag = serving::tag_for(&file.metadata.sha256_hash());
+fn served(path: &str, (file, packed): (EmbeddedFile, bool), held: Option<&str>, gzip: bool) -> Response<Body> {
+    let mime = mime_guess::from_path(path).first_or_octet_stream();
+    let mut tag = serving::tag_for(&file.metadata.sha256_hash());
+    // The unpacked answer is different bytes, so it answers to its own tag.
+    let unpack = packed && !gzip;
+    if unpack {
+        tag.insert_str(tag.len() - 1, "-identity");
+    }
     let kept_for = serving::kept_for(path);
+    let mut answer = Response::builder()
+        .header(header::CACHE_CONTROL, kept_for)
+        .header(header::ETAG, &tag);
+    if packed {
+        answer = answer.header(header::VARY, "accept-encoding");
+    }
 
     // The browser already has this exact file. Saying so costs a few bytes
     // instead of the whole file, which is what makes asking every time cheap.
     if serving::already_held(held, &tag) {
-        return Response::builder()
-            .status(StatusCode::NOT_MODIFIED)
-            .header(header::CACHE_CONTROL, kept_for)
-            .header(header::ETAG, &tag)
-            .body(Body::empty())
-            .unwrap();
+        return answer.status(StatusCode::NOT_MODIFIED).body(Body::empty()).unwrap();
     }
 
-    Response::builder()
+    // Carried in the binary for its whole life, so it is handed over as it
+    // sits rather than copied for every request.
+    let bytes = match file.data {
+        std::borrow::Cow::Borrowed(bytes) => axum::body::Bytes::from_static(bytes),
+        std::borrow::Cow::Owned(bytes) => axum::body::Bytes::from(bytes),
+    };
+    let body = if unpack {
+        let mut plain = Vec::new();
+        if let Err(e) = std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&bytes[..]), &mut plain) {
+            tracing::error!("carried screen {path} could not be unpacked: {e}");
+            return Response::builder().status(StatusCode::INTERNAL_SERVER_ERROR).body(Body::empty()).unwrap();
+        }
+        Body::from(plain)
+    } else {
+        if packed {
+            answer = answer.header(header::CONTENT_ENCODING, "gzip");
+        }
+        Body::from(bytes)
+    };
+    answer
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, mime)
-        .header(header::CACHE_CONTROL, kept_for)
-        .header(header::ETAG, &tag)
-        .body(Body::from(file.data.into_owned()))
+        .header(header::CONTENT_TYPE, mime.as_ref())
+        .body(body)
         .unwrap()
+}
+
+/// The compression layer's question, answered by `serving::worth_compressing`.
+fn compressible(
+    status: StatusCode,
+    _: axum::http::Version,
+    headers: &axum::http::HeaderMap,
+    _: &axum::http::Extensions,
+) -> bool {
+    let text = |name| headers.get(name).and_then(|value: &HeaderValue| value.to_str().ok());
+    serving::worth_compressing(
+        status.as_u16(),
+        text(header::CONTENT_TYPE),
+        text(header::CONTENT_LENGTH).and_then(|length| length.parse().ok()),
+        headers.contains_key(header::ACCEPT_RANGES) || headers.contains_key(header::CONTENT_RANGE),
+    )
+}
+
+/// One carried screen file by the name it is asked for, and whether it is
+/// stored gzipped.
+fn carried(name: &str) -> Option<(EmbeddedFile, bool)> {
+    Assets::get(&format!("{name}.gz"))
+        .map(|file| (file, true))
+        .or_else(|| Assets::get(name).map(|file| (file, false)))
 }
 
 #[tokio::main]
@@ -585,6 +625,16 @@ async fn serve(open_browser: bool) {
         .layer(Extension(bootstrap_bus))
         .layer(Extension(database))
         .layer(Extension(dolt_manager))
+        // A board is megabytes of JSON; a device on the network should not
+        // wait on it byte for byte (bw-fbzd.2). The screens are already carried
+        // gzipped and say so, so this leaves them alone.
+        .layer(
+            // The fastest level: a board or a chat list is polled over and over,
+            // and most of the saving is in the first pass anyway.
+            tower_http::compression::CompressionLayer::new()
+                .quality(tower_http::CompressionLevel::Fastest)
+                .compress_when(compressible),
+        )
         .layer(cors);
 
     // Where it bound, not an address to open: `http://0.0.0.0:3008` is not
