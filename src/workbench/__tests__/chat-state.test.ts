@@ -349,7 +349,7 @@ describe('the whole vocabulary for what a chat is doing', () => {
     { doing: 'running', word: 'Running', mark: 'running', counts: true, working: true },
     { doing: 'summarising', word: 'Summarising', mark: 'summarising', counts: true, working: true },
     { doing: 'retrying', word: 'Retrying', mark: 'retrying', counts: true, working: true },
-    { doing: 'helping', word: 'Helper working', mark: 'helping', counts: true, working: true },
+    { doing: 'helping', word: 'Background working', mark: 'helping', counts: true, working: true },
     { doing: 'working', word: 'Working', mark: 'working', counts: true, working: true },
     // Not working: it is the chat asking rather than answering, and the whole
     // point of its own mark is that the two do not look alike.

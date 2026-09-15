@@ -795,6 +795,23 @@ async fn append(database: &ChatDb, events: Vec<Event>) -> Result<(), agent_clien
         .map_err(acp_error)
 }
 
+/// A live turn's standing, taken out of what the normalizer produced.
+///
+/// The standing is published by the one status decision (`status.rs`) and by
+/// nothing else. A signal still counts: the normalizer keeps what it said as a
+/// runtime fact, and the caller asks the decision straight after, so the
+/// status follows the signal at once and can never be written over by a
+/// second opinion (bw-1fw6). Says whether anything was taken out.
+fn withhold_standing(events: Vec<Event>) -> (Vec<Event>, bool) {
+    let before = events.len();
+    let kept: Vec<Event> = events
+        .into_iter()
+        .filter(|event| event.kind != crate::workbench::protocol::EventKind::SessionState)
+        .collect();
+    let withheld = kept.len() != before;
+    (kept, withheld)
+}
+
 fn event(value: Value) -> Result<Event, agent_client_protocol::Error> {
     serde_json::from_value(value).map_err(acp_error)
 }
@@ -972,11 +989,9 @@ async fn permission(
             "options":options, "acp":raw
         }))?
     };
-    let waiting = event(json!({
-        "type":"session.state", "sessionId":local_session_id, "seq":0, "at":now(),
-        "state":"waiting_permission", "label":"Waiting for your answer"
-    }))?;
-    if let Err(error) = database.append_many(vec![asked, waiting]).await {
+    // Waiting for the answer is the status decision's to say: it counts the
+    // open question, and the question being asked is what sets it deciding.
+    if let Err(error) = database.append_many(vec![asked]).await {
         broker.pending.lock().await.remove(&ask_id);
         return Err(acp_error(error));
     }
@@ -1259,13 +1274,6 @@ async fn elicitation(
         }
     };
     database.append(asked).await.map_err(acp_error)?;
-    database
-        .append(event(json!({
-            "type":"session.state", "sessionId":local_session_id, "seq":0, "at":now(),
-            "state":"waiting_permission", "label":"Waiting for your answer"
-        }))?)
-        .await
-        .map_err(acp_error)?;
     Ok(Box::pin(async move {
         let response = receive.await.map_err(acp_error)?;
         let accepted = response["action"] == "accept";
@@ -2222,8 +2230,10 @@ impl AcpDriver {
                 if !controls.is_closed() && !activity.request_is_active(&requests) && activity.turn_is_open() {
                     permissions.cancel_all().await;
                     elicitations.cancel_all().await;
-                    let ended = activity.finish_turn(&session_id, brand, &json!({"stopReason":"end_turn"}));
-                    database.append_many(ended).await?;
+                    let (ended, _) = withhold_standing(activity.finish_turn(&session_id, brand, &json!({"stopReason":"end_turn"})));
+                    if !ended.is_empty() {
+                        database.append_many(ended).await?;
+                    }
                 }
                 let pending = permissions.pending.lock().await.values().any(|ask| !ask.answer.is_closed())
                     || elicitations.pending.lock().await.values().any(|ask| !ask.answer.is_closed());
@@ -2231,12 +2241,15 @@ impl AcpDriver {
                 super::super::status::reconcile(&database, &session_id, Some(&facts)).await
             })
         });
+        let task_reconcile = reconcile.clone();
         tokio::spawn(async move {
             let replaying = Arc::new(AtomicBool::new(false));
             let updates_db = task_database.clone();
             let updates_session = task_session.id.clone();
             let updates_brand = brand;
             let updates_normalizer = normalizer.clone();
+            let updates_reconcile = task_reconcile.clone();
+            let ready_reconcile = task_reconcile.clone();
             let updates_io = task_io.clone();
             let updates_replaying = replaying.clone();
             let permission_db = task_database.clone();
@@ -2274,12 +2287,16 @@ impl AcpDriver {
                             notification.params(),
                         )
                         .await;
-                        let events = updates_normalizer.lock().await.update(
+                        let (events, withheld) = withhold_standing(updates_normalizer.lock().await.update(
                             &updates_session,
                             updates_brand,
                             &raw,
-                        );
-                        append(&updates_db, events).await
+                        ));
+                        append(&updates_db, events).await?;
+                        if withheld {
+                            updates_reconcile().await.map_err(acp_error)?;
+                        }
+                        Ok(())
                     },
                     agent_client_protocol::on_receive_notification!(),
                 )
@@ -2557,10 +2574,7 @@ impl AcpDriver {
                             "permissionMode":pinned_mode, "model":pinned_model,
                             "effort":pinned_effort, "collaborationMode":pinned_collaboration
                         }))?).await.map_err(acp_error)?;
-                        task_database.append(event(json!({
-                            "type":"session.state", "sessionId":task_session.id, "seq":0, "at":now(),
-                            "state":"idle", "label":"Ready"
-                        }))?).await.map_err(acp_error)?;
+                        ready_reconcile().await.map_err(acp_error)?;
                         if let Some(ready) = ready.lock().await.take() {
                             let _ = ready.send(Ok(remote_id.clone()));
                         }
@@ -2575,6 +2589,7 @@ impl AcpDriver {
                                     let provider = brand;
                                     let remote_id = remote_id.clone();
                                     let normalizer = normalizer.clone();
+                                    let prompt_reconcile = task_reconcile.clone();
                                     let local_model = task_session.model.clone();
                                     let spawned = connection.spawn(async move {
                                         let _request_lease = request_lease;
@@ -2628,7 +2643,11 @@ impl AcpDriver {
                                                 }
                                             }
                                         };
-                                        database.append_many(events).await.map_err(acp_error)?;
+                                        let (events, _) = withhold_standing(events);
+                                        if !events.is_empty() {
+                                            database.append_many(events).await.map_err(acp_error)?;
+                                        }
+                                        prompt_reconcile().await.map_err(acp_error)?;
                                         Ok(())
                                     });
                                     let answer = spawned

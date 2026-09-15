@@ -1,17 +1,72 @@
 # Chat status ownership
 
-Live runtime facts are the authority for app-owned chats. The saved
-`session.state` is a cached projection, never evidence that a turn exists.
-`status.rs::resolve` is the single status decision: it takes attachment liveness,
-the actual current prompt task, pending answer receivers, activity, and the
-last terminal outcome. Stale database activity cannot override these facts.
+A chat's status is decided in one place, `status.rs::reconcile`, from facts that
+can be checked at the moment it is asked. The saved `session.state` is only the
+cached projection of that decision, never evidence that a turn exists, and no
+other code publishes a live turn's standing.
 
-`WorkbenchRegistry::reconcile_status` applies that decision on open, snapshots,
-commands (including sending and stopping), runtime events, and a five-second
-sweep. Changes are persisted as ordinary `session.state` events, so the session
-row, transcript projection, sidebar, and restored screen share the correction.
-An unchanged status creates no new event or clock reset. The sweep also covers
-lost notifications; it does not infer completion from a quiet transcript.
+## The facts
+
+- **The runtime's own objects**: attachment liveness, the outstanding prompt
+  request (`RequestLease`), open permission and question receivers, the
+  activity the normalizer read off provider signals (including a signal's own
+  label, such as Retrying), and the last terminal outcome.
+- **The provider's record on disk** (`liveness.rs`). For Claude, the JSONL
+  record says when the agent's reply ended: its last assistant row carries a
+  `stop_reason` other than `tool_use`, with no user row after it. The adapter
+  holds the prompt request open for as long as it believes tasks are live, so
+  the request alone is the adapter's belief, not proof of work. An ending is
+  believed once it is at least two seconds old (the row is written slightly
+  before the wire finishes delivering) and not older than the latest message.
+- **The machine**. A backgrounded command's shell holds its output file open for
+  as long as it runs, and nothing holds it afterwards. The file is named in the
+  command's own tool result ("Output is being written to: PATH").
+
+`resolve` is a pure function of those facts. A connected chat waiting on the
+person reads Waiting for your answer. A reply still going reads its activity.
+A reply that is over, with a task it started still alive, reads
+`waiting_for_agents`, drawn as **Background working**. Otherwise it reads its
+outcome. A detached chat keeps only a terminal outcome.
+
+## Background tasks
+
+`settle_background` runs inside every reconciliation and closes each open
+panel task that is shown to have ended:
+- by the notice the provider wrote in its record;
+- by a command's output file that no process holds any more;
+- by a helper's own record ending its reply, whose last words become the
+  answer;
+- by the chat's process being gone.
+
+Work that nothing shows has ended stays open. A chat started from a terminal
+runs outside the app, so its process not being attached here says nothing
+about its tasks. The panel, the chat bar and the sidebar therefore read the
+same settled record.
+
+Provider notices of a task's end arrive late or never. In bw-1fw6 a command
+finished at 10:08 and its notice was written at 15:03, when its process died.
+Two others were never written. The adapter held the turn open throughout, and
+the chat read Running · Terminal for hours. Reloading asked the same wrong
+question again. The decision no longer waits on those messages.
+
+## When it runs
+
+`WorkbenchRegistry::reconcile_status` applies the decision on open, snapshots,
+commands (including sending and stopping), every event of an attached chat,
+and a five-second sweep. The sweep covers chats whose row or whose last status
+event is active, because a row can be put to sleep without an event.
+
+Live signals take the same route. The client removes `session.state` from what
+the normalizer produced on the update, prompt-completion and reconciler paths.
+The normalizer keeps the signal as a runtime fact, and the client asks the
+decision straight away. A permission or question being asked sets it deciding
+through its own event. Changes are persisted as ordinary `session.state`
+events, so the session row, transcript projection, sidebar and restored screen
+share the result. An unchanged status creates no event and no clock reset.
+While a reply is going, tasks are looked at no more than every three seconds.
+
+Terminal outcomes written as a runtime closes (Stopped, Failed, Asleep) remain
+direct facts; the decision preserves them for a detached chat.
 
 Prompt membership follows the actual future's lifetime through a `RequestLease`,
 including a failed spawn, cancellation, or unwinding. Generation IDs prevent an
@@ -68,7 +123,7 @@ its root answer ended and usage arrived, while a helper kept running.
 The bundled adapter now emits `_meta.atelier.turnPhase=waiting_for_agents`
 when it defers settlement. The normalizer closes only the parent's message
 lanes and publishes the canonical `waiting_for_agents` state. All screens draw
-“Helper working” and retain Stop. Child output cannot replace that phase;
+“Background working” and retain Stop. Child output cannot replace that phase;
 fresh root output can. The final ACP response uses the usual turn cleanup and
 Idle. Permission and question answers update their pending-request facts; the shared
 reconciler then derives the current activity. They contain no separate status
@@ -103,7 +158,7 @@ Answering, including its stored status event. No event is broadcast and the
 provider remains silent. The baseline reopens with Answering and Stop. The
 fixed app repairs it to Idle on open, on sending, and through the periodic
 sweep without any interaction. The reverse corruption (Idle during a live
-helper turn) is repaired back to Helper working, and Stop/reload are verified.
+helper turn) is repaired back to Background working, and Stop/reload are verified.
 This tests recovery rather than assuming every completion event arrives.
 
 Evidence: `tests/results/bw-b0m4-reconcile-before.png` and

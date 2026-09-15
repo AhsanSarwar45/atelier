@@ -35,18 +35,18 @@ test('the real Claude adapter exposes helper work and settles completion and Sto
   await expect(page.getByTestId('chat-tab')).toContainText('The parent answer is complete.');
   await expect.poll(() => existsSync(resolve(projectPath, 'held-turns'))).toBe(true);
   await expect(row).toHaveAttribute('data-state', baseline ? 'streaming' : 'waiting_for_agents');
-  await expect(row).toContainText(baseline ? 'Answering' : 'Helper working');
+  await expect(row).toContainText(baseline ? 'Answering' : 'Background working');
   await expect(page.getByTestId('stop-button')).toBeVisible();
   await page.screenshot({ path: `tests/results/bw-b0m4-helper-${baseline ? 'before' : 'after'}.png` });
   // Leave the baseline visible for the separate native screen-check capture.
   if (baseline) return;
   await page.reload();
-  await expect(row).toContainText('Helper working');
+  await expect(row).toContainText('Background working');
   writeFileSync(resolve(projectPath, 'ask-helper-1'), 'ask');
   await expect(row).toHaveAttribute('data-state', 'waiting_permission');
   await page.getByRole('button', { name: 'Allow helper', exact: true }).click();
   await expect(row).toHaveAttribute('data-state', 'waiting_for_agents');
-  await expect(row).toContainText('Helper working');
+  await expect(row).toContainText('Background working');
   writeFileSync(resolve(projectPath, 'question-helper-1'), 'ask');
   const question = page.getByTestId('question-card');
   await expect(question).toBeVisible();
@@ -59,7 +59,7 @@ test('the real Claude adapter exposes helper work and settles completion and Sto
   await expect(row).toHaveAttribute('data-state', 'idle');
   await expect(page.getByTestId('stop-button')).toHaveCount(0);
   await send('Start another background helper.');
-  await expect(row).toContainText('Helper working');
+  await expect(row).toContainText('Background working');
   const pid = Number(readFileSync(resolve(projectPath, 'adapter-pids'), 'utf8').trim().split('\n').at(-1));
   await page.getByTestId('stop-button').click();
   await expect(row).toContainText('Stopped');

@@ -589,7 +589,7 @@ test.describe('a chat another program is in', () => {
       { doing: 'thinking', word: 'Thinking', mark: 'thinking', detail: null, ago: 14_000, bar: false },
       { doing: 'waiting', word: 'Waiting for you', mark: 'waiting', detail: 'Bash', ago: 240_000, bar: false },
       { doing: 'retrying', word: 'Retrying', mark: 'retrying', detail: 'resets 4:40pm', ago: 30_000, bar: false },
-      { doing: 'helping', word: 'Helper working', mark: 'helping', detail: '3 helpers', ago: 95_000, bar: false },
+      { doing: 'helping', word: 'Background working', mark: 'helping', detail: '3 helpers', ago: 95_000, bar: false },
     ] as const;
 
     const made = FIVE.map((it) => {

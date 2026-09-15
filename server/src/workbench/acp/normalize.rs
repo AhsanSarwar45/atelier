@@ -124,6 +124,10 @@ pub struct AcpNormalizer {
     /// The last standing published for the chat itself, so an unchanged one is
     /// not written again on every ping.
     said_standing: Option<(String, Option<String>, Option<Value>)>,
+    /// What a provider's own signal last said the turn is doing ("Retrying",
+    /// "Compacting"), until the turn's standing next changes. Kept as a fact
+    /// for the status decision, which publishes it (bw-1fw6).
+    signal_standing: Option<Value>,
     /// How many of a call's pictures have already been sent on.
     ///
     /// A tool's content arrives whole on every ping, not as a delta, so a call
@@ -175,6 +179,7 @@ impl Default for AcpNormalizer {
             open_tools: HashSet::new(),
             running_calls: Vec::new(),
             said_standing: None,
+            signal_standing: None,
             tool_pictures: HashMap::new(),
             terminals: HashMap::new(),
             tool_starts: HashMap::new(),
@@ -1383,9 +1388,9 @@ impl AcpNormalizer {
             turn_open,
             pending_answer,
             prompted_at: self.prompted_at,
-            activity: self.standing_now().map(|(state, detail, call)| json!({
+            activity: self.signal_standing.clone().or_else(|| self.standing_now().map(|(state, detail, call)| json!({
                 "state":state, "label":Value::Null, "detail":detail, "call":call
-            })),
+            }))),
             // A future that vanished without publishing completion still
             // cannot leave its old activity behind. The request lifetime wins.
             outcome: if !turn_open && self.turn_is_open() {
@@ -1421,6 +1426,7 @@ impl AcpNormalizer {
             return Vec::new();
         }
         self.said_standing = Some(standing);
+        self.signal_standing = None;
         vec![self.envelope(
             session_id,
             provider,
@@ -1826,6 +1832,7 @@ impl AcpNormalizer {
                 .filter(|(state, _)| !self.turn_finished || *state != "running_tool");
             events.push(event);
             if let Some((state, label)) = status {
+                self.signal_standing = Some(json!({"state":state, "label":label}));
                 events.push(self.envelope(session_id, provider, raw, json!({
                     "type":"session.state", "state":state, "label":label
                 })));
@@ -2490,6 +2497,7 @@ impl AcpNormalizer {
         self.turn_finished = true;
         self.waiting_for_agents = false;
         self.said_standing = None;
+        self.signal_standing = None;
         let failure = Self::typed_failure(provider, raw);
         let mut events = Vec::new();
         // Activity belongs to this turn. A tool whose final update was lost
@@ -2721,6 +2729,7 @@ impl AcpNormalizer {
 
     pub fn begin_local_prompt(&mut self) {
         self.prompted_at = Some(Utc::now());
+        self.signal_standing = None;
         self.suppress_local_user = true;
         self.turn_finished = false;
         self.waiting_for_agents = false;

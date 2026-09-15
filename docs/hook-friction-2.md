@@ -1591,3 +1591,12 @@ otherwise unnecessary commit the land gate requires.
 Reproduced on `bw-q50n.3`: after `bw-q50n.1` landed and the generated checks
 card closed green, `atelier tool board/land bw-q50n.3` again refused solely
 because no commit subject named the generated `no-code` teardown card.
+
+## Edit and Write refuse a child claimed in its job copy (bw-1fw6.1, bw-1fw6.2)
+
+With `bw-1fw6.1` claimed in `worktrees/bw-1fw6`, the Edit and Write tools
+refused `server/src/workbench/liveness.rs` and `status.rs` because the epic
+`bw-1fw6` named by the directory was not in progress. The tools cannot carry the
+per-command bypass, so every change was written through the shell with the
+documented per-job `ATELIER_BYPASS` prefix. The same held for `bw-1fw6.2`.
+

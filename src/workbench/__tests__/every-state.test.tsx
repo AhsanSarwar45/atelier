@@ -702,12 +702,12 @@ describe('the four screens that say what a chat is doing', () => {
   it('a chat blocked on its helpers says how many, on every one of them', () => {
     const helping = held({ doing: 'helping', detail: '3 helpers' });
     expect(drawn(onTheList(helping), 'four-row-helping')).toEqual({
-      word: 'Helper working',
+      word: 'Background working',
       detail: '· 3 helpers',
       moving: true,
     });
     expect(drawn(inThePane(helping), 'four-card-helping', 'inline').detail).toBe('· 3 helpers');
-    expect(body(inThePane(helping))).toMatchObject({ label: 'Helper working', detail: '3 helpers' });
+    expect(body(inThePane(helping))).toMatchObject({ label: 'Background working', detail: '3 helpers' });
   });
 
   it('the command in flight beats the count at the foot, and is not said twice', () => {
