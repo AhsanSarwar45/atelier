@@ -191,6 +191,12 @@ export interface TranscriptQuestion {
   blocking: boolean;
   questions: QuestionField[];
   answers: QuestionAnswer[] | null;
+  /**
+   * Closed with no answer: the reader sent a message instead, or the turn
+   * stopped. Without it a closed question read as one still open, and its
+   * form stayed on screen asking for an answer nobody would take (bw-1duw.1).
+   */
+  unanswered?: boolean;
   parentId: string | null;
   askedBy: string | null;
   execution?: ExecutionContext;
@@ -884,7 +890,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
         | TranscriptQuestion
         | undefined;
       next.items = items.map((it) => it.kind === 'question' && it.id === e.requestId
-        ? { ...it, answers: e.answers }
+        ? { ...it, answers: e.answers ?? null, ...(e.answers ? {} : { unanswered: true }) }
         : it);
       next.agents = nowWaiting(view.agents, asked?.parentId ?? null, false);
       return next;
@@ -1384,7 +1390,8 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         const at = items.findIndex((item) => item.kind === 'question' && item.id === e.requestId);
         if (at !== -1) {
           const asked = items[at] as TranscriptQuestion;
-          asked.answers = e.answers;
+          asked.answers = e.answers ?? null;
+          if (!e.answers) asked.unanswered = true;
           waited(agents, asked.parentId ?? null, false);
         }
         break;

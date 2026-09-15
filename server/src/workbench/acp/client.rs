@@ -749,7 +749,36 @@ impl ElicitationBroker {
             let _ = question.answer.send(json!({"action":"decline"}));
         }
     }
+
+    /// Close every question still asked as not answered, the way the agent's
+    /// own terminal does when a message is sent instead of an answer. A
+    /// sign-in link carries no form and stays open: sending a message is no
+    /// word on whether the owner signed in.
+    async fn dismiss_questions(&self) {
+        let mut pending = self.pending.lock().await;
+        let asked = pending
+            .iter()
+            .filter(|(_, question)| question.schema.is_some())
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        for id in asked {
+            if let Some(question) = pending.remove(&id) {
+                let _ = question.answer.send(json!({"action":"decline"}));
+            }
+        }
+    }
 }
+
+/// What is left of a provider request once it is on screen: waiting for the
+/// owner's answer and saying what it was.
+///
+/// Handed back rather than awaited, because a request handler runs inside the
+/// connection's reading loop. Awaiting the owner there held that loop until they
+/// answered, so a message sent instead of an answer waited on a reply the loop
+/// could never read, and Stop queued behind that message (bw-1duw.1).
+type Answering<T> = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<T, agent_client_protocol::Error>> + Send>,
+>;
 
 fn acp_error(error: impl ToString) -> agent_client_protocol::Error {
     agent_client_protocol::Error::internal_error().data(error.to_string())
@@ -854,7 +883,7 @@ async fn permission(
     local_session_id: String,
     broker: Arc<PermissionBroker>,
     normalizer: Option<Arc<Mutex<AcpNormalizer>>>,
-) -> Result<RequestPermissionResponse, agent_client_protocol::Error> {
+) -> Result<Answering<RequestPermissionResponse>, agent_client_protocol::Error> {
     let raw = serde_json::to_value(&request).map_err(acp_error)?;
     // A question a sent-away helper raised is stamped with the call that sent
     // it, in the same place the helper's work is: `_meta.claudeCode`. Without
@@ -951,55 +980,58 @@ async fn permission(
         broker.pending.lock().await.remove(&ask_id);
         return Err(acp_error(error));
     }
-    let selected = match receive.await.map_err(acp_error)? {
-        PermissionAnswer::Chose(option) => option,
-        // Stopped before he answered. The card is closed saying so rather than
-        // left open forever, and the agent is told the turn was cancelled
-        // rather than handed a refusal the owner never made. No "Working"
-        // state follows it: the turn is over, and the stop path has already
-        // said where the chat came to rest.
-        PermissionAnswer::Cancelled => {
-            let resolved = if plan.is_some() {
-                json!({"type":"plan.resolved", "sessionId":local_session_id, "seq":0, "at":now(),
-                    "proposalId":ask_id, "status":"dismissed",
-                    "actionId":crate::workbench::lifecycle::NOBODY_ANSWERED, "feedback":null})
-            } else {
-                json!({"type":"ask.resolved", "sessionId":local_session_id, "seq":0, "at":now(),
-                    "askId":ask_id, "chosen":crate::workbench::lifecycle::NOBODY_ANSWERED})
-            };
-            database
-                .append_many(vec![event(resolved)?])
-                .await
-                .map_err(acp_error)?;
-            return Ok(RequestPermissionResponse::new(
-                RequestPermissionOutcome::Cancelled,
-            ));
-        }
-    };
-    // Whether the plan was approved is settled by the kind of the option that
-    // was pressed, not by the letters in its id. The ids are the agent's own
-    // vocabulary — Claude approves with "allow-once" and refuses with "reject",
-    // and reading either for the substring "allow" is a guess that happens to
-    // hold for that one agent and for nothing else (bw-t26l.20).
-    let resolved = if plan.is_some() {
-        let approved = raw["options"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|option| option["optionId"] == selected.as_str())
-            .and_then(|option| option["kind"].as_str())
-            .is_some_and(|kind| kind.starts_with("allow"));
-        json!({"type":"plan.resolved", "sessionId":local_session_id, "seq":0, "at":now(),
-            "proposalId":ask_id, "status":if approved{"approved"}else{"changes_requested"},
-            "actionId":if approved{"approve"}else{"request_changes"}})
-    } else {
-        json!({"type":"ask.resolved", "sessionId":local_session_id, "seq":0, "at":now(),
-            "askId":ask_id, "chosen":selected})
-    };
-    database.append(event(resolved)?).await.map_err(acp_error)?;
-    Ok(RequestPermissionResponse::new(
-        RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(selected)),
-    ))
+    let is_plan = plan.is_some();
+    Ok(Box::pin(async move {
+        let selected = match receive.await.map_err(acp_error)? {
+            PermissionAnswer::Chose(option) => option,
+            // Stopped before he answered. The card is closed saying so rather than
+            // left open forever, and the agent is told the turn was cancelled
+            // rather than handed a refusal the owner never made. No "Working"
+            // state follows it: the turn is over, and the stop path has already
+            // said where the chat came to rest.
+            PermissionAnswer::Cancelled => {
+                let resolved = if is_plan {
+                    json!({"type":"plan.resolved", "sessionId":local_session_id, "seq":0, "at":now(),
+                        "proposalId":ask_id, "status":"dismissed",
+                        "actionId":crate::workbench::lifecycle::NOBODY_ANSWERED, "feedback":null})
+                } else {
+                    json!({"type":"ask.resolved", "sessionId":local_session_id, "seq":0, "at":now(),
+                        "askId":ask_id, "chosen":crate::workbench::lifecycle::NOBODY_ANSWERED})
+                };
+                database
+                    .append_many(vec![event(resolved)?])
+                    .await
+                    .map_err(acp_error)?;
+                return Ok(RequestPermissionResponse::new(
+                    RequestPermissionOutcome::Cancelled,
+                ));
+            }
+        };
+        // Whether the plan was approved is settled by the kind of the option that
+        // was pressed, not by the letters in its id. The ids are the agent's own
+        // vocabulary — Claude approves with "allow-once" and refuses with "reject",
+        // and reading either for the substring "allow" is a guess that happens to
+        // hold for that one agent and for nothing else (bw-t26l.20).
+        let resolved = if is_plan {
+            let approved = raw["options"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|option| option["optionId"] == selected.as_str())
+                .and_then(|option| option["kind"].as_str())
+                .is_some_and(|kind| kind.starts_with("allow"));
+            json!({"type":"plan.resolved", "sessionId":local_session_id, "seq":0, "at":now(),
+                "proposalId":ask_id, "status":if approved{"approved"}else{"changes_requested"},
+                "actionId":if approved{"approve"}else{"request_changes"}})
+        } else {
+            json!({"type":"ask.resolved", "sessionId":local_session_id, "seq":0, "at":now(),
+                "askId":ask_id, "chosen":selected})
+        };
+        database.append(event(resolved)?).await.map_err(acp_error)?;
+        Ok::<_, agent_client_protocol::Error>(RequestPermissionResponse::new(
+            RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(selected)),
+        ))
+    }))
 }
 
 fn custom_question_field(property: &Value) -> Option<&str> {
@@ -1188,7 +1220,7 @@ async fn elicitation(
     database: ChatDb,
     local_session_id: String,
     broker: Arc<ElicitationBroker>,
-) -> Result<CreateElicitationResponse, agent_client_protocol::Error> {
+) -> Result<Answering<CreateElicitationResponse>, agent_client_protocol::Error> {
     let raw = serde_json::to_value(&request).map_err(acp_error)?;
     let request_id = raw["elicitationId"]
         .as_str()
@@ -1220,7 +1252,11 @@ async fn elicitation(
                 {"id":"decline","label":"Cancel","kind":"deny"}
             ], "acp":raw
         }))?,
-        _ => return serde_json::from_value(json!({"action":"decline"})).map_err(acp_error),
+        _ => {
+            let declined = serde_json::from_value::<CreateElicitationResponse>(json!({"action":"decline"}))
+                .map_err(acp_error);
+            return Ok(Box::pin(std::future::ready(declined)));
+        }
     };
     database.append(asked).await.map_err(acp_error)?;
     database
@@ -1230,25 +1266,27 @@ async fn elicitation(
         }))?)
         .await
         .map_err(acp_error)?;
-    let response = receive.await.map_err(acp_error)?;
-    let accepted = response["action"] == "accept";
-    let resolved_type = if raw["mode"] == "form" {
-        "question.resolved"
-    } else {
-        "ask.resolved"
-    };
-    let resolution = vec![event(json!({
-        "type":resolved_type, "sessionId":local_session_id, "seq":0, "at":now(),
-        "requestId":request_id, "askId":request_id,
-        "answers":response["answers"], "chosen":response["action"]
-    }))?];
-    database.append_many(resolution).await.map_err(acp_error)?;
-    let wire = if accepted {
-        json!({"action":"accept","content":typed_elicitation_content(&raw["requestedSchema"], &response["content"])})
-    } else {
-        json!({"action":"decline"})
-    };
-    serde_json::from_value(wire).map_err(acp_error)
+    Ok(Box::pin(async move {
+        let response = receive.await.map_err(acp_error)?;
+        let accepted = response["action"] == "accept";
+        let resolved_type = if raw["mode"] == "form" {
+            "question.resolved"
+        } else {
+            "ask.resolved"
+        };
+        let resolution = vec![event(json!({
+            "type":resolved_type, "sessionId":local_session_id, "seq":0, "at":now(),
+            "requestId":request_id, "askId":request_id,
+            "answers":response["answers"], "chosen":response["action"]
+        }))?];
+        database.append_many(resolution).await.map_err(acp_error)?;
+        let wire = if accepted {
+            json!({"action":"accept","content":typed_elicitation_content(&raw["requestedSchema"], &response["content"])})
+        } else {
+            json!({"action":"decline"})
+        };
+        serde_json::from_value::<CreateElicitationResponse>(wire).map_err(acp_error)
+    }))
 }
 
 /// The base64 payload and the media type of one attached picture.
@@ -1946,6 +1984,10 @@ impl AcpDriver {
         )
         .await?;
         let mut accepted = if active {
+            // Sent instead of an answer: the question is closed as not
+            // answered first, so the agent is not left asking it while the
+            // message waits behind the answer it is owed (bw-1duw.1).
+            self.elicitations.dismiss_questions().await;
             self.control(|reply| Control::Steer {
                 content,
                 suppress_echo: true,
@@ -2242,8 +2284,8 @@ impl AcpDriver {
                     agent_client_protocol::on_receive_notification!(),
                 )
                 .on_receive_request(
-                    async move |request: RequestPermissionRequest, responder, _connection| {
-                        let response = permission(
+                    async move |request: RequestPermissionRequest, responder, connection| {
+                        let answering = permission(
                             request,
                             permission_db.clone(),
                             permission_session.clone(),
@@ -2251,20 +2293,34 @@ impl AcpDriver {
                             Some(permission_normalizer.clone()),
                         )
                         .await?;
-                        responder.respond(response)
+                        // Waiting for the owner happens off the reading loop;
+                        // see `Answering`.
+                        connection.spawn(async move {
+                            let _ = match answering.await {
+                                Ok(response) => responder.respond(response),
+                                Err(error) => responder.respond_with_error(error),
+                            };
+                            Ok(())
+                        })
                     },
                     agent_client_protocol::on_receive_request!(),
                 )
                 .on_receive_request(
-                    async move |request: CreateElicitationRequest, responder, _connection| {
-                        let response = elicitation(
+                    async move |request: CreateElicitationRequest, responder, connection| {
+                        let answering = elicitation(
                             request,
                             elicitation_db.clone(),
                             elicitation_session.clone(),
                             elicitation_broker.clone(),
                         )
                         .await?;
-                        responder.respond(response)
+                        connection.spawn(async move {
+                            let _ = match answering.await {
+                                Ok(response) => responder.respond(response),
+                                Err(error) => responder.respond_with_error(error),
+                            };
+                            Ok(())
+                        })
                     },
                     agent_client_protocol::on_receive_request!(),
                 )
@@ -3679,6 +3735,77 @@ mod tests {
         }));
         // The steered line is a message like any other, and the answer names it.
         assert_eq!(answer["messageId"], recorded_message(&events));
+    }
+
+    /// A message sent while the agent is asking a question closes the question
+    /// as not answered before the message is steered in. A sign-in link is not
+    /// a question and stays open (bw-1duw.1).
+    #[tokio::test]
+    async fn a_message_sent_past_a_question_closes_it_as_not_answered() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let session = test_session("thinking");
+        database.create_session(session.clone()).await.unwrap();
+        let (controls, mut requests) = mpsc::unbounded_channel();
+        let (_, ended) = mpsc::unbounded_channel();
+        let mut activity = AcpNormalizer::default();
+        let generation = activity.begin_prompt();
+        let in_flight = super::super::super::status::Requests::default();
+        let _request = super::super::super::status::RequestLease::new(in_flight.clone(), generation);
+        let elicitations = Arc::new(ElicitationBroker::default());
+        let (question_answer, question_result) = oneshot::channel();
+        elicitations.pending.lock().await.insert(
+            "question-1".into(),
+            PendingElicitation {
+                answer: question_answer,
+                schema: Some(json!({"type":"object","properties":{},"required":[]})),
+                custom_fields: HashMap::new(),
+                native_questions: true,
+            },
+        );
+        let (sign_in_answer, _sign_in_result) = oneshot::channel();
+        elicitations.pending.lock().await.insert(
+            "sign-in-1".into(),
+            PendingElicitation {
+                answer: sign_in_answer,
+                schema: None,
+                custom_fields: HashMap::new(),
+                native_questions: false,
+            },
+        );
+        let driver = AcpDriver {
+            brand: "claude",
+            database: database.clone(),
+            session,
+            controls,
+            ended,
+            permissions: Arc::new(PermissionBroker::default()),
+            elicitations: elicitations.clone(),
+            carries: Arc::new(AtomicU8::new(Carries::default().packed())),
+            normalizer: Arc::new(Mutex::new(activity)),
+            reconcile: Arc::new(|| Box::pin(async { Ok(json!({})) })),
+            in_flight,
+        };
+        let sent = tokio::spawn(async move {
+            driver
+                .submit_user_turn(
+                    "Never mind",
+                    &[],
+                    vec![ContentBlock::Text(TextContent::new("Never mind"))],
+                )
+                .await
+        });
+        match requests.recv().await.unwrap() {
+            Control::Steer { reply, .. } => {
+                // Closed before the message goes in, not after it is answered.
+                assert_eq!(question_result.await.unwrap(), json!({"action":"decline"}));
+                reply.send(Ok(json!({"ok":true}))).unwrap();
+            }
+            _ => panic!("an active turn must be steered"),
+        }
+        sent.await.unwrap().unwrap();
+        assert!(!elicitations.is_pending("question-1").await);
+        assert!(elicitations.is_pending("sign-in-1").await);
     }
 
     /// The id of the recorded user message, from the events it was written as.

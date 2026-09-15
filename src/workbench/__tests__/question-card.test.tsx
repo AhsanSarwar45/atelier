@@ -32,6 +32,14 @@ const request = (overrides: Partial<Extract<TranscriptItem, { kind: 'question' }
 describe('question card', () => {
   beforeEach(() => sendCommand.mockClear());
 
+  it('a question closed with no answer says so instead of offering its form again', () => {
+    render(<QuestionCard item={request({ unanswered: true })} sessionId="session-1" />);
+    expect(screen.getByText('Not answered')).toBeInTheDocument();
+    expect(screen.getByText('Database')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Answer' })).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: 'Postgres' })).toBeNull();
+  });
+
   it('groups vertical described choices and sends one deliberate multi-answer response with a note', async () => {
     render(<QuestionCard item={request()} sessionId="session-1" />);
     expect(screen.getByText('Durable relational storage.')).toBeInTheDocument();

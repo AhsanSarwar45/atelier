@@ -1257,6 +1257,17 @@ export const QuestionCard = memo(function QuestionCard({
     return draft.optionIds.length > 0 || (draft.custom && Boolean(draft.customText.trim()));
   });
 
+  if (item.unanswered && !item.answers) {
+    return (
+      <Panel data-testid="question-card" data-question-state="resolved" className="space-y-2">
+        <div className="text-sm font-medium text-foreground">Not answered</div>
+        {item.questions.map((question) => (
+          <div key={question.id} className="text-sm font-medium text-muted-foreground">{question.header}</div>
+        ))}
+      </Panel>
+    );
+  }
+
   if (item.answers) {
     return (
       <Panel data-testid="question-card" data-question-state="resolved" className="space-y-2">

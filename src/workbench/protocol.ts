@@ -657,7 +657,8 @@ export type WbpEvent = EventBase &
     | {
         type: 'question.resolved';
         requestId: string;
-        answers: QuestionAnswer[];
+        /** Null when the question was closed without an answer. */
+        answers: QuestionAnswer[] | null;
       }
     | {
         type: 'plan.proposed';
