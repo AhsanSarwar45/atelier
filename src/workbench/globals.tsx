@@ -22,6 +22,7 @@ import { Row } from '@/components/ui/row';
 import * as api from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useLiveSessions, waitsOnYou, type LiveSession } from '@/workbench/live';
+import { readNotificationPreferences, showDeviceNotification, useNotificationPreferences } from '@/workbench/notification-preferences';
 
 /** Project ids to their names, fetched once — the tray names a project, not a path. */
 function useProjectNames(): Map<string, string> {
@@ -58,9 +59,12 @@ function chatHref(s: LiveSession): string {
 function WaitingTray({ names }: { names: Map<string, string> }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
-  const waiting = useLiveSessions().filter(waitsOnYou);
+  const sessions = useLiveSessions();
+  const { preferences } = useNotificationPreferences();
+  const waiting = preferences.needsAction ? sessions.filter(waitsOnYou) : [];
+  const updates = preferences.updates ? sessions.filter((s) => !waitsOnYou(s) && (s.state === 'idle' || s.state === 'stopped')) : [];
 
-  if (!waiting.length) return null;
+  if (!waiting.length && !updates.length) return null;
 
   return (
     /*
@@ -86,9 +90,9 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
         <PopoverTrigger asChild>
           <ToolButton
             icon={<Bell />}
-            label={`Waiting on you: ${waiting.length}`}
+            label={`Notifications: ${waiting.length + updates.length}`}
             data-testid="tray-badge"
-            data-count={waiting.length}
+            data-count={waiting.length + updates.length}
             data-open={open}
           />
         </PopoverTrigger>
@@ -105,7 +109,7 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
           data-testid="tray-count"
           className="pointer-events-none absolute -right-1 -top-1 min-w-4 justify-center px-1"
         >
-          {waiting.length}
+          {waiting.length + updates.length}
         </Badge>
       </div>
 
@@ -124,6 +128,7 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
           'w-96 max-w-[calc(100vw-1rem)] overflow-hidden p-0',
         )}
       >
+        {waiting.length > 0 && <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-t-muted">Needs action</div>}
         {waiting.map((s) => (
           <Row
             key={s.id}
@@ -146,6 +151,15 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
             </div>
           </Row>
         ))}
+        {updates.length > 0 && <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-t-muted">Other updates</div>}
+        {updates.map((s) => (
+          <Row key={s.id} ruled data-testid="tray-row" data-notification-type="update" onClick={() => { setOpen(false); router.push(chatHref(s)); }}>
+            <div className="truncate text-sm text-foreground">{s.title ?? 'Untitled chat'}</div>
+            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span className="truncate font-medium">{names.get(s.projectId) ?? 'Unknown project'}</span><span className="truncate">· Ready to read</span>
+            </div>
+          </Row>
+        ))}
       </PopoverContent>
     </Popover>
   );
@@ -157,11 +171,25 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
  */
 export function WorkbenchStatus() {
   const names = useProjectNames();
-  const waiting = useLiveSessions().filter(waitsOnYou).length;
+  const sessions = useLiveSessions();
+  const relevant = sessions.filter((s) => waitsOnYou(s) || s.state === 'idle' || s.state === 'stopped').length;
+
+  useEffect(() => {
+    const preferences = readNotificationPreferences();
+    const previous = JSON.parse(sessionStorage.getItem('atelier.notification-states') ?? '{}') as Record<string, string>;
+    if (preferences.device) for (const session of sessions) {
+      if (previous[session.id] && previous[session.id] !== session.state) {
+        const action = waitsOnYou(session);
+        const update = session.state === 'idle' || session.state === 'stopped';
+        if ((action && preferences.needsAction) || (update && preferences.updates)) void showDeviceNotification(session.title ?? 'Atelier chat', action ? whatItWaitsFor(session) : 'Ready to read', chatHref(session));
+      }
+    }
+    sessionStorage.setItem('atelier.notification-states', JSON.stringify(Object.fromEntries(sessions.map((s) => [s.id, s.state]))));
+  }, [sessions]);
 
   return (
     <div data-testid="workbench-globals" className="flex min-w-0 flex-1 items-center justify-end gap-3">
-      {waiting > 0 && <WaitingTray names={names} />}
+      {relevant > 0 && <WaitingTray names={names} />}
     </div>
   );
 }

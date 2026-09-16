@@ -12,11 +12,12 @@ import { Suspense, useCallback, useMemo } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { FileCode2, Palette, Puzzle, Search, SquareTerminal, Tag, Users } from 'lucide-react';
+import { Bell, FileCode2, Palette, Puzzle, Search, SquareTerminal, Tag, Users } from 'lucide-react';
 
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
 import { useProfiles } from '@/components/settings/account-picker';
 import { AppearanceSettings } from '@/components/settings/appearance-settings';
+import { NotificationSettings } from '@/components/settings/notification-settings';
 import { ProviderSection } from '@/components/settings/provider-section';
 import { SettingsGroup } from '@/components/settings/section';
 import { SettingsScreen, type SettingsSectionDef } from '@/components/settings/settings-screen';
@@ -32,6 +33,7 @@ import { TerminalSettings } from '@/workbench/terminal-settings';
 
 const SECTIONS: SettingsSectionDef[] = [
   { id: 'appearance', label: 'Appearance', hint: 'Theme, type', icon: <Palette /> },
+  { id: 'notifications', label: 'Notifications', hint: 'Alerts, devices', icon: <Bell /> },
   { id: 'accounts', label: 'Accounts', hint: 'Sign-ins', icon: <Users /> },
   { id: 'claude', label: 'Claude Code', hint: 'Per account', icon: <BrandIcon brand="claude" /> },
   { id: 'codex', label: 'Codex', hint: 'Per account', icon: <BrandIcon brand="codex" /> },
@@ -101,6 +103,7 @@ function Settings() {
       wide={known === 'files'}
     >
       {(known ?? 'appearance') === 'appearance' && <AppearanceSettings />}
+      {known === 'notifications' && <NotificationSettings />}
       {known === 'accounts' && (
         <SettingsGroup title="Accounts">
           <div className="p-3">

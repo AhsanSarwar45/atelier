@@ -27,10 +27,12 @@ const ASKING = {
   state: 'waiting',
   waitingFor: 'permission',
 } as unknown as LiveSession;
+const FINISHED = { ...ASKING, id: 'chat-2', title: 'Finished chat', state: 'idle' } as LiveSession;
+let sessions = [ASKING];
 
 vi.mock('@/workbench/live', () => ({
-  useLiveSessions: () => [ASKING],
-  waitsOnYou: () => true,
+  useLiveSessions: () => sessions,
+  waitsOnYou: (session: LiveSession) => session.id === ASKING.id,
 }));
 vi.mock('@/lib/api', () => ({ projects: { list: () => Promise.resolve([]) } }));
 
@@ -43,6 +45,7 @@ async function openTheTray() {
 
 beforeEach(() => {
   push.mockClear();
+  sessions = [ASKING];
 });
 
 afterEach(() => {
@@ -85,5 +88,16 @@ describe('the tray of chats waiting on you', () => {
 
     await act(async () => void fireEvent.keyDown(document.body, { key: 'Escape' }));
     await waitFor(() => expect(screen.getByTestId('tray-badge')).toHaveAttribute('data-open', 'false'));
+  });
+
+  it('separates work that needs action from other updates', async () => {
+    sessions = [ASKING, FINISHED];
+    await openTheTray();
+
+    expect(screen.getByText('Needs action')).toBeVisible();
+    expect(screen.getByText('Other updates')).toBeVisible();
+    expect(screen.getByText('Waiting chat')).toBeVisible();
+    expect(screen.getByText('Finished chat')).toBeVisible();
+    expect(screen.getByTestId('tray-count')).toHaveTextContent('2');
   });
 });
