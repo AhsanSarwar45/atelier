@@ -107,7 +107,9 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
           size="xs"
           shape="circle"
           data-testid="tray-count"
-          className="pointer-events-none absolute -right-1 -top-1 min-w-4 justify-center px-1"
+          // Keep the whole count inside the bar. Negative offsets made it
+          // float beyond the bell and let the phone's top edge crop it.
+          className="pointer-events-none absolute right-0 top-0 min-w-4 justify-center px-1"
         >
           {waiting.length + updates.length}
         </Badge>
