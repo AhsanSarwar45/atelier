@@ -20,6 +20,7 @@ export const metadata: Metadata = {
   title: PRODUCT_NAME,
   description: `${PRODUCT_NAME} project board`,
   icons: [{ rel: 'icon', url: '/favicon.svg', type: 'image/svg+xml' }],
+  manifest: '/manifest.webmanifest',
 };
 
 export default function RootLayout({
