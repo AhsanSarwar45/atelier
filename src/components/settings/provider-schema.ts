@@ -17,6 +17,16 @@ export interface Choice {
   value: string;
   label: string;
   hint?: string;
+  /**
+   * Where this one value is honoured, when the key itself is honoured in both.
+   *
+   * `permissions.defaultMode` is read from any settings file, but two of its
+   * values are not: `auto` and `bypassPermissions` take effect only from user,
+   * `--settings` or managed settings, and from a project or local file they are
+   * ignored without a word. Offering them on the project screen was offering a
+   * choice that does nothing (bw-6ecp.10).
+   */
+  scopes?: ('account' | 'project')[];
 }
 
 export type Control =
@@ -85,9 +95,9 @@ export const CLAUDE_PERMISSION_MODES: Choice[] = [
   { value: 'default', label: 'Ask', hint: 'Asks first time' },
   { value: 'acceptEdits', label: 'Accept edits', hint: 'Edits pass, commands ask' },
   { value: 'plan', label: 'Plan', hint: 'Read only' },
-  { value: 'auto', label: 'Auto', hint: 'Classifier decides' },
+  { value: 'auto', label: 'Auto', hint: 'Classifier decides', scopes: ['account'] },
   { value: 'dontAsk', label: "Don't ask", hint: 'Refuses instead' },
-  { value: 'bypassPermissions', label: 'Bypass', hint: 'Nothing asks' },
+  { value: 'bypassPermissions', label: 'Bypass', hint: 'Nothing asks', scopes: ['account'] },
 ];
 
 export const CLAUDE_PAGES: ProviderPageDef[] = [

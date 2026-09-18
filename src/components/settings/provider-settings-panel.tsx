@@ -96,7 +96,10 @@ function ChoiceControl({
 }) {
   const text = asText(value);
   const own = useOutputStyles(scope, control.plus === 'outputStyles');
-  const choices = [...control.choices, ...own.filter((name) => !control.choices.some((c) => c.value === name)).map((name) => ({ value: name, label: name, hint: 'Yours' }))];
+  // A value the provider ignores from this kind of file is not offered here,
+  // so the reader is never handed a choice that does nothing (bw-6ecp.10).
+  const honoured = control.choices.filter((c) => !c.scopes || c.scopes.includes(scope.kind));
+  const choices = [...honoured, ...own.filter((name) => !control.choices.some((c) => c.value === name)).map((name) => ({ value: name, label: name, hint: 'Yours' }))];
   const listed = choices.some((c) => c.value === text);
   const [custom, setCustom] = useState(false);
   const [draft, setDraft] = useState(text);

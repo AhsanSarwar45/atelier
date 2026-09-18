@@ -57,3 +57,27 @@ test('Codex is not offered a model it has retired', async ({ page }) => {
   await expect(page.getByRole('option', { name: /GPT-5.5/ })).toContainText('Retires 14 Oct 2026');
   await page.screenshot({ path: join(results, 'desktop-codex-models.png') });
 });
+
+test('the two modes a project file cannot turn on are offered only on the account', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/settings?section=claude&tab=permissions');
+  await page.locator('#setting-claude-permissions-defaultMode').click();
+  await expect(page.getByRole('option', { name: /Auto/ })).toBeVisible();
+  await expect(page.getByRole('option', { name: /Bypass/ })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  const repo = mkdtempSync(join(tmpdir(), 'atelier-modes-'));
+  execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+  const made = await request.post('/api/projects', { data: { name: 'Modes', path: repo } });
+  expect(made.status(), await made.text()).toBe(201);
+  const { id } = (await made.json()) as { id: string };
+  await page.goto(`/project?id=${id}&settings=claude&ptab=permissions`);
+  await page.locator('#setting-claude-permissions-defaultMode').click();
+  // Claude Code ignores these two from a project or local file, without a word.
+  await expect(page.getByRole('option', { name: /Auto/ })).toHaveCount(0);
+  await expect(page.getByRole('option', { name: /Bypass/ })).toHaveCount(0);
+  // The rest of the list is honoured there and is still offered.
+  await expect(page.getByRole('option', { name: /Accept edits/ })).toBeVisible();
+  await expect(page.getByRole('option', { name: /Plan/ })).toBeVisible();
+  await page.screenshot({ path: join(results, 'desktop-project-modes.png') });
+});
