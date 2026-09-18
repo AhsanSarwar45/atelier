@@ -42,23 +42,26 @@ test('a server on one account is named on another, and one click puts it there',
   await expect(page.getByTestId('mcp-servers-claude')).toBeVisible();
   const add = async () => {
     await page.getByTestId('mcp-add').click();
-    await page.getByTestId('mcp-add-id').fill('memory');
+    await page.getByTestId('mcp-add-id').fill('elsewhereProbe');
     await page.getByTestId('mcp-add-command').fill('npx -y @modelcontextprotocol/server-memory');
     await page.getByTestId('mcp-add-submit').click();
-    await expect(page.getByTestId('mcp-server-memory')).toBeVisible();
+    await expect(page.getByTestId('mcp-server-elsewhereProbe')).toBeVisible();
   };
   await add();
   const systemFile = join(claudeDir, '.claude.json');
   // A `claude` the app ran to list sessions writes .claude.json back from its
   // own memory when it exits, dropping a server added meanwhile; add it again.
+  // The name is this case's own: another case on the same instance adds and
+  // removes a server called `memory`, and would empty this file underneath it
+  // (bw-6ecp.17).
   await expect
     .poll(
       async () => {
-        if (servers(systemFile).memory) return true;
+        if (servers(systemFile).elsewhereProbe) return true;
         await page.reload();
         await expect(page.getByTestId('mcp-add')).toBeVisible();
-        if ((await page.getByTestId('mcp-server-memory').count()) === 0) await add();
-        return Boolean(servers(systemFile).memory);
+        if ((await page.getByTestId('mcp-server-elsewhereProbe').count()) === 0) await add();
+        return Boolean(servers(systemFile).elsewhereProbe);
       },
       { timeout: 30_000 },
     )
@@ -70,28 +73,28 @@ test('a server on one account is named on another, and one click puts it there',
   // account holding it, under a heading that says why it is not available here.
   await page.goto(`/settings?section=claude&tab=mcp&account=${id}`);
   await expect(page.getByTestId('mcp-servers-claude')).toBeVisible();
-  await expect(page.getByTestId('mcp-server-memory')).toHaveCount(0);
+  await expect(page.getByTestId('mcp-server-elsewhereProbe')).toHaveCount(0);
   const elsewhere = page.getByTestId('mcp-elsewhere-claude');
   await expect(elsewhere).toContainText('On another account');
   await expect(elsewhere).toContainText('not available to a chat on this one');
-  await expect(page.getByTestId('mcp-elsewhere-memory')).toContainText('System');
+  await expect(page.getByTestId('mcp-elsewhere-elsewhereProbe')).toContainText('System');
   await page.screenshot({ path: join(results, 'desktop-named-on-the-other-account.png') });
 
   // One click puts it here…
-  await page.getByTestId('mcp-copy-here-memory').click();
-  await expect(page.getByTestId('mcp-server-memory')).toBeVisible();
+  await page.getByTestId('mcp-copy-here-elsewhereProbe').click();
+  await expect(page.getByTestId('mcp-server-elsewhereProbe')).toBeVisible();
   // …and it stops being offered, without the rest of the panel going with it.
-  await expect(page.getByTestId('mcp-copy-here-memory')).toHaveCount(0);
+  await expect(page.getByTestId('mcp-copy-here-elsewhereProbe')).toHaveCount(0);
   await page.screenshot({ path: join(results, 'desktop-added-to-this-account.png') });
 
   // It landed in this account's own file, which is the one a chat on this
   // account is launched pointed at, and the System account still has its own.
   const mine = join(dataDir, 'profiles', 'claude', id, '.claude.json');
-  await expect.poll(() => servers(mine).memory?.command, { timeout: 20_000 }).toBe('npx');
-  expect(Object.keys(servers(systemFile))).toContain('memory');
+  await expect.poll(() => servers(mine).elsewhereProbe?.command, { timeout: 20_000 }).toBe('npx');
+  expect(Object.keys(servers(systemFile))).toContain('elsewhereProbe');
 
   // Reopened, it is a server of this account like any other, not an offer.
   await page.reload();
-  await expect(page.getByTestId('mcp-server-memory')).toBeVisible();
-  await expect(page.getByTestId('mcp-elsewhere-memory')).toHaveCount(0);
+  await expect(page.getByTestId('mcp-server-elsewhereProbe')).toBeVisible();
+  await expect(page.getByTestId('mcp-elsewhere-elsewhereProbe')).toHaveCount(0);
 });
