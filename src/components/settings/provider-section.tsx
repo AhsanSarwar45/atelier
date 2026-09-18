@@ -100,7 +100,7 @@ export function ProviderSection({
         {unread ? (
           <ReadFailed what={`${brandName(brand)}'s accounts could not be listed.`} why={unread} />
         ) : profiles ? (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <AccountPicker brand={brand} profiles={profiles} value={account} onChange={onAccount} />
             {isPage && <CopyToAccounts brand={brand} from={account ?? SYSTEM_PROFILE} profiles={profiles} page={known} />}
           </div>

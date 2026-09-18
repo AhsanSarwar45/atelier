@@ -54,7 +54,7 @@ export function CopyToAccounts({ brand, from, profiles, page }: { brand: Brand; 
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)} data-testid={`copy-to-accounts-${brand}`}>
+      <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => setOpen(true)} data-testid={`copy-to-accounts-${brand}`}>
         <Copy /> Copy to…
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
