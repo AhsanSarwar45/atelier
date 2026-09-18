@@ -103,3 +103,15 @@ test('a mistyped environment line refuses rather than emptying the variables', a
   await env.blur();
   await expect.poll(() => claudeSettings().env).toEqual({ FOO: '1', BAR: '3' });
 });
+
+test('transcripts can be kept for longer than the ceiling this screen invented', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/settings?section=claude');
+  const days = page.locator('#setting-claude-cleanupPeriodDays');
+  await expect(days).toHaveAttribute('min', '1');
+  // Claude Code documents a minimum of 1 and no maximum.
+  await expect(days).not.toHaveAttribute('max', /./);
+  await days.fill('5000');
+  await days.blur();
+  await expect.poll(() => claudeSettings().cleanupPeriodDays).toBe(5000);
+});

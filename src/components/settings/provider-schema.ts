@@ -127,7 +127,9 @@ export const CLAUDE_PAGES: ProviderPageDef[] = [
           { key: 'autoCompactEnabled', label: 'Compact automatically', description: '', control: yesNo },
           { key: 'autoCompactWindow', label: 'Compact at', description: 'Tokens', control: { kind: 'number', min: 100000, max: 1000000, step: 10000 } },
           { key: 'autoMemoryEnabled', label: 'Auto memory', description: '', control: yesNo },
-          { key: 'cleanupPeriodDays', label: 'Keep transcripts for', description: 'Days', control: { kind: 'number', min: 1, max: 3650 } },
+          // A minimum of 1 and no maximum. The 3650 this once had was nobody's
+          // but ours, and it refused a number Claude Code accepts (bw-6ecp.12).
+          { key: 'cleanupPeriodDays', label: 'Keep transcripts for', description: 'Days', control: { kind: 'number', min: 1 } },
           { key: 'attribution.commit', label: 'Commit trailer', description: 'Empty hides it', control: { kind: 'text', placeholder: 'Co-Authored-By: …' } },
           { key: 'attribution.pr', label: 'Pull request line', description: 'Empty hides it', control: { kind: 'text' } },
         ],
