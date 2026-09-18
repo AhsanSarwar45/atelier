@@ -223,6 +223,7 @@ function LinesControl({
 }) {
   const text = pairs ? pairsOf(value) : linesOf(value);
   const [draft, setDraft] = useState(text);
+  const [wrong, setWrong] = useState<string | null>(null);
   useEffect(() => setDraft(text), [text]);
   const commit = () => {
     if (draft.trim() === text.trim()) return;
@@ -233,24 +234,40 @@ function LinesControl({
     if (rows.length === 0) return onChange(null);
     if (!pairs) return onChange(rows);
     const map: Record<string, string> = {};
+    const bad: string[] = [];
     for (const row of rows) {
       const at = row.indexOf('=');
-      if (at <= 0) continue;
-      map[row.slice(0, at).trim()] = row.slice(at + 1);
+      if (at <= 0) bad.push(row);
+      else map[row.slice(0, at).trim()] = row.slice(at + 1);
     }
+    // A typo used to be swallowed: the line was dropped without a word, and a
+    // box of nothing but typos wrote `{}` over every variable already there
+    // (bw-6ecp.11). Nothing is written until every line is a pair.
+    if (bad.length > 0) {
+      setWrong(`${bad.length === 1 ? 'This line is' : 'These lines are'} not NAME=value: ${bad.join(', ')}`);
+      return;
+    }
+    setWrong(null);
     onChange(map);
   };
   return (
-    <Textarea
-      id={id}
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      placeholder={pairs ? 'NAME=value' : placeholder}
-      rows={Math.min(8, Math.max(2, draft.split('\n').length))}
-      className="w-full font-mono text-xs"
-      spellCheck={false}
-    />
+    <div className="w-full space-y-1">
+      <Textarea
+        id={id}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        placeholder={pairs ? 'NAME=value' : placeholder}
+        rows={Math.min(8, Math.max(2, draft.split('\n').length))}
+        className="w-full font-mono text-xs"
+        spellCheck={false}
+      />
+      {wrong && (
+        <p className="text-xs text-danger" role="alert" data-testid={`${id}-wrong`}>
+          {wrong}
+        </p>
+      )}
+    </div>
   );
 }
 

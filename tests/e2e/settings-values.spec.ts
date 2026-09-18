@@ -81,3 +81,25 @@ test('the two modes a project file cannot turn on are offered only on the accoun
   await expect(page.getByRole('option', { name: /Plan/ })).toBeVisible();
   await page.screenshot({ path: join(results, 'desktop-project-modes.png') });
 });
+
+test('a mistyped environment line refuses rather than emptying the variables', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/settings?section=claude');
+  const env = page.locator('#setting-claude-env');
+  await env.fill('FOO=1\nBAR=2');
+  await env.blur();
+  await expect.poll(() => claudeSettings().env).toEqual({ FOO: '1', BAR: '2' });
+
+  // The typo: no `=`. This used to drop the line without a word, and a box of
+  // nothing but typos wrote `{}` over everything that was there.
+  await env.fill('FOO=1\nBAR');
+  await env.blur();
+  await expect(page.getByTestId('setting-claude-env-wrong')).toContainText('not NAME=value');
+  expect(claudeSettings().env).toEqual({ FOO: '1', BAR: '2' });
+  await page.screenshot({ path: join(results, 'desktop-claude-env-refused.png') });
+
+  // Corrected, it writes.
+  await env.fill('FOO=1\nBAR=3');
+  await env.blur();
+  await expect.poll(() => claudeSettings().env).toEqual({ FOO: '1', BAR: '3' });
+});
