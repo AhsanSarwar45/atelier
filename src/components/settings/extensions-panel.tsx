@@ -15,6 +15,7 @@ import { SettingsGroup } from '@/components/settings/section';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -33,17 +34,24 @@ const KIND_NAME: Record<ExtensionKind, string> = {
 
 type Kinds = { kinds: ExtensionKindList[] };
 
-function AddOne({ placeholder, testid, onAdd }: { placeholder: string; testid: string; onAdd: (value: string) => Promise<void> }) {
+function AddOne({
+  title,
+  what,
+  placeholder,
+  testid,
+  onAdd,
+}: {
+  /** The sheet's heading, so the reader knows what they have opened. */
+  title: string;
+  /** What to type, in words: the placeholder alone was an incantation. */
+  what: string;
+  placeholder: string;
+  testid: string;
+  onAdd: (value: string) => Promise<void>;
+}) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
-  if (!open) {
-    return (
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)} data-testid={testid}>
-        <Plus /> Add
-      </Button>
-    );
-  }
   const go = async () => {
     setBusy(true);
     try {
@@ -55,27 +63,39 @@ function AddOne({ placeholder, testid, onAdd }: { placeholder: string; testid: s
     }
   };
   return (
-    <div className="flex items-center gap-2">
-      <Input
-        aria-label={placeholder}
-        placeholder={placeholder}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && value.trim()) void go();
-          if (e.key === 'Escape') setOpen(false);
-        }}
-        className="h-8 w-64 font-mono text-xs"
-        autoFocus
-        data-testid={`${testid}-input`}
-      />
-      <Button size="sm" disabled={busy || !value.trim()} onClick={() => void go()} data-testid={`${testid}-submit`}>
-        {busy && <Loader2 className="animate-spin" />} Add
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)} data-testid={testid}>
+        <Plus /> Add
       </Button>
-      <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
-        Cancel
-      </Button>
-    </div>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent shape="sheet" data-testid={`${testid}-form`}>
+          <DialogHeader>
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>{what}</DialogDescription>
+          </DialogHeader>
+          <Input
+            aria-label={placeholder}
+            placeholder={placeholder}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && value.trim()) void go();
+            }}
+            className="font-mono text-xs"
+            autoFocus
+            data-testid={`${testid}-input`}
+          />
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button disabled={busy || !value.trim()} onClick={() => void go()} data-testid={`${testid}-submit`}>
+              {busy && <Loader2 className="animate-spin" />} Add
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -137,9 +157,21 @@ export function ExtensionsPanel({ brand, scope }: { brand: Brand; scope: Scope }
       {kinds.map(({ kind, items }) => {
         const actions =
           kind === 'plugins' ? (
-            <AddOne placeholder="name@marketplace" testid="plugin-install" onAdd={(id) => act(`plugins:${id}`, () => sendCommand({ type: 'plugin.install', brand, ...wire, id }), 'Installed')} />
+            <AddOne
+              title="Install a plugin"
+              what="A plugin is named by the marketplace it comes from, as plugin@marketplace. Add the marketplace first if it is not below."
+              placeholder="name@marketplace"
+              testid="plugin-install"
+              onAdd={(id) => act(`plugins:${id}`, () => sendCommand({ type: 'plugin.install', brand, ...wire, id }), 'Installed')}
+            />
           ) : (
-            <AddOne placeholder="owner/repo or URL" testid="marketplace-add" onAdd={(source) => act(`marketplaces:${source}`, () => sendCommand({ type: 'marketplace.add', brand, ...wire, source }), 'Added')} />
+            <AddOne
+              title="Add a marketplace"
+              what="A marketplace is a repository of plugins. Give its GitHub owner/repo, a git URL, or a path on this computer."
+              placeholder="owner/repo or URL"
+              testid="marketplace-add"
+              onAdd={(source) => act(`marketplaces:${source}`, () => sendCommand({ type: 'marketplace.add', brand, ...wire, source }), 'Added')}
+            />
           );
         return (
           <SettingsGroup key={kind} title={KIND_NAME[kind]} actions={actions} data-testid={`extensions-${kind}`}>

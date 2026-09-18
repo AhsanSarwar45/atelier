@@ -31,6 +31,14 @@ const DialogOverlay = React.forwardRef<
 ))
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
+/** The floating box, on a screen with room for one. */
+const BOX =
+  "left-[50%] top-[50%] grid grid-cols-1 w-full max-w-lg max-h-[90dvh] overflow-y-auto translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg"
+
+/** What that box becomes below the small breakpoint: a sheet on the bottom edge. */
+const SHEET_ON_A_PHONE =
+  "max-sm:bottom-0 max-sm:top-auto max-sm:translate-y-0 max-sm:rounded-t-lg max-sm:pb-[max(1.5rem,env(safe-area-inset-bottom))] max-sm:data-[state=open]:slide-in-from-top-[100%]"
+
 const dialogVariants = cva(
   "fixed z-50 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
   {
@@ -51,7 +59,13 @@ const dialogVariants = cva(
         // folder browser was enough to force the whole dialog to need
         // sideways scrolling. `grid-cols-1` compiles to
         // `repeat(1, minmax(0, 1fr))`, giving the column a real 0 minimum.
-        box: "left-[50%] top-[50%] grid grid-cols-1 w-full max-w-lg max-h-[90dvh] overflow-y-auto translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+        box: BOX,
+        // The same box on a wide screen; on a phone a sheet held to the bottom
+        // edge, where the thumb is, rather than a box floating mid-screen whose
+        // last row the window cut off. Add Project wore these rules as a line
+        // copied into its own className; everything the app adds something with
+        // wears them from here (bw-6ecp.3).
+        sheet: `${BOX} ${SHEET_ON_A_PHONE}`,
         // Fills the window and paints nothing, so the dim behind it is the
         // overlay's and the picture is the only thing on it (bw-dks8.13).
         screen: "inset-0",

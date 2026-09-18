@@ -13,8 +13,8 @@ import { SettingsGroup } from '@/components/settings/section';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Panel } from '@/components/ui/panel';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -106,64 +106,70 @@ function AddServer({ brand, scope, onAdded }: { brand: Brand; scope: Scope; onAd
     }
   };
 
-  if (!open) {
-    return (
+  return (
+    <>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)} data-testid="mcp-add">
         <Plus /> Add server
       </Button>
-    );
-  }
-  return (
-    <Panel className="space-y-3" data-testid="mcp-add-form">
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <Input aria-label="Server name" placeholder="name" value={id} onChange={(e) => setId(e.target.value)} className="font-mono text-xs sm:w-48" data-testid="mcp-add-id" />
-        <Select value={how} onValueChange={(v) => setHow(v as typeof how)}>
-          <SelectTrigger className="sm:w-36" aria-label="Kind">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="command">Command</SelectItem>
-            <SelectItem value="url">URL</SelectItem>
-            <SelectItem value="json">JSON</SelectItem>
-          </SelectContent>
-        </Select>
-        {sources.length > 1 && (
-          <Select value={source} onValueChange={(v) => setSource(v as McpSource)}>
-            <SelectTrigger className="sm:w-52" aria-label="Where">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {sources.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {SOURCE_NAME[s]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </div>
-      {how === 'command' && (
-        <>
-          <Input aria-label="Command" placeholder="npx -y @scope/server --flag" value={command} onChange={(e) => setCommand(e.target.value)} className="font-mono text-xs" data-testid="mcp-add-command" />
-          <Textarea aria-label="Environment" placeholder="API_KEY=…" value={env} onChange={(e) => setEnv(e.target.value)} rows={2} className="font-mono text-xs" spellCheck={false} />
-        </>
-      )}
-      {how === 'url' && <Input aria-label="URL" placeholder="https://…/mcp" value={url} onChange={(e) => setUrl(e.target.value)} className="font-mono text-xs" data-testid="mcp-add-url" />}
-      {how === 'json' && <Textarea aria-label="JSON" placeholder='{ "command": "…", "args": [] }' value={json} onChange={(e) => setJson(e.target.value)} rows={5} className="font-mono text-xs" spellCheck={false} />}
-      {refused && (
-        <p role="alert" className="text-sm text-danger">
-          {refused}
-        </p>
-      )}
-      <div className="flex gap-2">
-        <Button size="sm" disabled={busy || (!id.trim() && how !== 'json')} onClick={() => void submit()} data-testid="mcp-add-submit">
-          {busy && <Loader2 className="animate-spin" />} Add
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
-          Cancel
-        </Button>
-      </div>
-    </Panel>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent shape="sheet" data-testid="mcp-add-form">
+          <DialogHeader>
+            <DialogTitle>Add an MCP server</DialogTitle>
+            <DialogDescription>Give it a name, then say how it is started: a command to run, a URL to call, or the JSON entry itself.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input aria-label="Server name" placeholder="name" value={id} onChange={(e) => setId(e.target.value)} className="font-mono text-xs sm:w-48" data-testid="mcp-add-id" />
+              <Select value={how} onValueChange={(v) => setHow(v as typeof how)}>
+                <SelectTrigger className="sm:w-36" aria-label="Kind">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="command">Command</SelectItem>
+                  <SelectItem value="url">URL</SelectItem>
+                  <SelectItem value="json">JSON</SelectItem>
+                </SelectContent>
+              </Select>
+              {sources.length > 1 && (
+                <Select value={source} onValueChange={(v) => setSource(v as McpSource)}>
+                  <SelectTrigger className="sm:w-52" aria-label="Where">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sources.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {SOURCE_NAME[s]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+            {how === 'command' && (
+              <>
+                <Input aria-label="Command" placeholder="npx -y @scope/server --flag" value={command} onChange={(e) => setCommand(e.target.value)} className="font-mono text-xs" data-testid="mcp-add-command" />
+                <Textarea aria-label="Environment" placeholder="API_KEY=…" value={env} onChange={(e) => setEnv(e.target.value)} rows={2} className="font-mono text-xs" spellCheck={false} />
+              </>
+            )}
+            {how === 'url' && <Input aria-label="URL" placeholder="https://…/mcp" value={url} onChange={(e) => setUrl(e.target.value)} className="font-mono text-xs" data-testid="mcp-add-url" />}
+            {how === 'json' && <Textarea aria-label="JSON" placeholder='{ "command": "…", "args": [] }' value={json} onChange={(e) => setJson(e.target.value)} rows={5} className="font-mono text-xs" spellCheck={false} />}
+            {refused && (
+              <p role="alert" className="text-sm text-danger">
+                {refused}
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button disabled={busy || (!id.trim() && how !== 'json')} onClick={() => void submit()} data-testid="mcp-add-submit">
+              {busy && <Loader2 className="animate-spin" />} Add
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

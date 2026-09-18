@@ -197,12 +197,7 @@ export function AddProjectDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogContent className={cn(
-        // On a phone: a sheet held to the bottom edge, where the thumb is, rather
-        // than a box floating mid-screen whose last row the window cut off.
-        "max-sm:bottom-0 max-sm:top-auto max-sm:translate-y-0 max-sm:rounded-t-lg max-sm:pb-[max(1.5rem,env(safe-area-inset-bottom))] max-sm:data-[state=open]:slide-in-from-top-[100%]",
-        browsing || newDoltDatabases.length > 0 ? "sm:max-w-lg" : "sm:max-w-md",
-      )}>
+      <DialogContent shape="sheet" className={cn(browsing || newDoltDatabases.length > 0 ? "sm:max-w-lg" : "sm:max-w-md")}>
         <DialogHeader>
           <DialogTitle>Add Project</DialogTitle>
           <DialogDescription>
