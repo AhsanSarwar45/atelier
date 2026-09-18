@@ -26,11 +26,13 @@ import {
 } from '@/components/settings/provider-settings-api';
 import { SettingRow, SettingsGroup } from '@/components/settings/section';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -103,7 +105,26 @@ function ChoiceControl({
   const listed = choices.some((c) => c.value === text);
   const [custom, setCustom] = useState(false);
   const [draft, setDraft] = useState(text);
+  const [replacing, setReplacing] = useState(false);
   useEffect(() => setDraft(text), [text]);
+  // The key's other shape. Drawing the select over it would read the table as
+  // unset and then write a string in its place, losing what the file said
+  // (bw-6ecp.13). So it is shown as it stands, and replacing it is a click.
+  const table = control.table && value !== null && typeof value === 'object' ? value : null;
+  if (table && !replacing) {
+    return (
+      <div className="flex items-center gap-2">
+        <Tooltip label={JSON.stringify(table)}>
+          <Badge variant="secondary" size="sm" data-testid={`${id}-table`}>
+            {control.table} — set in the file
+          </Badge>
+        </Tooltip>
+        <Button variant="outline" size="sm" onClick={() => setReplacing(true)} data-testid={`${id}-replace`}>
+          Replace…
+        </Button>
+      </div>
+    );
+  }
   if (control.free && (custom || (text && !listed))) {
     return (
       <div className="flex items-center gap-2">

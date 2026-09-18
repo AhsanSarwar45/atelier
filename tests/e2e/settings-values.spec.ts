@@ -115,3 +115,22 @@ test('transcripts can be kept for longer than the ceiling this screen invented',
   await days.blur();
   await expect.poll(() => claudeSettings().cleanupPeriodDays).toBe(5000);
 });
+
+test('an approval policy written as a table is shown, not flattened', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  // What the reference calls the granular form.
+  writeFileSync(join(codexHome, 'config.toml'), '[approval_policy.granular]\nsandbox_approval = true\nrules = false\n');
+  await page.goto('/settings?section=codex&tab=permissions');
+  const policy = page.getByTestId('setting-approval_policy');
+  await expect(policy).toBeVisible();
+  await expect(page.getByTestId('setting-codex-approval_policy-table')).toContainText('granular');
+  // Reading the page does not rewrite it.
+  expect(readFileSync(join(codexHome, 'config.toml'), 'utf8')).toContain('[approval_policy.granular]');
+  await page.screenshot({ path: join(results, 'desktop-codex-granular.png') });
+
+  // Replacing it is a deliberate click, and then the choice writes as usual.
+  await page.getByTestId('setting-codex-approval_policy-replace').click();
+  await page.locator('#setting-codex-approval_policy').click();
+  await page.getByRole('option', { name: 'Never' }).click();
+  await expect.poll(() => readFileSync(join(codexHome, 'config.toml'), 'utf8')).toContain('approval_policy = "never"');
+});

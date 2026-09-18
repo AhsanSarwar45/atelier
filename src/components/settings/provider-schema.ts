@@ -33,6 +33,11 @@ export type Control =
   | {
       kind: 'choice';
       choices: Choice[];
+      /**
+       * The key also takes a table, which this control cannot draw. When the
+       * file holds one it is shown as it is, and replacing it takes a click.
+       */
+      table?: string;
       /** Also accept a value not in the list. */
       free?: boolean;
       /** Choices read from the scope's own files and added to the list. */
@@ -293,7 +298,10 @@ export const CODEX_PAGES: ProviderPageDef[] = [
         id: 'approvals',
         title: 'Approvals',
         settings: [
-          { key: 'approval_policy', label: 'When to ask', description: '', control: { kind: 'choice', choices: [{ value: 'on-request', label: 'When the model asks' }, { value: 'never', label: 'Never' }] } },
+          // Also takes a table — `{ granular = { … } }` — which the screen has
+          // no control for. Marked so a config using it is shown as it is
+          // rather than read as unset and overwritten (bw-6ecp.13).
+          { key: 'approval_policy', label: 'When to ask', description: '', control: { kind: 'choice', choices: [{ value: 'on-request', label: 'When the model asks' }, { value: 'never', label: 'Never' }], table: 'granular' } },
           { key: 'approvals_reviewer', label: 'Approval reviewer', description: '', control: { kind: 'choice', choices: [{ value: 'user', label: 'You' }, { value: 'auto_review', label: 'Automatic review' }] } },
         ],
       },
