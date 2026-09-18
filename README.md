@@ -226,6 +226,16 @@ open 3008, or whichever port you set.
 To keep it to this computer alone, set `ATELIER_HOST=127.0.0.1`; it then says
 so instead of offering an address that will not answer.
 
+### Open it from anywhere else
+
+Not from your own network — from a café, from a train. That is a different
+question, because Atelier has no password and a port answering the internet is
+a machine given away. [Reaching the board from outside your
+network](docs/remote-access.md) says what to do instead, and what never to do.
+The short of it: put a private network in front of it, close the port with
+`ATELIER_HOST=127.0.0.1`, and name the address in front with
+`ATELIER_PUBLIC_URL` so the banner tells you the one to open.
+
 ### Ask a running copy where it is
 
 ```bash
