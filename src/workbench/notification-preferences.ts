@@ -39,6 +39,6 @@ export async function showDeviceNotification(title: string, body: string, href: 
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   if ('serviceWorker' in navigator) {
     const registration = await navigator.serviceWorker.ready;
-    await registration.showNotification(title, { body, icon: '/logo.svg', tag: href, data: { href } });
-  } else new Notification(title, { body, icon: '/logo.svg', tag: href });
+    await registration.showNotification(title, { body, icon: '/icon-192.png', tag: href, data: { href } });
+  } else new Notification(title, { body, icon: '/icon-192.png', tag: href });
 }

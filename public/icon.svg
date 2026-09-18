@@ -1,0 +1,23 @@
+<!-- The app's mark, square, for a home screen, a tab and a notification.
+     The wordmark in `logo.svg` cannot do this job: it is 3:2, so a square
+     crop leaves the lettering too small to read at 48px, and it still says
+     the name the product had before it was called Atelier (bw-ndlu.2). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Atelier">
+  <defs>
+    <linearGradient id="spark" x1="70" y1="42" x2="186" y2="214" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e879f9" />
+      <stop offset="0.55" stop-color="#818cf8" />
+      <stop offset="1" stop-color="#22d3ee" />
+    </linearGradient>
+  </defs>
+
+  <!-- The chrome's own background, so the icon sits flush with the app it opens. -->
+  <rect data-frame="1" width="256" height="256" rx="56" fill="#09090b" />
+  <rect data-frame="1" x="0.5" y="0.5" width="255" height="255" rx="55.5" fill="none" stroke="#27272a" />
+
+  <!-- A four-pointed spark: each arm is one quadratic curve whose control
+       point is the centre, which is what pulls the waist in to a star. -->
+  <path d="M128 42 Q128 128 214 128 Q128 128 128 214 Q128 128 42 128 Q128 128 128 42 Z" fill="url(#spark)" />
+  <!-- A second, smaller one, off the first's shoulder. -->
+  <path d="M199 34 Q199 60 225 60 Q199 60 199 86 Q199 60 173 60 Q199 60 199 34 Z" fill="url(#spark)" opacity="0.85" />
+</svg>

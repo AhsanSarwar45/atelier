@@ -19,8 +19,16 @@ export const metadata: Metadata = {
   // Read from the one place the product's name is written down, never typed.
   title: PRODUCT_NAME,
   description: `${PRODUCT_NAME} project board`,
-  icons: [{ rel: 'icon', url: '/favicon.svg', type: 'image/svg+xml' }],
+  icons: [
+    { rel: 'icon', url: '/icon.svg', type: 'image/svg+xml' },
+    // iOS reads neither the manifest's icons nor an SVG, so the home-screen
+    // tile comes from here or it is a screenshot of the page (bw-ndlu.2).
+    { rel: 'apple-touch-icon', url: '/apple-touch-icon.png', sizes: '180x180' },
+  ],
   manifest: '/manifest.webmanifest',
+  // What the title bar says once iOS is running this as its own app rather
+  // than as a tab, where the <title> would be the whole page's.
+  appleWebApp: { capable: true, title: PRODUCT_NAME, statusBarStyle: 'black-translucent' },
 };
 
 export default function RootLayout({

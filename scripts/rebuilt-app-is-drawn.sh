@@ -215,14 +215,14 @@ fi
 
 # An address that is a file and not a page: same name every build, so it is
 # checked like a page rather than kept for a year.
-head="$(headers_of "http://127.0.0.1:$PORT/favicon.svg")"
+head="$(headers_of "http://127.0.0.1:$PORT/icon.svg")"
 kept="$(value_of "$head" "cache-control")"
 if [ "$(status_of "$head")" = "404" ]; then
-  pass "there is no favicon.svg to check"
+  pass "there is no icon.svg to check"
 elif [ "$kept" = "no-cache, must-revalidate" ]; then
-  pass "favicon.svg: $kept"
+  pass "icon.svg: $kept"
 else
-  fail "favicon.svg keeps its name across builds but is kept blind: $kept"
+  fail "icon.svg keeps its name across builds but is kept blind: $kept"
 fi
 
 say "$failures failure(s)"

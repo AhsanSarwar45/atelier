@@ -194,7 +194,7 @@ mod tests {
     fn a_file_whose_name_survives_a_rebuild_is_not() {
         // These live under `public/` and are served at the root under the same
         // name for ever, so a year-long copy would outlive several changes.
-        for same_name in ["favicon.svg", "logo.png", "_next/image", "static/x.js"] {
+        for same_name in ["icon.svg", "icon-192.png", "apple-touch-icon.png", "_next/image", "static/x.js"] {
             assert_eq!(
                 kept_for(same_name),
                 "no-cache, must-revalidate",
