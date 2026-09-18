@@ -73,6 +73,16 @@ pub struct AgentFile {
     pub format: &'static str,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub legacy: bool,
+    /// Personal rows only: the directory does not follow the chosen account.
+    ///
+    /// Every other personal row is under the account's own directory, so
+    /// choosing another account shows that account's files. Codex's skills are
+    /// under `$HOME/.agents`, which `CODEX_HOME` does not move — proven by
+    /// asking the CLI itself, which reports the marketplace root from `HOME`
+    /// alone — so every Codex account on the computer has the same ones. The
+    /// screen said nothing about it and so read as per-account (bw-6ecp.15).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub shared: bool,
     pub size: u64,
     pub modified_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -86,6 +96,8 @@ struct Location {
     root: PathBuf,
     files: Vec<PathBuf>,
     legacy: bool,
+    /// The same directory whichever account is chosen.
+    shared: bool,
 }
 
 fn format_of(path: &Path) -> &'static str {
@@ -168,6 +180,7 @@ fn locations(project: Option<&Path>, home: &Path, claude: &Path, codex: &Path) -
         root,
         files,
         legacy,
+        shared: false,
     };
     let mut rows = vec![
         loc(
@@ -273,14 +286,17 @@ fn locations(project: Option<&Path>, home: &Path, claude: &Path, codex: &Path) -
             below(&codex.join("rules"), Some(&["rules"])),
             false,
         ),
-        loc(
-            Provider::Codex,
-            Scope::Personal,
-            Category::Skills,
-            home.join(".agents/skills"),
-            below(&home.join(".agents/skills"), None),
-            false,
-        ),
+        Location {
+            shared: true,
+            ..loc(
+                Provider::Codex,
+                Scope::Personal,
+                Category::Skills,
+                home.join(".agents/skills"),
+                below(&home.join(".agents/skills"), None),
+                false,
+            )
+        },
     ];
     let Some(project) = project else { return rows };
     let project = fs::canonicalize(project).unwrap_or_else(|_| project.to_path_buf());
@@ -444,6 +460,7 @@ pub fn discover(
                     .to_path_buf(),
                 format: format_of(&path),
                 legacy: location.legacy,
+                shared: location.shared,
                 size: meta.len(),
                 modified_at: DateTime::<Utc>::from(
                     meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH),
@@ -667,6 +684,17 @@ mod tests {
         assert!(files
             .iter()
             .any(|f| f.name == "SKILL.md" && f.provider == Provider::Codex));
+        // Codex's personal skills are under `$HOME/.agents`, which CODEX_HOME
+        // does not move, so they are the same for every Codex account and are
+        // marked as such. Everything else personal follows the account and is
+        // not (bw-6ecp.15).
+        assert!(files
+            .iter()
+            .any(|f| f.name == "SKILL.md" && f.provider == Provider::Codex && f.shared));
+        assert!(files
+            .iter()
+            .filter(|f| f.name != "SKILL.md")
+            .all(|f| !f.shared));
         let agent = project.path().join(".codex/agents/reviewer.toml");
         assert_eq!(
             read(&agent, Some(project.path()), home.path(), None, None).unwrap(),
