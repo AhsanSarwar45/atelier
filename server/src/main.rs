@@ -305,8 +305,9 @@ fn whereabouts() -> String {
     let port = bind_port();
     let network = reachable::on_this_network();
     let name = reachable::name_on_this_network(network);
+    let public = reachable::published_url();
     let mut said = format!("{} addresses\n", identity::DISPLAY);
-    for line in reachable::openable_at(&bind_host(), port, network, name.as_deref()) {
+    for line in reachable::openable_at(&bind_host(), port, network, name.as_deref(), public.as_deref()) {
         said.push_str(&format!("  {line}\n"));
     }
     said.push_str(if answering(port) {
@@ -353,7 +354,9 @@ async fn serve(open_browser: bool) {
         Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
             let network = reachable::on_this_network();
             let name = reachable::name_on_this_network(network);
-            let openable = reachable::openable_at(&host, port, network, name.as_deref());
+            let public = reachable::published_url();
+            let openable =
+                reachable::openable_at(&host, port, network, name.as_deref(), public.as_deref());
             let who = handover::who_is_there(port).await;
             let ours = handover::program().map(|p| p.display().to_string());
             let (said, code) =
@@ -699,7 +702,8 @@ async fn serve(open_browser: bool) {
     println!("{} is running.", identity::DISPLAY);
     let network = reachable::on_this_network();
     let name = reachable::name_on_this_network(network);
-    for line in reachable::openable_at(&host, port, network, name.as_deref()) {
+    let public = reachable::published_url();
+    for line in reachable::openable_at(&host, port, network, name.as_deref(), public.as_deref()) {
         println!("  {line}");
     }
     println!("Ready.");

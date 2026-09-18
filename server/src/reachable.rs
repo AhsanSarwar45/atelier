@@ -129,6 +129,41 @@ fn is_this_computer(found: &[IpAddr], mine: Option<IpAddr>) -> bool {
     }
 }
 
+/// The address a reader opens when something in front of this program is
+/// carrying the traffic, as the environment was left.
+///
+/// This program has no certificate and terminates no TLS. The way a phone
+/// reaches a secure origin is a proxy, a tunnel or a mesh in front of it —
+/// and the name on that certificate belongs to whatever is in front, not to
+/// this computer, so it cannot be found here the way a `.local` name can. It
+/// is told, or it is not known (bw-tttn.1).
+///
+/// A bare name is read as `https://`, because the scheme is the whole reason
+/// to put something in front, and a reader who writes the name alone means
+/// the secure one.
+fn published(public: Option<&str>) -> Option<String> {
+    let said = public?.trim().trim_end_matches('/');
+    if said.is_empty() {
+        return None;
+    }
+    Some(match said.contains("://") {
+        true => said.to_string(),
+        false => format!("https://{said}"),
+    })
+}
+
+/// The address in front of this program, as the environment was left.
+///
+/// Read here rather than at each caller, because the running copy, the copy
+/// answering `atelier where`, and the installed service all have to name the
+/// same address or two of them are lying to somebody.
+pub fn published_url() -> Option<String> {
+    ["ATELIER_PUBLIC_URL", "BEADS_WEB_PUBLIC_URL"]
+        .into_iter()
+        .find_map(|key| std::env::var(key).ok().filter(|said| !said.trim().is_empty()))
+        .and_then(|said| published(Some(&said)))
+}
+
 /// The lines telling a reader where to open it.
 ///
 /// Two of them when anyone on the network may reach it, because the address a
@@ -136,46 +171,81 @@ fn is_this_computer(found: &[IpAddr], mine: Option<IpAddr>) -> bool {
 /// told to answer only here — and that one says so, rather than leaving
 /// somebody to type an address on their phone and wait for a page that will
 /// never come.
+///
+/// When an address in front of it has been named, that one is the network
+/// address: it is the only one of them a phone will hold a service worker or
+/// a notification on, and every plain one behind it drops to a fallback
+/// rather than being offered as the address to use (bw-tttn.1).
 pub fn openable_at(
     host: &str,
     port: u16,
     network: Option<IpAddr>,
     name: Option<&str>,
+    public: Option<&str>,
 ) -> Vec<String> {
     let here = format!("On this computer   http://localhost:{port}");
+    let published = published(public);
     match Listening::from(host) {
-        Listening::OnlyHere => vec![
-            here,
-            "Local access only. Set ATELIER_HOST=0.0.0.0 for network access."
-                .to_string(),
-        ],
+        // Answering only here is the settled way to run behind something in
+        // front: the door faces the proxy and nothing else. Telling that
+        // reader to open it to the network instead would be advice that undoes
+        // the arrangement they have already made.
+        Listening::OnlyHere => match published {
+            Some(url) => vec![here, format!("Network            {url}")],
+            None => vec![
+                here,
+                "Local access only. Set ATELIER_HOST=0.0.0.0 for network access."
+                    .to_string(),
+            ],
+        },
         Listening::Everywhere => {
-            let mut lines = vec![here];
+            let mut plain = Vec::new();
             match (name, network) {
                 // The name first: it is the one that still works next week.
                 // The number stays beside it, because a phone that cannot look
                 // the name up needs something to type today.
                 (Some(name), address) => {
-                    lines.push(format!("Network            http://{name}:{port}"));
+                    plain.push(format!("http://{name}:{port}"));
                     if let Some(address) = address {
-                        lines.push(format!("Network fallback   http://{}:{port}", shown(address)));
+                        plain.push(format!("http://{}:{port}", shown(address)));
                     }
                 }
-                (None, Some(address)) => lines.push(format!(
-                    "Network            http://{}:{port}",
-                    shown(address)
-                )),
-                (None, None) => lines.push(format!(
-                    "Network            unavailable (port {port})"
-                )),
+                (None, Some(address)) => plain.push(format!("http://{}:{port}", shown(address))),
+                (None, None) => {}
             }
+            let mut lines = vec![here];
+            lines.extend(ranked(published, plain, port));
             lines
         }
-        Listening::AtOneAddress => vec![
-            here,
-            format!("Network            http://{host}:{port}"),
-        ],
+        Listening::AtOneAddress => {
+            let mut lines = vec![here];
+            lines.extend(ranked(published, vec![format!("http://{host}:{port}")], port));
+            lines
+        }
     }
+}
+
+/// The network addresses in the order a reader should try them.
+///
+/// The first is the one to use and the rest are what is left to type when it
+/// cannot be reached. A named address in front always takes the first place,
+/// because a plain one cannot do what it does.
+fn ranked(published: Option<String>, plain: Vec<String>, port: u16) -> Vec<String> {
+    let mut all = Vec::new();
+    all.extend(published);
+    all.extend(plain);
+    let mut lines: Vec<String> = all
+        .into_iter()
+        .enumerate()
+        .map(|(rank, address)| match rank {
+            0 => format!("Network            {address}"),
+            _ => format!("Network fallback   {address}"),
+        })
+        .collect();
+    if lines.is_empty() {
+        lines.push(format!("Network            unavailable (port {port})"));
+    }
+    lines
 }
 
 /// What the address it was told to listen on means for who can reach it.
@@ -209,11 +279,15 @@ mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr};
 
     fn lines(host: &str, network: Option<IpAddr>) -> String {
-        openable_at(host, 3008, network, None).join("\n")
+        openable_at(host, 3008, network, None, None).join("\n")
     }
 
     fn named(host: &str, network: Option<IpAddr>, name: &str) -> String {
-        openable_at(host, 3008, network, Some(name)).join("\n")
+        openable_at(host, 3008, network, Some(name), None).join("\n")
+    }
+
+    fn fronted(host: &str, network: Option<IpAddr>, name: Option<&str>, public: &str) -> String {
+        openable_at(host, 3008, network, name, Some(public)).join("\n")
     }
 
     #[test]
@@ -312,7 +386,7 @@ mod tests {
 
     #[test]
     fn keeping_to_itself_offers_no_name_either() {
-        let said = openable_at("127.0.0.1", 3008, None, Some("nobara.local")).join("\n");
+        let said = openable_at("127.0.0.1", 3008, None, Some("nobara.local"), None).join("\n");
         assert!(
             !said.contains("nobara.local"),
             "a name was offered that would not answer: {said}"
@@ -347,6 +421,83 @@ mod tests {
         assert!(!is_this_computer(&[here], None));
         assert!(!is_this_computer(&[], None));
         assert!(is_this_computer(&[IpAddr::V4(Ipv4Addr::new(10, 0, 0, 4))], None));
+    }
+
+    #[test]
+    fn an_address_in_front_is_the_one_offered_and_the_plain_ones_fall_behind_it() {
+        // The point of the whole arrangement: a phone opening the first line
+        // gets a secure origin, and no plain address is put where a reader
+        // would read it as the one to use.
+        let said = fronted(
+            "0.0.0.0",
+            Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 11))),
+            Some("nobara.local"),
+            "https://nobara.tail1a2b.ts.net",
+        );
+        let offered = said
+            .lines()
+            .find(|line| line.starts_with("Network  ") && !line.contains("fallback"))
+            .expect(&format!("nothing was offered as the address to use:\n{said}"));
+        assert!(
+            offered.contains("https://nobara.tail1a2b.ts.net"),
+            "the address in front was not the one offered: {offered}"
+        );
+        assert!(!offered.contains("http://"), "a plain address was offered: {offered}");
+        // Still printed, because the mesh can be down and the LAN is then all
+        // the reader has left to type.
+        assert!(said.contains("Network fallback   http://nobara.local:3008"), "{said}");
+        assert!(said.contains("Network fallback   http://192.168.1.11:3008"), "{said}");
+    }
+
+    #[test]
+    fn answering_only_here_behind_something_in_front_is_reachable_not_local_only() {
+        // The settled shape: the door faces the proxy alone. Telling this
+        // reader to open it to the network would undo what they just set up.
+        let said = fronted("127.0.0.1", None, None, "https://nobara.tail1a2b.ts.net");
+        assert!(said.contains("Network            https://nobara.tail1a2b.ts.net"), "{said}");
+        assert!(!said.contains("Local access only"), "it called a reachable board local: {said}");
+        assert!(!said.contains("ATELIER_HOST=0.0.0.0"), "it advised undoing the arrangement: {said}");
+    }
+
+    #[test]
+    fn a_computer_with_no_route_out_behind_something_in_front_has_an_address_after_all() {
+        let said = fronted("0.0.0.0", None, None, "https://nobara.tail1a2b.ts.net");
+        assert!(said.contains("https://nobara.tail1a2b.ts.net"), "{said}");
+        assert!(!said.contains("unavailable"), "it reported nothing while holding an address: {said}");
+    }
+
+    #[test]
+    fn nothing_in_front_leaves_every_line_as_it_was() {
+        let network = Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 11)));
+        for nothing in ["", "   "] {
+            assert_eq!(
+                fronted("0.0.0.0", network, Some("nobara.local"), nothing),
+                named("0.0.0.0", network, "nobara.local"),
+                "{nothing:?} was read as an address in front"
+            );
+        }
+    }
+
+    #[test]
+    fn a_name_written_alone_is_read_as_the_secure_one() {
+        assert_eq!(
+            published(Some("nobara.tail1a2b.ts.net")).as_deref(),
+            Some("https://nobara.tail1a2b.ts.net")
+        );
+        // A scheme already written is kept, including a plain one: a reader
+        // who wrote `http://` meant it, and a silent upgrade would print an
+        // address that answers nothing.
+        assert_eq!(
+            published(Some("http://board.lan")).as_deref(),
+            Some("http://board.lan")
+        );
+        // A trailing slash would double against the paths a reader types.
+        assert_eq!(
+            published(Some("  https://board.ts.net/  ")).as_deref(),
+            Some("https://board.ts.net")
+        );
+        assert_eq!(published(Some("")), None);
+        assert_eq!(published(None), None);
     }
 
     #[test]

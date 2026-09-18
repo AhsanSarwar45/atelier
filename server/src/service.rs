@@ -425,7 +425,8 @@ fn install(exe: &str) -> Result<(), String> {
     println!("{DISPLAY} will start with this computer.");
     let network = crate::reachable::on_this_network();
     let name = crate::reachable::name_on_this_network(network);
-    for line in crate::reachable::openable_at(&host, port, network, name.as_deref()) {
+    let public = crate::reachable::published_url();
+    for line in crate::reachable::openable_at(&host, port, network, name.as_deref(), public.as_deref()) {
         println!("  {line}");
     }
     Ok(())
