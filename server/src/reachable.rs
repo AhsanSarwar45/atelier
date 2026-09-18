@@ -437,7 +437,7 @@ mod tests {
         let offered = said
             .lines()
             .find(|line| line.starts_with("Network  ") && !line.contains("fallback"))
-            .expect(&format!("nothing was offered as the address to use:\n{said}"));
+            .unwrap_or_else(|| panic!("nothing was offered as the address to use:\n{said}"));
         assert!(
             offered.contains("https://nobara.tail1a2b.ts.net"),
             "the address in front was not the one offered: {offered}"
