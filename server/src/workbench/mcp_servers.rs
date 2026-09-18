@@ -1677,6 +1677,9 @@ mod tests {
                 auth: Some(Auth::Expired),
                 config: json!({"type": "http", "url": "https://a"}),
             }],
+            // Empty, and the shape below says so: an account with nothing to
+            // report elsewhere sends no `elsewhere` key at all.
+            elsewhere: Vec::new(),
         };
         assert_eq!(
             serde_json::to_value(&listing).unwrap(),
