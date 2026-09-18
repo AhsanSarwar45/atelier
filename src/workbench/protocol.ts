@@ -923,6 +923,20 @@ export interface McpServer {
   config: Record<string, unknown>;
 }
 
+/**
+ * A server one of this brand's other accounts defines.
+ *
+ * Each account keeps its own servers and a chat loads only the ones its own
+ * account holds, so a server added on one account is simply absent on the
+ * next. The panel names those, and offers to put one where it is wanted
+ * (bw-6ecp.2).
+ */
+export interface McpElsewhere {
+  account: string;
+  accountName: string;
+  server: McpServer;
+}
+
 export type ExtensionKind = 'plugins' | 'marketplaces';
 
 export interface ExtensionItem {

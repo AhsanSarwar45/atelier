@@ -20,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
-import type { Brand, McpServer, McpSource, SettingsScope } from '@/workbench/protocol';
+import type { Brand, McpElsewhere, McpServer, McpSource, SettingsScope } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
 function said(e: unknown): string {
@@ -32,6 +32,9 @@ export function wireScope(scope: Scope): SettingsScope {
 }
 
 const SOURCE_NAME: Record<McpSource, string> = { user: 'Account', project: 'Project', local: 'Project, this computer' };
+
+/** What `mcp.list` answers with: this account's servers, and the other accounts'. */
+type Listed = { servers: McpServer[]; elsewhere?: McpElsewhere[] };
 
 /** Where a new server goes, given the scope and the brand. */
 function sourcesFor(brand: Brand, scope: Scope): McpSource[] {
@@ -166,6 +169,7 @@ function AddServer({ brand, scope, onAdded }: { brand: Brand; scope: Scope; onAd
 
 export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }) {
   const [servers, setServers] = useState<McpServer[] | null>(null);
+  const [elsewhere, setElsewhere] = useState<McpElsewhere[]>([]);
   const [unread, setUnread] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -175,8 +179,12 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
   useEffect(() => {
     let live = true;
     setUnread(null);
-    sendCommand<{ servers: McpServer[] }>({ type: 'mcp.list', brand, ...wireScope(scope) })
-      .then((r) => live && setServers(r.servers))
+    sendCommand<Listed>({ type: 'mcp.list', brand, ...wireScope(scope) })
+      .then((r) => {
+        if (!live) return;
+        setServers(r.servers);
+        setElsewhere(r.elsewhere ?? []);
+      })
       .catch((e: unknown) => live && setUnread(said(e)));
     return () => {
       live = false;
@@ -193,11 +201,14 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
   }, []);
 
   const act = useCallback(
-    async (key: string, run: () => Promise<{ servers: McpServer[] } | { started: boolean; url?: string }>, done?: string) => {
+    async (key: string, run: () => Promise<Listed | { started: boolean; url?: string }>, done?: string) => {
       setBusy(key);
       try {
         const r = await run();
-        if ('servers' in r) setServers(r.servers);
+        if ('servers' in r) {
+          setServers(r.servers);
+          setElsewhere(r.elsewhere ?? []);
+        }
         else {
           if (r.url) window.open(r.url, '_blank', 'noopener');
           setAttempt((n) => n + 1);
@@ -308,6 +319,62 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
           );
         })}
       </SettingsGroup>
+      {elsewhere.length > 0 && (
+        <SettingsGroup
+          title="On another account"
+          description="Each account loads only its own servers, so these are not available to a chat on this one."
+          data-testid={`mcp-elsewhere-${brand}`}
+        >
+          {elsewhere.map((e) => {
+            const s = e.server;
+            const key = `elsewhere:${e.account}:${s.id}`;
+            const target = s.command ? [s.command, ...(s.args ?? [])].join(' ') : s.url ?? '';
+            return (
+              <div key={key} className="flex items-center gap-3 px-3 py-2" data-testid={`mcp-elsewhere-${s.id}`}>
+                <span className="size-4" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate text-sm font-medium text-t-secondary">{s.id}</span>
+                    <Badge variant="outline" size="sm">
+                      {s.transport}
+                    </Badge>
+                    <Badge variant="secondary" size="sm">
+                      {e.accountName}
+                    </Badge>
+                    {busy === key && <Loader2 className="size-3 animate-spin text-t-muted" />}
+                  </div>
+                  <Tooltip label={target}>
+                    <p className="truncate font-mono text-xs text-t-muted">{target}</p>
+                  </Tooltip>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy !== null}
+                  onClick={() =>
+                    void act(
+                      key,
+                      () =>
+                        sendCommand<Listed>({
+                          type: 'mcp.add',
+                          brand,
+                          ...wireScope(scope),
+                          source: 'user',
+                          id: s.id,
+                          config: s.config,
+                        }),
+                      `${s.id} added to this account`,
+                    )
+                  }
+                  data-testid={`mcp-copy-here-${s.id}`}
+                >
+                  <Plus /> Add here
+                </Button>
+              </div>
+            );
+          })}
+        </SettingsGroup>
+      )}
     </div>
   );
 }

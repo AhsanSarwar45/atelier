@@ -394,6 +394,69 @@ impl WorkbenchRegistry {
         }
     }
 
+    /// A listing with the other accounts' servers filled in.
+    ///
+    /// Every MCP command answers with the whole list, and the panel draws
+    /// whatever it is handed — so an add or a remove that answered without
+    /// this would blank the other accounts' servers until the next read
+    /// (bw-6ecp.2).
+    fn with_elsewhere(
+        &self,
+        brand: &str,
+        scope: &provider_settings::Scope,
+        chosen: Option<&str>,
+        mut listing: mcp_servers::Listing,
+    ) -> mcp_servers::Listing {
+        listing.elsewhere = self.mcp_elsewhere(brand, scope, chosen, &listing);
+        listing
+    }
+
+    /// The servers this brand's OTHER accounts define, for the panel to name.
+    ///
+    /// Only for an account scope: a project's `.mcp.json` belongs to the
+    /// project and every account reads the same one, so there is nothing to
+    /// be elsewhere. A server this account already defines is left out — the
+    /// point is to show what is missing here, not to list the same name twice.
+    ///
+    /// Each other account is read without the Codex CLI step. That step asks
+    /// `codex mcp list --json` whether a sign-in is held, which costs up to
+    /// five seconds per account and answers a question about signing in that
+    /// nothing here asks: these entries are offered to be copied, not used.
+    fn mcp_elsewhere(
+        &self,
+        brand: &str,
+        scope: &provider_settings::Scope,
+        chosen: Option<&str>,
+        mine: &mcp_servers::Listing,
+    ) -> Vec<mcp_servers::Elsewhere> {
+        if !matches!(scope, provider_settings::Scope::Account { .. }) {
+            return Vec::new();
+        }
+        let here = chosen.unwrap_or(super::profiles::SYSTEM);
+        let no_cli: mcp_servers::CodexStatus = &|_, _| None;
+        let mut out = Vec::new();
+        for profile in self.profiles.list(brand) {
+            if profile.id == here {
+                continue;
+            }
+            let account = self.mcp_account(brand, Some(&profile.id));
+            let Ok(listing) = mcp_servers::list_with(brand, scope, &account, no_cli) else {
+                continue;
+            };
+            for server in listing.servers {
+                if mine.servers.iter().any(|s| s.id == server.id) {
+                    continue;
+                }
+                out.push(mcp_servers::Elsewhere {
+                    account: profile.id.clone(),
+                    account_name: profile.name.clone(),
+                    server,
+                });
+            }
+        }
+        out
+    }
+
     /// The Claude and Codex directories an agent-files command reads, for the
     /// account it names or the one the server booted with.
     fn agent_dirs(&self, profile: Option<&str>) -> (PathBuf, PathBuf) {
@@ -1241,8 +1304,10 @@ impl WorkbenchRegistry {
             CommandKind::McpList => {
                 let brand = Self::field(command, "brand")?;
                 let scope = Self::settings_scope(command)?;
-                let account = self.mcp_account(brand, Self::maybe(command, "profileId"));
-                serde_json::to_value(mcp_servers::list(brand, &scope, &account)?)
+                let chosen = Self::maybe(command, "profileId");
+                let account = self.mcp_account(brand, chosen);
+                let listing = mcp_servers::list(brand, &scope, &account)?;
+                serde_json::to_value(self.with_elsewhere(brand, &scope, chosen, listing))
                     .map_err(|e| e.to_string())
             }
             CommandKind::McpAdd => {
@@ -1255,19 +1320,21 @@ impl WorkbenchRegistry {
                     .get("config")
                     .and_then(Value::as_object)
                     .ok_or("config must be an object")?;
-                let account = self.mcp_account(brand, Self::maybe(command, "profileId"));
-                serde_json::to_value(mcp_servers::add(
-                    brand, &scope, &account, source, id, config,
-                )?)
-                .map_err(|e| e.to_string())
+                let chosen = Self::maybe(command, "profileId");
+                let account = self.mcp_account(brand, chosen);
+                let listing = mcp_servers::add(brand, &scope, &account, source, id, config)?;
+                serde_json::to_value(self.with_elsewhere(brand, &scope, chosen, listing))
+                    .map_err(|e| e.to_string())
             }
             CommandKind::McpRemove => {
                 let brand = Self::field(command, "brand")?;
                 let scope = Self::settings_scope(command)?;
                 let source = Self::mcp_source(command)?;
                 let id = Self::field(command, "id")?;
-                let account = self.mcp_account(brand, Self::maybe(command, "profileId"));
-                serde_json::to_value(mcp_servers::remove(brand, &scope, &account, source, id)?)
+                let chosen = Self::maybe(command, "profileId");
+                let account = self.mcp_account(brand, chosen);
+                let listing = mcp_servers::remove(brand, &scope, &account, source, id)?;
+                serde_json::to_value(self.with_elsewhere(brand, &scope, chosen, listing))
                     .map_err(|e| e.to_string())
             }
             CommandKind::McpSetEnabled => {
@@ -1279,10 +1346,11 @@ impl WorkbenchRegistry {
                     .at("enabled")
                     .as_bool()
                     .ok_or("enabled must be true or false")?;
-                let account = self.mcp_account(brand, Self::maybe(command, "profileId"));
-                serde_json::to_value(mcp_servers::set_enabled(
-                    brand, &scope, &account, source, id, enabled,
-                )?)
+                let chosen = Self::maybe(command, "profileId");
+                let account = self.mcp_account(brand, chosen);
+                let listing =
+                    mcp_servers::set_enabled(brand, &scope, &account, source, id, enabled)?;
+                serde_json::to_value(self.with_elsewhere(brand, &scope, chosen, listing))
                 .map_err(|e| e.to_string())
             }
             CommandKind::McpLogin | CommandKind::McpLogout => {

@@ -144,10 +144,34 @@ pub struct Server {
     pub config: Value,
 }
 
+/// A server one of this brand's OTHER accounts defines.
+///
+/// Each account keeps its own servers — the system account in `~/.claude.json`
+/// or the directory the server booted with, every other in its own profile
+/// directory — and a chat is launched pointed at the account's directory, so
+/// the agent loads that account's servers and no others. That is consistent,
+/// but it is invisible: a server added on one account simply is not there on
+/// the next, with nothing on the screen to say where it went (bw-6ecp.2). So
+/// the panel names them, and offers to put one where it is wanted.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Elsewhere {
+    /// The account it is defined on.
+    pub account: String,
+    /// That account's name, as the picker shows it.
+    pub account_name: String,
+    pub server: Server,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Listing {
     pub servers: Vec<Server>,
+    /// Servers the other accounts of this brand define, which this account's
+    /// agents do not load. Empty for a project scope, where the account is not
+    /// what decides.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub elsewhere: Vec<Elsewhere>,
 }
 
 /// What a login or logout answered with once it was under way.
@@ -219,7 +243,10 @@ pub fn list_with(
             }
         }
     }
-    Ok(Listing { servers })
+    Ok(Listing {
+        servers,
+        elsewhere: Vec::new(),
+    })
 }
 
 /// Put one server into the named file and answer the scope as it now reads.
