@@ -59,6 +59,11 @@ pub struct Item {
     pub marketplace: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<Source>,
+    /// A marketplace's own address — the `owner/repo`, URL or path it was
+    /// added from. What `plugin marketplace add` would be given to put the
+    /// same marketplace on another account (bw-6ecp.5).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -205,6 +210,9 @@ fn plugin_item(
             .and_then(string_of),
         marketplace,
         source: Some(source),
+        // A plugin is named by `plugin@marketplace`; only a marketplace has an
+        // address of its own.
+        origin: None,
     }
 }
 
@@ -282,15 +290,19 @@ fn declared_plugins(files: &[PathBuf], account_dir: &Path) -> Vec<Item> {
 }
 
 fn describe_source(source: &Value) -> Option<String> {
-    let object = source.as_object()?;
-    let kind = object.get("source").and_then(string_of)?;
-    let place = ["repo", "url", "path"]
-        .iter()
-        .find_map(|key| object.get(*key).and_then(string_of));
-    Some(match place {
+    let kind = source.as_object()?.get("source").and_then(string_of)?;
+    Some(match origin_of(source) {
         Some(place) => format!("{kind} {place}"),
         None => kind,
     })
+}
+
+/// The address the marketplace was added from, whichever key holds it.
+fn origin_of(source: &Value) -> Option<String> {
+    let object = source.as_object()?;
+    ["repo", "url", "path"]
+        .iter()
+        .find_map(|key| object.get(*key).and_then(string_of))
 }
 
 fn marketplace_item(name: &str, entry: &Value, source: Source, fallback_path: PathBuf) -> Item {
@@ -307,6 +319,7 @@ fn marketplace_item(name: &str, entry: &Value, source: Source, fallback_path: Pa
             .map(PathBuf::from)
             .unwrap_or(fallback_path),
         source: Some(source),
+        origin: object.and_then(|o| o.get("source")).and_then(origin_of),
         ..Item::default()
     }
 }
@@ -575,12 +588,19 @@ mod tests {
             markets[0].path,
             cfg.path().join("plugins/marketplaces/mine")
         );
+        // The address, apart from the prose, so the same marketplace can be
+        // added on another account (bw-6ecp.5).
+        assert_eq!(markets[1].origin.as_deref(), Some("anthropics/official"));
+        assert_eq!(markets[0].origin.as_deref(), Some("https://x/y.git"));
+        assert_eq!(plugins[2].origin, None);
 
         let wire = serde_json::to_value(&kinds).unwrap();
         assert_eq!(wire[0]["kind"], json!("plugins"));
         assert_eq!(wire[1]["kind"], json!("marketplaces"));
         assert_eq!(wire[0]["items"][2]["marketplace"], json!("official"));
         assert_eq!(wire[0]["items"][2]["source"], json!("user"));
+        assert_eq!(wire[1]["items"][1]["origin"], json!("anthropics/official"));
+        assert!(wire[0]["items"][2].get("origin").is_none());
         assert!(wire[0].get("shared").is_none());
     }
 

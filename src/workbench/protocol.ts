@@ -948,6 +948,8 @@ export interface ExtensionItem {
   version?: string;
   marketplace?: string;
   source?: 'user' | 'project';
+  /** A marketplace's own address: the `owner/repo`, URL or path it was added from. */
+  origin?: string;
 }
 
 export interface ExtensionKindList {

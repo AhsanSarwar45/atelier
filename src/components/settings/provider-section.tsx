@@ -102,7 +102,7 @@ export function ProviderSection({
         ) : profiles ? (
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <AccountPicker brand={brand} profiles={profiles} value={account} onChange={onAccount} />
-            {isPage && <CopyToAccounts brand={brand} from={account ?? SYSTEM_PROFILE} profiles={profiles} page={known} />}
+            <CopyToAccounts brand={brand} from={account ?? SYSTEM_PROFILE} profiles={profiles} page={known} />
           </div>
         ) : (
           <span className="text-sm text-t-tertiary">Reading accounts…</span>
