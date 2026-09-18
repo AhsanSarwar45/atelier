@@ -33,7 +33,9 @@ const servers = (file: string): Record<string, { command?: string }> =>
 test('a server on one account is named on another, and one click puts it there', async ({ page, request }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   // A second Claude account, made without the sign-in that follows adding one on screen.
-  const made = await request.post('/api/workbench/command', { data: { type: 'profile.create', brand: 'claude', name: 'Work' } });
+  // A name no other case uses: every case runs against one instance, and the
+  // server refuses a second account of the same brand and name (bw-6ecp.18).
+  const made = await request.post('/api/workbench/command', { data: { type: 'profile.create', brand: 'claude', name: 'Elsewhere' } });
   expect(made.ok(), await made.text()).toBeTruthy();
   const id = ((await made.json()) as { profile: { id: string } }).profile.id;
 

@@ -32,6 +32,8 @@ const account = (brand: string, id: string) => join(process.env.ATELIER_DATA_DIR
 const text = (file: string) => (existsSync(file) ? readFileSync(file, 'utf8') : '');
 
 test('a Claude account gives another its defaults and its servers, and leaves the rest alone', async ({ page, request }) => {
+  // A name no other case uses: every case runs against one instance, and the
+  // server refuses a second account of the same brand and name (bw-6ecp.18).
   const { profile } = (await command(request, { type: 'profile.create', brand: 'claude', name: 'Target' })) as { profile: { id: string } };
   const id = profile.id;
 

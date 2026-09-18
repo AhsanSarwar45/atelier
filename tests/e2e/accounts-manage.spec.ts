@@ -19,7 +19,9 @@ test.beforeAll(() => {
 test('an account is renamed, starred, and given a copy of another account\'s defaults', async ({ page, request }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   // A second Claude account, made without the sign-in that follows adding one on screen.
-  const made = await request.post('/api/workbench/command', { data: { type: 'profile.create', brand: 'claude', name: 'Work' } });
+  // A name no other case uses: every case runs against one instance, and the
+  // server refuses a second account of the same brand and name (bw-6ecp.18).
+  const made = await request.post('/api/workbench/command', { data: { type: 'profile.create', brand: 'claude', name: 'Renamed' } });
   expect(made.ok(), await made.text()).toBeTruthy();
   const { profile } = (await made.json()) as { profile: { id: string } };
   const id = profile.id;

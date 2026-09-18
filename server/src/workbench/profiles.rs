@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 use super::provider_defaults::atomic_write;
 
@@ -33,6 +34,23 @@ const BRANDS: &[(&str, &str)] = &[("claude", "CLAUDE_CONFIG_DIR"), ("codex", "CO
 
 /// The environment variable a brand reads its config directory from, or `None`
 /// for a brand that has no account to switch.
+/// Held across every read-modify-write of the index.
+///
+/// Adding, renaming and deleting all read `profiles.json` whole, change one
+/// entry and write it back. Two of those at once and the later write is of a
+/// copy read before the earlier one landed, so an account that was created and
+/// answered for simply vanishes — which is what the settings cases running
+/// together kept finding (bw-6ecp.18). One process's calls are serialised here;
+/// each copy of the app has a data directory of its own, so there is no second
+/// writer to lock against.
+static INDEX: Mutex<()> = Mutex::new(());
+
+/// A poisoned lock means a previous writer panicked, not that the index is
+/// unusable: take it anyway rather than refusing every account from then on.
+fn index_lock() -> MutexGuard<'static, ()> {
+    INDEX.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 pub fn variable(brand: &str) -> Option<&'static str> {
     BRANDS
         .iter()
@@ -249,6 +267,7 @@ impl Profiles {
         if name.is_empty() {
             return Err("a profile needs a name".to_string());
         }
+        let _index = index_lock();
         let mut index = self.read_index();
         if index
             .profiles
@@ -302,6 +321,7 @@ impl Profiles {
         if id == SYSTEM {
             return Err("the system profile cannot be renamed".to_string());
         }
+        let _index = index_lock();
         let mut index = self.read_index();
         if index.profiles.iter().any(|stored| {
             stored.brand == brand && stored.id != id && stored.name.eq_ignore_ascii_case(name)
@@ -331,6 +351,7 @@ impl Profiles {
         if id == SYSTEM {
             return Err("the system profile cannot be deleted".to_string());
         }
+        let _index = index_lock();
         let mut index = self.read_index();
         let before = index.profiles.len();
         index
@@ -393,6 +414,29 @@ fn create_private_dir(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_workbench_profiles_keep_every_account_made_at_once() {
+        // Twenty at once through the same index: before the lock, the later
+        // writes were of copies read before the earlier ones landed, and
+        // accounts the call had already answered for were gone (bw-6ecp.18).
+        let root = tempfile::tempdir().unwrap();
+        let made = std::sync::Arc::new(profiles(root.path()));
+        let hands: Vec<_> = (0..20)
+            .map(|n| {
+                let made = std::sync::Arc::clone(&made);
+                std::thread::spawn(move || made.create("claude", &format!("Account {n}")).unwrap())
+            })
+            .collect();
+        let ids: Vec<String> = hands
+            .into_iter()
+            .map(|hand| hand.join().unwrap().id)
+            .collect();
+        let listed: Vec<String> = made.list("claude").into_iter().map(|p| p.id).collect();
+        for id in &ids {
+            assert!(listed.contains(id), "{id} was answered for and then lost");
+        }
+    }
 
     fn profiles(root: &Path) -> Profiles {
         Profiles::new(
