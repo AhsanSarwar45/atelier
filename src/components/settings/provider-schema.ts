@@ -308,7 +308,10 @@ export const CODEX_PAGES: ProviderPageDef[] = [
       {
         id: 'sandbox',
         title: 'Sandbox',
-        description: 'Ignored when a profile is set',
+        // The reference says not to combine these with `default_permissions`
+        // at all. Calling it an override said the profile quietly wins, which
+        // is not what happens (bw-6ecp.14).
+        description: 'Do not set these and a permission profile together',
         settings: [
           { key: 'sandbox_mode', label: 'Sandbox', description: '', control: { kind: 'choice', choices: [{ value: 'read-only', label: 'Read only' }, { value: 'workspace-write', label: 'Write in the workspace' }, { value: 'danger-full-access', label: 'Full access' }] } },
           { key: 'sandbox_workspace_write.network_access', label: 'Network access', description: 'While writing', control: yesNo },
@@ -320,6 +323,7 @@ export const CODEX_PAGES: ProviderPageDef[] = [
       {
         id: 'profile',
         title: 'Permission profile',
+        description: 'Do not set this and the sandbox above together',
         settings: [
           { key: 'default_permissions', label: 'Profile', description: 'Or :read-only, :workspace, :danger-full-access', control: { kind: 'text', placeholder: ':workspace', mono: true } },
         ],

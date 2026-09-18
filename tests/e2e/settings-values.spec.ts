@@ -134,3 +134,10 @@ test('an approval policy written as a table is shown, not flattened', async ({ p
   await page.getByRole('option', { name: 'Never' }).click();
   await expect.poll(() => readFileSync(join(codexHome, 'config.toml'), 'utf8')).toContain('approval_policy = "never"');
 });
+
+test('the sandbox and the permission profile say not to be combined', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/settings?section=codex&tab=permissions');
+  await expect(page.getByTestId('settings-group-sandbox')).toContainText('Do not set these and a permission profile together');
+  await expect(page.getByTestId('settings-group-profile')).toContainText('Do not set this and the sandbox above together');
+});
