@@ -30,6 +30,17 @@ pub fn import_recipe(brand: &str) -> i64 {
     }
 }
 
+/// Which fold built the rows a chat is read back from.
+///
+/// The projection is a disposable cache of a fold this build performs, so a
+/// build that folds differently cannot trust rows an older one left: they are
+/// not stale, they are wrong, and no amount of catching up on new events
+/// repairs them. Raising this number is how a fold change says so -- each chat
+/// rebuilds its own rows the next time it is opened, and pays for it once.
+///
+/// 1: a picture a call answered with is kept on the call's row (bw-343e.1).
+const TRANSCRIPT_FOLD_VERSION: i64 = 1;
+
 const LEGACY_MIGRATIONS: &[&str] = &[
     r#"CREATE TABLE session (
          id TEXT PRIMARY KEY,
@@ -1565,17 +1576,28 @@ fn held_in_its_project(
         let held = self
             .connection
             .query_row(
-                "SELECT projected_seq, reset_seq FROM transcript_projection WHERE session_id = ?1",
+                r#"SELECT projected_seq, reset_seq, fold_version
+                     FROM transcript_projection WHERE session_id = ?1"#,
                 [session_id],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
             )
-            .optional()?;
-        if held == Some((newest_seq, reset_seq)) {
+            .optional()?
+            // Rows an older fold left are not behind, they are wrong, and
+            // catching them up on new events does not repair them. Forgetting
+            // them here puts each chat down the cold path below exactly once.
+            .filter(|(_, _, fold)| *fold == TRANSCRIPT_FOLD_VERSION);
+        if held.map(|(seq, reset, _)| (seq, reset)) == Some((newest_seq, reset_seq)) {
             return Ok(newest_seq);
         }
 
         match held {
-            Some((projected_seq, held_reset)) if held_reset == reset_seq => {
+            Some((projected_seq, held_reset, _)) if held_reset == reset_seq => {
                 self.catch_up_transcript_projection(
                     session_id,
                     projected_seq,
@@ -1600,12 +1622,14 @@ fn held_in_its_project(
                     [session_id],
                 )?;
                 transaction.execute(
-                    r#"INSERT INTO transcript_projection (session_id,projected_seq,reset_seq)
-                       VALUES (?1,?2,?2)
+                    r#"INSERT INTO transcript_projection
+                         (session_id,projected_seq,reset_seq,fold_version)
+                       VALUES (?1,?2,?2,?3)
                        ON CONFLICT(session_id) DO UPDATE SET
                          projected_seq=excluded.projected_seq,
-                         reset_seq=excluded.reset_seq"#,
-                    params![session_id, reset_seq],
+                         reset_seq=excluded.reset_seq,
+                         fold_version=excluded.fold_version"#,
+                    params![session_id, reset_seq, TRANSCRIPT_FOLD_VERSION],
                 )?;
                 transaction.commit()?;
                 self.catch_up_transcript_projection(session_id, reset_seq, newest_seq, reset_seq)?;
@@ -1711,8 +1735,9 @@ fn held_in_its_project(
             }
         }
         transaction.execute(
-            "UPDATE transcript_projection SET projected_seq=?1,reset_seq=?2 WHERE session_id=?3",
-            params![newest_seq, reset_seq, session_id],
+            r#"UPDATE transcript_projection
+                 SET projected_seq=?1,reset_seq=?2,fold_version=?4 WHERE session_id=?3"#,
+            params![newest_seq, reset_seq, session_id, TRANSCRIPT_FOLD_VERSION],
         )?;
         transaction.commit()
     }
@@ -1931,7 +1956,13 @@ fn held_in_its_project(
                  (type IN ('message.started','text.delta','thinking.delta','message.completed',
                            'message.retracted','image','image.compare','widget')
                     AND json_extract(json,'$.messageId') IN (SELECT id FROM selected_messages))
-                 OR (type IN ('tool.started','tool.completed','tool.progress','diff')
+                 -- 'image' is here as well as above because a picture a CALL
+                 -- answered with names the call and leaves messageId null, so
+                 -- the clause above never selected one and a reopened chat was
+                 -- not even told the picture existed. The two clauses cannot
+                 -- both match one event: an image carries one key or the other
+                 -- (bw-343e.1).
+                 OR (type IN ('tool.started','tool.completed','tool.progress','diff','image')
                     AND json_extract(json,'$.toolCallId') IN (SELECT id FROM selected_tools))
                  OR (type IN ('agent.started','agent.progress','agent.finished','agent.relayed','agent.identified')
                     AND json_extract(json,'$.agentId') IN (SELECT id FROM selected_agents))
@@ -2255,6 +2286,13 @@ fn projection_items_for_event(
             .unwrap_or_default()
     };
     let keys: Vec<String> = match event.kind {
+        // A picture a call answered with names the call, not a message, and
+        // the row it has to reach is that call's. Asking for `message:` with
+        // nothing after the colon loaded no row at all, so the picture had
+        // nowhere to land even once the fold knew where to put it (bw-343e.1).
+        EventKind::Image if !field("toolCallId").is_empty() => {
+            vec![format!("tool:{}", field("toolCallId"))]
+        }
         EventKind::Image
         | EventKind::ImageCompare
         | EventKind::Widget
@@ -2459,7 +2497,8 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
            CREATE TABLE IF NOT EXISTS transcript_projection (
              session_id TEXT PRIMARY KEY,
              projected_seq INTEGER NOT NULL,
-             reset_seq INTEGER NOT NULL
+             reset_seq INTEGER NOT NULL,
+             fold_version INTEGER NOT NULL DEFAULT 0
            );
            CREATE TABLE IF NOT EXISTS transcript_agent (
              session_id TEXT NOT NULL,
@@ -2469,6 +2508,17 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
              PRIMARY KEY (session_id, agent_id)
            );"#,
     )?;
+
+    // A database written before the fold was versioned has the table but not
+    // the column; every chat in it reads as fold 0 and rebuilds once.
+    if !columns(transaction, "transcript_projection")?
+        .iter()
+        .any(|name| name == "fold_version")
+    {
+        transaction.execute_batch(
+            "ALTER TABLE transcript_projection ADD COLUMN fold_version INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
 
     one_row_per_external_chat(transaction)
 }
@@ -2580,7 +2630,10 @@ fn one_row_per_external_chat(transaction: &Transaction<'_>) -> rusqlite::Result<
 }
 
 fn columns(transaction: &Transaction<'_>, table: &str) -> rusqlite::Result<Vec<String>> {
-    debug_assert!(matches!(table, "session" | "event"));
+    debug_assert!(matches!(
+        table,
+        "session" | "event" | "transcript_projection"
+    ));
     let mut statement = transaction.prepare(&format!("PRAGMA table_info({table})"))?;
     let found = statement
         .query_map([], |row| row.get::<_, String>(1))?
@@ -3672,6 +3725,136 @@ mod tests {
         assert_eq!(older.items.len(), 10);
         assert_eq!(older.items[0]["text"], "row 1");
         assert!(!older.has_older);
+    }
+
+    /// Reopening a chat still shows the picture an agent read.
+    ///
+    /// The manager's report: "images dont show when we reload a chat (the
+    /// images that usually show when agent reads an image)". The read goes
+    /// through the stored rows, not through the browser's own fold, and the
+    /// picture rides an event that names the CALL rather than a message. This
+    /// is the whole road -- record the events, then read the page back the way
+    /// a reopened chat does (bw-343e.1).
+    #[test]
+    fn a_picture_an_agent_read_is_still_there_when_the_chat_is_reopened() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let mut seq = 0;
+        let mut append = |body: Value| {
+            seq += 1;
+            let mut object = body.as_object().unwrap().clone();
+            object.insert("sessionId".into(), json!("looked"));
+            object.insert("seq".into(), json!(seq));
+            object.insert("at".into(), json!("now"));
+            assert!(store
+                .append_event(&serde_json::from_value(Value::Object(object)).unwrap())
+                .unwrap());
+        };
+        let picture = json!({
+            "mime":"image/png",
+            "dataUrl":"data:image/png;base64,iVBORw0KGgo=",
+            "alt":"Tool image"
+        });
+        append(json!({"type":"tool.started","toolCallId":"read","name":"Read","title":"Read shot.png"}));
+        append(json!({"type":"image","messageId":null,"toolCallId":"read","image":picture}));
+        append(json!({"type":"tool.completed","toolCallId":"read","ok":true}));
+
+        let page = store.transcript_items("looked", None, 40).unwrap();
+        let call = page
+            .items
+            .iter()
+            .find(|item| item["kind"] == "tool" && item["id"] == "read")
+            .expect("the call is on the page");
+        assert_eq!(
+            call["images"],
+            json!([picture]),
+            "the picture is read back onto the call that answered with it: {call:?}"
+        );
+
+        // The other road into the same chat: the folded rows the store keeps as
+        // a cache. Paging back through an open chat is served from there, and
+        // it dropped the picture for its own separate reason.
+        store.ensure_transcript_projection("looked").unwrap();
+        let cached: Vec<Value> = store
+            .connection
+            .prepare("SELECT json FROM transcript_item WHERE session_id='looked'")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .map(|json| serde_json::from_str(&json.unwrap()).unwrap())
+            .collect();
+        let folded = cached
+            .iter()
+            .find(|item| item["kind"] == "tool" && item["id"] == "read")
+            .expect("the call has a folded row");
+        assert_eq!(
+            folded["images"],
+            json!([picture]),
+            "the folded row keeps the picture too: {folded:?}"
+        );
+    }
+
+    /// Rows an older fold left are rebuilt rather than caught up.
+    ///
+    /// The manager's chats were all folded by the build that dropped the
+    /// picture, and their rows are what a reopened chat is drawn from. Nothing
+    /// new arrives in a finished chat, so a cache that is merely brought up to
+    /// date stays wrong forever; the fold's own version is what tells this
+    /// build not to trust them (bw-343e.1).
+    #[test]
+    fn rows_left_by_an_older_fold_are_built_again_rather_than_trusted() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        let store = Store::open(&path).unwrap();
+        let event: Event = serde_json::from_value(json!({
+            "type":"tool.started","sessionId":"aged","seq":1,"at":"now",
+            "toolCallId":"read","name":"Read","title":"Read shot.png"
+        }))
+        .unwrap();
+        assert!(store.append_event(&event).unwrap());
+        store.ensure_transcript_projection("aged").unwrap();
+
+        // What the older build left: rows it folded, marked with its own fold.
+        store
+            .connection
+            .execute(
+                "UPDATE transcript_projection SET fold_version=0 WHERE session_id='aged'",
+                [],
+            )
+            .unwrap();
+        store
+            .connection
+            .execute(
+                r#"UPDATE transcript_item SET json='{"kind":"tool","id":"read","stale":true}'
+                     WHERE session_id='aged'"#,
+                [],
+            )
+            .unwrap();
+
+        store.ensure_transcript_projection("aged").unwrap();
+        let json: String = store
+            .connection
+            .query_row(
+                "SELECT json FROM transcript_item WHERE session_id='aged'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let row: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(row["stale"], Value::Null, "the older row was not kept: {row}");
+        assert_eq!(row["title"], "Read shot.png", "it was folded again: {row}");
+        let fold: i64 = store
+            .connection
+            .query_row(
+                "SELECT fold_version FROM transcript_projection WHERE session_id='aged'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            fold, TRANSCRIPT_FOLD_VERSION,
+            "the rebuild is paid for once, not on every open"
+        );
     }
 
     #[test]

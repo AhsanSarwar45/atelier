@@ -144,6 +144,18 @@ fn find(items: &[Value], kind: &str, id: &str) -> Option<usize> {
         .position(|row| row["kind"] == kind && row["id"] == id)
 }
 
+/// Add one thing to a list a row keeps, making the list if the row has none.
+///
+/// A message row is born with its lists already empty, but a call's row is not:
+/// a call is announced before anyone knows it will answer with a picture, so
+/// the list has to be made when the first one lands.
+fn push_onto(row: &mut Value, list: &str, entry: Value) {
+    match row.get_mut(list).and_then(Value::as_array_mut) {
+        Some(existing) => existing.push(entry),
+        None => row[list] = json!([entry]),
+    }
+}
+
 fn brief_of(agents: &[Value], sent_by: &Value) -> Value {
     let Some(sent_by) = sent_by.as_str() else {
         return Value::Null;
@@ -275,6 +287,17 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                 copy_if_present(&mut row, event, "composedHere");
                 items.push(Value::Object(row));
             }
+            // A picture a CALL answered with belongs to the call's own row:
+            // `toolCallId` names it and `messageId` is null. The browser's own
+            // fold has always known that (src/workbench/fold.ts, the `image`
+            // case), but this replay looked only for a message, so a picture an
+            // agent had read was on the screen while the chat was live and gone
+            // the moment the chat was reopened (bw-343e.1).
+            EventKind::Image if !string(event, "toolCallId").is_empty() => {
+                if let Some(at) = find(&items, "tool", &string(event, "toolCallId")) {
+                    push_onto(&mut items[at], "images", value(event, "image"));
+                }
+            }
             EventKind::Image | EventKind::ImageCompare | EventKind::Widget => {
                 if let Some(at) = find(&items, "message", &string(event, "messageId")) {
                     let (list, field) = match event.kind {
@@ -282,10 +305,7 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                         EventKind::ImageCompare => ("comparisons", "comparison"),
                         _ => ("widgets", "widget"),
                     };
-                    items[at][list]
-                        .as_array_mut()
-                        .unwrap()
-                        .push(value(event, field));
+                    push_onto(&mut items[at], list, value(event, field));
                 }
             }
             EventKind::TextDelta => {
@@ -335,9 +355,24 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                 row.insert("diff".into(), Value::Null);
                 row.insert("input".into(), arguments(event, "input"));
                 row.insert("output".into(), Value::Null);
-                let row = Value::Object(row);
+                let mut row = Value::Object(row);
+                // A re-announcement REFRESHES the row; it does not empty it.
+                // What the call answered with arrives on its own events -- a
+                // diff, a picture -- and rebuilding the row from the
+                // announcement alone throws those away. The browser's fold
+                // carries both forward (src/workbench/fold.ts, the `twice`
+                // branch); this replay has to agree, or a reopened chat loses
+                // what a live one keeps (bw-343e.1).
                 match find(&items, "tool", &id) {
-                    Some(at) => items[at] = row,
+                    Some(at) => {
+                        if items[at]["diff"] != Value::Null {
+                            row["diff"] = items[at]["diff"].clone();
+                        }
+                        if let Some(images) = items[at].get("images") {
+                            row["images"] = images.clone();
+                        }
+                        items[at] = row;
+                    }
                     None => items.push(row),
                 }
             }
@@ -758,6 +793,57 @@ mod tests {
             json!({"brand":"claude","model":null,"permissionMode":"default"}),
         )]);
         assert_eq!(on_the_computers_own.view["profile"], Value::Null);
+    }
+
+    /// A picture a call answered with is still there when the chat is reopened.
+    ///
+    /// The manager's report: "images dont show when we reload a chat (the
+    /// images that usually show when agent reads an image)". The picture is
+    /// attached to the CALL, not to a message -- `toolCallId` names it and
+    /// `messageId` is null -- and this replay looked only for a message, so the
+    /// picture was on the screen for as long as the chat was live and gone the
+    /// moment it was read back (bw-343e.1).
+    ///
+    /// The call is announced twice on purpose: a reader who looks away and back
+    /// is told about the same call again, and rebuilding its row from that
+    /// second announcement is the other way the picture went missing.
+    #[test]
+    fn a_picture_a_call_answered_with_survives_reopening_the_chat() {
+        let event = |seq: i64, value: Value| -> Event {
+            let mut value = value;
+            let object = value.as_object_mut().unwrap();
+            object.insert("sessionId".into(), json!("chat"));
+            object.insert("seq".into(), json!(seq));
+            object.insert("at".into(), json!("2026-09-18T12:00:00Z"));
+            serde_json::from_value(value).unwrap()
+        };
+        let picture = json!({
+            "mime":"image/png",
+            "dataUrl":"data:image/png;base64,iVBORw0KGgo=",
+            "alt":"Tool image"
+        });
+        let told = vec![
+            event(1, json!({"type":"tool.started","toolCallId":"call","name":"Read","title":"Read screenshot.png"})),
+            event(2, json!({"type":"image","messageId":null,"toolCallId":"call","image":picture})),
+            event(3, json!({"type":"tool.started","toolCallId":"call","name":"Read","title":"Read screenshot.png"})),
+            event(4, json!({"type":"tool.completed","toolCallId":"call","ok":true})),
+        ];
+        let drawn = fold_all(&told);
+        let rows = drawn.items();
+        let call = rows
+            .iter()
+            .find(|row| row["kind"] == "tool" && row["id"] == "call")
+            .expect("the call has a row");
+        assert_eq!(
+            call["images"],
+            json!([picture]),
+            "the picture the call answered with is read back onto the call's own row"
+        );
+        assert_eq!(
+            rows.len(),
+            1,
+            "the picture does not become a row of its own: {rows:?}"
+        );
     }
 
     fn contract_events() -> Vec<Event> {
