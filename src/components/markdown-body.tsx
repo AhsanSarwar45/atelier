@@ -84,7 +84,18 @@ const PROSE_CLASSES =
   // block (which the preset exempts) read correctly (bw-3ndt.1).
   "prose-code:before:content-none prose-code:after:content-none " +
   // A pasted path or a long address must not push the column wider than its box.
-  "prose-pre:overflow-x-auto break-words";
+  "prose-pre:overflow-x-auto break-words " +
+  // A table is its own sideways scroller. Left alone, a table never narrows
+  // past its min-content width, so on a phone every column collapses to its
+  // longest word and the rows stack up into an unreadable comb -- the manager's
+  // "tables arr too cramped cureently on mobile ... the columns should be
+  // horizontally scrollable inside the table". Making the table a block gives
+  // it a scroll box of its own; keeping cells on one line puts the columns at
+  // the width they were written at and lets the reader push them along
+  // sideways. The scrolling stays INSIDE the table, so the message around it
+  // and the page behind it do not move (bw-343e.2).
+  "[&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto " +
+  "[&_th]:whitespace-nowrap [&_td]:whitespace-nowrap";
 
 /**
  * The words inside a marked span — what the reader actually wrote, which is

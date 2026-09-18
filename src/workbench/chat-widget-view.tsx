@@ -281,7 +281,12 @@ export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
   if (widget.type === 'timeline') return (
     <WidgetFrame kind="timeline" title={widget.title}><ol className="space-y-3">{widget.items.map((item) => { const Icon = item.status === 'done' ? Check : item.status === 'current' ? Clock : Circle; return <li key={item.label} className="flex gap-2"><Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><div><div className="text-sm font-medium">{item.label}</div>{item.detail && <div className="text-xs text-muted-foreground">{item.detail}</div>}</div></li>; })}</ol></WidgetFrame>
   );
+  // `w-max` is what makes the frame's scroller work at all: a table told to
+  // fill its box shrinks to fit instead of overflowing, so the scroll bar never
+  // appeared and the columns crushed together on a phone. Sized to its content
+  // it overflows and the reader pushes it along, the same shape the sequence
+  // diagram above already uses (bw-343e.2).
   return (
-    <WidgetFrame kind="table" title={widget.title} className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="border-b bg-muted/40"><tr>{widget.columns.map((column) => <th key={column} className="px-3 py-2 font-medium">{column}</th>)}</tr></thead><tbody>{widget.rows.map((row, index) => <tr key={index} className="border-b last:border-0">{row.map((cell, cellIndex) => <td key={cellIndex} className="px-3 py-2 text-muted-foreground">{cell}</td>)}</tr>)}</tbody></table></WidgetFrame>
+    <WidgetFrame kind="table" title={widget.title} className="overflow-x-auto"><table className="w-max min-w-full text-left text-xs"><thead className="border-b bg-muted/40"><tr>{widget.columns.map((column) => <th key={column} className="px-3 py-2 font-medium">{column}</th>)}</tr></thead><tbody>{widget.rows.map((row, index) => <tr key={index} className="border-b last:border-0">{row.map((cell, cellIndex) => <td key={cellIndex} className="px-3 py-2 text-muted-foreground">{cell}</td>)}</tr>)}</tbody></table></WidgetFrame>
   );
 }
