@@ -64,6 +64,15 @@ serde_yaml = "0.9"
 mysql_async = "0.34"
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"], default-features = false }
 base64 = "0.22"
+# The push encryption (RFC 8291) and the VAPID signature (RFC 8292), and
+# nothing else: every client this crate ships is built on OpenSSL, and this
+# server is deliberately rustls-only, so the message it builds is sent with
+# the `reqwest` already here (bw-ndlu.3).
+web-push = { version = "0.11", default-features = false }
+# Only to make the VAPID key pair in the first place, which `web-push` can
+# load and use but not generate. Features match what `web-push` asks of it, so
+# the two share one build of it rather than forcing a second.
+jwt-simple = { version = "0.12", default-features = false, features = ["pure-rust"] }
 flate2 = "1"
 tar = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }

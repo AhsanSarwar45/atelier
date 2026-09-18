@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+import { subscribeThisDevice, unsubscribeThisDevice } from '@/workbench/device-push';
+
 export interface NotificationPreferences { needsAction: boolean; updates: boolean; device: boolean }
 export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = { needsAction: true, updates: true, device: false };
 const KEY = 'atelier.notification-preferences.v1';
@@ -28,11 +30,37 @@ export function useNotificationPreferences() {
   return { preferences, save };
 }
 
-export async function enableDeviceNotifications(): Promise<NotificationPermission> {
-  if (!('Notification' in window)) return 'denied';
+/**
+ * What turning device notifications on achieved. `pushing` is the part that
+ * matters on a phone: false means notifications still only arrive while a
+ * window is open, because the server has no push keys or the browser has no
+ * push service (bw-ndlu.3).
+ */
+export interface DeviceNotificationResult { permission: NotificationPermission; pushing: boolean }
+
+export async function enableDeviceNotifications(preferences: NotificationPreferences): Promise<DeviceNotificationResult> {
+  if (!('Notification' in window)) return { permission: 'denied', pushing: false };
   const permission = await Notification.requestPermission();
-  if (permission === 'granted' && 'serviceWorker' in navigator) await navigator.serviceWorker.register('/notification-worker.js');
-  return permission;
+  if (permission !== 'granted' || !('serviceWorker' in navigator)) return { permission, pushing: false };
+  await navigator.serviceWorker.register('/notification-worker.js');
+  // A device that cannot be pushed to is still worth having registered: the
+  // open page draws through the same worker.
+  const pushing = await subscribeThisDevice({ ...preferences, device: true }).catch(() => false);
+  return { permission, pushing };
+}
+
+/** Stop this device being pushed to, without touching the browser permission. */
+export async function disableDeviceNotifications(): Promise<void> {
+  await unsubscribeThisDevice().catch(() => undefined);
+}
+
+/**
+ * Keep the server's copy of what this device wants to hear about in step with
+ * the checkboxes. Does nothing when this device was never subscribed.
+ */
+export async function resendDevicePreferences(preferences: NotificationPreferences): Promise<void> {
+  if (!preferences.device) return;
+  await subscribeThisDevice(preferences).catch(() => undefined);
 }
 
 export async function showDeviceNotification(title: string, body: string, href: string) {

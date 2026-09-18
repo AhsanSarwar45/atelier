@@ -29,6 +29,10 @@ export const metadata: Metadata = {
   // What the title bar says once iOS is running this as its own app rather
   // than as a tab, where the <title> would be the whole page's.
   appleWebApp: { capable: true, title: PRODUCT_NAME, statusBarStyle: 'black-translucent' },
+  // `appleWebApp` above writes only Apple's own spelling, which Chrome has
+  // deprecated in favour of this one. Both are set: Safari still reads only
+  // the Apple name, and without this Chrome logs a warning on every visit.
+  other: { 'mobile-web-app-capable': 'yes' },
 };
 
 export default function RootLayout({

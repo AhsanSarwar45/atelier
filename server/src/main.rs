@@ -475,6 +475,11 @@ async fn serve(open_browser: bool) {
         Err(error) => tracing::warn!(%error, "search index unavailable; searching messages only"),
     }
 
+    // What tells a phone whose app is closed that a chat is waiting. The page
+    // does the same while it is open; this is the half that survives the
+    // operating system freezing it (push.rs).
+    atelier::push::watch(database.clone(), workbench_state.clone());
+
     // Initialize Dolt connection manager. Local boards already backed by Dolt
     // are brought up through bd before the read-ahead can fall back to stale
     // JSONL, then checked for the rest of this process's lifetime.
@@ -573,6 +578,12 @@ async fn serve(open_browser: bool) {
         .nest(
             "/api",
             routes::search_settings::search_settings_routes().with_state(database.clone()),
+        )
+        // Where a device asked to be pushed to lives. Same table, same guard
+        // (routes/push.rs).
+        .nest(
+            "/api",
+            routes::push::push_routes().with_state(database.clone()),
         )
         .route("/api/beads", get(routes::beads::read_beads))
         .route("/api/beads/card", get(routes::beads::read_card))
