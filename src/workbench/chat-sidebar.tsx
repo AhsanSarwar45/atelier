@@ -758,6 +758,18 @@ export function ChatSidebar({
               // "Ready" elsewhere; on this row the manager asked for the
               // literal current activity: Idle (bw-zpyl.10).
               const rowState = closable && row.state === 'idle' ? { ...state, word: 'Idle' } : state;
+              // Whether the second line has a status to draw. Only where the
+              // holder has said something we can draw: the chip draws nothing
+              // at all for a hold that claims neither a state nor a verb, and
+              // that clause would otherwise open a line under the name saying
+              // nothing anybody can read.
+              const says =
+                busy === key ||
+                ending === key ||
+                closable ||
+                state.working ||
+                state.waiting ||
+                (ownership.kind === 'elsewhere' && rowState.word !== '');
               return (
                 <div
                   key={key}
@@ -864,8 +876,16 @@ export function ChatSidebar({
                       of ours: closing that one from here would call it asleep
                       while a terminal went on typing into it (registry.ts,
                       runningElsewhere).
+
+                      Both of these belong to the pointer, so a phone is shown
+                      neither. The control needs a hover to appear and a thumb
+                      has none; the menu button beside it already carries Close
+                      chat (bw-rpgh.1). Without the control this end of the
+                      name's line was a clock every long title was being cut
+                      short for, so on a phone the clock moves down to the
+                      second line (bw-8kk4.1).
                     */}
-                    <span className="relative flex shrink-0 items-center">
+                    <span className="relative hidden shrink-0 items-center md:flex">
                       <span
                         className={cn(
                           'font-mono text-[11px] text-muted-foreground',
@@ -955,48 +975,56 @@ export function ChatSidebar({
                     (chat-state.ts). A row that is asleep says nothing at all,
                     because most of the list is asleep and a pill on every one of
                     them is a pill on none (bw-96is).
+
+                    On a phone the line is drawn even then, because the clock
+                    rides on it there and a sleeping row still has a time. On a
+                    desktop the clock is up on the name's line, so a line with no
+                    chip would be an empty one and stays away (bw-8kk4.1).
                   */}
-                  {(busy === key ||
-                    ending === key ||
-                    closable ||
-                    state.working ||
-                    state.waiting ||
-                    // Only where the holder has said something we can draw. The
-                    // chip draws nothing at all for a hold that claims neither
-                    // a state nor a verb, and this clause used to be here for
-                    // the badge beside it — without the badge it would open an
-                    // empty line under the name and push every row below it
-                    // down by nothing anybody can read.
-                    (ownership.kind === 'elsewhere' && rowState.word !== '')) && (
-                    <div className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden">
-                      {busy === key || ending === key ? (
-                        <Badge
-                          variant="warning"
-                          appearance="light"
-                          size="sm"
-                          shape="circle"
-                          data-testid="row-pill"
-                          data-pill={busy === key ? 'opening' : 'ending'}
-                          className="shrink-0"
-                        >
-                          {busy === key ? 'opening' : 'ending'}
-                        </Badge>
-                      ) : (
-                        // The chip refuses to shrink everywhere else, which is
-                        // right where it stands beside body text. Here it has
-                        // the line to itself and what it is on cuts short only
-                        // when the rail is genuinely too narrow for it
-                        // (bw-jaoz.14.14).
-                        //
-                        // The word without its clause is not a rich status:
-                        // "Helping", "Retrying" or "Summarising" only becomes
-                        // actionable when the helper, reset time, or current
-                        // work remains visible. ChatStateChip middle-ellipsizes
-                        // that clause rather than dropping it.
-                        <ChatStateChip state={rowState} testId="row-pill" className="min-w-0 shrink" />
-                      )}
-                    </div>
-                  )}
+                  <div
+                    className={cn(
+                      'mt-1 flex min-w-0 items-center gap-1 overflow-hidden',
+                      !says && 'md:hidden',
+                    )}
+                  >
+                    {busy === key || ending === key ? (
+                      <Badge
+                        variant="warning"
+                        appearance="light"
+                        size="sm"
+                        shape="circle"
+                        data-testid="row-pill"
+                        data-pill={busy === key ? 'opening' : 'ending'}
+                        className="shrink-0"
+                      >
+                        {busy === key ? 'opening' : 'ending'}
+                      </Badge>
+                    ) : (
+                      // The chip refuses to shrink everywhere else, which is
+                      // right where it stands beside body text. Here it has
+                      // the line to itself and what it is on cuts short only
+                      // when the rail is genuinely too narrow for it
+                      // (bw-jaoz.14.14).
+                      //
+                      // The word without its clause is not a rich status:
+                      // "Helping", "Retrying" or "Summarising" only becomes
+                      // actionable when the helper, reset time, or current
+                      // work remains visible. ChatStateChip middle-ellipsizes
+                      // that clause rather than dropping it.
+                      says && <ChatStateChip state={rowState} testId="row-pill" className="min-w-0 shrink" />
+                    )}
+                    {/*
+                      The clock, on a phone only — the name's line hands it down
+                      here so a long title keeps that end of the line
+                      (bw-8kk4.1). Last and unshrinkable, with the chip taking
+                      the squeeze instead: a status long enough to fill the line
+                      middle-ellipsizes, and the time it would otherwise have
+                      shoved off the screen stays where the eye looks for it.
+                    */}
+                    <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground md:hidden">
+                      {clockTime(row.lastActiveAt)}
+                    </span>
+                  </div>
                 </div>
               );
             })}

@@ -1600,3 +1600,9 @@ refused `server/src/workbench/liveness.rs` and `status.rs` because the epic
 per-command bypass, so every change was written through the shell with the
 documented per-job `ATELIER_BYPASS` prefix. The same held for `bw-1fw6.2`.
 
+
+Reproduced on `bw-8kk4.1`: with the child claimed in `worktrees/bw-8kk4`, the
+Edit tool refused `src/workbench/chat-sidebar.tsx` because the epic named by the
+directory is open, as an epic is while its children run. Every change to the
+component, its unit case and the new spec was written through the shell with
+the documented per-job `ATELIER_BYPASS` prefix.

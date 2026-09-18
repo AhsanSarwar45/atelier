@@ -134,9 +134,17 @@ describe('a row on the restore rail', () => {
       'the row the manager was reading grew back its third line',
     ).toBe(2);
 
-    // And the quiet one, which says nothing at all below its name.
+    // And the quiet one, which says nothing at all below its name. Its second
+    // line is the phone's clock and only that — kept off a desktop, where the
+    // clock is up on the name's line and this one would be empty (bw-8kk4.1).
     const asleep = rows().find((r) => r !== held())!;
-    expect(asleep.children.length, 'a sleeping chat drew a line with nothing on it').toBe(1);
+    expect(asleep.children.length, 'a sleeping chat grew a line beyond its clock').toBe(2);
+    const under = asleep.children[1] as HTMLElement;
+    expect(under.className, 'the empty line a desktop was spared came back').toContain('md:hidden');
+    expect(under.children.length, 'a sleeping chat drew something beside its clock').toBe(1);
+    expect(under.textContent, 'the second line of a sleeping chat was not its time').toMatch(
+      /^\d{1,2}:\d{2}/,
+    );
   });
 
   it('carries the folder without drawing it, because the chat itself names it', async () => {
