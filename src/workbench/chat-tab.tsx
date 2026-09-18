@@ -2298,8 +2298,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         {view.error && <div className="text-sm text-red-500">{view.error}</div>}
         {/* What it is doing, where he is looking. Present exactly while it owes
             an answer (docs/agent-workbench.md §8.2.2) — whoever owes it, which
-            is the whole of what `workingLine` decides. */}
-        {atWork && <WorkingLine {...atWork} />}
+            is the whole of what `workingLine` decides. Not while the chat is
+            still loading: the page has not heard from it yet, and a chat it
+            has not heard from reads as the blank one, whose word is
+            "Starting" — a second spinner under the loading line (bw-721t.1). */}
+        {atWork && !view.loading && <WorkingLine {...atWork} />}
         </div>
       </div>
       {/* The way back floats over the conversation's own bottom corner, the way
