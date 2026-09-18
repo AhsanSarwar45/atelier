@@ -178,7 +178,11 @@ export const CLAUDE_PAGES: ProviderPageDef[] = [
         settings: [
           { key: 'sandbox.enabled', label: 'Sandbox commands', description: '', control: yesNo },
           { key: 'sandbox.autoAllowBashIfSandboxed', label: 'Allow sandboxed commands without asking', description: '', control: yesNo },
-          { key: 'sandbox.allowUnsandboxedCommands', label: 'When a command cannot be sandboxed', description: '', control: { kind: 'choice', choices: [{ value: 'retry', label: 'Ask to retry outside' }, { value: 'forbid', label: 'Refuse' }] } },
+          // A boolean, on by default, and off is what `/sandbox` calls strict
+          // sandbox mode. It was drawn as a choice between two strings the
+          // provider accepts neither of, so whichever the reader picked the
+          // setting did nothing at all (bw-6ecp.8).
+          { key: 'sandbox.allowUnsandboxedCommands', label: 'Retry outside the sandbox', description: 'Off refuses the retry, so every command must run sandboxed', control: yesNo },
           { key: 'sandbox.excludedCommands', label: 'Never sandbox', description: 'Commands', control: { kind: 'list', placeholder: 'docker' } },
           { key: 'sandbox.network.allowedDomains', label: 'Allowed domains', description: '', control: { kind: 'list', placeholder: 'github.com' } },
           { key: 'sandbox.network.deniedDomains', label: 'Denied domains', description: '', control: { kind: 'list' } },
