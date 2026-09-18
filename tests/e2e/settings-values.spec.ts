@@ -44,3 +44,16 @@ test('the unsandboxed-retry setting writes the boolean Claude Code reads', async
   await expect.poll(() => claudeSettings().sandbox?.allowUnsandboxedCommands).toBe(true);
   await page.screenshot({ path: join(results, 'desktop-claude-sandbox.png') });
 });
+
+test('Codex is not offered a model it has retired', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/settings?section=codex');
+  await page.locator('#setting-codex-model').click();
+  for (const gone of ['GPT-5.4', 'GPT-5.4 mini', 'GPT-5.3 Codex Spark']) {
+    await expect(page.getByRole('option', { name: gone, exact: true })).toHaveCount(0);
+  }
+  await expect(page.getByRole('option', { name: /GPT-6 Astra/ })).toBeVisible();
+  // 5.5 still runs until 14 October 2026, and says so.
+  await expect(page.getByRole('option', { name: /GPT-5.5/ })).toContainText('Retires 14 Oct 2026');
+  await page.screenshot({ path: join(results, 'desktop-codex-models.png') });
+});

@@ -200,15 +200,21 @@ export const CODEX_EFFORT: Choice[] = [
   { value: 'xhigh', label: 'Extra high' },
 ];
 
+/**
+ * The models Codex will still run, read 2026-09-19.
+ *
+ * GPT-5.4 and 5.4 mini retired from Codex on 2026-08-31 and were still offered
+ * here, so picking one wrote a model Codex refuses; 5.3 Codex Spark is in
+ * neither the reference nor the CLI (bw-6ecp.9). The list is `free`, so a model
+ * newer than this table can still be typed in.
+ * Source: https://learn.chatgpt.com/docs/models
+ */
 export const CODEX_MODELS: Choice[] = [
   { value: 'gpt-6-astra', label: 'GPT-6 Astra' },
   { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
   { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
   { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
-  { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark' },
-  { value: 'gpt-5.5', label: 'GPT-5.5' },
-  { value: 'gpt-5.4', label: 'GPT-5.4' },
-  { value: 'gpt-5.4-mini', label: 'GPT-5.4 mini' },
+  { value: 'gpt-5.5', label: 'GPT-5.5', hint: 'Retires 14 Oct 2026' },
 ];
 
 export const CODEX_PAGES: ProviderPageDef[] = [
