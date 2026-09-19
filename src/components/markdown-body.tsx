@@ -158,14 +158,18 @@ function CodeBlock({ code, children, className, ...props }: ComponentPropsWithou
         aria-label={copied ? 'Code copied' : 'Copy code'}
         data-testid="markdown-copy-code"
         className={cn(
-          'absolute right-2 top-2 size-7 rounded-md border border-zinc-700 bg-zinc-800/90',
-          'text-zinc-300 opacity-70 transition hover:bg-zinc-700 hover:text-zinc-50',
+          // Small enough to sit inside a block of a single line with air above
+          // and below it: the shortest block a reader ever meets is one line
+          // tall, and a button the height of a control filled it edge to edge
+          // and sat on its bottom border (bw-bl4g.1).
+          'absolute right-1.5 top-1.5 size-5 rounded border border-zinc-700 bg-zinc-800/90',
+          'text-zinc-400 opacity-70 transition hover:bg-zinc-700 hover:text-zinc-50',
           'focus-visible:opacity-100 group-hover:opacity-100',
           copied && 'text-success opacity-100',
         )}
         onClick={copy}
       >
-        {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+        {copied ? <Check className="size-3" aria-hidden="true" /> : <Copy className="size-3" aria-hidden="true" />}
       </Button>
     </div>
   );
