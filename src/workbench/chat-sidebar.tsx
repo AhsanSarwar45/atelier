@@ -793,6 +793,11 @@ export function ChatSidebar({
                   // and its branch, so drawing it here too spent a line of a
                   // two-line row saying what the next screen says anyway.
                   data-folder={row.folder ?? ''}
+                  // The chat the screen is on, which during a launch is the
+                  // chat being started rather than the one it replaced. Carried
+                  // as well as drawn, because "which row is lit" is otherwise
+                  // only a colour and nothing can be asked about it (bw-mew1.1).
+                  data-open={row.sessionId && row.sessionId === openSessionId ? 'yes' : 'no'}
                   onContextMenu={(event) => {
                     event.preventDefault();
                     setMenu({ row, at: { left: event.clientX, top: event.clientY } });

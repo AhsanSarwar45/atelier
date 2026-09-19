@@ -776,6 +776,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    */
   const [startingBrand, setStartingBrand] = useState<Brand | null>(null);
   const starting = startingBrand !== null;
+  /**
+   * The chat the click is on its way to, from the moment the server names it
+   * until the address says the same thing. The list is drawn against this
+   * while it stands, so the highlight leaves the old chat at the click and
+   * lands on the new row as soon as there is one — it used to sit on the chat
+   * he had just left for the second or two the launch takes (bw-mew1.1).
+   */
+  const [openingId, setOpeningId] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [newBrand, setNewBrand] = useState<Brand>('claude');
   /**
@@ -875,10 +883,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       const s = await sendCommand<{ id: string }>(
         startingChat(projectId, projectPath, brand, workingIn, profileId),
       );
+      setOpeningId(s.id);
       open(s.id);
     } catch (e) {
       setStartError(e instanceof Error ? e.message : String(e));
       setStartingBrand(null);
+      setOpeningId(null);
     }
   }, [projectId, projectPath, open, newBrand, providers]);
   // The spinner stands until the address really is the new chat, not until the
@@ -888,6 +898,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // list beside the spinner still works and what he picks there wins.
   useEffect(() => {
     setStartingBrand(null);
+    setOpeningId(null);
   }, [sessionId]);
   const view = useSession(sessionId);
   const factsRead = useSessionFactsRead(sessionId);
@@ -2035,7 +2046,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         <ChatSidebar
           projectId={projectId}
           projectPath={projectPath}
-          openSessionId={sessionId}
+          // While a chat is being started the open chat is the one being
+          // started, not the one he clicked away from: until the server names
+          // it there is no row to point at, and from there on it is the new
+          // row (bw-mew1.1).
+          openSessionId={starting ? openingId : sessionId}
           everything={everything}
           onOpen={(id) => { setRailOpen(false); open(id); }}
           onSearch={() => setShowing('search')}
