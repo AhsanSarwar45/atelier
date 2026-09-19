@@ -758,6 +758,35 @@ test.describe('workbench', () => {
       }
       await page.screenshot({ path: join(SHOTS, 'tray.png'), fullPage: false });
 
+      /*
+        Being done with them. Two chats are genuinely waiting on the owner here,
+        so this is the real question the button answers: having read that they
+        are waiting, he can put the tray away without answering either one, and
+        it stays away until one of them does something else (bw-k22y.1).
+      */
+      await page.getByTestId('tray-clear').click();
+      await expect(page.getByTestId('tray-panel')).toHaveCount(0);
+      // The bell goes with the rows: an empty tray is no tray, not a zero.
+      await expect(badge).toHaveCount(0);
+      await page.screenshot({ path: join(SHOTS, 'tray-cleared.png'), fullPage: false });
+
+      // And it is still cleared on the way back to this screen: what was read
+      // is read, not forgotten by the next navigation.
+      await page.reload();
+      // Anchored on the page's own heading, not on the bar the bell sits in:
+      // with the bell gone that bar has nothing in it, so it measures zero and
+      // waiting for it to be VISIBLE waits for something this very button is
+      // meant to prevent.
+      await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
+      await expect(badge).toHaveCount(0);
+
+      // Brought back to answer them, which is how the rest of this case goes on.
+      await page.evaluate(() => sessionStorage.removeItem('atelier.notifications-cleared'));
+      await page.reload();
+      await expect(badge).toHaveAttribute('data-count', '2', { timeout: 60_000 });
+      await badge.click();
+      await expect(rows).toHaveCount(2);
+
       // A row lands on its own chat, with the ask on screen.
       await page.locator(`[data-testid="tray-row"][data-session-id="${started[0]!.id}"]`).click();
       await expect(page.getByTestId('chat-tab')).toHaveAttribute('data-session-id', started[0]!.id, {

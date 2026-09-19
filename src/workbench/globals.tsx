@@ -8,14 +8,15 @@
  */
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { useRouter } from 'next/navigation';
 
-import { Bell } from 'lucide-react';
+import { Bell, CheckCheck } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { panelVariants } from '@/components/ui/panel';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Row } from '@/components/ui/row';
@@ -56,13 +57,66 @@ function chatHref(s: LiveSession): string {
   return `/project?id=${encodeURIComponent(s.projectId)}&tab=chat&chat=${encodeURIComponent(s.id)}`;
 }
 
+/** What the reader has already read: chat id to the state it was in when cleared. */
+const CLEARED_KEY = 'atelier.notifications-cleared';
+
+export function readCleared(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  try {
+    return JSON.parse(sessionStorage.getItem(CLEARED_KEY) ?? '{}') as Record<string, string>;
+  } catch {
+    // A tray that cannot read what was cleared shows everything, which is the
+    // safe way to be wrong: nothing waiting on the owner goes missing.
+    return {};
+  }
+}
+
+/**
+ * Whether a chat is still cleared.
+ *
+ * Against the state it was cleared IN, not against the id alone. These rows are
+ * not messages that arrive and stay — they are a live reading of what each chat
+ * is doing, so a chat cleared while it waits on permission must come back the
+ * moment it goes on to want something else. Clearing by id would have silenced
+ * that chat for the rest of the tab.
+ */
+export function stillCleared(cleared: Record<string, string>, s: LiveSession): boolean {
+  return cleared[s.id] === s.state;
+}
+
+/**
+ * What the tray has been told to forget, and the way to tell it.
+ *
+ * Kept for the tab rather than the machine (`sessionStorage`), beside the states
+ * the device notifications are judged against: clearing says "I have read
+ * these", which is a thing about this sitting rather than about this browser.
+ */
+function useCleared(): { cleared: Record<string, string>; clear: (sessions: LiveSession[]) => void } {
+  const [cleared, setCleared] = useState<Record<string, string>>({});
+  // Read after mount, not during: the server renders this too, and it has no
+  // sessionStorage to read.
+  useEffect(() => setCleared(readCleared()), []);
+  const clear = useCallback((sessions: LiveSession[]) => {
+    // Only the chats on screen are remembered, so the record cannot grow past
+    // the number of chats there are.
+    const next = Object.fromEntries(sessions.map((s) => [s.id, s.state]));
+    sessionStorage.setItem(CLEARED_KEY, JSON.stringify(next));
+    setCleared(next);
+  }, []);
+  return { cleared, clear };
+}
+
 function WaitingTray({ names }: { names: Map<string, string> }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
   const sessions = useLiveSessions();
   const { preferences } = useNotificationPreferences();
-  const waiting = preferences.needsAction ? sessions.filter(waitsOnYou) : [];
-  const updates = preferences.updates ? sessions.filter((s) => !waitsOnYou(s) && (s.state === 'idle' || s.state === 'stopped')) : [];
+  const { cleared, clear } = useCleared();
+  const unread = (s: LiveSession) => !stillCleared(cleared, s);
+  const waiting = preferences.needsAction ? sessions.filter(waitsOnYou).filter(unread) : [];
+  const updates = preferences.updates
+    ? sessions.filter((s) => !waitsOnYou(s) && (s.state === 'idle' || s.state === 'stopped')).filter(unread)
+    : [];
 
   if (!waiting.length && !updates.length) return null;
 
@@ -130,6 +184,32 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
           'w-96 max-w-[calc(100vw-1rem)] overflow-hidden p-0',
         )}
       >
+        {/*
+          The way to be done with what is in here. At the top rather than under
+          the rows, because the rows are as many as there are chats and this
+          panel does not scroll: a control below forty of them is a control off
+          the bottom of the screen.
+
+          It clears everything, which is what the one button in a tray of read
+          notifications should do. A row cleared here is not gone for good — see
+          {@link stillCleared} — it is gone until its chat does something else.
+        */}
+        <div className="flex items-center justify-between gap-2 border-b border-border/40 px-3 py-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-t-muted">Notifications</span>
+          <Button
+            type="button"
+            variant="dim"
+            size="xs"
+            data-testid="tray-clear"
+            onClick={() => {
+              clear(sessions);
+              setOpen(false);
+            }}
+          >
+            <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />
+            Clear all
+          </Button>
+        </div>
         {waiting.length > 0 && <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-t-muted">Needs action</div>}
         {waiting.map((s) => (
           <Row
@@ -174,6 +254,10 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
 export function WorkbenchStatus() {
   const names = useProjectNames();
   const sessions = useLiveSessions();
+  // Deliberately blind to what has been cleared: this is the cheap gate, and
+  // reading sessionStorage during a render the server also does would have the
+  // two of them disagree. The tray itself draws nothing once everything in it
+  // is cleared, so the bell goes with it either way.
   const relevant = sessions.filter((s) => waitsOnYou(s) || s.state === 'idle' || s.state === 'stopped').length;
 
   useEffect(() => {
