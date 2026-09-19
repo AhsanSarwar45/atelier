@@ -56,6 +56,8 @@ pub fn operational(row: &Value) -> bool {
                     | "step:design"
                     | "step:ground"
                     | "step:benchmark"
+                    | "step:verify"
+                    | "step:worktree"
             )
         })
 }
@@ -715,6 +717,10 @@ pub fn reconcile_command(rest: &[String]) -> Result<i32, String> {
             None
         };
         if let Some(sha) = receipt.or(explicit) {
+            if graph.iter().any(|node| node.id == id && node.container) {
+                report.push(json!({"id":id,"action":"retain","commit":sha,"reason":"Direct delivery on an empty legacy epic requires an audited kind correction; empty containers cannot be Done"}));
+                continue;
+            }
             report.push(json!({"id":id,"action":"done","commit":sha,"branch":landing}));
             if apply {
                 metadata(
@@ -748,10 +754,11 @@ pub fn reconcile_command(rest: &[String]) -> Result<i32, String> {
     }
     let graph = nodes(&planned);
     let projection = board_state::project(&graph);
-    for node in graph.iter().filter(|n| n.container || !n.children.is_empty()) {
+    for node in &graph {
         if let Some(error) = projection.errors.get(&node.id) {
             report.push(json!({"id":node.id,"action":"repair_hierarchy","reason":error}));
-        } else if let Some(next) = projection.states.get(&node.id) {
+        } else if (node.container || !node.children.is_empty()) && projection.states.contains_key(&node.id) {
+            let next = &projection.states[&node.id];
             let original = rows.iter().find(|row| row["id"] == node.id).unwrap();
             if status(original) != next {
                 report.push(json!({"id":node.id,"action":"derive","from":status(original),"to":next,"reason":"State of required descendants"}));
@@ -803,6 +810,8 @@ mod tests {
             json!({"id":"j","status":"open"}),
             json!({"id":"j.1","status":"closed","parent":"j"}),
             json!({"id":"j.2","status":"open","parent":"j","labels":["no-code","step:land"]}),
+            json!({"id":"j.3","status":"open","parent":"j","labels":["no-code","step:verify"]}),
+            json!({"id":"j.4","status":"open","parent":"j","labels":["no-code","step:worktree"]}),
         ];
         let projected = board_state::project(&nodes(&rows));
         assert_eq!(projected.states["j"], "closed");

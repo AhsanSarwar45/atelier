@@ -39,7 +39,8 @@ command = "test -f delivered.txt"
 paths = []
 `);
 writeFileSync(join(repo, '.gitignore'), '.beads/\nworktrees/\n');
-git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'fixture base');
+bd(repo, 'create', '--id', 'ld-legacy-empty', '--title', 'Legacy direct epic work', '--type', 'epic');
+git(repo, 'add', '.'); git(repo, 'commit', '--date=2030-01-01T00:00:00Z', '-qm', 'ld-legacy-empty: historical direct delivery');
 const installGuard = (interrupt = false) => {
   const hook = git(repo, 'rev-parse', '--git-path', 'hooks/reference-transaction');
   writeFileSync(hook, `#!/bin/sh
@@ -49,6 +50,10 @@ exec '${binary}' hook landing-gate "$@"
   chmodSync(hook, 0o755);
 };
 installGuard();
+const legacyPreview = JSON.parse(tool(repo, 'board/reconcile', '--legacy'));
+assert.equal(legacyPreview.find(item => item.id === 'ld-legacy-empty').action, 'retain');
+assert.equal(row(repo, 'ld-legacy-empty').status, 'open');
+console.log('PASS direct historical commit cannot automatically complete an empty epic');
 
 const make = (id, type = 'task', parent) => {
   bd(repo, 'create', '--id', id, '--title', id, '--type', type);

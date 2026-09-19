@@ -150,7 +150,7 @@ export function computeEpicProgress(
     const child = beadById.get(id);
     if (!child) { unresolved.add(id); return; }
     if (child.labels?.includes('no-code') && child.labels.some((label) =>
-      ['step:checks', 'step:land', 'step:review', 'step:design', 'step:ground', 'step:benchmark'].includes(label))) return;
+      ['step:checks', 'step:land', 'step:review', 'step:design', 'step:ground', 'step:benchmark', 'step:verify', 'step:worktree'].includes(label))) return;
     if (child.status !== 'cancelled' && child.children?.length) {
       active.add(id);
       child.children.forEach(collect);

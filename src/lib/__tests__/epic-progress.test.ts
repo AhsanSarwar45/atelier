@@ -50,6 +50,17 @@ const progressOf = (states: BeadStatus[]) => {
 const percentOf = progressPercent;
 
 describe('what a job counts', () => {
+  it('excludes legacy operation records while retaining explicit no-code deliverables', () => {
+    const { epic, pieces } = job('closed', 'open', 'open', 'open');
+    pieces[1].labels = ['no-code', 'step:verify'];
+    pieces[2].labels = ['no-code', 'step:worktree'];
+    pieces[3].labels = ['no-code', 'step:work'];
+    const progress = computeEpicProgress(epic, byId(pieces), lookup(pieces));
+    expect(progress.total).toBe(2);
+    expect(progress.completed).toBe(1);
+    expect(percentOf(progress)).toBe(50);
+  });
+
   it('leaves dropped work out of the total, so a finished job reads all of it', () => {
     // bw-oio5 as it stands: fourteen pieces, ten finished, four dropped.
     const p = progressOf([...many(10, 'closed'), ...many(4, 'cancelled')]);
@@ -73,7 +84,7 @@ describe('what a job counts', () => {
 
   it('reads a job whose every piece was dropped as nothing done, not as finished', () => {
     // Nothing was finished there. Such a job is one to drop, not one to sign
-    // off, and the screen offers the finish at a hundred and nowhere else.
+    // off. Completion is derived from required deliverables.
     const p = progressOf(many(3, 'cancelled'));
     expect(p.total).toBe(0);
     expect(p.completed).toBe(0);
@@ -95,7 +106,7 @@ describe('what a job counts', () => {
 
   it('never reads a hundred while a piece is still standing', () => {
     // 199 of 200 rounds to a hundred, and a hundred is what draws the full
-    // green bar and offers the sign-off.
+    // green bar.
     const p = progressOf([...many(199, 'closed'), 'open']);
     expect(p.total).toBe(200);
     expect(p.completed).toBe(199);

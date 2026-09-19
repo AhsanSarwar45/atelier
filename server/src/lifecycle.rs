@@ -1727,16 +1727,30 @@ fn status_gate(data: &Value) -> Option<Value> {
         let verb = call.segment.words[call.verb].text.as_str();
         let args = &call.segment.words[call.verb + 1..];
         if !matches!(verb, "update" | "close" | "reopen" | "create" | "label") { continue; }
-        if args.iter().any(|word| word.text == "cancelled" || word.text.ends_with("=cancelled")) {
+        let values = |flag: &str| -> Vec<&str> {
+            args.iter().enumerate().filter_map(|(at, word)| {
+                if word.text == flag { args.get(at + 1).map(|w| w.text.as_str()) }
+                else { word.text.strip_prefix(&format!("{flag}=")) }
+            }).collect()
+        };
+        let cancellation = ["--add-label", "--remove-label", "--labels", "-l", "--status", "-s"].iter()
+            .flat_map(|flag| values(flag)).any(|value| value.split(',').any(|tag| tag == "cancelled"))
+            || (verb == "label" && args.first().is_some_and(|w| matches!(w.text.as_str(), "add" | "remove" | "set"))
+                && args.iter().skip(1).any(|w| w.text.split(',').any(|tag| tag == "cancelled")));
+        if cancellation {
             return deny("Cancel scope with atelier tool board/job cancel ID --reason TEXT; cancellation needs ownership and a recorded reason");
         }
         // Manager signoff is a human action, never agent-authored metadata.
-        if args.iter().any(|w| ["manager_approved_tree", "checks_passed", "review_passed", "landed_commit"].iter().any(|key| w.text.starts_with(&format!("{key}=")) || w.text.starts_with(&format!("--set-metadata={key}=")))) {
+        if values("--set-metadata").iter().any(|value| ["manager_approved_tree", "checks_passed", "review_passed", "landed_commit"].iter().any(|key| value.starts_with(&format!("{key}=")))) {
             return deny("Completion and approval evidence must be recorded by the matching native workflow tool or the manager's board action");
         }
         let status = flag_value(args, "--status").or_else(|| flag_value(args, "-s"))
             .or_else(|| match verb { "close" => Some("closed".into()), "reopen" => Some("open".into()), _ => None });
         let Some(status) = status else { continue; };
+        if status == "blocked" && !["--append-notes", "--notes", "--reason"].iter()
+            .flat_map(|flag| values(flag)).any(|value| !value.trim().is_empty()) {
+            return deny("Record the concrete blocker and required input with --append-notes when marking work blocked");
+        }
         let ids = subject_ids(args);
         if ids.is_empty() { return deny("A status change must name its cards explicitly"); }
         for id in ids {
@@ -1940,10 +1954,11 @@ mod tests {
 
     #[test]
     fn native_machinery_status_filters_are_reads_and_cancellation_is_explicit() {
-        for command in ["bd list --status open --limit 0 --json", "bd ready --json", "bd search cancelled"] {
+        for command in ["bd list --status open --limit 0 --json", "bd ready --json", "bd search cancelled", "bd create --title cancelled", "bd update x-1 --append-notes cancelled", "bd create --title checks_passed=true"] {
             assert!(status_gate(&json!({"tool_input":{"command":command}})).is_none(), "{command}");
         }
-        for command in ["bd update x-1 --add-label cancelled", "bd update x-1 --remove-label=cancelled", "bd label add x-1 cancelled"] {
+        assert!(status_gate(&json!({"tool_input":{"command":"bd update x-1 --status blocked"}})).is_some());
+        for command in ["bd update x-1 --add-label cancelled", "bd update x-1 --remove-label=cancelled", "bd label add x-1 cancelled", "bd update x-1 --labels other,cancelled"] {
             assert!(status_gate(&json!({"tool_input":{"command":command}})).is_some(), "{command}");
         }
     }

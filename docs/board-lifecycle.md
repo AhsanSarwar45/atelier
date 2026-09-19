@@ -38,7 +38,9 @@ If the branch already exists, use `git worktree add worktrees/JOB-ID JOB-ID`.
 Keep evidence and concrete blockers on the card with `bd update ID
 --append-notes='...'`. An external blocker needs status blocked, its cause and
 the exact input or external change needed to resume. A question mark in a reply
-is not a blocker record. Continue owned work until it lands or has that record.
+is not a blocker record. Continue owned work until it lands or has that record. If Beads remains unavailable
+after a blocked stop and retry, report the outage as the concrete blocker; do not
+report completion or loop indefinitely.
 
 Create scoped deliverables with native commands:
 

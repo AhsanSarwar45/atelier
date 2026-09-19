@@ -1756,3 +1756,18 @@ explicit flag, and native review depending on a missing personal reviewer profil
 The reviewer returned valid JSON inside its result envelope rather than the
 requested structured_output; the parser now accepts that exact JSON form,
 rejecting prose, missing fields and error envelopes. No verdict is inferred.
+
+
+### Historical lifecycle reconciliation (bw-9vv9.4)
+
+The audit found two additional generated operation types, `step:verify` and
+`step:worktree`, which now follow the same no-code operation rule as checks and
+landing. Explicit no-code work remains a deliverable. An empty epic with a direct
+old commit is retained for audited type correction, never automatically closed.
+Reconciliation reports missing-parent errors on leaves too. Cancellation and proof
+checks inspect actual flags rather than words inside titles or notes, and an agent
+marking work blocked must append the concrete blocker and required input.
+
+The complete repair record is docs/audits/board-lifecycle-2026-09-19.md and its JSON
+companion. At the recorded snapshot all 4,560 states agree and the second dry run
+proposes no mutation. The owner app was not restarted or replaced.

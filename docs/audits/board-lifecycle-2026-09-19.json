@@ -1,0 +1,2433 @@
+{
+  "job": "bw-9vv9",
+  "date": "2026-09-19",
+  "contract": "Done means deliverable on main; epics derive recursively from required children. Cancelled is withdrawn scope.",
+  "delivery_evidence_main": "c3361ad668b04caee25c642de51c5a51c8e1a9f3",
+  "manual_actions": [
+    {
+      "id": "bw-x3jf.27",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Browser transitions call native Rust validation; no Python setup is needed.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-x3jf.28",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Generated and checked-in Codex Stop hooks enforce the shared board lifecycle.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-x3jf.29",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Freeform apply_patch checks add, update, delete and move paths.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-mzvf.1",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Native checks parser accepts exact declared names including Project checks=PASSED.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-mzvf.2",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Help and schema requests return before executing any workflow action.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-ezeb.1",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Beads instructions and workflow instruction tests use the same native landing contract.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-kw0o.1",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Instruction tests accept documented native landing command references.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-3wn",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Explicit command workdir/cwd and git target checkout determine ownership checks.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-13r7",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Native cleanup runs from another checkout and removes only merged completed jobs.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-wv3o.1",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Cleanup is a native operation from outside the completed job copy; no cleanup card or dummy commit.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-z9qn.14",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Completion matches whole card IDs in explicit commit headers, not sibling substrings.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-z9qn.17",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Incidental prose mentions cannot close unrelated cards; actual Git/Beads regression passed.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-3qs.7",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Board touch reconciles recorded state and journals; close reason prose cannot advance named jobs.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-etbo.14",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "An unrelated helper result cannot waive owned unfinished work at Stop.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-etbo.15",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Question punctuation no longer waives the completion check.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-2s3f.11",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Compound and prefixed bd commands retain the session actor; native workflow commands receive BEADS_ACTOR.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-2s3f.12",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Explicit actor impersonation is denied and state changes check claimed ownership.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-7e8.10",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Git reference-transaction validates the actual protected ref irrespective of linked-checkout cwd.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-mkp.86",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Protected refs require a prepared landing journal and fast-forward proof in the real Git hook.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-o9o7",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Generated closable workflow steps retired; checks/review are evidence on the deliverable and cleanup needs no commit.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-d02t",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Review findings remain on the deliverable; no generated parent gate blocks the work required to answer them.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-temt",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Recursive epic projection cannot show manager review while any required descendant is still being built.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-dek9",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Ticket wording and evidence-length preferences are guidance, with nonempty acceptance required.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-as0e",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Native job creation has no prose-regex gates or mandatory artificial step cards.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-6dq.7",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Independent Claude review uses a private Read/Grep/Glob-only profile, strict empty MCP and no inherited bypass.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-4i5.1",
+      "action": "cancel",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Superseded policy: ticket wording, length, size and boundary preferences are guidance, never hard refusals.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-4i5.2",
+      "action": "cancel",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Superseded policy: ticket wording, length, size and boundary preferences are guidance, never hard refusals.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-4i5.3",
+      "action": "cancel",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Superseded policy: ticket wording, length, size and boundary preferences are guidance, never hard refusals.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-4i5.4",
+      "action": "cancel",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Superseded policy: ticket wording, length, size and boundary preferences are guidance, never hard refusals.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-4i5.6",
+      "action": "cancel",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Superseded policy: ticket wording, length, size and boundary preferences are guidance, never hard refusals.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-4i5.7",
+      "action": "cancel",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Superseded policy: ticket wording, length, size and boundary preferences are guidance, never hard refusals.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-nu6n",
+      "action": "cancel",
+      "from_status": "open",
+      "from_type": "epic",
+      "reason": "Superseded policy: ticket wording, length, size and boundary preferences are guidance, never hard refusals.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-zxy.29",
+      "action": "cancel",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Superseded status contract: shared native reconciliation persists recursively derived epic state; stored status is not an independent authority.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-etbo.17",
+      "action": "cancel",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Retired semantic question classifier: completion is enforced by owned card state and explicit blockers, not guessing prose intent.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-etbo.18",
+      "action": "cancel",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Retired refusal-answer prose gate; durable scoped blockers replace matching a new ticket sentence to a refusal.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-5nxl.19",
+      "action": "cancel",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Retired helper answer-length gate; no mandatory percentile-derived prose limit remains.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-3qs.5",
+      "action": "cancel",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Retired keyword-generated benchmark steps; verification requirements belong to explicit project/card acceptance.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-3qs.6",
+      "action": "cancel",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Retired regex-shaped grounding notes and generated grounding steps; source evidence may name any relevant file.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "mch-8bg2.11",
+      "action": "cancel",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Superseded review contract: prelanding review is evidence on required work, not a synthetic open child keeping a landed epic out of Done.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-ixx0.1",
+      "action": "cancel",
+      "from_status": "open",
+      "from_type": "task",
+      "reason": "Retired automatic post-land review gate; review is required before landing and no new commit is invented to release it.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-uo47",
+      "action": "cancel",
+      "from_status": "in_progress",
+      "from_type": "epic",
+      "reason": "Retired Python machinery check; native Rust tests replace the removed interpreter workflow.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3"
+    },
+    {
+      "id": "bw-oesd.13",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "epic",
+      "reason": "Legacy direct deliverable was misclassified as an epic; its explicit main commit delivered the implementation and its only children are obsolete operational records. Preserve those records, classify the deliverable as a task.",
+      "commit": "ee1c2580ed66e35acf4a6278fdcea97765a890d6",
+      "type": "task"
+    },
+    {
+      "id": "bw-oesd.14",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "epic",
+      "reason": "Legacy direct deliverable was misclassified as an epic; its explicit main commit delivered the implementation and its only children are obsolete operational records. Preserve those records, classify the deliverable as a task.",
+      "commit": "ee1c2580ed66e35acf4a6278fdcea97765a890d6",
+      "type": "task"
+    },
+    {
+      "id": "bw-oesd.15",
+      "action": "done",
+      "from_status": "open",
+      "from_type": "epic",
+      "reason": "Legacy direct deliverable was misclassified as an epic; its explicit main commit delivered the implementation and its only children are obsolete operational records. Preserve those records, classify the deliverable as a task.",
+      "commit": "ee1c2580ed66e35acf4a6278fdcea97765a890d6",
+      "type": "task"
+    },
+    {
+      "id": "bw-fsza",
+      "action": "done",
+      "from_status": "in_progress",
+      "from_type": "epic",
+      "reason": "The isolated runner overrides inherited owner data and port variables at scripts/workbench-e2e.sh:25-26; Git blame attributes both fixes to this main commit.",
+      "commit": "e20983711b6b4f2a0d6352acee1c8c02ba712aef",
+      "type": "task"
+    },
+    {
+      "id": "bw-mm2a",
+      "action": "done",
+      "from_status": "in_progress",
+      "from_type": "epic",
+      "reason": "Native landing preserves unrelated uncommitted files and refuses conflicting main-checkout changes; it never sweeps, resets or silently stashes the landing checkout.",
+      "commit": "c3361ad668b04caee25c642de51c5a51c8e1a9f3",
+      "type": "task"
+    },
+    {
+      "id": "bw-sw4l",
+      "action": "reopen",
+      "from_status": "in_progress",
+      "from_type": "epic",
+      "reason": "Previous close has no delivery proof; the requested all-theme contrast regression does not exist. Reopen as the standalone fault it describes.",
+      "type": "task"
+    },
+    {
+      "id": "bw-1cqk",
+      "action": "reopen",
+      "from_status": "in_progress",
+      "from_type": "epic",
+      "reason": "Fault remains: use-project calls getProjectWithTags, which searches api.projects.list without include_test. Prior blanket close did not fix the described lookup.",
+      "type": "task"
+    },
+    {
+      "id": "bw-2i0j",
+      "action": "reopen",
+      "from_status": "in_progress",
+      "from_type": "epic",
+      "reason": "Fault remains: tests/board-reads.spec.ts still places cleanup after assertions rather than in finally in the last read-sharing test. Prior blanket close did not deliver this fix.",
+      "type": "task"
+    },
+    {
+      "id": "mch-agnl",
+      "action": "cancel",
+      "from_status": "closed",
+      "from_type": "epic",
+      "reason": "Historical close_reason explicitly withdraws the fault as obsolete/not real and records tracker reclaim evidence. Classify that withdrawal as Cancelled, not a delivered empty epic.",
+      "evidence": "Existing close_reason and recorded reclaim output"
+    },
+    {
+      "id": "mch-qrnj.51",
+      "action": "repair_hierarchy",
+      "reason": "Original migration notes explicitly say cor-qrnj remained on another board. Remove its stale local of: parent label, preserve the external reference in metadata, and retain the already-landed standalone deliverable.",
+      "commit": "e45d553c4c0954d91c2b4852c45b3998b5a5652c"
+    }
+  ],
+  "native_reconciliation": [
+    {
+      "id": "bw-t26l.26",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-u6cl.12",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-u6cl.13",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-u6cl.3",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-u6cl.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-u6cl.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-u6cl.6",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-t26l.22",
+      "action": "done",
+      "commit": "83c88e1d39f875ebb597df503488ab291f9a54e9",
+      "branch": "main"
+    },
+    {
+      "id": "bw-t26l.21",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-t26l.18",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-uw2r",
+      "action": "done",
+      "commit": "3dce1a0a4b0a7b70c47522a9af11b93d472af8c2",
+      "branch": "main"
+    },
+    {
+      "id": "bw-oesd.15.1",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-oesd.14.1",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-oesd.13.1",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-sds5.3",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-sds5.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-sds5.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-sds5.2",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-3d9h",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-jaoz.14.15",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-jaoz.13",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-jaoz.12",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-2lzj.3",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-1p2.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-x5ly.9",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-z9qn.20",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-bqca.10",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-6dq.18",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-6dq.17",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-m1t.21",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-m1t.20",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ufso.7",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ufso.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-zxy.30",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-zxy.28",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ufso.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ufso.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-f1q.21",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-f1q.20",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-f1q.19",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-f1q.18",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-m8o.19",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-m8o.18",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-m8o.16",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-p61.15",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-p61.13",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-p61.14",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-p61.12",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-p61.11",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ccm.17",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ccm.16",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ccm.15",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ccm.14",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ccm.13",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ccm.12",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-merge-slot",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-merge-slot",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-bqca.8",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-x5ly.6",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-x5ly.7",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-x5ly.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-x5ly.1",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "mch-16w1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-3s7",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-edq",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-wo2",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-etbo.13",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-etbo.16",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-6dq.14",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-6dq.10",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-z9qn.15",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-z9qn.11",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-z9qn.12",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-z9qn.13",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ndlu.6",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-u6cl.8",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-97h4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-oesd.5.3",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-ynuq.2",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ynuq.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-iihu.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-fcg.6",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-7ks.24.13",
+      "action": "done",
+      "commit": "46a297486a85fb1e4971ef170b0d3ae6b7860558",
+      "branch": "main"
+    },
+    {
+      "id": "bw-t1wg.6",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-t1wg.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ub2u.2",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-zpyl.8",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-x3jf.34",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-x3jf.31",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-x3jf.32",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-x3jf.33",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-x3jf.30",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-gnzl.6",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-7ks.24.12",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-hitm.6",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-hitm.7",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-epry",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-up1g.16.11",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-up1g.16.10",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-eqm.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-eqm.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-eqm.3",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-eqm.2",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-eqm.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-up1g.15",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-up1g.14",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-xyb3.6",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-xyb3.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-xyb3.3",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-xyb3.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-xyb3.2",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-futg.28",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-futg.26",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-2s3f.13",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-2s3f.10",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-7e8.12",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-7e8.11",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9is.20",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-o3sh.12",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-1rwe.18",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-1rwe.17",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-1rwe.15",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-1rwe.14",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-1rwe.13",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-1rwe.11",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-1rwe.10",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-e81.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-l6j.34",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-l6j.33",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-l6j.32",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-l6j.31",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-l6j.30",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-l6j.29",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-l6j.28",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-l6j.27",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-l6j.26",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9is.18",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9is.19",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9is.16",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9is.14",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9is.13",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9is.12",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-7ks.20",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-7ks.19",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-5nxl.23",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-5nxl.20",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-5nxl.21",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-5nxl.22",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-5nxl.14",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-5nxl.11",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-up1g.13",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-up1g.9",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-up1g.6",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-up1g.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-up1g.3",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-176",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-17d",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-2hr",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-3qb",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ysi",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-up1g.1",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-7ks.15",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-7ks.10",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-qnm7",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-futg.23",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-futg.24",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-futg.20",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-futg.21",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-futg.22",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-futg.18",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-futg.19",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-1rwe.6",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-1rwe.7",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-1rwe.8",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-1rwe.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-xyb3.1",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "mch-2s3f.1",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-rlkh.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-k22y.2",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-lvb7.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9vv9.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-20ao.2",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-gd84.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-gga4.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-a2m3.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-flq1.2",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-lolf.4",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-ogth.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-htxp.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-73on.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-pstm.2",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-z91m.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-zkuv.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-zkuv.2",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-h1u6.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-z3sv.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-pn9m.2",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-ky7q.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-e9p5.3",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-ad3r.16",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-cik5.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-o76v.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-5qhe.3",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-t259.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-105s.2",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-5gfo.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-vfgg",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-fs3z.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-byim.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-doye.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ewem.2",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-qr56.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-57dc.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-b7e2.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-03gc.8",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-03gc.6",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-03gc.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-03gc.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-03gc.3",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-03gc.2",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-4q8r.2",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-u7jj.2",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-9px0.11",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9px0.10",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9px0.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9px0.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9px0.6",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9px0.7",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9px0.8",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9px0.9",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-3r98.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-e9wz.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-i7pg.2",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-u6cl.10",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-x5hd.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-x5hd.2",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-7ecz.2",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-kcri.3",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-7v5c.2",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-68kf.2",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-r8iy.2",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-s5op.4",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-y7y.4",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-7lex.5",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-ogl1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-3zh3.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-5nrf.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-p86v.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-52gt.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-7lex.4",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-y7y.3",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-sw4l",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-orv7.6",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-orv7.7",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-orv7.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-orv7.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-m00u.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-m00u.6",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-gvb6.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-hkh8.10",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-hkh8.9",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-oupp.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-oupp.6",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-7v62.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-7ojj.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-7ojj.3",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-33qh.6",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-33qh.7",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-33qh.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-6m6w.12",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-1cqk",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-qzjd.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-d1ea.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-al5o.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-vsyx.4",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-vsyx.3",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ubyr",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-2i0j",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-rkau",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-h56r",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-gmqc",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ur5a",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-rmxu",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-zxge",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-bhb9",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9uiw",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ug84",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-iu2f",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-1ycx",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-xhqd",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-tl28",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-5qgx",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-tx8a",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-b857",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-wcef",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-hnqv",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-qij5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-0fu5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-w1fn",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-sxdg.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-sxdg.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ft3m",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-hkai.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-hkai.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-6gix",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-qxep",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-aes8",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9nzp",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-wg89",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-x6hb",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ej6h",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-dtb",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-6xo0",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-1efn",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-unof",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-etom",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-6m6w.11",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-v0na",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-7fhx",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-j0iw",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-jo9p",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-2uh1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-vuxu",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-gq00",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-j2i",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-eh8.6",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-eh8.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-eh8.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-eh8.2",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-eh8.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-3qs.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-3qs.3",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-3qs.2",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-3qs.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-pi1.7",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-pi1.6",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-pi1.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-pi1.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-pi1.3",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-pi1.2",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-pi1.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-4i5.8",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-4i5.5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-2gz.17",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-2gz.16",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-2gz.15",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-6m6w.8",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-6m6w.7",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-6m6w.6",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-6m6w.4",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-6m6w.3",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-6m6w.2",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-4a3b",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-5bwt",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-7bj",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-dyr",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-mkp.89",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-mkp.88",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-mkp.87",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-2gz.14",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-2gz.12",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-olpa",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-bmx",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-sjx",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-b2v5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-6axv.17",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-8m7s",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-8m7s.1",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-ccc5",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-ccc5.1",
+      "action": "cancel",
+      "reason": "Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"
+    },
+    {
+      "id": "bw-mn2x.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-suz0.2",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-suz0.1",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9v6.9",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9v6.8",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-9v6.7",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "mch-x4z",
+      "action": "retain",
+      "reason": "No current explicit landing evidence; needs implementation audit"
+    },
+    {
+      "id": "bw-oesd",
+      "action": "derive",
+      "from": "in_progress",
+      "to": "closed",
+      "reason": "State of required descendants"
+    },
+    {
+      "id": "bw-fcg",
+      "action": "derive",
+      "from": "in_progress",
+      "to": "closed",
+      "reason": "State of required descendants"
+    },
+    {
+      "id": "mch-8bg2",
+      "action": "derive",
+      "from": "in_progress",
+      "to": "closed",
+      "reason": "State of required descendants"
+    },
+    {
+      "id": "mch-2s3f",
+      "action": "derive",
+      "from": "open",
+      "to": "in_progress",
+      "reason": "State of required descendants"
+    },
+    {
+      "id": "bw-wv3o",
+      "action": "derive",
+      "from": "open",
+      "to": "closed",
+      "reason": "State of required descendants"
+    },
+    {
+      "id": "bw-mzvf",
+      "action": "derive",
+      "from": "open",
+      "to": "closed",
+      "reason": "State of required descendants"
+    },
+    {
+      "id": "bw-ezeb",
+      "action": "derive",
+      "from": "open",
+      "to": "closed",
+      "reason": "State of required descendants"
+    },
+    {
+      "id": "bw-kw0o",
+      "action": "derive",
+      "from": "open",
+      "to": "closed",
+      "reason": "State of required descendants"
+    },
+    {
+      "id": "bw-ixx0",
+      "action": "derive",
+      "from": "open",
+      "to": "cancelled",
+      "reason": "State of required descendants"
+    },
+    {
+      "id": "mch-3qs",
+      "action": "derive",
+      "from": "open",
+      "to": "in_progress",
+      "reason": "State of required descendants"
+    },
+    {
+      "id": "bw-y7y",
+      "action": "derive",
+      "from": "in_progress",
+      "to": "closed",
+      "reason": "State of required descendants"
+    }
+  ],
+  "verification": {
+    "cards_checked": 4560,
+    "stored_derived_mismatches": 0,
+    "hierarchy_errors": 0,
+    "second_dry_run_mutations": 0,
+    "browser": "tests/e2e/landing-state.spec.ts passed against the isolated packaged app; screenshots under tests/results/landing-state",
+    "native_git": "tests/native-landing.mjs passed with actual Git reference-transaction hook and Beads",
+    "external_review": {
+      "verdict": "NEEDS_WORK",
+      "reviewed_head": "20e5e3b564d99c17c96f877056f11238609b6dbb",
+      "findings": [
+        {
+          "title": "status_gate denies read-only `bd list --status ...` commands",
+          "severity": "critical",
+          "resolution": "Addressed in the review follow-up commit; focused regressions and full declared suites passed before landing."
+        },
+        {
+          "title": "An incomplete landing journal naming a cancelled card blocks every future land and reconcile",
+          "severity": "high",
+          "resolution": "Addressed in the review follow-up commit; focused regressions and full declared suites passed before landing."
+        },
+        {
+          "title": "Adding the cancelled label is ungated, and it drops unlanded scope out of the epic's required set",
+          "severity": "high",
+          "resolution": "Addressed in the review follow-up commit; focused regressions and full declared suites passed before landing."
+        },
+        {
+          "title": "stop_gate lost its stop_hook_active guard and blocks unconditionally when the board cannot be read",
+          "severity": "medium",
+          "resolution": "Addressed in the review follow-up commit; focused regressions and full declared suites passed before landing."
+        }
+      ]
+    },
+    "staged_hooks": {
+      "version": "Atelier workflow hooks 0.22.8 (protocol 3)",
+      "provider_envelopes": [
+        "Bash.command",
+        "functions.exec_command.cmd"
+      ],
+      "passed": true
+    }
+  },
+  "limits": [
+    "Retained tickets have no sufficient landing evidence; their features are not claimed complete.",
+    "The running owner app and installed executable were not replaced. Source and packaged isolated-instance behavior were verified.",
+    "Other agents may change the board after this snapshot."
+  ]
+}
