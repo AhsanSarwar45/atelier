@@ -59,7 +59,7 @@ function Row({ entry, busy, onInstall }: { entry: OfferedPlugin; busy: boolean; 
               {shelfName(entry.category)}
             </Badge>
           )}
-          <Tooltip label={entry.known ? `From ${entry.marketplace}, which this account already has` : `From ${entry.marketplace}, which will be added when you install this`}>
+          <Tooltip label={entry.known ? 'Marketplace added' : 'Marketplace added on install'}>
             <Badge variant="outline" size="sm">
               <Store /> {entry.marketplace}
             </Badge>
@@ -70,7 +70,7 @@ function Row({ entry, busy, onInstall }: { entry: OfferedPlugin; busy: boolean; 
             </Badge>
           )}
         </div>
-        {entry.description && <p className="line-clamp-2 text-xs text-t-muted">{entry.description}</p>}
+        {entry.description && <p className="line-clamp-1 text-xs text-t-muted">{entry.description}</p>}
       </div>
       <Button
         size="sm"
@@ -153,17 +153,14 @@ export function PluginCatalogue({ brand, scope, onInstalled }: { brand: Brand; s
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent shape="sheet" className="sm:max-w-2xl" data-testid="plugin-catalogue">
           <DialogHeader>
-            <DialogTitle>Install a plugin from a marketplace</DialogTitle>
-            <DialogDescription>
-              Everything the marketplaces this account has offer, and everything the marketplaces Anthropic publishes offer. Installing from one this account has not
-              added adds it first.
-            </DialogDescription>
+            <DialogTitle>Install plugin</DialogTitle>
+            <DialogDescription className="sr-only">Install a plugin from a marketplace</DialogDescription>
           </DialogHeader>
           <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-t-muted" />
             <Input
-              aria-label="Search the plugins"
-              placeholder="Search by name, what it does, or its marketplace…"
+              aria-label="Search plugins"
+              placeholder="Search plugins…"
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
               className="pl-8"
@@ -183,19 +180,21 @@ export function PluginCatalogue({ brand, scope, onInstalled }: { brand: Brand; s
             </div>
           )}
           {catalogue?.unreachable && catalogue.unreachable.length > 0 && (
-            <p className="text-xs text-t-muted" role="status" data-testid="plugin-catalogue-unreachable">
-              Not every marketplace could be read: {catalogue.unreachable.join('; ')}
-            </p>
+            <Tooltip label={catalogue.unreachable.join('; ')}>
+              <p className="text-xs text-t-muted" role="status" data-testid="plugin-catalogue-unreachable">
+                Some marketplaces unreachable
+              </p>
+            </Tooltip>
           )}
           {unread ? (
-            <ReadFailed what="The plugins could not be read." why={unread} onRetry={() => setAttempt((n) => n + 1)} />
+            <ReadFailed what="Plugins unavailable" why={unread} onRetry={() => setAttempt((n) => n + 1)} />
           ) : !catalogue ? (
             <p className="flex items-center gap-2 p-3 text-sm text-t-tertiary">
               <Loader2 className="size-4 animate-spin" /> Reading…
             </p>
           ) : shown.length === 0 ? (
             <p className="p-3 text-sm text-t-tertiary" data-testid="plugin-catalogue-none">
-              Nothing offered by that name.
+              No matches
             </p>
           ) : (
             <ul className="max-h-[50vh] divide-y divide-border overflow-y-auto rounded-md border border-border" data-testid="plugin-catalogue-list">

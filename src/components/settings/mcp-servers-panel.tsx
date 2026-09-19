@@ -80,7 +80,7 @@ function Subtitle({ server }: { server: McpServer }) {
         data-testid={`mcp-launch-toggle-${server.id}`}
       >
         <ChevronDown className={cn('size-3 transition-transform', open && 'rotate-180')} />
-        {open ? 'Hide how it starts' : 'How it starts'}
+        Command
       </Button>
       {open && (
         <p className="break-all font-mono text-xs text-t-muted" data-testid={`mcp-launch-${server.id}`}>
@@ -163,8 +163,8 @@ function AddServer({ brand, scope, onAdded }: { brand: Brand; scope: Scope; onAd
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent shape="sheet" data-testid="mcp-add-form">
           <DialogHeader>
-            <DialogTitle>Add an MCP server</DialogTitle>
-            <DialogDescription>Give it a name, then say how it is started: a command to run, a URL to call, or the JSON entry itself.</DialogDescription>
+            <DialogTitle>Add server</DialogTitle>
+            <DialogDescription className="sr-only">Add an MCP server by command, URL, or JSON</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="flex flex-col gap-2 sm:flex-row">
@@ -384,7 +384,7 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
       {elsewhere.length > 0 && (
         <SettingsGroup
           title="On another account"
-          description="Each account loads only its own servers, so these are not available to a chat on this one."
+          description="Not loaded on this account"
           data-testid={`mcp-elsewhere-${brand}`}
         >
           {elsewhere.map((e) => {

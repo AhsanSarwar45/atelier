@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+
 import { SettingRow, SettingsGroup } from '@/components/settings/section';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -52,25 +53,25 @@ export function NotificationSettings() {
   };
 
   const deviceDescription = permission === 'unsupported'
-    ? 'This browser does not support notifications.'
+    ? 'Not supported by this browser'
     : permission === 'denied'
-      ? 'Notifications are blocked in this browser’s site settings.'
+      ? 'Blocked in this browser’s site settings'
       : preferences.device
         ? pushing
-          ? 'Enabled on this device, including while Atelier is closed.'
-          : 'Enabled on this device, while an Atelier window is open.'
-        : 'Show notifications outside the Atelier window.';
+          ? 'On, even when Atelier is closed'
+          : 'On while an Atelier window is open'
+        : 'Show outside the Atelier window';
 
   return <>
-    <SettingsGroup title="Notify me about" description="Choose what appears in the bell and reaches this device.">
-      <SettingRow label="Needs action" description="Permission requests and chats that stopped with an error." htmlFor="notify-action">
+    <SettingsGroup title="Notify me about" description="What reaches the bell and this device">
+      <SettingRow label="Needs action" description="Permission requests and errors" htmlFor="notify-action">
         <Checkbox id="notify-action" checked={preferences.needsAction} onCheckedChange={(v) => choose('needsAction', v === true)} />
       </SettingRow>
-      <SettingRow label="Other updates" description="Chats that finished and are ready to read." htmlFor="notify-updates">
+      <SettingRow label="Other updates" description="Chats that finished" htmlFor="notify-updates">
         <Checkbox id="notify-updates" checked={preferences.updates} onCheckedChange={(v) => choose('updates', v === true)} />
       </SettingRow>
     </SettingsGroup>
-    <SettingsGroup title="Desktop and mobile" description="Delivery is configured separately on each device.">
+    <SettingsGroup title="Desktop and mobile" description="Set per device">
       <SettingRow label="Device notifications" description={deviceDescription}>
         <Button
           size="sm"
@@ -80,7 +81,7 @@ export function NotificationSettings() {
           onClick={() => void device()}
         >{preferences.device ? 'Enabled' : 'Enable'}</Button>
       </SettingRow>
-      <SettingRow label="Use on a phone" description="Open Atelier in your mobile browser, add it to your home screen, then enable device notifications here. On iOS the home screen step is required before a browser will offer notifications at all." />
+      <SettingRow label="Use on a phone" description="Add to home screen first, then enable above" />
     </SettingsGroup>
   </>;
 }

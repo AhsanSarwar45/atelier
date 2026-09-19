@@ -73,7 +73,7 @@ function AddOne({
         <DialogContent shape="sheet" data-testid={`${testid}-form`}>
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
-            <DialogDescription>{what}</DialogDescription>
+            <DialogDescription className="sr-only">{what}</DialogDescription>
           </DialogHeader>
           <Input
             aria-label={placeholder}
@@ -139,7 +139,7 @@ export function ExtensionsPanel({ brand, scope }: { brand: Brand; scope: Scope }
     [toast],
   );
 
-  if (unread) return <ReadFailed what="The extensions could not be read." why={unread} onRetry={() => setAttempt((n) => n + 1)} />;
+  if (unread) return <ReadFailed what="Extensions unavailable" why={unread} onRetry={() => setAttempt((n) => n + 1)} />;
   if (!kinds) {
     return (
       <p className="flex items-center gap-2 p-3 text-sm text-t-tertiary">
@@ -162,8 +162,8 @@ export function ExtensionsPanel({ brand, scope }: { brand: Brand; scope: Scope }
             <div className="flex items-center gap-2">
               <PluginCatalogue brand={brand} scope={scope} onInstalled={setKinds} />
               <AddOne
-                title="Install a plugin"
-                what="A plugin is named by the marketplace it comes from, as plugin@marketplace. Add the marketplace first if it is not below."
+                title="Install plugin"
+                what="Install a plugin named plugin@marketplace"
                 placeholder="name@marketplace"
                 testid="plugin-install"
                 onAdd={(id) => act(`plugins:${id}`, () => sendCommand({ type: 'plugin.install', brand, ...wire, id }), 'Installed')}
@@ -171,9 +171,9 @@ export function ExtensionsPanel({ brand, scope }: { brand: Brand; scope: Scope }
             </div>
           ) : (
             <AddOne
-              title="Add a marketplace"
-              what="A marketplace is a repository of plugins. Give its GitHub owner/repo, a git URL, or a path on this computer."
-              placeholder="owner/repo or URL"
+              title="Add marketplace"
+              what="Add a plugin marketplace by owner/repo, git URL, or local path"
+              placeholder="owner/repo, URL, or path"
               testid="marketplace-add"
               onAdd={(source) => act(`marketplaces:${source}`, () => sendCommand({ type: 'marketplace.add', brand, ...wire, source }), 'Added')}
             />

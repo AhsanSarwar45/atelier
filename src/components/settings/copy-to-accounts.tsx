@@ -24,6 +24,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tooltip } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import type { ExtensionItem, ExtensionKind, McpServer, ProfileChoice } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
@@ -36,17 +37,19 @@ function said(e: unknown): string {
 interface SectionDef {
   id: string;
   label: string;
-  /** What ticking it does to the target, in the target's own terms. */
+  /** One word for what it does to the target, shown as a badge. */
+  effect: 'Replaces' | 'Merges';
+  /** The badge's tooltip, for the reader who wants the detail. */
   hint: string;
 }
 
 /** Everything of an account that can be copied, in the order the tabs have them. */
 export function copyableSections(brand: Brand): SectionDef[] {
   return [
-    ...pagesFor(brand).map((p) => ({ id: p.id, label: p.label, hint: 'Every setting on the page, so one the source leaves unset is cleared there' })),
-    { id: 'mcp', label: 'MCP servers', hint: 'Added to the account; servers it already has are kept' },
+    ...pagesFor(brand).map((p) => ({ id: p.id, label: p.label, effect: 'Replaces' as const, hint: 'Settings unset here are cleared there' })),
+    { id: 'mcp', label: 'MCP servers', effect: 'Merges' as const, hint: 'Added; nothing is removed' },
     // Codex has no plugin system.
-    ...(brand === 'claude' ? [{ id: 'plugins', label: 'Plugins', hint: 'Marketplaces added, then the same plugins installed; nothing is removed' }] : []),
+    ...(brand === 'claude' ? [{ id: 'plugins', label: 'Plugins', effect: 'Merges' as const, hint: 'Marketplaces and plugins added; nothing is removed' }] : []),
   ];
 }
 
@@ -147,11 +150,11 @@ export function CopyToAccounts({ brand, from, profiles, page }: { brand: Brand; 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent data-testid="copy-to-accounts-dialog">
           <DialogHeader>
-            <DialogTitle>Copy this account to another</DialogTitle>
+            <DialogTitle>Copy to account</DialogTitle>
           </DialogHeader>
           <div className="max-h-[60vh] space-y-4 overflow-y-auto">
             <section className="space-y-2">
-              <h3 className="text-xs font-medium uppercase tracking-wide text-t-tertiary">What to copy</h3>
+              <h3 className="text-xs font-medium uppercase tracking-wide text-t-tertiary">What</h3>
               <ul className="divide-y divide-border rounded-md border border-border" data-testid="copy-to-sections">
                 {sections.map((s) => (
                   <li key={s.id} className="flex items-start gap-3 px-3 py-2">
@@ -162,23 +165,20 @@ export function CopyToAccounts({ brand, from, profiles, page }: { brand: Brand; 
                       onCheckedChange={(c) => toggle(setTicked, s.id, c === true)}
                       data-testid={`copy-section-${s.id}`}
                     />
-                    <label htmlFor={`copy-section-${s.id}`} className="flex-1 cursor-pointer">
-                      <span className="flex items-center gap-2 text-sm text-t-primary">
-                        {s.label}
-                        {s.id === 'mcp' || s.id === 'plugins' ? (
-                          <Badge variant="secondary" size="sm">
-                            Added, never removed
-                          </Badge>
-                        ) : null}
-                      </span>
-                      <span className="block text-xs text-t-muted">{s.hint}</span>
+                    <label htmlFor={`copy-section-${s.id}`} className="flex flex-1 cursor-pointer items-center gap-2 text-sm text-t-primary">
+                      <span className="flex-1 truncate">{s.label}</span>
+                      <Tooltip label={s.hint}>
+                        <Badge variant={s.effect === 'Merges' ? 'secondary' : 'outline'} size="sm">
+                          {s.effect}
+                        </Badge>
+                      </Tooltip>
                     </label>
                   </li>
                 ))}
               </ul>
             </section>
             <section className="space-y-2">
-              <h3 className="text-xs font-medium uppercase tracking-wide text-t-tertiary">Where to copy it</h3>
+              <h3 className="text-xs font-medium uppercase tracking-wide text-t-tertiary">Where</h3>
               <ul className="divide-y divide-border rounded-md border border-border">
                 {others.map((p) => (
                   <li key={p.id} className="flex items-center gap-3 px-3 py-2">

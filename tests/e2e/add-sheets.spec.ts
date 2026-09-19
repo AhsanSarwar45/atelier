@@ -51,7 +51,7 @@ test('the three add forms are one sheet, reachable and dismissible on a phone', 
   await page.goto('/settings?section=claude&tab=mcp&account=system');
   await page.getByTestId('mcp-add').click();
   await expect(page.getByTestId('mcp-add-form')).toBeVisible();
-  await expect(page.getByTestId('mcp-add-form')).toContainText('Add an MCP server');
+  await expect(page.getByTestId('mcp-add-form')).toContainText('Add server');
   await isASheet(page, 'mcp-add-form');
   await page.screenshot({ path: join(results, 'phone-add-server.png') });
   // The way out every sheet in the app has.
@@ -60,15 +60,14 @@ test('the three add forms are one sheet, reachable and dismissible on a phone', 
 
   await page.goto('/settings?section=claude&tab=plugins&account=system');
   await page.getByTestId('marketplace-add').click();
-  await expect(page.getByTestId('marketplace-add-form')).toContainText('Add a marketplace');
-  await expect(page.getByTestId('marketplace-add-form')).toContainText('repository of plugins');
+  await expect(page.getByTestId('marketplace-add-form')).toContainText('Add marketplace');
   await isASheet(page, 'marketplace-add-form');
   await page.screenshot({ path: join(results, 'phone-add-marketplace.png') });
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('marketplace-add-form')).toHaveCount(0);
 
   await page.getByTestId('plugin-install').click();
-  await expect(page.getByTestId('plugin-install-form')).toContainText('Install a plugin');
+  await expect(page.getByTestId('plugin-install-form')).toContainText('Install plugin');
   await isASheet(page, 'plugin-install-form');
   await page.screenshot({ path: join(results, 'phone-install-plugin.png') });
   await page.keyboard.press('Escape');

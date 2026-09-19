@@ -76,7 +76,7 @@ function Row({
               </Badge>
             )}
             {entry.container && (
-              <Tooltip label="It is published as a container, so Docker has to be running for it to start">
+              <Tooltip label="Runs in Docker">
                 <Badge variant="outline" size="sm">
                   Needs Docker
                 </Badge>
@@ -88,7 +88,7 @@ function Row({
               </Badge>
             )}
           </div>
-          {entry.description && <p className="line-clamp-2 text-xs text-t-muted">{entry.description}</p>}
+          {entry.description && <p className="line-clamp-1 text-xs text-t-muted">{entry.description}</p>}
         </div>
         <Button
           size="sm"
@@ -102,7 +102,7 @@ function Row({
       </div>
       {asking && needs.length > 0 && (
         <div className="space-y-2 pl-11" data-testid={`catalogue-needs-${entry.id}`}>
-          <p className="text-xs text-t-muted">This one will not start without:</p>
+          <p className="text-xs font-medium text-t-secondary">Required</p>
           {needs.map((need) => (
             <div key={need.name} className="space-y-1">
               <Input
@@ -117,7 +117,7 @@ function Row({
             </div>
           ))}
           <Button size="sm" disabled={busy || missing} onClick={() => void onAdd(entry, given)} data-testid={`catalogue-confirm-${entry.id}`}>
-            {busy && <Loader2 className="animate-spin" />} Add it
+            {busy && <Loader2 className="animate-spin" />} Add
           </Button>
         </div>
       )}
@@ -194,16 +194,14 @@ export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent shape="sheet" className="sm:max-w-2xl" data-testid="mcp-catalogue">
           <DialogHeader>
-            <DialogTitle>Add a server from the catalogue</DialogTitle>
-            <DialogDescription>
-              Browse the shelves below, or search every server published to the official MCP registry. Add configures it for you.
-            </DialogDescription>
+            <DialogTitle>Add server</DialogTitle>
+            <DialogDescription className="sr-only">Add an MCP server from the catalogue</DialogDescription>
           </DialogHeader>
           <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-t-muted" />
             <Input
-              aria-label="Search the catalogue"
-              placeholder="Search every published server…"
+              aria-label="Search servers"
+              placeholder="Search servers…"
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
               className="pl-8"
@@ -223,19 +221,21 @@ export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; 
             </div>
           )}
           {catalogue?.source === 'curated-only' && (
-            <p className="text-xs text-t-muted" role="status" data-testid="mcp-catalogue-offline">
-              The registry could not be reached, so this is the bundled list only. {catalogue.unreachable}
-            </p>
+            <Tooltip label={catalogue.unreachable ?? 'The registry could not be reached'}>
+              <p className="text-xs text-t-muted" role="status" data-testid="mcp-catalogue-offline">
+                Registry offline — bundled list only
+              </p>
+            </Tooltip>
           )}
           {unread ? (
-            <ReadFailed what="The catalogue could not be read." why={unread} onRetry={() => setSearch((s) => `${s}`)} />
+            <ReadFailed what="Catalogue unavailable" why={unread} onRetry={() => setSearch((s) => `${s}`)} />
           ) : !catalogue ? (
             <p className="flex items-center gap-2 p-3 text-sm text-t-tertiary">
               <Loader2 className="size-4 animate-spin" /> Reading…
             </p>
           ) : shown.length === 0 ? (
             <p className="p-3 text-sm text-t-tertiary" data-testid="mcp-catalogue-none">
-              Nothing here by that name.
+              No matches
             </p>
           ) : (
             <ul className="max-h-[50vh] divide-y divide-border overflow-y-auto rounded-md border border-border" data-testid="mcp-catalogue-list">
