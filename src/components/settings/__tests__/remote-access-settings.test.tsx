@@ -4,8 +4,10 @@
  * The API is stood in for, because what these cases are about is the section:
  * that the switch cannot be turned on while something is missing, that the one
  * step needing a password is offered to copy rather than half-done, that a
- * refusal is drawn as the server wrote it, and that what the switch says is
- * what came back rather than what was asked for. Whether Tailscale is actually
+ * refusal is drawn as the server wrote it, that a refusal with somewhere to go
+ * is drawn as a step rather than as a fault, that the wait is visible while it
+ * is happening, and that what the switch says is what came back rather than
+ * what was asked for. Whether Tailscale is actually
  * there, and whether a host can be bound, are the server's questions and are
  * answered in server/src/remote.rs and server/src/routes/remote_access.rs.
  */
@@ -13,11 +15,24 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RemoteAccessSettings } from '@/components/settings/remote-access-settings';
-import { remoteAccess, saveRemoteAccess, type RemoteAccess } from '@/lib/api';
+import {
+  remoteAccess,
+  RemoteAccessRefused,
+  saveRemoteAccess,
+  type RemoteAccess,
+} from '@/lib/api';
 
 vi.mock('@/lib/api', () => ({
   remoteAccess: vi.fn(),
   saveRemoteAccess: vi.fn(),
+  // The real one, because the section tells a refusal it can act on from one
+  // it cannot by asking what kind it is.
+  RemoteAccessRefused: class extends Error {
+    constructor(message: string, readonly link: string | null) {
+      super(message);
+      this.name = 'RemoteAccessRefused';
+    }
+  },
 }));
 
 const read = vi.mocked(remoteAccess);
@@ -67,12 +82,13 @@ describe('the Remote access section', () => {
 
     render(<RemoteAccessSettings />);
     const button = await screen.findByTestId('remote-serving');
-    expect(button).toHaveTextContent('Off');
+    // The button names what pressing it does, not the state it is sitting in.
+    expect(button).toHaveTextContent('Enable');
     expect(button).toBeEnabled();
 
     fireEvent.click(button);
 
-    await waitFor(() => expect(button).toHaveTextContent('On'));
+    await waitFor(() => expect(button).toHaveTextContent('Disable'));
     expect(save).toHaveBeenCalledWith({ serving: true });
     expect(screen.getByTestId('remote-address')).toHaveTextContent('https://desk.tailnet.ts.net');
   });
@@ -89,7 +105,49 @@ describe('the Remote access section', () => {
     fireEvent.click(button);
 
     await waitFor(() => expect(save).toHaveBeenCalled());
-    expect(button).toHaveTextContent('Off');
+    expect(button).toHaveTextContent('Enable');
+  });
+
+  it('says it is working while it waits, rather than going quiet and grey', async () => {
+    read.mockResolvedValue(ready);
+    let answer: (it: RemoteAccess) => void = () => {};
+    save.mockReturnValue(new Promise<RemoteAccess>((settle) => { answer = settle; }));
+
+    render(<RemoteAccessSettings />);
+    const button = await screen.findByTestId('remote-serving');
+    fireEvent.click(button);
+
+    // Turning this on starts processes and waits on a daemon, so there is a
+    // real wait here. A reader sitting through it in front of a dead grey
+    // button cannot tell working from broken (bw-ar1o).
+    await waitFor(() => expect(button).toHaveTextContent('Turning it on…'));
+    expect(screen.getByTestId('remote-working')).toHaveTextContent('Asking Tailscale');
+
+    answer({ ...ready, serving: true });
+
+    await waitFor(() => expect(button).toHaveTextContent('Disable'));
+    expect(screen.queryByTestId('remote-working')).not.toBeInTheDocument();
+  });
+
+  it('draws the one refusal that can be acted on as a step, with the link to take', async () => {
+    const link = 'https://login.tailscale.com/f/serve?node=abc';
+    read.mockResolvedValue(ready);
+    save.mockRejectedValue(
+      new RemoteAccessRefused(
+        `Your Tailscale network has not turned on Serve yet. Open ${link}, allow it, then turn this on again.`,
+        link,
+      ),
+    );
+
+    render(<RemoteAccessSettings />);
+    fireEvent.click(await screen.findByTestId('remote-serving'));
+
+    // Somewhere to go is not a fault to report in red: it is the next thing to
+    // do, and the address is a link rather than something to retype.
+    const step = await screen.findByTestId('remote-next-step');
+    expect(step).toHaveTextContent('has not turned on Serve yet');
+    expect(screen.getByTestId('remote-next-step-link')).toHaveAttribute('href', link);
+    expect(screen.queryByTestId('remote-refused')).not.toBeInTheDocument();
   });
 
   it("draws a refused host in the server's words, leaving what was typed to correct", async () => {

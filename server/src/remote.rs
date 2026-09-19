@@ -667,7 +667,24 @@ pub enum Refused {
 }
 
 impl Refused {
-    /// The whole of it as one sentence, for a log or a terminal.
+    /// What to say to a reader who has the link in front of them as a link.
+    ///
+    /// Kept apart from {@link Refused::sentence} because the same refusal has
+    /// two audiences: a screen, which puts the address on a button and does
+    /// not want it read out in the middle of a paragraph as well, and a log,
+    /// where there is no button and the address has nowhere else to be.
+    pub fn said(&self) -> String {
+        match self {
+            Refused::NeedsConsent { .. } => {
+                "Your Tailscale network has not turned on Serve yet. Allow it there, then \
+                 turn this on again."
+                    .to_string()
+            }
+            Refused::Said(said) => said.clone(),
+        }
+    }
+
+    /// The whole of it as one sentence, link and all, for a log or a terminal.
     pub fn sentence(&self) -> String {
         match self {
             Refused::NeedsConsent { link } => format!(
@@ -837,8 +854,12 @@ mod tests {
                 link: "https://login.tailscale.com/f/serve?node=nRkaJoumeQ11CNTRL".to_string()
             }
         );
+        // A log has nowhere to put a link but the sentence.
         assert!(why.sentence().contains("f/serve?node=nRkaJoumeQ11CNTRL"));
         assert!(why.sentence().contains("has not turned on Serve"));
+        // A screen puts it on a button, so the sentence does not repeat it.
+        assert!(!why.said().contains("https://"), "{}", why.said());
+        assert!(why.said().contains("has not turned on Serve"));
     }
 
     /// A refusal with nowhere to go is still passed on in Tailscale's words.

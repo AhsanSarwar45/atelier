@@ -1284,10 +1284,54 @@ export interface RemoteAccessChange {
   publicUrl?: string;
 }
 
+/**
+ * A remote access call the app turned away, with anywhere it left to go.
+ *
+ * The one refusal a reader can act on from this screen is a Tailscale network
+ * whose owner has never allowed Serve; it is put right by visiting an address
+ * Tailscale hands back. A sentence with that URL in the middle of it is not
+ * something a screen can make clickable, so the link is carried beside the
+ * sentence and the section draws it as a step (bw-ar1o).
+ */
+export class RemoteAccessRefused extends Error {
+  constructor(
+    message: string,
+    /** Where to go to put it right, or null when there is nowhere. */
+    readonly link: string | null,
+  ) {
+    super(message);
+    this.name = 'RemoteAccessRefused';
+  }
+}
+
+/**
+ * How long to wait on a remote access call before giving up on it.
+ *
+ * Every one of them asks Tailscale, and the server gives each question it
+ * asks six seconds before it stops waiting; turning serving on asks several
+ * in a row. So the honest ceiling here is well past the ten seconds the rest
+ * of the app gets — and a reader who waited out that ten was told the app
+ * might be stopped, which was never what had happened (bw-ar1o).
+ */
+const TAILSCALE_DEADLINE_MS = 45_000;
+
+/** What the app said about a refusal, kept whole. */
+async function remoteRefusal(answer: Response): Promise<RemoteAccessRefused> {
+  const fallback = `the app answered ${answer.status}`;
+  try {
+    const said = (await answer.json()) as { error?: string; link?: string };
+    return new RemoteAccessRefused(said.error || fallback, said.link ?? null);
+  } catch {
+    return new RemoteAccessRefused(fallback, null);
+  }
+}
+
 /** Remote access as it stands, read from Tailscale rather than remembered. */
 export async function remoteAccess(): Promise<RemoteAccess> {
-  const answer = await request('/api/settings/remote');
-  if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+  const answer = await request('/api/settings/remote', {
+    deadlineMs: TAILSCALE_DEADLINE_MS,
+  });
+  if (!answer.ok) throw await remoteRefusal(answer);
   return (await answer.json()) as RemoteAccess;
 }
 
@@ -1300,8 +1344,9 @@ export async function saveRemoteAccess(change: RemoteAccessChange): Promise<Remo
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(change),
+    deadlineMs: TAILSCALE_DEADLINE_MS,
   });
-  if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+  if (!answer.ok) throw await remoteRefusal(answer);
   return (await answer.json()) as RemoteAccess;
 }
 

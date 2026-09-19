@@ -69,7 +69,7 @@ fn turned_away(why: remote::Refused) -> Refusal {
                 remote::Refused::NeedsConsent { link } => Some(link.clone()),
                 remote::Refused::Said(_) => None,
             },
-            error: why.sentence(),
+            error: why.said(),
         }),
     )
 }
@@ -303,7 +303,10 @@ mod tests {
         });
         assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(trouble.link.as_deref(), Some(link));
-        assert!(trouble.error.contains(link), "{}", trouble.error);
+        // The screen draws the link as a link, so the sentence beside it does
+        // not spell the same address out again.
+        assert!(!trouble.error.contains("https://"), "{}", trouble.error);
+        assert!(trouble.error.contains("has not turned on Serve"));
     }
 
     /// Every other refusal is a sentence and nothing more, so the screen is

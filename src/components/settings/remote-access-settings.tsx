@@ -24,30 +24,61 @@
  * The switch reports what Tailscale is doing, not what this screen asked for.
  * A switch drawn on over a board nobody can reach is the one outcome worse
  * than a refusal, so every save redraws from the answer.
+ *
+ * ## Why the button says the word and says it is working
+ *
+ * It used to read On or Off, which is a label for a state and not for what
+ * pressing it does, and while the save was in flight it went grey and said
+ * nothing at all. Turning this on starts processes and waits on a daemon, so
+ * there is a real wait to sit through, and a reader sitting through it in
+ * front of a dead grey button has no way to tell working from broken — which
+ * is exactly how it was read (bw-ar1o). So the button names the action, and
+ * while it is happening it says so.
+ *
+ * ## Why one refusal is drawn as a step and not in red
+ *
+ * Serve is off for an entire Tailscale network until its owner allows it once,
+ * and the app is handed the address where they do that. That is not a fault to
+ * report, it is the next thing to do, so it is drawn as one — with the link as
+ * a link, because a URL inside a red sentence is something to retype.
  */
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, ExternalLink, Loader2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { ReadFailed } from '@/components/ui/read-failed';
-import { remoteAccess, saveRemoteAccess, type RemoteAccess, type RemoteAccessChange } from '@/lib/api';
+import {
+  remoteAccess,
+  RemoteAccessRefused,
+  saveRemoteAccess,
+  type RemoteAccess,
+  type RemoteAccessChange,
+} from '@/lib/api';
 
 /** The one command that needs a password, spelled once. */
 const INSTALL = 'atelier remote install';
+
+/** A refusal, and anywhere it left to go. */
+interface Turned {
+  /** What the app said, in its own words. */
+  said: string;
+  /** Where to go to put it right, when there is such a place. */
+  link: string | null;
+}
 
 export function RemoteAccessSettings() {
   const [held, setHeld] = useState<RemoteAccess | null>(null);
   const [host, setHost] = useState('');
   const [url, setUrl] = useState('');
   const [unread, setUnread] = useState<string | null>(null);
-  const [refused, setRefused] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [refused, setRefused] = useState<Turned | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -73,15 +104,18 @@ export function RemoteAccessSettings() {
   }, [attempt, take]);
 
   const change = useCallback(
-    async (what: RemoteAccessChange) => {
-      setSaving(true);
+    async (what: RemoteAccessChange, doing: string) => {
+      setSaving(doing);
       setRefused(null);
       try {
         take(await saveRemoteAccess(what));
       } catch (e) {
-        setRefused(e instanceof Error ? e.message : String(e));
+        setRefused({
+          said: e instanceof Error ? e.message : String(e),
+          link: e instanceof RemoteAccessRefused ? e.link : null,
+        });
       } finally {
-        setSaving(false);
+        setSaving(null);
       }
     },
     [take],
@@ -110,6 +144,9 @@ export function RemoteAccessSettings() {
   }
 
   const ready = held.standing === 'ready';
+  // Only the switch's own wait is drawn on the switch. A host being saved in
+  // the field below is a different wait and says so down there.
+  const flipping = saving?.startsWith('Turning') ? saving : null;
 
   return (
     <div className="space-y-5" data-testid="remote-access">
@@ -123,15 +160,31 @@ export function RemoteAccessSettings() {
           </div>
           <Button
             size="sm"
-            variant={held.serving ? 'primary' : 'outline'}
-            disabled={saving || (!ready && !held.serving)}
+            variant={held.serving ? 'outline' : 'primary'}
+            disabled={saving !== null || (!ready && !held.serving)}
             aria-pressed={held.serving}
-            onClick={() => void change({ serving: !held.serving })}
+            onClick={() =>
+              void change(
+                { serving: !held.serving },
+                held.serving ? 'Turning it off…' : 'Turning it on…',
+              )
+            }
             data-testid="remote-serving"
           >
-            {held.serving ? 'On' : 'Off'}
+            {flipping && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
+            {flipping ? flipping : held.serving ? 'Disable' : 'Enable'}
           </Button>
         </div>
+
+        {flipping && (
+          <p
+            className="mt-2 flex items-center gap-1.5 text-sm text-t-tertiary"
+            role="status"
+            data-testid="remote-working"
+          >
+            Asking Tailscale. This can take a few seconds.
+          </p>
+        )}
 
         {held.wrong && (
           <Panel tone="info" inset="md" className="mt-3" data-testid="remote-wrong">
@@ -176,9 +229,27 @@ export function RemoteAccessSettings() {
           </div>
         )}
 
-        {refused && (
+        {refused?.link && (
+          <Panel tone="info" inset="md" className="mt-3" data-testid="remote-next-step">
+            <p className="text-sm text-t-secondary">{refused.said}</p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-2"
+              asChild
+              data-testid="remote-next-step-link"
+            >
+              <a href={refused.link} target="_blank" rel="noreferrer noopener">
+                <ExternalLink className="size-4" aria-hidden="true" />
+                Open Tailscale
+              </a>
+            </Button>
+          </Panel>
+        )}
+
+        {refused && !refused.link && (
           <p role="alert" className="mt-2 text-sm text-danger" data-testid="remote-refused">
-            {refused}
+            {refused.said}
           </p>
         )}
       </div>
@@ -196,14 +267,14 @@ export function RemoteAccessSettings() {
             value={host}
             onChange={(e) => setHost(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') void change({ bindHost: host });
+              if (e.key === 'Enter') void change({ bindHost: host }, 'Saving…');
             }}
             placeholder={`Every network (${held.bindHostDefault})`}
             autoComplete="off"
             spellCheck={false}
             className="flex-1 font-mono"
           />
-          <Button size="sm" disabled={saving} onClick={() => void change({ bindHost: host })} data-testid="remote-host-save">
+          <Button size="sm" disabled={saving !== null} onClick={() => void change({ bindHost: host }, 'Saving…')} data-testid="remote-host-save">
             Save
           </Button>
         </div>
@@ -222,14 +293,14 @@ export function RemoteAccessSettings() {
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') void change({ publicUrl: url });
+              if (e.key === 'Enter') void change({ publicUrl: url }, 'Saving…');
             }}
             placeholder={held.address ?? 'https://your-computer.tailnet.ts.net'}
             autoComplete="off"
             spellCheck={false}
             className="flex-1 font-mono"
           />
-          <Button size="sm" disabled={saving} onClick={() => void change({ publicUrl: url })} data-testid="remote-url-save">
+          <Button size="sm" disabled={saving !== null} onClick={() => void change({ publicUrl: url }, 'Saving…')} data-testid="remote-url-save">
             Save
           </Button>
         </div>
