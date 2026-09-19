@@ -96,7 +96,7 @@ pub fn carried_settings() -> Vec<(String, String)> {
 /// with the list left behind the board comes up with a dead chat and no boards
 /// on it (bw-w5zs). It is carried exactly as the reader had it when they
 /// registered, because that is the list their own tools were found on.
-const CARRIED: [&str; 3] = ["ATELIER_HOST", "ATELIER_DATA_DIR", "PATH"];
+const CARRIED: [&str; 2] = ["ATELIER_DATA_DIR", "PATH"];
 
 /// The rule behind it, kept apart from the environment so it can be tested
 /// without one test's variable reaching another running beside it.
@@ -419,9 +419,12 @@ fn install(exe: &str) -> Result<(), String> {
     }
 
     // The address a phone would type, not only the one this computer uses:
-    // the registration carries the bind address, so this is the same answer
-    // the running copy gives (bw-hkai.1).
-    let host = std::env::var("ATELIER_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+    // the same rule the running copy reads, so the two cannot disagree
+    // (bw-hkai.1). The host is no longer written into the unit, so a reader
+    // who changes it on the screen later gets the change without
+    // reinstalling — which is why this asks the rule rather than the
+    // environment it happens to have been installed from (bw-hdor.1).
+    let host = crate::reachable::bind_host();
     println!("{DISPLAY} will start with this computer.");
     let network = crate::reachable::on_this_network();
     let name = crate::reachable::name_on_this_network(network);

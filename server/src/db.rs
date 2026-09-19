@@ -165,6 +165,40 @@ pub struct Database {
     conn: Mutex<Connection>,
 }
 
+/// One setting, read before anything has been started.
+///
+/// The listener is taken first on purpose (`main.rs`): a reader whose computer
+/// is already serving should meet the bind failure, not a page of healthy
+/// startup lines followed by one. But the address to bind is now a stored
+/// answer, so something has to read the file before the door is opened —
+/// without running a migration, without holding it open, and without turning
+/// a missing or half-written file into a reason not to start.
+///
+/// Read-only, and every failure is `None`: no file yet on a first run, no
+/// table yet on a database older than settings, no row for a reader who never
+/// chose. The caller's own default covers all four the same way.
+pub fn setting_at_rest(key: &str) -> Option<String> {
+    setting_in(&crate::identity::settings_db()?, key)
+}
+
+/// The same read, of a named file, so it can be tried against one that is not
+/// there and one that is.
+pub fn setting_in(path: &Path, key: &str) -> Option<String> {
+    let conn = Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .ok()?;
+    conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        params![key],
+        |row| row.get::<_, String>(0),
+    )
+    .ok()
+    .map(|value| value.trim().to_string())
+    .filter(|value| !value.is_empty())
+}
+
 impl Database {
     /// Creates a new database connection and initializes the schema
     ///

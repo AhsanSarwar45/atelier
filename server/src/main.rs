@@ -277,12 +277,13 @@ async fn run() {
     }
 }
 
-/// Who may reach it, as the environment was left.
+/// Who may reach it: this run's answer, else the screen's, else everyone.
+///
+/// The rule itself lives beside the addresses it decides, so the copy that
+/// serves, the copy that answers `atelier where` and the service that
+/// registers one all reach the same answer (bw-hdor.1).
 fn bind_host() -> String {
-    env::var("ATELIER_HOST")
-        .or_else(|_| env::var("BEADS_WEB_HOST"))
-        .or_else(|_| env::var("HOST"))
-        .unwrap_or_else(|_| "0.0.0.0".to_string())
+    reachable::bind_host()
 }
 
 /// The port it listens on, as the environment was left.

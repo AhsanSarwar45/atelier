@@ -152,16 +152,74 @@ fn published(public: Option<&str>) -> Option<String> {
     })
 }
 
-/// The address in front of this program, as the environment was left.
+/// Where the screen keeps who may reach this program.
+pub const BIND_HOST_SETTING: &str = "server.bind-host";
+
+/// Where the screen keeps the address in front of this program.
+pub const PUBLIC_URL_SETTING: &str = "server.public-url";
+
+/// Which of the two answers wins.
+///
+/// A value in the environment belongs to one run — a script, a test, an
+/// agent's own disposable copy of the app — so it outranks the stored one for
+/// that run and changes nothing afterwards. The stored answer is the durable
+/// choice, and it is the only one a reader who never opens a terminal has
+/// (bw-hdor.1).
+///
+/// Blank is not an answer in either place. A variable exported empty by a
+/// shell that meant to unset it reads as nothing chosen, which is what the
+/// person meant.
+fn chosen(for_this_run: Option<String>, stored: Option<String>) -> Option<String> {
+    [for_this_run, stored]
+        .into_iter()
+        .flatten()
+        .map(|said| said.trim().to_string())
+        .find(|said| !said.is_empty())
+}
+
+/// The first of these names the environment has an answer for.
+fn for_this_run(names: &[&str]) -> Option<String> {
+    names
+        .iter()
+        .find_map(|name| std::env::var(name).ok().filter(|said| !said.trim().is_empty()))
+}
+
+/// Who may reach this program: this run's answer, else the screen's, else
+/// everyone on the network.
+///
+/// Answering every address is the default because the board on a phone is the
+/// ordinary reason to run this at all, and a reader who wants the door shut
+/// says so on the screen.
+pub fn bind_host() -> String {
+    bind_host_from(
+        for_this_run(&["ATELIER_HOST", "BEADS_WEB_HOST", "HOST"]),
+        crate::db::setting_at_rest(BIND_HOST_SETTING),
+    )
+}
+
+/// The rule behind [`bind_host`], with both answers handed to it.
+pub fn bind_host_from(for_this_run: Option<String>, stored: Option<String>) -> String {
+    chosen(for_this_run, stored).unwrap_or_else(|| "0.0.0.0".to_string())
+}
+
+/// The address in front of this program: this run's answer, else the screen's.
 ///
 /// Read here rather than at each caller, because the running copy, the copy
 /// answering `atelier where`, and the installed service all have to name the
 /// same address or two of them are lying to somebody.
 pub fn published_url() -> Option<String> {
-    ["ATELIER_PUBLIC_URL", "BEADS_WEB_PUBLIC_URL"]
-        .into_iter()
-        .find_map(|key| std::env::var(key).ok().filter(|said| !said.trim().is_empty()))
-        .and_then(|said| published(Some(&said)))
+    published_url_from(
+        for_this_run(&["ATELIER_PUBLIC_URL", "BEADS_WEB_PUBLIC_URL"]),
+        crate::db::setting_at_rest(PUBLIC_URL_SETTING),
+    )
+}
+
+/// The rule behind [`published_url`], with both answers handed to it.
+pub fn published_url_from(
+    for_this_run: Option<String>,
+    stored: Option<String>,
+) -> Option<String> {
+    published(chosen(for_this_run, stored).as_deref())
 }
 
 /// The lines telling a reader where to open it.
@@ -498,6 +556,96 @@ mod tests {
         );
         assert_eq!(published(Some("")), None);
         assert_eq!(published(None), None);
+    }
+
+    #[test]
+    fn nothing_chosen_anywhere_answers_everyone() {
+        // The board on a phone is the ordinary reason to run this, so the
+        // default has to be the one that lets a phone in.
+        assert_eq!(bind_host_from(None, None), "0.0.0.0");
+        assert_eq!(published_url_from(None, None), None);
+    }
+
+    #[test]
+    fn the_screens_answer_is_used_when_this_run_has_none() {
+        assert_eq!(
+            bind_host_from(None, Some("127.0.0.1".into())),
+            "127.0.0.1"
+        );
+        assert_eq!(
+            published_url_from(None, Some("nobara.ts.net".into())).as_deref(),
+            Some("https://nobara.ts.net")
+        );
+    }
+
+    #[test]
+    fn this_runs_answer_outranks_the_screens() {
+        // A worktree, a test or an agent's own copy sets one of these for a
+        // single run. It must not be able to lose the reader's stored choice,
+        // and it must not be ignored either.
+        assert_eq!(
+            bind_host_from(Some("127.0.0.1".into()), Some("0.0.0.0".into())),
+            "127.0.0.1"
+        );
+        assert_eq!(
+            published_url_from(Some("https://run.ts.net".into()), Some("https://stored.ts.net".into()))
+                .as_deref(),
+            Some("https://run.ts.net")
+        );
+    }
+
+    #[test]
+    fn a_variable_exported_blank_is_not_an_answer_and_the_stored_one_still_counts() {
+        // `export ATELIER_HOST=` from a script that meant to unset it. Reading
+        // that as a bind address of nothing would bind nothing.
+        for blank in ["", "   ", "\n"] {
+            assert_eq!(
+                bind_host_from(Some(blank.into()), Some("127.0.0.1".into())),
+                "127.0.0.1",
+                "{blank:?} was taken as an answer"
+            );
+            assert_eq!(bind_host_from(Some(blank.into()), None), "0.0.0.0");
+        }
+    }
+
+    #[test]
+    fn a_stored_answer_is_trimmed_before_it_is_believed() {
+        // It arrives from a text box.
+        assert_eq!(bind_host_from(None, Some("  127.0.0.1  ".into())), "127.0.0.1");
+        assert_eq!(
+            published_url_from(None, Some("  nobara.ts.net/ ".into())).as_deref(),
+            Some("https://nobara.ts.net")
+        );
+    }
+
+    #[test]
+    fn the_stored_answer_is_read_before_anything_is_started() {
+        // Read straight off the file, with no migration run and nothing held
+        // open, because this happens before the door is taken.
+        let dir = std::env::temp_dir().join(format!("atelier-bw-hdor-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a folder to write a database into");
+        let file = dir.join("settings.db");
+        let _ = std::fs::remove_file(&file);
+
+        // No file at all: a first run, and not a reason to refuse to start.
+        assert_eq!(crate::db::setting_in(&file, BIND_HOST_SETTING), None);
+
+        let conn = rusqlite::Connection::open(&file).expect("a database to write");
+        conn.execute_batch(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO settings (key, value) VALUES ('server.bind-host', ' 127.0.0.1 ');",
+        )
+        .expect("the one table this reads");
+        drop(conn);
+
+        assert_eq!(
+            crate::db::setting_in(&file, BIND_HOST_SETTING).as_deref(),
+            Some("127.0.0.1"),
+            "the stored answer was not read, or was read untrimmed"
+        );
+        // A key nobody has chosen reads the same as no file.
+        assert_eq!(crate::db::setting_in(&file, PUBLIC_URL_SETTING), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
