@@ -1592,6 +1592,11 @@ Reproduced on `bw-q50n.3`: after `bw-q50n.1` landed and the generated checks
 card closed green, `atelier tool board/land bw-q50n.3` again refused solely
 because no commit subject named the generated `no-code` teardown card.
 
+Reproduced on `bw-rwce.3`: with `bw-rwce.1` landed and the generated checks card
+closed green at 1135 passing tests, `atelier tool board/land bw-rwce.3` refused
+solely because no commit subject named the generated `no-code` land card. This
+note is that otherwise unnecessary commit.
+
 ## Edit and Write refuse a child claimed in its job copy (bw-1fw6.1, bw-1fw6.2)
 
 With `bw-1fw6.1` claimed in `worktrees/bw-1fw6`, the Edit and Write tools
