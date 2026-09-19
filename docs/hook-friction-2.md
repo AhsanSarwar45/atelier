@@ -1784,3 +1784,36 @@ still require a reasoned per-command bypass in the owned job worktree; this run
 uses the corrected built native command, without replacing the owner's app.
 Full evidence and original historical reasons are preserved in
 `docs/audits/board-operational-completion-2026-09-19.json`.
+
+
+### A bypassed claim leaves the card unlandable (bw-mew1, bw-hu0z.1)
+
+Two refusals, and the second is caused by the first.
+
+`workflow-gate` reads the card id off the worktree's directory name, so a child
+claimed in its job's copy is refused:
+
+```
+Claim bw-mew1.1 from its own isolated worktree, not …/worktrees/bw-mew1.
+```
+
+The documented answer is a reasoned `ATELIER_BYPASS` on the claim. But the
+actor a session works under is not an environment variable it sets — a hook
+rewrites each `bd` call to carry `--actor <session>` and each `atelier tool`
+call to carry `BEADS_ACTOR=<session>` (server/src/lifecycle.rs, `actor`). A
+bypassed command is not rewritten, so the claim records the Git user as the
+card's assignee instead of the session. Landing then reads that assignee back
+and refuses, and no `BEADS_ACTOR=` written by hand can answer it, because the
+hook's own assignment is inserted after it and wins:
+
+```
+bw-mew1.1 belongs to another actor; invoke with the claiming session's BEADS_ACTOR
+```
+
+Getting out of it takes a second bypass — a forced reassignment to the session
+id, where the holder being coordinated with is the same session — to put back
+the assignee the unbypassed claim would have written.
+
+Either half would end this: `workflow-gate` accepting a claimed descendant of
+the card its directory names, or the actor injection surviving a bypass, since
+who the session is is not what any bypass is asking to set aside.
