@@ -79,6 +79,9 @@ const PROSE_CLASSES =
   "prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 " +
   "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0 " +
   "prose-pre:bg-zinc-900 prose-pre:text-zinc-100 " +
+  // The block keeps its own breathing room now that the stripped inner box
+  // is no longer providing any (bw-dusu.1).
+  "prose-pre:p-3 " +
   "prose-code:text-sm prose-code:bg-zinc-100 dark:prose-code:bg-zinc-800 " +
   "prose-code:px-1 prose-code:py-0.5 prose-code:rounded " +
   // The typography preset draws a backtick of its own before and after every
@@ -86,6 +89,16 @@ const PROSE_CLASSES =
   // command in a message read `like this`, quote marks and all, while a fenced
   // block (which the preset exempts) read correctly (bw-3ndt.1).
   "prose-code:before:content-none prose-code:after:content-none " +
+  // A fenced block is ONE box. Everything on the line above dresses a quoted
+  // word inside a sentence -- a fill of its own, a little padding, rounded
+  // corners -- and the preset hands it to every `code` element, the one inside
+  // a fenced block included. So a block was drawn as its own dark box with a
+  // second, lighter box painted inside it, and highlight.js's stylesheet
+  // (`pre code.hljs { padding: 1em }`) pushed that inner box a further line
+  // clear of the code. Code inside a block wears the block's own colours and
+  // nothing else; an inline `word` is untouched (bw-dusu.1).
+  "[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit " +
+  "[&_pre_code]:rounded-none [&_pre_code.hljs]:bg-transparent [&_pre_code.hljs]:p-0 " +
   // A pasted path or a long address must not push the column wider than its box.
   "prose-pre:overflow-x-auto break-words " +
   // A table is its own sideways scroller. Left alone, a table never narrows

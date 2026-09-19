@@ -248,3 +248,17 @@ describe('Copying a fenced block', () => {
     expect(screen.getAllByTestId('markdown-copy-code')).toHaveLength(2);
   });
 });
+
+describe('A fenced block is one box', () => {
+  it('strips the inline chip fill and padding from code inside a block, and keeps it on an inline word', () => {
+    const { container } = render(<MarkdownBody>{'```\nnpm run dev\n```'}</MarkdownBody>);
+    const prose = container.firstElementChild as HTMLElement;
+
+    // The fill, the padding and the corners of an inline `word` are undone for
+    // code inside a block, which is what drew the second box (bw-dusu.1).
+    for (const undone of ['[&_pre_code]:bg-transparent', '[&_pre_code]:p-0', '[&_pre_code]:rounded-none']) {
+      expect(prose.className).toContain(undone);
+    }
+    expect(prose.className).toContain('dark:prose-code:bg-zinc-800');
+  });
+});
