@@ -260,8 +260,39 @@ pub enum Ask {
 }
 
 /// Where this computer holds Tailscale, if it holds it.
+///
+/// A "no" is never taken from memory. Every lookup in the app remembers its
+/// answer for the life of the process, which is right for a tool that was
+/// there at startup and wrong for this one: the whole point of `atelier
+/// remote install` is that Tailscale arrives while something is already
+/// running. Without this, the command reporting on itself the moment after it
+/// installed Tailscale said it was not installed — it was repeating the
+/// answer it took before it ran — and the settings screen of an app started
+/// before the install said the same until a restart (bw-l70z).
+///
+/// Only the "no" is looked at again. A "yes" cannot go stale in a way that
+/// matters: a Tailscale deleted out from under us fails where it is run, with
+/// a sentence saying so, rather than being quietly reported as absent.
 pub fn looked_up() -> Option<std::path::PathBuf> {
-    crate::routes::find_tool(TAILSCALE, &[])
+    asked_twice(
+        || crate::routes::find_tool(TAILSCALE, &[]),
+        || crate::routes::forget_tool(TAILSCALE),
+    )
+}
+
+/// Look; and if the answer is no, drop what was remembered and look once more.
+///
+/// Split out from its one caller so the sequence can be put to a test without
+/// a Tailscale to install halfway through it.
+fn asked_twice(
+    find: impl Fn() -> Option<std::path::PathBuf>,
+    forget: impl FnOnce(),
+) -> Option<std::path::PathBuf> {
+    if let Some(path) = find() {
+        return Some(path);
+    }
+    forget();
+    find()
 }
 
 /// How far along this computer is, asked of the daemon now.
@@ -504,6 +535,44 @@ pub fn follow_the_app_down(port: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A "no" from before the install is not the answer given after it.
+    ///
+    /// This is the sequence `atelier remote install` runs: it asks whether
+    /// Tailscale is here, is told no, installs it, and asks again. The second
+    /// answer has to come from the computer and not from the first one, which
+    /// is what it did — the command finished a successful install by saying
+    /// Tailscale was not installed (bw-l70z).
+    #[test]
+    fn a_tailscale_that_arrived_since_the_last_look_is_not_reported_missing() {
+        use std::cell::Cell;
+        use std::path::PathBuf;
+
+        let dropped = Cell::new(false);
+        let here = PathBuf::from("/usr/bin/tailscale");
+        // Stands in for the memo: nothing until it is dropped, and the real
+        // answer once it has been.
+        let find = || dropped.get().then(|| here.clone());
+
+        assert_eq!(
+            asked_twice(find, || dropped.set(true)),
+            Some(here.clone()),
+            "the answer from before the install was handed back after it"
+        );
+    }
+
+    /// A yes is taken as it is, and nothing is dropped to get it.
+    #[test]
+    fn a_tailscale_that_is_already_there_is_not_looked_for_twice() {
+        use std::cell::Cell;
+        use std::path::PathBuf;
+
+        let here = PathBuf::from("/usr/bin/tailscale");
+        let dropped = Cell::new(false);
+
+        assert_eq!(asked_twice(|| Some(here.clone()), || dropped.set(true)), Some(here));
+        assert!(!dropped.get(), "a working answer was thrown away for no reason");
+    }
 
     /// What is being served is read by the address it forwards to.
     ///

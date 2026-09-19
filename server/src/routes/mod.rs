@@ -104,6 +104,20 @@ pub fn forget_tools() {
     }
 }
 
+/// Drop what was remembered about one tool, leaving the rest alone.
+///
+/// The same case as `forget_tools` for a caller that knows which one it just
+/// installed. Clearing everything would be correct too, but it would throw
+/// away answers about `git`, `bd` and the agents that nothing has invalidated
+/// — and the caller here is a poll, so it would throw them away repeatedly.
+pub fn forget_tool(name: &str) {
+    if let Some(tools) = TOOLS.get() {
+        if let Ok(mut tools) = tools.lock() {
+            tools.remove(name);
+        }
+    }
+}
+
 /// The remembered answer about a tool, or the one a fresh search gives.
 ///
 /// The lock is not held while the search runs: it starts programs and reads
@@ -573,6 +587,43 @@ mod tests {
             remembered(name, look),
             Some(tool),
             "and dropping it sends the next caller looking again"
+        );
+    }
+
+    /// Dropping one tool's answer leaves every other tool's alone.
+    ///
+    /// The caller that wants this is a poll — the settings screen asking every
+    /// time it is opened whether Tailscale has arrived yet. Clearing the whole
+    /// memo there would send the next lookup of git, bd and each agent back to
+    /// the disk, over and over, for a question that was only ever about one
+    /// program (bw-l70z).
+    #[test]
+    fn dropping_one_tools_answer_keeps_the_rest() {
+        let place = tempfile::tempdir().expect("a directory of our own");
+        let one = "atelier-tool-forgotten-alone";
+        let other = "atelier-tool-left-remembered";
+        let dir = place.path().to_path_buf();
+        let look_for = move |name: &'static str| {
+            let dir = dir.clone();
+            move || search_in(&here_endings(), &[dir], &[name])
+        };
+
+        assert_eq!(remembered(one, look_for(one)), None);
+        assert_eq!(remembered(other, look_for(other)), None);
+
+        let arrived = install(place.path(), one);
+        install(place.path(), other);
+
+        forget_tool(one);
+        assert_eq!(
+            remembered(one, look_for(one)),
+            Some(arrived),
+            "the one that was dropped did not go looking again"
+        );
+        assert_eq!(
+            remembered(other, look_for(other)),
+            None,
+            "an answer nobody asked to drop was thrown away with it"
         );
     }
 
