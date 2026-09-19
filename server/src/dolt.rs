@@ -430,6 +430,17 @@ async fn read_beads_from_conn(
     let mut beads = merge_comments(conn, db_name, beads).await?;
     merge_dependencies(conn, db_name, &mut beads).await?;
     merge_labels(conn, db_name, &mut beads).await?;
+    let metadata_column: Option<Row> = conn.exec_first(
+        "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=:db AND TABLE_NAME='issues' AND COLUMN_NAME='metadata'",
+        mysql_async::params! { "db" => db_name }).await.map_err(|e| DoltError::QueryFailed(e.to_string()))?;
+    if metadata_column.is_some() {
+        let rows: Vec<Row> = conn.query(format!("SELECT id, metadata FROM `{}`.issues", db_name)).await.map_err(|e| DoltError::QueryFailed(e.to_string()))?;
+        let metadata: std::collections::HashMap<_, _> = rows.iter().filter_map(|row| {
+            Some((get_str(row, "id"), serde_json::from_str::<serde_json::Value>(&get_opt_str(row, "metadata")?).ok()?))
+        }).collect();
+        for bead in &mut beads { bead.metadata = metadata.get(&bead.id).cloned(); }
+    }
+
     Ok(beads)
 }
 
@@ -463,6 +474,7 @@ async fn query_issues(conn: &mut mysql_async::Conn, db_name: &str) -> Result<Vec
         title: get_str(row, "title"),
         description: get_opt_str(row, "description"),
         status: get_opt_str(row, "status").unwrap_or_else(|| "open".to_string()),
+        hierarchy_error: None, metadata: None,
         priority: row.get::<Option<i32>, _>("priority").flatten(),
         issue_type: get_opt_str(row, "issue_type"),
         owner: get_opt_str(row, "owner"),

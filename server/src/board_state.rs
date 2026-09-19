@@ -8,6 +8,8 @@ pub struct Node {
     pub status: String,
     pub children: Vec<String>,
     pub started: bool,
+    pub container: bool,
+    pub error: Option<String>,
 }
 
 pub fn normalize(status: &str) -> &str {
@@ -77,10 +79,12 @@ pub fn project(nodes: &[Node]) -> Projection {
         if !active.insert(id.into()) {
             return Err(format!("Cyclic child relationship at {id}"));
         }
-        let state = if node.status == "cancelled" {
+        let state = if let Some(error) = &node.error {
+            Err(error.clone())
+        } else if node.status == "cancelled" {
             Ok("cancelled".into())
         } else if node.children.is_empty() {
-            Ok(normalize(&node.status).into())
+            Ok(if node.container { if node.started { "in_progress" } else { "open" } } else { normalize(&node.status) }.into())
         } else {
             let children: Result<Vec<String>, String> = node
                 .children
@@ -144,6 +148,8 @@ mod tests {
             status: status.into(),
             children: children.iter().map(|s| (*s).into()).collect(),
             started: false,
+            container: !children.is_empty(),
+            error: None,
         }
     }
     #[test]

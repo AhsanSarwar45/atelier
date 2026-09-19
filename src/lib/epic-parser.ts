@@ -141,13 +141,20 @@ export function computeEpicProgress(
   // Count deliverable leaves once, regardless of how deeply they are nested.
   const seen = new Set<string>();
   const children: Bead[] = [];
+  const unresolved = new Set<string>();
+  const active = new Set<string>([epic.id]);
   const collect = (id: string) => {
-    if (seen.has(id) || id === epic.id) return;
+    if (active.has(id)) { unresolved.add(id); return; }
+    if (seen.has(id)) return;
     seen.add(id);
     const child = beadById.get(id);
-    if (!child) return;
+    if (!child) { unresolved.add(id); return; }
+    if (child.labels?.includes('no-code') && child.labels.some((label) =>
+      ['step:checks', 'step:land', 'step:review', 'step:design', 'step:ground', 'step:benchmark'].includes(label))) return;
     if (child.status !== 'cancelled' && child.children?.length) {
+      active.add(id);
       child.children.forEach(collect);
+      active.delete(id);
     } else {
       children.push(child);
     }
@@ -166,7 +173,7 @@ export function computeEpicProgress(
   const blocked = pieces.filter((child) => isBlockedBy(child, statusById)).length;
 
   return {
-    total: pieces.length,
+    total: pieces.length + Math.max(unresolved.size, epic.hierarchy_error ? 1 : 0),
     completed,
     inProgress,
     blocked,

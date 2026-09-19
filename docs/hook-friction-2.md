@@ -1711,3 +1711,32 @@ The documented per-command bypass carried the removal. The fix is for the gate
 to read a repository under the checks' own holding directory as scratch, the
 way it already reads `/dev/null` and the pseudo-devices as not-files: a
 repository nobody committed to and no card names is not somebody's work.
+## Unified lifecycle repair (bw-9vv9, 2026-09-19)
+
+The current contract is `docs/board-lifecycle.md`. Earlier entries describe
+historical behavior; the repeated per-job bypass is not the normal workflow.
+Protocol 3 preserves Codex `cmd`, explicit workdir and every freeform patch
+path (including moves), stamps native workflow tools as well as compound bd
+calls, checks every status operand, and uses actual hierarchy for job ownership.
+Descriptor duplication is covered by the exact `> /tmp/out 2>&1` regression.
+
+The integration run also found that `bd init` configures `core.hooksPath`, and
+Git may send zero as the old ref when update-ref supplies no expected value.
+The installed-format guard uses the configured hook directory, reads the actual
+current ref, refuses an unprepared update and recovers closure after commit.
+Generated and checked-in Codex hooks now share Stop and session gates.
+
+Generated checks/land/review tasks no longer keep delivered work open or demand
+artificial commits. Required checks and review apply before landing. Review
+output and exact-tree evidence are preserved; manager approval is a separate
+pre-landing action. A normal completion never depends on teardown or deployment.
+
+Browser proof uncovered a concurrent cache fill restoring an old status after
+a successful write. Status mutations now serialize with board reads, invalidate
+the snapshot and notify subscribers. The isolated browser test verifies a
+reopened descendant moving its parent and its detail panel together.
+
+Verification: `tests/native-landing.mjs`, lifecycle/join/board_state Rust cases,
+`tests/e2e/landing-state.spec.ts`, and screenshots under
+`tests/results/landing-state`. These verify a built copy from the worktree;
+they do not claim to upgrade the owner's running app or other active sessions.

@@ -319,8 +319,8 @@ export function BeadDetail({
             </span>
             <span className="flex items-center gap-1.5">
               <Circle className={cn("size-2 fill-current", getStatusDotColor(bead.status))} aria-hidden="true" />
-              {isReadOnly ? (
-                <span>{formatStatus(bead.status)}</span>
+              {isReadOnly || bead.issue_type === 'epic' || !!bead.children?.length ? (
+                <span data-testid="derived-status">{formatStatus(bead.status)}<span className="sr-only"> — derived from required subtasks</span></span>
               ) : (
                 <Select value={bead.status} onValueChange={handleStatusChange}>
                   <SelectTrigger aria-label="Status" className={INLINE_PICKER}>
@@ -328,7 +328,7 @@ export function BeadDetail({
                   </SelectTrigger>
                   <SelectContent>
                     {STATES.map((state) => (
-                      <SelectItem key={state.id} value={state.id}>{state.label}</SelectItem>
+                      <SelectItem key={state.id} value={state.id} disabled={state.id === 'closed' && bead.status !== 'closed'}>{state.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -356,6 +356,24 @@ export function BeadDetail({
               <span>Created {formatShortDate(bead.created_at)}</span>
             </span>
           </div>
+
+          {bead.hierarchy_error && (
+            <p role="alert" className="mt-3 text-sm text-destructive">Hierarchy needs repair: {bead.hierarchy_error}</p>
+          )}
+          {!isReadOnly && bead.metadata?.manager_review_tree && bead.metadata.manager_approved_tree !== bead.metadata.manager_review_tree && (
+            <div className="mt-3 flex items-center gap-3">
+              <Button size="sm" onClick={async () => {
+                if (!projectPath) return;
+                try {
+                  await api.beads.update({path: projectPath, id: bead.id, approve_tree: bead.metadata?.manager_review_tree});
+                  onUpdate?.();
+                } catch (error) {
+                  toast({variant: "destructive", title: "Approval failed", description: error instanceof Error ? error.message : "Unknown error"});
+                }
+              }}>Approve reviewed change</Button>
+              <span className="text-xs text-t-muted">Approval permits landing. Done follows landing.</span>
+            </div>
+          )}
 
           {/* Why the work stopped. Dropped work is settled the same as finished
               work and an agent writes down why it dropped it, so asking for the

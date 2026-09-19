@@ -1,3 +1,4 @@
+pub mod board_gate;
 // Library entry point — exposes modules for integration tests.
 pub mod allocator;
 pub mod board_push;

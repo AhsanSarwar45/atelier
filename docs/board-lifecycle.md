@@ -1,8 +1,3 @@
----
-name: beads
-description: Use when working in a repository that uses bd or Beads for durable project task tracking, issue dependencies, blocker management, multi-session handoff, or shared work memory. Trigger when the user asks to find ready work, claim or close tasks, create follow-up work, inspect blockers, recover project context, or choose between local planning and persistent project tracking.
----
-
 # Atelier and Beads
 
 ## Completion contract
@@ -118,3 +113,24 @@ actual refusal in `docs/hook-friction.md` or `docs/hook-friction-2.md`. Do not
 export a standing bypass or use it to override truthful completion. Declared
 suites run without an inherited bypass. An old installed binary needs an
 explicit upgrade; source tests alone do not prove that the active hooks changed.
+
+## Contradictions repaired by bw-9vv9
+
+| Previous behavior | Required behavior | Enforcement |
+| --- | --- | --- |
+| Detail reads stored status; columns recalculate shallow children | One recursive server projection | board_state and full snapshots |
+| All children closed advances epic to review | All required work landed means Done | board_landing parent reconciliation |
+| Checks/review generated after work closes | Exact-tree prerequisites before merge | native lander |
+| Cleanup requires its own commit | Cleanup is a separate operation | board/cleanup |
+| Standalone and historical commit mentions mishandled | Explicit headers and durable receipt | landing journal |
+| Browser force-closes unfinished scope | Same completion invariant for every writer | transition |
+| Raw Git hook parsed as JSON | Validate raw reference transactions | landing-gate |
+| Codex cmd/workdir/patch targets discarded | Preserve tool envelope and all paths | lifecycle normalization |
+| Only first card in multi-close checked | Check every operand | status gate |
+| Question marks or board outages waive completion | Persist blockers; report unavailable evidence | board gate |
+| Eight-character actor collisions | Full stable session identity | board actor |
+| Copied provider settings drift | Generated and checked-in hooks tested together | join tests |
+
+Historical friction entries describe the behavior at their recorded date. They
+are evidence, not exceptions to this contract. This contract supersedes older
+acceptance that permits forced Done without landing or requires post-land review.

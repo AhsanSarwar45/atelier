@@ -72,6 +72,11 @@ pub async fn bd_command(Json(req): Json<BdCommandRequest>) -> impl IntoResponse 
             .into_response();
     }
 
+    if subcommand == "close" || (subcommand == "update" && req.args.iter().any(|arg|
+        arg == "--status" || arg == "-s" || arg.starts_with("--status=") || arg == "--set-metadata" || arg.starts_with("--set-metadata="))) {
+        return (StatusCode::CONFLICT, Json(serde_json::json!({"error":"Use the board status endpoint so completion and hierarchy can be verified"}))).into_response();
+    }
+
     // Validate and set working directory
     let cwd = if let Some(ref dir) = req.cwd {
         let path = Path::new(dir);
@@ -112,8 +117,10 @@ pub async fn bd_command(Json(req): Json<BdCommandRequest>) -> impl IntoResponse 
             ).into_response();
         }
     };
+    let gate = super::beads::gate_for(&cwd.to_string_lossy());
+    let _hold = gate.lock().await;
     let mut cmd = Command::new(bd_path);
-    cmd.args(&req.args).current_dir(&cwd);
+    cmd.args(&req.args).current_dir(&cwd).kill_on_drop(true);
 
     let result = tokio::time::timeout(Duration::from_secs(30), cmd.output()).await;
 

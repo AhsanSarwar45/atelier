@@ -71,7 +71,7 @@ const REDIRECTS: &[&str] = &[
 /// The redirect operators that name a file to be written.
 const WRITE_REDIRECTS: &[&str] = &[">", ">>", "&>", "&>>", ">|"];
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 pub fn version() -> String {
     format!(
@@ -159,8 +159,7 @@ pub fn said_cwd(data: &Value) -> Option<PathBuf> {
 }
 
 fn cwd(data: &Value) -> PathBuf {
-    tool_input(data)["workdir"]
-        .as_str()
+    tool_input(data).get("workdir").or_else(|| tool_input(data).get("cwd")).and_then(Value::as_str)
         .map(PathBuf::from)
         .or_else(|| said_cwd(data))
         .or_else(|| std::env::var_os("CLAUDE_PROJECT_DIR").map(PathBuf::from))
@@ -179,6 +178,8 @@ fn root(data: &Value) -> PathBuf {
 fn tool_input(data: &Value) -> &Value {
     data.get("tool_input")
         .or_else(|| data.get("toolInput"))
+        .or_else(|| data.get("arguments"))
+        .or_else(|| data.get("input"))
         .unwrap_or(&Value::Null)
 }
 
@@ -196,27 +197,25 @@ fn tool_name(data: &Value) -> &str {
         .and_then(Value::as_str)
         .unwrap_or("");
     match said {
-        "developer__shell" => "Bash",
+        "developer__shell" | "exec_command" | "functions.exec_command" | "shell_command" => "Bash",
         "developer__edit" => "Edit",
+        "functions.apply_patch" => "apply_patch",
         "developer__write" => "Write",
         said => said,
     }
 }
 
 fn shell(data: &Value) -> &str {
-    tool_input(data)["command"].as_str().unwrap_or("")
+    tool_input(data).get("command").or_else(|| tool_input(data).get("cmd")).and_then(Value::as_str).unwrap_or("")
 }
 fn session(data: &Value) -> String {
-    format!(
-        "s-{}",
-        data.get("session_id")
-            .or_else(|| data.get("sessionId"))
-            .and_then(Value::as_str)
-            .unwrap_or("nosession")
-            .chars()
-            .take(8)
-            .collect::<String>()
-    )
+    use sha2::{Digest, Sha256};
+    let identity = data.get("session_id").or_else(|| data.get("sessionId")).and_then(Value::as_str);
+    let identity = identity.map(str::to_owned).unwrap_or_else(||
+        format!("missing:{}:{}", cwd(data).display(), std::process::id()));
+    if identity.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')) {
+        format!("s-{identity}")
+    } else { format!("s-{:x}", Sha256::digest(identity.as_bytes())) }
 }
 
 fn command(root: &Path, program: &str, args: &[&str]) -> Option<(String, bool)> {
@@ -973,6 +972,11 @@ fn actor(data: &Value) -> Option<Value> {
     let parsed = calls(original, &cwd(data));
     let mut insertions: Vec<(usize, String)> = Vec::new();
     for (segment, here) in &parsed {
+        if let Some(at) = segment.words.iter().position(|w| executable(&w.text) == "atelier") {
+            if segment.words.get(at + 1).is_some_and(|w| w.text == "tool") {
+                insertions.push((segment.words[at].start, format!("BEADS_ACTOR={who} ")));
+            }
+        }
         let Some(call) = bd_call(segment) else {
             continue;
         };
@@ -1014,7 +1018,8 @@ fn actor(data: &Value) -> Option<Value> {
         return None;
     }
     let mut updated = tool_input(data).clone();
-    updated["command"] = json!(stamped);
+    let key = if updated.get("cmd").is_some() { "cmd" } else { "command" };
+    updated[key] = json!(stamped);
     Some(pretool("allow", "board identity", Some(updated)))
 }
 
@@ -1049,6 +1054,16 @@ fn segment_targets(segment: &Segment, here: &Path) -> Vec<Target> {
 fn mutation_targets(data: &Value) -> Vec<Target> {
     match tool_name(data) {
         "Edit" | "Write" | "MultiEdit" | "NotebookEdit" | "apply_patch" => {
+            if tool_name(data) == "apply_patch" {
+                let input = tool_input(data);
+                let patch = input.as_str().or_else(|| input.get("patch").and_then(Value::as_str))
+                    .or_else(|| input.get("input").and_then(Value::as_str)).unwrap_or("");
+                let targets: Vec<_> = patch.lines().filter_map(|line| {
+                    ["*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: "]
+                        .iter().find_map(|prefix| line.strip_prefix(prefix))
+                }).map(|path| Target::named(&cwd(data), path)).collect();
+                if !targets.is_empty() { return targets; }
+            }
             let named = [
                 "file_path",
                 "filePath",
@@ -1351,7 +1366,7 @@ fn isolation_made(data: &Value, issue: &str) -> Option<PathBuf> {
             let destination = operands(arguments).get(1).copied()?;
             isolates(&call).then(|| path_from(&call.cwd, destination))
         })
-        .find(|made| worktree_issue(made).as_deref() == Some(issue))
+        .find(|made| worktree_issue(made).is_some_and(|job| crate::board_landing::belongs_to(&root(data), issue, &job)))
 }
 
 fn creates_first_work(data: &Value) -> bool {
@@ -1379,6 +1394,7 @@ fn claimable(card: &Value, who: &str) -> bool {
 /// A worktree belongs to a job and is reused by every child under it — one
 /// checkout for a whole epic, not one per step. Beads ids are hierarchical, so
 /// `bw-x.1` and `bw-x.1.2` are both work in `bw-x` and nothing else is.
+#[cfg(test)]
 fn descends(card: &str, job: &str) -> bool {
     card == job
         || card
@@ -1401,7 +1417,7 @@ fn owns_work_under(project: &Path, job: &str, who: &str) -> bool {
     };
     rows(value).into_iter().any(|card| {
         card["assignee"].as_str() == Some(who)
-            && card["id"].as_str().is_some_and(|id| descends(id, job))
+            && card["id"].as_str().is_some_and(|id| crate::board_landing::belongs_to(project, id, job))
     })
 }
 
@@ -1432,7 +1448,7 @@ fn workflow(data: &Value) -> Option<Value> {
         // The copy is cut per job and reused by every card under it, so the
         // card being claimed need only be work inside the job the copy is
         // named for (`docs/hook-friction-2.md` §18).
-        let isolated = issue_at(&here).is_some_and(|job| descends(&issue, &job))
+        let isolated = issue_at(&here).is_some_and(|job| crate::board_landing::belongs_to(&here, &issue, &job))
             || isolation_made(data, &issue).as_deref() == Some(here.as_path());
         if !isolated {
             return deny(format!(
@@ -1447,9 +1463,7 @@ fn workflow(data: &Value) -> Option<Value> {
         let Some(card) = bd(&project, &["show", &issue, "--json"])
             .and_then(|value| rows(value).into_iter().next())
         else {
-            // Preserve the existing outage behavior for an already isolated,
-            // correctly named worktree.
-            return None;
+            return deny("Cannot verify ownership while Beads is unavailable; retry the claim when the board is reachable");
         };
         if claimable(&card, &session(data)) {
             return None;
@@ -1460,6 +1474,9 @@ fn workflow(data: &Value) -> Option<Value> {
         ));
     }
     for target in targets {
+        if target.path.to_string_lossy().contains('$') {
+            return deny(format!("Cannot resolve shell variable in {}; use an explicit path so ownership can be checked", target.spelled()));
+        }
         // A path in no Git worktree is not a change to anybody's work: a
         // scratch file, a temporary directory, a log outside the project. The
         // rule is about repository changes, so a target with no repository is
@@ -1479,8 +1496,7 @@ fn workflow(data: &Value) -> Option<Value> {
         let Some(card) =
             bd(&project, &["show", &issue, "--json"]).and_then(|v| rows(v).into_iter().next())
         else {
-            // An isolated Git worktree on a task branch is enough during a temporary board outage.
-            continue;
+            return deny("Cannot verify the worktree owner while Beads is unavailable");
         };
         let who = session(data);
         if let Some(reason) = ownership_refusal(&card, &issue, &who) {
@@ -1503,24 +1519,7 @@ fn current_branch(root: &Path) -> String {
 }
 
 fn landing_branch(root: &Path) -> String {
-    let candidates = ["ours", "main", "master"];
-    candidates
-        .into_iter()
-        .find(|name| {
-            command(
-                root,
-                "git",
-                &[
-                    "show-ref",
-                    "--verify",
-                    "--quiet",
-                    &format!("refs/heads/{name}"),
-                ],
-            )
-            .is_some_and(|(_, ok)| ok)
-        })
-        .unwrap_or("main")
-        .to_string()
+    crate::board_landing::landing_branch(root)
 }
 
 fn merge_refusal(
@@ -1624,31 +1623,6 @@ fn merge_gate(data: &Value) -> Option<Value> {
     None
 }
 
-fn no_commit(card: &Value) -> bool {
-    card["issue_type"]
-        .as_str()
-        .is_some_and(|t| matches!(t, "epic" | "decision"))
-        || card["labels"].as_array().is_some_and(|labels| {
-            labels.iter().any(|l| {
-                matches!(
-                    l.as_str(),
-                    Some("job" | "no-code" | "find" | "question" | "decision")
-                )
-            })
-        })
-}
-
-fn subject_names(subject: &str, id: &str) -> bool {
-    subject
-        .split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '.')))
-        .any(|word| word == id)
-}
-
-fn landed(root: &Path, id: &str) -> bool {
-    command(root, "git", &["log", &landing_branch(root), "--format=%s"])
-        .is_some_and(|(out, ok)| ok && out.lines().any(|subject| subject_names(subject, id)))
-}
-
 fn flag_value(words: &[Word], name: &str) -> Option<String> {
     words
         .iter()
@@ -1662,54 +1636,6 @@ fn flag_value(words: &[Word], name: &str) -> Option<String> {
                     .map(str::to_string)
             })
         })
-}
-
-fn labels(card: &Value) -> Vec<&str> {
-    card["labels"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .collect()
-}
-
-fn passing_check(text: &str, tree: &str) -> bool {
-    text.contains(&format!("checks: tree {tree} "))
-        && text.contains("=PASSED")
-        && !text.contains("=FAILED")
-}
-
-/// The name a run's evidence is filed under: the tree of what is committed.
-///
-/// A tree, not a commit. It is what a run actually checked, it is what the
-/// evidence says (`checks: tree HASH ...`), and it survives the thing that
-/// happens to every card here — a rebase, which gives the same files a new
-/// commit. Read as a commit, a green run's own evidence went stale the moment
-/// its branch was rebased, and no checks card could be closed at all
-/// (bw-zd18).
-fn checked_tree(root: &Path) -> Option<String> {
-    let (tree, ok) = command(root, "git", &["rev-parse", "HEAD^{tree}"])?;
-    (ok && !tree.is_empty()).then_some(tree)
-}
-
-fn fresh_checks(root: &Path, id: &str, card: &Value) -> bool {
-    if !labels(card).contains(&"step:checks") {
-        return true;
-    }
-    let Some(tree) = checked_tree(root) else {
-        return false;
-    };
-    let comments = bd(root, &["comments", id, "--json"])
-        .map(rows)
-        .unwrap_or_default();
-    comments.iter().any(|comment| {
-        let text = comment["text"]
-            .as_str()
-            .or_else(|| comment["body"].as_str())
-            .or_else(|| comment["comment"].as_str())
-            .unwrap_or("");
-        passing_check(text, &tree)
-    })
 }
 
 /// The `bd` flags that take a separate value, so the value is never read as
@@ -1749,6 +1675,7 @@ const BD_FLAGS_WITH_VALUES: &[&str] = &[
 ];
 
 /// The card a `bd` call is about.
+#[cfg(test)]
 fn subject_id(arguments: &[Word]) -> Option<String> {
     let mut at = 0;
     while let Some(word) = arguments.get(at) {
@@ -1770,102 +1697,44 @@ fn subject_id(arguments: &[Word]) -> Option<String> {
     None
 }
 
+#[cfg(test)]
 fn manager_review_refusal(card: &Value, id: &str) -> Option<String> {
     (card["status"].as_str() == Some("manager_review"))
         .then(|| format!("{id} is in the manager's column and only the manager may move it."))
 }
 
+fn subject_ids(arguments: &[Word]) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut at = 0;
+    while let Some(word) = arguments.get(at) {
+        let text = word.text.as_str();
+        if REDIRECTS.contains(&text) { at += 2; continue; }
+        if text.starts_with('-') {
+            at += if BD_FLAGS_WITH_VALUES.contains(&text) { 2 } else { 1 };
+            continue;
+        }
+        ids.push(text.to_owned()); at += 1;
+    }
+    ids
+}
 fn status_gate(data: &Value) -> Option<Value> {
     for (segment, here) in calls(shell(data), &cwd(data)) {
-        let Some(call) = bd_call(&segment) else {
-            continue;
-        };
-        let here = bd_cwd(&call, &here);
+        let Some(call) = bd_call(&segment) else { continue; };
+        let project = bd_cwd(&call, &here);
         let verb = call.segment.words[call.verb].text.as_str();
-        if verb == "create" {
-            eprintln!("warning: direct bd create skips optional ticket-writing guidance");
+        let args = &call.segment.words[call.verb + 1..];
+        // Manager signoff is a human action, never agent-authored metadata.
+        if args.iter().any(|w| ["manager_approved_tree", "checks_passed", "review_passed", "landed_commit"].iter().any(|key| w.text.starts_with(&format!("{key}=")) || w.text.starts_with(&format!("--set-metadata={key}=")))) {
+            return deny("Completion and approval evidence must be recorded by the matching native workflow tool or the manager's board action");
         }
-        let arguments = &call.segment.words[call.verb + 1..];
-        let status = flag_value(arguments, "--status").or_else(|| flag_value(arguments, "-s"));
-        let closing = verb == "close" || status.as_deref() == Some("closed");
-        let reviewing = matches!(
-            status.as_deref(),
-            Some("in_review" | "inreview" | "manager_review")
-        );
-        let moving = status.is_some() || verb == "reopen";
-        if !closing && !moving {
-            continue;
-        }
-        if closing
-            && arguments
-                .iter()
-                .any(|word| matches!(word.text.as_str(), "--force" | "-f"))
-        {
-            return deny("A forced close can skip blockers and unfinished children; close truthfully without --force.");
-        }
-        let Some(id) = subject_id(arguments) else {
-            continue;
-        };
-        let project = command(&here, "git", &["rev-parse", "--show-toplevel"])
-            .filter(|(_, ok)| *ok)
-            .map(|(out, _)| PathBuf::from(out))
-            .unwrap_or(here);
-        let Some(card) =
-            bd(&project, &["show", &id, "--json"]).and_then(|v| rows(v).into_iter().next())
-        else {
-            continue;
-        };
-        if let Some(reason) = manager_review_refusal(&card, &id) {
-            return deny(reason);
-        }
-        if (closing || reviewing) && !no_commit(&card) && !landed(&project, &id) {
-            return deny(format!(
-                "{id} cannot advance: no commit naming it has reached {}.",
-                landing_branch(&project)
-            ));
-        }
-        if closing {
-            // Tracked changes only: an untracked scratch file, a build
-            // artifact or a log is not unfinished work, and refusing a close
-            // over one is a refusal that protects nothing.
-            if !no_commit(&card)
-                && command(
-                    &project,
-                    "git",
-                    &["status", "--porcelain", "--untracked-files=no"],
-                )
-                .is_some_and(|(out, ok)| ok && !out.is_empty())
-            {
-                return deny(format!(
-                    "{id} cannot close while its worktree has uncommitted changes to tracked files."
-                ));
-            }
-            if !fresh_checks(&project, &id, &card) {
-                return deny(format!("{id} is the checks step and has no fresh passing evidence for the current Git tree."));
-            }
-            let children = bd(
-                &project,
-                &[
-                    "list", "--parent", &id, "--status", "all", "--limit", "0", "--json",
-                ],
-            )
-            .map(rows)
-            .unwrap_or_default();
-            if children
-                .iter()
-                .any(|row| row["status"].as_str() != Some("closed"))
-            {
-                return deny(format!("{id} still has unfinished children."));
-            }
-            let gates = bd(&project, &["gate", "list", "--json"])
-                .map(rows)
-                .unwrap_or_default();
-            if gates.iter().any(|row| {
-                row["status"].as_str() != Some("closed")
-                    && (row["parent"].as_str() == Some(&id)
-                        || row["issue_id"].as_str() == Some(&id))
-            }) {
-                return deny(format!("{id} still has unresolved review gates."));
+        let status = flag_value(args, "--status").or_else(|| flag_value(args, "-s"))
+            .or_else(|| match verb { "close" => Some("closed".into()), "reopen" => Some("open".into()), _ => None });
+        let Some(status) = status else { continue; };
+        let ids = subject_ids(args);
+        if ids.is_empty() { return deny("A status change must name its cards explicitly"); }
+        for id in ids {
+            if let Err(error) = crate::board_landing::transition(&project, &id, &status, false) {
+                return deny(error);
             }
         }
     }
@@ -1979,17 +1848,15 @@ fn prime(data: &Value) -> Option<Value> {
             ))
         })
         .collect();
-    let context = format!("Board actor: {who}. Claim work before editing; work in its isolated worktree; name the card in commits; use fast-forward landings; do not move cards out of manager review. Ticket prose preferences are guidance, not hard gates.{}",
+    let context = format!("Board actor: {who}. Claim the current child before editing in its job worktree. Commit with its ID, verify and review before atelier tool board/land. Landing automatically means Done; epics follow required descendants. Manager approval belongs to the manager. Ticket prose preferences are guidance, not hard gates.{}",
         if names.is_empty() { String::new() } else { format!("\n\nReady now:\n  {}", names.join("\n  ")) });
     Some(json!({"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":context}}))
 }
 
 fn stop_gate(data: &Value) -> Option<Value> {
-    if data["stop_hook_active"].as_bool() == Some(true) {
-        return None;
-    }
     let project = root(data);
     let who = session(data);
+    if !project.join(".beads").exists() && !crate::board_landing::common_root(&project).join(".beads").exists() { return None; }
     let cards = bd(
         &project,
         &[
@@ -2003,8 +1870,10 @@ fn stop_gate(data: &Value) -> Option<Value> {
             "--json",
         ],
     )
-    .map(rows)
-    .unwrap_or_default();
+    .map(rows);
+    let Some(cards) = cards else {
+        return Some(json!({"decision":"block","reason":"Cannot read owned work from Beads; restore board access before reporting completion"}));
+    };
     if cards.is_empty() {
         return None;
     }
@@ -2012,12 +1881,8 @@ fn stop_gate(data: &Value) -> Option<Value> {
         .iter()
         .filter_map(|card| card["id"].as_str())
         .collect();
-    let message = data["last_assistant_message"].as_str().unwrap_or("");
-    if message.contains('?') || message.to_ascii_lowercase().contains("blocked") {
-        return None;
-    }
     Some(
-        json!({"decision":"block","reason":format!("Owned work is still open: {}. Continue, close it truthfully, or state the concrete blocker.", ids.join(", "))}),
+        json!({"decision":"block","reason":format!("Owned work is still open: {}. Continue through landing, or record status blocked with the concrete blocker and required input on the card.", ids.join(", "))}),
     )
 }
 
@@ -2045,8 +1910,8 @@ mod tests {
 
     #[test]
     fn native_machinery_hook_protocol_has_an_installed_provenance_number() {
-        assert_eq!(PROTOCOL_VERSION, 2);
-        assert!(version().contains("protocol 2"));
+        assert_eq!(PROTOCOL_VERSION, 3);
+        assert!(version().contains("protocol 3"));
     }
 
     #[test]
@@ -2073,8 +1938,8 @@ mod tests {
 
         assert_eq!(tool_name(&snake), "Bash");
         assert_eq!(tool_name(&camel), "Bash");
-        assert_eq!(session(&snake), "s-abcdefgh");
-        assert_eq!(session(&camel), "s-abcdefgh");
+        assert_eq!(session(&snake), "s-abcdefghijk");
+        assert_eq!(session(&camel), "s-abcdefghijk");
         assert_eq!(mutation_paths(&snake), mutation_paths(&camel));
     }
 
@@ -2985,76 +2850,34 @@ mod tests {
     }
 
     #[test]
-    fn native_machinery_landed_subjects_name_exact_cards() {
-        assert!(subject_names("fix bw-oesd.16.1: database", "bw-oesd.16.1"));
-        assert!(!subject_names(
-            "fix bw-oesd.16.10: database",
-            "bw-oesd.16.1"
-        ));
+    fn codex_command_and_patch_preserve_every_real_target() {
+        let data = json!({"tool_name":"exec_command", "cwd":"/main", "session_id":"abcdefgh-one",
+            "tool_input":{"cmd":"git add src/a.rs", "workdir":"/repo/worktrees/job"}});
+        assert_eq!(tool_name(&data), "Bash");
+        assert_eq!(cwd(&data), PathBuf::from("/repo/worktrees/job"));
+        assert!(!mutation_paths(&data).is_empty());
+        let patch = json!({"tool_name":"apply_patch", "cwd":"/main", "tool_input":
+            "*** Begin Patch\n*** Update File: /repo/worktrees/job/a.rs\n*** Move to: /repo/worktrees/job/b.rs\n*** Delete File: /other/c.rs\n*** End Patch"});
+        assert_eq!(mutation_paths(&patch), vec![PathBuf::from("/repo/worktrees/job/a.rs"),PathBuf::from("/repo/worktrees/job/b.rs"),PathBuf::from("/other/c.rs")]);
+        assert_ne!(session(&data), session(&json!({"session_id":"abcdefgh-two"})));
     }
 
     #[test]
-    fn native_machinery_check_evidence_is_fresh_and_passing() {
-        assert!(passing_check("checks: tree abc cargo=PASSED", "abc"));
-        assert!(!passing_check("checks: tree old cargo=PASSED", "abc"));
-        assert!(!passing_check("checks: tree abc cargo=FAILED", "abc"));
+    fn descriptor_duplication_names_no_repository_file() {
+        for line in ["/tmp/run > /tmp/out 2>&1", "/tmp/run 7>&2", "/tmp/run &>> /tmp/out"] {
+            let data = json!({"tool_name":"exec_command","tool_input":{"cmd":line,"workdir":"/repo"}});
+            assert!(mutation_paths(&data).iter().all(|p| !p.starts_with("/repo")), "{line}: {:?}", mutation_paths(&data));
+        }
     }
 
-    /// Evidence is filed under the tree, so the rebase every card here ends
-    /// with does not throw a green run away (bw-zd18).
     #[test]
-    fn native_machinery_check_evidence_outlives_a_rewritten_commit() {
-        let repo = tempfile::tempdir().unwrap();
-        let git = crate::routes::find_git().unwrap();
-        let run = |args: &[&str]| {
-            assert!(Command::new(&git)
-                .args(args)
-                .current_dir(repo.path())
-                .env("GIT_AUTHOR_NAME", "t")
-                .env("GIT_AUTHOR_EMAIL", "t@t")
-                .env("GIT_COMMITTER_NAME", "t")
-                .env("GIT_COMMITTER_EMAIL", "t@t")
-                .status()
-                .unwrap()
-                .success());
-        };
-        run(&["init", "-q", "-b", "ours"]);
-        std::fs::write(repo.path().join("a.txt"), "one").unwrap();
-        run(&["add", "a.txt"]);
-        run(&["commit", "-qm", "one"]);
-
-        let recorded = checked_tree(repo.path()).expect("the tree a run would record");
-        run(&["commit", "-q", "--amend", "-m", "one, said again"]);
-        assert_eq!(
-            checked_tree(repo.path()).as_deref(),
-            Some(recorded.as_str()),
-            "a rewritten commit threw away evidence for files that never changed"
-        );
-
-        std::fs::write(repo.path().join("a.txt"), "two").unwrap();
-        run(&["commit", "-qam", "two"]);
-        assert_ne!(
-            checked_tree(repo.path()).as_deref(),
-            Some(recorded.as_str()),
-            "evidence for the old files still counts for new ones"
-        );
-    }
-
-    /// The two halves read each other, which is the whole of what went wrong:
-    /// a green run wrote `Project checks=719/0` and this gate was looking for
-    /// the word PASSED, so the run recorded a pass its own close could not
-    /// read and every checks card stood open (bw-zd18).
-    #[test]
-    fn what_a_run_records_is_what_this_gate_accepts() {
-        let green = crate::board_tools::proof_of("abc", &["Project checks", "cargo"], &[true, true]);
-        assert!(
-            passing_check(&green, "abc"),
-            "a green run recorded evidence its own close cannot read: {green}"
-        );
-        let red = crate::board_tools::proof_of("abc", &["Project checks"], &[false]);
-        assert!(
-            !passing_check(&red, "abc"),
-            "a run with a failing suite recorded a pass: {red}"
-        );
+    fn all_status_operands_are_checked_and_native_tools_keep_the_actor() {
+        let segments = shell_segments("bd close bw-a bw-b --reason 'work delivered'");
+        let call = bd_call(&segments[0]).unwrap();
+        assert_eq!(subject_ids(&call.segment.words[call.verb + 1..]), vec!["bw-a", "bw-b"]);
+        let event = json!({"tool_name":"exec_command","session_id":"test","tool_input":{"cmd":"cd /repo/worktrees/job && atelier tool board/land bw-a","workdir":"/repo"}});
+        let update = actor(&event).unwrap();
+        assert!(update["hookSpecificOutput"]["updatedInput"]["cmd"].as_str().unwrap().contains("BEADS_ACTOR=s-test atelier"));
+        assert_eq!(update["hookSpecificOutput"]["updatedInput"]["workdir"], "/repo");
     }
 }

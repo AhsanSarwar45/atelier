@@ -133,7 +133,7 @@ pub fn build(cwd: &Path) -> Result<String, String> {
     // running a command that cannot work (bw-3tkl.3).
     let reachable = crate::routes::find_bd().is_some();
     let beads = if wants_beads && reachable {
-        body(&skills.join("beads/SKILL.md"))?
+        include_str!("../../../machinery/skills/beads/SKILL.md").splitn(3, "---").nth(2).unwrap_or("").trim().to_string()
     } else {
         String::new()
     };

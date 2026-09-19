@@ -1,31 +1,17 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-
-import { STATES } from "@/types";
-
-const command = vi.fn();
-vi.mock("../api", () => ({ bd: { command: (...args: unknown[]) => command(...args) } }));
-
+import { describe, it, expect, vi } from "vitest";
+const update = vi.fn();
+vi.mock("../api", () => ({ beads: { update: (...args: unknown[]) => update(...args) } }));
 import { updateStatus } from "../cli"; // eslint-disable-line import/first
 
-beforeEach(() => {
-  command.mockReset();
-  command.mockResolvedValue({ stdout: "", stderr: "", code: 0 });
-});
-
-describe("a column a person asks for", () => {
-  it("is written with --force, for every column the board offers", async () => {
-    for (const state of STATES) {
-      command.mockClear();
-      await updateStatus("bw-1", state.id, "/a/project");
-      const [args] = command.mock.calls[0] as [string[]];
-      expect(args, state.id).toContain("--force");
-    }
+describe("browser status changes share the completion contract", () => {
+  it("uses the verified endpoint and preserves a refusal", async () => {
+    update.mockRejectedValueOnce(new Error("Work has not landed"));
+    await expect(updateStatus("bw-1", "closed", "/a/project")).rejects.toThrow("Work has not landed");
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({path:"/a/project",id:"bw-1",status:"closed"}));
   });
-
-  it("carries the force past the id, so bd reads it as a flag", async () => {
-    await updateStatus("bw-1", "closed", "/a/project");
-    const [args] = command.mock.calls[0] as [string[]];
-    expect(args.slice(0, 2)).toEqual(["update", "bw-1"]);
-    expect(args).toEqual(expect.arrayContaining(["--status", "closed", "--force"]));
+  it("represents cancellation separately from delivery", async () => {
+    update.mockResolvedValueOnce({success:true});
+    await updateStatus("bw-1", "cancelled", "/a/project");
+    expect(update).toHaveBeenLastCalledWith(expect.objectContaining({status:"closed",add_label:"cancelled"}));
   });
 });

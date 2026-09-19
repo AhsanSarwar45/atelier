@@ -5,18 +5,33 @@ description: Use Atelier's native Beads workflow commands for durable work track
 
 # Atelier and Beads
 
-Atelier's lifecycle is implemented by the `atelier` binary. Do not invoke files
-under `machinery/`; installed copies do not contain interpreters or executable
-scripts.
+## Completion contract
 
-Before changing repository files, find an existing ready card with `bd ready`,
-`bd list`, or `bd search`.
+Done, finished, fixed and resolved mean the deliverable has landed in the
+project's configured completed-work branch (main in this repository).
+Required verification and review happen before landing. Installation, deployment,
+worktree cleanup and presentation do not keep delivered work open.
 
-A worktree belongs to a job, not to a step. Cut one copy named for the epic and
-reuse it for every child underneath — a long job leaves one checkout on disk
-instead of dozens. Each checkout carries its own `node_modules` and test
-results, so a per-step copy costs gigabytes a step and has run this machine out
-of btrfs metadata.
+A leaf is Todo until claimed, then In Progress. Review and Manager Review are
+pre-landing states. A failed prerequisite leaves the work unlanded. Cancelled
+means the scope was withdrawn, not delivered. Record the reason.
+
+An epic is a recursive view of required descendants, never a second status to
+maintain. All required descendants landed means Done. Cancelled descendants
+are excluded; all cancelled means Cancelled. Partial completion or descendant
+activity means In Progress. If all remaining work is in review, show Review;
+if all remaining work awaits the manager, show Manager Review. Untouched work
+is Todo. An empty epic cannot be Done. Missing children or cycles prevent Done
+and require repairing the hierarchy. Reopening a child reopens its ancestors.
+
+## Working on a card
+
+Before changing repository files, find existing work with `bd ready`, `bd list`
+or `bd search`, then inspect its acceptance with `bd show ID`.
+
+One worktree belongs to the entire job. Reuse it for every descendant; for a
+standalone card the job ID and card ID are the same. The epic does not need a
+manual claim: claim the child being worked on.
 
 ```bash
 git -C . worktree add worktrees/JOB-ID -b JOB-ID
@@ -24,140 +39,82 @@ cd worktrees/JOB-ID
 bd update JOB-ID.1 --claim
 ```
 
-For a standalone card with nothing underneath it, the job is the card and the
-two IDs are the same. For a job with children, claim each child in turn in the
-copy you already have; do not cut a second one.
+If the branch already exists, use `git worktree add worktrees/JOB-ID JOB-ID`.
+Keep evidence and concrete blockers on the card with `bd update ID
+--append-notes='...'`. An external blocker needs status blocked, its cause and
+the exact input or external change needed to resume. A question mark in a reply
+is not a blocker record. Continue owned work until it lands or has that record.
 
-Atelier 0.22.0's `workflow-gate` has not caught up with this rule. It resolves
-one card from the copy's directory name and requires that exact card to be
-claimed and in_progress. A job is an epic and stays `open` while its children
-run, so in a job's copy both the child's claim and every write are refused:
-
-```
-Claim JOB-ID.1 from its own isolated worktree, not …/worktrees/JOB-ID.
-Beads issue JOB-ID must be claimed and in_progress before this worktree is changed.
-```
-
-Until the gate accepts a claimed descendant of the job the directory names,
-carry each refused command through the documented bypass and say why. The
-bypass must prefix the gated command itself — `export ATELIER_BYPASS=…` earlier
-in the line does not carry:
+Create scoped deliverables with native commands:
 
 ```bash
-ATELIER_BYPASS='a worktree is per job; this child is claimed in its job copy' \
-  bd update JOB-ID.2 --claim
+atelier tool board/job new --what 'OUTCOME' --done 'ACCEPTANCE' --area AREA --kind bug --do 'WORK|ACCEPTANCE'
+atelier tool board/job under JOB-ID --do 'WORK|ACCEPTANCE'
 ```
 
-That covers `Edit`, `Write` and every gated shell write in the copy, so set the
-reason once in a shell variable and prefix it to each. Do not answer the
-refusal by cutting a second worktree — that is the cost this rule exists to
-avoid.
+Ticket-writing preferences are guidance, not gates. Nonempty
+acceptance is sufficient. Do not invent checks or teardown tickets merely to
+satisfy a workflow template; these are operations on the deliverable.
 
-Remove the copy when the job closes; nothing else reclaims that disk.
+## Verify, review, land
 
-```bash
-cd /path/to/main/checkout
-git worktree remove worktrees/JOB-ID
-```
-
-Create work with the native command:
+Commit changes with the deliverable ID in the subject header, for example
+`CARD-ID: outcome` or `fix(CARD-ID): outcome`. Incidental mentions do not count.
+Run the project's declared suites and provide its required visual evidence.
+Checks and review evidence apply to the exact committed Git tree. Changes
+invalidate evidence; rebasing without changing the tree preserves it.
 
 ```bash
-atelier tool board/job new --what "OUTCOME" --done "ACCEPTANCE" --area AREA --kind bug|feature|chore --do "WORK ITEM|ACCEPTANCE"
-atelier tool board/job under JOB-ID --do "WORK ITEM|ACCEPTANCE"
-```
-
-Ticket-writing preferences are guidance, not gates. Titles may begin with verbs;
-concise evidence is valid; any nonempty acceptance criterion is valid; inline
-items are valid at every size. Hard refusals are reserved for ownership, dirty
-or conflicting Git state, merge serialization, manager-review ownership, and
-truthful completion.
-
-Commit each finished work item with its card ID in the subject and land it from
-the same worktree. `board/land` rebases, takes the merge slot, fast-forwards the
-landing branch and releases the slot; it is the landing protocol, and a raw
-`git merge --ff-only` from the landing checkout is gated on the same invariants:
-
-```bash
-git commit -m "CARD-ID: outcome"
+git commit -m 'CARD-ID: outcome'
+atelier tool checks CARD-ID --all
+atelier tool review CARD-ID --provider claude
 atelier tool board/land CARD-ID
 ```
 
-For a checks card, run the project's declared suites and record current-tree
-evidence with `atelier tool checks CHECKS-ID`; use `--all`, `--dry`, or
-`--record SUITE=PASSED/FAILED` when appropriate. For external review, use the
-provider-neutral external-review skill; the app never starts a Python reviewer.
+External review follows the project's policy; use the external-review skill
+when an independent review is required. The native lander runs missing checks,
+verifies required review and manager approval, rebases, acquires the merge slot,
+and fast-forwards main. A durable landing record closes every named deliverable
+and updates its ancestors. Retry the same command if interrupted. Never manually
+close a deliverable instead of landing it. No-code labels do not fabricate a
+landing. Review findings remain evidence on the work; resolve them before land.
 
-Keep durable findings on the card with `bd update ID --append-notes="..."`.
+The caller's board actor must own the work. Hooks preserve it across compound
+commands and native tools. Another card's assignee is not permission to act as
+that assignee. A manager decision is recorded by the manager, before landing.
+
+`atelier tool board/status [ID]` shows stored and effective states.
+`atelier tool board/reconcile` previews repairs; `--apply` recovers interrupted
+landings and derives parents. `--legacy` audits explicit historical commit
+headers; inspect its evidence before applying. `--retire-steps` cancels obsolete
+generated operational tickets with an explanation, retaining their history.
+
+After the job is Done, run `atelier tool board/cleanup JOB-ID` from another
+checkout. Cleanup removes only merged work; it requires no dummy commit.
 
 ## Live checklist
 
-A checklist is a view of an epic, not a second task list maintained by the
-agent. Show one only when the work has a Beads epic: pass that epic's ID as the
-single item in the provider checklist. Atelier replaces it with the epic's
-direct children and reads every title and status from Beads, so never copy the
-children into the checklist or update their checklist statuses by hand. For a
-standalone ticket or work with no epic, do not publish a checklist. The agent's
-only ongoing responsibility is keeping track of the ticket it is working on.
+A checklist is a view of an epic. For a Beads epic, pass that epic's ID as the
+single item in the provider checklist. Atelier reads every title and status from Beads.
+Never copy children into another list or update their checklist statuses by hand.
+For a standalone ticket, do not publish a checklist.
 
-## Rules the gates enforce
+## Enforcement and broken gates
 
-Hooks are the safeguard, not the first line of enforcement. Know these and you
-will not meet them. `docs/hooks.md` has the detail.
+The `atelier` binary implements the lifecycle. Do not execute files under
+`machinery/`. Provider hooks enforce ownership and transitions; Git's
+reference-transaction hook enforces the actual protected ref update. Board
+reads that cannot establish an invariant refuse the mutation with a reason.
+Browser moves use the same completion and hierarchy rules.
 
-**Where you may write** (`workflow-gate`). Repository changes need an owned card
-and its isolated worktree. The boundary is wider than editing a file: a shell
-redirect is judged on the file it writes (`>`, `>>`, `&>`, `&>>`, `>|`, and what
-`tee` is given), and a git verb that writes is judged on the repository it
-writes — plumbing included (`read-tree`, `update-ref`, `update-index`, `push`,
-and the rest), so there is no walk-around worth looking for. It is narrower than
-it looks, too: `/dev/null` and the other pseudo-devices under `/dev`, `/proc`
-and `/sys` are not files, a path in no repository is not gated at all, and a
-heredoc body, commit message or quoted string that merely names a path is data,
-not a command. A refusal names the target as you wrote it and the directory it
-was resolved against; read that closely for a backgrounded command, which starts
-in the main checkout rather than your worktree.
+Repository writes need the owned job worktree; tracker-only edits do not.
+Scratch outside repositories, pseudo-devices and file descriptor duplication
+are not repository writes. Unresolved shell variables must be reported as
+unresolved, not interpreted as literal paths. Use an explicit path if needed.
 
-**Starting a card** (`workflow-gate`). The opening above passes as written —
-`git worktree add worktrees/<ID> -b <ID>`, `cd`, `bd update <ID> --claim` —
-whether you run it as one line or three. Only that shape: a destination outside
-the project's worktree directory, a branch that is not the card, or any other
-command on the line that writes something, and the line is judged normally.
-The gate reads `<ID>` off the directory name and insists the claimed card match
-it, so a child claimed in its job's copy needs the bypass shown above; that is
-a gate that has not caught up with the rule, not a rule to work around by
-cutting another copy.
-
-**Landing** (`board-merge-gate`). The command above is the protocol: it
-rebases, takes the merge slot, fast-forwards the landing branch and releases the
-slot. A raw merge into that branch is held to the same invariants — it must be
-`--ff-only`, the merge slot must not be held by somebody else, and it may not
-overwrite the landing checkout's own uncommitted changes. That last refusal
-names the files, so commit or stash exactly those. `board/land` is safe
-to run twice: if the commits already landed it says so and finishes the close.
-
-**Status moves** (`board-status-gate`). A card in manager review is the
-manager's to move. A card cannot be closed while there are uncommitted changes
-to tracked files; untracked scratch never blocks a close.
-
-**Ending a turn** (`board-gate`). Do not close work before its named commit has
-landed, and do not close a parent with unfinished children.
-
-**Ending a turn truthfully** (`completion-gate`, Claude sessions only). A reply
-that hands the work to someone later — "future session", "future agent", "left
-for later", "deferred to a later/next…", "in a later session", "next session
-will/should", "a future pass will" — ends the turn. State the concrete blocker
-and what input it needs instead.
-
-## When a gate is wrong
-
-Do not step around it silently. Run the one command with an explicit reason:
-
-```bash
-ATELIER_BYPASS='why this gate is wrong here' <command>
-```
-
-Every hook honours it, on Claude and on Codex alike; it prints the reason and
-appends it to `hook-bypass.log`. Then add the refusal to `docs/hook-friction.md`
-or `docs/hook-friction-2.md` — either book — so the gate itself can be fixed. `docs/hooks.md` lists the wider switches, for a
-session or a whole tree.
+If a gate is wrong, carry only the refused command through a reasoned bypass:
+`ATELIER_BYPASS='specific incorrect refusal' COMMAND`. It is logged. Record the
+actual refusal in `docs/hook-friction.md` or `docs/hook-friction-2.md`. Do not
+export a standing bypass or use it to override truthful completion. Declared
+suites run without an inherited bypass. An old installed binary needs an
+explicit upgrade; source tests alone do not prove that the active hooks changed.

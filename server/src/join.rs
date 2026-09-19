@@ -60,9 +60,9 @@ const CLAUDE: &[(&str, &str, &[&str])] = &[
 /// (`workbench::external`). Registering it for Codex would leave files named
 /// after Codex sessions in Claude's directory for nothing to read.
 const CODEX: &[(&str, &str, &[&str])] = &[
-    ("PreToolUse", "Bash|apply_patch|Edit|Write", &["workflow-gate"]),
-    ("PreToolUse", "Bash", &["board-actor", "board-merge-gate", "board-status-gate"]),
-    ("PostToolUse", "Bash|apply_patch|Edit|Write", &["board-touch"]),
+    ("PreToolUse", "Bash|exec_command|shell_command|functions.exec_command|apply_patch|functions.apply_patch|Edit|Write", &["workflow-gate"]),
+    ("PreToolUse", "Bash|exec_command|shell_command|functions.exec_command", &["board-actor", "board-merge-gate", "board-status-gate"]),
+    ("PostToolUse", "Bash|exec_command|shell_command|functions.exec_command|apply_patch|functions.apply_patch|Edit|Write", &["board-touch"]),
     ("SubagentStop", "", &["board-touch"]),
     ("SessionStart", "", &["board-prime"]),
     // Codex allows this one a second, where every other event gets ten
@@ -157,7 +157,7 @@ pub fn remove(root: &Path) -> Result<(), String> {
     strip(&root.join(".claude/settings.json"))?;
     strip(&root.join(".codex/hooks.json"))?;
     let hook = git_hook(root);
-    if std::fs::read_to_string(&hook).is_ok_and(|text| text.starts_with(GUARD_MARK)) {
+    if std::fs::read_to_string(&hook).is_ok_and(|text| text.lines().take(2).any(|line| line == GUARD_MARK)) {
         std::fs::remove_file(&hook).map_err(|error| format!("could not remove {}: {error}", hook.display()))?;
     }
     Ok(())
@@ -251,11 +251,11 @@ fn guard(root: &Path) -> Result<(), String> {
     let path = git_hook(root);
     if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|error| error.to_string())?; }
     if let Ok(existing) = std::fs::read_to_string(&path) {
-        if !existing.starts_with(GUARD_MARK) {
+        if !existing.lines().take(2).any(|line| line == GUARD_MARK) {
             return Err(format!("kept {} unchanged because it is a project-owned Git hook", path.display()));
         }
     }
-    let body = format!("{GUARD_MARK}\n#!/bin/sh\n[ \"$1\" = prepared ] || exit 0\ncommand -v atelier >/dev/null 2>&1 || exit 0\nexec atelier hook landing-gate \"$@\"\n");
+    let body = format!("#!/bin/sh\n{GUARD_MARK}\ncase \"$1\" in prepared|committed) ;; *) exit 0 ;; esac\ncommand -v atelier >/dev/null 2>&1 || {{ echo 'Atelier landing guard is unavailable' >&2; exit 1; }}\nexec atelier hook landing-gate \"$@\"\n");
     std::fs::write(&path, body).map_err(|error| format!("could not write {}: {error}", path.display()))?;
     #[cfg(unix)] {
         use std::os::unix::fs::PermissionsExt;
@@ -466,4 +466,24 @@ mod tests {
         assert!(error.contains("project-owned"));
         assert_eq!(std::fs::read_to_string(path).unwrap(), "#!/bin/sh\necho project\n");
     }
+    #[test]
+    fn checked_in_codex_hooks_match_generated_lifecycle_commands() {
+        let checked: Value = serde_json::from_str(include_str!("../../.codex/hooks.json")).unwrap();
+        let mut generated = json!({});
+        wire_value(&mut generated, CODEX, false);
+        for event in ["PreToolUse", "PostToolUse", "SessionStart", "SessionEnd", "Stop"] {
+            let mut actual = on(&checked, event); actual.sort();
+            let mut expected = on(&generated, event); expected.sort();
+            assert_eq!(actual, expected, "{event} drifted from installed config");
+        }
+    }
+
+    #[test]
+    fn generated_guard_installs_twice_with_a_valid_shebang() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join(".git")).unwrap();
+        guard(root.path()).unwrap(); guard(root.path()).unwrap();
+        assert!(std::fs::read_to_string(git_hook(root.path())).unwrap().starts_with("#!/bin/sh\n"));
+    }
+
 }

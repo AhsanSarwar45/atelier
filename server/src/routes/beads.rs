@@ -154,6 +154,10 @@ pub struct Bead {
     pub description: Option<String>,
     pub status: String,
     #[serde(default)]
+    pub hierarchy_error: Option<String>,
+    #[serde(default)]
+    pub metadata: Option<serde_json::Value>,
+    #[serde(default)]
     pub priority: Option<i32>,
     #[serde(default)]
     pub issue_type: Option<String>,
@@ -384,14 +388,16 @@ fn counts_of(beads: &[Bead], data_source: &str) -> CachedCounts {
         let is_cancelled = bead.labels.as_ref()
             .is_some_and(|l| l.iter().any(|s| s == CANCELLED_LABEL));
         match bead.status.as_str() {
-            "open" => open += 1,
-            "in_progress" => in_progress += 1,
+            "open" | "pending" | "blocked" | "deferred" | "pinned" => open += 1,
+            "in_progress" | "hooked" => in_progress += 1,
             // bd writes `in_review`; this screen has always called the column `inreview`.
             "inreview" | "in_review" => inreview += 1,
             "manager_review" => manager_review += 1,
             "closed" if is_cancelled => cancelled += 1,
-            "closed" => closed += 1,
-            _ => {}
+            "closed" | "done" | "fixed" | "finished" | "resolved" => closed += 1,
+            "cancelled" => cancelled += 1,
+            "tombstone" => {},
+            _ => open += 1,
         }
     }
 
@@ -416,7 +422,7 @@ fn counts_of(beads: &[Bead], data_source: &str) -> CachedCounts {
 /// afterwards by `changed_since`, so one run answers every kind of ask and can
 /// be kept for the next one (bw-uiyz.13).
 async fn read_beads_from_cli(project_path: &Path) -> Result<Vec<Bead>, String> {
-    let list_output = run_bd(&["list", "--json", "--all"], project_path).await?;
+    let list_output = run_bd(&["list", "--json", "--all", "--limit", "0"], project_path).await?;
     let json_str = extract_json_array(&list_output)?;
     let mut beads: Vec<Bead> = serde_json::from_str(json_str)
         .map_err(|e| format!("Failed to parse bd list output: {}", e))?;
@@ -684,6 +690,8 @@ struct BriefBead<'a> {
     title: &'a str,
     description: &'a Option<String>,
     status: &'a str,
+    hierarchy_error: &'a Option<String>,
+    metadata: &'a Option<serde_json::Value>,
     priority: &'a Option<i32>,
     issue_type: &'a Option<String>,
     owner: &'a Option<String>,
@@ -706,6 +714,8 @@ impl<'a> From<&'a Bead> for BriefBead<'a> {
             title: &bead.title,
             description: &bead.description,
             status: &bead.status,
+            hierarchy_error: &bead.hierarchy_error,
+            metadata: &bead.metadata,
             priority: &bead.priority,
             issue_type: &bead.issue_type,
             owner: &bead.owner,
@@ -924,7 +934,7 @@ pub fn boards_read_again() -> tokio::sync::broadcast::Receiver<String> {
 type BoardGate = tokio::sync::Mutex<()>;
 type Gates = Mutex<HashMap<String, Weak<BoardGate>>>;
 
-fn gate_for(path: &str) -> Arc<BoardGate> {
+pub(crate) fn gate_for(path: &str) -> Arc<BoardGate> {
     static GATES: OnceLock<Gates> = OnceLock::new();
     let gates = GATES.get_or_init(Gates::default);
     let mut held = gates.lock().unwrap_or_else(|e| e.into_inner());
@@ -1407,7 +1417,7 @@ async fn create_bead(
 
     let result = tokio::time::timeout(
         Duration::from_secs(30),
-        Command::new(bd_path).args(&args).current_dir(&project_path).output(),
+        Command::new(bd_path).args(&args).current_dir(&project_path).kill_on_drop(true).output(),
     ).await;
 
     match result {
@@ -1467,16 +1477,12 @@ pub struct UpdateBeadRequest {
     pub add_label: Option<String>,
     /// A label to take off, ignored if it is not there (optional)
     pub remove_label: Option<String>,
+    /// Exact tree the manager saw and approved; never inferred from a status drag.
+    pub approve_tree: Option<String>,
 }
 
-// Nothing here stands between a person and a column. The screen used to run a
-// lifecycle check of its own before writing a status a hand asked for: a card in
-// the manager's column could not be dragged out, and review or done needed a
-// landed commit, every gate resolved and every child closed. That is the
-// discipline agent sessions are held to by their own hooks, and holding the
-// owner of the board to it as well left them looking at a column they could not
-// drop into with no way to say "I mean it". The board screen now writes what it
-// is told, and `--force` below carries the same answer down to `bd` (bw-7vpn).
+// Completion and hierarchy invariants also apply to human status moves.
+// Manager review is available before landing; Done is written by the lander.
 
 /// PATCH /api/beads/update
 ///
@@ -1486,9 +1492,13 @@ pub async fn update_bead_handler(
     manager: Extension<Arc<DoltManager>>,
     req: Json<UpdateBeadRequest>,
 ) -> impl IntoResponse {
-    let board = req.path.clone();
+    let board = req.path.replace('\\', "/");
+    // A read started before the write must not repopulate the cache after invalidation.
+    let gate = gate_for(&board);
+    let _hold = gate.lock().await;
     let answer = update_bead(manager, req).await;
     forget_board(&board);
+    let _ = changed_boards().send(board);
     answer
 }
 
@@ -1509,7 +1519,8 @@ async fn update_bead(
         || req.issue_type.is_some()
         || req.priority.is_some()
         || req.add_label.is_some()
-        || req.remove_label.is_some();
+        || req.remove_label.is_some()
+        || req.approve_tree.is_some();
     if !has_changes {
         return (
             StatusCode::BAD_REQUEST,
@@ -1526,6 +1537,14 @@ async fn update_bead(
         }
     }
 
+    if req.status.as_deref().is_some_and(|s| crate::board_state::normalize(s) == "closed")
+        && req.path.starts_with(DOLT_PATH_PREFIX) {
+        return (StatusCode::CONFLICT, Json(serde_json::json!({"error":"Connect this board to its Git checkout to verify completion on main"})));
+    }
+
+    if req.approve_tree.is_some() && req.path.starts_with(DOLT_PATH_PREFIX) {
+        return (StatusCode::CONFLICT, Json(serde_json::json!({"error":"Manager approval requires the project Git checkout"})));
+    }
     // Dolt-only path: update via SQL
     if let Some(db_name) = req.path.strip_prefix(DOLT_PATH_PREFIX) {
         if !dolt_manager.is_available() && !dolt_manager.check_server().await {
@@ -1563,6 +1582,20 @@ async fn update_bead(
     if let Err(e) = validate_path_security(&project_path) {
         return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": e })));
     }
+    if let Some(status) = req.status.as_deref() {
+        if let Some(error) = crate::board_gate::human_drag_denial(&project_path, &req.id,
+            if req.add_label.as_deref() == Some("cancelled") { "cancelled" } else { status }).await {
+            return (StatusCode::CONFLICT, Json(serde_json::json!({"error":error})));
+        }
+    }
+    if let Some(tree) = &req.approve_tree {
+        let path = project_path.clone(); let id = req.id.clone(); let tree = tree.clone();
+        let result = tokio::task::spawn_blocking(move || crate::board_landing::approve(&path, &id, &tree)).await;
+        return match result {
+            Ok(Ok(())) => (StatusCode::OK, Json(serde_json::json!({"success":true}))),
+            other => (StatusCode::CONFLICT, Json(serde_json::json!({"error":format!("Approval failed: {other:?}")}))),
+        };
+    }
     // Build bd update args
     let mut args = vec!["update".to_string(), req.id.clone()];
     if let Some(ref t) = req.title {
@@ -1573,10 +1606,7 @@ async fn update_bead(
     }
     if let Some(ref s) = req.status {
         args.push(format!("--status={}", s));
-        // `bd` refuses on its own to close a card with an open child or a live
-        // blocker. A person asking for that column has already decided; say so
-        // rather than handing them back a refusal they cannot act on (bw-7vpn).
-        args.push("--force".to_string());
+
     }
     if let Some(ref t) = req.issue_type {
         args.push(format!("--type={}", t));
@@ -1586,6 +1616,7 @@ async fn update_bead(
     }
     if let Some(ref l) = req.add_label {
         args.push(format!("--add-label={}", l));
+        if l == "cancelled" { args.push("--force".into()); }
     }
     if let Some(ref l) = req.remove_label {
         args.push(format!("--remove-label={}", l));
@@ -1598,12 +1629,16 @@ async fn update_bead(
 
     let result = tokio::time::timeout(
         Duration::from_secs(30),
-        Command::new(bd_path).args(&args).current_dir(&project_path).output(),
+        Command::new(bd_path).args(&args).current_dir(&project_path).kill_on_drop(true).output(),
     ).await;
 
     match result {
         Ok(Ok(output)) => {
             if output.status.success() {
+                let path = project_path.clone();
+                if let Ok(Err(error)) = tokio::task::spawn_blocking(move || crate::board_landing::reconcile_parents(&path)).await {
+                    tracing::warn!(%error, "Tracker updated; hierarchy repair needed");
+                }
                 (StatusCode::OK, Json(serde_json::json!({ "success": true })))
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1623,6 +1658,7 @@ async fn update_bead(
 
 /// Post-processes beads: resolves dependencies, infers parent-child from ID patterns, sets children.
 fn post_process_beads(mut beads: Vec<Bead>) -> Vec<Bead> {
+    beads.retain(|bead| !bead.labels.as_ref().is_some_and(|labels| labels.iter().any(|tag| tag == "gt:slot")));
     let mut parent_to_children: std::collections::HashMap<String, Vec<String>> =
         std::collections::HashMap::new();
 
@@ -1682,6 +1718,15 @@ fn post_process_beads(mut beads: Vec<Bead>) -> Vec<Bead> {
     let bead_ids: std::collections::HashSet<String> =
         beads.iter().map(|b| b.id.clone()).collect();
 
+    for bead in &mut beads {
+        if bead.parent_id.is_none() {
+            if let Some(parent) = bead.labels.as_ref().and_then(|labels| labels.iter().find_map(|tag| tag.strip_prefix("of:"))) {
+                bead.parent_id = Some(parent.to_string());
+                parent_to_children.entry(parent.to_string()).or_default().push(bead.id.clone());
+            }
+        }
+    }
+
     let inferred: Vec<(String, String)> = beads
         .iter()
         .filter_map(|bead| {
@@ -1711,7 +1756,9 @@ fn post_process_beads(mut beads: Vec<Bead>) -> Vec<Bead> {
     // Third pass: Set children on parent beads
     for bead in &mut beads {
         if let Some(children) = parent_to_children.get(&bead.id) {
-            bead.children = Some(children.clone());
+            let mut merged = bead.children.take().unwrap_or_default();
+            merged.extend(children.clone()); merged.sort(); merged.dedup();
+            bead.children = Some(merged);
         }
     }
 
@@ -1720,9 +1767,15 @@ fn post_process_beads(mut beads: Vec<Bead>) -> Vec<Bead> {
     let projection = crate::board_state::project(&nodes);
     for bead in &mut beads {
         if let Some(error) = projection.errors.get(&bead.id) {
+            bead.hierarchy_error = Some(error.clone());
             tracing::warn!(card = %bead.id, %error, "Board hierarchy needs repair");
         }
-        if let Some(status) = projection.states.get(&bead.id) { bead.status = status.clone(); }
+        if let Some(status) = projection.states.get(&bead.id) {
+            bead.status = status.clone();
+            if status != "cancelled" {
+                if let Some(labels) = &mut bead.labels { labels.retain(|label| label != "cancelled"); }
+            }
+        }
     }
     beads
 }
@@ -2125,6 +2178,7 @@ mod tests {
             title: "Serialization Test".to_string(),
             description: None,
             status: "open".to_string(),
+            hierarchy_error: None, metadata: None,
             priority: None,
             issue_type: None,
             owner: None,

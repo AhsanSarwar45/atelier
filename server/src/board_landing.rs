@@ -110,6 +110,23 @@ fn parent<'a>(row: &'a Value, ids: &HashSet<&str>) -> Option<&'a str> {
                 .filter(|p| ids.contains(p))
         })
 }
+pub fn belongs_to(root: &Path, id: &str, job: &str) -> bool {
+    if id == job { return true; }
+    let Ok(rows) = all(root) else { return false; };
+    let graph = nodes(&rows);
+    let mut pending = vec![job.to_string()]; let mut seen = HashSet::new();
+    while let Some(parent) = pending.pop() {
+        if !seen.insert(parent.clone()) { continue; }
+        if let Some(node) = graph.iter().find(|node| node.id == parent) {
+            for child in &node.children {
+                if child == id { return true; }
+                pending.push(child.clone());
+            }
+        }
+    }
+    false
+}
+
 pub fn nodes(rows: &[Value]) -> Vec<Node> {
     let ids: HashSet<_> = rows.iter().filter_map(|r| r["id"].as_str()).collect();
     let mut children: HashMap<&str, Vec<String>> = HashMap::new();
@@ -133,7 +150,9 @@ pub fn nodes(rows: &[Value]) -> Vec<Node> {
             below.dedup();
             Some(Node {
                 id: id.into(),
-                status: status(row).into(),
+                container: row["issue_type"] == "epic",
+                error: parent(row, &ids).filter(|p| !ids.contains(p)).map(|p| format!("Missing parent {p}")),
+                status: if status(row) == "cancelled" && true_meta(row, "status_derived") { "open" } else { status(row) }.into(),
                 children: below,
                 started: row["started_at"].as_str().is_some()
                     || !matches!(status(row), "open" | "cancelled"),
@@ -157,7 +176,10 @@ fn write_status(root: &Path, row: &Value, next: &str, reason: &str) -> Result<()
         },
     ];
     if next == "cancelled" {
-        args.extend(["--add-label".into(), "cancelled".into()]);
+        args.extend(["--add-label".into(), "cancelled".into(), "--set-metadata".into(),
+            format!("status_derived={}", reason.starts_with("Derived from"))]);
+    } else {
+        args.extend(["--remove-label".into(), "cancelled".into()]);
     }
     args.extend([
         "--if-status".into(),
@@ -176,12 +198,13 @@ pub fn reconcile_parents(root: &Path) -> Result<(), String> {
     let rows = all(root)?;
     let graph = nodes(&rows);
     let projected = board_state::project(&graph);
-    // Deepest children first. No forced closes: a bad graph is reported.
-    let mut containers: Vec<_> = graph.iter().filter(|n| !n.children.is_empty()).collect();
+    // Children before parents where IDs encode ancestry; projection is recursive for every ID.
+    let mut containers: Vec<_> = graph.iter().filter(|n| n.container || !n.children.is_empty()).collect();
     containers.sort_by_key(|n| std::cmp::Reverse(n.id.matches('.').count()));
+    let mut errors = Vec::new();
     for node in containers {
         if let Some(error) = projected.errors.get(&node.id) {
-            return Err(error.clone());
+            errors.push(format!("{}: {error}", node.id)); continue;
         }
         let next = &projected.states[&node.id];
         let row = rows.iter().find(|r| r["id"] == node.id).unwrap();
@@ -194,7 +217,7 @@ pub fn reconcile_parents(root: &Path) -> Result<(), String> {
             )?;
         }
     }
-    Ok(())
+    if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -252,26 +275,79 @@ fn finish(root: &Path, path: &Path, record: &mut Landing) -> Result<(), String> 
         if status(&row) == "closed" {
             continue;
         }
-        // Receipt survives worktree cleanup and pins the current completion.
-        metadata(
-            root,
-            id,
-            &[
-                ("landed_commit", record.tip.clone()),
-                ("landed_tree", record.tree.clone()),
-                ("landed_branch", record.branch.clone()),
-            ],
-        )?;
-        write_status(
-            root,
-            &row,
-            "closed",
-            &format!("Work landed in {} at {}", record.branch, record.tip),
-        )?;
+        // A previous successful write followed by a reopen starts new work.
+        // Recovery must never close it again from the same old transaction.
+        if row["metadata"]["landed_commit"] == record.tip { continue; }
+        bd(root, &[
+            "update".into(), id.clone(), "--status".into(), "closed".into(),
+            "--if-status".into(), row["status"].as_str().ok_or("Card has no status")?.into(),
+            "--force".into(),
+            "--set-metadata".into(), format!("landed_commit={}", record.tip),
+            "--set-metadata".into(), format!("landed_tree={}", record.tree),
+            "--set-metadata".into(), format!("landed_branch={}", record.branch),
+            "--append-notes".into(), format!("Work landed in {} at {}", record.branch, record.tip),
+        ])?;
     }
-    reconcile_parents(root)?;
+    if let Err(error) = reconcile_parents(root) {
+        eprintln!("Work landed; hierarchy still needs repair: {error}");
+    }
     record.complete = true;
     save(path, record)
+}
+
+/// Git sends raw old/new/ref triples, not provider JSON. Validate the actual
+/// ref update so merge, push, and update-ref share the same completion boundary.
+pub fn reference_transaction(phase: &str, input: &str) -> Result<i32, String> {
+    if phase == "aborted" { return Ok(0); }
+    if !matches!(phase, "prepared" | "committed") { return Err("Unknown Git transaction phase".into()); }
+    let work = root()?;
+    let branch = landing_branch(&work);
+    let target = format!("refs/heads/{branch}");
+    let mut touched = false;
+    for line in input.lines().filter(|l| !l.trim().is_empty()) {
+        let fields: Vec<_> = line.split_whitespace().collect();
+        if fields.len() != 3 { return Err("Malformed Git reference transaction".into()); }
+        if fields[2] != target { continue; }
+        touched = true;
+        if phase == "committed" { continue; }
+        let old = git(&work, &["rev-parse", &target])?;
+        let new = fields[1];
+        git(&work, &["merge-base", "--is-ancestor", &old, new])
+            .map_err(|_| "The completed-work branch only accepts fast-forward landings".to_string())?;
+        let dir = journal_dir(&work)?;
+        let mut authorized = false;
+        if dir.exists() {
+            for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
+                let path = entry.map_err(|e| e.to_string())?.path();
+                if path.extension().and_then(|s| s.to_str()) != Some("json") { continue; }
+                let record: Landing = serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?;
+                if record.complete || record.tip != new || record.branch != branch { continue; }
+                if git(&work, &["rev-parse", &format!("{new}^{{tree}}")])? != record.tree {
+                    return Err("Landing journal tree differs from the proposed commit".into());
+                }
+                let slot: Value = serde_json::from_str(&bd(&work, &["merge-slot".into(), "check".into(), "--json".into()])?).map_err(|e| e.to_string())?;
+                if slot["holder"].as_str() != Some(record.actor.as_str()) {
+                    return Err("The landing transaction does not own the merge slot".into());
+                }
+                let mut verified = false;
+                for id in &record.cards {
+                    let row = card(&work, id)?;
+                    if row["assignee"].as_str().is_some_and(|a| !a.is_empty() && a != record.actor) {
+                        return Err(format!("{id} changed owner during landing"));
+                    }
+                    prerequisites(&work, id, &record.cards)?;
+                    verified |= current_proof(&row, "checks", &record.tree);
+                }
+                if !verified { return Err("No passing checks for this landing tree".into()); }
+                authorized = true;
+                break;
+            }
+        }
+        if !authorized { return Err("No prepared landing transaction; use atelier tool board/land CARD-ID".into()); }
+    }
+    if touched && phase == "committed" { recover(&work)?; }
+    Ok(0)
 }
 
 pub fn recover(root: &Path) -> Result<(), String> {
@@ -353,6 +429,7 @@ pub fn land(rest: &[String]) -> Result<i32, String> {
     recover(&work)?;
     let item = card(&work, id)?;
     let landing = landing_branch(&work);
+    let settings = manifest(&work)?;
     if status(&item) == "closed"
         && item["metadata"]["landed_commit"]
             .as_str()
@@ -387,7 +464,7 @@ pub fn land(rest: &[String]) -> Result<i32, String> {
     let commits = git(&work, &["log", &format!("{landing}..HEAD"), "--format=%s"])?;
     let carried: Vec<String> = graph
         .iter()
-        .filter(|n| n.children.is_empty())
+        .filter(|n| n.children.is_empty() && !n.container)
         .filter_map(|node| {
             let row = rows.iter().find(|r| r["id"] == node.id)?;
             (status(row) != "closed"
@@ -431,10 +508,16 @@ pub fn land(rest: &[String]) -> Result<i32, String> {
         git(&work, &["rebase", &landing])?;
         let tree = git(&work, &["rev-parse", "HEAD^{tree}"])?;
         let current = card(&work, id)?;
-        if !current_proof(&current, "checks", &tree) {
+        let checked_suites: Vec<String> = current["metadata"]["checks_suites"].as_str()
+            .and_then(|text| serde_json::from_str(text).ok()).unwrap_or_default();
+        if !current_proof(&current, "checks", &tree)
+            || !settings.verification.commands.iter().all(|suite| checked_suites.contains(&suite.name)) {
             if checks(&[id.clone(), "--all".into()])? != 0 {
                 return Err("Required checks failed; nothing landed".into());
             }
+        }
+        if settings.review.external_review == "always" && !current_proof(&card(&work, id)?, "review", &tree) {
+            return Err(format!("Project policy requires external review of {id} before landing"));
         }
         let ids: HashSet<_> = rows.iter().filter_map(|r| r["id"].as_str()).collect();
         let mut review_ids = carried.clone();
@@ -469,9 +552,12 @@ pub fn land(rest: &[String]) -> Result<i32, String> {
             if (row["metadata"]["judge"]
                 .as_str()
                 .is_some_and(|s| s.starts_with("manager"))
-                || status(&row) == "manager_review")
+                || status(&row) == "manager_review"
+                || !settings.git.agents_may_merge_completed_work)
                 && row["metadata"]["manager_approved_tree"] != tree
             {
+                metadata(&work, &review_id, &[("manager_review_tree", tree.clone()), ("manager_review_commit", git(&work, &["rev-parse", "HEAD"])? )])?;
+                write_status(&work, &card(&work, id)?, "manager_review", "Waiting for manager approval of committed work")?;
                 return Err(format!(
                     "{review_id} requires manager approval of this tree before landing"
                 ));
@@ -507,6 +593,45 @@ pub fn land(rest: &[String]) -> Result<i32, String> {
     release?;
     println!("landed {} on {landing}; Done: {}", id, carried.join(", "));
     Ok(0)
+}
+
+/// Every entry point uses this decision. Only the landing transaction writes
+/// a deliverable's completion; containers are projections, never independent moves.
+pub fn approve(root: &Path, id: &str, tree: &str) -> Result<(), String> {
+    let row = card(root, id)?;
+    if tree.is_empty() || row["metadata"]["manager_review_tree"] != tree {
+        return Err("The requested approval is stale; refresh the review evidence".into());
+    }
+    let commit = row["metadata"]["manager_review_commit"].as_str().ok_or("No proposed commit")?;
+    if git(root, &["rev-parse", &format!("{commit}^{{tree}}")])? != tree {
+        return Err("The proposed commit does not match the reviewed tree".into());
+    }
+    metadata(root, id, &[("manager_approved_tree", tree.into())])?;
+    bd(root, &["comments".into(), "add".into(), id.into(), format!("Manager approved tree {tree} before landing")])?;
+    Ok(())
+}
+
+pub fn transition(root: &Path, id: &str, next: &str, human: bool) -> Result<(), String> {
+    let rows = all(root)?;
+    let row = rows.iter().find(|r| r["id"] == id).ok_or("Cannot read the requested card")?;
+    let next = board_state::normalize(next);
+    let graph = nodes(&rows);
+    let node = graph.iter().find(|n| n.id == id).ok_or("Missing hierarchy node")?;
+    if !node.children.is_empty() || row["issue_type"] == "epic" {
+        let projection = board_state::project(&graph);
+        if let Some(error) = projection.errors.get(id) { return Err(error.clone()); }
+        if projection.states.get(id).map(String::as_str) != Some(next) {
+            return Err(format!("{id} follows its required subtasks; change the subtasks or cancel scope explicitly"));
+        }
+        return Ok(());
+    }
+    if status(row) == "manager_review" && !human && next != "manager_review" {
+        return Err(format!("{id} needs the manager's decision before its state changes"));
+    }
+    if next == "closed" && status(row) != "closed" {
+        return Err(format!("{id} becomes Done when its work lands. Use atelier tool board/land {id}"));
+    }
+    Ok(())
 }
 
 pub fn status_command(rest: &[String]) -> Result<i32, String> {
@@ -610,6 +735,28 @@ pub fn reconcile_command(rest: &[String]) -> Result<i32, String> {
             report.push(json!({"id":id,"action":"retain","reason":"No current explicit landing evidence; needs implementation audit"}));
         }
     }
+    let mut planned = rows.clone();
+    for decision in &report {
+        if let Some(row) = planned.iter_mut().find(|row| row["id"] == decision["id"]) {
+            match decision["action"].as_str() {
+                Some("done") => row["status"] = json!("closed"),
+                Some("cancel") => row["status"] = json!("cancelled"),
+                _ => (),
+            }
+        }
+    }
+    let graph = nodes(&planned);
+    let projection = board_state::project(&graph);
+    for node in graph.iter().filter(|n| n.container || !n.children.is_empty()) {
+        if let Some(error) = projection.errors.get(&node.id) {
+            report.push(json!({"id":node.id,"action":"repair_hierarchy","reason":error}));
+        } else if let Some(next) = projection.states.get(&node.id) {
+            let original = rows.iter().find(|row| row["id"] == node.id).unwrap();
+            if status(original) != next {
+                report.push(json!({"id":node.id,"action":"derive","from":status(original),"to":next,"reason":"State of required descendants"}));
+            }
+        }
+    }
     if apply {
         reconcile_parents(&work)?;
     }
@@ -670,6 +817,18 @@ mod tests {
         let result = board_state::project(&nodes(&rows));
         assert_eq!(result.states["parent"], "closed");
         assert_eq!(result.states["nested"], "closed");
+    }
+    #[test]
+    fn inherited_job_labels_do_not_turn_deliverables_into_empty_epics() {
+        let row = json!({"id":"leaf","issue_type":"task","status":"closed","labels":["job","step:work"]});
+        assert_eq!(board_state::project(&nodes(&[row])).states["leaf"], "closed");
+    }
+    #[test]
+    fn an_empty_epic_is_never_delivered() {
+        for status in ["open", "closed", "in_progress"] {
+            let result = board_state::project(&nodes(&[json!({"id":"empty","issue_type":"epic","status":status})]));
+            assert_ne!(result.states["empty"], "closed");
+        }
     }
     #[test]
     fn check_and_review_evidence_belongs_to_the_exact_tree() {

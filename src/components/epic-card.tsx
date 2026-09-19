@@ -7,7 +7,6 @@ import { Layers, MessageSquare } from "lucide-react";
 import { BeadTags } from "@/components/bead-tags";
 import { CopyableText } from "@/components/copyable-text";
 import { DependencyBadge } from "@/components/dependency-badge";
-import { SignOffButton, useSignOff } from "@/components/sign-off";
 import { SubtaskList } from "@/components/subtask-list";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -41,7 +40,7 @@ export interface EpicCardProps {
   onNavigateToDependency?: (beadId: string) => void;
   /** Project root path for fetching design docs */
   projectPath?: string;
-  /** Callback after epic is closed (to refresh board) */
+  /** Callback after board changes */
   onUpdate?: () => void;
 }
 
@@ -71,13 +70,8 @@ export const EpicCard = memo(function EpicCard({
   onSelect,
   onChildClick,
   onNavigateToDependency,
-  projectPath,
-  onUpdate
 }: EpicCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-
-  // Pressing the sign-off is the shared code both kinds of card use.
-  const { isMarking, signOff } = useSignOff(epic.id, epic.title, projectPath, onUpdate);
 
   // Resolve children from IDs (memoized to prevent unnecessary re-fetches)
   const children = useMemo(() =>
@@ -105,15 +99,6 @@ export const EpicCard = memo(function EpicCard({
   // nobody needs to look at.
   const isSettled = !standing(epic.status);
 
-  // Manager Review is the one column a session may not move a card out of, so the
-  // screen is the only place a job there can be finished. Agent Review draws no
-  // such button: a job waiting to be read has not been signed by anyone yet.
-  // Asked of the pieces, not of the percentage: a job of two hundred with one
-  // still open rounds to a hundred, and offering the sign-off there is offering
-  // it on unfinished work.
-  const allDone = progress.total > 0 && progress.completed === progress.total;
-  const canCloseEpic = allDone && epic.status === 'manager_review';
-
   const { layout } = useTheme();
 
   // Selecting the card is one real button, kept out of sight, with the card's
@@ -126,8 +111,6 @@ export const EpicCard = memo(function EpicCard({
     "data-bead-id": epic.id,
     // Which card the press was about, for a reader with several jobs standing
     // in his column and for the checks that time the answer.
-    "data-marking": isMarking ? "true" : undefined,
-    "aria-busy": isMarking,
     onClick: () => onSelect(epic),
   };
   const selectButton = (
@@ -227,12 +210,6 @@ export const EpicCard = memo(function EpicCard({
     </div>
   );
 
-  const closeButton = canCloseEpic && (
-    <div className="pt-2">
-      <SignOffButton isMarking={isMarking} onPress={signOff} className="w-full" />
-    </div>
-  );
-
   // ─── Layout: compact-row (Linear Minimal) ───
   if (layout === 'compact-row') {
     return (
@@ -259,7 +236,7 @@ export const EpicCard = memo(function EpicCard({
               <BeadTags bead={epic} className="shrink-0" />
             </div>
             {progressSection}
-            {closeButton}
+
             {childrenSection}
             <CardLiveChat beadId={epic.id} />
           </div>
@@ -313,7 +290,7 @@ export const EpicCard = memo(function EpicCard({
             <CardLiveChat beadId={epic.id} />
 
           {progressSection}
-          {closeButton}
+
           {childrenSection}
         </div>
       </div>
@@ -368,7 +345,7 @@ export const EpicCard = memo(function EpicCard({
 
         {progressBlock(true)}
 
-        {closeButton}
+
         {childrenSection}
 
         {commentCount > 0 && (

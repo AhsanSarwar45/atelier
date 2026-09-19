@@ -520,11 +520,17 @@ pub fn hook(name: &str, rest: &[String]) -> Result<i32, String> {
     }
     let mut heard = String::new();
     let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut heard);
-    let event: serde_json::Value =
-        serde_json::from_str(&heard).unwrap_or(serde_json::Value::Object(Default::default()));
+    let event: serde_json::Value = if name == "landing-gate" && !rest.is_empty() {
+        serde_json::json!({})
+    } else {
+        serde_json::from_str(&heard).map_err(|e| format!("Cannot decode {name} hook event: {e}"))?
+    };
     if let Some(bypass) = crate::hook_bypass::asked(&event) {
         crate::hook_bypass::record(name, &bypass);
         return Ok(0);
+    }
+    if name == "landing-gate" && !rest.is_empty() {
+        return crate::board_landing::reference_transaction(&rest[0], &heard);
     }
     // Every executable gate is native. Unknown legacy names stand down so a
     // stale settings file can never make an interpreter a runtime dependency.
@@ -544,8 +550,7 @@ pub fn hook(name: &str, rest: &[String]) -> Result<i32, String> {
         "{}: retired or unknown hook `{name}` stood down",
         crate::identity::NAME
     );
-    let _ = rest;
-    Ok(0)
+    Err(format!("Unknown hook {name}; repair the provider configuration instead of silently disabling enforcement"))
 }
 
 /// Run one deliberately public workflow command from the installed rules.

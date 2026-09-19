@@ -206,6 +206,8 @@ export type KnownRawStatus =
   | 'hooked'
   | 'done'
   | 'resolved'
+  | 'fixed'
+  | 'finished'
   | 'pending';
 
 /**
@@ -234,6 +236,8 @@ export const STATUS_MAP: Record<KnownRawStatus, { column: BeadStatus; badge?: St
   manager_review: { column: 'manager_review' },
   done:        { column: 'closed' },
   resolved:    { column: 'closed' },
+  fixed:       { column: 'closed' },
+  finished:    { column: 'closed' },
   pending:     { column: 'open' },
   // Mapped with badges
   blocked:     { column: 'open',        badge: { label: 'Blocked',  variant: 'warning' } },
@@ -248,6 +252,8 @@ export const STATUS_MAP: Record<KnownRawStatus, { column: BeadStatus; badge?: St
  * Bead from .beads/issues.jsonl
  */
 export interface Bead {
+  hierarchy_error?: string;
+  metadata?: { manager_review_tree?: string; manager_approved_tree?: string; [key: string]: unknown };
   id: string;
   title: string;
   description?: string;

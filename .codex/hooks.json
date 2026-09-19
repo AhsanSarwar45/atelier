@@ -2,54 +2,40 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|apply_patch|Edit|Write",
+        "matcher": "Bash|exec_command|shell_command|functions.exec_command|apply_patch|functions.apply_patch|Edit|Write",
         "hooks": [
           {
-            "command": "atelier hook workflow-gate",
-            "statusMessage": "Checking ticket worktree",
-            "type": "command"
+            "type": "command",
+            "command": "atelier hook workflow-gate"
           }
         ]
       },
       {
-        "matcher": "Bash",
+        "matcher": "Bash|exec_command|shell_command|functions.exec_command",
         "hooks": [
           {
-            "command": "atelier hook board-actor",
-            "type": "command"
+            "type": "command",
+            "command": "atelier hook board-actor"
           },
           {
-            "command": "atelier hook board-merge-gate",
-            "statusMessage": "Checking protected branches",
-            "type": "command"
+            "type": "command",
+            "command": "atelier hook board-merge-gate"
           },
           {
-            "command": "atelier hook board-status-gate",
-            "statusMessage": "Checking board lifecycle",
-            "type": "command"
+            "type": "command",
+            "command": "atelier hook board-status-gate"
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|apply_patch|Edit|Write",
+        "matcher": "Bash|exec_command|shell_command|functions.exec_command|apply_patch|functions.apply_patch|Edit|Write",
         "hooks": [
           {
-            "command": "atelier hook board-touch",
-            "type": "command"
-          },
-          {
-            "command": "atelier hook doing",
-            "type": "command"
+            "type": "command",
+            "command": "atelier hook board-touch"
           }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          { "command": "atelier hook doing", "type": "command" }
         ]
       }
     ],
@@ -91,12 +77,30 @@
       {
         "hooks": [
           {
-            "command": "bd codex-hook SessionStart",
-            "statusMessage": "Loading Beads context",
-            "type": "command"
+            "type": "command",
+            "command": "atelier hook board-prime"
           }
-        ],
-        "matcher": "startup|resume|clear"
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "atelier hook board-gate"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "atelier hook board-push"
+          }
+        ]
       }
     ]
   }

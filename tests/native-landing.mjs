@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, chmodSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const run = resolve('tests/.e2e-run-bw-9vv9/native');
@@ -40,6 +40,16 @@ paths = []
 `);
 writeFileSync(join(repo, '.gitignore'), '.beads/\nworktrees/\n');
 git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'fixture base');
+const installGuard = (interrupt = false) => {
+  const hook = git(repo, 'rev-parse', '--git-path', 'hooks/reference-transaction');
+  writeFileSync(hook, `#!/bin/sh
+${interrupt ? '[ "$1" = committed ] && exit 0' : ''}
+exec '${binary}' hook landing-gate "$@"
+`);
+  chmodSync(hook, 0o755);
+};
+installGuard();
+
 const make = (id, type = 'task', parent) => {
   bd(repo, 'create', '--id', id, '--title', id, '--type', type);
   if (parent) bd(repo, 'update', id, '--parent', parent);
@@ -49,6 +59,8 @@ const commit = (path, id, file = 'delivered.txt') => { writeFileSync(join(path, 
 
 make('ld-one'); const one = copy('ld-one'); bd(one, 'update', 'ld-one', '--claim');
 commit(one, 'ld-one', 'not-delivered.txt');
+const raw = spawnSync('git', ['update-ref','refs/heads/main',git(one,'rev-parse','HEAD')], {cwd:repo,env,encoding:'utf8'});
+assert.notEqual(raw.status, 0); assert.match(raw.stderr, /No prepared landing transaction/);
 fails(one, ['board/land', 'ld-one'], /checks failed/);
 assert.equal(row(repo, 'ld-one').status, 'in_progress');
 assert.notEqual(git(one, 'rev-parse', 'HEAD'), git(repo, 'rev-parse', 'main'));
@@ -72,7 +84,9 @@ make('ld-recover'); const recovery = copy('ld-recover'); bd(recovery, 'update', 
 const tip = git(recovery, 'rev-parse', 'HEAD'); const tree = git(recovery, 'rev-parse', 'HEAD^{tree}');
 const journals = join(repo, '.git/atelier-landings'); mkdirSync(journals, { recursive: true });
 writeFileSync(join(journals, 'interrupted.json'), JSON.stringify({version:1, branch:'main', tip, tree, actor:'landing-test', cards:['ld-recover'], complete:false}));
-git(repo, 'merge', '--ff-only', 'ld-recover');
+bd(recovery, 'update', 'ld-recover', '--set-metadata', `checks_tree=${tree}`, '--set-metadata', 'checks_passed=true');
+bd(repo, 'merge-slot', 'acquire'); installGuard(true);
+git(repo, 'merge', '--ff-only', 'ld-recover'); installGuard(); bd(repo, 'merge-slot', 'release');
 assert.equal(row(repo, 'ld-recover').status, 'in_progress');
 tool(repo, 'board/reconcile', '--apply'); assert.equal(row(repo, 'ld-recover').status, 'closed');
 bd(repo, 'update', 'ld-recover', '--status', 'open'); tool(repo, 'board/reconcile', '--apply');

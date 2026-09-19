@@ -167,6 +167,7 @@ fn job(rest: &[String]) -> Result<i32, String> {
         let items = flags(rest, "--do");
         if items.is_empty() { return Err("board/job under needs at least one --do '<what>|<done>'".into()); }
         for item in items { println!("{}", make_item(&root, parent, &item, area, kind, &priority)?); }
+        advance_goal(&root, parent)?;
         return Ok(0);
     }
     if action == "cancel" {
@@ -174,6 +175,7 @@ fn job(rest: &[String]) -> Result<i32, String> {
         let reason = flag(rest, "--reason").filter(|reason| !reason.trim().is_empty())
             .ok_or_else(|| "board/job cancel needs --reason explaining why the work is being dropped".to_string())?;
         cancel_tree(&root, id, &reason)?;
+        advance_goal(&root, id)?;
         println!("{id} cancelled");
         return Ok(0);
     }
@@ -241,12 +243,17 @@ fn children(root: &Path, id: &str) -> Result<Vec<Value>, String> {
 }
 
 fn cancel_tree(root: &Path, id: &str, reason: &str) -> Result<(), String> {
+    let row = card(root, id)?;
+    let actor = crate::board_landing::actor(root)?;
+    if row["assignee"].as_str().is_some_and(|owner| !owner.is_empty() && owner != actor) {
+        return Err(format!("{id} belongs to another actor; its scope cannot be cancelled by this session"));
+    }
     for child in children(root, id)? {
         if child["status"].as_str() != Some("closed") {
             if let Some(child_id) = child["id"].as_str() { cancel_tree(root, child_id, reason)?; }
         }
     }
-    bd(root, &["update".into(), id.into(), "--add-label".into(), "cancelled".into()])?;
+    bd(root, &["update".into(), id.into(), "--add-label".into(), "cancelled".into(), "--set-metadata".into(), "status_derived=false".into()])?;
     bd(root, &["close".into(), id.into(), "--force".into(), "--reason".into(), format!("cancelled: {reason}")])?;
     Ok(())
 }
@@ -261,9 +268,7 @@ pub(crate) fn labels(card: &Value) -> Vec<&str> {
     card["labels"].as_array().into_iter().flatten().filter_map(Value::as_str).collect()
 }
 
-pub(crate) fn meta<'a>(card: &'a Value, key: &str) -> Option<&'a str> {
-    card["metadata"].get(key).and_then(Value::as_str)
-}
+
 
 pub(crate) fn advance_goal(root: &Path, _id: &str) -> Result<(), String> {
     crate::board_landing::reconcile_parents(root)
@@ -384,21 +389,6 @@ fn recorded_token(name: &str, said: &str) -> Result<String, String> {
     ))
 }
 
-/// The line a run leaves on its card, built the way `checks` builds it, so
-/// what the close gate is held to is the real thing rather than a copy of it.
-#[cfg(test)]
-pub(crate) fn proof_of(tree: &str, suites: &[&str], ok: &[bool]) -> String {
-    let tokens: Vec<String> = suites
-        .iter()
-        .zip(ok)
-        .map(|(name, &ok)| {
-            let summary = if ok { "test result: ok. 719 passed; 0 failed" } else { "test result: FAILED. 700 passed; 19 failed" };
-            result_token(name, summary, ok)
-        })
-        .collect();
-    format!("checks: tree {tree} {}", tokens.join(" "))
-}
-
 pub(crate) fn checks(rest: &[String]) -> Result<i32, String> {
     let root = root()?;
     let card = rest.iter().find(|word| !word.starts_with('-') && !word.contains('='));
@@ -447,6 +437,10 @@ pub(crate) fn checks(rest: &[String]) -> Result<i32, String> {
             if !output.status.success() { failure = Some(suite.name.clone()); break; }
         }
     }
+    if git(&root, &["rev-parse", "HEAD^{tree}"])? != tree
+        || !git(&root, &["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
+        return Err("The committed tree changed during checks; no passing evidence recorded".into());
+    }
     let proof = format!("checks: tree {tree} {}", tokens.join(" "));
     println!("{proof}");
     if let Some(card) = card {
@@ -471,16 +465,48 @@ pub(crate) fn checks(rest: &[String]) -> Result<i32, String> {
     Ok(if failure.is_some() { 1 } else { 0 })
 }
 
+fn bounded_output(command: &mut Command) -> Result<std::process::Output, String> {
+    use std::{io::{Read, Seek, SeekFrom}, process::Stdio, time::{Duration, Instant}};
+    let mut stdout = tempfile::tempfile().map_err(|e| e.to_string())?;
+    let mut stderr = tempfile::tempfile().map_err(|e| e.to_string())?;
+    #[cfg(unix)] { use std::os::unix::process::CommandExt; command.process_group(0); }
+    let mut child = command.stdout(Stdio::from(stdout.try_clone().map_err(|e| e.to_string())?))
+        .stderr(Stdio::from(stderr.try_clone().map_err(|e| e.to_string())?))
+        .spawn().map_err(|e| e.to_string())?;
+    let started = Instant::now(); let mut heartbeat = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? { break status; }
+        if heartbeat.elapsed() >= Duration::from_secs(30) {
+            eprintln!("External review still running ({} seconds)", started.elapsed().as_secs()); heartbeat = Instant::now();
+        }
+        if started.elapsed() > Duration::from_secs(600) {
+            #[cfg(unix)] unsafe { libc::kill(-(child.id() as i32), libc::SIGTERM); }
+            std::thread::sleep(Duration::from_secs(1));
+            #[cfg(unix)] unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL); }
+            let _ = child.kill(); let _ = child.wait();
+            return Err("TIMEOUT: external review exceeded ten minutes; no passing proof recorded".into());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    stdout.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
+    stderr.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
+    let mut out = Vec::new(); let mut err = Vec::new();
+    stdout.read_to_end(&mut out).map_err(|e| e.to_string())?;
+    stderr.read_to_end(&mut err).map_err(|e| e.to_string())?;
+    Ok(std::process::Output { status, stdout: out, stderr: err })
+}
+
 fn review(rest: &[String]) -> Result<i32, String> {
     let asked = rest.first().filter(|word| !word.starts_with('-'))
         .ok_or_else(|| "review needs a job id".to_string())?;
     let root = root()?;
+    if manifest(&root)?.review.external_review == "never" { return Err("This project's policy disables external review".into()); }
     let asked_card = card(&root, asked)?;
     let id = if labels(&asked_card).contains(&"step:review") {
         labels(&asked_card).iter().find_map(|label| label.strip_prefix("of:"))
             .ok_or_else(|| format!("review step {asked} names no job"))?.to_string()
     } else { asked.clone() };
-    let goal = card(&root, &id)?;
+    card(&root, &id)?;
     if !git(&root, &["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
         return Err("Commit the tracked changes before review.".into());
     }
@@ -500,16 +526,27 @@ fn review(rest: &[String]) -> Result<i32, String> {
         change.push('\n');
         if change.len() > 300_000 { change.truncate(300_000); change.push_str("\n[diff truncated; inspect the repository read-only]\n"); break; }
     }
+    let base = git(&root, &["rev-parse", &trunk])?;
+    let head = git(&root, &["rev-parse", "HEAD"])?;
+    let agreements = std::fs::read_to_string(root.join("AGENTS.md")).unwrap_or_default();
     let instructions = include_str!("../../machinery/workers/external-review.md");
-    let prompt = format!("{instructions}\n\nReturn this exact shape:\n{{\"verdict\":\"PASS or NEEDS_WORK\",\"summary\":\"one sentence\",\"verified\":[\"fact\"],\"findings\":[{{\"severity\":\"critical, high, or medium\",\"confidence\":80,\"file\":\"path\",\"line\":null,\"title\":\"failure\",\"evidence\":\"proof\",\"recommendation\":\"verifiable correction\"}}]}}\n\nJob:\n{card_json}\n\nUnlanded commits and diff:\n{change}");
-    let output = if provider == "claude" {
-        Command::new(program).args(["-p", &prompt, "--output-format", "text", "--permission-mode", "plan"])
-            .current_dir(&root).output()
-    } else {
-        Command::new(program).args(["exec", "--sandbox", "read-only", "--color", "never", &prompt])
-            .current_dir(&root).output()
-    }.map_err(|error| format!("could not start {provider} review: {error}"))?;
-    let verdict = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    let prompt = format!("{instructions}\n\nImmutable scope: base {base}, head {head}. Repository: {}.\nProject instructions:\n{agreements}\n\nReturn this exact shape:\n{{\"verdict\":\"PASS or NEEDS_WORK\",\"summary\":\"one sentence\",\"verified\":[\"fact\"],\"findings\":[{{\"severity\":\"critical, high, or medium\",\"confidence\":80,\"file\":\"path\",\"line\":null,\"title\":\"failure\",\"evidence\":\"proof\",\"recommendation\":\"verifiable correction\"}}]}}\n\nJob:\n{card_json}\n\nUnlanded commits and diff:\n{change}", root.display());
+    let reviewed_tree = git(&root, &["rev-parse", "HEAD^{tree}"])?;
+    let mut command = Command::new(program);
+    if provider == "claude" {
+        command.args(["--agent", "reviewer", "-p", &prompt, "--setting-sources", "user", "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--no-session-persistence", "--output-format", "json", "--json-schema", r#"{"type":"object","required":["verdict","summary","findings"],"properties":{"verdict":{"enum":["PASS","NEEDS_WORK"]},"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object"}}}}"#]);
+    } else if provider == "codex" {
+        command.args(["exec", "--sandbox", "read-only", "--color", "never", &prompt]);
+    } else { return Err("Review provider must be claude or codex".into()); }
+    command.current_dir(&root).env_remove("ATELIER_BYPASS");
+    let evidence = crate::board_landing::common_root(&root).join(".git/atelier-reviews").join(format!("{id}-{head}"));
+    std::fs::create_dir_all(&evidence).map_err(|e| e.to_string())?;
+    std::fs::write(evidence.join("packet.txt"), &prompt).map_err(|e| e.to_string())?;
+    let output = bounded_output(&mut command)?;
+    std::fs::write(evidence.join("stdout.json"), &output.stdout).map_err(|e| e.to_string())?;
+    std::fs::write(evidence.join("stderr.txt"), &output.stderr).map_err(|e| e.to_string())?;
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    let verdict = String::from_utf8_lossy(&output.stdout).to_string();
     let note = format!("external review via {provider} (exit {}):\n\n{}", output.status.code().unwrap_or(1), verdict.trim());
     bd(&root, &["comments".into(), "add".into(), id.clone(), note])?;
     print!("{verdict}");
@@ -519,29 +556,15 @@ fn review(rest: &[String]) -> Result<i32, String> {
         let end = verdict.rfind('}').map(|at| at + 1).unwrap_or(start);
         serde_json::from_str::<Value>(&verdict[start..end])
     }).map_err(|error| format!("{provider} returned no readable review JSON: {error}"))?;
+    let parsed = if provider == "claude" { parsed.get("structured_output").cloned().ok_or("REVIEWER_ERROR: missing structured review verdict")? } else { parsed };
+    std::fs::write(evidence.join("verdict.json"), serde_json::to_vec_pretty(&parsed).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let findings = parsed["findings"].as_array().ok_or_else(|| "review JSON has no findings array".to_string())?;
-    let priority = goal["priority"].as_i64().unwrap_or(2).to_string();
-    let area = meta(&goal, "area").unwrap_or("board");
-    let kind = meta(&goal, "kind").unwrap_or("bug");
-    let mut made = Vec::new();
-    for finding in findings {
-        let title = finding["title"].as_str().unwrap_or("").trim();
-        if title.is_empty() { continue; }
-        let done = finding["recommendation"].as_str().unwrap_or("The reported failure no longer reproduces.");
-        let child = make_item(&root, &id, &format!("{title}|{done}"), area, kind, &priority)?;
-        let where_at = match (finding["file"].as_str(), finding["line"].as_i64()) {
-            (Some(file), Some(line)) => format!("{file}:{line}"),
-            (Some(file), None) => file.to_string(),
-            _ => "not specified".into(),
-        };
-        let evidence = finding["evidence"].as_str().unwrap_or("");
-        bd(&root, &["update".into(), child.clone(), "--append-notes".into(), format!("External review at {where_at}:\n\n{evidence}")])?;
-        made.push(child);
+    let passed = parsed["verdict"].as_str() == Some("PASS") && findings.is_empty();
+    if git(&root, &["rev-parse", "HEAD^{tree}"])? != reviewed_tree
+        || !git(&root, &["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
+        return Err("The tree changed during review; rerun review on the committed result".into());
     }
-    let passed = parsed["verdict"].as_str() == Some("PASS") && made.is_empty();
-    let tree = git(&root, &["rev-parse", "HEAD^{tree}"])?;
-    metadata(&root, &id, &[("review_tree", tree), ("review_passed", passed.to_string()), ("reviewed_commits", commits.join(","))])?;
-    if !made.is_empty() { println!("filed findings: {}", made.join(", ")); }
+    metadata(&root, &id, &[("review_tree", reviewed_tree), ("review_passed", passed.to_string()), ("reviewed_commits", commits.join(","))])?;
     if !passed { return Ok(1); }
 
     Ok(0)
