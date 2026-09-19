@@ -981,6 +981,40 @@ export interface McpCatalogue {
   unreachable?: string;
 }
 
+/** One plugin a marketplace offers, as the catalogue draws it (bw-6ecp.7). */
+export interface OfferedPlugin {
+  /** `name@marketplace`, which is what `plugin install` is given. */
+  id: string;
+  name: string;
+  title: string;
+  description?: string;
+  category?: string;
+  keywords?: string[];
+  version?: string;
+  author?: string;
+  homepage?: string;
+  marketplace: string;
+  /** The `owner/repo` the marketplace was added from, when that is known. */
+  origin?: string;
+  /** The account has this marketplace already, so installing does not add it. */
+  known: boolean;
+  installed: boolean;
+}
+
+/** One shelf of the plugin catalogue, and how many plugins are on it. */
+export interface PluginShelf {
+  id: string;
+  count: number;
+}
+
+export interface PluginCatalogue {
+  entries: OfferedPlugin[];
+  categories: PluginShelf[];
+  marketplaces: PluginShelf[];
+  /** A marketplace that could not be read, and why. */
+  unreachable?: string[];
+}
+
 export type ExtensionKind = 'plugins' | 'marketplaces';
 
 export interface ExtensionItem {
@@ -1020,6 +1054,8 @@ export type WbpCommand =
   | ({ type: 'plugin.set-enabled'; brand: Brand; id: string; enabled: boolean } & SettingsScope)
   | ({ type: 'plugin.install'; brand: Brand; id: string } & SettingsScope)
   | ({ type: 'plugin.uninstall'; brand: Brand; id: string } & SettingsScope)
+  | ({ type: 'plugin.catalogue'; brand: Brand } & SettingsScope)
+  | ({ type: 'plugin.install-from-catalogue'; brand: Brand; id: string; origin?: string; known?: boolean } & SettingsScope)
   | ({ type: 'marketplace.add'; brand: Brand; source: string } & SettingsScope)
   | ({ type: 'marketplace.remove'; brand: Brand; name: string } & SettingsScope)
   | ({ type: 'provider-settings.write'; brand: Brand; layer: SettingsLayer; patch: Record<string, unknown> } & SettingsScope)

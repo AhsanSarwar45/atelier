@@ -1,0 +1,25 @@
+{
+  "name": "beads-web-fixture",
+  "description": "Two plugins that exist only so the catalogue has something it can install without a network (bw-6ecp.7).",
+  "owner": { "name": "Beads Web tests" },
+  "plugins": [
+    {
+      "name": "tidy-notes",
+      "displayName": "Tidy Notes",
+      "source": "./plugins/tidy-notes",
+      "description": "Keeps notes in order. A fixture plugin: it adds one command and does nothing else.",
+      "category": "productivity",
+      "version": "1.0.0",
+      "keywords": ["notes", "fixture"]
+    },
+    {
+      "name": "loud-logs",
+      "displayName": "Loud Logs",
+      "source": "./plugins/loud-logs",
+      "description": "Says more about what it did. A fixture plugin: it adds one command and does nothing else.",
+      "category": "devops",
+      "version": "1.0.0",
+      "keywords": ["logs", "fixture"]
+    }
+  ]
+}

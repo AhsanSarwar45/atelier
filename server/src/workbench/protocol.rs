@@ -59,6 +59,8 @@ wire_kinds!(CommandKind {
     PluginSetEnabled => "plugin.set-enabled",
     PluginInstall => "plugin.install",
     PluginUninstall => "plugin.uninstall",
+    PluginCatalogue => "plugin.catalogue",
+    PluginInstallFromCatalogue => "plugin.install-from-catalogue",
     MarketplaceAdd => "marketplace.add",
     MarketplaceRemove => "marketplace.remove",
     ProvidersList => "providers.list",

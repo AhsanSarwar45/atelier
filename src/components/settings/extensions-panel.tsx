@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Plus, Trash2 } from 'lucide-react';
 
 import { wireScope } from '@/components/settings/mcp-servers-panel';
+import { PluginCatalogue } from '@/components/settings/plugin-catalogue';
 import type { Scope } from '@/components/settings/provider-settings-api';
 import { SettingsGroup } from '@/components/settings/section';
 import { Badge } from '@/components/ui/badge';
@@ -157,13 +158,16 @@ export function ExtensionsPanel({ brand, scope }: { brand: Brand; scope: Scope }
       {kinds.map(({ kind, items }) => {
         const actions =
           kind === 'plugins' ? (
-            <AddOne
-              title="Install a plugin"
-              what="A plugin is named by the marketplace it comes from, as plugin@marketplace. Add the marketplace first if it is not below."
-              placeholder="name@marketplace"
-              testid="plugin-install"
-              onAdd={(id) => act(`plugins:${id}`, () => sendCommand({ type: 'plugin.install', brand, ...wire, id }), 'Installed')}
-            />
+            <div className="flex items-center gap-2">
+              <PluginCatalogue brand={brand} scope={scope} onInstalled={setKinds} />
+              <AddOne
+                title="Install a plugin"
+                what="A plugin is named by the marketplace it comes from, as plugin@marketplace. Add the marketplace first if it is not below."
+                placeholder="name@marketplace"
+                testid="plugin-install"
+                onAdd={(id) => act(`plugins:${id}`, () => sendCommand({ type: 'plugin.install', brand, ...wire, id }), 'Installed')}
+              />
+            </div>
           ) : (
             <AddOne
               title="Add a marketplace"

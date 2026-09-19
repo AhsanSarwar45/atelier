@@ -6,6 +6,7 @@ use super::browser::{self, BrowserCapture, BrowserRecipe};
 use super::extensions;
 use super::external::{self, ProviderHold};
 use super::mcp_catalogue;
+use super::plugin_catalogue;
 use super::mcp_servers;
 use super::media;
 use super::profiles::Profiles;
@@ -1277,6 +1278,39 @@ impl WorkbenchRegistry {
                     "uninstall"
                 };
                 let words = vec!["plugin".to_string(), verb.to_string(), id];
+                self.claude_plugin_cli(command, words, extensions::SLOW_CLI)
+                    .await
+            }
+            CommandKind::PluginCatalogue => {
+                let (brand, _, dir, _) = self.extension_account(command)?;
+                if brand != "claude" {
+                    return Err("plugins are a Claude Code feature".into());
+                }
+                serde_json::to_value(plugin_catalogue::browse(&dir).await).map_err(|e| e.to_string())
+            }
+            // Installing from the catalogue is the two commands a reader would
+            // have had to run: the marketplace is added first when the account
+            // does not have it, because `plugin install` cannot reach into one
+            // it has never heard of.
+            CommandKind::PluginInstallFromCatalogue => {
+                let id = Self::field(command, "id")?.to_string();
+                let origin = Self::maybe(command, "origin").unwrap_or_default().to_string();
+                let known = command.at("known").as_bool().unwrap_or(false);
+                if !known && !origin.is_empty() {
+                    let words = vec![
+                        "plugin".to_string(),
+                        "marketplace".to_string(),
+                        "add".to_string(),
+                        origin.clone(),
+                    ];
+                    let added = self
+                        .claude_plugin_cli(command, words, extensions::SLOW_CLI)
+                        .await?;
+                    if added["ok"] != json!(true) {
+                        return Ok(added);
+                    }
+                }
+                let words = vec!["plugin".to_string(), "install".to_string(), id];
                 self.claude_plugin_cli(command, words, extensions::SLOW_CLI)
                     .await
             }
