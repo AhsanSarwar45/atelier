@@ -32,6 +32,7 @@ import type {
   Cost,
   EffortChoice,
   ExecutionContext,
+  HeldMessage,
   ImagePayload,
   ImageComparison,
   MachineFamily,
@@ -385,6 +386,12 @@ export interface SessionView {
   agents: SentAway[];
   /** Cards this chat has touched, as the machine recorded them. */
   beads: string[];
+  /**
+   * What the reader wrote while the agent worked and chose to hold, oldest
+   * first. Kept by the server, so it is the same list in every window and
+   * after a reload (bw-r54j.1).
+   */
+  held: HeldMessage[];
   /** What the session is actually pinned to, as the agent reported it. */
   permissionMode: string | null;
   model: string | null;
@@ -433,6 +440,7 @@ export const EMPTY: SessionView = {
   todos: [],
   agents: [],
   beads: [],
+  held: [],
   permissionMode: null,
   model: null,
   effort: null,
@@ -525,6 +533,7 @@ export function asView(sent: Partial<SessionView> | null | undefined): SessionVi
     // "working" would never see another `session.state` to correct them.
     agents: nothingIsDriving(list(raw.agents, EMPTY.agents), raw.state ?? EMPTY.state),
     beads: list(raw.beads, EMPTY.beads),
+    held: list(raw.held, EMPTY.held),
     menu: menuOf(menu),
   };
 }
@@ -553,6 +562,17 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       // A turn that is over owes no thinking count to the next one.
       if (e.state === 'idle' || e.state === 'errored' || e.state === 'stopped') next.thinkingTokens = 0;
       next.agents = nothingIsDriving(view.agents, e.state);
+      return next;
+
+    case 'prompt.held':
+      // Held twice is once: the same message can arrive from the live tail and
+      // from a snapshot taken after it, and the queue is a list of messages,
+      // not of deliveries.
+      next.held = view.held.some((held) => held.id === e.held.id) ? view.held : [...view.held, e.held];
+      return next;
+
+    case 'prompt.released':
+      next.held = view.held.filter((held) => held.id !== e.heldId);
       return next;
 
     case 'message.started':

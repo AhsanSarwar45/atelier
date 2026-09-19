@@ -14,6 +14,9 @@
     { "type": "provider.logout", "brand": "codex" },
     { "type": "session.start", "projectId": "project-1", "projectPath": "/project", "brand": "claude", "model": "sonnet", "permissionMode": "default", "effort": "high", "brief": { "beadId": "bw-1", "text": "Fix it" } },
     { "type": "prompt.send", "sessionId": "session-1", "text": "Continue", "images": [{ "mime": "image/png", "dataUrl": "data:image/png;base64,AA==", "alt": "proof" }], "takeover": true },
+    { "type": "prompt.hold", "sessionId": "session-1", "text": "Also check the logs", "images": [], "parts": null },
+    { "type": "prompt.drop", "sessionId": "session-1", "heldId": "held-1" },
+    { "type": "prompt.push", "sessionId": "session-1", "heldId": "held-1", "takeover": false },
     { "type": "ask.answer", "sessionId": "session-1", "askId": "ask-1", "optionId": "once", "value": "yes" },
     { "type": "question.answer", "sessionId": "session-1", "requestId": "question-1", "response": { "answers": [{ "questionId": "field-1", "optionIds": ["choice-1"], "customText": "note" }] } },
     { "type": "plan.respond", "sessionId": "session-1", "proposalId": "plan-1", "response": { "actionId": "approve", "feedback": "go" } },
@@ -70,7 +73,9 @@
     { "seq": 35, "sessionId": "session-1", "at": "2026-08-30T00:00:34.000Z", "type": "provider.message", "signal": { "id": "condition:network", "kind": "network", "phase": "active", "severity": "error", "scope": "turn", "detail": "offline", "retryAt": null, "action": null, "sourceMessageId": null } },
     { "seq": 36, "sessionId": "session-1", "at": "2026-08-30T00:00:35.000Z", "type": "notice", "text": "Retrying", "family": "breathing", "audience": "machine" },
     { "seq": 37, "sessionId": "session-1", "at": "2026-08-30T00:00:36.000Z", "type": "note", "noteId": "note-1", "rank": "detail", "kind": "provider", "text": "Detail", "body": "Body", "audience": "machine" },
-    { "seq": 38, "sessionId": "session-1", "at": "2026-08-30T00:00:37.000Z", "type": "transcript.reset" }
+    { "seq": 38, "sessionId": "session-1", "at": "2026-08-30T00:00:35.000Z", "type": "prompt.held", "held": { "id": "held-1", "sessionId": "session-1", "text": "Also check the logs", "images": [], "parts": null, "heldAt": "2026-08-30T00:00:35.000Z" } },
+    { "seq": 39, "sessionId": "session-1", "at": "2026-08-30T00:00:36.000Z", "type": "prompt.released", "heldId": "held-1", "reason": "sent" },
+    { "seq": 40, "sessionId": "session-1", "at": "2026-08-30T00:00:37.000Z", "type": "transcript.reset" }
   ],
   "watchFrames": [
     { "kind": "snapshot", "sessions": [] },

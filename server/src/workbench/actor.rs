@@ -98,6 +98,20 @@ enum Command {
         Reply<TranscriptItemPage>,
     ),
     ProjectedAgents(String, Reply<Vec<serde_json::Value>>),
+    HoldMessage(
+        String,
+        String,
+        String,
+        serde_json::Value,
+        Option<serde_json::Value>,
+        String,
+        Reply<serde_json::Value>,
+    ),
+    HeldMessages(String, Reply<Vec<serde_json::Value>>),
+    TakeHeld(String, Option<String>, Reply<Option<serde_json::Value>>),
+    ReleaseHeld(String, Reply<()>),
+    DropHeld(String, String, Reply<Option<serde_json::Value>>),
+    ForgetHeld(String, Reply<()>),
     Shutdown,
 }
 
@@ -409,6 +423,55 @@ impl ChatDb {
     pub async fn steering_menu(&self, session_id: String) -> Result<serde_json::Value, String> {
         self.request(|reply| Command::SteeringMenu(session_id, reply))
             .await
+    }
+
+    /// Hold one message the reader wrote but has not sent (bw-r54j.1).
+    pub async fn hold_message(
+        &self,
+        session_id: String,
+        id: String,
+        text: String,
+        images: serde_json::Value,
+        parts: Option<serde_json::Value>,
+        at: String,
+    ) -> Result<serde_json::Value, String> {
+        self.request(|reply| Command::HoldMessage(session_id, id, text, images, parts, at, reply))
+            .await
+    }
+
+    pub async fn held_messages(
+        &self,
+        session_id: String,
+    ) -> Result<Vec<serde_json::Value>, String> {
+        self.request(|reply| Command::HeldMessages(session_id, reply))
+            .await
+    }
+
+    /// Claim a held message for sending; nothing when another sender has it.
+    pub async fn take_held(
+        &self,
+        session_id: String,
+        id: Option<String>,
+    ) -> Result<Option<serde_json::Value>, String> {
+        self.request(|reply| Command::TakeHeld(session_id, id, reply))
+            .await
+    }
+
+    pub async fn release_held(&self, id: String) -> Result<(), String> {
+        self.request(|reply| Command::ReleaseHeld(id, reply)).await
+    }
+
+    pub async fn drop_held(
+        &self,
+        session_id: String,
+        id: String,
+    ) -> Result<Option<serde_json::Value>, String> {
+        self.request(|reply| Command::DropHeld(session_id, id, reply))
+            .await
+    }
+
+    pub async fn forget_held(&self, id: String) -> Result<(), String> {
+        self.request(|reply| Command::ForgetHeld(id, reply)).await
     }
 
     pub async fn snapshot(&self, session_id: String) -> Result<SnapshotParts, String> {
@@ -1062,6 +1125,21 @@ fn run(
                     });
                 respond(reply, result)
             }
+            Command::HoldMessage(session_id, id, text, images, parts, at, reply) => respond(
+                reply,
+                store.hold_message(&session_id, &id, &text, &images, parts.as_ref(), &at),
+            ),
+            Command::HeldMessages(session_id, reply) => {
+                respond(reply, store.held_messages(&session_id))
+            }
+            Command::TakeHeld(session_id, id, reply) => {
+                respond(reply, store.take_held(&session_id, id.as_deref()))
+            }
+            Command::ReleaseHeld(id, reply) => respond(reply, store.release_held(&id)),
+            Command::DropHeld(session_id, id, reply) => {
+                respond(reply, store.drop_held(&session_id, &id))
+            }
+            Command::ForgetHeld(id, reply) => respond(reply, store.forget_held(&id)),
             Command::SteeringMenu(session_id, reply) => {
                 respond(reply, steering_menu(&store, &live_menus, &session_id))
             }

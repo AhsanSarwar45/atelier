@@ -750,6 +750,11 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                 agent_at.clear();
             }
             EventKind::SessionEnded => {}
+            // A waiting message is not part of the conversation until it is
+            // sent. These say only that the queue moved; the queue itself is
+            // read from where it is kept, so a chat whose history was trimmed
+            // still opens on everything it is holding (bw-r54j.1).
+            EventKind::PromptHeld | EventKind::PromptReleased => {}
         }
     }
 
@@ -930,7 +935,9 @@ mod tests {
         let before_reset = fold_all(&events[..events.len() - 1]);
         assert_eq!(before_reset.items().len(), 9);
         assert_eq!(before_reset.agents().len(), 1);
-        assert_eq!(before_reset.view["lastSeq"], 37);
+        // Two of those newest events are the queue's, which draw no row:
+        // the watermark counts them, the transcript does not (bw-r54j.1).
+        assert_eq!(before_reset.view["lastSeq"], 39);
         assert_eq!(before_reset.view["beads"], json!(["bw-1"]));
         assert_eq!(before_reset.view["items"][0]["text"], "Hello");
         assert_eq!(before_reset.view["items"][2]["status"], "ok");
@@ -938,7 +945,7 @@ mod tests {
         let after_reset = fold_all(&events);
         assert!(after_reset.items().is_empty());
         assert!(after_reset.agents().is_empty());
-        assert_eq!(after_reset.view["lastSeq"], 38);
+        assert_eq!(after_reset.view["lastSeq"], 40);
         assert_eq!(after_reset.view["cost"]["total"], 30);
     }
 

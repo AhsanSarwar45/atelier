@@ -156,6 +156,23 @@ export interface TodoItem {
 }
 
 /** An attachment on a message: a picture, or any other file it carries. */
+/**
+ * A message the reader wrote while the agent was working and chose to hold.
+ *
+ * It is not part of the conversation yet: it belongs to the reader until it is
+ * sent, which is why it is kept and drawn apart from the transcript and why it
+ * survives a reload (bw-r54j.1).
+ */
+export interface HeldMessage {
+  id: string;
+  sessionId: string;
+  text: string;
+  images: ImagePayload[];
+  parts: PromptPart[] | null;
+  /** When it was held, as an ISO timestamp. */
+  heldAt: string;
+}
+
 export interface ImagePayload {
   mime: string;
   /**
@@ -489,6 +506,8 @@ export type WbpEvent = EventBase &
     | { type: 'message.completed'; messageId: string }
     /** The user pulled an unanswered, locally echoed prompt back into the composer. */
     | { type: 'message.retracted'; messageId: string }
+    | { type: 'prompt.held'; held: HeldMessage }
+    | { type: 'prompt.released'; heldId: string; reason: 'sent' | 'dropped' }
     | {
         type: 'tool.started';
         toolCallId: string;
@@ -1108,6 +1127,9 @@ export type WbpCommand =
       brief?: Brief;
     }
   | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[]; parts?: PromptPart[]; takeover?: boolean }
+  | { type: 'prompt.hold'; sessionId: string; text: string; images?: ImagePayload[]; parts?: PromptPart[] }
+  | { type: 'prompt.drop'; sessionId: string; heldId: string }
+  | { type: 'prompt.push'; sessionId: string; heldId?: string; takeover?: boolean }
   | { type: 'ask.answer'; sessionId: string; askId: string; optionId: string; value?: string }
   | { type: 'question.answer'; sessionId: string; requestId: string; response: QuestionResponse }
   | { type: 'plan.respond'; sessionId: string; proposalId: string; response: PlanResponse }

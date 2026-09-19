@@ -1226,6 +1226,141 @@ fn held_in_its_project(
         Ok(())
     }
 
+    /**
+     * The messages a reader wrote while the agent was working and chose to
+     * hold rather than interrupt with.
+     *
+     * A held message is the reader's, not the provider's: it is kept here
+     * rather than in the event stream so it survives a reload and a restart,
+     * and so every window watching the chat sees the same waiting line. It
+     * becomes an ordinary message only when it is sent, either by the chat
+     * settling or by the reader pushing it through.
+     *
+     * `sending` is the whole of the race control. Two drains can look at the
+     * same chat in the same instant — the five-second sweep and the event that
+     * ended the turn — and both would otherwise take the same line and send it
+     * twice. Taking a line is a conditional update, so exactly one of them
+     * comes away with it, and a send that fails puts it back (bw-r54j.2).
+     */
+    pub fn hold_message(
+        &self,
+        session_id: &str,
+        id: &str,
+        text: &str,
+        images: &Value,
+        parts: Option<&Value>,
+        at: &str,
+    ) -> rusqlite::Result<Value> {
+        let position: i64 = self
+            .connection
+            .query_row(
+                "SELECT COALESCE(MAX(position), 0) + 1 FROM held_message WHERE session_id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(1);
+        self.connection.prepare_cached(
+            "INSERT INTO held_message (id, session_id, position, text, images, parts, held_at, sending)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,0)",
+        )?.execute(params![
+            id,
+            session_id,
+            position,
+            text,
+            images.to_string(),
+            parts.map(Value::to_string),
+            at
+        ])?;
+        Ok(held_row(id, session_id, text, images.clone(), parts.cloned(), at))
+    }
+
+    /// Every message this chat is holding, oldest first.
+    pub fn held_messages(&self, session_id: &str) -> rusqlite::Result<Vec<Value>> {
+        let mut statement = self.connection.prepare_cached(
+            "SELECT id, text, images, parts, held_at FROM held_message
+             WHERE session_id = ?1 ORDER BY position",
+        )?;
+        let rows = statement.query_map(params![session_id], |row| {
+            let id: String = row.get(0)?;
+            let text: String = row.get(1)?;
+            let images: String = row.get(2)?;
+            let parts: Option<String> = row.get(3)?;
+            let at: String = row.get(4)?;
+            Ok(held_row(
+                &id,
+                session_id,
+                &text,
+                serde_json::from_str(&images).unwrap_or_else(|_| json!([])),
+                parts.and_then(|parts| serde_json::from_str(&parts).ok()),
+                &at,
+            ))
+        })?;
+        rows.collect()
+    }
+
+    /**
+     * Claim one held message for sending, or nothing when another sender
+     * already has it.
+     *
+     * `id` names a message the reader pushed; without one this takes the
+     * oldest, which is what a settled chat does on its own.
+     */
+    pub fn take_held(
+        &self,
+        session_id: &str,
+        id: Option<&str>,
+    ) -> rusqlite::Result<Option<Value>> {
+        let held = self.held_messages(session_id)?;
+        let wanted = match id {
+            Some(id) => held.into_iter().find(|row| row["id"] == json!(id)),
+            None => held.into_iter().next(),
+        };
+        let Some(wanted) = wanted else {
+            return Ok(None);
+        };
+        let taken = self
+            .connection
+            .prepare_cached("UPDATE held_message SET sending = 1 WHERE id = ?1 AND sending = 0")?
+            .execute(params![wanted["id"].as_str().unwrap_or_default()])?;
+        Ok((taken == 1).then_some(wanted))
+    }
+
+    /// Put a claimed message back, because the send it was claimed for failed.
+    pub fn release_held(&self, id: &str) -> rusqlite::Result<()> {
+        self.connection
+            .prepare_cached("UPDATE held_message SET sending = 0 WHERE id = ?1")?
+            .execute(params![id])?;
+        Ok(())
+    }
+
+    /**
+     * Drop a held message at the reader's word.
+     *
+     * A message already claimed for sending is not the reader's to drop: it is
+     * on its way, and deleting the row here would leave the transcript with a
+     * message nothing is holding and nothing can put back. Those answer None,
+     * the same as an id this chat never held.
+     */
+    pub fn drop_held(&self, session_id: &str, id: &str) -> rusqlite::Result<Option<Value>> {
+        let held = self
+            .held_messages(session_id)?
+            .into_iter()
+            .find(|row| row["id"] == json!(id));
+        let gone = self
+            .connection
+            .prepare_cached("DELETE FROM held_message WHERE id = ?1 AND session_id = ?2 AND sending = 0")?
+            .execute(params![id, session_id])?;
+        Ok((gone == 1).then_some(held).flatten())
+    }
+
+    /// Forget a claimed message once its send was accepted.
+    pub fn forget_held(&self, id: &str) -> rusqlite::Result<()> {
+        self.connection
+            .prepare_cached("DELETE FROM held_message WHERE id = ?1")?
+            .execute(params![id])?;
+        Ok(())
+    }
+
     pub fn search(&self, query: &str, limit: usize) -> rusqlite::Result<Vec<SearchHit>> {
         let escaped = query
             .replace('\\', "\\\\")
@@ -2406,6 +2541,24 @@ fn explicit_title_from_event(event: &Value) -> Option<&str> {
         .flatten()
 }
 
+fn held_row(
+    id: &str,
+    session_id: &str,
+    text: &str,
+    images: Value,
+    parts: Option<Value>,
+    at: &str,
+) -> Value {
+    json!({
+        "id": id,
+        "sessionId": session_id,
+        "text": text,
+        "images": images,
+        "parts": parts,
+        "heldAt": at,
+    })
+}
+
 fn json_error(error: serde_json::Error) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(error))
 }
@@ -2463,6 +2616,20 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
     {
         transaction.execute_batch("ALTER TABLE session ADD COLUMN profile TEXT;")?;
     }
+    transaction.execute_batch(
+        "CREATE TABLE IF NOT EXISTS held_message (
+           id TEXT PRIMARY KEY,
+           session_id TEXT NOT NULL,
+           position INTEGER NOT NULL,
+           text TEXT NOT NULL,
+           images TEXT NOT NULL,
+           parts TEXT,
+           held_at TEXT NOT NULL,
+           sending INTEGER NOT NULL DEFAULT 0
+         );
+         CREATE INDEX IF NOT EXISTS held_message_in_order
+           ON held_message(session_id, position);",
+    )?;
     transaction.execute_batch(
         "CREATE TABLE IF NOT EXISTS session_handoff (
            session_id TEXT PRIMARY KEY,
@@ -3595,7 +3762,9 @@ mod tests {
         store.ensure_transcript_projection("session-1").unwrap();
 
         let newest = store.transcript_items("session-1", None, 3).unwrap();
-        assert_eq!(newest.newest_seq, 37);
+        // The watermark is the newest event stored, whether or not it drew a
+        // row: the two the queue writes draw none (bw-r54j.1).
+        assert_eq!(newest.newest_seq, 39);
         assert!(
             newest.items.len() <= 6,
             "one primary page plus one helper tail"
