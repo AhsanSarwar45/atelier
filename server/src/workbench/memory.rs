@@ -23,6 +23,8 @@ pub struct ProcessMemory {
     pub parent_pid: Option<u32>,
     pub name: String,
     pub bytes: u64,
+    /// The part of `bytes` that is paged out rather than in RAM.
+    pub swap_bytes: u64,
     pub session_id: Option<String>,
     pub chat_title: Option<String>,
     pub role: &'static str,
@@ -34,6 +36,8 @@ pub struct ProcessMemory {
 #[serde(rename_all = "camelCase")]
 pub struct MemoryReport {
     pub total_bytes: u64,
+    /// The part of `total_bytes` that is paged out rather than in RAM.
+    pub swap_bytes: u64,
     pub metric: &'static str,
     pub process_count: usize,
     pub chats: Vec<ChatMemory>,
@@ -65,14 +69,12 @@ fn chat_id(process: &sysinfo::Process) -> Option<String> {
     })
 }
 
+/// One `smaps_rollup` field, in bytes. The name must carry its colon, so that
+/// `Pss:` does not also answer for `Pss_Anon:` nor `Swap:` for `SwapPss:`.
 #[cfg(target_os = "linux")]
-fn parse_pss(contents: &str) -> Option<u64> {
+fn parse_field(contents: &str, name: &str) -> Option<u64> {
     contents.lines().find_map(|line| {
-        let value = line
-            .strip_prefix("Pss:")?
-            .trim()
-            .strip_suffix(" kB")?
-            .trim();
+        let value = line.strip_prefix(name)?.trim().strip_suffix(" kB")?.trim();
         value.parse::<u64>().ok()?.checked_mul(1024)
     })
 }
@@ -102,24 +104,45 @@ fn process_leader(_pid: Pid) -> Result<Option<bool>, String> {
     Ok(Some(true))
 }
 
+/// What one process costs the machine: its share of the pages held in RAM, and
+/// its share of the pages the kernel has pushed out to swap. Counting only the
+/// first halved the badge's own number on a machine under memory pressure —
+/// every process had tens of megabytes paged out that nobody was charged for,
+/// and the app looked half its real size (bw-c4i2.1).
+#[derive(Debug, Clone, Copy, Default)]
+struct ProcessCost {
+    resident: u64,
+    swapped: u64,
+}
+
+impl ProcessCost {
+    fn total(self) -> u64 {
+        self.resident.saturating_add(self.swapped)
+    }
+}
+
 #[cfg(target_os = "linux")]
-fn process_bytes(pid: Pid, _resident_bytes: u64) -> Result<Option<u64>, String> {
+fn process_cost(pid: Pid) -> Result<Option<ProcessCost>, String> {
     if process_leader(pid)? != Some(true) {
         return Ok(None);
     }
 
     let path = format!("/proc/{}/smaps_rollup", pid.as_u32());
     match std::fs::read_to_string(&path) {
-        Ok(contents) => parse_pss(&contents)
-            .map(Some)
-            .ok_or_else(|| format!("missing Pss in {path}")),
+        Ok(contents) => Ok(Some(ProcessCost {
+            resident: parse_field(&contents, "Pss:")
+                .ok_or_else(|| format!("missing Pss in {path}"))?,
+            // A kernel built without swap, or a process with nothing paged out,
+            // leaves this line out. Absent means none, not unreadable.
+            swapped: parse_field(&contents, "SwapPss:").unwrap_or(0),
+        })),
         Err(error) if process_vanished(&error) => Ok(None),
         Err(error) => Err(format!("could not read {path}: {error}")),
     }
 }
 
 #[cfg(not(target_os = "linux"))]
-fn process_bytes(_pid: Pid, _resident_bytes: u64) -> Result<Option<u64>, String> {
+fn process_cost(_pid: Pid) -> Result<Option<ProcessCost>, String> {
     Err("proportional process memory is not available on this operating system".into())
 }
 
@@ -238,6 +261,7 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
         .and_then(|found| found.chat.clone());
     let process_map: HashMap<Pid, &Found> = ours.iter().map(|found| (found.pid, found)).collect();
     let mut total = 0u64;
+    let mut swapped_total = 0u64;
     let mut grouped: HashMap<String, (u64, usize)> = HashMap::new();
     let mut details = Vec::new();
     // Titles are wanted only for the chats found running, and most reports find
@@ -263,10 +287,12 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
             .collect()
     };
     for found in &ours {
-        let Some(bytes) = process_bytes(found.pid, 0)? else {
+        let Some(cost) = process_cost(found.pid)? else {
             continue;
         };
+        let bytes = cost.total();
         total = total.saturating_add(bytes);
+        swapped_total = swapped_total.saturating_add(cost.swapped);
         let session_id = effective_chat(found.pid, &process_map, inherited_chat_id.as_ref());
         let role = role_of(&found, root, &process_map, session_id.as_deref());
         if let Some(id) = session_id.as_ref() {
@@ -279,6 +305,7 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
             parent_pid: found.parent.map(Pid::as_u32),
             name: found.name.clone(),
             bytes,
+            swap_bytes: cost.swapped,
             chat_title: session_id.as_ref().and_then(|id| titles.get(id)).cloned(),
             session_id,
             role,
@@ -302,6 +329,7 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
     details.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.pid.cmp(&b.pid)));
     Ok(MemoryReport {
         total_bytes: total,
+        swap_bytes: swapped_total,
         metric: MEMORY_METRIC,
         process_count: details.len(),
         chats,
@@ -394,10 +422,47 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
+    const ROLLUP: &str = "Rss:               12000 kB\nPss:                4321 kB\nPss_Anon:           4000 kB\nSwap:               9000 kB\nSwapPss:            1234 kB\n";
+
+    #[cfg(target_os = "linux")]
     #[test]
     fn reads_pss_without_confusing_it_with_pss_anon() {
-        let sample = "Rss:               12000 kB\nPss:                4321 kB\nPss_Anon:           4000 kB\n";
-        assert_eq!(parse_pss(sample), Some(4_424_704));
+        assert_eq!(parse_field(ROLLUP, "Pss:"), Some(4_424_704));
+    }
+
+    /// `Swap:` counts pages the process shares with others; `SwapPss:` counts
+    /// its own share. A prefix match that answered `Swap:` for `SwapPss:` would
+    /// charge this process for all nine megabytes instead of its own 1234 kB.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reads_swap_pss_without_confusing_it_with_plain_swap() {
+        assert_eq!(parse_field(ROLLUP, "SwapPss:"), Some(1_263_616));
+        assert_eq!(parse_field(ROLLUP, "Swap:"), Some(9_216_000));
+    }
+
+    /// The whole point of the fix: a process pays for what it has paged out.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_process_costs_what_it_holds_plus_what_it_has_paged_out() {
+        let cost = ProcessCost {
+            resident: parse_field(ROLLUP, "Pss:").unwrap(),
+            swapped: parse_field(ROLLUP, "SwapPss:").unwrap(),
+        };
+        assert_eq!(cost.total(), 4_424_704 + 1_263_616);
+    }
+
+    /// A rollup with no swap line is a machine that has never paged this
+    /// process out, not a rollup that could not be read.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_rollup_without_a_swap_line_costs_only_what_is_resident() {
+        let sample = "Rss:               12000 kB\nPss:                4321 kB\n";
+        assert_eq!(parse_field(sample, "SwapPss:"), None);
+        let cost = ProcessCost {
+            resident: parse_field(sample, "Pss:").unwrap(),
+            swapped: parse_field(sample, "SwapPss:").unwrap_or(0),
+        };
+        assert_eq!(cost.total(), 4_424_704);
     }
 
     #[test]
