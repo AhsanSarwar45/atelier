@@ -1469,21 +1469,14 @@ pub struct UpdateBeadRequest {
     pub remove_label: Option<String>,
 }
 
-fn lifecycle_status(status: Option<&str>) -> bool {
-    matches!(status, Some("inreview" | "in_review" | "manager_review" | "closed"))
-}
-
-/// The board lifecycle check for a person dragging a card in the browser.
-///
-/// This once shelled out to `machinery/hooks/board-status-gate.py`, feeding it a
-/// synthetic `atelier-api` Bash session. That gate is agent-session governance
-/// and demands a Python interpreter the release cannot assume, so on a host
-/// without one the whole review/done half of the board was refused. The check
-/// is now native and deliberately narrowed to the parts that mean something for
-/// a hand drag -- see `crate::board_gate` for exactly what it keeps and drops.
-async fn lifecycle_denial(project: &Path, id: &str, status: &str) -> Option<String> {
-    crate::board_gate::human_drag_denial(project, id, status).await
-}
+// Nothing here stands between a person and a column. The screen used to run a
+// lifecycle check of its own before writing a status a hand asked for: a card in
+// the manager's column could not be dragged out, and review or done needed a
+// landed commit, every gate resolved and every child closed. That is the
+// discipline agent sessions are held to by their own hooks, and holding the
+// owner of the board to it as well left them looking at a column they could not
+// drop into with no way to say "I mean it". The board screen now writes what it
+// is told, and `--force` below carries the same answer down to `bd` (bw-7vpn).
 
 /// PATCH /api/beads/update
 ///
@@ -1533,15 +1526,6 @@ async fn update_bead(
         }
     }
 
-    if lifecycle_status(req.status.as_deref()) && req.path.starts_with(DOLT_PATH_PREFIX) {
-        return (
-            StatusCode::CONFLICT,
-            Json(serde_json::json!({
-                "error": "Atelier cannot verify commit and merge prerequisites from a board-only Dolt address; update through the project on the host that owns its checkout"
-            })),
-        );
-    }
-
     // Dolt-only path: update via SQL
     if let Some(db_name) = req.path.strip_prefix(DOLT_PATH_PREFIX) {
         if !dolt_manager.is_available() && !dolt_manager.check_server().await {
@@ -1579,12 +1563,6 @@ async fn update_bead(
     if let Err(e) = validate_path_security(&project_path) {
         return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": e })));
     }
-    if let Some(status) = req.status.as_deref().filter(|_| lifecycle_status(req.status.as_deref())) {
-        if let Some(reason) = lifecycle_denial(&project_path, &req.id, status).await {
-            return (StatusCode::CONFLICT, Json(serde_json::json!({ "error": reason })));
-        }
-    }
-
     // Build bd update args
     let mut args = vec!["update".to_string(), req.id.clone()];
     if let Some(ref t) = req.title {
@@ -1595,6 +1573,10 @@ async fn update_bead(
     }
     if let Some(ref s) = req.status {
         args.push(format!("--status={}", s));
+        // `bd` refuses on its own to close a card with an open child or a live
+        // blocker. A person asking for that column has already decided; say so
+        // rather than handing them back a refusal they cannot act on (bw-7vpn).
+        args.push("--force".to_string());
     }
     if let Some(ref t) = req.issue_type {
         args.push(format!("--type={}", t));

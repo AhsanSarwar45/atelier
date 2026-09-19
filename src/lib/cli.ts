@@ -73,6 +73,11 @@ export async function addComment(
  * Writes what the board actually holds for that state, per SET_BY: a state the
  * board stores under another name, or as a closed card carrying a mark.
  *
+ * `--force` rides along. The person moving the card owns the board, and their
+ * own screen is not the place to argue with them: without it `bd` refuses to
+ * close a card that still has an open child or a live blocker, and a column the
+ * reader can see but cannot drop into is the complaint this answers (bw-7vpn).
+ *
  * @param beadId - The ID of the bead to update
  * @param status - The new status value
  * @param cwd - Working directory (project path)
@@ -90,7 +95,7 @@ export async function updateStatus(
 ): Promise<void> {
   const write = SET_BY[status];
   const result = await executeBdCommand(
-    ["update", beadId, "--status", write.status,
+    ["update", beadId, "--status", write.status, "--force",
       ...(write.addLabel ? ["--add-label", write.addLabel] : []),
       ...(write.removeLabel ? ["--remove-label", write.removeLabel] : [])],
     cwd
