@@ -1653,3 +1653,37 @@ subject named the generated `no-code` land card. This paragraph is that commit.
 `worktrees/bw-9vv9` was refused as a claim from the main checkout. The
 per-command bypass allowed the claim. The provider adapter must preserve the
 explicit tool workdir before any ownership decision.
+
+## The close of a land card is refused both ways (bw-vl3q.7)
+
+Reproduced on `bw-vl3q.7`, the generated `no-code` land card, with the job
+genuinely finished: every commit landed, `atelier tool checks` recorded
+`Project checks=PASSED` on tree `a054a919`, and the worktree and branch were
+removed. `bd close bw-vl3q.7` refused:
+
+```
+cannot close bw-vl3q.7: assignee is "AhsanSarwar45", actor is "s-916f1ee3";
+reclaim or use --force to override
+```
+
+`bd update --claim` had recorded the git user as the assignee, while the close
+compares against the session actor. Taking `bd`'s own advice then hit the other
+side:
+
+```
+A forced close can skip blockers and unfinished children;
+close truthfully without --force.
+```
+
+So one tool asks for `--force` and the other forbids it, and there is no third
+command: `bd update --assignee` refuses to reassign a card held in_progress,
+`bd reclaim` is the stale-lease reaper and only reverts expired leases to open,
+and `BEADS_ACTOR` — which `atelier tool board/land` documents as the way to set
+the actor — is not read on this path. The documented per-command bypass carried
+the close.
+
+The fix belongs on the identity, not the gate: a claim should record the actor
+the close will be compared against, or the close should accept the assignee a
+claim from this session wrote. Until then the refusal pair above is the whole
+of the friction, and it is reached by every job whose land card the agent
+closes itself rather than through `board/land`.
