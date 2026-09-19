@@ -583,6 +583,12 @@ async fn serve(open_browser: bool) {
             "/api",
             routes::new_chat::new_chat_routes().with_state(database.clone()),
         )
+        // Whether the board is reachable from away, and what it binds and
+        // calls itself. Same table, same guard (routes/remote_access.rs).
+        .nest(
+            "/api",
+            routes::remote_access::remote_access_routes().with_state(database.clone()),
+        )
         // How the AI search runs. Same table, same guard (routes/search_settings.rs).
         .nest(
             "/api",

@@ -211,6 +211,13 @@ pub fn install_plan(manager: Option<Manager>, user: &str) -> Option<Vec<Vec<Stri
     ])
 }
 
+/// The door Tailscale is told to forward to, written once so the command
+/// that starts serving and the reading that checks whether it is being served
+/// cannot disagree about the spelling.
+fn target(port: u16) -> String {
+    format!("http://127.0.0.1:{port}")
+}
+
 /// The command that starts serving the board at the address in front.
 ///
 /// `--bg` because it has to outlive the command that asked for it, and
@@ -222,7 +229,7 @@ pub fn serve_on(port: u16) -> Vec<String> {
         "serve".to_string(),
         "--bg".to_string(),
         "--https=443".to_string(),
-        format!("http://127.0.0.1:{port}"),
+        target(port),
     ]
 }
 
@@ -387,9 +394,78 @@ fn run_letting_it_ask(step: &[String]) -> Result<(), String> {
     }
 }
 
+/// Whether Tailscale is already putting this app's port on the tailnet.
+///
+/// Read out of `tailscale serve status --json` by looking for the address it
+/// was told to forward to. The shape of that reading has changed between
+/// Tailscale versions and the proxy target is the one part of it that has
+/// not, so this looks for that rather than walking a tree of keys that a
+/// later version may rename underneath us.
+pub fn serving_from(said: &str, port: u16) -> bool {
+    said.contains(&target(port))
+}
+
+/// Whether this app's port is being served right now.
+pub fn serving_now(port: u16) -> bool {
+    let Some(program) = looked_up() else {
+        return false;
+    };
+    let reading = serve_reading();
+    std::process::Command::new(program)
+        .args(&reading[1..])
+        .output()
+        .map(|out| serving_from(&String::from_utf8_lossy(&out.stdout), port))
+        .unwrap_or(false)
+}
+
+/// Start or stop serving this app's port, and say what went wrong if it did.
+///
+/// This needs no password: `remote install` handed operation to this user, so
+/// the switch on the settings screen can call it directly.
+pub fn set_serving(on: bool, port: u16) -> Result<(), String> {
+    let program = looked_up().ok_or_else(|| {
+        format!("Tailscale is not installed, so there is nothing to serve through. Run `atelier remote install` in a terminal, or get it from {DOWNLOAD}.")
+    })?;
+    // Turning it on with the daemon down would leave the switch saying on
+    // and nothing reachable, which is the one answer worse than a refusal.
+    if on {
+        if let Some(wrong) = standing().wrong() {
+            return Err(wrong);
+        }
+    }
+    let step = match on {
+        true => serve_on(port),
+        false => serve_off(),
+    };
+    let out = std::process::Command::new(program)
+        .args(&step[1..])
+        .output()
+        .map_err(|e| format!("Tailscale could not be run: {e}"))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let said = first_line(&String::from_utf8_lossy(&out.stderr));
+    Err(match said.is_empty() {
+        true => format!("`{}` did not finish.", step.join(" ")),
+        false => format!("Tailscale refused: {said}"),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What is being served is read by the address it forwards to.
+    ///
+    /// A reading for somebody else's port is not this app's; the switch would
+    /// otherwise draw itself on because a neighbour is served (bw-hdor.3).
+    #[test]
+    fn a_reading_for_another_port_is_not_read_as_this_one_being_served() {
+        let said = r#"{"Web":{"desk.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3008"}}}}}"#;
+        assert!(serving_from(said, 3008));
+        assert!(!serving_from(said, 3009));
+        assert!(!serving_from("{}", 3008));
+    }
 
     #[test]
     fn a_computer_that_is_up_and_named_gives_the_address_a_phone_opens() {

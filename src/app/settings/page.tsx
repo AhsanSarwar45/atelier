@@ -12,13 +12,14 @@ import { Suspense, useCallback, useMemo } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { Bell, FileCode2, Palette, Puzzle, Search, SquareTerminal, Tag, Users } from 'lucide-react';
+import { Bell, FileCode2, Globe, Palette, Puzzle, Search, SquareTerminal, Tag, Users } from 'lucide-react';
 
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
 import { useProfiles } from '@/components/settings/account-picker';
 import { AppearanceSettings } from '@/components/settings/appearance-settings';
 import { NotificationSettings } from '@/components/settings/notification-settings';
 import { ProviderSection } from '@/components/settings/provider-section';
+import { RemoteAccessSettings } from '@/components/settings/remote-access-settings';
 import { SettingsGroup } from '@/components/settings/section';
 import { SettingsScreen, type SettingsSectionDef } from '@/components/settings/settings-screen';
 import { TagsSettings } from '@/components/settings/tags-settings';
@@ -40,6 +41,7 @@ const SECTIONS: SettingsSectionDef[] = [
   { id: 'files', label: 'Agent files', hint: 'Per account', icon: <FileCode2 /> },
   { id: 'search', label: 'Search', hint: 'AI search', icon: <Search /> },
   { id: 'terminal', label: 'Terminal', hint: 'Shell', icon: <SquareTerminal /> },
+  { id: 'remote', label: 'Remote access', hint: 'Reach it from away', icon: <Globe /> },
   { id: 'dependencies', label: 'Dependencies', hint: 'Tools', icon: <Puzzle /> },
   { id: 'tags', label: 'Tags', hint: 'Projects', icon: <Tag /> },
 ];
@@ -145,6 +147,13 @@ function Settings() {
         <SettingsGroup title="Terminal">
           <div className="p-3">
             <TerminalSettings />
+          </div>
+        </SettingsGroup>
+      )}
+      {known === 'remote' && (
+        <SettingsGroup title="Remote access">
+          <div className="p-3">
+            <RemoteAccessSettings />
           </div>
         </SettingsGroup>
       )}

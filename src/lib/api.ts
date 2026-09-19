@@ -1249,6 +1249,62 @@ export async function saveTerminalSettings(shell: string | null): Promise<Termin
   return (await answer.json()) as TerminalShell;
 }
 
+/**
+ * Whether the board can be reached from outside the house, and what it binds
+ * and calls itself (server/src/routes/remote_access.rs).
+ *
+ * `standing` is how far along this computer is, as one word rather than a
+ * sentence, so the screen can draw the right next step: `not-installed`,
+ * `not-answering`, `needs-sign-in`, `stopped`, `starting`, `unnamed`, `ready`.
+ * `wrong` is that step written out, and is null once there is nothing left.
+ */
+export interface RemoteAccess {
+  standing:
+    | 'not-installed'
+    | 'not-answering'
+    | 'needs-sign-in'
+    | 'stopped'
+    | 'starting'
+    | 'unnamed'
+    | 'ready';
+  wrong: string | null;
+  serving: boolean;
+  address: string | null;
+  bindHost: string | null;
+  bindHostDefault: string;
+  publicUrl: string | null;
+  publishing: string | null;
+  port: number;
+}
+
+/** What the switch and the two fields may change; absent means unchanged. */
+export interface RemoteAccessChange {
+  serving?: boolean;
+  bindHost?: string;
+  publicUrl?: string;
+}
+
+/** Remote access as it stands, read from Tailscale rather than remembered. */
+export async function remoteAccess(): Promise<RemoteAccess> {
+  const answer = await request('/api/settings/remote');
+  if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+  return (await answer.json()) as RemoteAccess;
+}
+
+/**
+ * Change one part of it. Answers with the section as it then stands, read back
+ * from Tailscale, so the switch shows what is true and not what was asked for.
+ */
+export async function saveRemoteAccess(change: RemoteAccessChange): Promise<RemoteAccess> {
+  const answer = await request('/api/settings/remote', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(change),
+  });
+  if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+  return (await answer.json()) as RemoteAccess;
+}
+
 export interface SearchSettings {
   provider: 'claude' | 'codex' | 'local' | null;
   profile: string | null;

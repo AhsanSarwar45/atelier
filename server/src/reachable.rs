@@ -252,7 +252,7 @@ pub fn openable_at(
             Some(url) => vec![here, format!("Network            {url}")],
             None => vec![
                 here,
-                "Local access only. Set ATELIER_HOST=0.0.0.0 for network access."
+                "Local access only. Settings > Remote access changes what it answers on."
                     .to_string(),
             ],
         },
@@ -375,7 +375,13 @@ mod tests {
             "an address was offered that would not answer: {said}"
         );
         assert!(said.contains("Local access only"), "{said}");
-        assert!(said.contains("ATELIER_HOST=0.0.0.0"), "it does not say how to change it: {said}");
+        // Where to change it, and not what to change: the variable it used
+        // to name is no longer carried into the installed service, so a
+        // reader who set it would see nothing happen (bw-hdor.1).
+        assert!(
+            said.contains("Settings > Remote access"),
+            "it does not say where to change it: {said}"
+        );
     }
 
     #[test]
