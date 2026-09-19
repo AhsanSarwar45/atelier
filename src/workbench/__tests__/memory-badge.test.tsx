@@ -9,12 +9,12 @@ vi.mock('@/lib/api', () => ({ request: (...args: unknown[]) => request(...args) 
 describe('memory badge', () => {
   beforeEach(() => {
     request.mockResolvedValue({ ok: true, json: async () => ({
-      totalBytes: 200 * 1024 ** 2, metric: 'pss', processCount: 3,
+      totalBytes: 200 * 1024 ** 2, swapBytes: 50 * 1024 ** 2, metric: 'pssWithSwap', processCount: 3,
       chats: [{ sessionId: 'chat-1', title: 'Build the app', bytes: 100, processes: 2 }],
       processDetails: [
-        { pid: 10, parentPid: null, name: 'atelier', bytes: 100, sessionId: null, chatTitle: null, role: 'app', killable: false, startTime: 1 },
-        { pid: 11, parentPid: 10, name: 'claude', bytes: 100, sessionId: null, chatTitle: null, role: 'accountReader', killable: false, startTime: 2 },
-        { pid: 14, parentPid: 13, name: 'cargo', bytes: 100, sessionId: 'chat-1', chatTitle: 'Build the app', role: 'subprocess', killable: true, startTime: 4 },
+        { pid: 10, parentPid: null, name: 'atelier', bytes: 100, swapBytes: 0, sessionId: null, chatTitle: null, role: 'app', killable: false, startTime: 1 },
+        { pid: 11, parentPid: 10, name: 'claude', bytes: 100, swapBytes: 20, sessionId: null, chatTitle: null, role: 'accountReader', killable: false, startTime: 2 },
+        { pid: 14, parentPid: 13, name: 'cargo', bytes: 100, swapBytes: 0, sessionId: 'chat-1', chatTitle: 'Build the app', role: 'subprocess', killable: true, startTime: 4 },
       ],
     }) });
   });
@@ -23,6 +23,30 @@ describe('memory badge', () => {
   it('uses compact binary units', () => {
     expect(memoryWords(512 * 1024 ** 2)).toBe('512 MB');
     expect(memoryWords(1536 * 1024 ** 2)).toBe('1.5 GB');
+  });
+
+  // The chip's number counts swapped pages, so it can run well ahead of the
+  // resident figure a system monitor reports. The popover has to say why.
+  it('shows the total the app costs and splits it into resident and swapped', async () => {
+    render(<MemoryBadge />);
+    expect(await screen.findByTestId('memory-badge')).toHaveTextContent('200 MB');
+    fireEvent.click(screen.getByTestId('memory-badge'));
+    const split = await screen.findByTestId('memory-swap-line');
+    expect(split).toHaveTextContent('In RAM 150 MB');
+    expect(split).toHaveTextContent('Swapped 50 MB');
+  });
+
+  it('leaves the split out when nothing is paged out', async () => {
+    request.mockResolvedValue({ ok: true, json: async () => ({
+      totalBytes: 200 * 1024 ** 2, swapBytes: 0, metric: 'pssWithSwap', processCount: 1,
+      chats: [], processDetails: [
+        { pid: 10, parentPid: null, name: 'atelier', bytes: 100, swapBytes: 0, sessionId: null, chatTitle: null, role: 'app', killable: false, startTime: 1 },
+      ],
+    }) });
+    render(<MemoryBadge />);
+    fireEvent.click(await screen.findByTestId('memory-badge'));
+    await screen.findByTestId('memory-popup');
+    expect(screen.queryByTestId('memory-swap-line')).toBeNull();
   });
 
   it('offers a confirmed stop only for a chat subprocess', async () => {

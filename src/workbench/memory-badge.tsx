@@ -11,11 +11,13 @@ import { request } from '@/lib/api';
 
 interface MemoryReport {
   totalBytes: number;
-  metric: 'pss';
+  /** The part of totalBytes the kernel has paged out rather than holding in RAM. */
+  swapBytes: number;
+  metric: 'pssWithSwap';
   processCount: number;
   chats: Array<{ sessionId: string; title: string; bytes: number; processes: number }>;
   processDetails: Array<{
-    pid: number; parentPid: number | null; name: string; bytes: number;
+    pid: number; parentPid: number | null; name: string; bytes: number; swapBytes: number;
     sessionId: string | null; chatTitle: string | null;
     role: 'app' | 'accountReader' | 'appService' | 'chatAdapter' | 'provider' | 'subprocess';
     killable: boolean; startTime: number;
@@ -24,7 +26,8 @@ interface MemoryReport {
 function isMemoryReport(value: unknown): value is MemoryReport {
   if (!value || typeof value !== 'object') return false;
   const report = value as Partial<MemoryReport>;
-  return typeof report.totalBytes === 'number' && report.metric === 'pss'
+  return typeof report.totalBytes === 'number' && typeof report.swapBytes === 'number'
+    && report.metric === 'pssWithSwap'
     && typeof report.processCount === 'number' && Array.isArray(report.chats) && Array.isArray(report.processDetails);
 }
 export function memoryWords(bytes: number): string {
@@ -84,7 +87,7 @@ export function MemoryBadge() {
       </Badge>
     </PopoverTrigger>
     <PopoverContent align="start" className="w-96 p-0" data-testid="memory-popup">
-      <div className="border-b px-3 py-2"><p className="text-sm font-medium">RAM usage</p><p className="text-xs text-muted-foreground">Proportional memory across {report.processCount} processes</p></div>
+      <div className="border-b px-3 py-2"><p className="text-sm font-medium">RAM usage</p><p className="text-xs text-muted-foreground">Proportional memory across {report.processCount} processes, resident and swapped</p></div>
       <div className="max-h-80 overflow-y-auto p-2 text-sm">
         {report.chats.length > 0 && <><p className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Active chats</p>
           {report.chats.map(chat => <div key={chat.sessionId} className="flex items-center gap-3 rounded px-2 py-1.5" data-testid="memory-chat-row"><span className="min-w-0 flex-1 truncate">{chat.title}<span className="ml-1 text-xs text-muted-foreground">({chat.processes})</span></span><span className="shrink-0 tabular-nums text-muted-foreground">{memoryWords(chat.bytes)}</span></div>)}
@@ -101,7 +104,17 @@ export function MemoryBadge() {
         </div>)}
         {error && <p className="px-2 py-1 text-xs text-destructive" role="alert">{error}</p>}
       </div>
-      <div className="flex items-center justify-between border-t px-4 py-2 text-sm font-medium"><span>Total</span><span className="tabular-nums">{memoryWords(report.totalBytes)}</span></div>
+      <div className="border-t px-4 py-2 text-sm">
+        <div className="flex items-center justify-between font-medium"><span>Total</span><span className="tabular-nums">{memoryWords(report.totalBytes)}</span></div>
+        {/* Pages the kernel has pushed to swap still cost the machine, so the
+            total counts them. Naming the split keeps the total explainable
+            when it runs ahead of the resident figure a system monitor shows,
+            and says plainly that the app is under memory pressure. */}
+        {report.swapBytes > 0 && <div className="flex items-center justify-between pt-0.5 text-xs font-normal text-muted-foreground" data-testid="memory-swap-line">
+          <span>In RAM {memoryWords(report.totalBytes - report.swapBytes)}</span>
+          <span className="tabular-nums">Swapped {memoryWords(report.swapBytes)}</span>
+        </div>}
+      </div>
     </PopoverContent>
   </Popover>;
 }

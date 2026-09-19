@@ -146,7 +146,10 @@ fn process_cost(_pid: Pid) -> Result<Option<ProcessCost>, String> {
     Err("proportional process memory is not available on this operating system".into())
 }
 
-const MEMORY_METRIC: &str = "pss";
+/// Proportional set size, resident and swapped together. The name says both
+/// halves because a reader who saw "pss" would reasonably expect a number that
+/// ignores swap, which is the bug this replaced (bw-c4i2.2).
+const MEMORY_METRIC: &str = "pssWithSwap";
 
 /// One of this app's own processes, with what the report shows of it.
 struct Found {
