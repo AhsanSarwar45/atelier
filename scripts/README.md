@@ -388,3 +388,67 @@ Run it against a built instance. It is how the memory panel was caught reading
 what the project remembers before anyone had opened it — a `bd` run of its own,
 a seventh of a second, for an empty list (bw-uiyz.14).
 
+
+## The Files tab's cost — `files-*.mjs`, `files-perf-stack.sh`
+
+Six harnesses that together say where the wait goes when a file is opened.
+They were written for the audit in
+`docs/files-tab-performance-audit-2026-09-19.md`, and every number in it came
+from them. Run them against a BUILT instance of the worktree under test, never
+against the owner's app.
+
+`files-perf-stack.sh` starts that instance: the release binary from this
+worktree, on a port named by `BEADS_WEB_PORT`, with its own data directory. It
+refuses a port somebody else is on.
+
+```
+BEADS_WEB_PORT=3411 scripts/files-perf-stack.sh
+curl -X POST http://127.0.0.1:3411/api/projects -H 'content-type: application/json' \
+  -d '{"name":"perf","path":"<a checkout>"}'
+```
+
+`files-server-cost.mjs` times the two calls opening a file makes — one level of
+the tree and the text of a file — cold and warm, with the bytes each carries.
+It is what showed the server is not the problem: 2 ms for a directory, 7 ms for
+a 1.9 MB file.
+
+```
+BEADS_E2E_URL=http://127.0.0.1:3411 node scripts/files-server-cost.mjs <checkout>
+```
+
+`files-open-cost.mjs` clicks a file in the tree and stops the clock when its
+text is on screen, then steps away and back so what the app kept shows up in
+the second number. It also counts what an untouched tab costs in calls, and
+what coming back to the tab costs. `CPU_SLOWER=6` slows the main thread to
+something like an ordinary laptop.
+
+```
+BEADS_E2E_URL=http://127.0.0.1:3411 node scripts/files-open-cost.mjs <projectId> <checkout> README.md package-lock.json
+```
+
+`files-click-through.mjs` is the one that found the 5.6-second stall: a click
+that lands while a read is in the air is dropped, and the file it asked for
+waits for the next five-second poll. `SLOW_READ_MS` slows the answers so the
+overlap is certain rather than lucky; the third section needs no slowing at all
+and uses the tab's own re-read of the open file as the overlap.
+
+```
+BEADS_E2E_URL=http://127.0.0.1:3411 SLOW_READ_MS=600 \
+  node scripts/files-click-through.mjs <projectId> package-lock.json tsconfig.json components.json
+```
+
+`files-reveal-cost.mjs` opens a deep path straight from the address — the shape
+of every "open this file" link in the app — and prints the tree calls it took
+and the gaps between them. Five serial journeys for a three-deep path.
+
+```
+BEADS_E2E_URL=http://127.0.0.1:3411 SLOW_TREE_MS=200 \
+  node scripts/files-reveal-cost.mjs <projectId> <checkout>/server/src/routes/fs.rs
+```
+
+`files-typing-cost.mjs` times each keystroke in the editor against files of
+several sizes. It is what ruled typing out as a size problem.
+
+```
+BEADS_E2E_URL=http://127.0.0.1:3411 node scripts/files-typing-cost.mjs <projectId> <file> <file>
+```
