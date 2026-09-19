@@ -12,8 +12,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Loader2, Puzzle, Search, Store } from 'lucide-react';
+import { Loader2, Search, Store } from 'lucide-react';
 
+import { KindIcon } from '@/components/settings/kind-icon';
 import type { Scope } from '@/components/settings/provider-settings-api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -49,9 +50,7 @@ function matches(entry: OfferedPlugin, want: string): boolean {
 function Row({ entry, busy, onInstall }: { entry: OfferedPlugin; busy: boolean; onInstall: (entry: OfferedPlugin) => Promise<void> }) {
   return (
     <li className="flex items-start gap-3 px-3 py-2" data-testid={`plugin-entry-${entry.id}`}>
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-surface-overlay text-t-muted">
-        <Puzzle className="size-4" />
-      </span>
+      <KindIcon kind="plugin" />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium text-t-primary">{entry.title}</span>

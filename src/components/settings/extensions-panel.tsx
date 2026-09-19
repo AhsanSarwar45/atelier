@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { Loader2, Plus, Trash2 } from 'lucide-react';
 
+import { KindIcon } from '@/components/settings/kind-icon';
 import { wireScope } from '@/components/settings/mcp-servers-panel';
 import { PluginCatalogue } from '@/components/settings/plugin-catalogue';
 import type { Scope } from '@/components/settings/provider-settings-api';
@@ -194,6 +195,7 @@ export function ExtensionsPanel({ brand, scope }: { brand: Brand; scope: Scope }
                       data-testid={`plugin-enabled-${item.id}`}
                     />
                   )}
+                  <KindIcon kind={kind === 'plugins' ? 'plugin' : 'marketplace'} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate text-sm font-medium text-t-primary">{item.name}</span>

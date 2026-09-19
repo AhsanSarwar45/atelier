@@ -6,8 +6,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Loader2, LogIn, LogOut, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, Loader2, LogIn, LogOut, Plus, Trash2 } from 'lucide-react';
 
+import { KindIcon } from '@/components/settings/kind-icon';
 import { McpCatalogue } from '@/components/settings/mcp-catalogue';
 import type { Scope } from '@/components/settings/provider-settings-api';
 import { SettingsGroup } from '@/components/settings/section';
@@ -21,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 import type { Brand, McpElsewhere, McpServer, McpSource, SettingsScope } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -41,6 +43,51 @@ type Listed = { servers: McpServer[]; elsewhere?: McpElsewhere[] };
 function sourcesFor(brand: Brand, scope: Scope): McpSource[] {
   if (scope.kind === 'account') return ['user'];
   return brand === 'claude' ? ['project', 'local'] : ['project'];
+}
+
+/** What a server is started by, as one line. */
+function launchOf(s: McpServer): string {
+  return s.command ? [s.command, ...(s.args ?? [])].join(' ') : s.url ?? '';
+}
+
+/**
+ * What a row says underneath the name (bw-6ecp.16).
+ *
+ * This used to be the raw launch command, because a settings file holds
+ * nothing else — no name, no description, no icon. Where the catalogue knows
+ * the server, the line about what it is for goes here instead and the command
+ * becomes a detail the reader can open. Where it does not, the command stays:
+ * something true is better than nothing.
+ */
+function Subtitle({ server }: { server: McpServer }) {
+  const [open, setOpen] = useState(false);
+  const launch = launchOf(server);
+  if (!server.description) {
+    return (
+      <Tooltip label={launch}>
+        <p className="truncate font-mono text-xs text-t-muted">{launch}</p>
+      </Tooltip>
+    );
+  }
+  return (
+    <div className="min-w-0">
+      <p className="truncate text-xs text-t-muted">{server.description}</p>
+      <button
+        type="button"
+        className="mt-0.5 inline-flex cursor-pointer items-center gap-1 text-xs text-t-tertiary hover:text-t-secondary"
+        onClick={() => setOpen((was) => !was)}
+        data-testid={`mcp-launch-toggle-${server.id}`}
+      >
+        <ChevronDown className={cn('size-3 transition-transform', open && 'rotate-180')} />
+        {open ? 'Hide how it starts' : 'How it starts'}
+      </button>
+      {open && (
+        <p className="break-all font-mono text-xs text-t-muted" data-testid={`mcp-launch-${server.id}`}>
+          {launch}
+        </p>
+      )}
+    </div>
+  );
 }
 
 function AddServer({ brand, scope, onAdded }: { brand: Brand; scope: Scope; onAdded: (servers: McpServer[]) => void }) {
@@ -255,7 +302,6 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
         {servers.length === 0 && <p className="p-3 text-sm text-t-tertiary">None</p>}
         {servers.map((s) => {
           const key = `${s.source}:${s.id}`;
-          const target = s.command ? [s.command, ...(s.args ?? [])].join(' ') : s.url ?? '';
           return (
             <div key={key} className="flex items-center gap-3 px-3 py-2" data-testid={`mcp-server-${s.id}`}>
               {canToggle ? (
@@ -271,9 +317,11 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
               ) : (
                 <span className="size-4" />
               )}
+              <KindIcon kind="server" src={s.icon} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="truncate text-sm font-medium text-t-primary">{s.id}</span>
+                  {s.title && s.title.toLowerCase() !== s.id.toLowerCase() && <span className="truncate text-xs text-t-tertiary">{s.title}</span>}
                   <Badge variant="outline" size="sm">
                     {s.transport}
                   </Badge>
@@ -294,9 +342,7 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
                   )}
                   {busy === key && <Loader2 className="size-3 animate-spin text-t-muted" />}
                 </div>
-                <Tooltip label={target}>
-                  <p className="truncate font-mono text-xs text-t-muted">{target}</p>
-                </Tooltip>
+                <Subtitle server={s} />
               </div>
               {s.transport !== 'stdio' &&
                 (s.auth === 'signedIn' ? (
@@ -343,10 +389,9 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
           {elsewhere.map((e) => {
             const s = e.server;
             const key = `elsewhere:${e.account}:${s.id}`;
-            const target = s.command ? [s.command, ...(s.args ?? [])].join(' ') : s.url ?? '';
             return (
               <div key={key} className="flex items-center gap-3 px-3 py-2" data-testid={`mcp-elsewhere-${s.id}`}>
-                <span className="size-4" />
+                <KindIcon kind="server" src={s.icon} />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate text-sm font-medium text-t-secondary">{s.id}</span>
@@ -358,9 +403,7 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
                     </Badge>
                     {busy === key && <Loader2 className="size-3 animate-spin text-t-muted" />}
                   </div>
-                  <Tooltip label={target}>
-                    <p className="truncate font-mono text-xs text-t-muted">{target}</p>
-                  </Tooltip>
+                  <Subtitle server={s} />
                 </div>
                 <Button
                   variant="outline"

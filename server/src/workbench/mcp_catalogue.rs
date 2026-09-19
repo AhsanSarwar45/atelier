@@ -361,6 +361,73 @@ async fn search_registry(search: &str) -> Result<Vec<Entry>, String> {
     Ok(entries)
 }
 
+/// What starts a server, as a key two spellings of the same server agree on.
+///
+/// A server in a settings file is a command line and nothing else — no name,
+/// no description, no icon, because `.claude.json` and `config.toml` hold none
+/// of those. What it does hold is enough to say WHICH server it is: the npm
+/// package `npx` is told to fetch, the image `docker run` is told to start, the
+/// host a remote one is called at. That is what this reduces a launch to, so a
+/// server already on an account can be matched back to its catalogue record
+/// (bw-6ecp.16).
+pub fn launch_key(command: Option<&str>, args: &[String], url: Option<&str>) -> Option<String> {
+    if let Some(url) = url.map(str::trim).filter(|u| !u.is_empty()) {
+        let at = url.to_ascii_lowercase();
+        let at = at
+            .split_once("://")
+            .map(|(_, rest)| rest)
+            .unwrap_or(at.as_str());
+        return at.split('/').next().filter(|h| !h.is_empty()).map(str::to_string);
+    }
+    let program = command?.trim().rsplit('/').next()?.to_ascii_lowercase();
+    // A runner is told what to run; anything else IS what runs, and its own
+    // path says nothing a second copy of it would agree on.
+    if !matches!(
+        program.trim_end_matches(".exe"),
+        "npx" | "uvx" | "pipx" | "bunx" | "pnpx" | "docker" | "podman"
+    ) {
+        return None;
+    }
+    let mut rest = args.iter().map(String::as_str);
+    let mut word = rest.next();
+    while let Some(token) = word {
+        let skip_value = matches!(token, "-e" | "--env" | "-v" | "--volume" | "-p" | "--publish" | "--name" | "--from");
+        let is_flag = token.starts_with('-');
+        let is_verb = matches!(token, "run" | "exec" | "create");
+        if skip_value {
+            rest.next();
+            word = rest.next();
+        } else if is_flag || is_verb {
+            word = rest.next();
+        } else {
+            // `mcp/duckduckgo:latest` and `mcp/duckduckgo` are one server.
+            let name = token.rsplit_once(':').map_or(token, |(name, _)| name);
+            return Some(name.to_ascii_lowercase());
+        }
+    }
+    None
+}
+
+/// The curated set by what starts each of them.
+fn by_launch() -> &'static HashMap<String, Entry> {
+    static ONCE: OnceLock<HashMap<String, Entry>> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        let mut index = HashMap::new();
+        for entry in &bundled().entries {
+            if let Some(key) = launch_key(entry.command.as_deref(), &entry.args, entry.url.as_deref()) {
+                index.entry(key).or_insert_with(|| entry.clone());
+            }
+        }
+        index
+    })
+}
+
+/// The catalogue's record for a server already on an account, matched by what
+/// starts it. `None` when the catalogue has never heard of it.
+pub fn identify(command: Option<&str>, args: &[String], url: Option<&str>) -> Option<&'static Entry> {
+    by_launch().get(&launch_key(command, args, url)?)
+}
+
 /// The entry as the provider's own config, ready for `mcp.add`.
 ///
 /// Claude names the kind of server in the entry and Codex does not, which is the
@@ -401,6 +468,30 @@ pub fn config(brand: &str, entry: &Entry, supplied: &Map<String, Value>) -> Map<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_workbench_catalogue_matches_a_running_server_back_to_its_record() {
+        // A command line exactly as a settings file holds it.
+        let args = ["run", "-i", "--rm", "mcp/duckduckgo"].map(String::from);
+        let found = identify(Some("docker"), &args, None).expect("the bundled set has it");
+        assert_eq!(found.id, "duckduckgo");
+        // The same server, pinned to a tag and started by a full path.
+        let tagged = ["run", "-i", "--rm", "-e", "NOISE=1", "mcp/duckduckgo:latest"].map(String::from);
+        assert_eq!(
+            identify(Some("/usr/bin/docker"), &tagged, None).map(|e| e.id.as_str()),
+            Some("duckduckgo")
+        );
+        // A remote server is matched on the host it is called at.
+        assert_eq!(
+            launch_key(None, &[], Some("https://mcp.example.com/v1/sse")).as_deref(),
+            Some("mcp.example.com")
+        );
+        // Something the catalogue has never heard of stays unnamed rather than
+        // wearing somebody else's icon.
+        let mine = ["./my-server.py".to_string()];
+        assert!(identify(Some("python3"), &mine, None).is_none());
+        assert!(identify(Some("npx"), &["-y".to_string(), "@nobody/nothing".to_string()], None).is_none());
+    }
 
     #[test]
     fn native_workbench_catalogue_is_categorised_and_runnable() {

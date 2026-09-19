@@ -921,6 +921,10 @@ export interface McpServer {
   headers?: Record<string, unknown>;
   /** The entry exactly as the file has it. */
   config: Record<string, unknown>;
+  /** What the catalogue knows about it, matched by what starts it (bw-6ecp.16). */
+  title?: string;
+  description?: string;
+  icon?: string;
 }
 
 /**

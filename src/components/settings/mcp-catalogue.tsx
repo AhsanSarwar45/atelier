@@ -15,8 +15,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Boxes, Loader2, Plus, Search, Server } from 'lucide-react';
+import { Boxes, Loader2, Plus, Search } from 'lucide-react';
 
+import { KindIcon } from '@/components/settings/kind-icon';
 import type { Scope } from '@/components/settings/provider-settings-api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -25,7 +26,6 @@ import { Input } from '@/components/ui/input';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Tooltip } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
-import { cn } from '@/lib/utils';
 import type { Brand, McpCatalogue as Catalogue, McpCatalogueEntry, McpServer, McpSource, SettingsScope } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -48,33 +48,6 @@ export function shelfName(id: string): string {
   return words[id] ?? id.charAt(0).toUpperCase() + id.slice(1).replace(/-/g, ' ');
 }
 
-/**
- * The server's own icon, over the glyph every server without one wears.
- *
- * The glyph is not a fallback drawn once the image fails — a blocked or slow
- * fetch never fails, it just hangs, and what the reader got for it was an empty
- * grey box. So the glyph is underneath from the start and the icon is drawn on
- * top of it once it has actually arrived.
- */
-function EntryIcon({ entry }: { entry: McpCatalogueEntry }) {
-  const [loaded, setLoaded] = useState(false);
-  return (
-    <span className="relative flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-surface-overlay text-t-muted">
-      <Server className="size-4" />
-      {entry.icon && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={entry.icon}
-          alt=""
-          className={cn('absolute inset-0 size-8 rounded-md bg-surface-overlay object-contain transition-opacity', loaded ? 'opacity-100' : 'opacity-0')}
-          onLoad={() => setLoaded(true)}
-          data-testid={`catalogue-icon-${entry.id}`}
-        />
-      )}
-    </span>
-  );
-}
-
 /** One row, and the boxes it asks for before it can be added. */
 function Row({
   entry,
@@ -93,7 +66,7 @@ function Row({
   return (
     <li className="flex flex-col gap-2 px-3 py-2" data-testid={`catalogue-entry-${entry.id}`}>
       <div className="flex items-start gap-3">
-        <EntryIcon entry={entry} />
+        <KindIcon kind="server" src={entry.icon} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-t-primary">{entry.title}</span>

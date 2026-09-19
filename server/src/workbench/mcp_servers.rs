@@ -142,6 +142,34 @@ pub struct Server {
     pub auth: Option<Auth>,
     /// The entry exactly as the file holds it.
     pub config: Value,
+    /// What the catalogue knows about this server, matched by what starts it
+    /// (bw-6ecp.16). A settings file holds a command line and nothing else, so
+    /// without this a row can only say `npx -y @modelcontextprotocol/…`, which
+    /// tells the reader nothing about what the server is for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+}
+
+impl Server {
+    /// Wears the catalogue's name, line and icon, when the catalogue has a
+    /// record of what starts this server.
+    fn named(mut self) -> Self {
+        let args = self.args.clone().unwrap_or_default();
+        if let Some(entry) =
+            super::mcp_catalogue::identify(self.command.as_deref(), &args, self.url.as_deref())
+        {
+            self.title = Some(entry.title.clone());
+            if !entry.description.is_empty() {
+                self.description = Some(entry.description.clone());
+            }
+            self.icon = entry.icon.clone();
+        }
+        self
+    }
 }
 
 /// A server one of this brand's OTHER accounts defines.
@@ -244,7 +272,7 @@ pub fn list_with(
         }
     }
     Ok(Listing {
-        servers,
+        servers: servers.into_iter().map(Server::named).collect(),
         elsewhere: Vec::new(),
     })
 }
@@ -672,6 +700,9 @@ fn claude_server(
         headers: config.get("headers").and_then(Value::as_object).cloned(),
         auth: None,
         config: config.clone(),
+        title: None,
+        description: None,
+        icon: None,
     }
 }
 
@@ -709,6 +740,9 @@ fn codex_file(path: &Path, source: Source) -> Result<Vec<Server>, String> {
                     .cloned(),
                 auth: None,
                 config,
+                title: None,
+                description: None,
+                icon: None,
             }
         })
         .collect())
@@ -1676,6 +1710,9 @@ mod tests {
                 headers: None,
                 auth: Some(Auth::Expired),
                 config: json!({"type": "http", "url": "https://a"}),
+                title: None,
+                description: None,
+                icon: None,
             }],
             // Empty, and the shape below says so: an account with nothing to
             // report elsewhere sends no `elsewhere` key at all.
