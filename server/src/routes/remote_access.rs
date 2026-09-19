@@ -30,16 +30,11 @@ use axum::{extract::State, http::StatusCode, middleware, routing::get, Json, Rou
 use serde::{Deserialize, Serialize};
 
 use crate::reachable::{BIND_HOST_SETTING, PUBLIC_URL_SETTING};
-use crate::remote::{self, Standing};
+use crate::remote::{self, Standing, SERVING_SETTING};
 use crate::routes::projects::AppState;
 
 /// A refusal in the words the person should see, rather than a code alone.
 type Refusal = (StatusCode, String);
-
-/// Whether the switch was left on. What is actually being served is read from
-/// Tailscale and not from here; this is what the app puts back after a
-/// restart.
-pub const SERVING_SETTING: &str = "remote.serving";
 
 /// Everything the Remote access section draws.
 #[derive(Debug, PartialEq, Eq, Serialize)]

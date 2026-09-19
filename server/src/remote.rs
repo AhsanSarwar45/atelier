@@ -451,6 +451,60 @@ pub fn set_serving(on: bool, port: u16) -> Result<(), String> {
     })
 }
 
+/// Whether the switch on the settings screen was left on.
+///
+/// What is actually being served is read from Tailscale and never from here.
+/// This is only what the app puts back the next time it starts, and the record
+/// of whose serving it is to take down when it stops.
+pub const SERVING_SETTING: &str = "remote.serving";
+
+/// Whether the reader left reaching-from-away switched on.
+///
+/// Read straight out of the settings file rather than through the open
+/// database, because the shutdown path runs after the app has begun taking
+/// itself apart and there is nothing left there to ask.
+pub fn asked_for() -> bool {
+    crate::db::setting_at_rest(SERVING_SETTING).is_some()
+}
+
+/// Put serving back the way it was left, when the app starts.
+///
+/// Doing nothing loudly rather than failing: the app coming up is not
+/// conditional on a mesh network being reachable, and a person who cannot
+/// reach it from away can open the settings screen to find out why. What is
+/// drawn there is read from Tailscale, so it will say so.
+pub fn follow_the_app_up(port: u16) {
+    if !asked_for() {
+        return;
+    }
+    if serving_now(port) {
+        return;
+    }
+    match set_serving(true, port) {
+        Ok(()) => tracing::info!("reachable from away: serving port {port} on the tailnet"),
+        Err(why) => tracing::warn!("reaching this from away is switched on but did not start: {why}"),
+    }
+}
+
+/// Stop serving as the app goes down.
+///
+/// Leaving it up is the failure this exists to stop: the address would go on
+/// answering, from anywhere, with whatever a connection to a dead port looks
+/// like — and a reader who saw it answer yesterday has no way to tell that
+/// apart from the app being broken.
+///
+/// Only when the setting says the serving is ours. Somebody who ran
+/// `tailscale serve` themselves is owed having it left alone.
+pub fn follow_the_app_down(port: u16) {
+    if !asked_for() {
+        return;
+    }
+    match set_serving(false, port) {
+        Ok(()) => tracing::info!("reachable from away: stopped serving port {port}"),
+        Err(why) => tracing::warn!("serving port {port} could not be stopped: {why}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,7 +4,7 @@
 //! behind them. The one name the product answers to lives in `identity.rs`.
 
 use atelier::{
-    command_line, db, dolt, dolt_lifecycle, handover, identity, needs, reachable, routes,
+    command_line, db, dolt, dolt_lifecycle, handover, identity, needs, reachable, remote, routes,
     rules, service, serving, terminal, workbench,
 };
 
@@ -744,11 +744,85 @@ async fn serve(open_browser: bool) {
         }
     }
 
+    // Reaching this from away was switched on once, on the settings screen,
+    // and is expected to still be on after a reboot. Nothing here waits on it:
+    // the app coming up is not conditional on a mesh network answering
+    // (bw-hdor.4).
+    remote::follow_the_app_up(port);
+
     // Start the server. Without no-delay a response written in pieces, as a
     // compressed one is, waited on the browser's delayed acknowledgement and
     // arrived 40 ms late about one read in two (bw-fbzd.9).
-    axum::serve(listener, app)
-        .tcp_nodelay(true)
-        .await
-        .expect("Server failed to start");
+    // The stop, told twice: once to axum, which begins draining, and once to
+    // the line below, which is what starts the clock on that drain.
+    let (ring, heard) = tokio::sync::oneshot::channel::<()>();
+    let served = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .tcp_nodelay(true)
+            .with_graceful_shutdown(async move {
+                asked_to_stop().await;
+                let _ = ring.send(());
+            })
+            .await
+    });
+
+    // `Err` is the server having ended without ever being asked to, which is
+    // the port going away under it; there is nothing to wait out in that case
+    // and the join below has the reason.
+    let _ = heard.await;
+
+    // A graceful stop waits for every open connection to close, and this app
+    // holds connections that never do: the live wire each screen keeps open,
+    // and every terminal tab. Waited on without a limit, Ctrl-C would look
+    // like a hang for as long as one browser tab is open somewhere in the
+    // house. So the drain is bounded, and what is being waited for — the
+    // requests already in flight finishing — takes far less than this.
+    match tokio::time::timeout(STOPPING_PATIENCE, served).await {
+        Ok(it) => it
+            .expect("the server stopped without saying why")
+            .expect("Server failed to start"),
+        Err(_) => info!("{} stopped with connections still open.", identity::DISPLAY),
+    }
+
+    // And take the address back down with it, so it does not go on answering
+    // from anywhere with a dead port behind it.
+    remote::follow_the_app_down(port);
+}
+
+/// How long a stop waits on requests already in flight before going anyway.
+const STOPPING_PATIENCE: Duration = Duration::from_secs(3);
+
+/// Resolves when the computer asks this program to stop.
+///
+/// Both of the two ways it is asked: Ctrl-C from a terminal, and the signal
+/// systemd sends the unit `atelier service install` writes. Listening for only
+/// the first would mean a machine restart left the board's outside address
+/// answering nothing, which is exactly the case the unit exists for.
+async fn asked_to_stop() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut it) => {
+                it.recv().await;
+            }
+            // Nothing to be done about it, and it is not a reason to refuse to
+            // serve: the other half of this still answers Ctrl-C.
+            Err(e) => {
+                tracing::warn!("this program cannot be told to stop by signal: {e}");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
+    info!("{} is stopping.", identity::DISPLAY);
 }
