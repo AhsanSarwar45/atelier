@@ -39,6 +39,19 @@ describe('zooming image comparisons', () => {
     expect(right).toHaveAttribute('data-pan-y', '-30');
   });
 
+  it.each(['side_by_side', 'wipe'] as const)('opens in the source %s mode and can switch layouts', (mode) => {
+    render(<PictureViewer image={comparison(mode)} onClose={vi.fn()} />);
+
+    const sideBySide = screen.getByRole('button', { name: 'Side by side' });
+    const wipe = screen.getByRole('button', { name: 'Wipe' });
+    expect(sideBySide).toHaveAttribute('aria-pressed', String(mode === 'side_by_side'));
+    expect(wipe).toHaveAttribute('aria-pressed', String(mode === 'wipe'));
+    expect(screen.getByTestId('picture-viewer-comparison')).toHaveAttribute('data-mode', mode);
+
+    fireEvent.click(mode === 'side_by_side' ? wipe : sideBySide);
+    expect(screen.getByTestId('picture-viewer-comparison')).toHaveAttribute('data-mode', mode === 'side_by_side' ? 'wipe' : 'side_by_side');
+  });
+
   it('keeps both layers of a wipe comparison aligned while its split remains adjustable', () => {
     render(<PictureViewer image={comparison('wipe')} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));

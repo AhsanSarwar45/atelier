@@ -214,6 +214,34 @@ test('a presenter-created 864x40 side-by-side comparison survives its source fil
   } finally { if (project) await request.delete(`/api/projects/${project.id}`); }
 });
 
+test('fullscreen comparisons share a mode toggle and stack side-by-side pictures on a phone', async ({ page, request, browser }) => {
+  const run = process.env.WORKBENCH_E2E_RUN!;
+  const comparison = comparisonOf(
+    await bands(browser, join(run, 'mobile-before.png'), '#7c3aed'),
+    await bands(browser, join(run, 'mobile-after.png'), '#059669'),
+    'Mobile before', 'Mobile after', 'side_by_side');
+
+  let project: { id: string } | null = null;
+  try {
+    project = await chatShowing(page, request, comparison, 'mobile-fullscreen-comparison', 'Mobile fullscreen comparison');
+    await page.getByRole('button', { name: 'Open Mobile after comparison to zoom' }).click();
+    const dialog = page.getByTestId('picture-viewer');
+    await expect(dialog).toBeVisible();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: 'tests/results/image-compare-mobile-fullscreen.png', animations: 'disabled' });
+
+    await expect(dialog.getByRole('button', { name: 'Side by side' })).toHaveAttribute('aria-pressed', 'true');
+    const viewports = dialog.locator('[data-testid^=comparison-zoom-viewport-]');
+    const [beforeBox, afterBox] = await Promise.all([viewports.nth(0).boundingBox(), viewports.nth(1).boundingBox()]);
+    if (!beforeBox || !afterBox) throw new Error('Expected both fullscreen comparison pictures');
+    expect(afterBox.y, 'mobile side-by-side pictures did not stack').toBeGreaterThan(beforeBox.y + beforeBox.height);
+
+    await dialog.getByRole('button', { name: 'Wipe' }).click();
+    await expect(dialog.getByTestId('picture-viewer-comparison')).toHaveAttribute('data-mode', 'wipe');
+    await expect(dialog.getByRole('button', { name: 'Wipe' })).toHaveAttribute('aria-pressed', 'true');
+  } finally { if (project) await request.delete(`/api/projects/${project.id}`); }
+});
+
 test('a wide, short wipe comparison keeps its labels and zoom button clear of the picture', async ({ page, request, browser }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   const run = process.env.WORKBENCH_E2E_RUN!;
@@ -264,6 +292,8 @@ test('a wide, short wipe comparison keeps its labels and zoom button clear of th
     await zoom.click();
     const dialog = page.getByTestId('picture-viewer');
     await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Wipe' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(dialog.getByRole('button', { name: 'Side by side' })).toHaveAttribute('aria-pressed', 'false');
     const split = dialog.getByRole('slider', { name: 'Before and after split' });
     await expect(split).toHaveAttribute('aria-valuenow', '50');
     expect(await dialog.locator('input[type=range]').count(), 'the expanded view still has a bare range control').toBe(0);

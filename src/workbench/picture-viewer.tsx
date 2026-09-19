@@ -112,7 +112,7 @@ function Single({ image, transform, onChange }: { image: ImagePayload; transform
 
 function SideBySide({ comparison, transform, onChange }: { comparison: ImageComparison; transform: ImageTransform; onChange: (value: ImageTransform) => void }) {
   return (
-    <div data-testid="picture-viewer-comparison" data-mode="side_by_side" className="grid min-h-0 w-full flex-1 grid-cols-2 gap-3">
+    <div data-testid="picture-viewer-comparison" data-mode="side_by_side" className="grid min-h-0 w-full flex-1 grid-cols-1 grid-rows-2 gap-3 sm:grid-cols-2 sm:grid-rows-1">
       {[comparison.before, comparison.after].map((side, index) => (
         <figure key={side.dataUrl} className="flex min-h-0 min-w-0 flex-col gap-2">
           <ZoomViewport transform={transform} onChange={onChange} testId={`comparison-zoom-viewport-${index}`}>
@@ -208,15 +208,20 @@ function Wipe({ comparison, transform, onChange }: { comparison: ImageComparison
 export function PictureViewer({ image, onClose }: { image: LookableImage; onClose: () => void }) {
   const [transform, setTransform] = useState<ImageTransform>(RESET);
   const comparison: ImageComparison | null = 'mode' in image ? image : null;
+  const [comparisonMode, setComparisonMode] = useState<ImageComparison['mode'] | null>(comparison?.mode ?? null);
   const single: ImagePayload | null = 'mode' in image ? null : image;
   const label = comparison ? `${comparison.before.alt} and ${comparison.after.alt}` : single?.alt;
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent shape="screen" hideClose overlayClassName="bg-black/80" aria-describedby={undefined} aria-label={label || 'Picture'} data-testid="picture-viewer" className="flex h-full w-full flex-col items-center justify-center p-2 pt-16 sm:p-6 sm:pt-16">
+      <DialogContent shape="screen" hideClose overlayClassName="bg-black/80" aria-describedby={undefined} aria-label={label || 'Picture'} data-testid="picture-viewer" className="flex h-full w-full flex-col items-center justify-center p-2 pb-16 pt-16 sm:p-6 sm:pb-16 sm:pt-16">
         <DialogTitle className="sr-only">{label || 'Picture'}</DialogTitle>
         <Controls transform={transform} onChange={setTransform} />
-        {comparison?.mode === 'side_by_side' && <SideBySide comparison={comparison} transform={transform} onChange={setTransform} />}
-        {comparison?.mode === 'wipe' && <Wipe comparison={comparison} transform={transform} onChange={setTransform} />}
+        {comparison && <Panel tone="overlay" inset="none" className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 gap-1 bg-black/70 p-1" aria-label="Comparison layout">
+          <Button type="button" variant="ghost" size="sm" aria-pressed={comparisonMode === 'side_by_side'} className={comparisonMode === 'side_by_side' ? 'bg-white/20 text-white' : 'text-white'} onClick={() => setComparisonMode('side_by_side')}>Side by side</Button>
+          <Button type="button" variant="ghost" size="sm" aria-pressed={comparisonMode === 'wipe'} className={comparisonMode === 'wipe' ? 'bg-white/20 text-white' : 'text-white'} onClick={() => setComparisonMode('wipe')}>Wipe</Button>
+        </Panel>}
+        {comparison && comparisonMode === 'side_by_side' && <SideBySide comparison={comparison} transform={transform} onChange={setTransform} />}
+        {comparison && comparisonMode === 'wipe' && <Wipe comparison={comparison} transform={transform} onChange={setTransform} />}
         {single && <Single image={single} transform={transform} onChange={setTransform} />}
         <Button variant="ghost" mode="icon" size="sm" aria-label="Close the picture" data-testid="picture-viewer-close" className="absolute right-4 top-4 z-20 text-white" onClick={onClose}><X className="h-5 w-5" /></Button>
       </DialogContent>
