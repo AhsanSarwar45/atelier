@@ -6,15 +6,17 @@
  * step needing a password is offered to copy rather than half-done, that a
  * refusal is drawn as the server wrote it, that a refusal with somewhere to go
  * is drawn as a step rather than as a fault, that the wait is visible while it
- * is happening, that the address is shown with where it came from, and that
- * what the switch says is what came back rather than what was asked for. Whether Tailscale is actually
- * there, and whether a host can be bound, are the server's questions and are
- * answered in server/src/remote.rs and server/src/routes/remote_access.rs.
+ * is happening, that the address is shown with where it came from, that who can
+ * reach it is two named doors rather than an address to type, and that what
+ * the switch says is what came back rather than what was asked for. Whether
+ * Tailscale is actually there, and whether a host can be bound, are the
+ * server's questions and are answered in server/src/remote.rs and
+ * server/src/routes/remote_access.rs.
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { RemoteAccessSettings } from '@/components/settings/remote-access-settings';
+import { RemoteAccessSettings, shutsTheDoor } from '@/components/settings/remote-access-settings';
 import {
   remoteAccess,
   RemoteAccessRefused,
@@ -106,7 +108,7 @@ describe('the Remote access section', () => {
     );
     expect(screen.getByTestId('remote-serving')).toHaveTextContent('Enable');
     expect(screen.getByTestId('remote-address-source')).toHaveTextContent(
-      'rename the computer in Tailscale',
+      'Set by Tailscale',
     );
     expect(screen.getByTestId('remote-rename-link')).toHaveAttribute(
       'href',
@@ -142,7 +144,7 @@ describe('the Remote access section', () => {
     // real wait here. A reader sitting through it in front of a dead grey
     // button cannot tell working from broken (bw-ar1o).
     await waitFor(() => expect(button).toHaveTextContent('Turning it on…'));
-    expect(screen.getByTestId('remote-working')).toHaveTextContent('Asking Tailscale');
+    expect(screen.getByTestId('remote-working')).toHaveTextContent('Contacting Tailscale');
 
     answer({ ...ready, serving: true });
 
@@ -171,18 +173,51 @@ describe('the Remote access section', () => {
     expect(screen.queryByTestId('remote-refused')).not.toBeInTheDocument();
   });
 
-  it("draws a refused host in the server's words, leaving what was typed to correct", async () => {
-    read.mockResolvedValue(nothing);
+  it('offers who can reach it as two doors, and saves the one picked', async () => {
+    // The old box wanted an IP address for a question a reader asks in words,
+    // and any address typed into it could lock them out (bw-t2m2.3).
+    read.mockResolvedValue(ready);
+    save.mockResolvedValue({ ...ready, bindHost: '127.0.0.1' });
+
+    render(<RemoteAccessSettings />);
+    const everyone = await screen.findByTestId('remote-reach-everyone');
+    const here = screen.getByTestId('remote-reach-here');
+    // Nothing stored means the default, which lets the home network in.
+    expect(everyone).toBeChecked();
+
+    fireEvent.click(here);
+
+    await waitFor(() => expect(here).toBeChecked());
+    expect(save).toHaveBeenCalledWith({ bindHost: '127.0.0.1' });
+  });
+
+  it('draws a stored address that is neither door as itself, rather than guessing', async () => {
+    // Rounding somebody's own address to whichever door looks closer would be
+    // guessing about who can reach their board, which is the one place not to.
+    read.mockResolvedValue({ ...ready, bindHost: '192.168.1.13' });
+
+    render(<RemoteAccessSettings />);
+
+    expect(await screen.findByTestId('remote-host-odd')).toHaveTextContent('192.168.1.13');
+  });
+
+  it("draws a refusal in the server's words", async () => {
+    read.mockResolvedValue(ready);
     save.mockRejectedValue(new Error('my-desk is not an address this computer can listen on.'));
 
     render(<RemoteAccessSettings />);
-    const field = await screen.findByLabelText('Listen on');
-    fireEvent.change(field, { target: { value: 'my-desk' } });
-    fireEvent.click(screen.getByTestId('remote-host-save'));
+    fireEvent.click(await screen.findByTestId('remote-reach-here'));
 
     expect(await screen.findByTestId('remote-refused')).toHaveTextContent(
       'my-desk is not an address this computer can listen on.',
     );
-    expect(field).toHaveValue('my-desk');
+  });
+
+  it('knows which stored addresses shut the door on the network', () => {
+    expect(shutsTheDoor('127.0.0.1')).toBe(true);
+    expect(shutsTheDoor('::1')).toBe(true);
+    expect(shutsTheDoor('localhost')).toBe(true);
+    expect(shutsTheDoor('0.0.0.0')).toBe(false);
+    expect(shutsTheDoor(null)).toBe(false);
   });
 });

@@ -151,11 +151,7 @@ function Settings() {
         </SettingsGroup>
       )}
       {known === 'remote' && (
-        <SettingsGroup title="Remote access">
-          <div className="p-3">
-            <RemoteAccessSettings />
-          </div>
-        </SettingsGroup>
+        <RemoteAccessSettings />
       )}
       {known === 'dependencies' && (
         <SettingsGroup title="Dependencies">
