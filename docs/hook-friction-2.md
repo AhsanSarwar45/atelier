@@ -1640,3 +1640,9 @@ the gate read the `2` before `>` as a path and resolved it against the main
 checkout. The documented per-command bypass carried the line.
 
 The same shape appears in `&>>` and in `N>&M` for any other descriptor.
+
+## The land gate wants a commit naming a card with nothing to change (bw-ryh3.4)
+
+Reproduced on `bw-ryh3.4`: with the work landed and the generated checks card
+closed green, `atelier tool board/land bw-ryh3.4` refused because no commit
+subject named the generated `no-code` land card. This paragraph is that commit.
