@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 
 /**
- * A settings sheet directs the reader with labels, not paragraphs (bw-ocyd.1).
+ * A settings sheet directs the reader with labels, not paragraphs (bw-ocyd.1),
+ * and on a phone its pages are a picker rather than a cramped row of tabs
+ * (bw-ocyd.2).
  *
  * The sheets used to open with a sentence or two explaining themselves, which
  * is a reading assignment in front of the control the reader came for. What is
@@ -16,6 +18,7 @@ import { expect, test } from '@playwright/test';
  */
 
 const results = 'tests/results/settings-labels';
+const PHONE = { width: 390, height: 844 };
 
 test.describe.configure({ mode: 'serial' });
 
@@ -83,4 +86,23 @@ test('every settings sheet opens with a label, not a paragraph', async ({ page, 
 
   await page.getByTestId('plugin-browse').click();
   await saysItShort(page, 'plugin-catalogue', 'plugin-catalogue.png');
+});
+
+test('on a phone the pages are one picker, not a row of tabs', async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await page.goto('/settings?section=claude&tab=defaults&account=system');
+
+  // The row of tabs is a wide screen's; a phone gets the picker instead.
+  await expect(page.getByTestId('provider-tabs-claude')).toBeHidden();
+  const picker = page.getByTestId('provider-page-claude');
+  await expect(picker).toBeVisible();
+  await expect(picker).toContainText('Defaults');
+  await page.screenshot({ path: join(results, 'phone-pages.png') });
+
+  // Choosing from it opens the page, the same as pressing a tab would.
+  await picker.click();
+  await page.getByTestId('provider-page-mcp').click();
+  await expect(page.getByTestId('mcp-add')).toBeVisible();
+  await expect(picker).toContainText('MCP servers');
+  await page.screenshot({ path: join(results, 'phone-mcp.png') });
 });

@@ -19,6 +19,7 @@ import { pagesFor, type Brand } from '@/components/settings/provider-schema';
 import type { Scope } from '@/components/settings/provider-settings-api';
 import { ProviderSettingsPanel } from '@/components/settings/provider-settings-panel';
 import { ReadFailed } from '@/components/ui/read-failed';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { brandName } from '@/workbench/brand-icon';
 import { SYSTEM_PROFILE } from '@/workbench/protocol';
@@ -55,9 +56,26 @@ export function ProviderTabs({
 }) {
   return (
     <Tabs value={tab} onValueChange={onOpen}>
-      <TabsList className="flex h-auto w-full flex-wrap justify-start sm:h-9 sm:w-auto" data-testid={`provider-tabs-${brand}`}>
+      {/* A phone has no room for four tabs side by side, so there it is one
+          full-width picker naming the open page (bw-ocyd.2). */}
+      <div className="flex flex-col gap-1 sm:hidden">
+        <span className="text-xs font-medium text-t-tertiary">Page</span>
+        <Select value={tab} onValueChange={onOpen}>
+          <SelectTrigger className="w-full" aria-label="Page" data-testid={`provider-page-${brand}`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {tabs.map((t) => (
+              <SelectItem key={t.id} value={t.id} data-testid={`provider-page-${t.id}`}>
+                {t.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <TabsList className="hidden sm:inline-flex sm:h-9 sm:w-auto" data-testid={`provider-tabs-${brand}`}>
         {tabs.map((t) => (
-          <TabsTrigger key={t.id} value={t.id} data-testid={`provider-tab-${t.id}`} className="flex-1 sm:flex-none">
+          <TabsTrigger key={t.id} value={t.id} data-testid={`provider-tab-${t.id}`}>
             {t.label}
           </TabsTrigger>
         ))}
