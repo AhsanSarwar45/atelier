@@ -1606,3 +1606,9 @@ Edit tool refused `src/workbench/chat-sidebar.tsx` because the epic named by the
 directory is open, as an epic is while its children run. Every change to the
 component, its unit case and the new spec was written through the shell with
 the documented per-job `ATELIER_BYPASS` prefix.
+
+Reproduced on `bw-ryh3.1` and `bw-ryh3.2`: with the children claimed in
+`worktrees/bw-ryh3`, the Edit tool refused `server/src/workbench/acp/normalize.rs`,
+and a plain `mkdir` of a scratch directory under the worktree was refused the
+same way. Every edit, every scratch directory and every `git add`/`git commit`
+went through the shell with the documented per-job `ATELIER_BYPASS` prefix.
