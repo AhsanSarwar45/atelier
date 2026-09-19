@@ -24,13 +24,18 @@ pub type Reconciler =
     Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>> + Send + Sync>;
 
 /// Every state a chat is in while a turn is under way.
-pub const ACTIVE_STATES: [&str; 6] = [
+pub const ACTIVE_STATES: [&str; 7] = [
     "starting",
     "thinking",
     "streaming",
     "running_tool",
     "waiting_for_agents",
     "waiting_permission",
+    // A chat folding itself up is working, and for longer than most of the
+    // others: the middle run measured on this machine is 124 seconds. Left out
+    // of this list it is not active, so "Ready" is written over a fold that is
+    // still going and the chat drops off the working list while it runs.
+    "summarising",
 ];
 
 pub fn is_active(state: &str) -> bool {

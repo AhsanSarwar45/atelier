@@ -427,9 +427,15 @@ export function useSession(sessionId: string | null): LoadedSessionView {
   };
 }
 
-/** True while the agent owes an answer — the Stop button's condition. */
+/**
+ * True while the agent owes an answer — the Stop button's condition.
+ *
+ * A chat folding itself up owes one too: the fold happens inside a turn the
+ * agent will carry on with afterwards, and this is the clock the measured bar
+ * counts from, so leaving it out drew the word with no bar under it (bw-ryh3.1).
+ */
 export function isBusy(state: SessionState): boolean {
-  return state === 'thinking' || state === 'streaming' || state === 'waiting_for_agents' || state === 'running_tool' || state === 'waiting_permission';
+  return state === 'thinking' || state === 'streaming' || state === 'waiting_for_agents' || state === 'running_tool' || state === 'waiting_permission' || state === 'summarising';
 }
 
 /**

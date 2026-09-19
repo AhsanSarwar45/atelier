@@ -316,6 +316,10 @@ const OWN_WORD: Record<SessionState, string> = {
   running_tool: 'Running',
   waiting_for_agents: 'Background working',
   waiting_permission: 'Waiting for you',
+  // The same word a chat somebody else holds has always drawn for this, and
+  // deliberately not the adapter's own ("Compacting"): one event, one word,
+  // whoever is driving (bw-ryh3).
+  summarising: 'Summarising',
   stopped: 'Stopped',
   errored: 'Failed',
   dormant: 'Asleep',
@@ -330,6 +334,7 @@ const OWN_MARK: Record<SessionState, StateMark> = {
   running_tool: 'running',
   waiting_for_agents: 'helping',
   waiting_permission: 'waiting',
+  summarising: 'summarising',
   stopped: 'stopped',
   errored: 'failed',
   dormant: 'asleep',
@@ -353,6 +358,7 @@ const OWN_DOING: Record<SessionState, Doing> = {
   running_tool: 'running',
   waiting_for_agents: 'helping',
   waiting_permission: 'waiting',
+  summarising: 'summarising',
   stopped: 'idle',
   errored: 'idle',
   dormant: 'idle',
@@ -365,6 +371,7 @@ const OWN_WORKING: ReadonlySet<SessionState> = new Set<SessionState>([
   'streaming',
   'running_tool',
   'waiting_for_agents',
+  'summarising',
 ]);
 
 /**

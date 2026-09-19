@@ -34,6 +34,12 @@ export type SessionState =
   | 'running_tool'
   | 'waiting_for_agents'
   | 'waiting_permission'
+  /**
+   * Folding itself up to make room. The one thing a chat does whose length can
+   * be predicted, and so the one that gets a bar rather than a clock
+   * (summarising.ts).
+   */
+  | 'summarising'
   | 'stopped'
   | 'errored'
   /** Known, not running: nothing wakes it but a click. */

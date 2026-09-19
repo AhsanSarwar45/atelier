@@ -790,3 +790,49 @@ describe('a state the record named, against the timers', () => {
     expect(asked, 'the disk was read for a chat that was plainly busy').toBe(0);
   });
 });
+
+
+/**
+ * One event, one reading, whoever is driving.
+ *
+ * A chat folding itself up used to be drawn three ways: Claude typed
+ * "Compacting..." into the middle of its own answer, Codex's own
+ * compaction_update drew an "unrecognized update" note, and only a chat
+ * SOMEBODY ELSE held got the word, the mark and the bar. The normalizer now
+ * publishes one standing for all of them, and this is the screen's half of
+ * that: a chat of ours can stand in it and reads exactly as a held one does
+ * (bw-ryh3.2).
+ */
+describe('a chat of ours folding itself up', () => {
+  it('reads the same as one somebody else holds', () => {
+    const ours = chatState({ state: 'summarising', label: '', since: 1_000, turnSince: 1_000 });
+    const theirs = chatState({
+      state: 'dormant',
+      label: '',
+      held: { id: 'x', holder: 'program', doing: 'summarising', since: 1_000 },
+    });
+    expect(ours.doing).toBe('summarising');
+    expect(ours.word).toBe(theirs.word);
+    expect(ours.mark).toBe(theirs.mark);
+    expect(ours.working).toBe(theirs.working);
+    expect(ours.working).toBe(true);
+  });
+
+  it('counts the seconds it has been folding', () => {
+    const state = chatState({ state: 'summarising', label: '', since: 1_000, turnSince: 1_000 });
+    expect(counting('summarising')).toBe(true);
+    expect(state.since).toBe(1_000);
+  });
+
+  /**
+   * The driver's own word is deliberately not drawn over it. The adapters
+   * disagree about what to call this — "Compacting" from one, nothing at all
+   * from another — and the screen has had one word for it all along.
+   */
+  it('says Summarising whatever the adapter calls it', () => {
+    expect(chatState({ state: 'summarising', label: 'Compacting', since: null }).doing).toBe(
+      'summarising',
+    );
+    expect(chatState({ state: 'summarising', label: '', since: null }).word).toBe('Summarising');
+  });
+});
