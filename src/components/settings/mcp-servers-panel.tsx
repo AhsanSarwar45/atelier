@@ -72,15 +72,16 @@ function Subtitle({ server }: { server: McpServer }) {
   return (
     <div className="min-w-0">
       <p className="truncate text-xs text-t-muted">{server.description}</p>
-      <button
-        type="button"
-        className="mt-0.5 inline-flex cursor-pointer items-center gap-1 text-xs text-t-tertiary hover:text-t-secondary"
+      <Button
+        variant="ghost"
+        size="sm"
+        className="mt-0.5 h-5 px-1 text-xs text-t-tertiary hover:text-t-secondary"
         onClick={() => setOpen((was) => !was)}
         data-testid={`mcp-launch-toggle-${server.id}`}
       >
         <ChevronDown className={cn('size-3 transition-transform', open && 'rotate-180')} />
         {open ? 'Hide how it starts' : 'How it starts'}
-      </button>
+      </Button>
       {open && (
         <p className="break-all font-mono text-xs text-t-muted" data-testid={`mcp-launch-${server.id}`}>
           {launch}
