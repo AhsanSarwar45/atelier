@@ -35,6 +35,18 @@
  * is exactly how it was read (bw-ar1o). So the button names the action, and
  * while it is happening it says so.
  *
+ * ## Why there is no box for the address
+ *
+ * There used to be one, called Public URL, sitting right under the Tailscale
+ * address. It looked like the place to change that address. It was not: all it
+ * changed was a line this app prints in the terminal at startup. A reader
+ * typed their own address into it, saved, and watched the address above stay
+ * exactly as it was — which is how it was found (bw-t2m2). A box that appears
+ * to answer the question a reader actually has, and does not, is worse than no
+ * box. The address comes from Tailscale, so the screen says so and links to
+ * where it can really be changed. Anybody genuinely running this behind their
+ * own domain sets ATELIER_PUBLIC_URL, which is where that reader already was.
+ *
  * ## Why one refusal is drawn as a step and not in red
  *
  * Serve is off for an entire Tailscale network until its owner allows it once,
@@ -75,7 +87,6 @@ interface Turned {
 export function RemoteAccessSettings() {
   const [held, setHeld] = useState<RemoteAccess | null>(null);
   const [host, setHost] = useState('');
-  const [url, setUrl] = useState('');
   const [unread, setUnread] = useState<string | null>(null);
   const [refused, setRefused] = useState<Turned | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
@@ -85,7 +96,6 @@ export function RemoteAccessSettings() {
   const take = useCallback((it: RemoteAccess) => {
     setHeld(it);
     setHost(it.bindHost ?? '');
-    setUrl(it.publicUrl ?? '');
   }, []);
 
   useEffect(() => {
@@ -278,37 +288,6 @@ export function RemoteAccessSettings() {
             Save
           </Button>
         </div>
-      </div>
-
-      <div>
-        <label htmlFor="remote-url" className="block text-sm font-medium text-t-secondary">
-          Public URL
-        </label>
-        <p className="mt-1 text-sm text-t-tertiary">
-          Shown at startup. Leave blank to detect it automatically.
-        </p>
-        <div className="mt-2 flex items-center gap-2">
-          <Input
-            id="remote-url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void change({ publicUrl: url }, 'Saving…');
-            }}
-            placeholder={held.address ?? 'https://your-computer.tailnet.ts.net'}
-            autoComplete="off"
-            spellCheck={false}
-            className="flex-1 font-mono"
-          />
-          <Button size="sm" disabled={saving !== null} onClick={() => void change({ publicUrl: url }, 'Saving…')} data-testid="remote-url-save">
-            Save
-          </Button>
-        </div>
-        {held.publishing && (
-          <p className="mt-2 text-xs text-t-muted" data-testid="remote-publishing">
-            Startup message: {held.publishing}
-          </p>
-        )}
       </div>
     </div>
   );

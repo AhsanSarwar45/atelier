@@ -155,7 +155,19 @@ fn published(public: Option<&str>) -> Option<String> {
 /// Where the screen keeps who may reach this program.
 pub const BIND_HOST_SETTING: &str = "server.bind-host";
 
-/// Where the screen keeps the address in front of this program.
+/// Where a stored address in front of this program used to be kept.
+///
+/// Nothing reads it any more. It had a box on the settings screen, and that
+/// box was the most confusing thing there: it sat under the Tailscale address
+/// and looked like it set it, when all it changed was a line the app prints
+/// at startup. A reader who typed their own address into it watched the real
+/// one stay exactly as it was (bw-t2m2).
+///
+/// The name is kept so a value stored by an older copy can be recognised as
+/// dead rather than rediscovered as a setting. The address in front of this
+/// program now comes from the environment alone, which is where the one
+/// reader who needs it — somebody running this behind their own domain or a
+/// proxy — was always going to put it.
 pub const PUBLIC_URL_SETTING: &str = "server.public-url";
 
 /// Which of the two answers wins.
@@ -202,24 +214,17 @@ pub fn bind_host_from(for_this_run: Option<String>, stored: Option<String>) -> S
     chosen(for_this_run, stored).unwrap_or_else(|| "0.0.0.0".to_string())
 }
 
-/// The address in front of this program: this run's answer, else the screen's.
+/// The address in front of this program, when this run was given one.
 ///
 /// Read here rather than at each caller, because the running copy, the copy
 /// answering `atelier where`, and the installed service all have to name the
 /// same address or two of them are lying to somebody.
+///
+/// Only the environment is asked. What used to be stored beside it is dead —
+/// see {@link PUBLIC_URL_SETTING} — so a value somebody typed into the old
+/// box stops changing what is printed the moment they take this version.
 pub fn published_url() -> Option<String> {
-    published_url_from(
-        for_this_run(&["ATELIER_PUBLIC_URL", "BEADS_WEB_PUBLIC_URL"]),
-        crate::db::setting_at_rest(PUBLIC_URL_SETTING),
-    )
-}
-
-/// The rule behind [`published_url`], with both answers handed to it.
-pub fn published_url_from(
-    for_this_run: Option<String>,
-    stored: Option<String>,
-) -> Option<String> {
-    published(chosen(for_this_run, stored).as_deref())
+    published(for_this_run(&["ATELIER_PUBLIC_URL", "BEADS_WEB_PUBLIC_URL"]).as_deref())
 }
 
 /// The lines telling a reader where to open it.
@@ -569,7 +574,7 @@ mod tests {
         // The board on a phone is the ordinary reason to run this, so the
         // default has to be the one that lets a phone in.
         assert_eq!(bind_host_from(None, None), "0.0.0.0");
-        assert_eq!(published_url_from(None, None), None);
+        assert_eq!(published(None), None);
     }
 
     #[test]
@@ -577,10 +582,6 @@ mod tests {
         assert_eq!(
             bind_host_from(None, Some("127.0.0.1".into())),
             "127.0.0.1"
-        );
-        assert_eq!(
-            published_url_from(None, Some("nobara.ts.net".into())).as_deref(),
-            Some("https://nobara.ts.net")
         );
     }
 
@@ -592,11 +593,6 @@ mod tests {
         assert_eq!(
             bind_host_from(Some("127.0.0.1".into()), Some("0.0.0.0".into())),
             "127.0.0.1"
-        );
-        assert_eq!(
-            published_url_from(Some("https://run.ts.net".into()), Some("https://stored.ts.net".into()))
-                .as_deref(),
-            Some("https://run.ts.net")
         );
     }
 
@@ -618,10 +614,6 @@ mod tests {
     fn a_stored_answer_is_trimmed_before_it_is_believed() {
         // It arrives from a text box.
         assert_eq!(bind_host_from(None, Some("  127.0.0.1  ".into())), "127.0.0.1");
-        assert_eq!(
-            published_url_from(None, Some("  nobara.ts.net/ ".into())).as_deref(),
-            Some("https://nobara.ts.net")
-        );
     }
 
     #[test]

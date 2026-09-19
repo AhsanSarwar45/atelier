@@ -46,8 +46,6 @@ const nothing: RemoteAccess = {
   address: null,
   bindHost: null,
   bindHostDefault: '0.0.0.0',
-  publicUrl: null,
-  publishing: null,
   port: 3008,
 };
 

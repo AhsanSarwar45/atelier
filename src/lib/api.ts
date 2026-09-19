@@ -1272,16 +1272,13 @@ export interface RemoteAccess {
   address: string | null;
   bindHost: string | null;
   bindHostDefault: string;
-  publicUrl: string | null;
-  publishing: string | null;
   port: number;
 }
 
-/** What the switch and the two fields may change; absent means unchanged. */
+/** What the switch and the field may change; absent means unchanged. */
 export interface RemoteAccessChange {
   serving?: boolean;
   bindHost?: string;
-  publicUrl?: string;
 }
 
 /**

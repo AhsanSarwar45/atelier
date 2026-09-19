@@ -29,7 +29,7 @@
 use axum::{extract::State, http::StatusCode, middleware, routing::get, Json, Router};
 use serde::{Deserialize, Serialize};
 
-use crate::reachable::{BIND_HOST_SETTING, PUBLIC_URL_SETTING};
+use crate::reachable::BIND_HOST_SETTING;
 use crate::remote::{self, Standing, SERVING_SETTING};
 use crate::routes::projects::AppState;
 
@@ -117,10 +117,6 @@ pub struct RemoteAccess {
     /// What this computer binds with nothing stored, so the field can say what
     /// leaving it empty means.
     pub bind_host_default: String,
-    /// The address the app tells people to open, as stored. `null` for none.
-    pub public_url: Option<String>,
-    /// The address it will actually publish, once the two above are resolved.
-    pub publishing: Option<String>,
     /// The port being served, so the screen can say what is being exposed.
     pub port: u16,
 }
@@ -133,7 +129,6 @@ pub struct RemoteAccess {
 struct Choosing {
     serving: Option<bool>,
     bind_host: Option<String>,
-    public_url: Option<String>,
 }
 
 /// GET /api/settings/remote
@@ -159,9 +154,6 @@ async fn write_remote(
         }
         store(&db, BIND_HOST_SETTING, kept)?;
     }
-    if let Some(said) = &asked.public_url {
-        store(&db, PUBLIC_URL_SETTING, tidied(said))?;
-    }
     if let Some(on) = asked.serving {
         // Tailscale first. If it refuses, nothing is remembered, because a
         // switch drawn on over a board nobody can reach is worse than a
@@ -185,7 +177,6 @@ fn as_it_stands(
 ) -> Result<RemoteAccess, Refusal> {
     let port = crate::service::port();
     let bind_host = read(db, BIND_HOST_SETTING)?;
-    let public_url = read(db, PUBLIC_URL_SETTING)?;
     Ok(RemoteAccess {
         standing: named(&standing),
         wrong: standing.wrong(),
@@ -194,10 +185,8 @@ fn as_it_stands(
             Standing::Ready { address } => Some(address.clone()),
             _ => None,
         },
-        publishing: crate::reachable::published_url_from(None, public_url.clone()),
         bind_host,
         bind_host_default: crate::reachable::bind_host_from(None, None),
-        public_url,
         port,
     })
 }
