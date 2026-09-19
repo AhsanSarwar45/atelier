@@ -7,6 +7,7 @@ import { FolderOpen, Link2, MessageSquare } from "lucide-react";
 import { BeadKindTag, BeadSystemTag, BeadTags } from "@/components/bead-tags";
 import { CopyableText } from "@/components/copyable-text";
 import { Badge } from "@/components/ui/badge";
+import { SignOffButton, useSignOff } from "@/components/sign-off";
 import { Panel } from "@/components/ui/panel";
 import { useTheme } from "@/hooks/use-theme";
 import { tagFor } from "@/lib/bead-labels";
@@ -30,6 +31,10 @@ export interface BeadCardProps {
   worktreeStatus?: WorktreeStatus;
   isSelected?: boolean;
   onSelect: (bead: Bead) => void;
+  /** The project this card's board belongs to, for signing the card off. */
+  projectPath?: string;
+  /** Read the board again, after a sign-off has moved this card. */
+  onUpdate?: () => void;
 }
 
 /**
@@ -95,8 +100,9 @@ function getStatusBadgeClasses(variant: StatusBadgeInfo['variant']): string {
  * moves, and without this every card on the screen was built again to say
  * exactly what it already said.
  */
-export const BeadCard = memo(function BeadCard({ bead, statusById, worktreeStatus, isSelected = false, onSelect }: BeadCardProps) {
+export const BeadCard = memo(function BeadCard({ bead, statusById, worktreeStatus, isSelected = false, onSelect, projectPath, onUpdate }: BeadCardProps) {
   const { layout } = useTheme();
+  const { isMarking, signOff } = useSignOff(bead.id, bead.title, projectPath, onUpdate);
   const blocked = isBlockedBy(bead, statusById);
   const commentCount = commentCountOf(bead);
   const relatedCount = (bead.relates_to ?? []).length;
@@ -115,6 +121,10 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, worktreeStatu
   // still selects it.
   const interactionProps = {
     "data-bead-id": bead.id,
+    // Which card the press was about, for a reader with several cards standing
+    // in the manager's column and for the checks that time the answer.
+    "data-marking": isMarking ? "true" : undefined,
+    "aria-busy": isMarking,
     onClick: () => onSelect(bead),
   };
   const selectButton = (
@@ -145,6 +155,22 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, worktreeStatu
   // one of them struck the title and the other two did not, so the same card
   // read as two different things depending on the theme in use.
   const isSettled = !standing(bead.status);
+
+  // Manager Review is the one column a session may not move a card out of, so
+  // the screen is the only place a card there can be finished. Every other
+  // column draws nothing: a card still being worked on, or waiting to be read,
+  // has been signed by nobody yet. A plain card carries no pieces to count, so
+  // unlike a job there is nothing to weigh before offering it — and if the
+  // board refuses the close anyway, it says why in a toast.
+  const canSignOff = bead.status === 'manager_review';
+  /**
+   * @param className - Each shape gives the button its own room: the two block
+   *   shapes hand it the width of the card, the dense row keeps it beside the
+   *   badges on the right.
+   */
+  const signOffButton = (className: string) => canSignOff && (
+    <SignOffButton isMarking={isMarking} onPress={signOff} className={className} />
+  );
 
   // ─── Layout: compact-row (Linear Minimal) ───
   if (layout === 'compact-row') {
@@ -198,6 +224,7 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, worktreeStatu
 
         {/* Right badges */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {signOffButton("shrink-0")}
           <BeadTags bead={bead} />
           {commentCount > 0 && (
             <span className="flex items-center gap-0.5 text-[11px] text-t-faint">
@@ -276,6 +303,7 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, worktreeStatu
             </span>
           )}
         </div>
+        {canSignOff && <div className="pt-2">{signOffButton("w-full")}</div>}
         <CardLiveChat beadId={bead.id} />
       </div>
     );
@@ -380,6 +408,7 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, worktreeStatu
             )}
           </div>
         )}
+        {canSignOff && <div className="px-3 pb-2">{signOffButton("w-full")}</div>}
         <div className="px-3 pb-2">
           <CardLiveChat beadId={bead.id} />
         </div>

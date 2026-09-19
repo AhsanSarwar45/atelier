@@ -97,6 +97,8 @@ const ColumnCard = memo(function ColumnCard({
       statusById={statusById}
       isSelected={isSelected}
       onSelect={onSelectBead}
+      projectPath={projectPath}
+      onUpdate={onUpdate}
     />
   );
 });

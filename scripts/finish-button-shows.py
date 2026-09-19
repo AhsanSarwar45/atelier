@@ -16,13 +16,19 @@ jobs into it — one waiting for the manager, one still waiting to be read, both
 with every counted piece finished and one piece dropped — registers it with the
 running app as a project, opens it in a real browser and looks.
 
+It pours two plain cards beside them, in the same two columns. The finish was
+built inside the job card alone, so a plain card that reached the manager's
+column — the one column no session may move a card out of — could be finished
+from nowhere at all (bw-2l3k).
+
 What it asserts:
-  * the job in Manager Review draws 'Mark Done';
-  * the job in Agent Review does not — a job nobody has read yet has been
-    signed by nobody, and a finish offered there is how unsigned work reached
-    Done;
-  * both draw the dropped-work count and read 100%, which is the counting rule
-    the button hangs off.
+  * the job in Manager Review draws 'Mark Done', and so does the plain card
+    standing in the same column;
+  * neither the job nor the plain card in Agent Review does — nobody has read
+    them yet, so they are signed by nobody, and a finish offered there is how
+    unsigned work reached Done;
+  * both jobs draw the dropped-work count and read 100%, which is the counting
+    rule the job's button hangs off.
 
 The throwaway project and its directory are removed on the way out, whether the
 check passed or not, unless --keep is given.
@@ -76,6 +82,24 @@ def piece(job, n, status, dropped=False):
     }
 
 
+def card(ident, status, title):
+    """A plain card of its own, under no job: what a task looks like alone."""
+    return {
+        "_type": "issue",
+        "id": ident,
+        "title": title,
+        "description": "",
+        "status": status,
+        "priority": 1,
+        "issue_type": "task",
+        "owner": "probe",
+        "created_at": WHEN,
+        "updated_at": WHEN,
+        "labels": [],
+        "dependencies": [],
+    }
+
+
 def job(ident, status, title):
     return {
         "_type": "issue",
@@ -93,8 +117,8 @@ def job(ident, status, title):
     }
 
 
-# Two jobs of the same shape — three pieces finished, one dropped — sitting in
-# the two columns that must answer differently.
+# Two jobs of the same shape — three pieces finished, one dropped — and two
+# plain cards, sitting in the two columns that must answer differently.
 BOARD = [
     job("probe-m", "manager_review", "A job waiting for the manager"),
     piece("probe-m", 1, "closed"), piece("probe-m", 2, "closed"),
@@ -102,7 +126,17 @@ BOARD = [
     job("probe-r", "in_review", "A job still waiting to be read"),
     piece("probe-r", 1, "closed"), piece("probe-r", 2, "closed"),
     piece("probe-r", 3, "closed"), piece("probe-r", 4, "closed", dropped=True),
+    card("probe-tm", "manager_review", "A plain card waiting for the manager"),
+    card("probe-tr", "in_review", "A plain card still waiting to be read"),
 ]
+
+
+# What the poured board must put on the screen: the column each card belongs in
+# and whether the finish is offered on it.
+EXPECTED = (("probe-m", True, "manager_review"),
+            ("probe-r", False, "inreview"),
+            ("probe-tm", True, "manager_review"),
+            ("probe-tr", False, "inreview"))
 
 
 def run(cmd, cwd):
@@ -133,6 +167,10 @@ def post(url, payload):
     return json.load(urllib.request.urlopen(req))
 
 
+def get(url):
+    return json.load(urllib.request.urlopen(url))
+
+
 def delete(url):
     try:
         urllib.request.urlopen(urllib.request.Request(url, method="DELETE"))
@@ -142,20 +180,21 @@ def delete(url):
 
 # Every job card the board draws, with the column it sits in, what its bar says
 # and whether the finish is offered on it.
+# Every card the board draws, with the column it sits in, what its bar says if
+# it has one, and whether the finish is offered on it. A plain card has no bar,
+# and is read all the same: it is the card this check was widened for.
 READ = """
 (() => {
   const out = {};
   for (const col of document.querySelectorAll('[data-column]')) {
     for (const el of col.querySelectorAll('.theme-card[data-bead-id]')) {
       const bar = el.querySelector('[aria-label^="Epic progress:"]');
-      if (!bar) continue;
-      const label = bar.getAttribute('aria-label');
-      const block = bar.parentElement;
-      const percent = block.innerText.match(/(\\d+)%/);
-      const drop = block.innerText.match(/(\\d+) dropped/);
+      const block = bar ? bar.parentElement : null;
+      const percent = block ? block.innerText.match(/(\\d+)%/) : null;
+      const drop = block ? block.innerText.match(/(\\d+) dropped/) : null;
       out[el.dataset.beadId] = {
         column: col.getAttribute('data-column'),
-        bar: label,
+        bar: bar ? bar.getAttribute('aria-label') : null,
         percent: percent ? Number(percent[1]) : null,
         dropped: drop ? Number(drop[1]) : 0,
         finish: [...el.querySelectorAll('button')]
@@ -186,14 +225,28 @@ def main():
         build_board(root)
         project = post(f"{args.url}/api/projects",
                        {"name": "finish-button probe", "path": root})
+        # Registering a project writes no settings file, and a project with no
+        # settings file is drawn without a board at all -- the screen opens on
+        # its chat and this check saw an empty page. Asking for the settings is
+        # what makes the app write them, from what the directory shows, which
+        # is `.beads` and so a board (server/src/routes/projects.rs,
+        # located_or_created).
+        get(f"{args.url}/api/projects/{project['id']}/settings")
 
         b = Browser()
         try:
             b.send("Page.enable")
             b.send("Runtime.enable")
             b.send("Page.navigate", url=f"{args.url}/project?id={project['id']}")
-            time.sleep(8)
-            drawn = b.js(READ)
+            # Waited for rather than slept through: a fixed sleep was long
+            # enough on a warm app and not on a cold one, and a cold app read
+            # too early reports an empty screen as a broken board.
+            drawn = {}
+            for _ in range(30):
+                time.sleep(1)
+                drawn = b.js(READ) or {}
+                if len(drawn) >= len(EXPECTED):
+                    break
             if args.shot:
                 import base64
                 shot = b.send("Page.captureScreenshot", format="png")
@@ -207,31 +260,34 @@ def main():
             shutil.rmtree(root, ignore_errors=True)
 
     if not drawn:
-        sys.exit("no job card on the screen draws a count — is this the fork?")
+        sys.exit("no card at all reached the screen — is this the fork?")
 
     bad = []
-    for ident, want_finish, where in (("probe-m", True, "manager_review"),
-                                      ("probe-r", False, "inreview")):
+    for ident, want_finish, where in EXPECTED:
         shown = drawn.get(ident)
         if shown is None:
             bad.append(f"{ident} was never drawn on the screen at all")
             continue
         if shown["column"] != where:
             bad.append(f"{ident} sits in {shown['column']}, not {where}")
-        if shown["bar"] != "Epic progress: 3 of 3 completed":
-            bad.append(f"{ident} draws '{shown['bar']}' where 3 of 3 was poured")
-        if shown["percent"] != 100:
-            bad.append(f"{ident} calls three of three {shown['percent']}%")
-        if shown["dropped"] != 1:
-            bad.append(f"{ident} dropped one piece but says {shown['dropped'] or 'nothing'}")
         if shown["finish"] != want_finish:
             bad.append(f"{ident} in {where} "
                        + ("offers no finish" if want_finish
                           else "offers the finish, which only the manager's column may"))
+        # The counting rule the job's button hangs off. A plain card carries no
+        # pieces, so there is nothing here to ask it.
+        if not ident.startswith("probe-t") and shown["bar"] != "Epic progress: 3 of 3 completed":
+            bad.append(f"{ident} draws '{shown['bar']}' where 3 of 3 was poured")
+        elif not ident.startswith("probe-t"):
+            if shown["percent"] != 100:
+                bad.append(f"{ident} calls three of three {shown['percent']}%")
+            if shown["dropped"] != 1:
+                bad.append(f"{ident} dropped one piece but says {shown['dropped'] or 'nothing'}")
 
     for ident in sorted(drawn):
         s = drawn[ident]
-        print(f"  {ident:<10} {s['column']:<16} {s['bar']:<32} "
+        bar = s["bar"] or "no bar (a plain card)"
+        print(f"  {ident:<10} {s['column']:<16} {bar:<32} "
               f"{s['percent']}%  {s['dropped']} dropped  "
               f"finish {'drawn' if s['finish'] else 'not drawn'}")
 
@@ -240,7 +296,8 @@ def main():
         for line in bad:
             print("  " + line)
         return 1
-    print("\nthe manager is offered the finish on his own column, and nowhere else")
+    print("\nthe manager is offered the finish on his own column, on both kinds "
+          "of card, and nowhere else")
     return 0
 
 

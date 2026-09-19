@@ -2,20 +2,18 @@
 
 import { memo, useState, useMemo } from "react";
 
-import { CheckCircle2, Layers, Loader2, MessageSquare } from "lucide-react";
+import { Layers, MessageSquare } from "lucide-react";
 
 import { BeadTags } from "@/components/bead-tags";
 import { CopyableText } from "@/components/copyable-text";
 import { DependencyBadge } from "@/components/dependency-badge";
+import { SignOffButton, useSignOff } from "@/components/sign-off";
 import { SubtaskList } from "@/components/subtask-list";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useTheme } from "@/hooks/use-theme";
-import { toast } from "@/hooks/use-toast";
 import { getStatusDotColor, isBlockedBy, truncate } from "@/lib/bead-utils";
 import { commentCountOf } from "@/lib/beads-parser";
-import { closeBead } from "@/lib/cli";
 import { computeEpicProgress, progressPercent } from "@/lib/epic-parser";
 import { cn } from "@/lib/utils";
 import { CardLiveChat } from "@/workbench/card-live";
@@ -77,7 +75,9 @@ export const EpicCard = memo(function EpicCard({
   onUpdate
 }: EpicCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
+
+  // Pressing the sign-off is the shared code both kinds of card use.
+  const { isMarking, signOff } = useSignOff(epic.id, epic.title, projectPath, onUpdate);
 
   // Resolve children from IDs (memoized to prevent unnecessary re-fetches)
   const children = useMemo(() =>
@@ -114,50 +114,6 @@ export const EpicCard = memo(function EpicCard({
   const allDone = progress.total > 0 && progress.completed === progress.total;
   const canCloseEpic = allDone && epic.status === 'manager_review';
 
-  /**
-   * The manager signs the job off.
-   *
-   * Answered the moment it is pressed rather than when the work behind it
-   * finishes. Finishing a job runs the board program, which on this machine
-   * takes seconds while it is quiet and was measured at 35 while other agents
-   * were writing to the board; until then the only sign the press had landed
-   * was a twelve-pixel spinner inside the button, which reads as a screen that
-   * did nothing (bw-x1fv.8).
-   *
-   * The card stays where it is until the board says it moved — a card that
-   * jumped to Done on the press would be telling the manager something the
-   * board had not agreed to yet, and a job whose close fails would have to
-   * jump back.
-   */
-  const handleCloseEpic = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (isClosing) return;
-
-    setIsClosing(true);
-    toast({
-      title: `Marking ${epic.id} done…`,
-      description: 'Updating the board…',
-    });
-    try {
-      await closeBead(epic.id, projectPath);
-      toast({ title: `${epic.id} is done`, description: truncate(epic.title, 80) });
-      onUpdate?.();
-    } catch (error) {
-      // Silent before this: the spinner stopped, the card stayed where it was,
-      // and nothing said whether it had worked. The board is read again either
-      // way, because the commonest failure here is the request giving up at
-      // thirty seconds on a close that went on to succeed.
-      toast({
-        variant: 'destructive',
-        title: `Could not mark ${epic.id} done`,
-        description: error instanceof Error ? error.message : 'Unknown error',
-      });
-      onUpdate?.();
-    } finally {
-      setIsClosing(false);
-    }
-  };
-
   const { layout } = useTheme();
 
   // Selecting the card is one real button, kept out of sight, with the card's
@@ -170,8 +126,8 @@ export const EpicCard = memo(function EpicCard({
     "data-bead-id": epic.id,
     // Which card the press was about, for a reader with several jobs standing
     // in his column and for the checks that time the answer.
-    "data-marking": isClosing ? "true" : undefined,
-    "aria-busy": isClosing,
+    "data-marking": isMarking ? "true" : undefined,
+    "aria-busy": isMarking,
     onClick: () => onSelect(epic),
   };
   const selectButton = (
@@ -271,20 +227,9 @@ export const EpicCard = memo(function EpicCard({
     </div>
   );
 
-  // The manager's sign-off, named for what he is doing rather than for the card
-  // it acts on.
   const closeButton = canCloseEpic && (
     <div className="pt-2">
-      <Button
-        variant="outline"
-        size="xs"
-        onClick={handleCloseEpic}
-        disabled={isClosing}
-        className="w-full border-success/30 text-success hover:bg-success/10 hover:text-success/80"
-      >
-        {isClosing ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : <CheckCircle2 className="size-3" aria-hidden="true" />}
-        {isClosing ? 'Marking…' : 'Mark Done'}
-      </Button>
+      <SignOffButton isMarking={isMarking} onPress={signOff} className="w-full" />
     </div>
   );
 
