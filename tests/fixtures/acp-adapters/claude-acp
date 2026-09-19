@@ -301,7 +301,59 @@ async function dropOnceWithOwnedProvider(sessionId) {
   process.exit(86);
 }
 
+/**
+ * The two ways an adapter has of saying the chat is folding itself up.
+ *
+ * ACP's compaction kinds are unstable, so the adapters in the wild disagree.
+ * Codex's sends the real thing; the one shipped for Claude has nowhere to put a
+ * fold and says it in the agent's own voice, a beat at a time, which the app
+ * used to append to whatever sentence was open. Both are scripted here so one
+ * case can prove they draw the same (bw-ryh3).
+ */
+const FOLD = 'fold this up';
+const OLD_WAY = 'the old way';
+/** How long the scripted fold is held open, so the screen can be read mid-fold. */
+const FOLD_MS = Number(process.env.BEADS_E2E_ACP_FOLD_MS ?? 4_000);
+
+async function fold(id, params, inWords) {
+  const sessionId = params?.sessionId;
+  const send = (update) => say({ method: 'session/update', params: { sessionId, update } });
+  const words = (text) => send({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } });
+
+  // The sentence the fold must not land in the middle of.
+  words('Let me follow the existing spec’s shape.');
+
+  if (inWords) {
+    // Verbatim what the shipped claude-acp emits, one beat per status tick.
+    const beats = Math.max(1, Math.round(FOLD_MS / 1000));
+    for (let beat = 0; beat < beats; beat += 1) {
+      words('Compacting...');
+      await new Promise((settle) => setTimeout(settle, FOLD_MS / beats));
+    }
+    words('\n\nCompacting completed.');
+  } else {
+    send({ sessionUpdate: 'compaction_update', compactionId: 'fold-1', status: 'in_progress' });
+    send({
+      sessionUpdate: 'compaction_summary_chunk',
+      compactionId: 'fold-1',
+      content: { type: 'text', text: 'They were working on the board.' },
+    });
+    await new Promise((settle) => setTimeout(settle, FOLD_MS));
+    send({ sessionUpdate: 'compaction_update', compactionId: 'fold-1', status: 'completed' });
+  }
+
+  words(' Now a test to hold it.');
+  say({ id, result: { stopReason: 'end_turn' } });
+}
+
 async function turn(id, params) {
+  // A fold, asked for by name. Every other prompt takes the question turn
+  // below, so no case written before this one changes.
+  const asked = (params?.prompt ?? []).map((block) => block?.text ?? '').join('');
+  if (asked.includes(FOLD)) {
+    await fold(id, params, asked.includes(OLD_WAY));
+    return;
+  }
   if (MISSING_CODEX_ROLLOUT) {
     say({
       method: 'session/update',

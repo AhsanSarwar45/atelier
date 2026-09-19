@@ -128,6 +128,13 @@ pub struct AcpNormalizer {
     /// "Compacting"), until the turn's standing next changes. Kept as a fact
     /// for the status decision, which publishes it (bw-1fw6).
     signal_standing: Option<Value>,
+    /// The compactions this session has open, oldest first, by ACP id.
+    ///
+    /// A list rather than a flag because `compaction_update` is an upsert keyed
+    /// by `compactionId` and the terminal update names which one ended; a flag
+    /// would let the first of two overlapping runs end both. Empty is the
+    /// ordinary case and means nothing is folding itself up.
+    compactions: Vec<String>,
     /// How many of a call's pictures have already been sent on.
     ///
     /// A tool's content arrives whole on every ping, not as a delta, so a call
@@ -180,6 +187,7 @@ impl Default for AcpNormalizer {
             running_calls: Vec::new(),
             said_standing: None,
             signal_standing: None,
+            compactions: Vec::new(),
             tool_pictures: HashMap::new(),
             terminals: HashMap::new(),
             tool_starts: HashMap::new(),
@@ -1341,6 +1349,14 @@ impl AcpNormalizer {
     /// outside a turn is. The turn's own beginning and end are published by the
     /// driver and are not this reading's to overrule.
     fn standing_now(&self) -> Option<(&'static str, Option<String>, Option<Value>)> {
+        // A chat folding itself up, before anything else it might look like.
+        // Nothing runs during a compaction, so the newest call and the last
+        // open thought are both from before it began; read in the ordinary
+        // order they would name a step that is over and hold a stale command
+        // card up for the two minutes the fold actually takes (bw-ryh3.1).
+        if !self.compactions.is_empty() {
+            return Some(("summarising", None, None));
+        }
         if self.waiting_for_agents {
             return Some(("waiting_for_agents", None, None));
         }
@@ -1622,6 +1638,94 @@ impl AcpNormalizer {
         Some(row)
     }
 
+    /// One compaction upsert, read as ACP defines it.
+    ///
+    /// `compaction_update` is keyed by `compactionId` and patches the entity in
+    /// place, so the terminal update names WHICH fold ended. Hence a list and
+    /// not a flag: a session may have two open, and a flag would let the first
+    /// one to finish end both.
+    ///
+    /// An unrecognised status is read as still running rather than as an error.
+    /// `CompactionStatus` is deliberately an open string -- "Custom or future
+    /// compaction status" -- and the kinds themselves are unstable, so a value
+    /// added upstream should leave the chat saying it is folding itself up,
+    /// which is true, instead of dropping the fold on the floor.
+    ///
+    /// Opening one reopens the turn. An auto-compaction begins when the window
+    /// fills, which is not always inside a turn the app is watching, and a
+    /// standing is not published at all once the turn is finished -- so
+    /// without this the two minutes a fold takes are drawn as Idle, which is
+    /// the same lie in a quieter voice (bw-ryh3.1).
+    fn compaction_update(
+        &mut self,
+        session_id: &str,
+        provider: &str,
+        raw: &Value,
+        update: &Value,
+    ) -> Vec<Event> {
+        let id = update["compactionId"].as_str().unwrap_or("_unnamed").to_string();
+        if matches!(
+            update["status"].as_str(),
+            Some("completed" | "failed" | "cancelled")
+        ) {
+            self.compactions.retain(|open| open != &id);
+        } else if !self.compactions.iter().any(|open| open == &id) {
+            self.compactions.push(id);
+            self.turn_finished = false;
+        }
+        self.says_standing(session_id, provider, raw)
+    }
+
+    /// The compaction an adapter could only say in words, read back as the
+    /// update it would have sent.
+    ///
+    /// ACP's compaction kinds are unstable -- `schema/v2/schema.unstable.json`,
+    /// "**UNSTABLE** This capability is not part of the spec yet, and may be
+    /// removed or changed at any point" -- so an adapter built before them has
+    /// nowhere to put a fold and says it in the agent's own voice instead. The
+    /// one shipped for Claude switches on the kit's structured signal and then
+    /// throws that structure away at the ACP boundary:
+    ///
+    /// ```js
+    /// case "status":
+    ///   if (E.status === "compacting")           -> agent_message_chunk "Compacting..."
+    ///   else if (E.compact_result === "success") -> "\n\nCompacting completed."
+    ///   else if (E.compact_result === "failed")  -> "\n\nCompacting failed" + reason
+    /// ```
+    ///
+    /// Left as words, those chunks are appended to whatever message is open, so
+    /// a fold lands in the middle of the agent's last sentence: measured on one
+    /// real chat as nine "Compacting..." glued to the end of "Let me follow the
+    /// existing spec's shape." (bw-ryh3.1).
+    ///
+    /// This is the only place any provider's English is read, and it exists to
+    /// be deleted. The day that adapter sends `compaction_update` itself, the
+    /// arm that calls this goes and nothing else here changes.
+    ///
+    /// The id leads with `_`, which the schema reserves for exactly this:
+    /// "Values beginning with `_` are reserved for implementation-specific
+    /// extensions."
+    fn compaction_stand_in(content: &Value) -> Option<Value> {
+        const STOOD_IN: &str = "_claude-acp-stand-in";
+        let said = Self::content_words(content)?;
+        let said = said.trim();
+        if said == "Compacting..." {
+            return Some(json!({"compactionId":STOOD_IN, "status":"in_progress"}));
+        }
+        if said == "Compacting completed." {
+            return Some(json!({"compactionId":STOOD_IN, "status":"completed"}));
+        }
+        // "." when the kit gave no reason for it, ": <reason>" when it did.
+        // Anything else that merely starts with those words is the agent
+        // talking about compaction, not the adapter reporting one.
+        let why = said.strip_prefix("Compacting failed")?;
+        if why == "." {
+            return Some(json!({"compactionId":STOOD_IN, "status":"failed", "error":Value::Null}));
+        }
+        let why = why.strip_prefix(':')?.trim();
+        Some(json!({"compactionId":STOOD_IN, "status":"failed", "error":why}))
+    }
+
     fn message_chunk(
         &mut self,
         session_id: &str,
@@ -1846,7 +1950,25 @@ impl AcpNormalizer {
         match update["sessionUpdate"].as_str() {
             Some("user_message_chunk") if self.suppress_local_user => Vec::new(),
             Some("user_message_chunk") => self.message_chunk(session_id, provider, raw, "user", &update["content"]),
+            // A compaction the adapter could only say in the agent's own voice
+            // is turned into the update it would have sent, and then read by
+            // the one arm below. See {@link Self::compaction_stand_in}.
+            Some("agent_message_chunk")
+                if Self::compaction_stand_in(&update["content"]).is_some() =>
+            {
+                let stood_in = Self::compaction_stand_in(&update["content"]).unwrap_or_default();
+                self.compaction_update(session_id, provider, raw, &stood_in)
+            }
             Some("agent_message_chunk") => self.message_chunk(session_id, provider, raw, "assistant", &update["content"]),
+            // ACP's own compaction kinds, which are what every adapter is read
+            // through -- the one above translates INTO these rather than
+            // around them (bw-ryh3.1).
+            Some("compaction_update") => self.compaction_update(session_id, provider, raw, update),
+            // The summary a compaction retains, streamed a block at a time. It
+            // is the fold's own product, not the agent answering, so it never
+            // joins the conversation's words; the fold is drawn by its
+            // standing and the summary belongs to the record.
+            Some("compaction_summary_chunk") => Vec::new(),
             // A thought is words, and words are the four kinds `content_words`
             // reads -- not only a bare text block. An agent that thought about
             // a file by quoting it, or by linking to it, had the whole thought
@@ -2498,6 +2620,11 @@ impl AcpNormalizer {
         self.waiting_for_agents = false;
         self.said_standing = None;
         self.signal_standing = None;
+        // A fold the agent never closed does not outlive the turn it began in.
+        // An adapter that dies mid-compaction sends no terminal update, and a
+        // chat left saying it is folding itself up for ever is worse than one
+        // that stops saying anything.
+        self.compactions.clear();
         let failure = Self::typed_failure(provider, raw);
         let mut events = Vec::new();
         // Activity belongs to this turn. A tool whose final update was lost
@@ -2983,6 +3110,162 @@ mod tests {
             signal["signal"]["detail"],
             "This provider needs you to sign in."
         );
+    }
+
+    /// Helper: one `session/update` through the normalizer.
+    fn sent(normalizer: &mut AcpNormalizer, provider: &str, update: Value) -> Vec<Event> {
+        normalizer.update("local", provider, &json!({"sessionId":"remote","update":update}))
+    }
+
+    /// Codex says this outright, and every adapter that speaks the draft will.
+    #[test]
+    fn a_compaction_is_a_standing_and_not_a_word_in_the_conversation() {
+        let mut normalizer = AcpNormalizer::default();
+        sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Reading the spec."}
+        }));
+        let began = sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_update","compactionId":"c1","status":"in_progress"
+        }));
+        assert_eq!(kinds(&began), vec!["session.state"]);
+        assert_eq!(serde_json::to_value(&began[0]).unwrap()["state"], "summarising");
+
+        // The summary the fold retains is the fold's product, not the agent
+        // answering: it draws nothing and it joins no message.
+        let chunk = sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_summary_chunk","compactionId":"c1",
+            "content":{"type":"text","text":"They were working on the board."}
+        }));
+        assert!(chunk.is_empty());
+
+        // Not one word of any of it reached the conversation.
+        assert_eq!(
+            normalizer.message_text.values().cloned().collect::<Vec<_>>(),
+            vec!["Reading the spec.".to_string()]
+        );
+
+        let done = sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_update","compactionId":"c1","status":"completed"
+        }));
+        assert_eq!(serde_json::to_value(&done[0]).unwrap()["state"], "streaming");
+    }
+
+    /// The kinds are unstable and the status is an open string, so a value
+    /// added upstream leaves the chat saying the true thing rather than
+    /// dropping the fold.
+    #[test]
+    fn a_compaction_status_nobody_has_seen_yet_is_still_a_compaction() {
+        let mut normalizer = AcpNormalizer::default();
+        let began = sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_update","compactionId":"c1","status":"_vendor_pausing"
+        }));
+        assert_eq!(serde_json::to_value(&began[0]).unwrap()["state"], "summarising");
+    }
+
+    /// Two folds open at once: the first to finish must not end the second.
+    #[test]
+    fn one_compaction_ending_does_not_end_another() {
+        let mut normalizer = AcpNormalizer::default();
+        sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_update","compactionId":"a","status":"in_progress"
+        }));
+        sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_update","compactionId":"b","status":"in_progress"
+        }));
+        let ended = sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_update","compactionId":"a","status":"completed"
+        }));
+        // Still folding, so nothing changed and nothing was published.
+        assert!(ended.is_empty());
+        assert_eq!(normalizer.standing_now().map(|s| s.0), Some("summarising"));
+        sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_update","compactionId":"b","status":"cancelled"
+        }));
+        assert_eq!(normalizer.standing_now().map(|s| s.0), None);
+    }
+
+    /// The adapter shipped for Claude has no compaction kind, so it says the
+    /// fold in the agent's voice. Read as words, nine of these were measured
+    /// glued to the end of one real sentence (bw-ryh3.1).
+    #[test]
+    fn the_claude_adapters_stand_in_words_are_read_as_the_update_it_meant() {
+        let mut normalizer = AcpNormalizer::default();
+        sent(&mut normalizer, "claude", json!({
+            "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Let me follow the existing spec's shape."}
+        }));
+        for _ in 0..9 {
+            let beat = sent(&mut normalizer, "claude", json!({
+                "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Compacting..."}
+            }));
+            // Only the first one says anything; the rest are the same fold.
+            assert!(beat.len() <= 1);
+        }
+        assert_eq!(normalizer.standing_now().map(|s| s.0), Some("summarising"));
+        sent(&mut normalizer, "claude", json!({
+            "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"\n\nCompacting completed."}
+        }));
+        assert_eq!(normalizer.standing_now().map(|s| s.0), Some("streaming"));
+
+        // The sentence is exactly the sentence the agent wrote.
+        assert_eq!(
+            normalizer.message_text.values().cloned().collect::<Vec<_>>(),
+            vec!["Let me follow the existing spec's shape.".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_fold_that_failed_carries_the_reason_and_still_ends() {
+        let mut normalizer = AcpNormalizer::default();
+        sent(&mut normalizer, "claude", json!({
+            "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Compacting..."}
+        }));
+        sent(&mut normalizer, "claude", json!({
+            "sessionUpdate":"agent_message_chunk",
+            "content":{"type":"text","text":"\n\nCompacting failed: the summary would not fit"}
+        }));
+        assert_eq!(normalizer.standing_now().map(|s| s.0), None);
+        assert!(normalizer.message_text.is_empty());
+
+        let failed = AcpNormalizer::compaction_stand_in(
+            &json!({"type":"text","text":"\n\nCompacting failed: the summary would not fit"}),
+        )
+        .expect("the adapter's failure line to be read");
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(failed["error"], "the summary would not fit");
+        // The kit gave no reason for this one.
+        let bare = AcpNormalizer::compaction_stand_in(
+            &json!({"type":"text","text":"\n\nCompacting failed."}),
+        )
+        .expect("the bare failure line to be read");
+        assert_eq!(bare["error"], Value::Null);
+    }
+
+    /// The stand-in reads the adapter's OWN words, and the agent is allowed to
+    /// use them: a reply that talks about compaction is still a reply.
+    #[test]
+    fn an_agent_talking_about_compaction_is_not_compacting() {
+        for said in [
+            "Compacting is off in this project.",
+            "I ran Compacting... twice",
+            "Compacting failed for a different reason entirely",
+        ] {
+            assert!(
+                AcpNormalizer::compaction_stand_in(&json!({"type":"text","text":said})).is_none(),
+                "{said:?} is the agent talking, not the adapter reporting"
+            );
+        }
+    }
+
+    /// An adapter that dies mid-fold sends no terminal update. The chat must
+    /// not be left folding itself up for ever.
+    #[test]
+    fn a_fold_does_not_outlive_the_turn_it_began_in() {
+        let mut normalizer = AcpNormalizer::default();
+        sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_update","compactionId":"c1","status":"in_progress"
+        }));
+        normalizer.finish_turn("local", "codex", &json!({"stopReason":"end_turn"}));
+        assert_eq!(normalizer.standing_now().map(|s| s.0), None);
     }
 
     #[test]
