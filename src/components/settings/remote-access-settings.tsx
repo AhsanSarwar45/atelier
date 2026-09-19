@@ -31,8 +31,10 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { Check, Copy } from 'lucide-react';
 
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Panel } from '@/components/ui/panel';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { remoteAccess, saveRemoteAccess, type RemoteAccess, type RemoteAccessChange } from '@/lib/api';
 
@@ -133,7 +135,7 @@ export function RemoteAccessSettings() {
         </div>
 
         {held.wrong && (
-          <div className="mt-3 rounded-md border border-border bg-bg-subtle p-3" data-testid="remote-wrong">
+          <Panel tone="info" inset="md" className="mt-3" data-testid="remote-wrong">
             <p className="text-sm text-t-secondary">
               {held.standing === 'not-installed'
                 ? 'Tailscale is not installed. It is the one step that needs a password, so it is run in a terminal:'
@@ -141,9 +143,9 @@ export function RemoteAccessSettings() {
             </p>
             {held.standing === 'not-installed' && (
               <div className="mt-2 flex items-center gap-2">
-                <code className="flex-1 rounded bg-bg px-2 py-1 font-mono text-xs text-t-secondary">
-                  {INSTALL}
-                </code>
+                <Badge asChild variant="secondary" appearance="light" size="sm" className="flex-1 justify-start font-mono">
+                  <code>{INSTALL}</code>
+                </Badge>
                 <Button
                   size="sm"
                   variant="outline"
@@ -155,14 +157,14 @@ export function RemoteAccessSettings() {
                 </Button>
               </div>
             )}
-          </div>
+          </Panel>
         )}
 
         {held.serving && held.address && (
           <div className="mt-3 flex items-center gap-2" data-testid="remote-address">
-            <code className="flex-1 rounded bg-bg-subtle px-2 py-1 font-mono text-xs text-t-secondary">
-              {held.address}
-            </code>
+            <Badge asChild variant="secondary" appearance="light" size="sm" className="flex-1 justify-start font-mono">
+              <code>{held.address}</code>
+            </Badge>
             <Button
               size="sm"
               variant="outline"
