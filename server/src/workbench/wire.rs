@@ -49,6 +49,31 @@ pub fn bound_event(event: &mut Event) {
             }
         }
         EventKind::Diff => {
+            // The change has to be worked out before the text is cut. Cutting
+            // first leaves the first four thousand characters of the file,
+            // which for anything but a tiny edit is the top of the file and
+            // not the part that changed — the app could then say nothing
+            // truer than a character count. Hunks taken here survive the cut
+            // and are smaller than the prefix they replace (bw-vl3q.1).
+            //
+            // Bounding runs on read as well as on write, and by the second
+            // time the text is already cut; hunks worked out from a cut side
+            // would be a worse answer than the ones already stored, so a diff
+            // that has been summarised once is left alone.
+            if !event.fields.contains_key("hunks") {
+                let side = |field: &str| {
+                    event
+                        .fields
+                        .get(field)
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string()
+                };
+                let (before, after) = (side("before"), side("after"));
+                if !before.is_empty() || !after.is_empty() {
+                    event.fields.extend(super::hunks::summarize(&before, &after));
+                }
+            }
             for field in ["before", "after"] {
                 if let Some(value) = event.fields.get_mut(field) {
                     trim(value, 0, field)
@@ -118,5 +143,47 @@ mod tests {
         bound_event(&mut note);
         assert!(note.fields["text"].as_str().unwrap().len() < 5_000);
         assert!(note.fields["body"]["nested"].as_str().unwrap().len() < 5_000);
+    }
+
+    /// The whole point of taking the diff here: a file far past the string
+    /// bound still delivers the lines that changed, and says how many.
+    #[test]
+    fn a_diff_past_the_bound_keeps_its_change_and_not_the_top_of_the_file() {
+        let before: String = (1..=2000).map(|n| format!("line {n}\n")).collect();
+        let after = before.replace("line 1900\n", "line 1900 changed\n");
+        let mut diff = event(json!({
+            "type":"diff","sessionId":"s","seq":0,"at":"now","toolCallId":"t",
+            "path":"/a/big.tsx","before":before,"after":after
+        }));
+        bound_event(&mut diff);
+
+        assert_eq!(diff.fields["added"], json!(1));
+        assert_eq!(diff.fields["removed"], json!(1));
+        assert_eq!(diff.fields["beforeLines"], json!(2000));
+        let hunks = diff.fields["hunks"].as_array().unwrap();
+        assert_eq!(hunks.len(), 1);
+        let drawn = serde_json::to_string(&hunks[0]).unwrap();
+        assert!(drawn.contains("line 1900 changed"), "{drawn}");
+        // The text itself is still cut, and the change still got through.
+        assert!(diff.fields["before"].as_str().unwrap().len() < 5_000);
+    }
+
+    /// Bounding runs again every time an event is read back. The second pass
+    /// sees a before that was already cut, and must not replace good hunks
+    /// with hunks of the top of the file.
+    #[test]
+    fn bounding_a_diff_twice_keeps_the_hunks_from_the_full_text() {
+        let before: String = (1..=2000).map(|n| format!("line {n}\n")).collect();
+        let after = before.replace("line 1900\n", "line 1900 changed\n");
+        let mut diff = event(json!({
+            "type":"diff","sessionId":"s","seq":0,"at":"now","toolCallId":"t",
+            "path":"/a/big.tsx","before":before,"after":after
+        }));
+        bound_event(&mut diff);
+        let once = diff.fields["hunks"].clone();
+        bound_event(&mut diff);
+
+        assert_eq!(diff.fields["hunks"], once);
+        assert_eq!(diff.fields["added"], json!(1));
     }
 }

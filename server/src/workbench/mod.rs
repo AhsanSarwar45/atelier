@@ -14,6 +14,7 @@ pub mod cli;
 pub mod codex;
 pub mod extensions;
 pub mod external;
+pub mod hunks;
 pub mod kit_words;
 pub mod lifecycle;
 pub mod liveness;
