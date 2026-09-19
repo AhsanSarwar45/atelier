@@ -46,6 +46,9 @@ const ALLOWED = new Set([
   // The one state contract the server derives a container's column from. Same
   // reason as the hook above: no TypeScript list reaches it.
   "server/src/board_state.rs",
+  // Landing acts on the transitions it performs, so it names them. Same reason
+  // again: it is Rust, and no TypeScript list reaches it.
+  "server/src/board_landing.rs",
 ]);
 
 const NAMES = STATES.map((s) => s.id);
