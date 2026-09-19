@@ -193,13 +193,15 @@ Node.js or npm.
 | `atelier service install` | Have this computer start it at login, and keep it up |
 | `atelier service uninstall` | Stop having it started, and leave nothing behind |
 | `atelier service status` | Say whether this computer starts it |
+| `atelier remote install` | Set this computer up to be reached from away |
+| `atelier remote` | Say how far along that setup is |
 | `atelier --data-dir` | Print where this computer keeps Atelier's data |
 | `atelier --version` | Print which build this is |
 | `atelier --help` | List the above |
 
-It serves on http://localhost:3008 unless `ATELIER_PORT` says otherwise;
-`ATELIER_HOST` sets who may reach it, and `ATELIER_DATA_DIR` moves where it
-keeps its data.
+It serves on http://localhost:3008 unless `ATELIER_PORT` says otherwise, and
+`ATELIER_DATA_DIR` moves where it keeps its data. Who may reach it is a
+setting, under Settings › Remote access.
 
 ### Open it on your phone
 
@@ -223,8 +225,9 @@ cannot — types the number instead.
 If nothing answers at all, your computer's firewall is holding the port shut —
 open 3008, or whichever port you set.
 
-To keep it to this computer alone, set `ATELIER_HOST=127.0.0.1`; it then says
-so instead of offering an address that will not answer.
+To keep it to this computer alone, set **Answer on** to `127.0.0.1` under
+Settings › Remote access; it then says so instead of offering an address that
+will not answer.
 
 ### Open it from anywhere else
 
@@ -232,9 +235,10 @@ Not from your own network — from a café, from a train. That is a different
 question, because Atelier has no password and a port answering the internet is
 a machine given away. [Reaching the board from outside your
 network](docs/remote-access.md) says what to do instead, and what never to do.
-The short of it: put a private network in front of it, close the port with
-`ATELIER_HOST=127.0.0.1`, and name the address in front with
-`ATELIER_PUBLIC_URL` so the banner tells you the one to open.
+The short of it: run `atelier remote install` once, then turn **Reach it from
+anywhere** on under Settings › Remote access. That puts a private network in
+front of the board, and the same section closes the port behind it and names
+the address to open.
 
 ### Ask a running copy where it is
 
@@ -254,9 +258,11 @@ atelier service install
 
 Registers a systemd user service on Linux, a launch agent on macOS, and a
 logon task on Windows — each of them starting `atelier run --no-browser`, so
-nothing opens a window over your login. Whatever `ATELIER_PORT`,
-`ATELIER_HOST` and `ATELIER_DATA_DIR` are set to when you install is written
-into the registration, because a service inherits no shell.
+nothing opens a window over your login. Whatever `ATELIER_PORT` and
+`ATELIER_DATA_DIR` are set to when you install is written into the
+registration, because a service inherits no shell. The settings are read from
+where they are stored, so a service picks up a change made on the screen the
+next time it starts.
 
 `atelier service uninstall` stops it and removes the registration.
 

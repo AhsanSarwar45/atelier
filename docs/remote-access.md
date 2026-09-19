@@ -53,13 +53,17 @@ install on the phone and no warning screen to click past.
 
 ### Setting it up
 
-Tailscale is packaged for this machine, so installing it is:
+One command does the part that needs a password:
 
 ```bash
-sudo dnf install tailscale
-sudo systemctl enable --now tailscaled
-sudo tailscale up
+atelier remote install
 ```
+
+It prints what it is about to run before it runs any of it: your package
+manager, `systemctl enable --now tailscaled`, and `tailscale up
+--operator=<you>`. That last one is why this is the only step with a password
+in it — it hands Tailscale to your user, so everything after it is a switch on
+a screen.
 
 `tailscale up` prints a link; open it and sign in. Install the Tailscale app on
 your phone and sign into the same account.
@@ -69,33 +73,34 @@ then enable **HTTPS Certificates**. It will ask you to acknowledge that machine
 names are published on a public certificate transparency ledger — that is a
 real consequence and the next section says what it means.
 
-Now put the board behind it:
+Now open **Settings › Remote access** and turn **Reach it from anywhere** on.
+The section tells you which of installed, running, signed in and named is the
+one still missing, and names the single thing to do about each. With nothing
+missing, the switch puts the board on your tailnet and shows the `https`
+address your phone opens.
 
-```bash
-tailscale serve --bg --https=443 http://127.0.0.1:3008
-tailscale serve status
-```
+The switch stays on across restarts: the app serves when it starts and stops
+serving when it stops, so the address never goes on answering a port with
+nothing behind it. `atelier remote` says where this computer stands without
+changing anything.
 
-`serve` is the tailnet-only one. Its sibling `tailscale funnel` publishes to the
-whole internet — **do not use funnel with this program**, for every reason in
-the first section.
+Under the switch is `tailscale serve`, the tailnet-only one. Its sibling
+`tailscale funnel` publishes to the whole internet — **do not use funnel with
+this program**, for every reason in the first section.
 
 ### Close the door behind it
 
 With Tailscale carrying the traffic, the program itself no longer needs to
-answer the network:
+answer the network. Two fields in the same settings section:
 
-```bash
-ATELIER_HOST=127.0.0.1 ATELIER_PUBLIC_URL=nobara.tailnet-name.ts.net atelier run
-```
-
-`ATELIER_HOST=127.0.0.1` means the only thing that can reach the port is
-something on this computer — which is now Tailscale and nothing else. Even a
-laptop on the same café Wi-Fi as you finds a closed port.
-
-`ATELIER_PUBLIC_URL` tells the program the name on the certificate in front of
-it. It cannot find that out for itself: the name belongs to Tailscale, not to
-this computer. Told it, the banner names the address you should actually open:
+- **Answer on** — set it to `127.0.0.1` and the only thing that can reach the
+  port is something on this computer, which is now Tailscale and nothing else.
+  Even a laptop on the same café Wi-Fi as you finds a closed port. It takes
+  effect the next time the app starts.
+- **Tell people to open** — the name on the certificate in front of the app.
+  The program cannot work that out for itself, because the name belongs to
+  Tailscale and not to this computer. Told it, the banner names the address you
+  should actually open:
 
 ```
 Atelier is running.
@@ -103,11 +108,10 @@ Atelier is running.
   Network            https://nobara.tailnet-name.ts.net
 ```
 
-Without it, the banner would go on offering a plain `http` address on a machine
+Without it the banner would go on offering a plain `http` address on a machine
 that has stopped answering it — three ways of being wrong at once. A bare name
 is read as `https://`; write the scheme yourself if you mean something else.
 
-Substitute your own tailnet name, which `tailscale serve status` prints.
 
 ## What it costs
 
@@ -142,9 +146,9 @@ and chat transcripts are readable at their edge; and Access is the only thing
 between the internet and an unauthenticated shell, so a misconfiguration there
 is the whole machine.
 
-If you go that way, `ATELIER_HOST=127.0.0.1` and `ATELIER_PUBLIC_URL` work
-exactly the same — the program does not care what is in front of it, only what
-the address is called.
+If you go that way, **Answer on** and **Tell people to open** work exactly the
+same — the program does not care what is in front of it, only what the address
+is called. The switch above is Tailscale's and stays off.
 
 ## Where this is checked
 
