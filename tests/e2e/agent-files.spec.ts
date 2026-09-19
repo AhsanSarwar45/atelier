@@ -76,5 +76,12 @@ test('uses file-list then reader navigation on a phone', async ({ page }) => {
   await page.getByText('CLAUDE.md').first().click();
   await expect(page.getByRole('button', { name: 'Files' })).toBeVisible();
   await expect(page.getByTestId('agent-file-editor')).toContainText('# Personal instructions');
+
+  // The name is the one thing the header must say in full: the buttons used to
+  // squeeze it to "CL…", and the format was spelled out beside it (bw-5j2e.1).
+  const name = page.getByTestId('agent-file-name');
+  await expect(name).toHaveText('CLAUDE.md');
+  expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await expect(page.getByText('MARKDOWN')).toHaveCount(0);
   await page.screenshot({ path: join(results, 'phone.png'), fullPage: true });
 });
