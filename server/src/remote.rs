@@ -102,6 +102,66 @@ struct Reported {
 struct Named {
     #[serde(rename = "DNSName")]
     dns_name: Option<String>,
+    #[serde(rename = "TailscaleIPs")]
+    addresses: Option<Vec<String>>,
+}
+
+/// What this machine is called, and answers to, on the tailnet.
+///
+/// Read by the guard in `local_host.rs`: a phone that came in over Tailscale
+/// states a name and an address this machine has no other way of knowing are
+/// its own, and a guard built on an allowlist of what this machine is cannot
+/// admit them until it is told (bw-ndlu.4).
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct OnTheTailnet {
+    /// The full MagicDNS name, lowercased, with the root dot off.
+    pub name: Option<String>,
+    /// Every address the daemon hands this machine, as text.
+    pub addresses: Vec<String>,
+}
+
+/// What the daemon's report says this machine is on the tailnet.
+///
+/// Pure, so the shape of a real report is tested without a daemon. An absent
+/// or unreadable report is an empty answer rather than a guess: the guard's
+/// other rules still stand, and admitting nothing is the safe failure.
+pub fn on_the_tailnet_from(said: &str) -> OnTheTailnet {
+    let Ok(reported) = serde_json::from_str::<Reported>(said) else {
+        return OnTheTailnet::default();
+    };
+    // Only a running daemon's names mean anything. A stopped one still reports
+    // the name it last held, and this machine does not answer to it now.
+    if reported.backend_state.as_deref() != Some("Running") {
+        return OnTheTailnet::default();
+    }
+    let Some(this_computer) = reported.this_computer else {
+        return OnTheTailnet::default();
+    };
+    OnTheTailnet {
+        name: this_computer
+            .dns_name
+            .map(|name| name.trim().trim_end_matches('.').to_ascii_lowercase())
+            .filter(|name| !name.is_empty()),
+        addresses: this_computer
+            .addresses
+            .unwrap_or_default()
+            .into_iter()
+            .map(|address| address.trim().to_string())
+            .filter(|address| !address.is_empty())
+            .collect(),
+    }
+}
+
+/// The same, asked of the daemon now.
+pub fn on_the_tailnet() -> OnTheTailnet {
+    let Some(program) = looked_up() else {
+        return OnTheTailnet::default();
+    };
+    let reading = standing_reading();
+    let Ok(out) = std::process::Command::new(program).args(&reading[1..]).output() else {
+        return OnTheTailnet::default();
+    };
+    on_the_tailnet_from(&String::from_utf8_lossy(&out.stdout))
 }
 
 /// What `tailscale status --json` said, read into the one question asked of
@@ -584,6 +644,26 @@ mod tests {
         assert!(serving_from(said, 3008));
         assert!(!serving_from(said, 3009));
         assert!(!serving_from("{}", 3008));
+    }
+
+    #[test]
+    fn what_this_machine_is_on_the_tailnet_is_read_from_the_report() {
+        // The guard in local_host.rs admits exactly these, so a phone that came
+        // in over Tailscale is answered rather than refused (bw-ndlu.4).
+        let said = r#"{"BackendState":"Running","Self":{"DNSName":"Nobara.tail1a2b.ts.net.","TailscaleIPs":["100.70.11.94","fd7a:115c:a1e0::1701:b5e"]}}"#;
+        let it = on_the_tailnet_from(said);
+        assert_eq!(it.name.as_deref(), Some("nobara.tail1a2b.ts.net"), "the root dot and the case belong to DNS, not to the allowlist");
+        assert_eq!(it.addresses, vec!["100.70.11.94", "fd7a:115c:a1e0::1701:b5e"]);
+    }
+
+    #[test]
+    fn a_daemon_that_is_not_running_says_this_machine_is_nowhere() {
+        // It still reports the name it last held, and this machine does not
+        // answer to it now, so admitting it would outlive the tailnet.
+        let stopped = r#"{"BackendState":"Stopped","Self":{"DNSName":"nobara.tail1a2b.ts.net.","TailscaleIPs":["100.70.11.94"]}}"#;
+        assert_eq!(on_the_tailnet_from(stopped), OnTheTailnet::default());
+        assert_eq!(on_the_tailnet_from("tailscale: command not found"), OnTheTailnet::default());
+        assert_eq!(on_the_tailnet_from(""), OnTheTailnet::default());
     }
 
     #[test]

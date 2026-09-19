@@ -43,6 +43,24 @@
 //! one are judged by it, and curl, a same-origin `GET` and an address-bar
 //! navigation are unchanged.
 //!
+//! ## Why a tailnet name is admitted, and only this machine's own
+//!
+//! A phone away from the house reaches the board over Tailscale, which
+//! terminates TLS and proxies to this server, and the name it states is this
+//! machine's MagicDNS name — `nobara.tail58b026.ts.net`. That is a name this
+//! machine genuinely answers to, but nothing in the list above knows it: it is
+//! not the hostname, not under `.local`, and the address behind it is in the
+//! carrier-grade range, which is neither private nor loopback. So every route
+//! guarded here was refused at it — the terminal, a new chat, and the push
+//! endpoints a phone needs before a closed app can be notified at all, which
+//! is the whole point of reaching it from away (bw-ndlu.4).
+//!
+//! The allowance is the machine's own name and its own addresses, read from
+//! the daemon, and never the `.ts.net` suffix. Every tailnet in the world sits
+//! under that suffix, so allowing it would admit a name somebody else controls
+//! — the one thing this module exists to refuse. It is the same rule as the
+//! rest of the file, asked of one more place this machine is.
+//!
 //! ## Why the address is parsed and never string-matched
 //!
 //! `127.0.0.1` can be spelled `2130706433`, `0x7f000001`, `017700000001`, or
@@ -61,7 +79,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::net::IpAddr;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 /// The names this machine answers to besides `localhost` and its addresses.
 ///
@@ -159,12 +178,32 @@ fn bare_host(host: &str) -> Option<String> {
 
 /// Whether a caller claiming this host is talking to this machine.
 pub fn host_is_local(host: &str) -> bool {
+    answers_to(host, &on_the_tailnet())
+}
+
+/// The rule itself, given what this machine is on the tailnet.
+///
+/// Split out from `host_is_local` so every case below is decided by a value a
+/// test can hand it, rather than by whatever daemon happens to be running on
+/// the machine the tests are run on.
+fn answers_to(host: &str, tailnet: &crate::remote::OnTheTailnet) -> bool {
     let Some(name) = bare_host(host) else {
         return false;
     };
 
     if let Ok(address) = name.parse::<IpAddr>() {
-        return address_is_local(address);
+        if address_is_local(address) {
+            return true;
+        }
+        // A tailnet address is in the carrier-grade range, which is neither
+        // private nor loopback, so it reaches here. Only the addresses this
+        // machine was itself handed are admitted — the range as a whole
+        // belongs to every other machine on every other tailnet too.
+        return tailnet
+            .addresses
+            .iter()
+            .filter_map(|own| own.parse::<IpAddr>().ok())
+            .any(|own| own == address);
     }
 
     if name == "localhost" || name.ends_with(".localhost") {
@@ -178,7 +217,44 @@ pub fn host_is_local(host: &str) -> bool {
         return true;
     }
 
-    own_names().contains(&name)
+    if own_names().contains(&name) {
+        return true;
+    }
+
+    // The one name a phone coming in over Tailscale states. `.ts.net` is not
+    // allowed as a suffix: every tailnet in the world is under it, and a name
+    // in somebody else's is exactly the name this module exists to refuse. The
+    // machine's own name, and nothing else beside it.
+    tailnet.name.as_deref() == Some(name.as_str())
+}
+
+/// How long this machine's tailnet identity is trusted before asking again.
+///
+/// Asking costs a subprocess, so it cannot happen per request. It cannot be
+/// read once either: Tailscale is routinely installed and signed in while the
+/// board is already running — the whole of bw-l70z — and a name read at
+/// startup would be missing for as long as the app stayed up.
+const TAILNET_IS_FRESH_FOR: Duration = Duration::from_secs(10);
+
+/// What this machine is on the tailnet, asked of the daemon at most every
+/// {@link TAILNET_IS_FRESH_FOR}.
+fn on_the_tailnet() -> crate::remote::OnTheTailnet {
+    static KNOWN: OnceLock<Mutex<Option<(Instant, crate::remote::OnTheTailnet)>>> = OnceLock::new();
+    let known = KNOWN.get_or_init(|| Mutex::new(None));
+    let mut held = match known.lock() {
+        Ok(held) => held,
+        // A panic in another request's read must not take the guard down with
+        // it; the safe answer is the one that admits nothing extra.
+        Err(_) => return crate::remote::OnTheTailnet::default(),
+    };
+    if let Some((read, ref what)) = *held {
+        if read.elapsed() < TAILNET_IS_FRESH_FOR {
+            return what.clone();
+        }
+    }
+    let now = crate::remote::on_the_tailnet();
+    *held = Some((Instant::now(), now.clone()));
+    now
 }
 
 /// Whether the page a caller says it is acting for was served by this machine.
@@ -314,6 +390,61 @@ mod tests {
         ] {
             assert!(!host_is_local(host), "should have refused {host}");
         }
+    }
+
+    /// A daemon reporting this machine the way a real one does.
+    fn this_machine() -> crate::remote::OnTheTailnet {
+        crate::remote::OnTheTailnet {
+            name: Some("nobara.tail58b026.ts.net".to_string()),
+            addresses: vec!["100.70.11.94".to_string(), "fd7a:115c:a1e0::1701:b5e".to_string()],
+        }
+    }
+
+    #[test]
+    fn accepts_the_name_and_addresses_this_machine_has_on_the_tailnet() {
+        // What a phone away from the house states, having come in over
+        // Tailscale: without these the push endpoints are refused and a closed
+        // app is never notified.
+        for host in [
+            "nobara.tail58b026.ts.net",
+            "nobara.tail58b026.ts.net.",
+            "nobara.tail58b026.ts.net:3008",
+            "NOBARA.TAIL58B026.TS.NET",
+            "100.70.11.94",
+            "100.70.11.94:3008",
+            "[fd7a:115c:a1e0::1701:b5e]:3008",
+        ] {
+            assert!(answers_to(host, &this_machine()), "should have accepted {host}");
+        }
+    }
+
+    #[test]
+    fn refuses_a_tailnet_that_is_not_this_one() {
+        for host in [
+            // Every tailnet in the world is under this suffix. Allowing the
+            // suffix would admit a name its owner points wherever he likes.
+            "nobara.tail99z999.ts.net",
+            "evil.tail58b026.ts.net",
+            "nobara.tail58b026.ts.net.evil.com",
+            "ts.net",
+            // The carrier-grade range belongs to every other tailnet too, so
+            // only the addresses this machine was handed are admitted.
+            "100.70.11.95",
+            "100.64.0.1:3008",
+        ] {
+            assert!(!answers_to(host, &this_machine()), "should have refused {host}");
+        }
+    }
+
+    #[test]
+    fn refuses_a_tailnet_name_when_this_machine_is_on_no_tailnet() {
+        // Tailscale not installed, stopped, or signed out: the name is nobody's
+        // here, and the rest of the allowlist still stands.
+        let nowhere = crate::remote::OnTheTailnet::default();
+        assert!(!answers_to("nobara.tail58b026.ts.net", &nowhere));
+        assert!(!answers_to("100.70.11.94", &nowhere));
+        assert!(answers_to("nobara.local", &nowhere), "the LAN rule is untouched");
+        assert!(answers_to("127.0.0.1:3008", &nowhere), "loopback is untouched");
     }
 
     #[test]
