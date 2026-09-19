@@ -74,7 +74,7 @@ test('uses file-list then reader navigation on a phone', async ({ page }) => {
   await page.goto('/settings?section=files');
   await expect(page.getByText('CLAUDE.md').first()).toBeVisible();
   await page.getByText('CLAUDE.md').first().click();
-  await expect(page.getByRole('button', { name: 'Files' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'All files' })).toBeVisible();
   await expect(page.getByTestId('agent-file-editor')).toContainText('# Personal instructions');
 
   // The name is the one thing the header must say in full: the buttons used to
@@ -83,5 +83,11 @@ test('uses file-list then reader navigation on a phone', async ({ page }) => {
   await expect(name).toHaveText('CLAUDE.md');
   expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   await expect(page.getByText('MARKDOWN')).toHaveCount(0);
+
+  // Name and actions share the one row: the header is a line, not a band.
+  const line = async (testid: string) => (await page.getByTestId(testid).boundingBox())!;
+  const nameBox = await line('agent-file-name');
+  const saveBox = await line('agent-file-save');
+  expect(Math.abs(nameBox.y - saveBox.y)).toBeLessThan(saveBox.height);
   await page.screenshot({ path: join(results, 'phone.png'), fullPage: true });
 });
