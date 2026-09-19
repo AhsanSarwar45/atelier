@@ -7,8 +7,10 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { EMPTY, foldAll, reduce, type TranscriptTool } from '@/workbench/fold';
 import { diffOf } from '@/workbench/imported-history';
 import { changeOf } from '@/workbench/line-diff';
+import type { WbpEvent } from '@/workbench/protocol';
 
 const big = (n: number) => Array.from({ length: n }, (_, at) => `line ${at + 1}`).join('\n') + '\n';
 
@@ -83,5 +85,45 @@ describe('a diff read back out of a record', () => {
     expect(diff?.hunks?.[0]?.oldStart).toBe(150);
     expect(diff?.added).toBe(1);
     expect(diff?.removed).toBe(1);
+  });
+});
+
+/**
+ * There are two folds — one for a chat arriving live, one for a whole record
+ * read at once — and a field carried by only one of them is a field the card
+ * has half the time. The e2e caught exactly that, so both are asked here.
+ */
+describe('both folds carry what the wire worked out', () => {
+  const before = big(40);
+  const after = before.replace('line 20\n', 'line 20 changed\n');
+  const change = changeOf(before, after);
+  const base = { sessionId: 's', at: new Date(0).toISOString() };
+  const events: WbpEvent[] = [
+    { ...base, seq: 1, type: 'tool.started', toolCallId: 't', name: 'Write', input: {}, title: 'Changed a.ts', parentToolCallId: null },
+    { ...base, seq: 2, type: 'diff', toolCallId: 't', path: '/a.ts', before, after, line: 1, ...change },
+  ];
+
+  const diffOfFirstTool = (items: readonly unknown[]) =>
+    (items.find((it) => (it as TranscriptTool).kind === 'tool') as TranscriptTool).diff;
+
+  it('carries it through the whole-record fold', () => {
+    const diff = diffOfFirstTool(foldAll(events).items);
+    expect(diff).toMatchObject({ added: 1, removed: 1 });
+    expect(diff?.hunks).toHaveLength(1);
+  });
+
+  it('carries it through the live fold', () => {
+    const view = events.reduce(reduce, EMPTY);
+    const diff = diffOfFirstTool(view.items);
+    expect(diff).toMatchObject({ added: 1, removed: 1 });
+    expect(diff?.hunks).toHaveLength(1);
+  });
+
+  it('leaves a row from an event that carried none the shape it always was', () => {
+    const bare: WbpEvent[] = [
+      events[0]!,
+      { ...base, seq: 2, type: 'diff', toolCallId: 't', path: '/a.ts', before, after, line: 1 },
+    ];
+    expect(diffOfFirstTool(foldAll(bare).items)).toEqual({ path: '/a.ts', before, after, line: 1 });
   });
 });

@@ -1373,6 +1373,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
             before: e.before,
             after: e.after,
             ...(e.line ? { line: e.line } : {}),
+            ...changeFields(e),
           };
         }
         break;

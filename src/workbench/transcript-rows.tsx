@@ -34,7 +34,8 @@ import { forHowLong } from '@/workbench/elapsed';
 import { SUMMARY_HELD_AT, summaryFill } from '@/workbench/summarising';
 import { languageOf, languagesOf, paint, paintLines } from '@/workbench/colouring';
 import { DiffTable } from '@/workbench/diff-table';
-import { diffLines } from '@/workbench/line-diff';
+import type { TranscriptTool } from '@/workbench/fold';
+import { diffLines, hunksToRows } from '@/workbench/line-diff';
 import { opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
 import { lookOf, markOf } from '@/workbench/machine-look';
 import { attachmentMarker, attachmentsIn } from '@/workbench/mentions';
@@ -241,17 +242,53 @@ function cutSize(text: string): number | null {
   return ending ? text.length - ending[0].length + Number(ending[1]) : null;
 }
 
-function DiffView({ path, before, after, line }: { path: string; before: string; after: string; line?: number }) {
+/**
+ * How much changed, as the header says it.
+ *
+ * A count is the unit the reader thinks in, and unlike a character count it
+ * survives the wire: the server works it out before it cuts the text, so it is
+ * exact even for an edit whose lines could not all be carried (bw-vl3q.3).
+ */
+function Counts({ added, removed }: { added: number; removed: number }) {
+  return (
+    <span className="shrink-0 tabular-nums" data-testid="diff-counts">
+      <span className="text-emerald-500">+{added.toLocaleString('en-US')}</span>{' '}
+      <span className="text-red-500">−{removed.toLocaleString('en-US')}</span>
+    </span>
+  );
+}
+
+/**
+ * What an edit changed.
+ *
+ * The lines come from the hunks the wire worked out on the full text, so a
+ * change near the bottom of a large file is drawn where it is rather than lost
+ * behind a count of the characters the card was not sent. An edit small enough
+ * to have crossed whole is still compared here, and a row stored before any of
+ * this falls back to the measurement that was all it ever carried (bw-vl3q.3).
+ */
+function DiffView({ diff }: { diff: NonNullable<TranscriptTool['diff']> }) {
+  const { path, before, after, line, hunks, added, removed, omittedHunks, omittedLines } = diff;
   const beforeSize = cutSize(before);
   const afterSize = cutSize(after);
   // Once either side has been cut, the code left in it is arbitrary context:
   // it is not the whole change and it is not necessarily the changed part.
   // Drawing that partial text as a diff made large edits look precise while
-  // saying almost nothing useful. Keep the honest measurement and no code
-  // from either side (bw-2xjd.1).
-  const compact = beforeSize !== null || afterSize !== null;
-  const rows = compact ? [] : diffLines(before, after, line ?? 1);
+  // saying almost nothing useful (bw-2xjd.1). Hunks are the answer to that —
+  // they were taken before the cut — so they are preferred wherever they are.
+  const cut = beforeSize !== null || afterSize !== null;
+  const rows = hunks ? hunksToRows(hunks) : cut ? [] : diffLines(before, after, line ?? 1);
+  const counted = added !== undefined && removed !== undefined;
   const language = languageOf(path);
+  // What the hunks could not carry, said rather than implied. A change left out
+  // whole is the loss worth naming when there is one; lines are named only when
+  // clipping one long run is the whole of what happened, which is the shape a
+  // new file takes. Saying both at once read as arithmetic and not as a count.
+  const left = omittedHunks
+    ? `${omittedHunks.toLocaleString('en-US')} more ${omittedHunks === 1 ? 'change' : 'changes'}`
+    : omittedLines
+      ? `${omittedLines.toLocaleString('en-US')} more lines`
+      : null;
   return (
     <Panel
       tone="frame"
@@ -261,13 +298,29 @@ function DiffView({ path, before, after, line }: { path: string; before: string;
       data-diff-language={language ?? ''}
       className="mt-1.5 overflow-hidden"
     >
-      <div className="flex items-center justify-between bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+      <div className="flex items-center justify-between gap-2 bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
         <span className="truncate">
           <EditPath path={path} line={line} />
         </span>
-        <span className="shrink-0">before → after</span>
+        {counted ? <Counts added={added} removed={removed} /> : <span className="shrink-0">before → after</span>}
       </div>
-      {compact ? (
+      {rows.length > 0 ? (
+        <>
+          <div className="max-h-64 overflow-auto">
+            <DiffTable rows={rows} language={language} />
+          </div>
+          {left && (
+            <div data-testid="diff-omitted" className="border-t border-border/40 bg-muted/20 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+              … and {left} not shown
+            </div>
+          )}
+        </>
+      ) : counted ? (
+        // Counted, and nothing to draw: the two sides are the same.
+        <div data-testid="diff-summary" className="px-2 py-1.5 font-mono text-[11px] text-muted-foreground">
+          No lines changed
+        </div>
+      ) : (
         <div data-testid="diff-summary" className="grid grid-cols-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
           <div className="bg-red-500/15 px-2 py-1.5">
             {before.length === 0 ? 'No previous content' : `${(beforeSize ?? before.length).toLocaleString('en-US')} characters hidden`}
@@ -275,10 +328,6 @@ function DiffView({ path, before, after, line }: { path: string; before: string;
           <div className="border-l border-border/40 bg-emerald-500/15 px-2 py-1.5">
             {after.length === 0 ? 'No new content' : `${(afterSize ?? after.length).toLocaleString('en-US')} characters hidden`}
           </div>
-        </div>
-      ) : (
-        <div className="max-h-64 overflow-auto">
-          <DiffTable rows={rows} language={language} />
         </div>
       )}
     </Panel>
@@ -592,12 +641,7 @@ export const ToolRow = memo(function ToolRow({
              again in worse words. So the card holds the diff INSTEAD of them,
              and holds it behind its own click rather than under itself, where
              nothing could put a screen of changed lines away (bw-cso1.1). */
-          <DiffView
-            path={shown.diff.path}
-            before={shown.diff.before}
-            after={shown.diff.after}
-            line={shown.diff.line}
-          />
+          <DiffView diff={shown.diff} />
         ) : (
           <>
             <Body label={shell ? 'ran' : 'asked'} text={asked} testId="tool-input" language={tongue.asked} />
