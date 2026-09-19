@@ -16,6 +16,7 @@ import {
   ArrowUp,
   ChevronDown,
   ChevronRight,
+  Clock3,
   Folder,
   FolderGit2,
   Gauge,
@@ -68,6 +69,7 @@ import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
 import { AttachmentTile } from '@/workbench/attachment-tile';
 import { draftFiles, withoutFile } from '@/workbench/draft-files';
 import { FileDropTarget } from '@/workbench/file-drop';
+import { HeldMessages } from '@/workbench/held-messages';
 import { imageIds, imageMarker, pictureId, promptFromDraft, promptParts, whyNot } from '@/workbench/composer-attachments';
 import type { DraftPicture } from '@/workbench/composer-attachments';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
@@ -86,7 +88,7 @@ import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, sentAway, showing as stillShowing, type KindId } from '@/workbench/message-filter';
-import type { Brand, CommandInfo, LookableImage, ProfileChoice, SessionConfigOption, TodoItem } from '@/workbench/protocol';
+import type { Brand, CommandInfo, HeldMessage, LookableImage, ProfileChoice, SessionConfigOption, TodoItem } from '@/workbench/protocol';
 import type { SessionMenu } from '@/workbench/fold';
 
 /** The brands a chat can run on somebody's account. `local` has none. */
@@ -711,12 +713,26 @@ export function TodoPanel({ items }: { items: TodoItem[] }) {
   );
 }
 
+/** What the writing box reads off a keystroke, on either of its two surfaces. */
+export type ComposerKey = Pick<KeyboardEvent<HTMLTextAreaElement>, 'key' | 'shiftKey' | 'metaKey' | 'ctrlKey'>;
+
 /** Desktop keeps its quick Enter shortcut; phone keyboards always make a new line. */
-export function enterSubmits(
-  event: Pick<KeyboardEvent<HTMLTextAreaElement>, 'key' | 'shiftKey'>,
-  mobile = isPhoneScreen(),
-): boolean {
+export function enterSubmits(event: ComposerKey, mobile = isPhoneScreen()): boolean {
   return event.key === 'Enter' && !event.shiftKey && !mobile;
+}
+
+/**
+ * Cmd or Ctrl with Enter: send it now, whatever the chat is doing.
+ *
+ * Enter alone means the safe thing — send an idle chat, hold a working one —
+ * so the one keystroke never has to be thought about. This is the other half:
+ * the deliberate interruption, and it is deliberately the awkward one to press
+ * by accident. No phone test, because a phone with a keyboard attached has
+ * this key too, and the button beside the box is what a phone without one
+ * uses (bw-r54j.4).
+ */
+export function enterPushesThrough(event: ComposerKey): boolean {
+  return event.key === 'Enter' && !event.shiftKey && (event.metaKey || event.ctrlKey);
 }
 
 export default function ChatTab({ projectId, projectPath, openSessionId }: ChatTabProps) {
@@ -821,6 +837,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [steerError, setSteerError] = useState<string | null>(null);
   /** Why the last thing he wrote did not go, if it did not go. */
   const [sendError, setSendError] = useState<string | null>(null);
+  /** The waiting message a click is in flight for, so it is clicked once. */
+  const [heldWorking, setHeldWorking] = useState<string | null>(null);
   /** Lines sent and drawn, standing until the server sends its own copy back. */
   const [pendingSends, setPendingSends] = useState<PendingSend[]>([]);
   /** The user messages the transcript held when the first of those went out. */
@@ -1336,6 +1354,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // first frame it draws (live.ts, LiveSession.externalId).
   const live = useLiveSessions().find((s) => s.id === sessionId);
   const sessionBrand = live?.brand ?? facts?.brand ?? 'claude';
+  /**
+   * Whether there is a message to do anything with. One reading for all three
+   * buttons, so Send, Send now and Queue can never disagree about whether
+   * there is something in the box (bw-r54j.4).
+   */
+  const sendable = Boolean(draft.trim()) && !(sessionBrand === 'local' && !view.model);
   const composer = composerMenu(view.menu, sessionBrand, view.model, view.collaborationMode);
   const selectedModel = composer.models.find((model) => model.value === view.model);
   // The chat's own accounts are needed even on the system account: that is the
@@ -1544,7 +1568,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    * cannot depend on which of them the key arrived at. True means the chat has
    * dealt with it and nothing else may.
    */
-  function composerKey(e: { key: string; shiftKey: boolean }): boolean {
+  function composerKey(e: ComposerKey): boolean {
     if (matches.length) {
       if (e.key === 'ArrowDown') {
         setPick((n) => (n + 1) % matches.length);
@@ -1567,8 +1591,17 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       void recallLastPrompt();
       return true;
     }
-    if (enterSubmits(e)) {
+    // Ahead of the plain Enter below, which would otherwise take this too:
+    // both are Enter without Shift, and only this one says push it through.
+    if (enterPushesThrough(e)) {
       void submit();
+      return true;
+    }
+    if (enterSubmits(e)) {
+      // One key, one meaning: give it to the chat if the chat is free, and
+      // hold it if it is working. Nothing the reader types is ever thrown at
+      // a turn in progress unless they asked for that.
+      void (busy ? hold() : submit());
       return true;
     }
     return false;
@@ -1620,6 +1653,95 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       recallableNow.current = null;
       sending.current = null;
       setSendError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /**
+   * Hold what was written instead of interrupting the turn with it.
+   *
+   * The message goes to the server rather than into a list on this page: a
+   * queue kept here would be gone on the next reload and invisible in the
+   * other window the same chat is open in. What comes back is the
+   * `prompt.held` event, which is what draws it (bw-r54j.1).
+   */
+  async function hold() {
+    const { text, images } = promptFromDraft(draft, attached);
+    if ((!text && attached.length === 0) || !sessionId) return;
+    const written = draft;
+    const carried = attached;
+    setDraft('');
+    setAttached([]);
+    setSendError(null);
+    try {
+      await sendCommand({
+        type: 'prompt.hold',
+        sessionId,
+        text,
+        images,
+        ...(carried.length ? { parts: promptParts(written, carried) } : {}),
+      });
+    } catch (e) {
+      // Refused the same way a send is refused, and answered the same way:
+      // what he wrote goes back in the box he wrote it in.
+      setDraft(written);
+      setAttached(carried);
+      setSendError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /** Send a waiting message now, into whatever the chat is in the middle of. */
+  async function pushHeld(message: HeldMessage) {
+    if (!sessionId) return;
+    setHeldWorking(message.id);
+    setSendError(null);
+    try {
+      await sendCommand({
+        type: 'prompt.push',
+        sessionId,
+        heldId: message.id,
+        takeover: ownership.kind === 'elsewhere',
+      });
+    } catch (e) {
+      setSendError(`That message is still waiting. ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setHeldWorking(null);
+    }
+  }
+
+  /** Drop a waiting message. */
+  async function dropHeld(message: HeldMessage) {
+    if (!sessionId) return;
+    setHeldWorking(message.id);
+    setSendError(null);
+    try {
+      await sendCommand({ type: 'prompt.drop', sessionId, heldId: message.id });
+    } catch (e) {
+      setSendError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setHeldWorking(null);
+    }
+  }
+
+  /**
+   * Take a waiting message back into the writing box.
+   *
+   * Editing is dropping and rewriting, so there is no second way for a message
+   * to be changed: whatever is in the box is what will be sent, and a message
+   * being edited is no longer in the queue to go out from under the cursor.
+   * Anything already written is kept in front of it rather than overwritten.
+   */
+  async function editHeld(message: HeldMessage) {
+    if (!sessionId) return;
+    setHeldWorking(message.id);
+    setSendError(null);
+    try {
+      await sendCommand({ type: 'prompt.drop', sessionId, heldId: message.id });
+      setDraft((written) => (written.trim() ? `${written.replace(/\s+$/, '')}\n${message.text}` : message.text));
+      typing.current?.focus();
+    } catch (e) {
+      setSendError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setHeldWorking(null);
     }
   }
 
@@ -2328,6 +2450,18 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             comes back by itself when they let go, because the stream this is
             read from does (bw-96is). The line's words are the reading's, so it
             cannot contradict the mark at the top of the pane (bw-96is.9). */}
+        {/* What is waiting, above the box it was written in and below the
+            answer it is waiting on. Drawn even while another program holds the
+            chat: those messages are still the reader's, and dropping one is
+            something they can still do. */}
+        <HeldMessages
+          held={view.held}
+          working={busy}
+          busyId={heldWorking}
+          onPush={(message) => void pushHeld(message)}
+          onEdit={(message) => void editHeld(message)}
+          onDrop={(message) => void dropHeld(message)}
+        />
         {ownership.kind === 'elsewhere' ? (
           <p data-testid="held-elsewhere" className="mx-auto w-full max-w-[110ch] px-4 py-3 text-xs text-info">
             {heldLine(state)}
@@ -2607,6 +2741,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               </Tooltip>
             )}
             <span className="ml-auto" />
+            {/* While it works there are three things a reader can want, and
+                all three are on the row rather than behind a shortcut nobody
+                was told about: stop what is running, hold what was just
+                written, or push it through now. Stop stands alone until there
+                is something written — there is nothing to send or hold until
+                then — and the rightmost button is always the one Enter
+                presses, so the primary action never moves (bw-r54j.4). */}
             {busy ? (
               <Button
                 variant="destructive"
@@ -2629,7 +2770,38 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               >
                 <Square className="h-4 w-4" />
               </Button>
-            ) : (
+            ) : null}
+            {busy && sendable && (
+              <Tooltip label="Send now, into the turn that is running (Ctrl/Cmd + Enter)">
+                <Button
+                  variant="outline"
+                  mode="icon"
+                  size="sm"
+                  aria-label="Send now"
+                  data-testid="send-now-button"
+                  className="rounded-full"
+                  onClick={() => void submit()}
+                >
+                  <ArrowUp className="h-4 w-4" />
+                </Button>
+              </Tooltip>
+            )}
+            {busy && sendable && (
+              <Tooltip label="Hold it until this turn is over (Enter)">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  aria-label="Queue"
+                  data-testid="queue-button"
+                  className="rounded-full"
+                  onClick={() => void hold()}
+                >
+                  <Clock3 className="h-4 w-4" />
+                  Queue
+                </Button>
+              </Tooltip>
+            )}
+            {!busy && (
               <Button
                 variant="primary"
                 mode="icon"
@@ -2643,7 +2815,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 // could never come out true. What stops a send while someone
                 // else is in there is the composer not being drawn at all,
                 // which is what the browser checks measure (bw-96is.23).
-                disabled={!draft.trim() || (sessionBrand === 'local' && !view.model)}
+                disabled={!sendable}
               >
                 <ArrowUp className="h-4 w-4" />
               </Button>

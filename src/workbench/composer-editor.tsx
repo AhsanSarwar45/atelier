@@ -245,7 +245,8 @@ export interface ComposerEditorProps {
    * chat took it — Enter that sent, Escape that recalled — and it goes no
    * further.
    */
-  onKey: (event: { key: string; shiftKey: boolean }) => boolean;
+  /** Every modifier the chat's reading needs: Enter holds, Cmd/Ctrl+Enter pushes. */
+  onKey: (event: { key: string; shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => boolean;
   /** Files arriving by paste or by drop; both are the chat's to absorb. */
   onFiles: (files: File[], at: number) => void;
   pictures?: DraftPicture[];

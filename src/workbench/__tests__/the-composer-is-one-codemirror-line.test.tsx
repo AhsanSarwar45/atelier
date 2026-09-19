@@ -91,7 +91,7 @@ describe('the composer', () => {
   it('sends on Enter, breaks the line on Shift+Enter, and on a phone always breaks', async () => {
     const sent: string[] = [];
     /** The chat's own reading of a keystroke, as `chat-tab.tsx` spells it. */
-    const answer = (phone: boolean) => (event: { key: string; shiftKey: boolean }) => {
+    const answer = (phone: boolean) => (event: { key: string; shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => {
       if (!enterSubmits(event, phone)) return false;
       sent.push('sent');
       return true;
