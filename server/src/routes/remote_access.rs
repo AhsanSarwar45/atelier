@@ -91,13 +91,13 @@ async fn write_remote(
 
     if let Some(said) = &asked.bind_host {
         let kept = tidied(said);
-        if let Some(why) = why_not_a_host(kept.as_deref()) {
+        if let Some(why) = why_not_a_host(kept) {
             return Err((StatusCode::UNPROCESSABLE_ENTITY, why));
         }
-        store(&db, BIND_HOST_SETTING, kept.as_deref())?;
+        store(&db, BIND_HOST_SETTING, kept)?;
     }
     if let Some(said) = &asked.public_url {
-        store(&db, PUBLIC_URL_SETTING, tidied(said).as_deref())?;
+        store(&db, PUBLIC_URL_SETTING, tidied(said))?;
     }
     if let Some(on) = asked.serving {
         // Tailscale first. If it refuses, nothing is remembered, because a
