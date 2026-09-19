@@ -16,7 +16,6 @@ use axum::{
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
@@ -600,11 +599,7 @@ const DOLT_PATH_PREFIX: &str = "dolt://";
 const CANCELLED_LABEL: &str = "cancelled";
 
 /// The live stages, earliest first, each with every spelling bd may write.
-const LIVE_STAGES: [(&str, &[&str]); 3] = [
-    ("in_progress", &["in_progress"]),
-    ("inreview", &["inreview", "in_review"]),
-    ("manager_review", &["manager_review"]),
-];
+
 
 /// GET /api/beads?path=/path/to/project
 /// GET /api/beads?path=dolt://beads_dbname
@@ -1738,218 +1733,22 @@ fn post_process_beads(mut beads: Vec<Bead>) -> Vec<Bead> {
         }
     }
 
+    let nodes: Vec<_> = beads.iter().map(|bead| crate::board_state::Node {
+        id: bead.id.clone(),
+        status: if bead.labels.as_ref().is_some_and(|labels| labels.iter().any(|l| l == "cancelled")) { "cancelled".into() } else { bead.status.clone() },
+        children: bead.children.clone().unwrap_or_default(),
+        started: bead.status != "open",
+    }).collect();
+    let projection = crate::board_state::project(&nodes);
+    for bead in &mut beads {
+        if let Some(error) = projection.errors.get(&bead.id) {
+            tracing::warn!(card = %bead.id, %error, "Board hierarchy needs repair");
+        }
+        if let Some(status) = projection.states.get(&bead.id) { bead.status = status.clone(); }
+    }
     beads
 }
 
-/// Computes the appropriate status for an epic based on its children's statuses.
-///
-/// The first live stage any child still stands in, in LIVE_STAGES order, which
-/// is the order src/lib/bead-utils.ts places a card by; then all-closed reads as
-/// inreview and all-open as open. An epic is never auto-closed.
-fn compute_epic_status_from_children(child_statuses: &[&str]) -> Option<&'static str> {
-    if child_statuses.is_empty() {
-        return None;
-    }
-
-    for (stage, spellings) in LIVE_STAGES {
-        if child_statuses.iter().any(|s| spellings.contains(s)) {
-            return Some(stage);
-        }
-    }
-
-    if child_statuses.iter().all(|s| *s == "closed") {
-        return Some("inreview");
-    }
-
-    if child_statuses.iter().all(|s| *s == "open") {
-        return Some("open");
-    }
-
-    None
-}
-
-/// Recomputes and updates epic statuses based on their children's statuses.
-///
-/// This function reads the issues.jsonl file, finds all epics with children,
-/// computes the appropriate status for each epic based on its children,
-/// and writes back the file if any epic status changed.
-///
-/// # Arguments
-///
-/// * `issues_path` - Path to the .beads/issues.jsonl file
-///
-/// # Returns
-///
-/// * `Ok(Vec<String>)` - List of epic IDs that were updated
-/// * `Err(String)` - Error message if something went wrong
-pub fn recompute_epic_statuses(issues_path: &Path) -> Result<Vec<String>, String> {
-    // Skip if JSONL doesn't exist (Dolt mode — bd manages its own data)
-    if !issues_path.exists() {
-        return Ok(vec![]);
-    }
-
-    // Read the file contents
-    let contents = std::fs::read_to_string(issues_path)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
-
-    // Parse JSONL as both raw Values (for lossless write-back) and Beads (for logic)
-    let mut raw_lines: Vec<serde_json::Value> = Vec::new();
-    let mut beads: Vec<Bead> = Vec::new();
-    for (line_num, line) in contents.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        match serde_json::from_str::<serde_json::Value>(line) {
-            Ok(value) => {
-                // Skip non-issue service records (e.g. `bd remember` memories),
-                // but keep them in raw_lines for lossless write-back.
-                if value
-                    .as_object()
-                    .is_some_and(|o| o.contains_key("_type"))
-                {
-                    raw_lines.push(value);
-                    continue;
-                }
-                match serde_json::from_value::<Bead>(value.clone()) {
-                    Ok(bead) => beads.push(bead),
-                    Err(e) => {
-                        tracing::warn!(
-                            "Failed to parse bead at line {}: {}",
-                            line_num + 1,
-                            e
-                        );
-                    }
-                }
-                raw_lines.push(value);
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "Failed to parse JSON at line {}: {}",
-                    line_num + 1,
-                    e
-                );
-            }
-        }
-    }
-
-    // Build parent-child relationships
-    let mut parent_to_children: HashMap<String, Vec<String>> = HashMap::new();
-
-    // First pass: Extract from dependencies and parent field
-    for bead in &mut beads {
-        if let Some(RawDependencies::Legacy(ref legacy_deps)) = bead.dependencies {
-            for dep in legacy_deps {
-                if dep.dep_type == "parent-child" {
-                    bead.parent_id = Some(dep.depends_on_id.clone());
-                    parent_to_children
-                        .entry(dep.depends_on_id.clone())
-                        .or_default()
-                        .push(bead.id.clone());
-                }
-            }
-        }
-
-        if let Some(parent_id) = &bead.parent_id {
-            let children = parent_to_children.entry(parent_id.clone()).or_default();
-            if !children.contains(&bead.id) {
-                children.push(bead.id.clone());
-            }
-        }
-    }
-
-    // Second pass: Infer parent-child from ID patterns
-    let bead_ids: std::collections::HashSet<String> =
-        beads.iter().map(|b| b.id.clone()).collect();
-
-    for bead in &beads {
-        if bead.parent_id.is_none() && bead.id.contains('.') {
-            if let Some(dot_pos) = bead.id.rfind('.') {
-                let potential_parent = &bead.id[..dot_pos];
-                if bead_ids.contains(potential_parent) {
-                    let children = parent_to_children
-                        .entry(potential_parent.to_string())
-                        .or_default();
-                    if !children.contains(&bead.id) {
-                        children.push(bead.id.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    // Build status map
-    let status_map: HashMap<String, String> = beads
-        .iter()
-        .map(|b| (b.id.clone(), b.status.clone()))
-        .collect();
-
-    // Find which epics need updates
-    let mut epic_updates: Vec<(String, String)> = Vec::new();
-
-    for bead in &beads {
-        if bead.issue_type.as_deref() != Some("epic") {
-            continue;
-        }
-        if bead.status == "closed" {
-            continue;
-        }
-        let children = match parent_to_children.get(&bead.id) {
-            Some(c) => c,
-            None => continue,
-        };
-        let child_statuses: Vec<&str> = children
-            .iter()
-            .filter_map(|child_id| status_map.get(child_id).map(String::as_str))
-            .collect();
-        if let Some(new_status) = compute_epic_status_from_children(&child_statuses) {
-            if bead.status != new_status {
-                epic_updates.push((bead.id.clone(), new_status.to_string()));
-            }
-        }
-    }
-
-    // Apply updates to raw JSON values (preserving original field names)
-    let mut updated_epic_ids: Vec<String> = Vec::new();
-
-    for (epic_id, new_status) in &epic_updates {
-        for value in &mut raw_lines {
-            if let Some(obj) = value.as_object_mut() {
-                if obj.get("id").and_then(|v| v.as_str()) == Some(epic_id) {
-                    tracing::info!(
-                        "Updating epic {} status to {}",
-                        epic_id,
-                        new_status
-                    );
-                    obj.insert("status".to_string(), serde_json::json!(new_status));
-                    obj.insert("updated_at".to_string(), serde_json::json!(Utc::now().to_rfc3339()));
-                    updated_epic_ids.push(epic_id.clone());
-                    break;
-                }
-            }
-        }
-    }
-
-    // Write back if any epic was updated (using raw values to preserve format)
-    if !updated_epic_ids.is_empty() {
-        let file = std::fs::File::create(issues_path)
-            .map_err(|e| format!("Failed to open file for writing: {}", e))?;
-
-        let mut writer = std::io::BufWriter::new(file);
-        for value in &raw_lines {
-            let json_line = serde_json::to_string(value)
-                .map_err(|e| format!("Failed to serialize: {}", e))?;
-            writeln!(writer, "{}", json_line)
-                .map_err(|e| format!("Failed to write to file: {}", e))?;
-        }
-        writer
-            .flush()
-            .map_err(|e| format!("Failed to flush file: {}", e))?;
-    }
-
-    Ok(updated_epic_ids)
-}
 
 #[cfg(test)]
 mod tests {
@@ -2250,72 +2049,6 @@ mod tests {
         let bead: Bead = serde_json::from_str(json).unwrap();
         assert_eq!(bead.design, Some("some design notes".to_string()));
         assert_eq!(bead.notes, Some("some extra notes".to_string()));
-    }
-
-    #[test]
-    fn test_compute_epic_status_any_in_progress() {
-        // Any child in_progress -> Epic in_progress
-        let statuses = vec!["open", "in_progress", "closed"];
-        assert_eq!(
-            compute_epic_status_from_children(&statuses),
-            Some("in_progress")
-        );
-    }
-
-    #[test]
-    fn test_compute_epic_status_all_open() {
-        // All children open -> Epic open
-        let statuses = vec!["open", "open", "open"];
-        assert_eq!(compute_epic_status_from_children(&statuses), Some("open"));
-    }
-
-    #[test]
-    fn test_compute_epic_status_all_inreview_or_closed_with_inreview() {
-        // All children inreview or closed (with at least one inreview) -> Epic inreview
-        let statuses = vec!["inreview", "closed", "inreview"];
-        assert_eq!(
-            compute_epic_status_from_children(&statuses),
-            Some("inreview")
-        );
-    }
-
-    #[test]
-    fn test_compute_epic_status_all_closed() {
-        // All children closed -> Epic should be inreview (ready for final review)
-        let statuses = vec!["closed", "closed"];
-        assert_eq!(compute_epic_status_from_children(&statuses), Some("inreview"));
-    }
-
-    #[test]
-    fn test_compute_epic_status_mixed_open_closed() {
-        // Mixed open and closed (no in_progress or inreview) -> No change
-        let statuses = vec!["open", "closed"];
-        assert_eq!(compute_epic_status_from_children(&statuses), None);
-    }
-
-    #[test]
-    fn test_compute_epic_status_empty() {
-        // No children -> No change
-        let statuses: Vec<&str> = vec![];
-        assert_eq!(compute_epic_status_from_children(&statuses), None);
-    }
-
-    #[test]
-    fn test_compute_epic_status_single_in_progress() {
-        let statuses = vec!["in_progress"];
-        assert_eq!(
-            compute_epic_status_from_children(&statuses),
-            Some("in_progress")
-        );
-    }
-
-    #[test]
-    fn test_compute_epic_status_single_inreview() {
-        let statuses = vec!["inreview"];
-        assert_eq!(
-            compute_epic_status_from_children(&statuses),
-            Some("inreview")
-        );
     }
 
     #[test]

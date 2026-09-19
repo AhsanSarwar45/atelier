@@ -25,7 +25,7 @@ use tokio::sync::{broadcast::error::RecvError, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info, warn};
 
-use super::beads::{boards_read_again, recompute_epic_statuses, refresh_board, resolve_issues_path};
+use super::beads::{boards_read_again, refresh_board, resolve_issues_path};
 use super::live::Tagged;
 use super::validate_path_security;
 use crate::db::Database;
@@ -357,23 +357,6 @@ async fn run_watcher(
                 }
 
                 info!("Board change detected: {:?}", reported_path);
-
-                // Only the jsonl store has a file to recompute epic status
-                // from; a Dolt board is served from the database.
-                if let BoardStore::Jsonl { file } = &store {
-                    if change_type == "modified" || change_type == "created" {
-                        match recompute_epic_statuses(file) {
-                            Ok(updated_epics) => {
-                                if !updated_epics.is_empty() {
-                                    info!("Updated epic statuses: {:?}", updated_epics);
-                                }
-                            }
-                            Err(e) => {
-                                warn!("Failed to recompute epic statuses: {}", e);
-                            }
-                        }
-                    }
-                }
 
                 // The board on disk moved, so what we last read of it is no
                 // longer the truth — but throwing it away only moves the wait

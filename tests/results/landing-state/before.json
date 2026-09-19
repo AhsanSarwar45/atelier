@@ -1,0 +1,22 @@
+{
+  "check_id": "check_4bcbf66fe86e",
+  "captures": [
+    {
+      "asset": "4bcbf66fe86ea0680aa65c7ac8d8230472e1937ba23b626b51506de0a509cbd3.png",
+      "label": "Capture",
+      "evidence": {
+        "source": "image",
+        "dimensions": {
+          "width": 2200,
+          "height": 1000
+        },
+        "visible_text": {
+          "source": "vision-required",
+          "text": ""
+        },
+        "accessibility": null
+      }
+    }
+  ],
+  "verdict": null
+}

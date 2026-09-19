@@ -138,11 +138,21 @@ export function computeEpicProgress(
     return NOTHING;
   }
 
-  // The board already paid for the one whole-board walk that built this
-  // lookup. Each job now reads only its own pieces.
-  const children = epic.children
-    .map((id) => beadById.get(id))
-    .filter((bead): bead is Bead => bead !== undefined);
+  // Count deliverable leaves once, regardless of how deeply they are nested.
+  const seen = new Set<string>();
+  const children: Bead[] = [];
+  const collect = (id: string) => {
+    if (seen.has(id) || id === epic.id) return;
+    seen.add(id);
+    const child = beadById.get(id);
+    if (!child) return;
+    if (child.status !== 'cancelled' && child.children?.length) {
+      child.children.forEach(collect);
+    } else {
+      children.push(child);
+    }
+  };
+  epic.children.forEach(collect);
 
   // The pieces this job is actually made of, and the ones it dropped.
   const pieces = children.filter((c) => counted(c.status));

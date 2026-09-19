@@ -94,8 +94,6 @@ export function useBeads(projectPath: string): UseBeadsResult {
   // Track if initial load has completed
   const hasLoadedRef = useRef(false);
   const isLoadingRef = useRef(false);
-  // Track latest updated_at for incremental polling
-  const lastUpdatedRef = useRef<string | null>(null);
 
   /**
    * Load beads from the project directory
@@ -119,44 +117,14 @@ export function useBeads(projectPath: string): UseBeadsResult {
     }
 
     try {
-      // Incremental fetch: pass updatedAfter on subsequent loads
-      const updatedAfter = hasLoadedRef.current ? lastUpdatedRef.current ?? undefined : undefined;
-      const { beads: fetchedBeads, source: fetchedSource } =
-        // Brief: the board draws no card's long text; the panel fetches it (bw-fbzd.7).
-        await loadProjectBeads(projectPath, { withSource: true, updatedAfter, brief: true });
+      // Hierarchy and deletions can change cards whose own timestamps did not.
+      // Replace a complete snapshot so every surface observes the same revision.
+      const { beads: loadedBeads, source: fetchedSource } =
+        await loadProjectBeads(projectPath, { withSource: true, brief: true });
       setSource(fetchedSource);
-
-      // Compute max updated_at from fetched results
-      const maxUpdated = fetchedBeads.reduce((max, b) => {
-        const t = b.updated_at || b.created_at || '';
-        return t > max ? t : max;
-      }, '');
-      if (maxUpdated) lastUpdatedRef.current = maxUpdated;
-
-      let loadedBeads: Bead[];
-      if (hasLoadedRef.current && updatedAfter) {
-        // Incremental update — merge changed beads into existing state
-        setBeads(prev => {
-          const beadMap = new Map(prev.map(b => [b.id, b]));
-          for (const updated of fetchedBeads) {
-            beadMap.set(updated.id, updated);
-          }
-          loadedBeads = Array.from(beadMap.values());
-          const grouped = groupBeadsByStatus(loadedBeads);
-          const tickets = assignTicketNumbers(loadedBeads);
-          setBeadsByStatus(grouped);
-          setTicketNumbers(tickets);
-          return loadedBeads;
-        });
-      } else {
-        // Full load — replace everything
-        loadedBeads = fetchedBeads;
-        const grouped = groupBeadsByStatus(loadedBeads);
-        const tickets = assignTicketNumbers(loadedBeads);
-        setBeads(loadedBeads);
-        setBeadsByStatus(grouped);
-        setTicketNumbers(tickets);
-      }
+      setBeads(loadedBeads);
+      setBeadsByStatus(groupBeadsByStatus(loadedBeads));
+      setTicketNumbers(assignTicketNumbers(loadedBeads));
 
       setError(null);
       hasLoadedRef.current = true;
@@ -184,7 +152,6 @@ export function useBeads(projectPath: string): UseBeadsResult {
   // Initial load when project path changes
   useEffect(() => {
     hasLoadedRef.current = false;
-    lastUpdatedRef.current = null;
     loadBeads();
   }, [loadBeads]);
 

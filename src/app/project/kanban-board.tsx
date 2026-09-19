@@ -132,9 +132,7 @@ export default function KanbanBoard() {
   }, [filteredBeads, typeFilter]);
 
   /**
-   * Group the drawn beads into columns. A card sits where the pieces directly
-   * under it put it (columnFor), so a started job is not left in Todo and an
-   * untouched one is never drawn as waiting on a reader.
+   * Group cards using the server state shared by the panel and counters.
    * Defensive: falls back to 'open' for any column not among the 6.
    */
   const boardIndex = useMemo(() => indexBoard(beads), [beads]);

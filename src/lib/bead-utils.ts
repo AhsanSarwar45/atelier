@@ -7,13 +7,8 @@
 
 import { classesFor } from "@/lib/state-styles";
 import {
-  STATE_BY_ID, STATES, UNTOUCHED, WORKING, standing, type BeadStatus,
+  STATE_BY_ID, STATES, standing, type BeadStatus,
 } from "@/types";
-
-/** Places the board itself writes, which columnFor takes as final. */
-const SETTLED: ReadonlySet<string> = new Set<string>(
-  STATES.filter((s) => s.settled).map((s) => s.id),
-);
 
 /**
  * Format status for display (e.g., "in_progress" -> "In Progress")
@@ -183,41 +178,7 @@ export function oldestFirst<T extends { created_at?: string }>(
   );
 }
 
-/**
- * The column a card belongs in.
- *
- * Read from the pieces DIRECTLY under it and no deeper, so a card and the list
- * of pieces printed beneath it can never disagree — that mismatch is what made
- * an untouched job read as waiting on a reader. All of them open and the card
- * is open; one being worked and it is in progress. A card with no pieces, and a
- * card with nothing left standing under it, keeps the status the board holds:
- * finishing the last piece is not the same as being read or signed off, and
- * those are the board's own to write.
- *
- * A review column is the board's own answer, written once every piece has
- * closed, so it is taken as final rather than recomputed here. Manager's
- * ruling, 2026-08-13: corsetta docs/board.md#3a1.
- *
- * Derived for display only — the board's own record is never rewritten from here.
- *
- * @param bead - The card to place.
- * @param byId - Every bead on the board, by id, for reading its pieces.
- */
-export function columnFor<T extends { id: string; status: string; children?: string[] | null }>(
-  bead: T,
-  byId: ReadonlyMap<string, T>,
-): string {
-  if (SETTLED.has(bead.status)) return bead.status;
-
-  const pieces = (bead.children ?? [])
-    .map((id) => byId.get(id))
-    .filter((k): k is T => k !== undefined && k.id !== bead.id);
-  if (pieces.length === 0) return bead.status;
-
-  const left = pieces.filter((k) => standing(k.status));
-  // Nothing left standing is not the same as finished: the board writes the
-  // card's own state when it is read and when it is signed off, and until it
-  // does, a card it still holds open belongs where it says it is.
-  if (left.length === 0) return bead.status;
-  return left.some((k) => k.status === WORKING) ? WORKING : UNTOUCHED;
+/** The server projects hierarchy state once for every board surface. */
+export function columnFor<T extends { id: string; status: string }>(bead: T, _byId: ReadonlyMap<string, T>): string {
+  return bead.status;
 }

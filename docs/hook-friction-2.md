@@ -1646,3 +1646,10 @@ The same shape appears in `&>>` and in `N>&M` for any other descriptor.
 Reproduced on `bw-ryh3.4`: with the work landed and the generated checks card
 closed green, `atelier tool board/land bw-ryh3.4` refused because no commit
 subject named the generated `no-code` land card. This paragraph is that commit.
+
+## Explicit exec workdir discarded while claiming bw-9vv9.1
+
+`bd update bw-9vv9.1 --claim` with exec workdir set to the existing
+`worktrees/bw-9vv9` was refused as a claim from the main checkout. The
+per-command bypass allowed the claim. The provider adapter must preserve the
+explicit tool workdir before any ownership decision.

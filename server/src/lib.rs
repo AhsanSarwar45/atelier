@@ -30,3 +30,5 @@ pub mod service;
 pub mod serving;
 pub mod terminal;
 pub mod workbench;
+
+pub mod board_state;

@@ -1,0 +1,22 @@
+{
+  "check_id": "check_c227355e6a5d",
+  "captures": [
+    {
+      "asset": "c227355e6a5d65996136460174a8e77fbf86f45e48ea2864221724d2e6567e26.png",
+      "label": "Capture",
+      "evidence": {
+        "source": "image",
+        "dimensions": {
+          "width": 2200,
+          "height": 1000
+        },
+        "visible_text": {
+          "source": "vision-required",
+          "text": ""
+        },
+        "accessibility": null
+      }
+    }
+  ],
+  "verdict": null
+}

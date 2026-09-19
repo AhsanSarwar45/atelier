@@ -102,78 +102,10 @@ describe("the columns draw one card per job", () => {
   });
 });
 
-describe("a card sits where its own pieces put it", () => {
-  type Node = { id: string; status: string; children?: string[] };
-  const board = (...nodes: Node[]) => new Map(nodes.map((n) => [n.id, n]));
-
-  it("every piece untouched leaves the card in the first column", () => {
-    const goal = { id: "g", status: "open", children: ["s1", "s2"] };
-    const map = board(goal, { id: "s1", status: "open" }, { id: "s2", status: "open" });
-    expect(columnFor(goal, map)).toBe("open");
-  });
-
-  it("one piece being worked is enough to say the card is being worked", () => {
-    // The goal keeps its stored status until the board moves it, so its own
-    // status alone would leave every started job sitting in the first column.
-    const goal = { id: "g", status: "open", children: ["s1", "s2"] };
-    const map = board(goal, { id: "s1", status: "closed" }, { id: "s2", status: "in_progress" });
-    expect(columnFor(goal, map)).toBe("in_progress");
-  });
-
-  it("a piece waiting to be read never speaks for the card it is under", () => {
-    // What the manager caught: a job drawn under Agent Review with everything
-    // under it untouched. Only the board puts a card in that column, and only
-    // once no piece is left standing.
-    const goal = { id: "g", status: "open", children: ["s1", "s2"] };
-    const map = board(goal, { id: "s1", status: "inreview" }, { id: "s2", status: "open" });
-    expect(columnFor(goal, map)).toBe("open");
-  });
-
-  it("a piece two levels down is its own job's business, not this card's", () => {
-    // Read one level and one level only: a card and the list of pieces printed
-    // beneath it can then never contradict each other.
-    const goal = { id: "g", status: "open", children: ["s1"] };
-    const map = board(goal,
-      { id: "s1", status: "open", children: ["w1"] },
-      { id: "w1", status: "in_progress" });
-    expect(columnFor(goal, map)).toBe("open");
-  });
-
-  it("a review column is the board's own answer and is left alone", () => {
-    const goal = { id: "g", status: "inreview", children: ["s1"] };
-    expect(columnFor(goal, board(goal, { id: "s1", status: "closed" }))).toBe("inreview");
-  });
-
-  it("the manager's column outranks anything still open below it", () => {
-    const goal = { id: "g", status: "manager_review", children: ["s1"] };
-    expect(columnFor(goal, board(goal, { id: "s1", status: "open" }))).toBe("manager_review");
-  });
-
-  it("a card the board still holds open is not drawn as finished", () => {
-    const goal = { id: "g", status: "open", children: ["s1", "s2"] };
-    const map = board(goal, { id: "s1", status: "closed" }, { id: "s2", status: "cancelled" });
-    expect(columnFor(goal, map)).toBe("open");
-  });
-
-  it("a card being worked with nothing left standing is still being worked", () => {
-    const goal = { id: "g", status: "in_progress", children: ["s1"] };
-    expect(columnFor(goal, board(goal, { id: "s1", status: "closed" }))).toBe("in_progress");
-  });
-
-  it("a closed goal stays closed once its pieces are done", () => {
-    const goal = { id: "g", status: "closed", children: ["s1"] };
-    expect(columnFor(goal, board(goal, { id: "s1", status: "closed" }))).toBe("closed");
-  });
-
-  it("a card with nothing under it keeps its own status", () => {
-    const lone = { id: "t", status: "in_progress" };
-    expect(columnFor(lone, board(lone))).toBe("in_progress");
-  });
-
-  it("a loop in the graph does not hang the screen", () => {
-    const a = { id: "a", status: "open", children: ["b"] };
-    const b = { id: "b", status: "open", children: ["a"] };
-    expect(columnFor(a, board(a, b))).toBe("open");
+describe("columns use the server state", () => {
+  it("does not recalculate a different state from a partial client snapshot", () => {
+    const card = { id: "g", status: "in_progress", children: ["missing"] };
+    expect(columnFor(card, new Map([[card.id, card]]))).toBe("in_progress");
   });
 });
 
