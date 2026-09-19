@@ -34,7 +34,69 @@ use crate::remote::{self, Standing, SERVING_SETTING};
 use crate::routes::projects::AppState;
 
 /// A refusal in the words the person should see, rather than a code alone.
-type Refusal = (StatusCode, String);
+type Refusal = (StatusCode, Json<Trouble>);
+
+/// What a refused call answers with.
+///
+/// A sentence, always. And sometimes somewhere to go: the one refusal a
+/// reader can act on from this screen is a Tailscale network whose owner has
+/// never allowed Serve, and that is put right by visiting a link Tailscale
+/// hands back. Flattening it into a sentence with a URL buried in the middle
+/// would leave the screen nothing it could make clickable, so the link rides
+/// beside the sentence instead of inside it.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct Trouble {
+    /// What went wrong, in the reader's words. Named `error` because that is
+    /// the field every refusal in this app already answers with, and the
+    /// browser reads the sentence out of it without being taught this one.
+    pub error: String,
+    /// Where to go to put it right, when there is such a place.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
+}
+
+/// A refusal with nothing to click.
+fn refused(code: StatusCode, why: impl Into<String>) -> Refusal {
+    (code, Json(Trouble { error: why.into(), link: None }))
+}
+
+/// A refusal from Tailscale, keeping whatever it left to act on.
+fn turned_away(why: remote::Refused) -> Refusal {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(Trouble {
+            link: match &why {
+                remote::Refused::NeedsConsent { link } => Some(link.clone()),
+                remote::Refused::Said(_) => None,
+            },
+            error: why.sentence(),
+        }),
+    )
+}
+
+/// Run blocking work somewhere other than the runtime's own threads.
+///
+/// Everything Tailscale is asked here is a process that has to be started and
+/// waited for. Waiting for one on a runtime thread is a thread answering
+/// nobody — and while `tailscale serve` could wait forever, that was the whole
+/// app going quiet rather than this one call (bw-ar1o).
+async fn away<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, Refusal> {
+    tokio::task::spawn_blocking(work).await.map_err(|e| {
+        refused(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("The remote access step could not be run: {e}"),
+        )
+    })
+}
+
+/// What Tailscale says right now: how far along this computer is, and whether
+/// this port is on the network. Both readings taken together, once, off the
+/// runtime's threads.
+async fn from_tailscale(port: u16) -> Result<(Standing, bool), Refusal> {
+    away(move || (remote::standing(), remote::serving_now(port))).await
+}
 
 /// Everything the Remote access section draws.
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -76,7 +138,8 @@ struct Choosing {
 
 /// GET /api/settings/remote
 async fn read_remote(State(db): State<AppState>) -> Result<Json<RemoteAccess>, Refusal> {
-    Ok(Json(as_it_stands(&db)?))
+    let (standing, serving) = from_tailscale(crate::service::port()).await?;
+    Ok(Json(as_it_stands(&db, standing, serving)?))
 }
 
 /// PUT /api/settings/remote
@@ -92,7 +155,7 @@ async fn write_remote(
     if let Some(said) = &asked.bind_host {
         let kept = tidied(said);
         if let Some(why) = why_not_a_host(kept) {
-            return Err((StatusCode::UNPROCESSABLE_ENTITY, why));
+            return Err(refused(StatusCode::UNPROCESSABLE_ENTITY, why));
         }
         store(&db, BIND_HOST_SETTING, kept)?;
     }
@@ -103,23 +166,30 @@ async fn write_remote(
         // Tailscale first. If it refuses, nothing is remembered, because a
         // switch drawn on over a board nobody can reach is worse than a
         // refusal drawn under it.
-        remote::set_serving(on, port).map_err(|why| (StatusCode::UNPROCESSABLE_ENTITY, why))?;
+        away(move || remote::set_serving(on, port))
+            .await?
+            .map_err(turned_away)?;
         store(&db, SERVING_SETTING, on.then_some("on"))?;
     }
 
-    Ok(Json(as_it_stands(&db)?))
+    let (standing, serving) = from_tailscale(port).await?;
+    Ok(Json(as_it_stands(&db, standing, serving)?))
 }
 
-/// Everything the section draws, read together.
-fn as_it_stands(db: &AppState) -> Result<RemoteAccess, Refusal> {
+/// Everything the section draws, put together out of what the settings hold
+/// and what Tailscale was just asked.
+fn as_it_stands(
+    db: &AppState,
+    standing: Standing,
+    serving: bool,
+) -> Result<RemoteAccess, Refusal> {
     let port = crate::service::port();
-    let standing = remote::standing();
     let bind_host = read(db, BIND_HOST_SETTING)?;
     let public_url = read(db, PUBLIC_URL_SETTING)?;
     Ok(RemoteAccess {
         standing: named(&standing),
         wrong: standing.wrong(),
-        serving: remote::serving_now(port),
+        serving,
         address: match &standing {
             Standing::Ready { address } => Some(address.clone()),
             _ => None,
@@ -183,7 +253,7 @@ fn store(db: &AppState, key: &str, value: Option<&str>) -> Result<(), Refusal> {
 /// The database refusing to answer, which is not the person's doing and is not
 /// written as though it were.
 fn unreadable(what: &str, why: impl std::fmt::Display) -> Refusal {
-    (StatusCode::INTERNAL_SERVER_ERROR, format!("{what}: {why}"))
+    refused(StatusCode::INTERNAL_SERVER_ERROR, format!("{what}: {why}"))
 }
 
 /// The routes, behind the guard that decides who may reach them.
@@ -218,6 +288,32 @@ mod tests {
         words.sort_unstable();
         words.dedup();
         assert_eq!(words.len(), counted, "two standings answer to the same word");
+    }
+
+    /// A refusal the reader can act on keeps the thing to act on.
+    ///
+    /// The sentence alone would have the link buried in the middle of it,
+    /// where a browser cannot make it clickable and a reader has to select a
+    /// URL out of a line of prose to get anywhere (bw-ar1o).
+    #[test]
+    fn a_refusal_with_somewhere_to_go_hands_the_screen_the_link() {
+        let link = "https://login.tailscale.com/f/serve?node=abc";
+        let (code, Json(trouble)) = turned_away(remote::Refused::NeedsConsent {
+            link: link.to_string(),
+        });
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(trouble.link.as_deref(), Some(link));
+        assert!(trouble.error.contains(link), "{}", trouble.error);
+    }
+
+    /// Every other refusal is a sentence and nothing more, so the screen is
+    /// never left offering a button that goes nowhere.
+    #[test]
+    fn a_refusal_with_nowhere_to_go_offers_nothing_to_click() {
+        let (_, Json(trouble)) =
+            turned_away(remote::Refused::Said("Tailscale is off.".to_string()));
+        assert_eq!(trouble.link, None);
+        assert_eq!(trouble.error, "Tailscale is off.");
     }
 
     /// A host the computer could not bind is refused while the screen is still

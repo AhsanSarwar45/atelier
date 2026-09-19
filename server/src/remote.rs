@@ -158,10 +158,10 @@ pub fn on_the_tailnet() -> OnTheTailnet {
         return OnTheTailnet::default();
     };
     let reading = standing_reading();
-    let Ok(out) = std::process::Command::new(program).args(&reading[1..]).output() else {
+    let Ok(said) = said_within(&program, &reading[1..], PATIENCE) else {
         return OnTheTailnet::default();
     };
-    on_the_tailnet_from(&String::from_utf8_lossy(&out.stdout))
+    on_the_tailnet_from(&said.out)
 }
 
 /// What `tailscale status --json` said, read into the one question asked of
@@ -361,18 +361,22 @@ pub fn standing() -> Standing {
         return Standing::NotInstalled;
     };
     let reading = standing_reading();
-    let out = match std::process::Command::new(program).args(&reading[1..]).output() {
-        Ok(out) => out,
-        Err(e) => return Standing::NotAnswering { said: e.to_string() },
+    let said = match said_within(&program, &reading[1..], PATIENCE) {
+        Ok(said) => said,
+        Err(e) => return Standing::NotAnswering { said: e },
     };
+    if said.finished.is_none() {
+        return Standing::NotAnswering {
+            said: format!("it did not answer in {}s", PATIENCE.as_secs()),
+        };
+    }
     // A daemon that is not running, and a user who was never handed
     // operation, both complain on the error stream and print nothing on the
     // other one. Reading only stdout would turn both into "unreadable".
-    let said = String::from_utf8_lossy(&out.stdout);
-    match said.trim().is_empty() {
-        false => standing_from(&said),
+    match said.out.trim().is_empty() {
+        false => standing_from(&said.out),
         true => Standing::NotAnswering {
-            said: first_line(&String::from_utf8_lossy(&out.stderr)),
+            said: first_line(&said.err),
         },
     }
 }
@@ -498,44 +502,235 @@ pub fn serving_now(port: u16) -> bool {
         return false;
     };
     let reading = serve_reading();
-    std::process::Command::new(program)
-        .args(&reading[1..])
-        .output()
-        .map(|out| serving_from(&String::from_utf8_lossy(&out.stdout), port))
+    said_within(&program, &reading[1..], PATIENCE)
+        .map(|said| serving_from(&said.out, port))
         .unwrap_or(false)
+}
+
+/// How long any one Tailscale command is given before it is taken to be stuck.
+///
+/// Every command here talks to a daemon on this same computer, and the
+/// slowest of them prints a few kilobytes of JSON about the current state of
+/// the network. So this is not an estimate of how long the work takes. It is
+/// the point past which the work is not happening.
+const PATIENCE: std::time::Duration = std::time::Duration::from_secs(6);
+
+/// What a Tailscale command said, and whether it got to the end of saying it.
+pub struct Said {
+    /// What it exited with, or `None` when it was still running when the
+    /// patience ran out and was stopped.
+    pub finished: Option<std::process::ExitStatus>,
+    /// What it printed on the ordinary stream.
+    pub out: String,
+    /// What it printed on the error stream.
+    pub err: String,
+}
+
+impl Said {
+    /// Both streams at once, for finding a sentence in whichever one has it.
+    ///
+    /// Which stream Tailscale uses is not a thing to depend on: the consent
+    /// notice below arrives on the ordinary one and its refusals arrive on
+    /// the error one, and a reader wants whichever of them carries the words.
+    pub fn both(&self) -> String {
+        format!("{}\n{}", self.out, self.err)
+    }
+}
+
+/// Run a Tailscale command, and stop waiting for it when the patience is out.
+///
+/// ## Why this exists instead of `Command::output()`
+///
+/// `tailscale serve`, on a network whose owner has never turned Serve on,
+/// prints a link to turn it on and then waits — with no deadline of its own —
+/// for somebody to go and visit it. `output()` waits alongside it, forever.
+///
+/// That call was being made from inside a web request, so the request never
+/// answered either, and what the reader got was their browser giving up after
+/// ten seconds with a line about the app perhaps being stopped: untrue, and
+/// silent about the link they actually had to click (bw-ar1o).
+///
+/// So nothing here waits without end, and what a command printed before it
+/// was stopped is kept rather than thrown away — because in that one case the
+/// thing it printed *is* the answer.
+fn said_within(
+    program: &std::path::Path,
+    args: &[String],
+    patience: std::time::Duration,
+) -> Result<Said, String> {
+    let mut child = std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Tailscale could not be run: {e}"))?;
+
+    // Both pipes are drained on their own threads. Reading them one after the
+    // other on this thread would block on the first, and a pipe nobody is
+    // reading fills up and stops the command that is writing to it — which
+    // would be a second way to hang, underneath the one being fixed.
+    let out = drained(child.stdout.take());
+    let err = drained(child.stderr.take());
+
+    let finished = waited_for(&mut child, patience);
+    if finished.is_none() {
+        // Stopping it is what closes the two pipes, and closing them is what
+        // lets the readers above reach the end and finish. Without this the
+        // joins below would wait exactly as long as `output()` did.
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    Ok(Said {
+        finished,
+        out: out.join().unwrap_or_default(),
+        err: err.join().unwrap_or_default(),
+    })
+}
+
+/// Read a pipe to its end on a thread of its own.
+fn drained<R: std::io::Read + Send + 'static>(
+    pipe: Option<R>,
+) -> std::thread::JoinHandle<String> {
+    std::thread::spawn(move || {
+        let mut said = String::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe.read_to_string(&mut said);
+        }
+        said
+    })
+}
+
+/// Wait for a command for as long as the patience allows.
+///
+/// `None` means it was still going, and also means a command that could not
+/// even be asked how it was doing — which is not one to go on waiting for.
+fn waited_for(
+    child: &mut std::process::Child,
+    patience: std::time::Duration,
+) -> Option<std::process::ExitStatus> {
+    let until = std::time::Instant::now() + patience;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status),
+            Err(_) => return None,
+            Ok(None) => {}
+        }
+        if std::time::Instant::now() >= until {
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+}
+
+/// Where Tailscale sends somebody who has to give it permission.
+const CONSENT: &str = "https://login.tailscale.com/";
+
+/// The link out of a Tailscale command that is waiting to be allowed.
+///
+/// Serve is off for an entire Tailscale network until its owner turns it on,
+/// once, in the admin console. Asked to serve before that has happened, the
+/// command prints
+///
+/// ```text
+/// Serve is not enabled on your tailnet.
+/// To enable, visit:
+///
+///          https://login.tailscale.com/f/serve?node=nRkaJoumeQ11CNTRL
+/// ```
+///
+/// and then waits to be visited. That link is the whole of what the reader
+/// has to do next, and the only part of it they could not have worked out for
+/// themselves, so it is lifted out and handed to them as a step.
+pub fn consent_link(said: &str) -> Option<String> {
+    said.split_whitespace()
+        .find(|word| word.starts_with(CONSENT))
+        .map(|word| word.trim_end_matches(['.', ',', ')']).to_string())
+}
+
+/// Why turning serving on or off did not happen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Refused {
+    /// This Tailscale network has never had Serve turned on, and the link is
+    /// where its owner turns it on.
+    ///
+    /// Kept apart from every other refusal because it is the only one with
+    /// somewhere to go. A screen can draw it as the next step rather than as
+    /// something that went wrong, which is the difference between a reader
+    /// who is finished in a minute and one who is stuck.
+    NeedsConsent {
+        /// The address to open.
+        link: String,
+    },
+    /// Anything else, already in the reader's words.
+    Said(String),
+}
+
+impl Refused {
+    /// The whole of it as one sentence, for a log or a terminal.
+    pub fn sentence(&self) -> String {
+        match self {
+            Refused::NeedsConsent { link } => format!(
+                "Your Tailscale network has not turned on Serve yet. Open {link}, allow it, \
+                 then turn this on again."
+            ),
+            Refused::Said(said) => said.clone(),
+        }
+    }
+}
+
+/// What to tell the reader when a serve command did not succeed.
+///
+/// The link is looked for before anything else, because a command still
+/// waiting for consent has two things to say about itself — that the network
+/// has not enabled Serve, and that it never finished — and only the first of
+/// them is worth a reader's attention.
+fn went_wrong(step: &[String], said: &Said) -> Refused {
+    if let Some(link) = consent_link(&said.both()) {
+        return Refused::NeedsConsent { link };
+    }
+    let spoke = match said.both().trim().is_empty() {
+        true => None,
+        false => Some(first_line(&said.both())),
+    };
+    let ran = step.join(" ");
+    Refused::Said(match (said.finished.is_none(), spoke) {
+        (true, None) => format!("`{ran}` did not answer in {}s.", PATIENCE.as_secs()),
+        (true, Some(spoke)) => format!(
+            "`{ran}` did not answer in {}s. It said: {spoke}",
+            PATIENCE.as_secs()
+        ),
+        (false, None) => format!("`{ran}` did not finish."),
+        (false, Some(spoke)) => format!("Tailscale refused: {spoke}"),
+    })
 }
 
 /// Start or stop serving this app's port, and say what went wrong if it did.
 ///
 /// This needs no password: `remote install` handed operation to this user, so
 /// the switch on the settings screen can call it directly.
-pub fn set_serving(on: bool, port: u16) -> Result<(), String> {
+pub fn set_serving(on: bool, port: u16) -> Result<(), Refused> {
     let program = looked_up().ok_or_else(|| {
-        format!("Tailscale is not installed. Run `atelier remote install`, or install it from {DOWNLOAD}.")
+        Refused::Said(format!(
+            "Tailscale is not installed. Run `atelier remote install`, or install it from {DOWNLOAD}."
+        ))
     })?;
     // Turning it on with the daemon down would leave the switch saying on
     // and nothing reachable, which is the one answer worse than a refusal.
     if on {
         if let Some(wrong) = standing().wrong() {
-            return Err(wrong);
+            return Err(Refused::Said(wrong));
         }
     }
     let step = match on {
         true => serve_on(port),
         false => serve_off(),
     };
-    let out = std::process::Command::new(program)
-        .args(&step[1..])
-        .output()
-        .map_err(|e| format!("Tailscale could not be run: {e}"))?;
-    if out.status.success() {
-        return Ok(());
+    let said = said_within(&program, &step[1..], PATIENCE).map_err(Refused::Said)?;
+    match said.finished.is_some_and(|status| status.success()) {
+        true => Ok(()),
+        false => Err(went_wrong(&step, &said)),
     }
-    let said = first_line(&String::from_utf8_lossy(&out.stderr));
-    Err(match said.is_empty() {
-        true => format!("`{}` did not finish.", step.join(" ")),
-        false => format!("Tailscale refused: {said}"),
-    })
 }
 
 /// Whether the switch on the settings screen was left on.
@@ -569,7 +764,10 @@ pub fn follow_the_app_up(port: u16) {
     }
     match set_serving(true, port) {
         Ok(()) => tracing::info!("reachable from away: serving port {port} on the tailnet"),
-        Err(why) => tracing::warn!("reaching this from away is switched on but did not start: {why}"),
+        Err(why) => tracing::warn!(
+            "reaching this from away is switched on but did not start: {}",
+            why.sentence()
+        ),
     }
 }
 
@@ -588,13 +786,135 @@ pub fn follow_the_app_down(port: u16) {
     }
     match set_serving(false, port) {
         Ok(()) => tracing::info!("reachable from away: stopped serving port {port}"),
-        Err(why) => tracing::warn!("serving port {port} could not be stopped: {why}"),
+        Err(why) => tracing::warn!(
+            "serving port {port} could not be stopped: {}",
+            why.sentence()
+        ),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What Tailscale actually prints on a network that has never allowed
+    /// Serve, copied off this computer on 2026-09-19.
+    const NOT_ENABLED: &str = "Serve is not enabled on your tailnet.\n\
+        To enable, visit:\n\
+        \n\
+        \t https://login.tailscale.com/f/serve?node=nRkaJoumeQ11CNTRL\n";
+
+    /// The one thing the reader has to do is pulled out of the notice.
+    #[test]
+    fn the_link_to_allow_serving_is_found_in_what_tailscale_printed() {
+        assert_eq!(
+            consent_link(NOT_ENABLED).as_deref(),
+            Some("https://login.tailscale.com/f/serve?node=nRkaJoumeQ11CNTRL")
+        );
+    }
+
+    /// Ordinary output is not mistaken for somewhere to go.
+    #[test]
+    fn nothing_to_visit_is_no_link() {
+        assert_eq!(consent_link(""), None);
+        assert_eq!(consent_link("Error: tailscaled is not running"), None);
+    }
+
+    /// A command stopped for waiting is reported by what it was waiting for,
+    /// not by the fact that it was stopped. The reader needs the link, and a
+    /// line about a command not answering would bury it.
+    #[test]
+    fn a_command_still_waiting_for_consent_is_reported_as_the_link() {
+        let said = Said {
+            finished: None,
+            out: NOT_ENABLED.to_string(),
+            err: String::new(),
+        };
+        let why = went_wrong(&serve_on(3008), &said);
+        assert_eq!(
+            why,
+            Refused::NeedsConsent {
+                link: "https://login.tailscale.com/f/serve?node=nRkaJoumeQ11CNTRL".to_string()
+            }
+        );
+        assert!(why.sentence().contains("f/serve?node=nRkaJoumeQ11CNTRL"));
+        assert!(why.sentence().contains("has not turned on Serve"));
+    }
+
+    /// A refusal with nowhere to go is still passed on in Tailscale's words.
+    #[test]
+    fn an_ordinary_refusal_keeps_what_tailscale_said() {
+        let said = Said {
+            finished: Some(failed()),
+            out: String::new(),
+            err: "access denied: serve config denied\n".to_string(),
+        };
+        assert_eq!(
+            went_wrong(&serve_on(3008), &said),
+            Refused::Said("Tailscale refused: access denied: serve config denied".to_string())
+        );
+    }
+
+    /// Silence past the deadline names the command and the wait, so the line
+    /// is about Tailscale rather than about the app being unreachable.
+    #[test]
+    fn a_silent_command_that_never_answers_says_which_one_and_for_how_long() {
+        let said = Said {
+            finished: None,
+            out: String::new(),
+            err: String::new(),
+        };
+        let Refused::Said(why) = went_wrong(&serve_off(), &said) else {
+            panic!("silence is not a link to visit");
+        };
+        assert!(why.contains("tailscale serve --https=443 off"), "{why}");
+        assert!(why.contains(&format!("{}s", PATIENCE.as_secs())), "{why}");
+    }
+
+    /// The whole point: a command that would never stop on its own does.
+    #[test]
+    fn a_command_that_will_not_end_is_stopped_and_what_it_printed_is_kept() {
+        let patience = std::time::Duration::from_millis(300);
+        let began = std::time::Instant::now();
+        let said = said_within(
+            std::path::Path::new("sh"),
+            &[
+                "-c".to_string(),
+                "echo https://login.tailscale.com/f/serve?node=abc; sleep 30".to_string(),
+            ],
+            patience,
+        )
+        .expect("a shell is on this computer");
+        assert!(began.elapsed() < std::time::Duration::from_secs(5), "it waited for the sleep");
+        assert!(said.finished.is_none(), "it was not stopped");
+        assert_eq!(
+            consent_link(&said.both()).as_deref(),
+            Some("https://login.tailscale.com/f/serve?node=abc"),
+            "what it managed to print was thrown away"
+        );
+    }
+
+    /// A command that ends on its own is waited for, not cut off.
+    #[test]
+    fn a_command_that_ends_is_reported_with_what_it_ended_with() {
+        let said = said_within(
+            std::path::Path::new("sh"),
+            &["-c".to_string(), "echo out; echo err >&2".to_string()],
+            std::time::Duration::from_secs(10),
+        )
+        .expect("a shell is on this computer");
+        assert!(said.finished.is_some_and(|it| it.success()));
+        assert_eq!(said.out.trim(), "out");
+        assert_eq!(said.err.trim(), "err");
+    }
+
+    /// An exit status that is not a success, without running anything.
+    fn failed() -> std::process::ExitStatus {
+        std::process::Command::new("sh")
+            .args(["-c", "exit 1"])
+            .status()
+            .expect("a shell is on this computer")
+    }
 
     /// A "no" from before the install is not the answer given after it.
     ///
