@@ -1687,3 +1687,27 @@ the close will be compared against, or the close should accept the assignee a
 claim from this session wrote. Until then the refusal pair above is the whole
 of the friction, and it is reached by every job whose land card the agent
 closes itself rather than through `board/land`.
+
+## A screen check's throwaway board is a repository, so cleaning it up is gated
+
+bw-2l3k, 19 September. `scripts/finish-button-shows.py` builds a board to look
+at: a temp directory under `~/.cache/atelier-checks`, with `git init` and
+`bd init` run inside it, a project registered with the running app, and the
+whole thing removed on the way out. Removing the one directory a run had been
+told to keep was refused:
+
+```
+Changes require an owned Beads work item in its isolated worktree
+(resolved target: /home/ahsan/.cache/atelier-checks/finish-button-angpk8hs).
+```
+
+The gate is right that the path is a repository — the check made it one — and
+wrong that it is work. Nothing in it is tracked by anything, no card can ever
+name it, and the check that created it removes it itself on every run that is
+not asked to keep it. The refusal falls on the one path a reader takes by hand:
+`--keep`, look at the board, then delete it.
+
+The documented per-command bypass carried the removal. The fix is for the gate
+to read a repository under the checks' own holding directory as scratch, the
+way it already reads `/dev/null` and the pseudo-devices as not-files: a
+repository nobody committed to and no card names is not somebody's work.
