@@ -1612,3 +1612,26 @@ Reproduced on `bw-ryh3.1` and `bw-ryh3.2`: with the children claimed in
 and a plain `mkdir` of a scratch directory under the worktree was refused the
 same way. Every edit, every scratch directory and every `git add`/`git commit`
 went through the shell with the documented per-job `ATELIER_BYPASS` prefix.
+
+Reproduced on `bw-rwce.1`: with the child claimed in `worktrees/bw-rwce`, the
+Edit tool refused `server/src/workbench/acp/normalize.rs` for the same reason.
+The normalizer, the connector, the spec and this file were all written through
+the shell with the documented per-job `ATELIER_BYPASS` prefix. This is the
+fifth card to record it.
+
+## A shell fd-redirect is read as a file named `2` (bw-rwce.1)
+
+Starting a throwaway app instance with
+
+```
+/tmp/bw-rwce-run.sh > /tmp/bw-rwce-server.log 2>&1
+```
+
+was refused by `workflow-gate`: "Changes require an owned Beads work item in its
+isolated worktree (target `2` resolved from /home/ahsan/dev/beads-web →
+/home/ahsan/dev/beads-web/2)." Both the script and both log files are in `/tmp`,
+in no repository at all. `2>&1` duplicates a file descriptor and names no file;
+the gate read the `2` before `>` as a path and resolved it against the main
+checkout. The documented per-command bypass carried the line.
+
+The same shape appears in `&>>` and in `N>&M` for any other descriptor.

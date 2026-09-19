@@ -2564,7 +2564,11 @@ impl AcpDriver {
                             &task_agent_definitions,
                             &providers,
                         );
-                        normalizer.lock().await.set_menu(menu.clone());
+                        // Recorded as the normalizer merged it, not as it was
+                        // built: an `available_commands_update` that landed
+                        // while the session was being set up is in the merge
+                        // and in nothing else (bw-rwce.1).
+                        let menu = normalizer.lock().await.set_menu(menu);
                         task_database
                             .append(menu_event(&task_session.id, menu).map_err(acp_error)?)
                             .await
@@ -2796,7 +2800,7 @@ impl AcpDriver {
                                                 &task_agent_definitions,
                                                 &providers,
                                             );
-                                            normalizer.lock().await.set_menu(menu.clone());
+                                            let menu = normalizer.lock().await.set_menu(menu);
                                             task_database.append(menu_event(
                                                 &task_session.id,
                                                 menu.clone(),

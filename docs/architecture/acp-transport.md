@@ -97,8 +97,12 @@ no equivalent yet.
 User prompts are persisted before transport and their ACP echo is suppressed,
 so one prompt produces one visible user message. Every provider event receives
 a unique delivery identity before append, and the database enforces idempotent
-replay. Command-catalog updates replace only commands; they cannot erase the
-negotiated model, effort or mode catalogs.
+replay. The two catalogues arrive by different roads and neither may erase the
+other: a command-catalog update replaces only commands, and a menu rebuilt from
+`session/new` or from a changed session option keeps the commands and skills the
+agent has already announced. Both adapters publish their catalogue a beat after
+the session exists, so the second half of that rule is what makes the `/` menu
+work at all.
 
 The Atelier session policy is rebuilt from the current project on every
 connection. A provider-neutral copy travels in `_meta.atelier.sessionPolicy`.

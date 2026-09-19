@@ -293,8 +293,32 @@ impl AcpNormalizer {
         !included_in_prompt_usage
     }
 
-    pub fn set_menu(&mut self, menu: Value) {
+    /// Replace the negotiated catalogues, keeping the ones the agent announces
+    /// on its own.
+    ///
+    /// Models, efforts, modes and config options come back from `session/new`
+    /// and from every option change, so a menu built out of those answers is
+    /// the whole truth about them. Commands and skills arrive by a different
+    /// road: the agent publishes them in its own `available_commands_update`,
+    /// which the adapters send a beat after the session exists. A menu built
+    /// here carries neither -- `menu_fields` writes `[]` for both -- so
+    /// replacing wholesale erased a catalogue that had just landed. The `/`
+    /// menu was then empty for the rest of the chat and every command typed
+    /// into it was refused as "not available in this provider" (bw-rwce.1).
+    /// Whoever announced last wins, in both directions. Answers with the
+    /// merged menu, which is what a caller must record.
+    pub fn set_menu(&mut self, menu: Value) -> Value {
+        let announced = ["commands", "skills"].map(|field| (field, self.menu[field].clone()));
         self.menu = menu;
+        for (field, catalogue) in announced {
+            let replaced_by_nothing = self.menu[field]
+                .as_array()
+                .is_none_or(|list| list.is_empty());
+            if replaced_by_nothing && !catalogue.is_null() {
+                self.menu[field] = catalogue;
+            }
+        }
+        self.menu.clone()
     }
 
     fn menu_event(&mut self, session_id: &str, provider: &str, raw: &Value) -> Event {
@@ -5269,5 +5293,52 @@ mod tests {
         assert_eq!(menu["models"][0]["value"], "model-a");
         assert_eq!(menu["efforts"][0]["value"], "high");
         assert_eq!(menu["permissionModes"], json!(["on-request"]));
+    }
+
+    /// The other direction of the same rule, and the one nothing held.
+    ///
+    /// The adapters announce their commands a beat after `session/new`
+    /// answers, so the catalogue lands while the session is still being set
+    /// up -- and a menu rebuilt from that answer, or from any later option
+    /// change, carries no commands at all. Replacing wholesale threw the
+    /// catalogue away: the `/` menu stayed empty for the life of the chat and
+    /// every command typed into it was refused as "not available in this
+    /// provider" (bw-rwce.1).
+    #[test]
+    fn a_rebuilt_menu_keeps_the_commands_the_agent_has_already_announced() {
+        let negotiated = || {
+            json!({
+                "commands":[], "skills":[],
+                "models":[{"value":"model-a","label":"Model A"}],
+                "efforts":[], "permissionModes":["on-request"], "collaborationModes":[],
+                "agentDefinitions":[], "agentControls":["stop"]
+            })
+        };
+        let mut normalizer = AcpNormalizer::default();
+        normalizer.update(
+            "local",
+            "claude",
+            &json!({
+                "sessionId":"remote", "update":{"sessionUpdate":"available_commands_update",
+                "availableCommands":[{"name":"context","description":"Show context usage"}]}
+            }),
+        );
+
+        // The session's own catalogues arriving afterwards keep the commands.
+        let merged = normalizer.set_menu(negotiated());
+        assert_eq!(merged["commands"][0]["name"], "context");
+        assert_eq!(merged["models"][0]["value"], "model-a");
+
+        // So does the menu rebuilt when a model or an effort is changed later.
+        let again = normalizer.set_menu(negotiated());
+        assert_eq!(again["commands"][0]["name"], "context");
+
+        // And a replacement that carries its own catalogue still wins: the
+        // last announcement is the current one, whichever road it came by.
+        let replaced = normalizer.set_menu(json!({
+            "commands":[{"name":"review"}], "skills":[], "models":[]
+        }));
+        assert_eq!(replaced["commands"][0]["name"], "review");
+        assert_eq!(replaced["commands"].as_array().unwrap().len(), 1);
     }
 }

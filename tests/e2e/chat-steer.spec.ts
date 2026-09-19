@@ -227,6 +227,81 @@ test.describe('steering the chat you are in', () => {
     await expect(page.getByTestId('command-menu')).toBeHidden();
   });
 
+  /**
+   * Picking one and sending it must RUN it, on whichever agent is behind the
+   * chat.
+   *
+   * The menu being full was the whole of the old proof, and it left the only
+   * question a reader actually asks unanswered: a command sent to an agent
+   * that never received its catalogue was refused outright, and one sent to an
+   * agent that did was answered as if it were a sentence. Both providers speak
+   * the same road here -- the command is ordinary prompt text and the adapter
+   * runs it -- so both are asked the same question, and the answer looked for
+   * is the command's own output rather than prose about it (bw-rwce.1).
+   *
+   * `/context` and `/status` are answered by the tool itself, so neither case
+   * spends a token on a model.
+   */
+  for (const { brand, command, says } of [
+    { brand: 'claude' as const, command: 'context', says: /Context Usage/i },
+    { brand: 'codex' as const, command: 'status', says: /Model:/i },
+  ]) {
+    test(`a ${brand} command picked from the menu is run, not read as a sentence`, async ({ page, request }) => {
+      await freshChat(request, page, brand);
+      await page.getByTestId('mode-picker').waitFor({ timeout: HELLO_MS });
+
+      await page.getByTestId('composer').fill(`/${command}`);
+      await page.getByTestId('command-menu').waitFor({ timeout: 60_000 });
+      await page.locator(`[data-testid="command-option"][data-command="${command}"]`).click();
+      await expect(page.getByTestId('composer')).toHaveValue(`/${command} `);
+
+      await page.getByTestId('send-button').click();
+      // A refusal would put the command back in the box and say why, which is
+      // the shape the broken catalogue had. Neither may happen.
+      await expect(page.getByTestId('send-error')).toBeHidden();
+      await expect(page.getByTestId('transcript-rows')).toContainText(says, { timeout: 120_000 });
+    });
+  }
+
+  /**
+   * And it survives the other menus being redrawn.
+   *
+   * Commands are the one catalogue an agent announces on its own, a beat after
+   * the session exists; models, efforts and modes come back from the session
+   * itself. Rebuilding the second from an answer used to replace the first
+   * with nothing, so changing the model silently emptied the `/` menu for the
+   * rest of the chat (bw-rwce.1).
+   */
+  test('changing the model does not empty the slash menu', async ({ page, request }) => {
+    await freshChat(request, page);
+    await page.getByTestId('mode-picker').waitFor({ timeout: HELLO_MS });
+
+    const names = async (): Promise<string[]> => {
+      await page.getByTestId('composer').fill('/');
+      await page.getByTestId('command-menu').waitFor({ timeout: 60_000 });
+      const found = await page
+        .getByTestId('command-option')
+        .evaluateAll((els) => els.map((e) => e.getAttribute('data-command') ?? ''));
+      await page.getByTestId('composer').fill('');
+      return found;
+    };
+    const before = await names();
+    expect(before.length, 'the slash menu is empty before the model is changed').toBeGreaterThan(3);
+
+    const picker = page.getByTestId('model-picker');
+    await picker.click();
+    await page.getByTestId('model-picker-option').first().waitFor({ timeout: 30_000 });
+    const values = (
+      await Promise.all((await page.getByTestId('model-picker-option').all()).map((o) => o.getAttribute('data-value')))
+    ).filter((v): v is string => !!v);
+    const current = await picker.getAttribute('data-current');
+    const target = values.find((v) => v !== current)!;
+    await page.locator(`[data-testid="model-picker-option"][data-value="${target}"]`).click();
+    await expect.poll(async () => picker.getAttribute('data-current'), { timeout: 60_000 }).toBe(target);
+
+    expect(await names(), 'the model change emptied the slash menu').toEqual(before);
+  });
+
   test('a sleeping chat does not offer to steer what is not running', async ({ page, request }) => {
     const api = backend();
     // A sleeping chat of its own, made by putting one to sleep.
