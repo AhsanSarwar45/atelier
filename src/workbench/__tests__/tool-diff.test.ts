@@ -12,11 +12,11 @@ import { diffOf, KEPT } from '@/workbench/imported-history';
 
 describe('the change a call made', () => {
   it('reads an edit as what went out and what came in', () => {
-    expect(diffOf('Edit', { file_path: '/w/a.ts', old_string: 'const a = 1', new_string: 'const a = 2' })).toEqual({
-      path: '/w/a.ts',
-      before: 'const a = 1',
-      after: 'const a = 2',
-    });
+    const change = diffOf('Edit', { file_path: '/w/a.ts', old_string: 'const a = 1', new_string: 'const a = 2' });
+    expect(change).toMatchObject({ path: '/w/a.ts', before: 'const a = 1', after: 'const a = 2' });
+    // And what changed, which travels beside the text rather than in it, so a
+    // card can say how much changed when the text itself had to be cut.
+    expect(change).toMatchObject({ added: 1, removed: 1 });
   });
 
   it('names the first line edited when the surrounding file is available', () => {
@@ -28,12 +28,9 @@ describe('the change a call made', () => {
   });
 
   it('reads a written file as an addition with nothing before it', () => {
-    expect(diffOf('Write', { file_path: '/w/new.ts', content: 'hello' })).toEqual({
-      path: '/w/new.ts',
-      before: '',
-      after: 'hello',
-      line: 1,
-    });
+    const change = diffOf('Write', { file_path: '/w/new.ts', content: 'hello' });
+    expect(change).toMatchObject({ path: '/w/new.ts', before: '', after: 'hello', line: 1 });
+    expect(change).toMatchObject({ added: 1, removed: 0 });
   });
 
   it('runs the several edits of one call together, in the order they were made', () => {
@@ -45,7 +42,7 @@ describe('the change a call made', () => {
           { old_string: 'two', new_string: 'TWO' },
         ],
       }),
-    ).toEqual({ path: '/w/a.ts', before: 'one\ntwo', after: 'ONE\nTWO' });
+    ).toMatchObject({ path: '/w/a.ts', before: 'one\ntwo', after: 'ONE\nTWO', added: 2, removed: 2 });
   });
 
   it('says nothing for a call that changed no file', () => {
@@ -59,5 +56,7 @@ describe('the change a call made', () => {
     const change = diffOf('Write', { file_path: '/w/big.ts', content: 'x'.repeat(KEPT * 2) })!;
     expect(change.after.length).toBeLessThan(KEPT + 60);
     expect(change.after).toContain('more characters');
+    // The cut falls on the text and not on what the card needs to describe it.
+    expect(change.added).toBe(1);
   });
 });

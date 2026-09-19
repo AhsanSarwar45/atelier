@@ -281,7 +281,10 @@ fn hunk(ops: &[Op]) -> Value {
 /// say how large the change was even when it cannot draw all of it. When the
 /// hunks themselves had to be cut, `omittedHunks` says how many were dropped
 /// and the card can say so rather than imply it showed everything.
-pub fn summarize(before: &str, after: &str) -> Map<String, Value> {
+/// `start` is the line both sides begin at in the file they were cut from — a
+/// provider hands over the changed fragment and says where it sits, and a hunk
+/// numbered from one would point the reader at the top of the file instead.
+pub fn summarize(before: &str, after: &str, start: usize) -> Map<String, Value> {
     let a = split_lines(before);
     let b = split_lines(after);
     let prefix = common_prefix(&a, &b);
@@ -292,37 +295,48 @@ pub fn summarize(before: &str, after: &str) -> Map<String, Value> {
     // hunk; the rest of a large file need never be carried at all.
     let head = prefix.saturating_sub(CONTEXT);
     for (at, text) in a[head..prefix].iter().enumerate() {
-        let no = head + at + 1;
+        let no = head + at + start;
         ops.push(Op { kind: Kind::Context, text, old_no: no, new_no: no });
     }
     ops.extend(middle_ops(
         &a[prefix..a.len() - suffix],
         &b[prefix..b.len() - suffix],
-        prefix + 1,
-        prefix + 1,
+        prefix + start,
+        prefix + start,
     ));
     for (at, text) in a[a.len() - suffix..].iter().take(CONTEXT).enumerate() {
         ops.push(Op {
             kind: Kind::Context,
             text,
-            old_no: a.len() - suffix + at + 1,
-            new_no: b.len() - suffix + at + 1,
+            old_no: a.len() - suffix + at + start,
+            new_no: b.len() - suffix + at + start,
         });
     }
 
     let added = ops.iter().filter(|o| o.kind == Kind::Added).count();
     let removed = ops.iter().filter(|o| o.kind == Kind::Removed).count();
 
-    let spans = runs(&ops);
-    let wanted = spans.len();
+    // Hunks are kept until the budget runs out, and the one that runs it out
+    // is kept as far as it goes. Taking whole hunks only would mean a brand
+    // new file arrived as one hunk of every line it has, which is the bound
+    // this module was written to respect.
     let mut hunks: Vec<Value> = Vec::new();
-    let mut drawn = 0usize;
-    for (from, to) in spans {
-        if hunks.len() >= MAX_HUNKS || (drawn + (to - from) > MAX_LINES && !hunks.is_empty()) {
-            break;
+    let mut budget = MAX_LINES;
+    let mut omitted_hunks = 0usize;
+    let mut omitted_lines = 0usize;
+    for (from, to) in runs(&ops) {
+        let size = to - from;
+        if hunks.len() >= MAX_HUNKS || budget == 0 {
+            omitted_hunks += 1;
+            omitted_lines += size;
+        } else if size <= budget {
+            budget -= size;
+            hunks.push(hunk(&ops[from..to]));
+        } else {
+            hunks.push(hunk(&ops[from..from + budget]));
+            omitted_lines += size - budget;
+            budget = 0;
         }
-        drawn += to - from;
-        hunks.push(hunk(&ops[from..to]));
     }
 
     let mut change = Map::new();
@@ -330,8 +344,13 @@ pub fn summarize(before: &str, after: &str) -> Map<String, Value> {
     change.insert("removed".into(), json!(removed));
     change.insert("beforeLines".into(), json!(a.len()));
     change.insert("afterLines".into(), json!(b.len()));
-    if wanted > hunks.len() {
-        change.insert("omittedHunks".into(), json!(wanted - hunks.len()));
+    // Said only when there is something to say, so a card can tell a whole
+    // diff from a cut one by whether these are there at all.
+    if omitted_hunks > 0 {
+        change.insert("omittedHunks".into(), json!(omitted_hunks));
+    }
+    if omitted_lines > 0 {
+        change.insert("omittedLines".into(), json!(omitted_lines));
     }
     change.insert("hunks".into(), Value::Array(hunks));
     change
@@ -359,7 +378,7 @@ mod tests {
         let after = before.replace("line 1400\n", "line 1400 changed\n");
         assert!(before.len() > 10_000);
 
-        let change = summarize(&before, &after);
+        let change = summarize(&before, &after, 1);
         assert_eq!(change["added"], json!(1));
         assert_eq!(change["removed"], json!(1));
         assert_eq!(change["beforeLines"], json!(1500));
@@ -384,7 +403,7 @@ mod tests {
             .replace("line 100\n", "one\n")
             .replace("line 1100\n", "two\n");
 
-        let change = summarize(&before, &after);
+        let change = summarize(&before, &after, 1);
         let hunks = change["hunks"].as_array().unwrap();
         assert_eq!(hunks.len(), 2);
         assert_eq!(hunks[0]["oldStart"], json!(94));
@@ -400,7 +419,7 @@ mod tests {
         let before: String = (1..=100).map(|n| format!("line {n}\n")).collect();
         let after = before.replace("line 50\n", "a\n").replace("line 53\n", "b\n");
 
-        let change = summarize(&before, &after);
+        let change = summarize(&before, &after, 1);
         assert_eq!(change["hunks"].as_array().unwrap().len(), 1);
     }
 
@@ -409,14 +428,14 @@ mod tests {
     /// zero the way git writes it.
     #[test]
     fn a_new_file_is_all_additions_and_an_emptied_one_all_removals() {
-        let born = summarize("", "a\nb\n");
+        let born = summarize("", "a\nb\n", 1);
         assert_eq!(born["added"], json!(2));
         assert_eq!(born["removed"], json!(0));
         assert_eq!(born["hunks"][0]["oldStart"], json!(0));
         assert_eq!(born["hunks"][0]["oldLines"], json!(0));
         assert_eq!(born["hunks"][0]["newLines"], json!(2));
 
-        let gone = summarize("a\nb\n", "");
+        let gone = summarize("a\nb\n", "", 1);
         assert_eq!(gone["removed"], json!(2));
         assert_eq!(gone["hunks"][0]["newStart"], json!(0));
     }
@@ -425,7 +444,7 @@ mod tests {
     /// the card would have to guess about.
     #[test]
     fn an_unchanged_file_has_no_hunks() {
-        let change = summarize("a\nb\n", "a\nb\n");
+        let change = summarize("a\nb\n", "a\nb\n", 1);
         assert_eq!(change["added"], json!(0));
         assert_eq!(change["removed"], json!(0));
         assert!(change["hunks"].as_array().unwrap().is_empty());
@@ -440,12 +459,28 @@ mod tests {
             .map(|n| if n % 40 == 0 { format!("changed {n}\n") } else { format!("line {n}\n") })
             .collect();
 
-        let change = summarize(&before, &after);
+        let change = summarize(&before, &after, 1);
         assert_eq!(change["added"], json!(100));
         assert_eq!(change["removed"], json!(100));
         let hunks = change["hunks"].as_array().unwrap().len();
         assert!(hunks <= MAX_HUNKS, "kept {hunks} hunks");
         assert_eq!(change["omittedHunks"], json!(100 - hunks));
+    }
+
+    /// A whole new file is one run of additions with nothing to break it up,
+    /// so the bound has to hold inside a hunk and not only between hunks.
+    #[test]
+    fn a_whole_new_file_is_cut_inside_its_one_hunk() {
+        let after: String = (1..=3000).map(|n| format!("line {n}\n")).collect();
+
+        let change = summarize("", &after, 1);
+        assert_eq!(change["added"], json!(3000));
+        assert_eq!(change["hunks"].as_array().unwrap().len(), 1);
+        assert_eq!(change["hunks"][0]["lines"].as_array().unwrap().len(), MAX_LINES);
+        assert_eq!(change["omittedLines"], json!(3000 - MAX_LINES));
+        assert!(change.get("omittedHunks").is_none());
+        // Which is the whole point: it fits on the wire.
+        assert!(serde_json::to_string(&change).unwrap().len() < 20_000);
     }
 
     /// A file rewritten from end to end shares no line with what it replaced,
@@ -456,10 +491,13 @@ mod tests {
         let before: String = (1..=3000).map(|n| format!("old {n}\n")).collect();
         let after: String = (1..=3000).map(|n| format!("new {n}\n")).collect();
 
-        let change = summarize(&before, &after);
+        let change = summarize(&before, &after, 1);
         assert_eq!(change["added"], json!(3000));
         assert_eq!(change["removed"], json!(3000));
         assert_eq!(change["hunks"].as_array().unwrap().len(), 1);
+        // Clipped to the bound, with the counts above still exact.
+        assert_eq!(change["hunks"][0]["lines"].as_array().unwrap().len(), MAX_LINES);
+        assert_eq!(change["omittedLines"], json!(6000 - MAX_LINES));
     }
 
     /// A large file changed all through it is past the comparison bound, and
@@ -472,7 +510,7 @@ mod tests {
             .map(|n| if n % 500 == 0 { format!("changed {n}\n") } else { format!("line {n}\n") })
             .collect();
 
-        let change = summarize(&before, &after);
+        let change = summarize(&before, &after, 1);
         assert_eq!(change["added"], json!(8));
         assert_eq!(change["removed"], json!(8));
         assert_eq!(change["hunks"].as_array().unwrap().len(), 8);
@@ -483,7 +521,7 @@ mod tests {
     /// and neither is one with a trailing newline one line longer.
     #[test]
     fn the_last_newline_is_not_a_line_of_its_own() {
-        assert_eq!(summarize("a\nb", "a\nb")["beforeLines"], json!(2));
-        assert_eq!(summarize("a\nb\n", "a\nb\n")["beforeLines"], json!(2));
+        assert_eq!(summarize("a\nb", "a\nb", 1)["beforeLines"], json!(2));
+        assert_eq!(summarize("a\nb\n", "a\nb\n", 1)["beforeLines"], json!(2));
     }
 }

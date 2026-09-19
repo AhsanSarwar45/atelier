@@ -50,6 +50,7 @@ import type {
   WbpEvent,
 } from './protocol';
 import type { ChatWidget } from './chat-widgets';
+import type { EditChange } from './line-diff';
 import type { ProviderMessageSignal } from './provider-messages';
 // With its extension, which is not a style: this file is read two ways. The
 // browser's build resolves it either way; the sidecar is Node running the
@@ -108,7 +109,12 @@ export interface TranscriptTool {
   /** Set when a subagent made this call — the row nests under that call. */
   parentId: string | null;
   execution?: ExecutionContext;
-  diff: { path: string; before: string; after: string; line?: number } | null;
+  /**
+   * The change, with what the server worked out about it before the wire cut
+   * the text: the changed lines and how many there were (bw-vl3q.2). A row
+   * built from an older stored event carries only the three it always did.
+   */
+  diff: ({ path: string; before: string; after: string; line?: number } & Partial<EditChange>) | null;
   /** What it was asked to do, and what it printed. Both open on the row's own click. */
   input: Record<string, unknown>;
   output: string | null;
@@ -853,7 +859,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
     case 'diff':
       next.items = items.map((it) =>
         it.kind === 'tool' && it.id === e.toolCallId
-          ? { ...it, diff: { path: e.path, before: e.before, after: e.after, ...(e.line ? { line: e.line } : {}) } }
+          ? { ...it, diff: { path: e.path, before: e.before, after: e.after, ...(e.line ? { line: e.line } : {}), ...changeFields(e) } }
           : it,
       );
       return next;
@@ -1041,6 +1047,26 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
  * case by case in src/workbench/__tests__/reading-a-chat.test.ts against the
  * real fold.
  */
+
+/**
+ * The change the wire worked out, lifted off an event that may not carry one.
+ *
+ * An event stored before the server began summarising diffs has none of these
+ * fields, and a row built from it must come out the shape it always was rather
+ * than one carrying a pile of undefineds (bw-vl3q.2).
+ */
+function changeFields(e: Partial<EditChange>): Partial<EditChange> {
+  return {
+    ...(e.hunks ? { hunks: e.hunks } : {}),
+    ...(e.added === undefined ? {} : { added: e.added }),
+    ...(e.removed === undefined ? {} : { removed: e.removed }),
+    ...(e.beforeLines === undefined ? {} : { beforeLines: e.beforeLines }),
+    ...(e.afterLines === undefined ? {} : { afterLines: e.afterLines }),
+    ...(e.omittedHunks === undefined ? {} : { omittedHunks: e.omittedHunks }),
+    ...(e.omittedLines === undefined ? {} : { omittedLines: e.omittedLines }),
+  };
+}
+
 export function foldAll(events: readonly WbpEvent[]): SessionView {
   const items: TranscriptItem[] = [];
   // Where each item sits, by name. A message and a block of thinking can carry

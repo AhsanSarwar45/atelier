@@ -15,6 +15,7 @@
  * transcript as the same thing and are drawn by the same rule, with no second
  * shape to keep in step (bw-uu9x.1, bw-uu9x.8).
  */
+import { changeOf, type EditChange } from './line-diff';
 import type { ImagePayload } from './protocol';
 
 /** How much of a chat's past is drawn when it is opened. */
@@ -565,7 +566,7 @@ export function withoutMachineChatter<T extends { type: string; messageId?: stri
 }
 
 /** The change one tool call made to one file: what it took out, what it put in. */
-export interface ToolDiff {
+export interface ToolDiff extends Partial<EditChange> {
   path: string;
   before: string;
   after: string;
@@ -590,15 +591,17 @@ export function diffOf(name: string, input: Record<string, unknown>, source?: st
   if (!path) return null;
   if (name === 'Edit' && typeof input.old_string === 'string' && typeof input.new_string === 'string') {
     const at = source?.indexOf(input.old_string) ?? -1;
+    const line = at < 0 ? undefined : source!.slice(0, at).split('\n').length;
     return {
       path,
       before: cut(input.old_string),
       after: cut(input.new_string),
-      ...(at < 0 ? {} : { line: source!.slice(0, at).split('\n').length }),
+      ...(line === undefined ? {} : { line }),
+      ...changeOf(input.old_string, input.new_string, line ?? 1),
     };
   }
   if (name === 'Write' && typeof input.content === 'string') {
-    return { path, before: '', after: cut(input.content), line: 1 };
+    return { path, before: '', after: cut(input.content), line: 1, ...changeOf('', input.content) };
   }
   // Several edits to one file arrive as a list, and each is a change of its own.
   // Run together they read as one, which is how they were made.
@@ -611,11 +614,15 @@ export function diffOf(name: string, input: Record<string, unknown>, source?: st
     );
     if (!edits.length) return null;
     const at = source?.indexOf(edits[0]!.old_string) ?? -1;
+    const line = at < 0 ? undefined : source!.slice(0, at).split('\n').length;
+    const before = edits.map((e) => e.old_string).join('\n');
+    const after = edits.map((e) => e.new_string).join('\n');
     return {
       path,
-      before: cut(edits.map((e) => e.old_string).join('\n')),
-      after: cut(edits.map((e) => e.new_string).join('\n')),
-      ...(at < 0 ? {} : { line: source!.slice(0, at).split('\n').length }),
+      before: cut(before),
+      after: cut(after),
+      ...(line === undefined ? {} : { line }),
+      ...changeOf(before, after, line ?? 1),
     };
   }
   return null;

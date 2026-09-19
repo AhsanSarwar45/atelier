@@ -567,6 +567,15 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                     for field in ["path", "before", "after"] {
                         diff.insert(field.into(), value(event, field));
                     }
+                    // What the wire worked out before it cut the text: the
+                    // changed lines and how many there were (bw-vl3q.2). Only
+                    // carried when it is there, so a row built from an older
+                    // stored event stays exactly the shape it always was.
+                    for field in ["hunks", "added", "removed", "beforeLines", "afterLines", "omittedHunks", "omittedLines"] {
+                        if let Some(found) = event.fields.get(field) {
+                            diff.insert(field.into(), found.clone());
+                        }
+                    }
                     if integer(event, "line") != 0 {
                         diff.insert("line".into(), value(event, "line"));
                     }

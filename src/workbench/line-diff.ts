@@ -42,6 +42,152 @@ export interface DiffHunk {
   lines: DiffHunkLine[];
 }
 
+/**
+ * What an edit changed: the counts, and the changed lines with context.
+ *
+ * The server works this out for a live edit before the wire limit cuts the
+ * text (see `server/src/workbench/hunks.rs`); this is the same answer for the
+ * other producer, a chat read back out of a provider's own record, where the
+ * full text is in hand on this side of the wire instead (bw-vl3q.2).
+ */
+export interface EditChange {
+  /** Lines the file gained. Exact, whatever had to be left undrawn. */
+  added: number;
+  /** Lines it lost. Exact in the same way. */
+  removed: number;
+  beforeLines: number;
+  afterLines: number;
+  /** The changed lines with context, in file order. */
+  hunks: DiffHunk[];
+  /** Hunks left out of `hunks` entirely, when there were too many to draw. */
+  omittedHunks?: number;
+  /** Lines clipped off the last hunk drawn, when it ran past the bound. */
+  omittedLines?: number;
+}
+
+/** Unchanged lines kept either side of a changed run. Matches the server's. */
+const CONTEXT = 6;
+/** The most hunks one edit carries, and the most lines between them. */
+const MAX_HUNKS = 30;
+const MAX_LINES = 400;
+
+/** A body as lines, without the one newline that ends a file. */
+function toLines(text: string): string[] {
+  return text.length === 0 ? [] : text.replace(/\n$/, '').split('\n');
+}
+
+/**
+ * The same change the server reports, worked out here.
+ *
+ * The rows are taken from `diffLines` over the changed middle alone — the
+ * shared head and tail of a whole-file write are never compared — and then cut
+ * into hunks by the server's rules, so both producers hand the card one shape.
+ */
+export function changeOf(before: string, after: string, startLine = 1): EditChange {
+  const a = toLines(before);
+  const b = toLines(after);
+
+  let prefix = 0;
+  while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix++;
+  let suffix = 0;
+  const most = Math.min(a.length, b.length) - prefix;
+  while (suffix < most && a[a.length - 1 - suffix] === b[b.length - 1 - suffix]) suffix++;
+
+  const ops: DiffRow[] = [];
+  const head = Math.max(0, prefix - CONTEXT);
+  for (let at = head; at < prefix; at++) {
+    const no = at + startLine;
+    ops.push({ left: a[at]!, right: a[at]!, kind: 'same', leftNo: no, rightNo: no });
+  }
+  // A row that pairs a removal with the addition replacing it is one line of
+  // each for a hunk, which counts its sides separately.
+  for (const row of diffLines(
+    a.slice(prefix, a.length - suffix).join('\n'),
+    b.slice(prefix, b.length - suffix).join('\n'),
+    prefix + startLine,
+  )) {
+    if (row.kind === 'changed') {
+      ops.push({ left: row.left, right: null, kind: 'removed', leftNo: row.leftNo });
+      ops.push({ left: null, right: row.right, kind: 'added', rightNo: row.rightNo });
+    } else {
+      ops.push(row);
+    }
+  }
+  for (let at = 0; at < Math.min(suffix, CONTEXT); at++) {
+    const text = a[a.length - suffix + at]!;
+    ops.push({
+      left: text,
+      right: text,
+      kind: 'same',
+      leftNo: a.length - suffix + at + startLine,
+      rightNo: b.length - suffix + at + startLine,
+    });
+  }
+
+  const added = ops.filter((o) => o.kind === 'added').length;
+  const removed = ops.filter((o) => o.kind === 'removed').length;
+
+  // Every changed line claims CONTEXT lines either side; spans that then touch
+  // are one hunk, because two hunks with no gap between them are one hunk.
+  const spans: [number, number][] = [];
+  ops.forEach((op, at) => {
+    if (op.kind === 'same') return;
+    const from = Math.max(0, at - CONTEXT);
+    const to = Math.min(ops.length, at + CONTEXT + 1);
+    const last = spans[spans.length - 1];
+    if (last && from <= last[1]) last[1] = to;
+    else spans.push([from, to]);
+  });
+
+  const hunks: DiffHunk[] = [];
+  let budget = MAX_LINES;
+  let omittedHunks = 0;
+  let omittedLines = 0;
+  for (const [from, to] of spans) {
+    const size = to - from;
+    if (hunks.length >= MAX_HUNKS || budget === 0) {
+      omittedHunks++;
+      omittedLines += size;
+    } else if (size <= budget) {
+      budget -= size;
+      hunks.push(toHunk(ops.slice(from, to)));
+    } else {
+      hunks.push(toHunk(ops.slice(from, from + budget)));
+      omittedLines += size - budget;
+      budget = 0;
+    }
+  }
+
+  return {
+    added,
+    removed,
+    beforeLines: a.length,
+    afterLines: b.length,
+    hunks,
+    ...(omittedHunks ? { omittedHunks } : {}),
+    ...(omittedLines ? { omittedLines } : {}),
+  };
+}
+
+/** One run of rows written as a hunk. */
+function toHunk(ops: DiffRow[]): DiffHunk {
+  const oldLines = ops.filter((o) => o.kind !== 'added').length;
+  const newLines = ops.filter((o) => o.kind !== 'removed').length;
+  const first = ops[0]!;
+  return {
+    // A hunk with nothing on one side starts at the line before it, which is
+    // nothing; git writes that as zero and so does the server.
+    oldStart: oldLines === 0 ? 0 : (first.leftNo ?? first.rightNo ?? 1),
+    oldLines,
+    newStart: newLines === 0 ? 0 : (first.rightNo ?? first.leftNo ?? 1),
+    newLines,
+    lines: ops.map((o) => ({
+      kind: o.kind === 'added' ? 'added' : o.kind === 'removed' ? 'removed' : 'context',
+      text: (o.kind === 'added' ? o.right : o.left) ?? '',
+    })),
+  };
+}
+
 function lcs(a: string[], b: string[]): number[][] {
   const table: number[][] = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
   for (let i = a.length - 1; i >= 0; i--) {

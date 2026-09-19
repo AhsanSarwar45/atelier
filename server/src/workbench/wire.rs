@@ -70,8 +70,18 @@ pub fn bound_event(event: &mut Event) {
                         .to_string()
                 };
                 let (before, after) = (side("before"), side("after"));
+                // A provider hands over the changed fragment and says where it
+                // starts; numbering from one would point at the top of the file.
+                let start = event
+                    .fields
+                    .get("line")
+                    .and_then(Value::as_u64)
+                    .filter(|line| *line > 0)
+                    .unwrap_or(1) as usize;
                 if !before.is_empty() || !after.is_empty() {
-                    event.fields.extend(super::hunks::summarize(&before, &after));
+                    event
+                        .fields
+                        .extend(super::hunks::summarize(&before, &after, start));
                 }
             }
             for field in ["before", "after"] {
@@ -166,6 +176,20 @@ mod tests {
         assert!(drawn.contains("line 1900 changed"), "{drawn}");
         // The text itself is still cut, and the change still got through.
         assert!(diff.fields["before"].as_str().unwrap().len() < 5_000);
+    }
+
+    /// A provider that sends the changed fragment says where it starts, and
+    /// the hunks have to be numbered from there rather than from the top.
+    #[test]
+    fn a_fragment_is_numbered_from_where_the_provider_says_it_sits() {
+        let mut diff = event(json!({
+            "type":"diff","sessionId":"s","seq":0,"at":"now","toolCallId":"t",
+            "path":"/a/notes.txt","before":"one\ntwo\n","after":"one\nTWO\n","line":400
+        }));
+        bound_event(&mut diff);
+
+        assert_eq!(diff.fields["hunks"][0]["oldStart"], json!(400));
+        assert_eq!(diff.fields["hunks"][0]["newStart"], json!(400));
     }
 
     /// Bounding runs again every time an event is read back. The second pass

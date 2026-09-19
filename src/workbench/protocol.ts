@@ -15,6 +15,7 @@
 
 /** Brands we can drive. One string per driver. */
 import type { HeldChat } from './chat-state';
+import type { EditChange } from './line-diff';
 import type { ChatWidget } from './chat-widgets';
 import type { PlanUsage } from './plan-usage';
 import type { ProviderMessageSignal } from './provider-messages';
@@ -636,7 +637,13 @@ export type WbpEvent = EventBase &
      */
     | { type: 'agent.relayed'; agentId: string; text: string }
     | { type: 'agent.identified'; agentId: string; agentType: string }
-    | { type: 'diff'; toolCallId: string; path: string; before: string; after: string; line?: number }
+    /**
+     * A file changed. `before` and `after` are bounded on the wire, so for
+     * anything but a small edit they are a prefix of the text and not the
+     * change; the change itself travels as `hunks` and the counts beside them,
+     * worked out before that cut (bw-vl3q.2).
+     */
+    | ({ type: 'diff'; toolCallId: string; path: string; before: string; after: string; line?: number } & Partial<EditChange>)
     | { type: 'todo'; items: TodoItem[] }
     /**
      * One picture. `messageId` names the message it belongs to; `toolCallId`
