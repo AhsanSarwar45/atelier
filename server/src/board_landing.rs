@@ -268,9 +268,10 @@ fn finish(root: &Path, path: &Path, record: &mut Landing) -> Result<(), String> 
     for id in &record.cards {
         let row = card(root, id)?;
         if cancelled(&row) {
-            return Err(format!(
-                "{id} was cancelled during landing; reconcile its changed scope explicitly"
-            ));
+            bd(root, &["update".into(), id.clone(), "--append-notes".into(),
+                format!("Landing recovery preserved cancelled scope; commit {} reached {} but this card was not marked delivered", record.tip, record.branch)])?;
+            eprintln!("{id}: preserving cancellation while completing landing recovery");
+            continue;
         }
         if status(&row) == "closed" {
             continue;

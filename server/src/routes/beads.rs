@@ -1537,7 +1537,12 @@ async fn update_bead(
         }
     }
 
+    // Cancellation labels are lifecycle state, never a metadata-only edit.
+    if (req.add_label.as_deref() == Some("cancelled") || req.remove_label.as_deref() == Some("cancelled")) && req.status.is_none() {
+        return (StatusCode::CONFLICT, Json(serde_json::json!({"error":"Change cancellation through an explicit status action"})));
+    }
     if req.status.as_deref().is_some_and(|s| crate::board_state::normalize(s) == "closed")
+        && req.add_label.as_deref() != Some("cancelled")
         && req.path.starts_with(DOLT_PATH_PREFIX) {
         return (StatusCode::CONFLICT, Json(serde_json::json!({"error":"Connect this board to its Git checkout to verify completion on main"})));
     }
@@ -1616,7 +1621,9 @@ async fn update_bead(
     }
     if let Some(ref l) = req.add_label {
         args.push(format!("--add-label={}", l));
-        if l == "cancelled" { args.push("--force".into()); }
+        if l == "cancelled" {
+            args.extend(["--force".into(), "--append-notes".into(), "Manager cancelled scope through the board status action".into()]);
+        }
     }
     if let Some(ref l) = req.remove_label {
         args.push(format!("--remove-label={}", l));

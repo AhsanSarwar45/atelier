@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, rmSync, chmodSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const run = resolve('tests/.e2e-run-bw-9vv9/native');
@@ -92,6 +92,15 @@ tool(repo, 'board/reconcile', '--apply'); assert.equal(row(repo, 'ld-recover').s
 bd(repo, 'update', 'ld-recover', '--status', 'open'); tool(repo, 'board/reconcile', '--apply');
 assert.equal(row(repo, 'ld-recover').status, 'open', 'an old receipt cannot close reopened work');
 console.log('PASS recovery after merge and old-receipt protection on reopened work');
+make('ld-cancelled-recovery');
+bd(repo, 'update', 'ld-cancelled-recovery', '--add-label', 'cancelled');
+writeFileSync(join(journals, 'cancelled.json'), JSON.stringify({version:1, branch:'main', tip, tree, actor:'landing-test', cards:['ld-cancelled-recovery', 'ld-recover'], complete:false}));
+tool(repo, 'board/reconcile', '--apply');
+assert.equal(JSON.parse(readFileSync(join(journals, 'cancelled.json'), 'utf8')).complete, true);
+assert.ok(row(repo, 'ld-cancelled-recovery').labels.includes('cancelled'));
+assert.equal(row(repo, 'ld-recover').status, 'open');
+console.log('PASS cancellation during recovery retires the journal without closing reopened work');
+
 
 make('ld-review'); const review = copy('ld-review'); bd(review, 'update', 'ld-review', '--claim', '--set-metadata', 'review_required=true'); commit(review, 'ld-review', 'review.txt');
 fails(review, ['board/land', 'ld-review'], /Review ld-review/);

@@ -33,17 +33,17 @@ pub fn run(name: &str, rest: &[String]) -> Option<Result<i32, String>> {
 /// There was no way to ask what the flags were without paying for the command
 /// (`docs/hook-friction-2.md` §8 of the tooling entries, bw-e3dw.7).
 fn asks_for_help(rest: &[String]) -> bool {
-    rest.iter().any(|word| matches!(word.as_str(), "--help" | "-h"))
+    rest.iter().any(|word| matches!(word.as_str(), "--help" | "-h" | "--schema"))
 }
 
 fn usage(tool: &str) -> &'static str {
     match tool {
         "board/job" => "usage: atelier tool board/job <action> [options]
 
-  new --what TEXT --done TEXT [options]     open a job and its spine
+  new --what TEXT --done TEXT [options]     open a job and its work items
   epic --what TEXT --done TEXT [options]    open a container of jobs
   under ID --do 'WHAT|DONE' ...             add work items to an open job
-  upgrade ID [options]                      give an existing card a job's spine
+  upgrade ID [options]                      give an existing card work items
   cancel ID --reason TEXT                   drop a job and everything under it
 
 options for new, epic and upgrade:
@@ -56,7 +56,7 @@ options for new, epic and upgrade:
   --kind NAME        bug, feature or chore (default: feature)
   --priority N, -p N 0 to 4 (default: 2)
   --parent ID        file this job under an existing card
-  --steps LIST       extra spine steps from ground,design,benchmark,review,record
+  --steps LIST       legacy review requirements; no generated step tickets
   --judge NAME       who approves before landing (default: agent)",
         "board/land" => "usage: atelier tool board/land CARD-ID
 
@@ -243,18 +243,30 @@ fn children(root: &Path, id: &str) -> Result<Vec<Value>, String> {
 }
 
 fn cancel_tree(root: &Path, id: &str, reason: &str) -> Result<(), String> {
-    let row = card(root, id)?;
-    let actor = crate::board_landing::actor(root)?;
-    if row["assignee"].as_str().is_some_and(|owner| !owner.is_empty() && owner != actor) {
-        return Err(format!("{id} belongs to another actor; its scope cannot be cancelled by this session"));
-    }
-    for child in children(root, id)? {
-        if child["status"].as_str() != Some("closed") {
-            if let Some(child_id) = child["id"].as_str() { cancel_tree(root, child_id, reason)?; }
+    // Validate the entire scope before the first write, including cycles and
+    // ownership, so a later child cannot leave a partly cancelled job.
+    fn collect(root: &Path, id: &str, actor: &str, visiting: &mut std::collections::HashSet<String>, out: &mut Vec<String>) -> Result<(), String> {
+        if !visiting.insert(id.into()) { return Err(format!("Cycle in cancellation scope at {id}")); }
+        let row = card(root, id)?;
+        if row["assignee"].as_str().is_some_and(|owner| !owner.is_empty() && owner != actor) {
+            return Err(format!("{id} belongs to another actor; its scope cannot be cancelled by this session"));
         }
+        if row["status"] == "manager_review" { return Err(format!("{id} needs the manager's scope decision")); }
+        for child in children(root, id)? {
+            if child["status"] != "closed" {
+                if let Some(child_id) = child["id"].as_str() { collect(root, child_id, actor, visiting, out)?; }
+            }
+        }
+        visiting.remove(id);
+        if row["status"] != "closed" { out.push(id.into()); }
+        Ok(())
     }
-    bd(root, &["update".into(), id.into(), "--add-label".into(), "cancelled".into(), "--set-metadata".into(), "status_derived=false".into()])?;
-    bd(root, &["close".into(), id.into(), "--force".into(), "--reason".into(), format!("cancelled: {reason}")])?;
+    let mut ids = Vec::new();
+    collect(root, id, &crate::board_landing::actor(root)?, &mut std::collections::HashSet::new(), &mut ids)?;
+    for id in ids {
+        bd(root, &["update".into(), id.clone(), "--add-label".into(), "cancelled".into(), "--status".into(), "closed".into(), "--force".into(),
+            "--set-metadata".into(), "status_derived=false".into(), "--append-notes".into(), format!("Cancelled scope: {reason}")])?;
+    }
     Ok(())
 }
 
@@ -518,23 +530,24 @@ fn review(rest: &[String]) -> Result<i32, String> {
         .ok_or_else(|| format!("{provider} is not available"))?;
     let card_json = bd(&root, &["show".into(), id.clone(), "--json".into()])?;
     let trunk = landing_name(&root);
+    let reviewed_tree = git(&root, &["rev-parse", "HEAD^{tree}"])?;
     let commits: Vec<String> = git(&root, &["log", &format!("{trunk}..HEAD"), "--format=%H"])?.lines().map(str::to_string).collect();
     if commits.is_empty() { return Err(format!("{id} has no unlanded commits to review")); }
     let mut change = String::new();
     for sha in commits.iter().rev() {
         change.push_str(&git(&root, &["show", "--format=commit %H%n%s", "--stat", "--patch", sha])?);
         change.push('\n');
-        if change.len() > 300_000 { change.truncate(300_000); change.push_str("\n[diff truncated; inspect the repository read-only]\n"); break; }
+        if change.len() > 300_000 { let mut end = 300_000; while !change.is_char_boundary(end) { end -= 1; } change.truncate(end); change.push_str("\n[diff truncated; inspect the repository read-only]\n"); break; }
     }
     let base = git(&root, &["rev-parse", &trunk])?;
     let head = git(&root, &["rev-parse", "HEAD"])?;
     let agreements = std::fs::read_to_string(root.join("AGENTS.md")).unwrap_or_default();
     let instructions = include_str!("../../machinery/workers/external-review.md");
     let prompt = format!("{instructions}\n\nImmutable scope: base {base}, head {head}. Repository: {}.\nProject instructions:\n{agreements}\n\nReturn this exact shape:\n{{\"verdict\":\"PASS or NEEDS_WORK\",\"summary\":\"one sentence\",\"verified\":[\"fact\"],\"findings\":[{{\"severity\":\"critical, high, or medium\",\"confidence\":80,\"file\":\"path\",\"line\":null,\"title\":\"failure\",\"evidence\":\"proof\",\"recommendation\":\"verifiable correction\"}}]}}\n\nJob:\n{card_json}\n\nUnlanded commits and diff:\n{change}", root.display());
-    let reviewed_tree = git(&root, &["rev-parse", "HEAD^{tree}"])?;
+    if git(&root, &["rev-parse", "HEAD^{tree}"])? != reviewed_tree { return Err("The tree changed while preparing review".into()); }
     let mut command = Command::new(program);
     if provider == "claude" {
-        command.args(["--agent", "reviewer", "-p", &prompt, "--setting-sources", "user", "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--no-session-persistence", "--output-format", "json", "--json-schema", r#"{"type":"object","required":["verdict","summary","findings"],"properties":{"verdict":{"enum":["PASS","NEEDS_WORK"]},"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object"}}}}"#]);
+        command.args(["--agents", r#"{"reviewer":{"description":"Independent code review","prompt":"Review the supplied immutable scope. Do not edit files or mutate Git, Beads, applications or processes. Return only the requested JSON verdict.","tools":["Read","Grep","Glob"]}}"#, "--agent", "reviewer", "-p", &prompt, "--setting-sources", "user", "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--no-session-persistence", "--output-format", "json", "--json-schema", r#"{"type":"object","required":["verdict","summary","findings"],"properties":{"verdict":{"enum":["PASS","NEEDS_WORK"]},"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object"}}}}"#]);
     } else if provider == "codex" {
         command.args(["exec", "--sandbox", "read-only", "--color", "never", &prompt]);
     } else { return Err("Review provider must be claude or codex".into()); }
@@ -556,7 +569,7 @@ fn review(rest: &[String]) -> Result<i32, String> {
         let end = verdict.rfind('}').map(|at| at + 1).unwrap_or(start);
         serde_json::from_str::<Value>(&verdict[start..end])
     }).map_err(|error| format!("{provider} returned no readable review JSON: {error}"))?;
-    let parsed = if provider == "claude" { parsed.get("structured_output").cloned().ok_or("REVIEWER_ERROR: missing structured review verdict")? } else { parsed };
+    let parsed = if provider == "claude" { claude_verdict(&parsed)? } else { parsed };
     std::fs::write(evidence.join("verdict.json"), serde_json::to_vec_pretty(&parsed).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let findings = parsed["findings"].as_array().ok_or_else(|| "review JSON has no findings array".to_string())?;
     let passed = parsed["verdict"].as_str() == Some("PASS") && findings.is_empty();
@@ -570,9 +583,30 @@ fn review(rest: &[String]) -> Result<i32, String> {
     Ok(0)
 }
 
+fn claude_verdict(envelope: &Value) -> Result<Value, String> {
+    if envelope["is_error"] == true { return Err("REVIEWER_ERROR: reviewer reported failure".into()); }
+    if let Some(value) = envelope.get("structured_output") { return Ok(value.clone()); }
+    let text = envelope["result"].as_str().ok_or("REVIEWER_ERROR: missing review verdict")?.trim();
+    let text = text.strip_prefix("```json").and_then(|s| s.trim().strip_suffix("```")).unwrap_or(text).trim();
+    let value: Value = serde_json::from_str(text).map_err(|e| format!("REVIEWER_ERROR: invalid verdict: {e}"))?;
+    if !matches!(value["verdict"].as_str(), Some("PASS" | "NEEDS_WORK")) || !value["findings"].is_array() {
+        return Err("REVIEWER_ERROR: missing verdict or findings".into());
+    }
+    Ok(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_machinery_review_accepts_json_envelopes_but_not_prose_or_errors() {
+        let result = serde_json::json!({"verdict":"NEEDS_WORK","findings":[{"title":"fault"}]});
+        assert_eq!(claude_verdict(&serde_json::json!({"structured_output":result})).unwrap(), result);
+        assert_eq!(claude_verdict(&serde_json::json!({"result":format!("```json\n{result}\n```")})).unwrap(), result);
+        assert!(claude_verdict(&serde_json::json!({"result":"Looks good"})).is_err());
+        assert!(claude_verdict(&serde_json::json!({"is_error":true,"structured_output":result})).is_err());
+    }
 
     /// A worker in a job copy has to carry a bypass on every command; once it
     /// is exported rather than welded on, the gate stands down out loud and a
@@ -597,6 +631,7 @@ mod tests {
     #[test]
     fn native_machinery_asking_for_help_is_not_asking_for_the_work() {
         assert!(asks_for_help(&["--help".to_string()]));
+        assert!(asks_for_help(&["--schema".to_string()]));
         assert!(asks_for_help(&["new".to_string(), "-h".to_string()]));
         assert!(!asks_for_help(&["new".to_string(), "--what".to_string(), "a fault".to_string()]));
         // A card whose own text says `--help` is still a card, not a question.

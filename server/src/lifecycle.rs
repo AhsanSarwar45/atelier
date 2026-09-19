@@ -988,6 +988,9 @@ fn actor(data: &Value) -> Option<Value> {
         let has_actor = args
             .iter()
             .any(|word| word.text == "--actor" || word.text.starts_with("--actor="));
+        if flag_value(args, "--actor").is_some_and(|given| given != who) {
+            return deny(format!("This session acts as {who}; it cannot use another board actor"));
+        }
         if !has_actor {
             insertions.push((
                 call.segment.words[call.executable].end,
@@ -1723,6 +1726,10 @@ fn status_gate(data: &Value) -> Option<Value> {
         let project = bd_cwd(&call, &here);
         let verb = call.segment.words[call.verb].text.as_str();
         let args = &call.segment.words[call.verb + 1..];
+        if !matches!(verb, "update" | "close" | "reopen" | "create" | "label") { continue; }
+        if args.iter().any(|word| word.text == "cancelled" || word.text.ends_with("=cancelled")) {
+            return deny("Cancel scope with atelier tool board/job cancel ID --reason TEXT; cancellation needs ownership and a recorded reason");
+        }
         // Manager signoff is a human action, never agent-authored metadata.
         if args.iter().any(|w| ["manager_approved_tree", "checks_passed", "review_passed", "landed_commit"].iter().any(|key| w.text.starts_with(&format!("{key}=")) || w.text.starts_with(&format!("--set-metadata={key}=")))) {
             return deny("Completion and approval evidence must be recorded by the matching native workflow tool or the manager's board action");
@@ -1733,6 +1740,13 @@ fn status_gate(data: &Value) -> Option<Value> {
         let ids = subject_ids(args);
         if ids.is_empty() { return deny("A status change must name its cards explicitly"); }
         for id in ids {
+            match crate::board_tools::card(&project, &id) {
+                Ok(row) if row["assignee"].as_str().is_some_and(|owner| !owner.is_empty() && owner != session(data)) => {
+                    return deny(format!("{id} belongs to another actor; its state cannot be changed by this session"));
+                }
+                Err(error) => return deny(error),
+                _ => (),
+            }
             if let Err(error) = crate::board_landing::transition(&project, &id, &status, false) {
                 return deny(error);
             }
@@ -1872,7 +1886,11 @@ fn stop_gate(data: &Value) -> Option<Value> {
     )
     .map(rows);
     let Some(cards) = cards else {
-        return Some(json!({"decision":"block","reason":"Cannot read owned work from Beads; restore board access before reporting completion"}));
+        if data["stop_hook_active"].as_bool() == Some(true) {
+            eprintln!("Board remains unavailable after a blocked stop. Report the board outage as a blocker; completion has not been verified.");
+            return None;
+        }
+        return Some(json!({"decision":"block","reason":"Cannot read owned work from Beads; retry board access. If it remains unavailable, report that outage as the concrete blocker, not completion."}));
     };
     if cards.is_empty() {
         return None;
@@ -1918,6 +1936,16 @@ mod tests {
     fn native_machinery_ticket_prose_is_not_a_hard_gate() {
         let data = json!({"tool_name":"Bash","tool_input":{"command":"bd create --title 'Fix duplicate cards'"}});
         assert!(status_gate(&data).is_none());
+    }
+
+    #[test]
+    fn native_machinery_status_filters_are_reads_and_cancellation_is_explicit() {
+        for command in ["bd list --status open --limit 0 --json", "bd ready --json", "bd search cancelled"] {
+            assert!(status_gate(&json!({"tool_input":{"command":command}})).is_none(), "{command}");
+        }
+        for command in ["bd update x-1 --add-label cancelled", "bd update x-1 --remove-label=cancelled", "bd label add x-1 cancelled"] {
+            assert!(status_gate(&json!({"tool_input":{"command":command}})).is_some(), "{command}");
+        }
     }
 
     #[test]
@@ -2306,17 +2334,23 @@ mod tests {
     #[test]
     fn native_machinery_does_not_duplicate_actor_or_copy_label() {
         let data = json!({"tool_name":"Bash", "session_id":"test", "cwd":"/repo/.worktrees/bd-bw-1",
-            "tool_input":{"command":"bd --actor somebody update bw-1 --claim --add-label copy:bw-1"}});
+            "tool_input":{"command":"bd --actor s-test update bw-1 --claim --add-label copy:bw-1"}});
         assert!(actor(&data).is_none());
 
         let data = json!({"tool_name":"Bash", "session_id":"test", "cwd":"/repo/.worktrees/bd-bw-2",
-            "tool_input":{"command":"bd --actor somebody update bw-2 --claim"}});
+            "tool_input":{"command":"bd --actor s-test update bw-2 --claim"}});
         let command = actor(&data).unwrap()["hookSpecificOutput"]["updatedInput"]["command"]
             .as_str()
             .unwrap()
             .to_string();
         assert_eq!(command.matches("--actor").count(), 1, "{command}");
         assert!(command.contains("--add-label copy:bw-2"), "{command}");
+    }
+
+    #[test]
+    fn native_machinery_cannot_impersonate_another_actor() {
+        let data = json!({"tool_name":"Bash", "session_id":"test", "tool_input":{"command":"bd --actor somebody update bw-1 --claim"}});
+        assert_eq!(actor(&data).unwrap()["hookSpecificOutput"]["permissionDecision"], "deny");
     }
 
     #[test]

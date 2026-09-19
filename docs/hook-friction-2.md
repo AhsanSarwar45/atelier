@@ -1740,3 +1740,19 @@ Verification: `tests/native-landing.mjs`, lifecycle/join/board_state Rust cases,
 `tests/e2e/landing-state.spec.ts`, and screenshots under
 `tests/results/landing-state`. These verify a built copy from the worktree;
 they do not claim to upgrade the owner's running app or other active sessions.
+
+
+### bw-9vv9 independent review follow-up (2026-09-19)
+
+The independent review of 20e5e3b5 returned NEEDS_WORK. Fixed read-only
+`bd list --status` being treated as a write; pending landing recovery now preserves
+cancelled scope and retires the journal; agent cancellation labels require the
+owned native cancellation command; browser cancellation requires an explicit
+status action. Cancellation validates the whole scope before writing.
+An unreadable board blocks the first stop; a repeated stop reports the outage as
+a blocker rather than looping forever. Readable unfinished work is still enforced.
+Also fixed `checks --schema` executing work, actor impersonation through an
+explicit flag, and native review depending on a missing personal reviewer profile.
+The reviewer returned valid JSON inside its result envelope rather than the
+requested structured_output; the parser now accepts that exact JSON form,
+rejecting prose, missing fields and error envelopes. No verdict is inferred.
