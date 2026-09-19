@@ -58,6 +58,8 @@ pub fn operational(row: &Value) -> bool {
                     | "step:benchmark"
                     | "step:verify"
                     | "step:worktree"
+                    | "step:clarify"
+                    | "step:prove"
             )
         })
 }
@@ -181,7 +183,7 @@ fn write_status(root: &Path, row: &Value, next: &str, reason: &str) -> Result<()
         args.extend(["--add-label".into(), "cancelled".into(), "--set-metadata".into(),
             format!("status_derived={}", reason.starts_with("Derived from"))]);
     } else {
-        args.extend(["--remove-label".into(), "cancelled".into()]);
+        args.extend(["--remove-label".into(), "cancelled".into(), "--remove-label".into(), "resolution:cancelled".into()]);
     }
     args.extend([
         "--if-status".into(),
@@ -190,14 +192,42 @@ fn write_status(root: &Path, row: &Value, next: &str, reason: &str) -> Result<()
     if next == "closed" || next == "cancelled" {
         // Only reached for proven landings, derived settled parents, or explicit cancellation.
         // Legacy operational children and stale dependency gates cannot undo a landing.
-        args.extend(["--force".into(), "--append-notes".into(), reason.into()]);
+        args.push("--force".into());
     }
+    args.extend(["--append-notes".into(), reason.into()]);
     bd(root, &args)?;
     Ok(())
 }
 
+/// Legacy workflow items are completion records for their owning deliverable.
+/// They need no artificial commits and completed work must not look cancelled.
+fn operation_decisions(rows: &[Value]) -> Vec<Value> {
+    let ids: HashSet<_> = rows.iter().filter_map(|r| r["id"].as_str()).collect();
+    let projection = board_state::project(&nodes(rows));
+    rows.iter().filter(|r| operational(r)).filter_map(|row| {
+        let id = row["id"].as_str()?;
+        let owner = parent(row, &ids)?;
+        if projection.errors.contains_key(owner) || projection.errors.contains_key(id) { return None; }
+        let next = match projection.states.get(owner).map(String::as_str) {
+            Some("closed") if status(row) != "closed" => "closed",
+            // Undo this reconciler's old blanket retirement on still-active work.
+            Some(state) if state != "closed" && state != "cancelled" && cancelled(row)
+                && row["notes"].as_str().is_some_and(|s| s.contains("Superseded by landing-is-Done workflow")) => "open",
+            _ => return None,
+        };
+        Some(json!({"id":id,"parent":owner,"action":if next == "closed" {"complete_operation"} else {"restore_operation"},
+            "to":next,"reason":if next == "closed" {
+                "Required implementation is delivered; historical workflow subtask is complete with its parent. This reconciliation does not claim a new verification run."
+            } else { "Restore pending workflow record: required implementation is still unfinished, not cancelled." }}))
+    }).collect()
+}
+
 pub fn reconcile_parents(root: &Path) -> Result<(), String> {
     let rows = all(root)?;
+    for decision in operation_decisions(&rows) {
+        let row = rows.iter().find(|r| r["id"] == decision["id"]).unwrap();
+        write_status(root, row, decision["to"].as_str().unwrap(), decision["reason"].as_str().unwrap())?;
+    }
     let graph = nodes(&rows);
     let projected = board_state::project(&graph);
     // Children before parents where IDs encode ancestry; projection is recursive for every ID.
@@ -442,7 +472,7 @@ pub fn land(rest: &[String]) -> Result<i32, String> {
         return Ok(0);
     }
     if operational(&item) {
-        return Err("This is a legacy workflow step, not deliverable work. Use board/reconcile --retire-steps; cleanup is board/cleanup JOB-ID.".into());
+        return Err("This is a legacy workflow step, not deliverable work. Use board/reconcile to complete workflow records with delivered work; cleanup is board/cleanup JOB-ID.".into());
     }
     if !git(&work, &["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
         return Err("Commit the tracked changes before landing.".into());
@@ -656,7 +686,9 @@ pub fn reconcile_command(rest: &[String]) -> Result<i32, String> {
     let work = root()?;
     let apply = rest.iter().any(|s| s == "--apply");
     let legacy = rest.iter().any(|s| s == "--legacy");
-    let retire = rest.iter().any(|s| s == "--retire-steps");
+    // --retire-steps remains a compatible spelling; operations now complete
+    // with delivered work rather than being blanket-cancelled.
+
     if apply {
         recover(&work)?;
     }
@@ -670,18 +702,7 @@ pub fn reconcile_command(rest: &[String]) -> Result<i32, String> {
             continue;
         }
         let id = row["id"].as_str().ok_or("Card without id")?;
-        if operational(row) && retire {
-            report.push(json!({"id":id,"action":"cancel","reason":"Superseded generated workflow step; requirements and cleanup are operation records, not deliverable tickets"}));
-            if apply {
-                write_status(
-                    &work,
-                    row,
-                    "cancelled",
-                    "Superseded by landing-is-Done workflow; operation history retained",
-                )?;
-            }
-            continue;
-        }
+        if operational(row) { continue; }
         if graph
             .iter()
             .any(|node| node.id == id && !node.children.is_empty())
@@ -752,6 +773,7 @@ pub fn reconcile_command(rest: &[String]) -> Result<i32, String> {
             }
         }
     }
+    report.extend(operation_decisions(&planned));
     let graph = nodes(&planned);
     let projection = board_state::project(&graph);
     for node in &graph {
@@ -804,6 +826,26 @@ pub fn cleanup(rest: &[String]) -> Result<i32, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn historical_operations_complete_with_delivered_work_including_prior_retirement() {
+        let rows = vec![
+            json!({"id":"j","issue_type":"epic","status":"open"}),
+            json!({"id":"j.1","status":"closed","parent":"j"}),
+            json!({"id":"j.2","status":"open","parent":"j","labels":["no-code","step:verify"]}),
+            json!({"id":"j.3","status":"closed","parent":"j","labels":["no-code","step:land","cancelled"]}),
+            json!({"id":"j.4","status":"open","parent":"j","labels":["no-code","step:clarify"]}),
+        ];
+        let decisions = operation_decisions(&rows);
+        assert_eq!(decisions.len(), 3);
+        assert!(decisions.iter().all(|d| d["to"] == "closed" && d["action"] == "complete_operation"));
+        let mut pending = rows.clone(); pending[1]["status"] = json!("open");
+        assert!(operation_decisions(&pending).is_empty());
+        pending[3]["notes"] = json!("Superseded by landing-is-Done workflow; operation history retained");
+        assert_eq!(operation_decisions(&pending)[0]["action"], "restore_operation");
+        pending[0]["labels"] = json!(["cancelled"]);
+        assert!(operation_decisions(&pending).is_empty());
+    }
+
     #[test]
     fn operation_records_do_not_keep_landed_work_open() {
         let rows = vec![

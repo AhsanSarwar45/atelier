@@ -38,6 +38,10 @@ cache invalidation keep the screen current.
 
 ## Historical repair performed
 
+The operational cancellation treatment below was corrected by the
+[follow-up completion audit](board-operational-completion-2026-09-19.md).
+Delivered workflow records are Done, not Cancelled.
+
 - 33 deliverables closed with main-branch evidence, including audited corrections
   for legacy work incorrectly typed as empty epics.
 - 54 obsolete policy or generated operational records cancelled, preserving history.

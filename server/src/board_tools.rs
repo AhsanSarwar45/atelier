@@ -66,7 +66,7 @@ items the landed commits name. Run it from the card's own worktree.
 
 Safe to run twice: if the commits already landed it says so and finishes the
 close. The actor is BEADS_ACTOR, or the Git user; another actor cannot land owned work.",
-        "board/reconcile" => "usage: atelier tool board/reconcile [--apply] [--legacy] [--retire-steps]\n\nDry-run by default. Recover interrupted landings, derive parents, and optionally audit explicit legacy commit headers or retire generated operational steps.",
+        "board/reconcile" => "usage: atelier tool board/reconcile [--apply] [--legacy] [--retire-steps]\n\nDry-run by default. Recover interrupted landings, derive parents, and complete historical workflow subtasks with delivered work, and optionally audit explicit legacy commit headers.",
         "board/status" => "usage: atelier tool board/status [CARD-ID]\n\nPrint stored and recursively derived status, including hierarchy errors.",
         "board/cleanup" => "usage: atelier tool board/cleanup JOB-ID\n\nRemove a completed job worktree and its merged branch. No delivery commit is required for cleanup.",
         "checks" => "usage: atelier tool checks [CARD-ID] [options]

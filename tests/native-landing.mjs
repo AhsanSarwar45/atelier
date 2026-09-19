@@ -77,12 +77,17 @@ assert.match(tool(one, 'board/land', 'ld-one'), /already Done/);
 console.log('PASS standalone landing, failing checks, receipts and idempotent retry');
 
 make('ld-job', 'epic'); make('ld-job.1', 'epic', 'ld-job'); make('ld-job.1.1', 'task', 'ld-job.1'); make('ld-job.2', 'task', 'ld-job');
+make('ld-job.verify', 'task', 'ld-job'); bd(repo, 'update', 'ld-job.verify', '--add-label', 'no-code', '--add-label', 'step:verify');
+make('ld-job.land', 'task', 'ld-job'); bd(repo, 'update', 'ld-job.land', '--add-label', 'no-code', '--add-label', 'step:land', '--add-label', 'cancelled');
 const job = copy('ld-job'); bd(job, 'update', 'ld-job.1.1', '--claim'); commit(job, 'ld-job.1.1', 'nested.txt');
 tool(job, 'board/land', 'ld-job.1.1');
 assert.equal(row(repo, 'ld-job.1.1').status, 'closed'); assert.equal(row(repo, 'ld-job.1').status, 'closed'); assert.equal(row(repo, 'ld-job').status, 'in_progress');
 bd(job, 'update', 'ld-job.2', '--claim'); commit(job, 'ld-job.2', 'last.txt'); tool(job, 'board/land', 'ld-job.2');
 assert.equal(row(repo, 'ld-job').status, 'closed');
-assert.equal(JSON.parse(bd(repo, 'list', '--parent', 'ld-job', '--status', 'all', '--json')).length, 2, 'no generated post-land checks or cleanup tickets');
+assert.equal(row(repo, 'ld-job.verify').status, 'closed');
+assert.equal(row(repo, 'ld-job.land').status, 'closed');
+assert.ok(!row(repo, 'ld-job.land').labels.includes('cancelled'));
+assert.equal(JSON.parse(bd(repo, 'list', '--parent', 'ld-job', '--status', 'all', '--json')).length, 4, 'no generated post-land checks or cleanup tickets');
 console.log('PASS recursive completion and partial epic state without generated blockers');
 
 make('ld-recover'); const recovery = copy('ld-recover'); bd(recovery, 'update', 'ld-recover', '--claim'); commit(recovery, 'ld-recover', 'recovery.txt');

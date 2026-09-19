@@ -1771,3 +1771,16 @@ marking work blocked must append the concrete blocker and required input.
 The complete repair record is docs/audits/board-lifecycle-2026-09-19.md and its JSON
 companion. At the recorded snapshot all 4,560 states agree and the second dry run
 proposes no mutation. The owner app was not restarted or replaced.
+
+
+### Historical operational completion correction (bw-9vv9.5)
+
+The first reconciliation incorrectly used Cancelled for leftover workflow steps.
+The manager clarified that delivered work and its verification/landing records
+must be Done together. Native landing now finishes these records automatically;
+reconciliation repairs historical cases and restores mistakenly retired pending
+operations. Cancellation remains withdrawn scope. Old per-child installed gates
+still require a reasoned per-command bypass in the owned job worktree; this run
+uses the corrected built native command, without replacing the owner's app.
+Full evidence and original historical reasons are preserved in
+`docs/audits/board-operational-completion-2026-09-19.json`.

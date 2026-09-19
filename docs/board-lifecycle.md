@@ -83,8 +83,11 @@ that assignee. A manager decision is recorded by the manager, before landing.
 `atelier tool board/status [ID]` shows stored and effective states.
 `atelier tool board/reconcile` previews repairs; `--apply` recovers interrupted
 landings and derives parents. `--legacy` audits explicit historical commit
-headers; inspect its evidence before applying. `--retire-steps` cancels obsolete
-generated operational tickets with an explanation, retaining their history.
+headers; inspect its evidence before applying. Historical verification, review,
+landing and housekeeping subtasks become Done when their required implementation
+is delivered, together with the parent. Completed steps are never relabelled
+Cancelled. Cancelled is reserved for withdrawn scope. `--retire-steps` remains
+an alias for this reconciliation; it no longer blanket-cancels workflow records.
 
 After the job is Done, run `atelier tool board/cleanup JOB-ID` from another
 checkout. Cleanup removes only merged work; it requires no dummy commit.
