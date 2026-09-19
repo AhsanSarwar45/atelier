@@ -75,7 +75,7 @@ describe('new-chat provider default', () => {
 
   it('never starts a provider the installed backend says is unavailable', () => {
     expect(source).toContain('if (!providerIsAvailable(providers, brand))');
-    expect(source).toContain('disabled={starting || !newBrandAvailable || whereMissing !== null}');
+    expect(source).toContain('disabled={starting !== null || !newBrandAvailable || whereMissing !== null}');
     expect(source).toContain('disabled={!provider.available}');
   });
 });

@@ -93,7 +93,7 @@ import type { SessionMenu } from '@/workbench/fold';
 
 /** The brands a chat can run on somebody's account. `local` has none. */
 const ACCOUNTED_BRANDS: readonly Brand[] = ['claude', 'codex'];
-import { BRAND_DEFAULT_MODEL, startingChat } from '@/workbench/protocol';
+import { BRAND_DEFAULT_MODEL, newChatId, startingChat } from '@/workbench/protocol';
 import { SectionHeading } from '@/workbench/section-heading';
 import { heldElsewhere, sessionOwnership, streamStillAnswers } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
@@ -764,26 +764,19 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // A chat opened here, a link from a card and the Back button all arrive the
   // same way (docs/designs/app-shell.md §1.7).
   const sessionId = openSessionId ?? null;
+  // `null` is a real address here: it is the chat screen with no chat on it,
+  // which is where a launch that failed has to put him back.
   const open = useCallback(
-    (id: string) => router.push(addressWith(params, { tab: 'chat', chat: id })),
+    (id: string | null) => router.push(addressWith(params, { tab: 'chat', chat: id })),
     [router, params],
   );
   /**
-   * The agent a chat is being started for, while the server is still making
-   * it — the brand and not just a flag, because the screen it stands on says
-   * which agent is starting and the sidebar's menu starts one that is not the
-   * one the picker is holding (bw-l9cu.1).
+   * The chat a click is making, while the server is still making it: the agent
+   * it is for, because the screen it stands on says which agent is starting and
+   * the sidebar's menu starts one that is not the one the picker is holding
+   * (bw-l9cu.1), and the id it will have, because that is what is sent.
    */
-  const [startingBrand, setStartingBrand] = useState<Brand | null>(null);
-  const starting = startingBrand !== null;
-  /**
-   * The chat the click is on its way to, from the moment the server names it
-   * until the address says the same thing. The list is drawn against this
-   * while it stands, so the highlight leaves the old chat at the click and
-   * lands on the new row as soon as there is one — it used to sit on the chat
-   * he had just left for the second or two the launch takes (bw-mew1.1).
-   */
-  const [openingId, setOpeningId] = useState<string | null>(null);
+  const [starting, setStarting] = useState<{ brand: Brand; id: string } | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [newBrand, setNewBrand] = useState<Brand>('claude');
   /**
@@ -865,8 +858,20 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       setStartError(`The ${brandName(brand)} provider is not available in this installation.`);
       return;
     }
-    setStartingBrand(brand);
+    // The chat is named here rather than waited for. Which chat is open is the
+    // address and nothing else — the list lights its row from it — so a click
+    // that could only move the address once the launch answered left the rail
+    // pointing at the chat he had just left, and the new chat's row, which the
+    // list shows within a frame of the click, sat there unlit for the whole of
+    // the launch (bw-akk9.1). The server takes the name it is given.
+    const id = newChatId();
+    setStarting({ brand, id });
     setStartError(null);
+    // Where to put him back if the launch never happens. A chat that was never
+    // made has no screen to leave him on, and the address only has to be put
+    // back if it was moved: a worktree that could not be made fails before it.
+    const was = sessionId;
+    let moved = false;
     try {
       let workingIn: string | null = null;
       if (where.kind === 'existing') workingIn = where.path;
@@ -880,28 +885,29 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         );
         workingIn = made.path;
       }
-      const s = await sendCommand<{ id: string }>(
-        startingChat(projectId, projectPath, brand, workingIn, profileId),
-      );
-      setOpeningId(s.id);
-      open(s.id);
+      open(id);
+      moved = true;
+      await sendCommand(startingChat(projectId, projectPath, brand, workingIn, profileId, id));
+      setStarting(null);
     } catch (e) {
       setStartError(e instanceof Error ? e.message : String(e));
-      setStartingBrand(null);
-      setOpeningId(null);
+      setStarting(null);
+      if (moved) open(was);
     }
-  }, [projectId, projectPath, open, newBrand, providers]);
-  // The spinner stands until the address really is the new chat, not until the
-  // server has answered: clearing it on the answer put the old screen back for
-  // the frame or two the router takes to arrive, which is the flicker this card
-  // is about. Any other chat opened underneath it clears it too, because the
-  // list beside the spinner still works and what he picks there wins.
+  }, [projectId, projectPath, open, newBrand, providers, sessionId]);
+  // Any other chat opened underneath the spinner clears it: the list beside it
+  // still works and what he picks there wins. The chat being started is not
+  // one of those — the address is already on it, from the click.
   useEffect(() => {
-    setStartingBrand(null);
-    setOpeningId(null);
+    setStarting((made) => (made && made.id === sessionId ? made : null));
   }, [sessionId]);
-  const view = useSession(sessionId);
-  const factsRead = useSessionFactsRead(sessionId);
+  // A chat still being made has nothing to read: there is no transcript to ask
+  // for, and asking reshapes the one live connection — a reconnect in the
+  // middle of a launch is what kept the new chat's own row out of the list for
+  // as long as the launch took (bw-akk9.1, live-wire.ts `open`).
+  const reading = starting ? null : sessionId;
+  const view = useSession(reading);
+  const factsRead = useSessionFactsRead(reading);
   const facts = factsRead?.facts ?? null;
   const checklist = useEpicChecklist(view.todos, projectPath);
   // What the board knows plus what this chat has been seen doing since.
@@ -2000,7 +2006,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               value={newWhere}
               onChange={setNewWhere}
               onMissing={setWhereMissing}
-              disabled={starting}
+              disabled={starting !== null}
             />
           )}
           <DialogFooter className="gap-2 sm:space-x-0">
@@ -2009,7 +2015,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               data-testid="new-chat-start"
               // A place that is not yet a place cannot start a chat, and the
               // picker is already saying why underneath it.
-              disabled={starting || !newBrandAvailable || whereMissing !== null}
+              disabled={starting !== null || !newBrandAvailable || whereMissing !== null}
               onClick={() => {
                 setShowing(null);
                 setRailOpen(false);
@@ -2046,11 +2052,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         <ChatSidebar
           projectId={projectId}
           projectPath={projectPath}
-          // While a chat is being started the open chat is the one being
-          // started, not the one he clicked away from: until the server names
-          // it there is no row to point at, and from there on it is the new
-          // row (bw-mew1.1).
-          openSessionId={starting ? openingId : sessionId}
+          openSessionId={sessionId}
           everything={everything}
           onOpen={(id) => { setRailOpen(false); open(id); }}
           onSearch={() => setShowing('search')}
@@ -2059,7 +2061,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           // its job is done once the chat it starts exists — left open, it would
           // sit over the transcript it just created (bw-81wt.5).
           onNewChat={newChat}
-          startingNewChat={starting}
+          startingNewChat={starting !== null}
         />
       </div>
       {leftOpen && (
@@ -2171,7 +2173,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // before the empty screen on purpose: the empty screen holds the very buttons
   // he has just used, and leaving them under him read as a click that did
   // nothing.
-  if (startingBrand) {
+  if (starting) {
     return shell(
       <div
         data-testid="chat-starting"
@@ -2180,7 +2182,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         className="flex flex-1 flex-col items-center justify-center gap-3"
       >
         <Loader2 className="size-6 animate-spin text-muted-foreground motion-reduce:animate-none" aria-hidden="true" />
-        <p className="text-sm text-muted-foreground">Starting {brandName(startingBrand)} chat…</p>
+        <p className="text-sm text-muted-foreground">Starting {brandName(starting.brand)} chat…</p>
       </div>,
     );
   }

@@ -1134,6 +1134,13 @@ export type WbpCommand =
        * profiles existed.
        */
       profileId?: string;
+      /**
+       * The name to make the chat under. The screen moves to the chat it is
+       * starting at the click, and it can only do that if it is the one that
+       * says what the chat is called (bw-akk9.1). Left off, the server names
+       * it, which is what every caller outside this app does.
+       */
+      sessionId?: string;
       model?: string;
       permissionMode?: string;
       effort?: string;
@@ -1454,6 +1461,22 @@ export interface SessionSummary {
 export const BRAND_DEFAULT_MODEL = 'default';
 
 /**
+ * A name for a chat about to be started, made here rather than waited for.
+ *
+ * `crypto.randomUUID` exists only on a secure page, and this app is opened over
+ * plain HTTP from a phone on the same network (bw-8ig7); `getRandomValues` is
+ * there on any page. The shape is a v4 UUID because that is what the server
+ * would have made had it been left to name the chat itself.
+ */
+export function newChatId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/**
  * The command that starts a chat, given where it is to work.
  *
  * A function rather than an object built at the call site because the one
@@ -1471,6 +1494,9 @@ export function startingChat(
   /** The account to run on. Left off, and for the system profile, the chat
    *  runs on the directory the server booted with. */
   profileId?: string | null,
+  /** The name the chat is to be made under, when the screen has already moved
+   *  to it. Left off, the server names it. */
+  sessionId?: string,
 ): Extract<WbpCommand, { type: 'session.start' }> {
   const command: Extract<WbpCommand, { type: 'session.start' }> = {
     type: 'session.start',
@@ -1478,6 +1504,7 @@ export function startingChat(
     projectPath,
     brand,
   };
+  if (sessionId) command.sessionId = sessionId;
   const where = workingIn?.replace(/\/+$/, '');
   if (where && where !== projectPath.replace(/\/+$/, '')) command.cwd = where;
   if (profileId && profileId !== 'system') command.profileId = profileId;

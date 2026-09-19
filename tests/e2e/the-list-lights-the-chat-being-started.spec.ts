@@ -4,16 +4,17 @@ import { join } from 'node:path';
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 /**
- * The list lights the chat being started, not the one it replaced (bw-mew1.1).
+ * The list lights the chat being started, from the click (bw-akk9.1).
  *
- * The fault: the highlight was drawn against the address, and the address is
- * the last thing a launch changes. So for the second or two a launch takes,
- * the middle of the screen said "Starting Claude chat…" while the rail beside
- * it still pointed at the chat he had just left — and when the new row
- * appeared it appeared unlit, under a highlight belonging to another chat.
+ * The fault: the app learned what the new chat was called from the launch's
+ * answer, and the launch answers when the agent is up — a second or two later,
+ * and the whole of that second the address still named the chat he had left. So
+ * did the list, which reads the address and nothing else: the new chat's row
+ * appears within a frame of the click, and it sat there unlit under a highlight
+ * belonging to the old chat until the launch finished.
  *
- * Against a real launch, because the wait this is about is a real process
- * starting: a stubbed answer comes back too fast to have the fault at all.
+ * The chat is named by the screen now, so the address is the new chat from the
+ * click and the row the list lights is the right one all along.
  *
  * Run: scripts/workbench-e2e.sh tests/e2e/the-list-lights-the-chat-being-started.spec.ts
  */
@@ -24,8 +25,16 @@ const SHOTS = 'tests/results';
 /** Starting an agent is a process launch. */
 const HELLO_MS = 120_000;
 
-/** How long the second launch is held open, to stand in for a real one. */
+/**
+ * How long the second launch's ANSWER is held back. The server still does the
+ * work — it makes the chat, and the row appears — the screen is just told late,
+ * which is what a real launch does to it. Against the stub that gap is a few
+ * hundred milliseconds, too narrow for a case to stand in.
+ */
 const HELD_MS = 4_000;
+
+/** How the list says which row is the open chat. */
+const LIT = '.bg-accent';
 
 /** A folder of its own, so this case never runs an agent in someone's work. */
 const FIXTURE = join(__dirname, '..', '.workbench-run-lit-row');
@@ -60,7 +69,7 @@ test.describe('the row the list lights', () => {
     });
   });
 
-  test('leaves the chat being started from and lands on the new one', async ({ page, request }) => {
+  test('is the chat being started, not the one it replaced', async ({ page, request }) => {
     const project = await fixtureProject(request);
     await page.goto(`/project?id=${project.id}&tab=chat`);
 
@@ -72,47 +81,42 @@ test.describe('the row the list lights', () => {
     await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
     const first = new URL(page.url()).searchParams.get('chat') ?? '';
     expect(first).not.toBe('');
-    await expect(page.locator(`[data-testid="restore-row"][data-row-key="${first}"]`)).toHaveAttribute('data-open', 'yes');
+    const old = page.locator(`[data-testid="restore-row"][data-row-key="${first}"]`);
+    await expect(old).toHaveClass(/bg-accent/);
 
-    // The launch this case is about is held open on purpose. A real one takes
-    // a second or two and the fault lives in exactly that window; against the
-    // stub the window is a frame or two wide, and a case that raced it would
-    // pass on a tree with the fault still in it. Only the launch is held —
-    // everything else the page asks for goes through untouched.
     await page.route('**/api/workbench/command', async (route) => {
       const body = route.request().postDataJSON() as { type?: string } | null;
-      if (body?.type === 'session.start') await new Promise((done) => setTimeout(done, HELD_MS));
-      await route.continue();
+      if (body?.type !== 'session.start') return route.continue();
+      const answer = await route.fetch();
+      await new Promise((done) => setTimeout(done, HELD_MS));
+      await route.fulfill({ response: answer });
     });
 
-    // Now start a second one from the rail, and look while it is still starting.
     await page.getByTestId('new-chat-tool').click();
     await page.getByTestId('new-chat-provider-dialog').getByRole('button', { name: 'Start chat' }).click();
-    const starting = page.getByTestId('chat-starting');
-    await expect(starting).toBeVisible();
-    // The chooser has finished leaving, so the picture is of the screen and not
-    // of a dialog halfway through its fade.
+
+    // A quarter of the hold in: the chat has been made and its row is in the
+    // list, and nothing that follows can be the answer arriving. The picture is
+    // taken before anything is asserted, so a tree with the fault in it still
+    // leaves the picture that shows the fault.
+    await page.waitForTimeout(HELD_MS / 4);
+    await expect(page.getByTestId('chat-starting')).toContainText('Starting Claude chat…');
     await expect(page.getByTestId('new-chat-provider-dialog')).toHaveCount(0);
+    await page.screenshot({ path: `${SHOTS}/bw-akk9-starting.png` });
 
-    // The chat he clicked away from goes dark at the click, before the address
-    // has changed and while the middle of the screen is still a spinner. That
-    // is the whole of the fault: it used to stay lit for the entire launch.
-    // The picture is taken before the assertion, so a tree with the fault in it
-    // still leaves the picture that shows the fault.
-    // Well inside the held launch, so the answer arriving cannot be what makes
-    // this true.
-    const old = page.locator(`[data-testid="restore-row"][data-row-key="${first}"]`);
-    await page.screenshot({ path: `${SHOTS}/bw-mew1-starting.png` });
-    await expect(old).toHaveAttribute('data-open', 'no', { timeout: HELD_MS / 4 });
-    await expect(starting).toBeVisible();
-
-    // And the row that ends up lit is the chat the address arrives at.
-    await page.waitForURL((url) => (url.searchParams.get('chat') ?? '') !== first, { timeout: HELLO_MS });
-    await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+    // The address is the new chat, and the lit row is the new chat's — the one
+    // he left is dark, and it is the only other row there is.
     const second = new URL(page.url()).searchParams.get('chat') ?? '';
-    await expect(
-      page.locator(`[data-testid="restore-row"][data-open="yes"][data-row-key*="${second}"]`),
-    ).toHaveCount(1);
-    await page.screenshot({ path: `${SHOTS}/bw-mew1-started.png` });
+    expect(second).not.toBe(first);
+    expect(second).not.toBe('');
+    await expect(page.locator(`[data-testid="restore-row"][data-row-key="${second}"]`)).toHaveClass(/bg-accent/);
+    await expect(old).not.toHaveClass(/bg-accent/);
+    await expect(page.locator(`[data-testid="restore-row"]${LIT}`)).toHaveCount(1);
+
+    // And the chat it opens on is that same chat, still the lit row.
+    await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+    expect(new URL(page.url()).searchParams.get('chat')).toBe(second);
+    await expect(page.locator(`[data-testid="restore-row"][data-row-key="${second}"]`)).toHaveClass(/bg-accent/);
+    await page.screenshot({ path: `${SHOTS}/bw-akk9-started.png` });
   });
 });
