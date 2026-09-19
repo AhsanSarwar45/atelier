@@ -11,18 +11,47 @@ pub struct Node {
 }
 
 pub fn normalize(status: &str) -> &str {
-    match status { "in_review" => "inreview", "done" | "resolved" | "fixed" | "finished" => "closed", other => other }
+    match status {
+        "in_review" => "inreview",
+        "done" | "resolved" | "fixed" | "finished" => "closed",
+        other => other,
+    }
 }
 
 pub fn aggregate(states: &[&str], started: bool) -> String {
-    if states.is_empty() { return "open".into(); }
-    let required: Vec<_> = states.iter().copied().filter(|s| *s != "cancelled").collect();
-    if required.is_empty() { return "cancelled".into(); }
-    if required.iter().all(|s| *s == "closed") { return "closed".into(); }
-    let remaining: Vec<_> = required.iter().copied().filter(|s| *s != "closed").collect();
-    if remaining.iter().all(|s| *s == "manager_review") { return "manager_review".into(); }
-    if remaining.iter().all(|s| matches!(*s, "inreview" | "manager_review")) { return "inreview".into(); }
-    if !started && required.iter().all(|s| *s == "open") { "open".into() } else { "in_progress".into() }
+    if states.is_empty() {
+        return "open".into();
+    }
+    let required: Vec<_> = states
+        .iter()
+        .copied()
+        .filter(|s| *s != "cancelled")
+        .collect();
+    if required.is_empty() {
+        return "cancelled".into();
+    }
+    if required.iter().all(|s| *s == "closed") {
+        return "closed".into();
+    }
+    let remaining: Vec<_> = required
+        .iter()
+        .copied()
+        .filter(|s| *s != "closed")
+        .collect();
+    if remaining.iter().all(|s| *s == "manager_review") {
+        return "manager_review".into();
+    }
+    if remaining
+        .iter()
+        .all(|s| matches!(*s, "inreview" | "manager_review"))
+    {
+        return "inreview".into();
+    }
+    if !started && required.iter().all(|s| *s == "open") {
+        "open".into()
+    } else {
+        "in_progress".into()
+    }
 }
 
 #[derive(Default, Debug)]
@@ -32,26 +61,57 @@ pub struct Projection {
 }
 
 pub fn project(nodes: &[Node]) -> Projection {
-    fn visit(id: &str, nodes: &HashMap<&str, &Node>, active: &mut HashSet<String>, out: &mut Projection) -> Result<String, String> {
-        if let Some(error) = out.errors.get(id) { return Err(error.clone()); }
-        if let Some(state) = out.states.get(id) { return Ok(state.clone()); }
+    fn visit(
+        id: &str,
+        nodes: &HashMap<&str, &Node>,
+        active: &mut HashSet<String>,
+        out: &mut Projection,
+    ) -> Result<String, String> {
+        if let Some(error) = out.errors.get(id) {
+            return Err(error.clone());
+        }
+        if let Some(state) = out.states.get(id) {
+            return Ok(state.clone());
+        }
         let node = nodes.get(id).ok_or_else(|| format!("Missing child {id}"))?;
-        if !active.insert(id.into()) { return Err(format!("Cyclic child relationship at {id}")); }
-        let state = if node.status == "cancelled" { Ok("cancelled".into()) }
-        else if node.children.is_empty() { Ok(normalize(&node.status).into()) }
-        else {
-            let children: Result<Vec<String>, String> = node.children.iter().map(|child| visit(child, nodes, active, out)).collect();
-            children.map(|states| aggregate(&states.iter().map(String::as_str).collect::<Vec<_>>(), node.started))
+        if !active.insert(id.into()) {
+            return Err(format!("Cyclic child relationship at {id}"));
+        }
+        let state = if node.status == "cancelled" {
+            Ok("cancelled".into())
+        } else if node.children.is_empty() {
+            Ok(normalize(&node.status).into())
+        } else {
+            let children: Result<Vec<String>, String> = node
+                .children
+                .iter()
+                .map(|child| visit(child, nodes, active, out))
+                .collect();
+            children.map(|states| {
+                aggregate(
+                    &states.iter().map(String::as_str).collect::<Vec<_>>(),
+                    node.started,
+                )
+            })
         };
         active.remove(id);
         match state {
-            Ok(state) => { out.states.insert(id.into(), state.clone()); Ok(state) }
-            Err(error) => { out.errors.insert(id.into(), error.clone()); out.states.insert(id.into(), "in_progress".into()); Err(error) }
+            Ok(state) => {
+                out.states.insert(id.into(), state.clone());
+                Ok(state)
+            }
+            Err(error) => {
+                out.errors.insert(id.into(), error.clone());
+                out.states.insert(id.into(), "in_progress".into());
+                Err(error)
+            }
         }
     }
     let lookup: HashMap<_, _> = nodes.iter().map(|node| (node.id.as_str(), node)).collect();
     let mut out = Projection::default();
-    for node in nodes { let _ = visit(&node.id, &lookup, &mut HashSet::new(), &mut out); }
+    for node in nodes {
+        let _ = visit(&node.id, &lookup, &mut HashSet::new(), &mut out);
+    }
     out
 }
 
@@ -67,17 +127,32 @@ mod tests {
             (vec!["closed", "cancelled"], false, "closed"),
             (vec!["cancelled", "cancelled"], false, "cancelled"),
             (vec!["inreview", "open"], false, "in_progress"),
-            (vec!["inreview", "manager_review", "closed"], false, "inreview"),
+            (
+                vec!["inreview", "manager_review", "closed"],
+                false,
+                "inreview",
+            ),
             (vec!["manager_review", "closed"], false, "manager_review"),
             (vec!["open"], true, "in_progress"),
-        ] { assert_eq!(aggregate(&children, started), expected, "{children:?}"); }
+        ] {
+            assert_eq!(aggregate(&children, started), expected, "{children:?}");
+        }
     }
     fn node(id: &str, status: &str, children: &[&str]) -> Node {
-        Node { id: id.into(), status: status.into(), children: children.iter().map(|s| (*s).into()).collect(), started: false }
+        Node {
+            id: id.into(),
+            status: status.into(),
+            children: children.iter().map(|s| (*s).into()).collect(),
+            started: false,
+        }
     }
     #[test]
     fn nested_completion_and_reopening_reach_every_ancestor() {
-        let mut nodes = vec![node("a", "closed", &["b"]), node("b", "open", &["c"]), node("c", "in_progress", &[])];
+        let mut nodes = vec![
+            node("a", "closed", &["b"]),
+            node("b", "open", &["c"]),
+            node("c", "in_progress", &[]),
+        ];
         assert_eq!(project(&nodes).states["a"], "in_progress");
         nodes[2].status = "closed".into();
         assert_eq!(project(&nodes).states["a"], "closed");
@@ -87,7 +162,10 @@ mod tests {
     }
     #[test]
     fn missing_data_and_cycles_never_complete() {
-        for nodes in [vec![node("a", "closed", &["missing"])], vec![node("a", "open", &["b"]), node("b", "open", &["a"])]] {
+        for nodes in [
+            vec![node("a", "closed", &["missing"])],
+            vec![node("a", "open", &["b"]), node("b", "open", &["a"])],
+        ] {
             let result = project(&nodes);
             assert_eq!(result.states["a"], "in_progress");
             assert!(result.errors.contains_key("a"));

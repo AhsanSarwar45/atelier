@@ -7,7 +7,7 @@ use std::process::Command;
 
 pub fn run(name: &str, rest: &[String]) -> Option<Result<i32, String>> {
     let tool = match name {
-        "board/job" | "board/land" | "checks" | "review" => name,
+        "board/job" | "board/land" | "board/reconcile" | "board/status" | "board/cleanup" | "checks" | "review" => name,
         _ => return None,
     };
     if asks_for_help(rest) {
@@ -18,6 +18,9 @@ pub fn run(name: &str, rest: &[String]) -> Option<Result<i32, String>> {
         "board/job" => job(rest),
         "board/land" => land(rest),
         "checks" => checks(rest),
+        "board/reconcile" => crate::board_landing::reconcile_command(rest),
+        "board/status" => crate::board_landing::status_command(rest),
+        "board/cleanup" => crate::board_landing::cleanup(rest),
         _ => review(rest),
     })
 }
@@ -54,7 +57,7 @@ options for new, epic and upgrade:
   --priority N, -p N 0 to 4 (default: 2)
   --parent ID        file this job under an existing card
   --steps LIST       extra spine steps from ground,design,benchmark,review,record
-  --judge NAME       who reads the finished job (default: agent)",
+  --judge NAME       who approves before landing (default: agent)",
         "board/land" => "usage: atelier tool board/land CARD-ID
 
 Rebases the card's branch onto the landing branch, takes the merge slot,
@@ -62,11 +65,14 @@ fast-forwards the landing branch and releases the slot, then closes the work
 items the landed commits name. Run it from the card's own worktree.
 
 Safe to run twice: if the commits already landed it says so and finishes the
-close. The actor is the card's own assignee, or BEADS_ACTOR when that is set.",
+close. The actor is BEADS_ACTOR, or the Git user; another actor cannot land owned work.",
+        "board/reconcile" => "usage: atelier tool board/reconcile [--apply] [--legacy] [--retire-steps]\n\nDry-run by default. Recover interrupted landings, derive parents, and optionally audit explicit legacy commit headers or retire generated operational steps.",
+        "board/status" => "usage: atelier tool board/status [CARD-ID]\n\nPrint stored and recursively derived status, including hierarchy errors.",
+        "board/cleanup" => "usage: atelier tool board/cleanup JOB-ID\n\nRemove a completed job worktree and its merged branch. No delivery commit is required for cleanup.",
         "checks" => "usage: atelier tool checks [CARD-ID] [options]
 
 Runs the project's declared verification suites against the current tree,
-records the result on the card, and closes it when everything passed.
+records the result on the card without closing unlanded work.
 
   --all              run every declared suite, not only those matching changes
   --dry              say which suites would run, and run none of them
@@ -74,12 +80,11 @@ records the result on the card, and closes it when everything passed.
                      record a result without running the suite; repeatable",
         _ => "usage: atelier tool review JOB-ID [--provider claude|codex]
 
-Sends a finished job — its work and checks steps closed — to an external
-reader. Given a step:review card, reads the job from its `of:` label.",
+Sends the committed, unlanded changes to an external reader. Given a step:review card, reads the job from its `of:` label.",
     }
 }
 
-fn root() -> Result<PathBuf, String> {
+pub(crate) fn root() -> Result<PathBuf, String> {
     let program = crate::routes::find_git().ok_or_else(|| crate::routes::GIT_MISSING.to_string())?;
     let output = Command::new(program).args(["rev-parse", "--show-toplevel"]).output()
         .map_err(|error| format!("could not ask Git for the project root: {error}"))?;
@@ -87,7 +92,7 @@ fn root() -> Result<PathBuf, String> {
     Ok(PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()))
 }
 
-fn bd(root: &Path, args: &[String]) -> Result<String, String> {
+pub(crate) fn bd(root: &Path, args: &[String]) -> Result<String, String> {
     let program = crate::routes::find_bd().ok_or_else(|| "Beads is not installed".to_string())?;
     let output = Command::new(program).args(args).current_dir(root).output()
         .map_err(|error| format!("could not start bd: {error}"))?;
@@ -141,7 +146,7 @@ fn chosen_spine(rest: &[String]) -> Vec<String> {
         .chain(std::iter::once("land")).map(str::to_string).collect()
 }
 
-fn metadata(root: &Path, id: &str, entries: &[(&str, String)]) -> Result<(), String> {
+pub(crate) fn metadata(root: &Path, id: &str, entries: &[(&str, String)]) -> Result<(), String> {
     let mut args = vec!["update".into(), id.into()];
     for (key, value) in entries { args.extend(["--set-metadata".into(), format!("{key}={value}")]); }
     bd(root, &args).map(|_| ())
@@ -246,97 +251,45 @@ fn cancel_tree(root: &Path, id: &str, reason: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn card(root: &Path, id: &str) -> Result<Value, String> {
+pub(crate) fn card(root: &Path, id: &str) -> Result<Value, String> {
     let value: Value = serde_json::from_str(&bd(root, &["show".into(), id.into(), "--json".into()])?)
         .map_err(|error| error.to_string())?;
     Ok(value.as_array().and_then(|rows| rows.first()).cloned().unwrap_or(value))
 }
 
-fn labels(card: &Value) -> Vec<&str> {
+pub(crate) fn labels(card: &Value) -> Vec<&str> {
     card["labels"].as_array().into_iter().flatten().filter_map(Value::as_str).collect()
 }
 
-fn meta<'a>(card: &'a Value, key: &str) -> Option<&'a str> {
+pub(crate) fn meta<'a>(card: &'a Value, key: &str) -> Option<&'a str> {
     card["metadata"].get(key).and_then(Value::as_str)
 }
 
-fn step_body(step: &str, done: &str) -> String {
-    match step {
-        "checks" => format!("Run the project's declared verification commands.\n\n## Acceptance Criteria\n{done}\n\nRecord `checks: tree HASH suite=PASSED/FAILED`."),
-        "land" => "Remove the finished worktree and branch after every commit has reached the landing branch and the merge slot is free.\n\n## Acceptance Criteria\nThe branch and worktree are gone and the merge slot is free.".into(),
-        "ground" => "Read the sources that define the behavior and record the relevant facts here.\n\n## Acceptance Criteria\nThe sources and the facts they support are on this card.".into(),
-        "design" => "Describe the effects of the change and record the manager's approval.\n\n## Acceptance Criteria\nThe approved design is on this card.".into(),
-        "benchmark" => "Measure the claimed effect before and after.\n\n## Acceptance Criteria\nBoth measurements and their commands are on this card.".into(),
-        "record" => "Put durable facts in the document that owns them.\n\n## Acceptance Criteria\nThe owning document contains the durable result.".into(),
-        _ => format!("Complete the {step} step and record its evidence."),
-    }
-}
-
-fn create_step(root: &Path, goal: &Value, id: &str, step: &str) -> Result<String, String> {
-    let subject = meta(goal, "subject").unwrap_or_else(|| goal["title"].as_str().unwrap_or(id));
-    let area = meta(goal, "area").unwrap_or("board");
-    let kind = meta(goal, "kind").unwrap_or("chore");
-    let done = meta(goal, "done").unwrap_or("The declared result is verified.");
-    let priority = goal["priority"].as_i64().unwrap_or(2).to_string();
-    let title = format!("{}: {}", step[..1].to_uppercase() + &step[1..], subject);
-    let mut args = vec!["create".into(), "--title".into(), title, "--type".into(), "task".into(),
-        "--parent".into(), id.into(), "-p".into(), priority, "-d".into(), step_body(step, done),
-        "-l".into(), format!("step:{step}"), "-l".into(), format!("of:{id}"),
-        "-l".into(), format!("area:{area}"), "-l".into(), format!("kind:{kind}"), "--json".into()];
-    if step != "record" { args.extend(["-l".into(), "no-code".into()]); }
-    created_id(&bd(root, &args)?)
-}
-
-pub(crate) fn advance_goal(root: &Path, id: &str) -> Result<(), String> {
-    let goal = card(root, id)?;
-    if goal["status"].as_str() == Some("closed") { return Ok(()); }
-    let order: Vec<&str> = meta(&goal, "spine").unwrap_or("work,checks,land").split(',').filter(|s| !s.is_empty()).collect();
-    let children_value: Value = serde_json::from_str(&bd(root, &["list".into(), "--parent".into(), id.into(), "--status".into(), "all".into(), "--limit".into(), "0".into(), "--json".into()])?).unwrap_or(Value::Array(vec![]));
-    let children = children_value.as_array().cloned().unwrap_or_default();
-    for step in order {
-        let wanted = format!("step:{step}");
-        let rows: Vec<&Value> = children.iter()
-            .filter(|row| labels(row).iter().any(|label| *label == wanted))
-            .collect();
-        if step == "work" {
-            if rows.is_empty() || rows.iter().any(|row| row["status"].as_str() != Some("closed")) { return Ok(()); }
-            continue;
-        }
-        if rows.is_empty() {
-            let opened = create_step(root, &goal, id, step)?;
-            println!("opened {opened} ({step})");
-            return Ok(());
-        }
-        if rows.iter().any(|row| row["status"].as_str() != Some("closed")) { return Ok(()); }
-    }
-    let judge = meta(&goal, "judge").unwrap_or("agent");
-    if judge.starts_with("manager") {
-        bd(root, &["update".into(), id.into(), "--status".into(), "manager_review".into()])?;
-    } else {
-        bd(root, &["close".into(), id.into(), "--reason".into(), "all native lifecycle steps completed".into()])?;
-    }
-    Ok(())
+pub(crate) fn advance_goal(root: &Path, _id: &str) -> Result<(), String> {
+    crate::board_landing::reconcile_parents(root)
 }
 
 pub(crate) fn advance_all(root: &Path) {
-    let Ok(text) = bd(root, &["list".into(), "--label".into(), "job".into(), "--status".into(), "all".into(), "--limit".into(), "0".into(), "--json".into()]) else { return };
-    let Ok(value) = serde_json::from_str::<Value>(&text) else { return };
-    for id in value.as_array().into_iter().flatten().filter_map(|row| row["id"].as_str()) { let _ = advance_goal(root, id); }
+    if let Err(error) = crate::board_landing::recover(root).and_then(|_| reconcile_parents_for_touch(root)) {
+        eprintln!("Board reconciliation failed: {error}");
+    }
+}
+fn reconcile_parents_for_touch(root: &Path) -> Result<(), String> {
+    crate::board_landing::reconcile_parents(root)
 }
 
-fn git(root: &Path, args: &[&str]) -> Result<String, String> {
+pub(crate) fn git(root: &Path, args: &[&str]) -> Result<String, String> {
     let program = crate::routes::find_git().ok_or_else(|| crate::routes::GIT_MISSING.to_string())?;
     let output = Command::new(program).args(args).current_dir(root).output().map_err(|error| error.to_string())?;
     if !output.status.success() { return Err(format!("git {} failed: {}", args.first().copied().unwrap_or(""), String::from_utf8_lossy(&output.stderr))); }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn landing_name(root: &Path) -> String {
-    let Some(program) = crate::routes::find_git() else { return "main".into() };
-    ["ours", "main", "master"].into_iter().find(|name| Command::new(&program).args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{name}")]).current_dir(root).status().is_ok_and(|s| s.success())).unwrap_or("main").into()
+pub(crate) fn landing_name(root: &Path) -> String {
+    crate::board_landing::landing_branch(root)
 }
 
-fn main_copy(root: &Path, branch: &str) -> Result<PathBuf, String> {
+pub(crate) fn main_copy(root: &Path, branch: &str) -> Result<PathBuf, String> {
     let listing = git(root, &["worktree", "list", "--porcelain"])?;
     let mut path = None;
     for line in listing.lines() {
@@ -347,99 +300,7 @@ fn main_copy(root: &Path, branch: &str) -> Result<PathBuf, String> {
 }
 
 fn land(rest: &[String]) -> Result<i32, String> {
-    let id = rest.first().ok_or_else(|| "board/land needs a card id".to_string())?;
-    let work = root()?;
-    let item = card(&work, id)?;
-    let goal = labels(&item).iter().find_map(|label| label.strip_prefix("of:"))
-        .or_else(|| item["parent"].as_str()).or_else(|| item["parent_id"].as_str())
-        .unwrap_or(id).to_string();
-    if !git(&work, &["status", "--porcelain"])?.is_empty() { return Err("the worktree has uncommitted changes".into()); }
-    let branch = git(&work, &["branch", "--show-current"])?;
-    let landing = landing_name(&work);
-    if branch == landing { return Err(format!("{landing} is the landing branch; run board/land from the branch carrying the work")); }
-    let (already, subjects) = landed_subjects(&work, &branch, &landing)?;
-    if !subjects.lines().any(|subject| subject_names(subject, id)) {
-        let read: Vec<String> = subjects.lines().map(|subject| format!("  {subject}")).collect();
-        let read = if read.is_empty() {
-            format!("  (no commit on {branch} that is not already on {landing})")
-        } else {
-            read.join("\n")
-        };
-        return Err(format!("no commit subject on {branch} names {id}. The subjects read were:\n{read}"));
-    }
-    let open_work: Vec<Value> = children(&work, &goal)?.into_iter().filter(|row| {
-        row["status"].as_str() != Some("closed") && labels(row).contains(&"step:work")
-    }).collect();
-    let carried: Vec<String> = open_work.iter().filter_map(|row| row["id"].as_str())
-        .filter(|work_id| subjects.lines().any(|subject| subject_names(subject, work_id)))
-        .map(str::to_string).collect();
-    let actor = landing_actor(std::env::var("BEADS_ACTOR").ok().as_deref(), &item);
-    if !already {
-        git(&work, &["rebase", &landing])?;
-        let main = main_copy(&work, &landing)?;
-        bd(&work, &["--actor".into(), actor.clone(), "merge-slot".into(), "acquire".into()])?;
-        let merged = git(&main, &["merge", "--ff-only", &branch]);
-        let _ = bd(&work, &["--actor".into(), actor.clone(), "merge-slot".into(), "release".into()]);
-        merged?;
-    }
-    for work_id in &carried {
-        bd(&work, &["--actor".into(), actor.clone(), "close".into(), work_id.clone(),
-            "--reason".into(), format!("commit naming {work_id} landed on {landing}")])?;
-    }
-    advance_goal(&work, &goal)?;
-    let how = if already {
-        format!("{id} had already landed on {landing}, so there was nothing to merge")
-    } else {
-        format!("landed {id} on {landing}")
-    };
-    if carried.is_empty() {
-        println!("{how}; closed nothing because no open work-item id was named by a landed commit subject");
-    } else {
-        println!("{how}; closed {}", carried.join(", "));
-    }
-    Ok(0)
-}
-
-/// The subjects a land should judge, and whether the work is already on the
-/// landing branch.
-///
-/// A land that fails after the fast-forward — the close step is the one that
-/// does — leaves the commits on the landing branch, so the range is empty when
-/// the agent retries. Reading that as a naming failure sends the reader
-/// hunting for a badly-named commit that does not exist, when the truth is the
-/// commit was named correctly and the work is safe
-/// (`docs/hook-friction-2.md` §4).
-fn landed_subjects(work: &Path, branch: &str, landing: &str) -> Result<(bool, String), String> {
-    let range = git(work, &["log", "--format=%s", &format!("{landing}..{branch}")])?;
-    if !range.is_empty() || git(work, &["merge-base", "--is-ancestor", branch, landing]).is_err() {
-        return Ok((false, range));
-    }
-    // Once the branch is an ancestor there is no range that isolates its own
-    // commits, so read the whole branch. What may be closed is bounded either
-    // way: an open `step:work` child of this goal.
-    Ok((true, git(work, &["log", "--format=%s", branch])?))
-}
-
-/// Who the lander acts as.
-///
-/// Its authority is the authority of the session that invoked it: it runs in
-/// that session's worktree, on a card that session owns and has just committed
-/// to. Acting under a name of its own made bd read that ownership as a
-/// conflict, and there was no way to satisfy it from inside the workflow — bd
-/// will not reassign an `in_progress` card, so the card could not be handed to
-/// the lander that demanded it be handed over (`docs/hook-friction-2.md` §4).
-/// Acting as the owner keeps the rule the assignee check exists for: work
-/// owned by somebody else still refuses.
-fn card_actor(configured: Option<&str>, item: &Value, fallback: &str) -> String {
-    configured
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| item["assignee"].as_str().filter(|who| !who.is_empty()))
-        .unwrap_or(fallback)
-        .to_string()
-}
-
-fn landing_actor(configured: Option<&str>, item: &Value) -> String {
-    card_actor(configured, item, "atelier-land")
+    crate::board_landing::land(rest)
 }
 
 /// Does this subject name this card?
@@ -450,15 +311,14 @@ fn landing_actor(configured: Option<&str>, item: &Value) -> String {
 /// to the check, so no subject in any form could satisfy it, and the refusal
 /// then reported a naming failure that had not happened
 /// (`docs/hook-friction-2.md` §5).
-fn subject_names(subject: &str, id: &str) -> bool {
-    subject
-        .split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '.')))
-        .any(|word| word == id)
+pub(crate) fn subject_names(subject: &str, id: &str) -> bool {
+    let header = subject.split_once(':').map(|(header, _)| header).unwrap_or(subject);
+    header.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '.'))).any(|word| word == id)
 }
 
-fn manifest(root: &Path) -> Result<crate::project_manifest::ProjectManifest, String> {
+pub(crate) fn manifest(root: &Path) -> Result<crate::project_manifest::ProjectManifest, String> {
     let data = crate::identity::data_dir().ok_or_else(|| "Atelier has no data directory".to_string())?;
-    crate::project_manifest::locate(root, &data).map(|found| found.manifest)
+    crate::project_manifest::locate(root, &data).or_else(|| crate::project_manifest::locate(&crate::board_landing::common_root(root), &data)).map(|found| found.manifest)
         .ok_or_else(|| "This project has no Atelier settings. Run `atelier init` first.".to_string())
 }
 
@@ -539,7 +399,7 @@ pub(crate) fn proof_of(tree: &str, suites: &[&str], ok: &[bool]) -> String {
     format!("checks: tree {tree} {}", tokens.join(" "))
 }
 
-fn checks(rest: &[String]) -> Result<i32, String> {
+pub(crate) fn checks(rest: &[String]) -> Result<i32, String> {
     let root = root()?;
     let card = rest.iter().find(|word| !word.starts_with('-') && !word.contains('='));
     let all = rest.iter().any(|word| word == "--all");
@@ -560,7 +420,10 @@ fn checks(rest: &[String]) -> Result<i32, String> {
         if selected.is_empty() { println!("no declared suite matches the changed paths"); }
         return Ok(0);
     }
-    let tree = git(&root, &["write-tree"])?;
+    if !git(&root, &["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
+        return Err("Commit the tracked changes before recording checks for the landing tree.".into());
+    }
+    let tree = git(&root, &["rev-parse", "HEAD^{tree}"])?;
     let mut tokens = Vec::new();
     let mut failure = None;
     if !recorded.is_empty() {
@@ -593,15 +456,17 @@ fn checks(rest: &[String]) -> Result<i32, String> {
         // the card open with its own evidence attached saying it passed
         // (`docs/hook-friction-2.md` §10).
         let row = self::card(&root, card)?;
-        let actor = card_actor(std::env::var("BEADS_ACTOR").ok().as_deref(), &row, "atelier-checks");
-        bd(&root, &["--actor".into(), actor.clone(), "comments".into(), "add".into(), card.clone(), proof.clone()])?;
-        if failure.is_none() {
-            bd(&root, &["--actor".into(), actor, "close".into(), card.clone(), "--reason".into(), format!("{proof}. Run by `atelier tool checks {card}`")])?;
-            if let Some(goal) = row["parent"].as_str().or_else(|| row["parent_id"].as_str()) {
-                advance_goal(&root, goal)?;
-            }
-            println!("closed {card}");
+        let actor = crate::board_landing::actor(&root)?;
+        if row["assignee"].as_str().is_some_and(|owner| !owner.is_empty() && owner != actor) {
+            return Err(format!("{card} belongs to another actor; record checks as the claiming session"));
         }
+        bd(&root, &["--actor".into(), actor.clone(), "comments".into(), "add".into(), card.clone(), proof.clone()])?;
+        let suite_names: Vec<String> = tokens.iter().filter_map(|token| token.split_once('=').map(|(name, _)| name.to_string())).collect();
+        let all_required = settings.verification.commands.iter().filter(|suite| all || suite.paths.is_empty() || files.iter().any(|file| suite.paths.iter().any(|path| file.starts_with(path))))
+            .all(|suite| suite_names.contains(&suite.name));
+        metadata(&root, card, &[("checks_tree", tree.clone()), ("checks_passed", (failure.is_none() && all_required).to_string()), ("checks_suites", serde_json::to_string(&suite_names).unwrap())])?;
+        println!("Recorded checks for {card}; work closes when it lands.");
+
     }
     Ok(if failure.is_some() { 1 } else { 0 })
 }
@@ -616,16 +481,8 @@ fn review(rest: &[String]) -> Result<i32, String> {
             .ok_or_else(|| format!("review step {asked} names no job"))?.to_string()
     } else { asked.clone() };
     let goal = card(&root, &id)?;
-    if !labels(&goal).contains(&"job") { return Err(format!("{id} is not a job")); }
-    let children_value: Value = serde_json::from_str(&bd(&root, &["list".into(), "--parent".into(), id.clone(), "--status".into(), "all".into(), "--limit".into(), "0".into(), "--json".into()])?)
-        .map_err(|error| error.to_string())?;
-    let children = children_value.as_array().cloned().unwrap_or_default();
-    for required in ["work", "checks"] {
-        let wanted = format!("step:{required}");
-        let rows: Vec<&Value> = children.iter().filter(|row| labels(row).iter().any(|label| *label == wanted)).collect();
-        if rows.is_empty() || rows.iter().any(|row| row["status"].as_str() != Some("closed")) {
-            return Err(format!("{id} is not ready for review: its {required} work is not closed"));
-        }
+    if !git(&root, &["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
+        return Err("Commit the tracked changes before review.".into());
     }
     let provider = flag(rest, "--provider").or_else(|| {
         crate::routes::find_tool("claude", &[]).map(|_| "claude".to_string())
@@ -634,21 +491,9 @@ fn review(rest: &[String]) -> Result<i32, String> {
     let program = crate::routes::find_tool(&provider, &[])
         .ok_or_else(|| format!("{provider} is not available"))?;
     let card_json = bd(&root, &["show".into(), id.clone(), "--json".into()])?;
-    if card_json.contains("review:attempted") {
-        return Err(format!("{id} already used its one external-review attempt"));
-    }
-    bd(&root, &["update".into(), id.clone(), "--add-label".into(), "review:attempted".into()])?;
     let trunk = landing_name(&root);
-    let mut commits = Vec::new();
-    for work_id in std::iter::once(id.as_str()).chain(children.iter()
-        .filter(|row| labels(row).contains(&"step:work"))
-        .filter_map(|row| row["id"].as_str())) {
-        commits.extend(git(&root, &["log", &trunk, "--format=%H", "--fixed-strings", "--grep", work_id])?
-            .lines().map(str::to_string));
-    }
-    commits.sort();
-    commits.dedup();
-    if commits.is_empty() { return Err(format!("{id} has no landed commits to review")); }
+    let commits: Vec<String> = git(&root, &["log", &format!("{trunk}..HEAD"), "--format=%H"])?.lines().map(str::to_string).collect();
+    if commits.is_empty() { return Err(format!("{id} has no unlanded commits to review")); }
     let mut change = String::new();
     for sha in commits.iter().rev() {
         change.push_str(&git(&root, &["show", "--format=commit %H%n%s", "--stat", "--patch", sha])?);
@@ -656,7 +501,7 @@ fn review(rest: &[String]) -> Result<i32, String> {
         if change.len() > 300_000 { change.truncate(300_000); change.push_str("\n[diff truncated; inspect the repository read-only]\n"); break; }
     }
     let instructions = include_str!("../../machinery/workers/external-review.md");
-    let prompt = format!("{instructions}\n\nReturn this exact shape:\n{{\"verdict\":\"PASS or NEEDS_WORK\",\"summary\":\"one sentence\",\"verified\":[\"fact\"],\"findings\":[{{\"severity\":\"critical, high, or medium\",\"confidence\":80,\"file\":\"path\",\"line\":null,\"title\":\"failure\",\"evidence\":\"proof\",\"recommendation\":\"verifiable correction\"}}]}}\n\nJob:\n{card_json}\n\nLanded commits and diff:\n{change}");
+    let prompt = format!("{instructions}\n\nReturn this exact shape:\n{{\"verdict\":\"PASS or NEEDS_WORK\",\"summary\":\"one sentence\",\"verified\":[\"fact\"],\"findings\":[{{\"severity\":\"critical, high, or medium\",\"confidence\":80,\"file\":\"path\",\"line\":null,\"title\":\"failure\",\"evidence\":\"proof\",\"recommendation\":\"verifiable correction\"}}]}}\n\nJob:\n{card_json}\n\nUnlanded commits and diff:\n{change}");
     let output = if provider == "claude" {
         Command::new(program).args(["-p", &prompt, "--output-format", "text", "--permission-mode", "plan"])
             .current_dir(&root).output()
@@ -693,20 +538,12 @@ fn review(rest: &[String]) -> Result<i32, String> {
         bd(&root, &["update".into(), child.clone(), "--append-notes".into(), format!("External review at {where_at}:\n\n{evidence}")])?;
         made.push(child);
     }
-    let review_rows: Vec<&Value> = children.iter().filter(|row| labels(row).contains(&"step:review")).collect();
-    for row in review_rows.into_iter().filter(|row| row["status"].as_str() != Some("closed")) {
-        if let Some(step_id) = row["id"].as_str() {
-            bd(&root, &["close".into(), step_id.into(), "--reason".into(), format!("external review completed via {provider}")])?;
-        }
-    }
-    metadata(&root, &id, &[("reviewed_commits", commits.join(","))])?;
-    if made.is_empty() {
-        advance_goal(&root, &id)?;
-    } else {
-        bd(&root, &["update".into(), id.clone(), "--status".into(), "open".into()])?;
-        let _ = create_step(&root, &goal, &id, "checks")?;
-        println!("filed findings: {}", made.join(", "));
-    }
+    let passed = parsed["verdict"].as_str() == Some("PASS") && made.is_empty();
+    let tree = git(&root, &["rev-parse", "HEAD^{tree}"])?;
+    metadata(&root, &id, &[("review_tree", tree), ("review_passed", passed.to_string()), ("reviewed_commits", commits.join(","))])?;
+    if !made.is_empty() { println!("filed findings: {}", made.join(", ")); }
+    if !passed { return Ok(1); }
+
     Ok(0)
 }
 
@@ -763,64 +600,6 @@ mod tests {
         assert!(subject_names("fix(bw-uxoe): the chat list opens again", "bw-uxoe"));
         assert!(subject_names("bw-uxoe", "bw-uxoe"));
         assert!(!subject_names("bw-uxoen: a neighbour", "bw-uxoe"));
-    }
-
-    /// `docs/hook-friction-2.md` §4: the lander closing this session's own work
-    /// under a name of its own read the ownership the workflow had just
-    /// established as a conflict.
-    #[test]
-    fn native_machinery_the_lander_acts_as_the_card_it_was_given() {
-        let mine = serde_json::json!({"id":"bw-1", "assignee":"s-abc"});
-        let nobodys = serde_json::json!({"id":"bw-1"});
-        // The checks tool closed as the repository's human owner and could
-        // not, after every suite had already run (`docs/hook-friction-2.md`
-        // §10). It signs as the card's own assignee now, like the lander.
-        assert_eq!(card_actor(None, &mine, "atelier-checks"), "s-abc");
-        assert_eq!(card_actor(None, &nobodys, "atelier-checks"), "atelier-checks");
-        assert_eq!(landing_actor(None, &mine), "s-abc");
-        assert_eq!(landing_actor(None, &nobodys), "atelier-land");
-        assert_eq!(landing_actor(Some("s-set"), &mine), "s-set");
-        assert_eq!(landing_actor(Some("  "), &mine), "s-abc", "blank is unset");
-    }
-
-    /// `docs/hook-friction-2.md` §4: the retry after a failed close reported a
-    /// naming failure, which describes the opposite of what happened.
-    #[test]
-    fn native_machinery_a_land_knows_its_work_is_already_on_the_branch() {
-        let repo = tempfile::tempdir().unwrap();
-        let run = |args: &[&str]| {
-            assert!(Command::new("git")
-                .args(args)
-                .current_dir(repo.path())
-                .env("GIT_AUTHOR_NAME", "t")
-                .env("GIT_AUTHOR_EMAIL", "t@t")
-                .env("GIT_COMMITTER_NAME", "t")
-                .env("GIT_COMMITTER_EMAIL", "t@t")
-                .status()
-                .unwrap()
-                .success(), "git {args:?}");
-        };
-        run(&["init", "-q", "-b", "ours"]);
-        std::fs::write(repo.path().join("a"), "a").unwrap();
-        run(&["add", "-A"]);
-        run(&["commit", "-qm", "base"]);
-        run(&["checkout", "-qb", "bw-1"]);
-        std::fs::write(repo.path().join("b"), "b").unwrap();
-        run(&["add", "-A"]);
-        run(&["commit", "-qm", "bw-1: the work"]);
-
-        let (already, subjects) = landed_subjects(repo.path(), "bw-1", "ours").unwrap();
-        assert!(!already, "nothing has landed yet");
-        assert_eq!(subjects, "bw-1: the work", "only the branch's own commits");
-
-        run(&["checkout", "-q", "ours"]);
-        run(&["merge", "-q", "--ff-only", "bw-1"]);
-        let (already, subjects) = landed_subjects(repo.path(), "bw-1", "ours").unwrap();
-        assert!(already, "the commit is an ancestor of the landing branch");
-        assert!(
-            subjects.lines().any(|line| subject_names(line, "bw-1")),
-            "the retry can still see the commit that names the card"
-        );
     }
 
     #[test]

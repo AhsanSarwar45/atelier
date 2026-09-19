@@ -1715,12 +1715,8 @@ fn post_process_beads(mut beads: Vec<Bead>) -> Vec<Bead> {
         }
     }
 
-    let nodes: Vec<_> = beads.iter().map(|bead| crate::board_state::Node {
-        id: bead.id.clone(),
-        status: if bead.labels.as_ref().is_some_and(|labels| labels.iter().any(|l| l == "cancelled")) { "cancelled".into() } else { bead.status.clone() },
-        children: bead.children.clone().unwrap_or_default(),
-        started: bead.status != "open",
-    }).collect();
+    let records: Vec<serde_json::Value> = beads.iter().map(|bead| serde_json::to_value(bead).expect("Bead serialization")).collect();
+    let nodes = crate::board_landing::nodes(&records);
     let projection = crate::board_state::project(&nodes);
     for bead in &mut beads {
         if let Some(error) = projection.errors.get(&bead.id) {
