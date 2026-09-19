@@ -43,6 +43,9 @@ const ALLOWED = new Set([
   // Native hooks cannot import the browser list and must recognize the board
   // transitions they protect even when no frontend is present.
   "server/src/lifecycle.rs",
+  // The one state contract the server derives a container's column from. Same
+  // reason as the hook above: no TypeScript list reaches it.
+  "server/src/board_state.rs",
 ]);
 
 const NAMES = STATES.map((s) => s.id);
