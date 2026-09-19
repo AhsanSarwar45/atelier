@@ -43,6 +43,8 @@ wire_kinds!(CommandKind {
     AgentFilesList => "agent-files.list",
     AgentFilesRead => "agent-files.read",
     AgentFilesWrite => "agent-files.write",
+    McpCatalogue => "mcp.catalogue",
+    McpAddFromCatalogue => "mcp.add-from-catalogue",
     McpList => "mcp.list",
     McpAdd => "mcp.add",
     McpRemove => "mcp.remove",

@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { Loader2, LogIn, LogOut, Plus, Trash2 } from 'lucide-react';
 
+import { McpCatalogue } from '@/components/settings/mcp-catalogue';
 import type { Scope } from '@/components/settings/provider-settings-api';
 import { SettingsGroup } from '@/components/settings/section';
 import { Badge } from '@/components/ui/badge';
@@ -242,7 +243,15 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
 
   return (
     <div className="space-y-4" data-testid={`mcp-servers-${brand}`}>
-      <SettingsGroup title="MCP servers" actions={<AddServer brand={brand} scope={scope} onAdded={setServers} />}>
+      <SettingsGroup
+        title="MCP servers"
+        actions={
+          <div className="flex items-center gap-2">
+            <McpCatalogue brand={brand} scope={scope} source={sourcesFor(brand, scope)[0]} onAdded={setServers} />
+            <AddServer brand={brand} scope={scope} onAdded={setServers} />
+          </div>
+        }
+      >
         {servers.length === 0 && <p className="p-3 text-sm text-t-tertiary">None</p>}
         {servers.map((s) => {
           const key = `${s.source}:${s.id}`;

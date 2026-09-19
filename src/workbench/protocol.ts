@@ -937,6 +937,50 @@ export interface McpElsewhere {
   server: McpServer;
 }
 
+/** A variable a catalogue server will not start without. */
+export interface McpNeed {
+  name: string;
+  description?: string;
+}
+
+/**
+ * One server in the catalogue: enough to draw a row a reader can choose from,
+ * and enough to add it without their typing anything (bw-6ecp.6).
+ */
+export interface McpCatalogueEntry {
+  /** The name it is added under. */
+  id: string;
+  title: string;
+  description?: string;
+  category?: string;
+  icon?: string;
+  repository?: string;
+  /** Its name in the official registry, when it has one. */
+  registryName?: string;
+  needs?: McpNeed[];
+  transport: 'stdio' | 'http';
+  command?: string;
+  args?: string[];
+  url?: string;
+  env?: Record<string, string>;
+  /** It runs as a container, so it needs Docker on this computer. */
+  container?: boolean;
+}
+
+export interface McpCategory {
+  id: string;
+  count: number;
+}
+
+/** What `mcp.catalogue` answers with. */
+export interface McpCatalogue {
+  entries: McpCatalogueEntry[];
+  categories: McpCategory[];
+  /** `curated` browsing, `registry` for a live search, `curated-only` when it could not be reached. */
+  source: 'curated' | 'registry' | 'curated-only';
+  unreachable?: string;
+}
+
 export type ExtensionKind = 'plugins' | 'marketplaces';
 
 export interface ExtensionItem {
@@ -964,6 +1008,8 @@ export type WbpCommand =
   | { type: 'agent-files.read'; path: string; projectPath?: string; profileId?: string }
   | { type: 'agent-files.write'; path: string; content: string; projectPath?: string; profileId?: string }
   | ({ type: 'provider-settings.read'; brand: Brand } & SettingsScope)
+  | { type: 'mcp.catalogue'; search?: string }
+  | ({ type: 'mcp.add-from-catalogue'; brand: Brand; source: McpSource; entry: McpCatalogueEntry; id?: string; env?: Record<string, string> } & SettingsScope)
   | ({ type: 'mcp.list'; brand: Brand } & SettingsScope)
   | ({ type: 'mcp.add'; brand: Brand; source: McpSource; id: string; config: Record<string, unknown> } & SettingsScope)
   | ({ type: 'mcp.remove'; brand: Brand; source: McpSource; id: string } & SettingsScope)

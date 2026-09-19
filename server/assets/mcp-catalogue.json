@@ -1,0 +1,5759 @@
+{
+  "builtAt": "2026-09-19",
+  "entries": [
+    {
+      "id": "airtable-mcp-server",
+      "title": "Airtable",
+      "description": "Provides AI assistants with direct access to Airtable bases, allowing them to read schemas, query records, and interact with your Airtable data. Supports listing bases, retrieving table structures, and searching through records to help automate workflows and answer questions about your organized data.",
+      "category": "productivity",
+      "icon": "https://www.google.com/s2/favicons?domain=airtable.com&sz=64",
+      "repository": "https://github.com/domdomegg/airtable-mcp-server",
+      "registryName": "io.github.domdomegg/airtable-mcp-server",
+      "needs": [
+        {
+          "name": "AIRTABLE_API_KEY",
+          "description": "Airtable personal access token (e.g., pat123.abc123). Create at https://airtable.com/create/tokens/new with scopes: schema.bases:read, data.records:read, and optionally schema.bases:write and data.records:write."
+        }
+      ],
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "airtable-mcp-server"
+      ]
+    },
+    {
+      "id": "aks",
+      "title": "Azure Kubernetes Service (AKS)",
+      "description": "Azure Kubernetes Service (AKS) official MCP server",
+      "category": "devops",
+      "icon": "https://raw.githubusercontent.com/Azure/AKS/1c3979cf6729c78cfff2c0c78cb0aa657e1bbf7a/blog/assets/images/400x400.png",
+      "repository": "https://github.com/Azure/aks-mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/aks"
+      ],
+      "container": true
+    },
+    {
+      "id": "alfresco",
+      "title": "Alfresco",
+      "description": "A minimal Model Context Protocol (MCP) server for Alfresco providing tools via the Alfresco REST API",
+      "category": "productivity",
+      "icon": "https://avatars.githubusercontent.com/u/391127?v=4",
+      "repository": "https://github.com/AlfrescoLabs/alfresco-mcp-server",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "angelborroy/alfresco-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "amazon-bedrock-agentcore",
+      "title": "AWS Bedrock AgentCore",
+      "description": "Documentation on AgentCore platform services.",
+      "category": "ai",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/amazon-bedrock-agentcore-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "amazon-kendra-index",
+      "title": "Amazon Kendra Index",
+      "description": "Enterprise search and RAG enhancement.",
+      "category": "ai",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/amazon-kendra-index-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "amazon-neptune",
+      "title": "Amazon Neptune",
+      "description": "Graph database queries with Cypher and Gremlin.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/amazon-neptune-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "amazon-qbusiness-anonymous",
+      "title": "Amazon Q Business",
+      "description": "AI assistant for ingested content with anonymous access.",
+      "category": "ai",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "description": "e.g. your-aws-secret-access-key"
+        },
+        {
+          "name": "AWS_SESSION_TOKEN",
+          "description": "e.g. your-aws-session-token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "AWS_SECRET_ACCESS_KEY",
+        "-e",
+        "AWS_SESSION_TOKEN",
+        "mcp/amazon-qbusiness-anonymous-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "apify-mcp-server",
+      "title": "Apify",
+      "description": "Apify is the world's largest marketplace of tools for web scraping, data extraction, and web automation. You can extract structured data from social media, e-commerce, search engines, maps, travel sites, or any other website.",
+      "category": "productivity",
+      "icon": "https://avatars.githubusercontent.com/u/24586296?s=200&v=4",
+      "repository": "https://github.com/apify/actors-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "APIFY_TOKEN",
+          "description": "e.g. your-apify-token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "APIFY_TOKEN",
+        "mcp/apify-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "apollo-mcp-server",
+      "title": "Apollo",
+      "description": "Enable graph-based API orchestration with AI",
+      "category": "ai",
+      "icon": "https://www.apollographql.com/favicon/android-icon-192x192.png",
+      "repository": "https://github.com/apollographql/apollo-mcp-server",
+      "registryName": "io.github.apollographql/apollo-mcp-server",
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "ghcr.io/apollographql/apollo-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "arm-mcp",
+      "title": "Arm",
+      "description": "Provides AI assistants with specialized tools for Arm architecture development, migration, optimization, and profiling. Includes knowledge base search, code migration analysis, container architecture inspection, Arm Performix workload profiling, and assembly performance analysis.",
+      "category": "development",
+      "icon": "https://avatars.githubusercontent.com/u/184160443?s=200&v=4",
+      "repository": "https://github.com/arm/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "armlimited/arm-mcp:2.4.0"
+      ],
+      "container": true
+    },
+    {
+      "id": "arxiv-mcp-server",
+      "title": "ArXiv",
+      "description": "|",
+      "category": "search",
+      "icon": "https://avatars.githubusercontent.com/u/15390319?v=4",
+      "repository": "https://github.com/jasonleinart/arxiv-mcp-server",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/arxiv-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "ast-grep",
+      "title": "ast-grep",
+      "description": "ast-grep is a fast and polyglot tool for code structural search, lint, rewriting at large scale.",
+      "category": "development",
+      "icon": "https://avatars.githubusercontent.com/u/114017360?s=200&v=4",
+      "repository": "https://github.com/dgageot/mcp-ast-grep",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/ast-grep"
+      ],
+      "container": true
+    },
+    {
+      "id": "astra-db",
+      "title": "Astra DB",
+      "description": "Configure the connection to Astra DB",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/573369?s=200&v=4",
+      "repository": "https://github.com/datastax/astra-db-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "ASTRA_DB_APPLICATION_TOKEN",
+          "description": "e.g. your_astra_db_token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "ASTRA_DB_APPLICATION_TOKEN",
+        "mcp/astra-db"
+      ],
+      "container": true
+    },
+    {
+      "id": "atlan",
+      "title": "Atlan",
+      "description": "MCP server for interacting with Atlan services including asset search, updates, and lineage traversal for comprehensive data governance and discovery.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/47002402?s=200&v=4",
+      "repository": "https://github.com/atlanhq/agent-toolkit",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "ATLAN_API_KEY",
+          "description": "e.g. <YOUR_ATLAN_API_KEY>"
+        },
+        {
+          "name": "ATLAN_BASE_URL",
+          "description": "e.g. https://your-instance.atlan.com"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "ATLAN_API_KEY",
+        "-e",
+        "ATLAN_BASE_URL",
+        "mcp/atlan"
+      ],
+      "container": true
+    },
+    {
+      "id": "atlas-docs",
+      "title": "Atlas Docs",
+      "description": "Configure the connection to Atlas Docs",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/184709581?s=200&v=4",
+      "repository": "https://github.com/CartographAI/atlas-docs-mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/atlas-docs"
+      ],
+      "container": true
+    },
+    {
+      "id": "atlassian",
+      "title": "Atlassian",
+      "description": "Tools for Atlassian products (Confluence and Jira). This integration supports both Atlassian Cloud and Jira Server/Data Center deployments.",
+      "category": "productivity",
+      "icon": "https://avatars.githubusercontent.com/u/43281909?s=200&v=4",
+      "repository": "https://github.com/sooperset/mcp-atlassian",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "CONFLUENCE_API_TOKEN",
+          "description": "e.g. your_api_token"
+        },
+        {
+          "name": "CONFLUENCE_PERSONAL_TOKEN",
+          "description": "e.g. your_api_token"
+        },
+        {
+          "name": "JIRA_API_TOKEN",
+          "description": "e.g. your_api_token"
+        },
+        {
+          "name": "JIRA_PERSONAL_TOKEN",
+          "description": "e.g. your_api_token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "CONFLUENCE_API_TOKEN",
+        "-e",
+        "CONFLUENCE_PERSONAL_TOKEN",
+        "-e",
+        "JIRA_API_TOKEN",
+        "-e",
+        "JIRA_PERSONAL_TOKEN",
+        "mcp/atlassian"
+      ],
+      "container": true
+    },
+    {
+      "id": "audiense-insights",
+      "title": "Audiense Insights",
+      "description": "Configure the connection to Audiense Insights",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/2454008?s=200&v=4",
+      "repository": "https://github.com/AudienseCo/mcp-audiense-insights",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "AUDIENSE_CLIENT_SECRET",
+          "description": "e.g. your_client_secret_here"
+        },
+        {
+          "name": "TWITTER_BEARER_TOKEN",
+          "description": "e.g. your_token_here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "AUDIENSE_CLIENT_SECRET",
+        "-e",
+        "TWITTER_BEARER_TOKEN",
+        "mcp/audiense-insights"
+      ],
+      "container": true
+    },
+    {
+      "id": "aws-api",
+      "title": "AWS API",
+      "description": "Comprehensive AWS API support with command validation and access to all services.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "description": "e.g. your-aws-secret-access-key"
+        },
+        {
+          "name": "AWS_SESSION_TOKEN",
+          "description": "e.g. your-aws-session-token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "AWS_SECRET_ACCESS_KEY",
+        "-e",
+        "AWS_SESSION_TOKEN",
+        "mcp/aws-api-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "aws-appsync",
+      "title": "AWS AppSync",
+      "description": "Manage applications powered by AWS AppSync.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "description": "e.g. your-aws-secret-access-key"
+        },
+        {
+          "name": "AWS_SESSION_TOKEN",
+          "description": "e.g. your-aws-session-token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "AWS_SECRET_ACCESS_KEY",
+        "-e",
+        "AWS_SESSION_TOKEN",
+        "mcp/aws-appsync-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "aws-bedrock-custom-model-import",
+      "title": "AWS Bedrock Custom Model Import",
+      "description": "Manage custom models in Bedrock.",
+      "category": "ai",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "description": "e.g. your-aws-secret-access-key"
+        },
+        {
+          "name": "AWS_SESSION_TOKEN",
+          "description": "e.g. your-aws-session-token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "AWS_SECRET_ACCESS_KEY",
+        "-e",
+        "AWS_SESSION_TOKEN",
+        "mcp/aws-bedrock-custom-model-import-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "aws-bedrock-data-automation",
+      "title": "AWS Bedrock Data Automation",
+      "description": "Analyze documents, images, videos, and audio.",
+      "category": "ai",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/aws-bedrock-data-automation-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "aws-cdk-mcp-server",
+      "title": "AWS CDK",
+      "description": "AWS Cloud Development Kit (CDK) best practices, infrastructure as code patterns, and security compliance with CDK Nag.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/aws-cdk-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "aws-core-mcp-server",
+      "title": "AWS Core",
+      "description": "Starting point for using the awslabs MCP servers.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/aws-core-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "aws-dataprocessing",
+      "title": "AWS Data Processing",
+      "description": "Data processing and transformation services.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/aws-dataprocessing-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "aws-diagram",
+      "title": "AWS Diagram",
+      "description": "Seamlessly create diagrams using the Python diagrams package DSL. This server allows you to generate AWS diagrams, sequence diagrams, flow diagrams, and class diagrams using Python code.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/aws-diagram"
+      ],
+      "container": true
+    },
+    {
+      "id": "aws-documentation",
+      "title": "AWS Documentation",
+      "description": "Tools to access AWS documentation, search for content, and get recommendations.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/aws-documentation"
+      ],
+      "container": true
+    },
+    {
+      "id": "aws-healthomics",
+      "title": "AWS HealthOmics",
+      "description": "Generate, run, debug lifescience workflows.",
+      "category": "healthcare",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/aws-healthomics-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "aws-iot-sitewise",
+      "title": "AWS IoT SiteWise",
+      "description": "Industrial IoT asset management.",
+      "category": "iot",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/aws-iot-sitewise-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "aws-kb-retrieval-server",
+      "title": "AWS KB Retrieval (Archived)",
+      "description": "An MCP server implementation for retrieving information from the AWS Knowledge Base using the Bedrock Agent Runtime.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/182288589?s=200&v=4",
+      "repository": "https://github.com/modelcontextprotocol/servers",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "description": "e.g. YOUR_SECRET_ACCESS_KEY_HERE"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "AWS_SECRET_ACCESS_KEY",
+        "mcp/aws-kb-retrieval-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "aws-location",
+      "title": "Amazon Location Service",
+      "description": "Place search, geocoding, and route optimization.",
+      "category": "geospatial",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "description": "e.g. your-aws-secret-access-key"
+        },
+        {
+          "name": "AWS_SESSION_TOKEN",
+          "description": "e.g. your-aws-session-token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "AWS_SECRET_ACCESS_KEY",
+        "-e",
+        "AWS_SESSION_TOKEN",
+        "mcp/aws-location-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "aws-msk",
+      "title": "Amazon MSK",
+      "description": "Managed Kafka cluster operations.",
+      "category": "communication",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "description": "e.g. your-aws-secret-access-key"
+        },
+        {
+          "name": "AWS_SESSION_TOKEN",
+          "description": "e.g. your-aws-session-token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "AWS_SECRET_ACCESS_KEY",
+        "-e",
+        "AWS_SESSION_TOKEN",
+        "mcp/aws-msk-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "aws-pricing",
+      "title": "AWS Pricing",
+      "description": "AWS service pricing and cost estimates.",
+      "category": "cost-management",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "description": "e.g. your-aws-secret-access-key"
+        },
+        {
+          "name": "AWS_SESSION_TOKEN",
+          "description": "e.g. your-aws-session-token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "AWS_SECRET_ACCESS_KEY",
+        "-e",
+        "AWS_SESSION_TOKEN",
+        "mcp/aws-pricing-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "aws-terraform",
+      "title": "AWS Terraform",
+      "description": "Terraform on AWS best practices, infrastructure as code patterns, and security compliance with Checkov",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/aws-terraform"
+      ],
+      "container": true
+    },
+    {
+      "id": "awslabs-billing-cost-management",
+      "title": "AWS Billing and Cost Management",
+      "description": "Billing and cost management.",
+      "category": "cost-management",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/billing-cost-management-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "awslabs-ccapi",
+      "title": "AWS Cloud Control API",
+      "description": "Direct resource management with security scanning.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "description": "e.g. your-aws-secret-access-key"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "AWS_SECRET_ACCESS_KEY",
+        "mcp/ccapi-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "awslabs-cfn",
+      "title": "AWS CloudFormation",
+      "description": "CloudFormation resource management via Cloud Control API.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "description": "e.g. your-aws-secret-access-key"
+        },
+        {
+          "name": "AWS_SESSION_TOKEN",
+          "description": "e.g. your-aws-session-token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "AWS_SECRET_ACCESS_KEY",
+        "-e",
+        "AWS_SESSION_TOKEN",
+        "mcp/cfn-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "awslabs-cloudtrail",
+      "title": "AWS CloudTrail",
+      "description": "AWS CloudTrail audit logging and monitoring.",
+      "category": "security",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/cloudtrail-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "awslabs-cloudwatch",
+      "title": "Amazon CloudWatch",
+      "description": "Metrics, alarms, and logs analysis.",
+      "category": "monitoring",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/cloudwatch-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "awslabs-cloudwatch-appsignals",
+      "title": "Amazon CloudWatch Application Signals",
+      "description": "Application performance monitoring and insights.",
+      "category": "monitoring",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/cloudwatch-appsignals-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "awslabs-cost-explorer",
+      "title": "AWS Cost Explorer",
+      "description": "Detailed cost analysis and reporting.",
+      "category": "cost-management",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "description": "e.g. your-aws-secret-access-key"
+        },
+        {
+          "name": "AWS_SESSION_TOKEN",
+          "description": "e.g. your-aws-session-token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "AWS_SECRET_ACCESS_KEY",
+        "-e",
+        "AWS_SESSION_TOKEN",
+        "mcp/cost-explorer-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "awslabs-dynamodb",
+      "title": "Amazon DynamoDB",
+      "description": "Complete DynamoDB operations and table management.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/dynamodb-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "awslabs-elasticache",
+      "title": "Amazon ElastiCache",
+      "description": "ElastiCache control plane operations.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/elasticache-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "awslabs-iam",
+      "title": "AWS IAM",
+      "description": "IAM user, role, group, and policy management.",
+      "category": "security",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "description": "e.g. your-aws-secret-access-key"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "AWS_SECRET_ACCESS_KEY",
+        "mcp/iam-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "awslabs-memcached",
+      "title": "Amazon ElastiCache for Memcached",
+      "description": "High-speed caching with Memcached.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/memcached-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "awslabs-nova-canvas",
+      "title": "AWS Labs Nova Canvas",
+      "description": "AI image generation using Amazon Nova Canvas.",
+      "category": "ai",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "description": "e.g. your-aws-secret-access-key"
+        },
+        {
+          "name": "AWS_SESSION_TOKEN",
+          "description": "e.g. your-aws-session-token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "AWS_SECRET_ACCESS_KEY",
+        "-e",
+        "AWS_SESSION_TOKEN",
+        "mcp/nova-canvas-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "awslabs-redshift",
+      "title": "Amazon Redshift",
+      "description": "Data warehouse operations and queries.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/redshift-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "awslabs-s3-tables",
+      "title": "AWS S3 Tables",
+      "description": "Manage S3 Tables for analytics.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "description": "e.g. your-aws-secret-access-key"
+        },
+        {
+          "name": "AWS_SESSION_TOKEN",
+          "description": "e.g. your-aws-session-token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "AWS_SECRET_ACCESS_KEY",
+        "-e",
+        "AWS_SESSION_TOKEN",
+        "mcp/s3-tables-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "awslabs-timestream-for-influxdb",
+      "title": "Amazon Timestream for InfluxDB",
+      "description": "Time-series database operations.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/timestream-for-influxdb-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "awslabs-valkey",
+      "title": "Amazon ElastiCache/MemoryDB for Valkey",
+      "description": "Advanced data structures with Valkey.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/3299148?v=4",
+      "repository": "https://github.com/awslabs/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/valkey-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "azure",
+      "title": "Azure",
+      "description": "Catalog of official Microsoft MCP (Model Context Protocol) server implementations for AI-powered data access and tool integration.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/6844498?s=200&v=4",
+      "repository": "https://github.com/microsoft/mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcr.microsoft.com/azure-sdk/azure-mcp"
+      ],
+      "container": true
+    },
+    {
+      "id": "beagle-security",
+      "title": "Beagle Security",
+      "description": "Connects with the Beagle Security backend using a user token to manage applications, run automated security tests, track vulnerabilities across environments, and gain intelligence from Application and API vulnerability data.",
+      "category": "devops",
+      "icon": "https://cdn.beaglesecurity.com/assets/brand/png/beagle-blue-icon.png",
+      "repository": "https://github.com/beaglesecurity/beagle-security-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "BEAGLE_SECURITY_API_TOKEN",
+          "description": "e.g. your_personal_access_token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "BEAGLE_SECURITY_API_TOKEN",
+        "mcp/beagle-security-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "bitrefill",
+      "title": "Bitrefill",
+      "description": "Configure the connection to Bitrefill",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/10897174?s=200&v=4",
+      "repository": "https://github.com/bitrefill/bitrefill-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "BITREFILL_API_SECRET",
+          "description": "e.g. your_api_key_here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "BITREFILL_API_SECRET",
+        "mcp/bitrefill"
+      ],
+      "container": true
+    },
+    {
+      "id": "box",
+      "title": "Box",
+      "description": "Configure the connection to Box",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/8659759?s=200&v=4",
+      "repository": "https://github.com/dgageot/mcp-server-box",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "BOX_CLIENT_SECRET",
+          "description": "e.g. your_client_secret"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "BOX_CLIENT_SECRET",
+        "mcp/box"
+      ],
+      "container": true
+    },
+    {
+      "id": "brave",
+      "title": "Brave Search",
+      "description": "Search the Web for pages, images, news, videos, and more using the Brave Search API.",
+      "category": "search",
+      "icon": "https://avatars.githubusercontent.com/u/12301619?s=200&v=4",
+      "repository": "https://github.com/brave/brave-search-mcp-server",
+      "registryName": "io.github.brave/brave-search-mcp-server",
+      "needs": [
+        {
+          "name": "BRAVE_API_KEY",
+          "description": "Your API key for the service"
+        }
+      ],
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@brave/brave-search-mcp-server"
+      ]
+    },
+    {
+      "id": "browserbase",
+      "title": "Browserbase",
+      "description": "Allow LLMs to control a browser with Browserbase and Stagehand for AI-powered web automation, intelligent data extraction, and screenshot capture.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/158221360?s=200&v=4",
+      "repository": "https://github.com/browserbase/mcp-server-browserbase",
+      "registryName": "io.github.browserbase/mcp-server-browserbase",
+      "needs": [
+        {
+          "name": "BROWSERBASE_API_KEY",
+          "description": "Your Browserbase API key"
+        },
+        {
+          "name": "BROWSERBASE_PROJECT_ID",
+          "description": "Your Browserbase Project ID"
+        },
+        {
+          "name": "GEMINI_API_KEY",
+          "description": "Your Gemini API key (default model)"
+        }
+      ],
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@browserbasehq/mcp-server-browserbase"
+      ]
+    },
+    {
+      "id": "buildkite",
+      "title": "Buildkite",
+      "description": "Buildkite MCP lets agents interact with Buildkite Builds, Jobs, Logs, Packages and Test Suites",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/5055988?v=4",
+      "repository": "https://github.com/buildkite/buildkite-mcp-server",
+      "registryName": "io.github.buildkite/buildkite-mcp-server",
+      "needs": [
+        {
+          "name": "BUILDKITE_API_TOKEN",
+          "description": "Buildkite API token for authentication. Get one from https://buildkite.com/user/api-access-tokens"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "BUILDKITE_API_TOKEN",
+        "mcp/buildkite"
+      ],
+      "container": true
+    },
+    {
+      "id": "camunda",
+      "title": "Camunda BPM Process Engine",
+      "description": "Tools to interact with the Camunda 7 Community Edition Engine using the Model Context Protocol (MCP). Whether you're automating workflows, querying process instances, or integrating with external systems, Camunda MCP Server is your agentic solution for seamless interaction with Camunda.",
+      "category": "productivity",
+      "icon": "https://raw.githubusercontent.com/lepoco/mcp-camunda/refs/heads/main/build/icon.png",
+      "repository": "https://github.com/lepoco/mcp-camunda",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/camunda"
+      ],
+      "container": true
+    },
+    {
+      "id": "cdata-connectcloud",
+      "title": "CData Connect Cloud",
+      "description": "Configure the connection to CData Connect Cloud",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/24947354?v=4",
+      "repository": "https://github.com/CDataSoftware/connectcloud-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "CDATA_PAT",
+          "description": "e.g. <your-cdata-pat>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "CDATA_PAT",
+        "mcp/cdata-connectcloud"
+      ],
+      "container": true
+    },
+    {
+      "id": "charmhealth-mcp-server",
+      "title": "CharmHealth",
+      "description": "An MCP server for CharmHealth EHR that allows LLMs and MCP clients to interact with patient records, encounters, and practice information.",
+      "category": "productivity",
+      "icon": "https://raw.githubusercontent.com/CharmHealth/charm-mcp-server/d7928f1ed514f59656e36693749dffea52ab04c2/Charm_icon.png",
+      "repository": "https://github.com/CharmHealth/charm-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "CHARMHEALTH_API_KEY",
+          "description": "e.g. <CHARMHEALTH_API_KEY>"
+        },
+        {
+          "name": "CHARMHEALTH_REFRESH_TOKEN",
+          "description": "e.g. <CHARMHEALTH_REFRESH_TOKEN>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "CHARMHEALTH_API_KEY",
+        "-e",
+        "CHARMHEALTH_REFRESH_TOKEN",
+        "mcp/charmhealth-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "chroma",
+      "title": "Chroma",
+      "description": "A Model Context Protocol (MCP) server implementation that provides database capabilities for Chroma.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/105881770?s=200&v=4",
+      "repository": "https://github.com/chroma-core/chroma-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "CHROMA_API_KEY",
+          "description": "e.g. your-api-key"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "CHROMA_API_KEY",
+        "mcp/chroma"
+      ],
+      "container": true
+    },
+    {
+      "id": "clickhouse",
+      "title": "Official ClickHouse",
+      "description": "Official ClickHouse MCP Server",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/54801242?v=4",
+      "repository": "https://github.com/ClickHouse/mcp-clickhouse",
+      "registryName": "io.github.ClickHouse/mcp-clickhouse",
+      "needs": [
+        {
+          "name": "CLICKHOUSE_HOST",
+          "description": "Hostname of the ClickHouse server"
+        },
+        {
+          "name": "CLICKHOUSE_USER",
+          "description": "Username for ClickHouse authentication"
+        },
+        {
+          "name": "CLICKHOUSE_PASSWORD",
+          "description": "Password for ClickHouse authentication"
+        }
+      ],
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-clickhouse"
+      ]
+    },
+    {
+      "id": "cloud-run-mcp",
+      "title": "Cloud Run",
+      "description": "MCP server to deploy apps to Cloud Run",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/2810941?v=4",
+      "repository": "https://github.com/GoogleCloudPlatform/cloud-run-mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/cloud-run-mcp"
+      ],
+      "container": true
+    },
+    {
+      "id": "cockroachdb",
+      "title": "CockroachDB",
+      "description": "Enable AI agents to manage, monitor, and query CockroachDB using natural language. Perform complex database operations, cluster management, and query execution seamlessly through AI-driven workflows. Integrate effortlessly with MCP clients for scalable and high-performance data operations.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/6748139?v=4",
+      "repository": "https://github.com/amineelkouhen/mcp-cockroachdb",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "CRDB_PWD",
+          "description": ""
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "CRDB_PWD",
+        "mcp/cockroachdb"
+      ],
+      "container": true
+    },
+    {
+      "id": "couchbase",
+      "title": "Couchbase",
+      "description": "Couchbase is a distributed document database with a powerful search engine and in-built operational and analytical capabilities.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/605755?s=200&v=4",
+      "repository": "https://github.com/Couchbase-Ecosystem/mcp-server-couchbase",
+      "registryName": "io.github.Couchbase-Ecosystem/mcp-server-couchbase",
+      "needs": [],
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "couchbase-mcp-server"
+      ]
+    },
+    {
+      "id": "cylera-mcp-server",
+      "title": "Cylera",
+      "description": "|",
+      "category": "productivity",
+      "icon": "https://github.com/Cylera/cylera-mcp-server/blob/main/assets/cylera_logo.png?raw=true",
+      "repository": "https://github.com/Cylera/cylera-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "CYLERA_BASE_URL",
+          "description": "e.g. https://partner.us1.cylera.com Or https://partner.uk1.cylera.com/ Or https://partner.demo.cylera.com"
+        },
+        {
+          "name": "CYLERA_USERNAME",
+          "description": "e.g. Your username you use to login to Cylera"
+        },
+        {
+          "name": "CYLERA_PASSWORD",
+          "description": "e.g. Your password you use to login to Cylera"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "CYLERA_BASE_URL",
+        "-e",
+        "CYLERA_USERNAME",
+        "-e",
+        "CYLERA_PASSWORD",
+        "mcp/cylera-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "cyreslab-ai-shodan",
+      "title": "Shodan",
+      "description": "A Model Context Protocol server that provides access to Shodan API functionality.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/178556137?s=200&v=4",
+      "repository": "https://github.com/Cyreslab-AI/shodan-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "SHODAN_API_KEY",
+          "description": "e.g. YOUR_SHODAN_API_KEY"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "SHODAN_API_KEY",
+        "mcp/cyreslab-ai-shodan"
+      ],
+      "container": true
+    },
+    {
+      "id": "dappier",
+      "title": "Dappier",
+      "description": "Enable fast, free real-time web search and access premium data from trusted media brands—news, financial markets, sports, entertainment, weather, and more. Build powerful AI agents with Dappier.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/152645347?s=200&v=4",
+      "repository": "https://github.com/dappierai/dappier-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "DAPPIER_API_KEY",
+          "description": "e.g. YOUR_API_KEY_HERE"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "DAPPIER_API_KEY",
+        "mcp/dappier"
+      ],
+      "container": true
+    },
+    {
+      "id": "dart",
+      "title": "Dart AI",
+      "description": "Configure the connection to Dart",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/92822028?s=200&v=4",
+      "repository": "https://github.com/its-dart/dart-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "DART_TOKEN",
+          "description": "e.g. dsa_..."
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "DART_TOKEN",
+        "mcp/dart"
+      ],
+      "container": true
+    },
+    {
+      "id": "database-server",
+      "title": "MCP Database Server",
+      "description": "Comprehensive database server supporting PostgreSQL, MySQL, and SQLite with natural language SQL query capabilities. Enables AI agents to interact with databases through both direct SQL and natural language queries.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/182288589?s=200&v=4",
+      "repository": "https://github.com/Souhar-dya/mcp-db-server",
+      "registryName": "io.github.Souhar-dya/mcp-db-server",
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "souhardyak/mcp-db-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "databutton",
+      "title": "Databutton",
+      "description": "Databutton MCP Server.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/182288589?s=200&v=4",
+      "repository": "https://github.com/databutton/databutton-mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/databutton"
+      ],
+      "container": true
+    },
+    {
+      "id": "descope",
+      "title": "Descope",
+      "description": "The Descope Model Context Protocol (MCP) server provides an interface to interact with Descope's Management APIs, enabling the search and retrieval of project-related information.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/119703169?s=200&v=4",
+      "repository": "https://github.com/descope-sample-apps/descope-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "DESCOPE_MANAGEMENT_KEY",
+          "description": "e.g. your-descope-management-key-here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "DESCOPE_MANAGEMENT_KEY",
+        "mcp/descope"
+      ],
+      "container": true
+    },
+    {
+      "id": "desktop-commander",
+      "title": "Desktop Commander",
+      "description": "Search, update, manage files and run terminal commands with AI",
+      "category": "devops",
+      "icon": "https://raw.githubusercontent.com/wonderwhy-er/DesktopCommanderMCP/main/icon.png",
+      "repository": "https://github.com/wonderwhy-er/DesktopCommanderMCP",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/desktop-commander"
+      ],
+      "container": true
+    },
+    {
+      "id": "devhub-cms",
+      "title": "DevHub CMS",
+      "description": "Configure the connection to DevHub CMS",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/602719?s=200&v=4",
+      "repository": "https://github.com/devhub/devhub-cms-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "DEVHUB_API_KEY",
+          "description": "e.g. YOUR_KEY_HERE"
+        },
+        {
+          "name": "DEVHUB_API_SECRET",
+          "description": "e.g. YOUR_SECRET_HERE"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "DEVHUB_API_KEY",
+        "-e",
+        "DEVHUB_API_SECRET",
+        "mcp/devhub-cms"
+      ],
+      "container": true
+    },
+    {
+      "id": "dockerhub",
+      "title": "Docker Hub",
+      "description": "Docker Hub official MCP server",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/5429470?s=200&v=4",
+      "repository": "https://github.com/docker/hub-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "HUB_PAT_TOKEN",
+          "description": "e.g. your_hub_pat_token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "HUB_PAT_TOKEN",
+        "mcp/dockerhub"
+      ],
+      "container": true
+    },
+    {
+      "id": "dotnet-types-explorer",
+      "title": ".NET Types Explorer",
+      "description": "Provides detailed type information from .NET projects including assembly exploration, namespace discovery, type reflection, and NuGet integration for AI coding agents",
+      "category": "development",
+      "icon": "https://upload.wikimedia.org/wikipedia/commons/e/ee/.NET_Core_Logo.svg",
+      "repository": "https://github.com/V0v1kkk/DotNetMetadataMcpServer",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "vrogozhin/dotnet-types-explorer-mcp:1.1.7"
+      ],
+      "container": true
+    },
+    {
+      "id": "dreamfactory-mcp",
+      "title": "DreamFactory",
+      "description": "DreamFactory is a REST API generation platform with support for hundreds of data sources, including Microsoft SQL Server, MySQL, PostgreSQL, and MongoDB. The DreamFactory MCP Server makes it easy for users to securely interact with their data sources via an MCP client.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/2593688?v=4",
+      "repository": "https://github.com/dreamfactorysoftware/df-mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/df-mcp"
+      ],
+      "container": true
+    },
+    {
+      "id": "duckduckgo",
+      "title": "Private Web Search",
+      "description": "Community-maintained server for DuckDuckGo search. Not published by or affiliated with DuckDuckGo.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/182288589?s=200&v=4",
+      "repository": "https://github.com/nickclyde/duckduckgo-mcp-server",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/duckduckgo"
+      ],
+      "container": true
+    },
+    {
+      "id": "dynatrace-mcp-server",
+      "title": "Dynatrace",
+      "description": "This MCP Server allows interaction with the Dynatrace observability platform, brining real-time observability data directly into your development workflow.",
+      "category": "monitoring",
+      "icon": "https://avatars.githubusercontent.com/u/58178984?s=200&v=4",
+      "repository": "https://github.com/dynatrace-oss/dynatrace-mcp",
+      "registryName": "io.github.dynatrace-oss/Dynatrace-mcp",
+      "needs": [
+        {
+          "name": "DT_ENVIRONMENT",
+          "description": "The URL of your Dynatrace environment (e.g. 'https://abc12345.apps.dynatrace.com'). Do not use Dynatrace classic URLs."
+        }
+      ],
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@dynatrace-oss/dynatrace-mcp-server"
+      ]
+    },
+    {
+      "id": "e2b",
+      "title": "E2B",
+      "description": "Giving Claude ability to run code with E2B via MCP (Model Context Protocol).",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/129434473?s=200&v=4",
+      "repository": "https://github.com/e2b-dev/mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "E2B_API_KEY",
+          "description": "e.g. YOUR_API_KEY_HERE"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "E2B_API_KEY",
+        "mcp/e2b"
+      ],
+      "container": true
+    },
+    {
+      "id": "edubase",
+      "title": "EduBase",
+      "description": "Configure the connection to EduBase",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/33938028?s=200&v=4",
+      "repository": "https://github.com/EduBase/MCP",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "EDUBASE_API_KEY",
+          "description": "e.g. YOUR_EDUBASE_API_KEY"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "EDUBASE_API_KEY",
+        "mcp/edubase"
+      ],
+      "container": true
+    },
+    {
+      "id": "effect-mcp",
+      "title": "Effect",
+      "description": "Tools and resources for writing Effect code in Typescript.",
+      "category": "productivity",
+      "icon": "https://avatars.githubusercontent.com/u/77678942?v=4",
+      "repository": "https://github.com/tim-smart/effect-mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/effect-mcp"
+      ],
+      "container": true
+    },
+    {
+      "id": "elasticsearch",
+      "title": "Elasticsearch",
+      "description": "Interact with your Elasticsearch indices through natural language conversations.",
+      "category": "search",
+      "icon": "https://avatars.githubusercontent.com/u/6764390?s=200&v=4",
+      "repository": "https://github.com/elastic/mcp-server-elasticsearch",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "ES_API_KEY",
+          "description": "e.g. your-api-key"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "ES_API_KEY",
+        "mcp/elasticsearch"
+      ],
+      "container": true
+    },
+    {
+      "id": "elevenlabs",
+      "title": "ElevenLabs",
+      "description": "Official ElevenLabs Model Context Protocol (MCP) server that enables interaction with powerful Text to Speech and audio processing APIs.",
+      "category": "ai",
+      "icon": "https://avatars.githubusercontent.com/u/94471909?v=4",
+      "repository": "https://github.com/elevenlabs/elevenlabs-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "ELEVENLABS_API_KEY",
+          "description": "e.g. <ELEVENLABS_API_KEY>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "ELEVENLABS_API_KEY",
+        "mcp/elevenlabs"
+      ],
+      "container": true
+    },
+    {
+      "id": "everart",
+      "title": "EverArt (Archived)",
+      "description": "Image generation server using EverArt's API.",
+      "category": "search",
+      "icon": "https://avatars.githubusercontent.com/u/182288589?s=200&v=4",
+      "repository": "https://github.com/modelcontextprotocol/servers",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "EVERART_API_KEY",
+          "description": "e.g. your_key_here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "EVERART_API_KEY",
+        "mcp/everart"
+      ],
+      "container": true
+    },
+    {
+      "id": "exa",
+      "title": "Exa",
+      "description": "Exa MCP for web search and web crawling!.",
+      "category": "search",
+      "icon": "https://avatars.githubusercontent.com/u/77906174?s=200&v=4",
+      "repository": "https://github.com/exa-labs/exa-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "EXA_API_KEY",
+          "description": "e.g. your-api-key-here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "EXA_API_KEY",
+        "mcp/exa"
+      ],
+      "container": true
+    },
+    {
+      "id": "explorium",
+      "title": "Explorium B2B Data",
+      "description": "Discover companies, contacts, and business insights—powered by dozens of trusted external data sources.",
+      "category": "search",
+      "icon": "https://marketing-public-links.s3.us-east-1.amazonaws.com/Brand/Logo-dark.png",
+      "repository": "https://github.com/explorium-ai/mcp-explorium",
+      "registryName": "ai.explorium/mcp-explorium",
+      "needs": [],
+      "transport": "http",
+      "url": "https://mcp-github-registry.explorium.ai/mcp"
+    },
+    {
+      "id": "fetch",
+      "title": "Fetch (Reference)",
+      "description": "Fetches a URL from the internet and extracts its contents as markdown",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/182288589?s=200&v=4",
+      "repository": "https://github.com/modelcontextprotocol/servers",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/fetch"
+      ],
+      "container": true
+    },
+    {
+      "id": "fibery",
+      "title": "Fibery",
+      "description": "Interact with your Fibery workspace.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/72027989?v=4",
+      "repository": "https://github.com/Fibery-inc/fibery-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "FIBERY_API_TOKEN",
+          "description": "e.g. your-api-token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "FIBERY_API_TOKEN",
+        "mcp/fibery"
+      ],
+      "container": true
+    },
+    {
+      "id": "filesystem",
+      "title": "Filesystem (Reference)",
+      "description": "Local filesystem access with configurable allowed paths",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/182288589?s=200&v=4",
+      "repository": "https://github.com/modelcontextprotocol/servers",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/filesystem"
+      ],
+      "container": true
+    },
+    {
+      "id": "firecrawl",
+      "title": "Firecrawl",
+      "description": "Configure the connection to Firecrawl",
+      "category": "search",
+      "icon": "https://avatars.githubusercontent.com/u/135057108?s=200&v=4",
+      "repository": "https://github.com/mendableai/firecrawl-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "FIRECRAWL_API_KEY",
+          "description": "e.g. YOUR-API-KEY"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "FIRECRAWL_API_KEY",
+        "mcp/firecrawl"
+      ],
+      "container": true
+    },
+    {
+      "id": "firewalla-mcp-server",
+      "title": "Firewalla",
+      "description": "Real-time network monitoring, security analysis, and firewall management through 28 specialized tools. Access security alerts, network flows, device status, and firewall rules directly from your Firewalla device.",
+      "category": "security",
+      "icon": "https://avatars.githubusercontent.com/u/16805913?s=200&v=4",
+      "repository": "https://github.com/amittell/firewalla-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "FIREWALLA_MSP_TOKEN",
+          "description": "e.g. your_msp_access_token_here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "FIREWALLA_MSP_TOKEN",
+        "mcp/firewalla-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "flexprice",
+      "title": "FlexPrice",
+      "description": "Configure the connection to Redis",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/168305045?v=4",
+      "repository": "https://github.com/flexprice/mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "API_KEY",
+          "description": "e.g. your_api_key_here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "API_KEY",
+        "mcp/flexprice"
+      ],
+      "container": true
+    },
+    {
+      "id": "gemini-api-docs",
+      "title": "Gemini API Docs",
+      "description": "Provides tools to search and retrieve Google Gemini API documentation.",
+      "category": "ai",
+      "icon": "https://www.google.com/s2/favicons?domain=gemini.google.com&sz=64",
+      "repository": "https://github.com/kgprs/gemini-api-docs-mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/gemini-api-docs-mcp"
+      ],
+      "container": true
+    },
+    {
+      "id": "git",
+      "title": "Git (Reference)",
+      "description": "Git repository interaction and automation.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/18133?s=200&v=4",
+      "repository": "https://github.com/modelcontextprotocol/servers",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/git"
+      ],
+      "container": true
+    },
+    {
+      "id": "github",
+      "title": "GitHub (Archived)",
+      "description": "Tools for interacting with the GitHub API, enabling file operations, repository management, search functionality, and more.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/182288589?s=200&v=4",
+      "repository": "https://github.com/modelcontextprotocol/servers",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "GITHUB_PERSONAL_ACCESS_TOKEN",
+          "description": "e.g. <YOUR_TOKEN>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "mcp/github"
+      ],
+      "container": true
+    },
+    {
+      "id": "github-chat",
+      "title": "GitHub Chat",
+      "description": "A Model Context Protocol (MCP) for analyzing and querying GitHub repositories using the GitHub Chat API.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/194295535?s=200&v=4",
+      "repository": "https://github.com/AsyncFuncAI/github-chat-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "GITHUB_API_KEY",
+          "description": "e.g. YOUR_GITHUB_API_KEY"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_API_KEY",
+        "mcp/github-chat"
+      ],
+      "container": true
+    },
+    {
+      "id": "github-official",
+      "title": "GitHub Official",
+      "description": "Official GitHub MCP Server, by GitHub. Provides seamless integration with GitHub APIs, enabling advanced automation and interaction capabilities for developers and tools.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/9919?s=200&v=4",
+      "repository": "https://github.com/github/github-mcp-server",
+      "registryName": "io.github.github/github-mcp-server",
+      "needs": [],
+      "transport": "http",
+      "url": "https://api.githubcopilot.com/mcp/"
+    },
+    {
+      "id": "gitlab",
+      "title": "GitLab (Archived)",
+      "description": "MCP Server for the GitLab API, enabling project management, file operations, and more.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/1086321?s=200&v=4",
+      "repository": "https://github.com/modelcontextprotocol/servers",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "GITLAB_PERSONAL_ACCESS_TOKEN",
+          "description": "e.g. <YOUR_TOKEN>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITLAB_PERSONAL_ACCESS_TOKEN",
+        "mcp/gitlab"
+      ],
+      "container": true
+    },
+    {
+      "id": "glif",
+      "title": "glif.app",
+      "description": "Configure the connection to glif.app",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/119348676?s=200&v=4",
+      "repository": "https://github.com/glifxyz/glif-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "GLIF_API_TOKEN",
+          "description": "e.g. your-token-here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GLIF_API_TOKEN",
+        "mcp/glif"
+      ],
+      "container": true
+    },
+    {
+      "id": "gmail-mcp",
+      "title": "Gmail",
+      "description": "A Model Context Protocol server for Gmail operations using IMAP/SMTP with app password authentication. Supports listing messages, searching emails, and sending messages. To create your app password, visit your Google Account settings under Security > App Passwords. Or visit the link https://myaccount.google.com/apppasswords",
+      "category": "communication",
+      "icon": "https://www.google.com/gmail/about/static/images/logo-gmail.png",
+      "repository": "https://github.com/Sallytion/Gmail-MCP",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "EMAIL_PASSWORD",
+          "description": "e.g. <your-gmail-app-password>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "EMAIL_PASSWORD",
+        "yashtekwani/gmail-mcp"
+      ],
+      "container": true
+    },
+    {
+      "id": "google-flights",
+      "title": "Google Flights",
+      "description": "Interact with Google Flights data to search for one-way, round-trip, and date range flight options between airports",
+      "category": "travel",
+      "icon": "https://www.google.com/s2/favicons?domain=google.com/travel/flights&sz=64",
+      "repository": "https://github.com/kgprs/Google-Flights-MCP-Server",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/google-flights"
+      ],
+      "container": true
+    },
+    {
+      "id": "google-maps",
+      "title": "Google Maps (Archived)",
+      "description": "Tools for interacting with the Google Maps API.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/182288589?s=200&v=4",
+      "repository": "https://github.com/modelcontextprotocol/servers",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "GOOGLE_MAPS_API_KEY",
+          "description": "e.g. <YOUR_API_KEY>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GOOGLE_MAPS_API_KEY",
+        "mcp/google-maps"
+      ],
+      "container": true
+    },
+    {
+      "id": "google-maps-comprehensive",
+      "title": "Google Maps Comprehensive",
+      "description": "Complete Google Maps integration with 8 tools including geocoding, places search, directions, elevation data, and more using Google's latest APIs.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/182288589?s=200&v=4",
+      "repository": "https://github.com/vicpeacock/google-maps-comprehensive-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "GOOGLE_MAPS_API_KEY",
+          "description": "e.g. <YOUR_GOOGLE_MAPS_API_KEY>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GOOGLE_MAPS_API_KEY",
+        "mcp/google-maps-comprehensive"
+      ],
+      "container": true
+    },
+    {
+      "id": "grafana",
+      "title": "Grafana",
+      "description": "Configure the connection to Grafana",
+      "category": "monitoring",
+      "icon": "https://avatars.githubusercontent.com/u/7195757?s=200&v=4",
+      "repository": "https://github.com/grafana/mcp-grafana",
+      "registryName": "io.github.grafana/mcp-grafana",
+      "needs": [
+        {
+          "name": "GRAFANA_URL",
+          "description": "URL to your Grafana instance"
+        }
+      ],
+      "transport": "http",
+      "url": "https://mcp.grafana.com/mcp"
+    },
+    {
+      "id": "gyazo",
+      "title": "Gyazo",
+      "description": "Official Model Context Protocol server for Gyazo.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/113151?v=4",
+      "repository": "https://github.com/nota/gyazo-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "GYAZO_ACCESS_TOKEN",
+          "description": "e.g. your-access-token-here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GYAZO_ACCESS_TOKEN",
+        "mcp/gyazo"
+      ],
+      "container": true
+    },
+    {
+      "id": "hackle",
+      "title": "Hackle",
+      "description": "Model Context Protocol server for Hackle.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/65485327?v=4",
+      "repository": "https://github.com/hackle-io/hackle-mcp",
+      "registryName": "io.github.hackle-io/hackle-mcp",
+      "needs": [],
+      "transport": "http",
+      "url": "https://mcp.hackle.io/mcp"
+    },
+    {
+      "id": "handwriting-ocr",
+      "title": "Handwriting OCR",
+      "description": "Model Context Protocol (MCP) Server for Handwriting OCR.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/202432073?s=200&v=4",
+      "repository": "https://github.com/Handwriting-OCR/handwriting-ocr-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "API_TOKEN",
+          "description": "e.g. your-api-token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "API_TOKEN",
+        "mcp/handwriting-ocr"
+      ],
+      "container": true
+    },
+    {
+      "id": "hdx",
+      "title": "Humanitarian Data Exchange",
+      "description": "HDX MCP Server provides access to humanitarian data through the Humanitarian Data Exchange (HDX) API - https://data.humdata.org/hapi. This server offers 33 specialized tools for retrieving humanitarian information including affected populations (refugees, IDPs, returnees), baseline demographics, food security indicators, conflict data, funding information, and operational presence across hundreds of countries and territories. See repository for instructions on getting a free HDX_APP_INDENTIFIER for access.",
+      "category": "search",
+      "icon": "https://raw.githubusercontent.com/dividor/hdx-mcp/main/assets/hdx_mcp_icon_transparent_512.png",
+      "repository": "https://github.com/dividor/hdx-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "HDX_APP_IDENTIFIER",
+          "description": "e.g. <HDX_APP_IDENTIFIER>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "HDX_APP_IDENTIFIER",
+        "mcp/hdx"
+      ],
+      "container": true
+    },
+    {
+      "id": "heroku",
+      "title": "Heroku",
+      "description": "Heroku Platform MCP Server using the Heroku CLI.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/23211?s=200&v=4",
+      "repository": "https://github.com/heroku/heroku-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "HEROKU_API_KEY",
+          "description": "e.g. <YOUR_HEROKU_AUTH_TOKEN>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "HEROKU_API_KEY",
+        "mcp/heroku"
+      ],
+      "container": true
+    },
+    {
+      "id": "hostinger-mcp-server",
+      "title": "Hostinger API",
+      "description": "Interact with Hostinger services over the Hostinger API.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/2630767?v=4",
+      "repository": "https://github.com/hostinger/api-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "APITOKEN",
+          "description": "e.g. 0ASvFDoYoloTOoLd6fSRKUx9ihuoejCVbTT6xpmob7adce6d"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "APITOKEN",
+        "mcp/api-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "hoverfly-mcp-server",
+      "title": "Hoverfly",
+      "description": "A Model Context Protocol (MCP) server that exposes Hoverfly as a programmable tool for AI assistants like Cursor, Claude, GitHub Copilot, and others supporting MCP. It enables dynamic mocking of third-party APIs to unblock development, automate testing, and simulate unavailable services during integration.",
+      "category": "productivity",
+      "icon": "https://raw.githubusercontent.com/kapishmalik/hoverfly-mcp-server/main/HoverflyMCPServerDocker.png",
+      "repository": "https://github.com/kapishmalik/hoverfly-mcp-server",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "kapish88/hoverfly-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "hummingbot-mcp",
+      "title": "Hummingbot: Trading Agent",
+      "description": "Hummingbot MCP is an open-source toolset that lets you control and monitor your Hummingbot trading bots through AI-powered commands and automation.",
+      "category": "finance",
+      "icon": "https://avatars.githubusercontent.com/u/88165212?v=4",
+      "repository": "https://github.com/hummingbot/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "HUMMINGBOT_API_USERNAME",
+          "description": "e.g. admin"
+        },
+        {
+          "name": "HUMMINGBOT_API_PASSWORD",
+          "description": "e.g. password"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "HUMMINGBOT_API_USERNAME",
+        "-e",
+        "HUMMINGBOT_API_PASSWORD",
+        "hummingbot/hummingbot-mcp"
+      ],
+      "container": true
+    },
+    {
+      "id": "husqvarna-automower",
+      "title": "Husqvarna Automower",
+      "description": "Configure the connection to Husqvarna Automower",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/17142631?v=4",
+      "repository": "https://github.com/jeanlaurent/mcp-husqvarna-automower",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "HUSQVARNA_CLIENT_SECRET",
+          "description": "e.g. YOUR_CLIENT_SECRET_HERE"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "HUSQVARNA_CLIENT_SECRET",
+        "mcp/husqvarna-automower"
+      ],
+      "container": true
+    },
+    {
+      "id": "hyperbrowser",
+      "title": "Hyperbrowser",
+      "description": "Configure the connection to Hyperbrowser",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/189776885?s=200&v=4",
+      "repository": "https://github.com/hyperbrowserai/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "HYPERBROWSER_API_KEY",
+          "description": "e.g. <app or user token>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "HYPERBROWSER_API_KEY",
+        "mcp/hyperbrowser"
+      ],
+      "container": true
+    },
+    {
+      "id": "hyperspell",
+      "title": "Hyperspell",
+      "description": "Configure the connection to Hyperspell",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/170754924?s=200&v=4",
+      "repository": "https://github.com/hyperspell/hyperspell-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "HYPERSPELL_TOKEN",
+          "description": "e.g. <app or user token>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "HYPERSPELL_TOKEN",
+        "mcp/hyperspell"
+      ],
+      "container": true
+    },
+    {
+      "id": "iaptic",
+      "title": "Iaptic",
+      "description": "Configure the connection to iaptic",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/72789805?s=200&v=4",
+      "repository": "https://github.com/iaptic/mcp-server-iaptic",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "IAPTIC_API_KEY",
+          "description": "e.g. your-api-key-here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "IAPTIC_API_KEY",
+        "mcp/iaptic"
+      ],
+      "container": true
+    },
+    {
+      "id": "inspektor-gadget",
+      "title": "Inspektor Gadget",
+      "description": "AI interface to troubleshoot and observe Kubernetes/Container workloads",
+      "category": "monitoring",
+      "icon": "https://avatars.githubusercontent.com/u/111520143?s=200&v=4",
+      "repository": "https://github.com/inspektor-gadget/ig-mcp-server",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/inspektor-gadget"
+      ],
+      "container": true
+    },
+    {
+      "id": "jetbrains",
+      "title": "JetBrains",
+      "description": "Configure the connection to the IDE",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/878437?s=200&v=4",
+      "repository": "https://github.com/GannaChernyshova/mcp-jetbrains",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/jetbrains"
+      ],
+      "container": true
+    },
+    {
+      "id": "kafka-schema-reg-mcp",
+      "title": "Kafka Schema Registry",
+      "description": "Comprehensive MCP server for Kafka Schema Registry operations. Features multi-registry support, schema contexts, migration tools, OAuth authentication, and 57+ tools for complete schema management. Supports SLIM_MODE for optimal performance.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/47359?s=200&v=4",
+      "repository": "https://github.com/aywengo/kafka-schema-reg-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "SCHEMA_REGISTRY_USER",
+          "description": "e.g. <REGISTRY_USERNAME>"
+        },
+        {
+          "name": "SCHEMA_REGISTRY_PASSWORD",
+          "description": "e.g. <REGISTRY_PASSWORD>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "SCHEMA_REGISTRY_USER",
+        "-e",
+        "SCHEMA_REGISTRY_PASSWORD",
+        "aywengo/kafka-schema-reg-mcp:stable"
+      ],
+      "container": true
+    },
+    {
+      "id": "kagisearch",
+      "title": "Kagi Search",
+      "description": "Configure the connection to Kagi search",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/92134518?s=200&v=4",
+      "repository": "https://github.com/kagisearch/kagimcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "KAGI_API_KEY",
+          "description": "e.g. YOUR_API_KEY_HERE"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "KAGI_API_KEY",
+        "mcp/kagisearch"
+      ],
+      "container": true
+    },
+    {
+      "id": "keboola-mcp",
+      "title": "Keboola",
+      "description": "Keboola MCP Server is an open-source bridge between your Keboola project and modern AI tools.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/1424387?v=4",
+      "repository": "https://github.com/keboola/mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "KBC_STORAGE_TOKEN",
+          "description": "e.g. your_keboola_storage_token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "KBC_STORAGE_TOKEN",
+        "mcp/keboola-mcp"
+      ],
+      "container": true
+    },
+    {
+      "id": "kgrag-mcp-server",
+      "title": "Knowledge Graph",
+      "description": "|-",
+      "category": "productivity",
+      "icon": "https://avatars.githubusercontent.com/u/6775950?v=4",
+      "repository": "https://github.com/gzileni/kgrag_mcp_server",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/kgrag_mcp_server"
+      ],
+      "container": true
+    },
+    {
+      "id": "kong",
+      "title": "Kong Konnect",
+      "description": "Configure the connection to Kong Konnect",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/962416?s=200&v=4",
+      "repository": "https://github.com/Kong/mcp-konnect",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "KONNECT_ACCESS_TOKEN",
+          "description": "e.g. kpat_api_key_here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "KONNECT_ACCESS_TOKEN",
+        "mcp/kong"
+      ],
+      "container": true
+    },
+    {
+      "id": "kubectl-mcp-server",
+      "title": "Kubectl",
+      "description": "MCP Server that enables AI assistants to interact with Kubernetes clusters via kubectl operations.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/13629408?s=200&v=4",
+      "repository": "https://github.com/rohitg00/kubectl-mcp-server",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/kubectl-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "kubernetes",
+      "title": "Kubernetes",
+      "description": "Connect to a Kubernetes cluster and manage it",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/13629408?s=200&v=4",
+      "repository": "https://github.com/Flux159/mcp-server-kubernetes",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/kubernetes"
+      ],
+      "container": true
+    },
+    {
+      "id": "lara",
+      "title": "Lara Translate",
+      "description": "Connect to Lara Translate API, enabling powerful translation capabilities with support for language detection and context-aware translations.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/10272138?s=200&v=4",
+      "repository": "https://github.com/translated/lara-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "LARA_ACCESS_KEY_SECRET",
+          "description": "e.g. YOUR_LARA_ACCESS_KEY_SECRET"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "LARA_ACCESS_KEY_SECRET",
+        "mcp/lara"
+      ],
+      "container": true
+    },
+    {
+      "id": "line",
+      "title": "LINE",
+      "description": "Configure the connection to LINE",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/13128444?v=4",
+      "repository": "https://github.com/line/line-bot-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "CHANNEL_ACCESS_TOKEN",
+          "description": "e.g. FILL_HERE"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "CHANNEL_ACCESS_TOKEN",
+        "mcp/line"
+      ],
+      "container": true
+    },
+    {
+      "id": "linkedin-mcp-server",
+      "title": "LinkedIn",
+      "description": "This MCP server allows Claude and other AI assistants to access your LinkedIn. Scrape LinkedIn profiles and companies, get your recommended jobs, and perform job searches. Set your li_at LinkedIn cookie to use this server.",
+      "category": "productivity",
+      "icon": "https://raw.githubusercontent.com/stickerdaniel/linkedin-mcp-server/main/assets/icons/linkedin.svg",
+      "repository": "https://github.com/stickerdaniel/linkedin-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "LINKEDIN_COOKIE",
+          "description": "e.g. AQETADxR7bsCqpZlAAACm-lNHKAAA..."
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "LINKEDIN_COOKIE",
+        "stickerdaniel/linkedin-mcp-server:1.4.0"
+      ],
+      "container": true
+    },
+    {
+      "id": "maestro-mcp-server",
+      "title": "Maestro",
+      "description": "A Model Context Protocol (MCP) server exposing Bitcoin blockchain data through the Maestro API platform. Provides tools to explore blocks, transactions, addresses, inscriptions, runes, and other metaprotocol data.",
+      "category": "monitoring",
+      "icon": "https://avatars.githubusercontent.com/u/84299480?s=200&v=4",
+      "repository": "https://github.com/maestro-org/maestro-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "API_KEY_API_KEY",
+          "description": "e.g. your-maestro-api-key"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "API_KEY_API_KEY",
+        "mcp/maestro-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "mapbox",
+      "title": "Mapbox",
+      "description": "Transform any AI agent into a geospatially-aware system with Mapbox APIs. Provides geocoding, POI search, routing, travel time matrices, isochrones, and static map generation.",
+      "category": "geospatial",
+      "icon": "https://avatars.githubusercontent.com/u/600935?s=200&v=4",
+      "repository": "https://github.com/mapbox/mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "MAPBOX_ACCESS_TOKEN",
+          "description": "e.g. YOUR_API_KEY_HERE"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "MAPBOX_ACCESS_TOKEN",
+        "mcp/mapbox"
+      ],
+      "container": true
+    },
+    {
+      "id": "mapbox-devkit",
+      "title": "Mapbox Developer",
+      "description": "Direct access to Mapbox developer APIs for AI assistants. Enables style management, token management, GeoJSON preview, and other developer tools for building Mapbox applications.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/600935?s=200&v=4",
+      "repository": "https://github.com/mapbox/mcp-devkit-server",
+      "registryName": "io.github.mapbox/mcp-devkit-server",
+      "needs": [
+        {
+          "name": "MAPBOX_ACCESS_TOKEN",
+          "description": "Your Mapbox access token. See docs for required scopes."
+        }
+      ],
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@mapbox/mcp-devkit-server"
+      ]
+    },
+    {
+      "id": "markdownify",
+      "title": "Markdownify",
+      "description": "A Model Context Protocol server for converting almost anything to Markdown.",
+      "category": "productivity",
+      "icon": "https://avatars.githubusercontent.com/u/182288589?s=200&v=4",
+      "repository": "https://github.com/zcaceres/markdownify-mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/markdownify"
+      ],
+      "container": true
+    },
+    {
+      "id": "markitdown",
+      "title": "Markitdown",
+      "description": "A lightweight MCP server for calling MarkItDown.",
+      "category": "productivity",
+      "icon": "https://avatars.githubusercontent.com/u/6154722?v=4",
+      "repository": "https://github.com/microsoft/markitdown",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/markitdown"
+      ],
+      "container": true
+    },
+    {
+      "id": "maven-tools-mcp",
+      "title": "Maven Tools",
+      "description": "JVM dependency intelligence for any build tool using Maven Central Repository. Includes Context7 integration for upgrade documentation and guidance.",
+      "category": "development",
+      "icon": "https://avatars.githubusercontent.com/u/18013523?s=200&v=4",
+      "repository": "https://github.com/arvindand/maven-tools-mcp",
+      "registryName": "io.github.arvindand/maven-tools-mcp",
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "arvindand/maven-tools-mcp:latest"
+      ],
+      "container": true
+    },
+    {
+      "id": "mcp-api-gateway",
+      "title": "API Gateway",
+      "description": "A universal MCP (Model Context Protocol) server to integrate any API with Claude Desktop using only Docker configurations.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/182288589?s=200&v=4",
+      "repository": "https://github.com/rflpazini/mcp-api-gateway",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/api-gateway"
+      ],
+      "container": true
+    },
+    {
+      "id": "mcp-code-interpreter",
+      "title": "Python Interpreter",
+      "description": "A Python-based execution tool that mimics a Jupyter notebook environment. It accepts code snippets, executes them, and maintains state across sessions — preserving variables, imports, and past results. Ideal for iterative development, debugging, or code execution.",
+      "category": "productivity",
+      "icon": "https://raw.githubusercontent.com/akuadane/mcp-code-interpreter/refs/heads/main/asset/logo.png",
+      "repository": "https://github.com/akuadane/mcp-code-interpreter",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/mcp-code-interpreter"
+      ],
+      "container": true
+    },
+    {
+      "id": "mcp-discord",
+      "title": "Discord",
+      "description": "Interact with the Discord platform.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/1965106?s=200&v=4",
+      "repository": "https://github.com/slimslenderslacks/mcp-discord",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "DISCORD_TOKEN",
+          "description": "e.g. YOUR_DISCORD_TOKEN"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "DISCORD_TOKEN",
+        "mcp/mcp-discord"
+      ],
+      "container": true
+    },
+    {
+      "id": "mcp-github-pr-issue-analyser",
+      "title": "GitHub PRs and Issues Analyser",
+      "description": "A Model Context Protocol (MCP) application for automated GitHub PR analysis and issue management. Enables LLMs to fetch PR details, analyse diffs, manage issues, and handle releases through a standardised interface",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/6002187?v=4",
+      "repository": "https://github.com/saidsef/mcp-github-pr-issue-analyser",
+      "registryName": "ai.smithery/saidsef-mcp-github-pr-issue-analyser",
+      "needs": [],
+      "transport": "http",
+      "url": "https://server.smithery.ai/@saidsef/mcp-github-pr-issue-analyser/mcp"
+    },
+    {
+      "id": "mcp-hackernews",
+      "title": "Hacker News",
+      "description": "A Model Context Protocol (MCP) server that provides access to Hacker News stories, comments, and user data, with support for search and content retrieval.",
+      "category": "news",
+      "icon": "https://news.ycombinator.com/y18.svg",
+      "repository": "https://github.com/AayushBahukhandi/hackernews-mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/hackernews-mcp"
+      ],
+      "container": true
+    },
+    {
+      "id": "mcp-python-refactoring",
+      "title": "Python Refactoring Assistant",
+      "description": "|",
+      "category": "development",
+      "icon": "https://www.google.com/s2/favicons?domain=python.org&sz=64",
+      "repository": "https://github.com/slamer59/mcp-python-refactoring",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/mcp-python-refactoring"
+      ],
+      "container": true
+    },
+    {
+      "id": "mcp-reddit",
+      "title": "Reddit",
+      "description": "This server provides AI agents with tools to fetch, post and search on Reddit.",
+      "category": "communication",
+      "icon": "https://www.google.com/s2/favicons?domain=reddit.com&sz=64",
+      "repository": "https://github.com/KrishnaRandad2023/mcp-reddit",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "REDDIT_CLIENT_ID",
+          "description": "e.g. <REDDIT_CLIENT_ID>"
+        },
+        {
+          "name": "REDDIT_CLIENT_SECRET",
+          "description": "e.g. <REDDIT_CLIENT_SECRET>"
+        },
+        {
+          "name": "REDDIT_PASSWORD",
+          "description": "e.g. <REDDIT_PASSWORD>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "REDDIT_CLIENT_ID",
+        "-e",
+        "REDDIT_CLIENT_SECRET",
+        "-e",
+        "REDDIT_PASSWORD",
+        "mcp/reddit-mcp"
+      ],
+      "container": true
+    },
+    {
+      "id": "memory",
+      "title": "Memory (Reference)",
+      "description": "Knowledge graph-based persistent memory system.",
+      "category": "ai",
+      "icon": "https://cdn.jsdelivr.net/npm/simple-icons@v7/icons/knowledgebase.svg",
+      "repository": "https://github.com/modelcontextprotocol/servers",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/memory"
+      ],
+      "container": true
+    },
+    {
+      "id": "metabase",
+      "title": "Metabase",
+      "description": "A comprehensive MCP server for Metabase with 70+ tools.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/10520629?s=48&v=4",
+      "repository": "https://github.com/easecloudio/mcp-metabase-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "METABASE_API_KEY",
+          "description": "e.g. metabase api key"
+        },
+        {
+          "name": "METABASE_PASSWORD",
+          "description": "e.g. yourpassword"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "METABASE_API_KEY",
+        "-e",
+        "METABASE_PASSWORD",
+        "mcp/metabase"
+      ],
+      "container": true
+    },
+    {
+      "id": "minecraft-wiki",
+      "title": "Minecraft Wiki",
+      "description": "Configure the connection to Minecraft Wiki Server",
+      "category": "games",
+      "icon": "https://cdn.jsdelivr.net/npm/simple-icons@v7/icons/minecraft.svg",
+      "repository": "https://github.com/L3-N0X/Minecraft-Wiki-MCP",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/minecraft-wiki"
+      ],
+      "container": true
+    },
+    {
+      "id": "mongodb",
+      "title": "MongoDB",
+      "description": "Configure the connection to MongoDB",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/11214950?v=4",
+      "repository": "https://github.com/mongodb-js/mongodb-mcp-server",
+      "registryName": "io.github.mongodb-js/mongodb-mcp-server",
+      "needs": [],
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mongodb-mcp-server"
+      ]
+    },
+    {
+      "id": "multiversx-mx",
+      "title": "MultiversX",
+      "description": "Configure the connection to MultiversX blockchain",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/114073177?s=200&v=4",
+      "repository": "https://github.com/multiversx/mx-mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/multiversx-mx"
+      ],
+      "container": true
+    },
+    {
+      "id": "n8n",
+      "title": "n8n",
+      "description": "Bridges n8n's workflow automation platform with AI models, providing access to 543 n8n nodes, workflow templates, and AI-capable automation tools.",
+      "category": "productivity",
+      "icon": "https://www.google.com/s2/favicons?domain=n8n.io&sz=64",
+      "repository": "https://github.com/czlonkowski/n8n-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "N8N_API_KEY",
+          "description": "e.g. n8n_api_****"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "N8N_API_KEY",
+        "-e",
+        "MCP_MODE",
+        "mcp/n8n"
+      ],
+      "container": true,
+      "env": {
+        "MCP_MODE": "stdio"
+      }
+    },
+    {
+      "id": "nasdaq-data-link",
+      "title": "Nasdaq Data Link",
+      "description": "MCP server to interact with the data feeds provided by the Nasdaq Data Link. Developed by the community and maintained by Stefano Amorelli.",
+      "category": "finance",
+      "icon": "https://raw.githubusercontent.com/stefanoamorelli/nasdaq-data-link-mcp/refs/heads/main/nasdaq-mcp-server-logo.png",
+      "repository": "https://github.com/stefanoamorelli/nasdaq-data-link-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "NASDAQ_DATA_LINK_API_KEY",
+          "description": "e.g. <YOUR_API_KEY>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "NASDAQ_DATA_LINK_API_KEY",
+        "mcp/nasdaq-data-link"
+      ],
+      "container": true
+    },
+    {
+      "id": "needle-mcp",
+      "title": "Needle",
+      "description": "Production-ready RAG service to search and retrieve data from your documents.",
+      "category": "search",
+      "icon": "https://avatars.githubusercontent.com/u/194782563?s=200&v=4",
+      "repository": "https://github.com/needle-ai/needle-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "NEEDLE_API_KEY",
+          "description": "e.g. your-needle-api-key-here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "NEEDLE_API_KEY",
+        "mcp/needle-mcp"
+      ],
+      "container": true
+    },
+    {
+      "id": "neo4j",
+      "title": "Neo4j",
+      "description": "Official MCP server for Neo4j. Interact with Neo4j using Cypher graph queries.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/201120?v=4",
+      "repository": "https://github.com/neo4j/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "NEO4J_PASSWORD",
+          "description": "e.g. password"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "NEO4J_PASSWORD",
+        "mcp/neo4j"
+      ],
+      "container": true
+    },
+    {
+      "id": "neo4j-cloud-aura-api",
+      "title": "Neo4j Cloud Aura Api",
+      "description": "Manage Neo4j Aura database instances through the Neo4j Aura API.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/916372?s=200&v=4",
+      "repository": "https://github.com/neo4j-contrib/mcp-neo4j",
+      "registryName": "io.github.neo4j-contrib/mcp-neo4j-aura-manager",
+      "needs": [
+        {
+          "name": "NEO4J_AURA_CLIENT_ID",
+          "description": "Neo4j Aura API Client ID"
+        },
+        {
+          "name": "NEO4J_AURA_CLIENT_SECRET",
+          "description": "Neo4j Aura API Client Secret"
+        }
+      ],
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-neo4j-aura-manager"
+      ]
+    },
+    {
+      "id": "neo4j-cypher",
+      "title": "Neo4j Cypher",
+      "description": "Interact with Neo4j using Cypher graph queries.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/916372?s=200&v=4",
+      "repository": "https://github.com/neo4j-contrib/mcp-neo4j",
+      "registryName": "io.github.neo4j-contrib/mcp-neo4j-aura-manager",
+      "needs": [
+        {
+          "name": "NEO4J_AURA_CLIENT_ID",
+          "description": "Neo4j Aura API Client ID"
+        },
+        {
+          "name": "NEO4J_AURA_CLIENT_SECRET",
+          "description": "Neo4j Aura API Client Secret"
+        }
+      ],
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-neo4j-aura-manager"
+      ]
+    },
+    {
+      "id": "neo4j-data-modeling",
+      "title": "Neo4j Data Modeling",
+      "description": "MCP server that assists in creating, validating and visualizing graph data models.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/916372?s=200&v=4",
+      "repository": "https://github.com/neo4j-contrib/mcp-neo4j",
+      "registryName": "io.github.neo4j-contrib/mcp-neo4j-aura-manager",
+      "needs": [
+        {
+          "name": "NEO4J_AURA_CLIENT_ID",
+          "description": "Neo4j Aura API Client ID"
+        },
+        {
+          "name": "NEO4J_AURA_CLIENT_SECRET",
+          "description": "Neo4j Aura API Client Secret"
+        }
+      ],
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-neo4j-aura-manager"
+      ]
+    },
+    {
+      "id": "neo4j-memory",
+      "title": "Neo4j Memory",
+      "description": "Provide persistent memory capabilities through Neo4j graph database integration.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/916372?s=200&v=4",
+      "repository": "https://github.com/neo4j-contrib/mcp-neo4j",
+      "registryName": "io.github.neo4j-contrib/mcp-neo4j-aura-manager",
+      "needs": [
+        {
+          "name": "NEO4J_AURA_CLIENT_ID",
+          "description": "Neo4j Aura API Client ID"
+        },
+        {
+          "name": "NEO4J_AURA_CLIENT_SECRET",
+          "description": "Neo4j Aura API Client Secret"
+        }
+      ],
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-neo4j-aura-manager"
+      ]
+    },
+    {
+      "id": "neon",
+      "title": "Neon",
+      "description": "MCP server for interacting with Neon Management API and databases.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/183852044?s=200&v=4",
+      "repository": "https://github.com/neondatabase-labs/mcp-server-neon",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "NEON_API_KEY",
+          "description": "e.g. YOUR_API_KEY_HERE"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "NEON_API_KEY",
+        "mcp/neon"
+      ],
+      "container": true
+    },
+    {
+      "id": "next-devtools-mcp",
+      "title": "Next.js DevTools",
+      "description": "next-devtools-mcp is a Model Context Protocol (MCP) server that provides Next.js development tools and utilities for AI coding assistants.",
+      "category": "development",
+      "icon": "https://avatars.githubusercontent.com/u/14985020?s=200&v=4",
+      "repository": "https://github.com/kgprs/next-devtools-mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/next-devtools-mcp"
+      ],
+      "container": true
+    },
+    {
+      "id": "node-code-sandbox",
+      "title": "Node.js Sandbox",
+      "description": "A Node.js–based Model Context Protocol server that spins up disposable Docker containers to execute arbitrary JavaScript.",
+      "category": "devops",
+      "icon": "https://cdn.jsdelivr.net/npm/simple-icons@v7/icons/nodedotjs.svg",
+      "repository": "https://github.com/alfonsograziano/node-code-sandbox-mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/node-code-sandbox"
+      ],
+      "container": true
+    },
+    {
+      "id": "notion",
+      "title": "Notion",
+      "description": "Official Notion MCP Server.",
+      "category": "productivity",
+      "icon": "https://avatars.githubusercontent.com/u/4792552?s=200&v=4",
+      "repository": "https://github.com/makenotion/notion-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "INTERNAL_INTEGRATION_TOKEN",
+          "description": "e.g. ntn_****"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "INTERNAL_INTEGRATION_TOKEN",
+        "-e",
+        "OPENAPI_MCP_HEADERS",
+        "mcp/notion"
+      ],
+      "container": true,
+      "env": {
+        "OPENAPI_MCP_HEADERS": "{\"Authorization\": \"Bearer $INTERNAL_INTEGRATION_TOKEN\", \"Notion-Version\": \"2022-06-28\"}"
+      }
+    },
+    {
+      "id": "novita",
+      "title": "Novita",
+      "description": "Seamless interaction with Novita AI platform resources.",
+      "category": "ai",
+      "icon": "https://avatars.githubusercontent.com/u/145963681?v=4",
+      "repository": "https://github.com/novitalabs/novita-mcp-server",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/novita"
+      ],
+      "container": true
+    },
+    {
+      "id": "npm-sentinel",
+      "title": "NPM Sentinel",
+      "description": "MCP server that enables intelligent NPM package analysis powered by AI.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/85507589?v=4",
+      "repository": "https://github.com/Nekzus/npm-sentinel-mcp",
+      "registryName": "ai.smithery/Nekzus-npm-sentinel-mcp",
+      "needs": [],
+      "transport": "http",
+      "url": "https://server.smithery.ai/@Nekzus/npm-sentinel-mcp/mcp"
+    },
+    {
+      "id": "obsidian",
+      "title": "Obsidian",
+      "description": "Configure the connection of [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) to Obsidian",
+      "category": "productivity",
+      "icon": "https://avatars.githubusercontent.com/u/65011256?s=200&v=4",
+      "repository": "https://github.com/docker/mcp-obsidian",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "OBSIDIAN_API_KEY",
+          "description": "e.g. YOUR_OBSIDIAN_API_KEY"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "OBSIDIAN_API_KEY",
+        "mcp/obsidian"
+      ],
+      "container": true
+    },
+    {
+      "id": "okta-mcp-fctr",
+      "title": "Okta",
+      "description": "Secure Okta identity and access management via Model Context Protocol (MCP). Access Okta users, groups, applications, logs, and policies through AI assistants with enterprise-grade security.",
+      "category": "ai",
+      "icon": "https://avatars.githubusercontent.com/u/198773578?v=4",
+      "repository": "https://github.com/fctr-id/okta-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "OKTA_API_TOKEN",
+          "description": "e.g. 00aBcDeFGhIjkLmNoPqRsTuVwxYz"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "OKTA_API_TOKEN",
+        "mcp/okta-mcp-fctr"
+      ],
+      "container": true
+    },
+    {
+      "id": "okta-mcp-server",
+      "title": "Okta",
+      "description": "|",
+      "category": "ai",
+      "icon": "https://avatars.githubusercontent.com/u/362460?v=4",
+      "repository": "https://github.com/okta/okta-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "OKTA_PRIVATE_KEY",
+          "description": "e.g. <YOUR_PRIVATE_KEY>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "OKTA_PRIVATE_KEY",
+        "mcp/okta-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "omi",
+      "title": "Omi",
+      "description": "A Model Context Protocol server for Omi interaction and automation. This server provides tools to read, search, and manipulate Memories and Conversations.",
+      "category": "ai",
+      "icon": "https://avatars.githubusercontent.com/u/162546372?v=4",
+      "repository": "https://github.com/BasedHardware/omi",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "OMI_API_KEY",
+          "description": "e.g. <OMI_API_KEY>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "OMI_API_KEY",
+        "mcp/omi"
+      ],
+      "container": true
+    },
+    {
+      "id": "onlyoffice-docspace",
+      "title": "ONLYOFFICE DocSpace",
+      "description": "ONLYOFFICE DocSpace is a room-based collaborative platform which allows organizing a clear file structure depending on users' needs or project goals.",
+      "category": "productivity",
+      "icon": "https://avatars.githubusercontent.com/u/1426033?v=4",
+      "repository": "https://github.com/ONLYOFFICE/docspace-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "DOCSPACE_API_KEY",
+          "description": "e.g. sk-a499e..."
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "DOCSPACE_API_KEY",
+        "mcp/onlyoffice-docspace"
+      ],
+      "container": true
+    },
+    {
+      "id": "openapi",
+      "title": "OpenAPI Toolkit",
+      "description": "Fetch, validate, and generate code or curl from any OpenAPI or Swagger spec - all from a single URL.",
+      "category": "productivity",
+      "icon": "https://raw.githubusercontent.com/lepoco/openapi.client/refs/heads/main/build/nuget.png",
+      "repository": "https://github.com/lepoco/openapi.client",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/openapi"
+      ],
+      "container": true
+    },
+    {
+      "id": "openapi-schema",
+      "title": "OpenAPI Schema",
+      "description": "Expose OpenAPI schema information to Large Language Models",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/16343502?s=200&v=4",
+      "repository": "https://github.com/slimslenderslacks/mcp-openapi-schema",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/openapi-schema"
+      ],
+      "container": true
+    },
+    {
+      "id": "openbnb-airbnb",
+      "title": "Airbnb Search",
+      "description": "MCP Server for searching Airbnb and get listing details.",
+      "category": "search",
+      "icon": "https://avatars.githubusercontent.com/u/202564951?v=4",
+      "repository": "https://github.com/openbnb-org/mcp-server-airbnb",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/openbnb-airbnb"
+      ],
+      "container": true
+    },
+    {
+      "id": "openweather",
+      "title": "Openweather",
+      "description": "|",
+      "category": "search",
+      "icon": "https://avatars.githubusercontent.com/u/1743227?s=200&v=4",
+      "repository": "https://github.com/mschneider82/mcp-openweather",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "OWM_API_KEY",
+          "description": "e.g. <OWM_API_KEY>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "OWM_API_KEY",
+        "mcp/openweather"
+      ],
+      "container": true
+    },
+    {
+      "id": "opik",
+      "title": "Opik",
+      "description": "Configure the connection to Opik",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/31487821?s=200&v=4",
+      "repository": "https://github.com/comet-ml/opik-mcp",
+      "registryName": "io.github.comet-ml/opik-mcp",
+      "needs": [
+        {
+          "name": "OPIK_API_KEY",
+          "description": "API key from your Opik workspace for authenticating SDK calls."
+        }
+      ],
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "opik-mcp"
+      ]
+    },
+    {
+      "id": "opine-mcp-server",
+      "title": "Opine",
+      "description": "|",
+      "category": "productivity",
+      "icon": "https://app.tryopine.com/_next/image?url=%2Flogomark.png&w=32&q=75",
+      "repository": "https://github.com/cody-docker/opine-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "OPINE_API_KEY",
+          "description": "e.g. <OPINE_API_KEY>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "OPINE_API_KEY",
+        "codygreen719/opine-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "oracle",
+      "title": "Oracle Database",
+      "description": "Connect to Oracle databases via MCP, providing secure read-only access with support for schema exploration, query execution, and metadata inspection",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/93792006?v=4",
+      "repository": "https://github.com/samscarrow/oracle-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "ORACLE_PASSWORD",
+          "description": "e.g. <ORACLE_PASSWORD>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "ORACLE_PASSWORD",
+        "mcp/oracle"
+      ],
+      "container": true
+    },
+    {
+      "id": "osp_marketing_tools",
+      "title": "OSP Marketing Tools",
+      "description": "A Model Context Protocol (MCP) server that empowers LLMs to use some of Open Srategy Partners' core writing and product marketing techniques.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/47528973?s=200&v=4",
+      "repository": "https://github.com/open-strategy-partners/osp_marketing_tools",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/osp_marketing_tools"
+      ],
+      "container": true
+    },
+    {
+      "id": "oxylabs",
+      "title": "Oxylabs",
+      "description": "A Model Context Protocol (MCP) server that enables AI assistants like Claude to seamlessly access web data through Oxylabs' powerful web scraping technology.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/43960873?s=200&v=4",
+      "repository": "https://github.com/oxylabs/oxylabs-mcp",
+      "registryName": "ai.smithery/oxylabs-oxylabs-mcp",
+      "needs": [],
+      "transport": "http",
+      "url": "https://server.smithery.ai/@oxylabs/oxylabs-mcp/mcp"
+    },
+    {
+      "id": "paper-search",
+      "title": "Paper Search",
+      "description": "MCP, CLI, Skills for searching and downloading academic papers from multiple sources like arXiv, PubMed, bioRxiv, etc.",
+      "category": "search",
+      "icon": "https://avatars.githubusercontent.com/u/197887910?v=4",
+      "repository": "https://github.com/openags/paper-search-mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/paper-search"
+      ],
+      "container": true
+    },
+    {
+      "id": "perplexity-ask",
+      "title": "Perplexity",
+      "description": "Connector for Perplexity API, to enable real-time, web-wide research.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/110299016?s=200&v=4",
+      "repository": "https://github.com/ppl-ai/modelcontextprotocol",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "PERPLEXITY_API_KEY",
+          "description": "e.g. YOUR_PERPLEXITY_API_KEY"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "PERPLEXITY_API_KEY",
+        "mcp/perplexity-ask"
+      ],
+      "container": true
+    },
+    {
+      "id": "pia",
+      "title": "Program Integrity Alliance",
+      "description": "|-",
+      "category": "ai",
+      "icon": "http://programintegrity.org/wp-content/uploads/2025/08/docker-mcp-pia-icon-512.png",
+      "repository": "https://github.com/Program-Integrity-Alliance/pia-mcp-local",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "PIA_API_KEY",
+          "description": "e.g. pia_5cFd9jtG3zbY4VpREewTP17uzdfnvMt8_3m778O2dv8"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "PIA_API_KEY",
+        "mcp/pia"
+      ],
+      "container": true
+    },
+    {
+      "id": "pica",
+      "title": "Pica",
+      "description": "Provides access to Pica's integrations, actions, execution, and code generation capabilities.",
+      "category": "productivity",
+      "icon": "https://assets.picaos.com/github/mcp.svg",
+      "repository": "https://github.com/picahq/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "PICA_SECRET",
+          "description": "e.g. sk_live_example_key_replace_with_your_actual_pica_secret"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "PICA_SECRET",
+        "mcp/pica-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "pinecone",
+      "title": "Pinecone Assistant",
+      "description": "Configure the connection to Pinecone Assistant",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/54333248?v=4",
+      "repository": "https://github.com/pinecone-io/assistant-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "PINECONE_API_KEY",
+          "description": "e.g. <YOUR_PINECONE_API_KEY_HERE>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "PINECONE_API_KEY",
+        "mcp/pinecone"
+      ],
+      "container": true
+    },
+    {
+      "id": "playwright",
+      "title": "Playwright",
+      "description": "Playwright MCP server.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/6154722?v=4",
+      "repository": "https://github.com/microsoft/playwright-mcp",
+      "registryName": "io.github.microsoft/playwright-mcp",
+      "needs": [],
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp"
+      ]
+    },
+    {
+      "id": "playwright-mcp-server",
+      "title": "ExecuteAutomation Playwright",
+      "description": "Playwright Model Context Protocol Server - Tool to automate Browsers and APIs in Claude Desktop, Cline, Cursor IDE and More \\U0001F50C",
+      "category": "ai",
+      "icon": "https://avatars.githubusercontent.com/u/10337030?v=4",
+      "repository": "https://github.com/executeautomation/mcp-playwright",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/mcp-playwright"
+      ],
+      "container": true
+    },
+    {
+      "id": "pluggedin-mcp-proxy",
+      "title": "Plugged.in Proxy",
+      "description": "A unified MCP proxy that aggregates multiple MCP servers into one interface, enabling seamless tool discovery and management across all your AI interactions. Manage all your MCP servers from a single connection point with RAG capabilities and real-time notifications.",
+      "category": "productivity",
+      "icon": "https://www.plugged.in/favicon.ico",
+      "repository": "https://github.com/VeriTeknik/pluggedin-mcp-proxy",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "PLUGGEDIN_API_KEY",
+          "description": "e.g. YOUR_PLUGGEDIN_API_KEY"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "PLUGGEDIN_API_KEY",
+        "mcp/pluggedin-mcp-proxy"
+      ],
+      "container": true
+    },
+    {
+      "id": "pomodash",
+      "title": "PomoDash",
+      "description": "Connect your AI assistant to PomoDash for seamless task and project management",
+      "category": "productivity",
+      "icon": "https://mindsnapz.de/wp-content/uploads/2025/09/PomoDash-Logo-512-x-512-px.png",
+      "repository": "https://github.com/dannyytv/pomodash-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "POMODASH_API_KEY",
+          "description": "e.g. pmk_abc123your_real_key_here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "POMODASH_API_KEY",
+        "mcp/pomodash"
+      ],
+      "container": true
+    },
+    {
+      "id": "postman",
+      "title": "Postman",
+      "description": "Postman's MCP server connects AI agents, assistants, and chatbots directly to your APIs on Postman. Use natural language to prompt AI to automate work across your Postman collections, environments, workspaces, and more.",
+      "category": "devops",
+      "icon": "https://voyager.postman.com/logo/postman-logo-icon-orange.svg",
+      "repository": "https://github.com/postmanlabs/postman-mcp-server",
+      "registryName": "com.postman/postman-mcp-server",
+      "needs": [
+        {
+          "name": "POSTMAN_API_KEY",
+          "description": "A valid Postman API key."
+        }
+      ],
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@postman/postman-mcp-server"
+      ]
+    },
+    {
+      "id": "pref-editor",
+      "title": "Pref Editor",
+      "description": "Pref Editor is a tool for viewing and editing Android app preferences during development.",
+      "category": "devops",
+      "icon": "https://raw.githubusercontent.com/charlesmuchene/pref-editor-mcp-server/refs/heads/main/logo.png",
+      "repository": "https://github.com/charlesmuchene/pref-editor-mcp-server",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/pref-editor"
+      ],
+      "container": true
+    },
+    {
+      "id": "prometheus",
+      "title": "Prometheus",
+      "description": "A Model Context Protocol (MCP) server that enables AI assistants to query and analyze Prometheus metrics through standardized interfaces. Connect to your Prometheus instance to retrieve metrics, perform queries, and gain insights into your system's performance and health.",
+      "category": "monitoring",
+      "icon": "https://upload.wikimedia.org/wikipedia/commons/3/38/Prometheus_software_logo.svg",
+      "repository": "https://github.com/pab1it0/prometheus-mcp-server",
+      "registryName": "io.github.pab1it0/prometheus-mcp-server",
+      "needs": [
+        {
+          "name": "PROMETHEUS_URL",
+          "description": "Prometheus server URL (e.g., http://localhost:9090)"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "PROMETHEUS_URL",
+        "ghcr.io/pab1it0/prometheus-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "proxmox",
+      "title": "Proxmox VE",
+      "description": "Manage Proxmox VE infrastructure including virtual machines, containers, storage, networking, firewall rules, high availability, and more",
+      "category": "devops",
+      "icon": "https://camo.githubusercontent.com/deb848279f14aca7545274d26d2c8b785fd6232d6864243f630457c7f43103f9/68747470733a2f2f7777772e70726f786d6f782e636f6d2f696d616765732f70726f786d6f782f50726f786d6f785f73796d626f6c5f7374616e646172645f6865782e706e67",
+      "repository": "https://github.com/GethosTheWalrus/proxmox-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "PROXMOX_TOKEN_VALUE",
+          "description": "e.g. xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+        },
+        {
+          "name": "PROXMOX_PASSWORD",
+          "description": "e.g. your-proxmox-password"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "PROXMOX_TOKEN_VALUE",
+        "-e",
+        "PROXMOX_PASSWORD",
+        "mcp/proxmox"
+      ],
+      "container": true
+    },
+    {
+      "id": "pulumi",
+      "title": "Pulumi",
+      "description": "Pulumi MCP server enables AI-powered coding assistants to help you codify cloud architectures and get diffs for infrastructure changes right in your development environment.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/21992475?s=200&v=4",
+      "repository": "https://github.com/pulumi/mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "PULUMI_ACCESS_TOKEN",
+          "description": "e.g. <PULUMI_ACCESS_TOKEN>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "PULUMI_ACCESS_TOKEN",
+        "mcp/pulumi"
+      ],
+      "container": true
+    },
+    {
+      "id": "puppeteer",
+      "title": "Puppeteer (Archived)",
+      "description": "Browser automation and web scraping using Puppeteer.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/6906516?s=200&v=4",
+      "repository": "https://github.com/modelcontextprotocol/servers",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/puppeteer"
+      ],
+      "container": true
+    },
+    {
+      "id": "quantconnect",
+      "title": "QuantConnect",
+      "description": "The QuantConnect MCP Server is a bridge for AIs (such as Claude and OpenAI o3 Pro) to interact with our cloud platform. When equipped with our MCP, the AI can perform tasks on your behalf through our API such as updating projects, writing strategies, backtesting, and deploying strategies to production live-trading.",
+      "category": "finance",
+      "icon": "https://avatars.githubusercontent.com/u/3912814?v=4",
+      "repository": "https://github.com/QuantConnect/mcp-server",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/quantconnect"
+      ],
+      "container": true
+    },
+    {
+      "id": "ramparts",
+      "title": "Ramparts Security Scanner",
+      "description": "A comprehensive security scanner for MCP servers with YARA rules and static analysis capabilities.",
+      "category": "security",
+      "icon": "https://raw.githubusercontent.com/getjavelin/ramparts/main/assets/ramparts.png",
+      "repository": "https://github.com/getjavelin/ramparts",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/ramparts"
+      ],
+      "container": true
+    },
+    {
+      "id": "razorpay",
+      "title": "Razorpay",
+      "description": "Configure the connection to Razorpay",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/7713209?v=4",
+      "repository": "https://github.com/razorpay/razorpay-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "RAZORPAY_KEY_SECRET",
+          "description": "e.g. your_razorpay_key_secret"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "RAZORPAY_KEY_SECRET",
+        "mcp/razorpay"
+      ],
+      "container": true
+    },
+    {
+      "id": "redis",
+      "title": "Redis",
+      "description": "Access to Redis database operations.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/1529926?v=4",
+      "repository": "https://github.com/redis/mcp-redis",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "REDIS_PWD",
+          "description": ""
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "REDIS_PWD",
+        "mcp/redis"
+      ],
+      "container": true
+    },
+    {
+      "id": "redis-cloud",
+      "title": "Redis Cloud",
+      "description": "MCP Server for Redis Cloud's API, allowing you to manage your Redis Cloud resources using natural language.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/1529926?s=200&v=4",
+      "repository": "https://github.com/redis/mcp-redis-cloud",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "SECRET_KEY",
+          "description": "e.g. <redis_cloud_api_secret_key>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "SECRET_KEY",
+        "mcp/redis-cloud"
+      ],
+      "container": true
+    },
+    {
+      "id": "ref",
+      "title": "Ref - Up-To-Date Docs",
+      "description": "Ref powerful search tool connets your coding tools with documentation context. It includes an up-to-date index of public documentation and it can ingest your private documentation (eg. GitHub repos, PDFs) as well.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/210568548?v=4",
+      "repository": "https://github.com/ref-tools/ref-tools-mcp",
+      "registryName": "ai.smithery/ref-tools-ref-tools-mcp",
+      "needs": [],
+      "transport": "http",
+      "url": "https://server.smithery.ai/@ref-tools/ref-tools-mcp/mcp"
+    },
+    {
+      "id": "render",
+      "title": "Render",
+      "description": "Interact with your Render resources via LLMs.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/114033652?v=4",
+      "repository": "https://github.com/render-oss/render-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "RENDER_API_KEY",
+          "description": "e.g. DUMMY"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "RENDER_API_KEY",
+        "mcp/render"
+      ],
+      "container": true
+    },
+    {
+      "id": "resend",
+      "title": "Resend",
+      "description": "Configure sender and reply email addresses",
+      "category": "communication",
+      "icon": "https://avatars.githubusercontent.com/u/109384852?s=200&v=4",
+      "repository": "https://github.com/slimslenderslacks/mcp-send-email",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "RESEND_API_KEY",
+          "description": "e.g. YOUR_RESEND_API_KEY"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "RESEND_API_KEY",
+        "mcp/resend"
+      ],
+      "container": true
+    },
+    {
+      "id": "risken",
+      "title": "RISKEN",
+      "description": "Configure the connection to Risken",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/88366693?s=200&v=4",
+      "repository": "https://github.com/ca-risken/risken-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "RISKEN_ACCESS_TOKEN",
+          "description": "e.g. your_access_token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "RISKEN_ACCESS_TOKEN",
+        "mcp/risken"
+      ],
+      "container": true
+    },
+    {
+      "id": "ros2",
+      "title": "WiseVision ROS2",
+      "description": "Python server implementing Model Context Protocol (MCP) for ROS2.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/85994630?v=4",
+      "repository": "https://github.com/wise-vision/mcp_server_ros_2",
+      "registryName": "io.github.wise-vision/mcp_server_ros_2",
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/ros2"
+      ],
+      "container": true
+    },
+    {
+      "id": "rust-mcp-filesystem",
+      "title": "Rust Filesystem",
+      "description": "|-",
+      "category": "productivity",
+      "icon": "https://raw.githubusercontent.com/rust-mcp-stack/rust-mcp-filesystem/refs/heads/main/docs/_media/rust-mcp-filesystem.png",
+      "repository": "https://github.com/rust-mcp-stack/rust-mcp-filesystem",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/rust-mcp-filesystem"
+      ],
+      "container": true
+    },
+    {
+      "id": "schemacrawler-ai",
+      "title": "SchemaCrawler AI",
+      "description": ">-",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/58572?v=4",
+      "repository": "https://github.com/schemacrawler/SchemaCrawler-AI",
+      "registryName": "io.github.schemacrawler/schemacrawler-ai",
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/schemacrawler-ai"
+      ],
+      "container": true
+    },
+    {
+      "id": "schogini-mcp-image-border",
+      "title": "Schogini Image Border",
+      "description": "This adds a border to an image and returns base64 encoded image",
+      "category": "productivity",
+      "icon": "https://d1yei2z3i6k35z.cloudfront.net/7429984/669a56c4ca69e_SCHOGINI-LOGO-ROUND.png",
+      "repository": "https://github.com/schogini/schogini_mcp_image_border",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/schogini_mcp_image_border"
+      ],
+      "container": true
+    },
+    {
+      "id": "scrapegraph",
+      "title": "ScrapeGraph",
+      "description": "ScapeGraph MCP Server.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/171017415?s=200&v=4",
+      "repository": "https://github.com/ScrapeGraphAI/scrapegraph-mcp",
+      "registryName": "ai.smithery/ScrapeGraphAI-scrapegraph-mcp",
+      "needs": [],
+      "transport": "http",
+      "url": "https://server.smithery.ai/@ScrapeGraphAI/scrapegraph-mcp/mcp"
+    },
+    {
+      "id": "scrapezy",
+      "title": "Scrapezy",
+      "description": "A Model Context Protocol server for Scrapezy that enables AI models to extract structured data from websites.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/196929482?s=200&v=4",
+      "repository": "https://github.com/Scrapezy/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "SCRAPEZY_API_KEY",
+          "description": "e.g. your_api_key"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "SCRAPEZY_API_KEY",
+        "mcp/scrapezy"
+      ],
+      "container": true
+    },
+    {
+      "id": "securenote-link-mcp-server",
+      "title": "Securenote.link",
+      "description": "SecureNote.link MCP Server - allowing AI agents to securely share sensitive information through end-to-end encrypted notes.",
+      "category": "communication",
+      "icon": "https://avatars.githubusercontent.com/u/5723207?v=5",
+      "repository": "https://github.com/jackalterman/securenote-link-MCP-server",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/securenote-link-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "sentry",
+      "title": "Sentry (Archived)",
+      "description": "A Model Context Protocol server for retrieving and analyzing issues from Sentry.io. This server provides tools to inspect error reports, stacktraces, and other debugging information from your Sentry account.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/1396951?s=200&v=4",
+      "repository": "https://github.com/modelcontextprotocol/servers",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "SENTRY_AUTH_TOKEN",
+          "description": "e.g. YOUR_SENTRY_TOKEN"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "SENTRY_AUTH_TOKEN",
+        "mcp/sentry"
+      ],
+      "container": true
+    },
+    {
+      "id": "sequa",
+      "title": "Sequa.AI",
+      "description": "Stop stitching context for Copilot and Cursor. With Sequa MCP, your AI tools know your entire codebase and docs out of the box.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/187640573?v=4",
+      "repository": "https://github.com/sequa-ai/sequa-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "API_KEY",
+          "description": "e.g. your_sequa_api_key"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "API_KEY",
+        "mcp/sequa"
+      ],
+      "container": true
+    },
+    {
+      "id": "sequentialthinking",
+      "title": "Sequential Thinking (Reference)",
+      "description": "Dynamic and reflective problem-solving through thought sequences.",
+      "category": "ai",
+      "icon": "https://avatars.githubusercontent.com/u/182288589?s=200&v=4",
+      "repository": "https://github.com/modelcontextprotocol/servers",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/sequentialthinking"
+      ],
+      "container": true
+    },
+    {
+      "id": "simplechecklist",
+      "title": "SimpleCheckList",
+      "description": "|",
+      "category": "productivity",
+      "icon": "https://raw.githubusercontent.com/DevMayur/SimpleCheckList/main/icon.png",
+      "repository": "https://github.com/DevMayur/SimpleCheckList",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mayurkakade/mcp-server:latest"
+      ],
+      "container": true
+    },
+    {
+      "id": "singlestore",
+      "title": "Singlestore",
+      "description": "MCP server for interacting with SingleStore Management API and services.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/79943160?v=4",
+      "repository": "https://github.com/singlestore-labs/mcp-server-singlestore",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "MCP_API_KEY",
+          "description": "e.g. <MCP_API_KEY>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "MCP_API_KEY",
+        "mcp/singlestore"
+      ],
+      "container": true
+    },
+    {
+      "id": "slack",
+      "title": "Slack (Archived)",
+      "description": "Interact with Slack Workspaces over the Slack API.",
+      "category": "communication",
+      "icon": "https://avatars.githubusercontent.com/u/6911160?s=200&v=4",
+      "repository": "https://github.com/modelcontextprotocol/servers",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "SLACK_BOT_TOKEN",
+          "description": "e.g. xoxb-your-bot-token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "SLACK_BOT_TOKEN",
+        "mcp/slack"
+      ],
+      "container": true
+    },
+    {
+      "id": "smartbear",
+      "title": "SmartBear",
+      "description": "MCP server for AI access to SmartBear tools, including BugSnag, Reflect, API Hub, PactFlow.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/1644671?s=200&v=4",
+      "repository": "https://github.com/SmartBear/smartbear-mcp",
+      "registryName": "com.smartbear/smartbear-mcp",
+      "needs": [],
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@smartbear/mcp"
+      ]
+    },
+    {
+      "id": "sonarqube",
+      "title": "SonarQube",
+      "description": "Interact with SonarQube Cloud, Server and Community build over the web API. Analyze code to identify quality and security issues.",
+      "category": "productivity",
+      "icon": "https://avatars.githubusercontent.com/u/545988?s=200&v=4",
+      "repository": "https://github.com/SonarSource/sonarqube-mcp-server",
+      "registryName": "io.github.SonarSource/sonarqube-mcp-server",
+      "needs": [
+        {
+          "name": "SONARQUBE_TOKEN",
+          "description": "Your SonarQube USER token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "SONARQUBE_TOKEN",
+        "mcp/sonarqube"
+      ],
+      "container": true
+    },
+    {
+      "id": "SQLite",
+      "title": "SQLite (Archived)",
+      "description": "Database interaction and business intelligence capabilities.",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/48680494?v=4",
+      "repository": "https://github.com/modelcontextprotocol/servers",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/sqlite"
+      ],
+      "container": true
+    },
+    {
+      "id": "sqlite-mcp-server",
+      "title": "SQLite",
+      "description": "The SQLite MCP Server transforms SQLite into a powerful, AI-ready database engine. It combines standard relational operations with advanced analytics, text and vector search, geospatial capabilities, and intelligent workflow automation. By layering business intelligence tools, semantic resources, and guided prompts on top of SQLite, it enables both developers and AI assistants to interact with data more naturally and effectively.",
+      "category": "data",
+      "icon": "https://adamic.tech/assets/images/logo.web",
+      "repository": "https://github.com/neverinfamous/sqlite-mcp-server",
+      "registryName": "io.github.neverinfamous/sqlite-mcp-server",
+      "needs": [],
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "sqlite-mcp-server-enhanced"
+      ]
+    },
+    {
+      "id": "stackgen",
+      "title": "StackGen",
+      "description": "AI-powered DevOps assistant for managing cloud infrastructure and applications.",
+      "category": "devops",
+      "icon": "https://docs.stackgen.com/img/logo.svg",
+      "repository": "https://github.com/stackgenhq/homebrew-stackgen",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "STACKGEN_TOKEN",
+          "description": "e.g. stackgen_abc123def456ghi789jkl012mno345pqr678stu901vwx"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "STACKGEN_TOKEN",
+        "ghcr.io/stackgenhq/stackgen"
+      ],
+      "container": true
+    },
+    {
+      "id": "stackhawk",
+      "title": "StackHawk",
+      "description": "A Model Context Protocol (MCP) server for integrating with StackHawk's security scanning platform. Provides security analytics, YAML configuration management, sensitive data/threat surface analysis, and anti-hallucination tools for LLMs.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/53230463?v=4",
+      "repository": "https://github.com/stackhawk/stackhawk-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "STACKHAWK_API_KEY",
+          "description": "e.g. <STACKHAWK_API_KEY>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "STACKHAWK_API_KEY",
+        "mcp/stackhawk"
+      ],
+      "container": true
+    },
+    {
+      "id": "stripe",
+      "title": "Stripe",
+      "description": "Interact with Stripe services over the Stripe API.",
+      "category": "finance",
+      "icon": "https://avatars.githubusercontent.com/u/856813?s=200&v=4",
+      "repository": "https://github.com/stripe/agent-toolkit",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "STRIPE_SECRET_KEY",
+          "description": "e.g. sk_STRIPE_SECRET_KEY"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "STRIPE_SECRET_KEY",
+        "mcp/stripe"
+      ],
+      "container": true
+    },
+    {
+      "id": "supadata",
+      "title": "Supadata",
+      "description": "Configure the connection to Supadata",
+      "category": "search",
+      "icon": "https://avatars.githubusercontent.com/u/194430777?s=48&v=4",
+      "repository": "https://github.com/supadata-ai/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "SUPADATA_API_KEY",
+          "description": "e.g. YOUR-API-KEY"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "SUPADATA_API_KEY",
+        "ghcr.io/supadata-ai/mcp"
+      ],
+      "container": true
+    },
+    {
+      "id": "suzieq",
+      "title": "Suzieq",
+      "description": "MCP Server to interact with a SuzieQ network observability instance via its REST API",
+      "category": "monitoring",
+      "icon": "https://avatars.githubusercontent.com/u/182288589?s=200&v=4",
+      "repository": "https://github.com/PovedaAqui/suzieq-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "SUZIEQ_API_KEY",
+          "description": "e.g. none"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "SUZIEQ_API_KEY",
+        "mcp/suzieq-mcp"
+      ],
+      "container": true
+    },
+    {
+      "id": "task-orchestrator",
+      "title": "Task Orchestrator",
+      "description": "Model Context Protocol (MCP) server for comprehensive task and feature management, providing AI assistants with a structured, context-efficient way to interact with project data.",
+      "category": "ai",
+      "icon": "https://avatars.githubusercontent.com/u/5747775?v=4",
+      "repository": "https://github.com/jpicklyk/task-orchestrator",
+      "registryName": "io.github.jpicklyk/task-orchestrator",
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "ghcr.io/jpicklyk/task-orchestrator"
+      ],
+      "container": true
+    },
+    {
+      "id": "tavily",
+      "title": "Tavily",
+      "description": "The Tavily MCP server provides seamless interaction with the tavily-search and tavily-extract tools, real-time web search capabilities through the tavily-search tool and Intelligent data extraction from web pages via the tavily-extract tool.",
+      "category": "search",
+      "icon": "https://avatars.githubusercontent.com/u/170207473?s=200&v=4",
+      "repository": "https://github.com/tavily-ai/tavily-mcp",
+      "registryName": "io.github.tavily-ai/tavily-mcp",
+      "needs": [
+        {
+          "name": "TAVILY_API_KEY",
+          "description": "Your Tavily API key from tavily.com"
+        }
+      ],
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "tavily-mcp"
+      ]
+    },
+    {
+      "id": "teamwork",
+      "title": "Teamwork",
+      "description": "Tools for Teamwork.com products.",
+      "category": "productivity",
+      "icon": "https://avatars.githubusercontent.com/u/4037476?v=4",
+      "repository": "https://github.com/teamwork/mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "TW_MCP_BEARER_TOKEN",
+          "description": "e.g. <TW_MCP_BEARER_TOKEN>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "TW_MCP_BEARER_TOKEN",
+        "mcp/teamwork"
+      ],
+      "container": true
+    },
+    {
+      "id": "tembo",
+      "title": "Tembo",
+      "description": "",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/113815875?s=200&v=4",
+      "repository": "https://github.com/tembo-io/mcp-server-tembo",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "TEMBO_API_KEY",
+          "description": "e.g. your-tembo-apikey-here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "TEMBO_API_KEY",
+        "mcp/tembo"
+      ],
+      "container": true
+    },
+    {
+      "id": "temporal",
+      "title": "Temporal",
+      "description": "Manage Temporal workflows, schedules, namespaces, task queues, and workflow execution history from MCP clients.",
+      "category": "devops",
+      "icon": "https://media.licdn.com/dms/image/v2/D560BAQG2k4od1BnFYw/company-logo_200_200/company-logo_200_200/0/1719946312124/temporal_technologies_logo?e=2147483647&v=beta&t=MFaqPo93l6qp8Dj0NrAdWyIk3izLBhN1i0WCBf-yVFs",
+      "repository": "https://github.com/GethosTheWalrus/temporal-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "TEMPORAL_API_KEY",
+          "description": "e.g. <TEMPORAL_API_KEY>"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "TEMPORAL_API_KEY",
+        "mcp/temporal"
+      ],
+      "container": true
+    },
+    {
+      "id": "terraform",
+      "title": "Hashicorp Terraform",
+      "description": "The Terraform MCP Server provides seamless integration with Terraform ecosystem, enabling advanced automation and interaction capabilities for Infrastructure as Code (IaC) development.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/761456?v=4",
+      "repository": "https://github.com/hashicorp/terraform-mcp-server",
+      "registryName": "io.github.hashicorp/terraform-mcp-server",
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "hashicorp/terraform-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "testkube",
+      "title": "Testkube",
+      "description": "The Testkube MCP Server exposes continuous testing capabilities (test orchestration, execution, troubleshooting and anlysis) to AI tools and workflows ",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/82541796?v=4",
+      "repository": "https://github.com/kubeshop/testkube",
+      "registryName": "io.github.kubeshop/testkube-mcp",
+      "needs": [
+        {
+          "name": "TK_ACCESS_TOKEN",
+          "description": "Testkube access token for authentication"
+        },
+        {
+          "name": "TK_ORG_ID",
+          "description": "Testkube organization ID"
+        },
+        {
+          "name": "TK_ENV_ID",
+          "description": "Testkube environment ID"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "TK_ACCESS_TOKEN",
+        "-e",
+        "TK_ORG_ID",
+        "-e",
+        "TK_ENV_ID",
+        "mcp/testkube"
+      ],
+      "container": true
+    },
+    {
+      "id": "text-to-graphql",
+      "title": "Text-to-GraphQL",
+      "description": "Transform natural language queries into GraphQL queries using an AI agent. Provides schema management, query validation, execution, and history tracking.",
+      "category": "devops",
+      "icon": "https://upload.wikimedia.org/wikipedia/commons/1/17/GraphQL_Logo.svg",
+      "repository": "https://github.com/Arize-ai/text-to-graphql-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "OPENAI_API_KEY",
+          "description": "e.g. sk-proj-xxx"
+        },
+        {
+          "name": "GRAPHQL_ENDPOINT",
+          "description": "e.g. https://your-graphql-api.com/graphql"
+        },
+        {
+          "name": "GRAPHQL_API_KEY",
+          "description": "e.g. your_api_key_here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "OPENAI_API_KEY",
+        "-e",
+        "GRAPHQL_ENDPOINT",
+        "-e",
+        "GRAPHQL_API_KEY",
+        "mcp/text-to-graphql"
+      ],
+      "container": true
+    },
+    {
+      "id": "thingsboard",
+      "title": "ThingsBoard",
+      "description": "|+",
+      "category": "monitoring",
+      "icon": "https://avatars.githubusercontent.com/u/24291394?v=4",
+      "repository": "https://github.com/thingsboard/thingsboard-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "THINGSBOARD_USERNAME",
+          "description": ""
+        },
+        {
+          "name": "THINGSBOARD_PASSWORD",
+          "description": ""
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "THINGSBOARD_USERNAME",
+        "-e",
+        "THINGSBOARD_PASSWORD",
+        "mcp/thingsboard"
+      ],
+      "container": true
+    },
+    {
+      "id": "tigris",
+      "title": "Tigris Data",
+      "description": "Tigris is a globally distributed S3-compatible object storage service that provides low latency anywhere in the world, enabling developers to store and access any amount of data for a wide range of use cases.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/95787860?v=4",
+      "repository": "https://github.com/tigrisdata/tigris-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "description": "e.g. tsec_xxxxxxxxxxxxxxxxxxx"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "AWS_SECRET_ACCESS_KEY",
+        "mcp/tigris"
+      ],
+      "container": true
+    },
+    {
+      "id": "time",
+      "title": "Time (Reference)",
+      "description": "Time and timezone conversion capabilities",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/182288589?s=200&v=4",
+      "repository": "https://github.com/modelcontextprotocol/servers",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/time"
+      ],
+      "container": true
+    },
+    {
+      "id": "triplewhale",
+      "title": "Triplewhale",
+      "description": "",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/79388081?s=200&v=4",
+      "repository": "https://github.com/Triple-Whale/mcp-server-triplewhale",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "TRIPLEWHALE_API_KEY",
+          "description": "e.g. your-triplewhale-api-key-here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "TRIPLEWHALE_API_KEY",
+        "mcp/triplewhale"
+      ],
+      "container": true
+    },
+    {
+      "id": "uberall",
+      "title": "Uberall",
+      "description": "Manage multi-location presence, including listings, reviews, and social posting, via uberall.",
+      "category": "ecommerce",
+      "icon": "https://uberall.com/media/favicon.svg",
+      "repository": "https://github.com/uberall/uberall-mcp-server",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "uberall/uberall-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "unreal-engine-mcp-server",
+      "title": "Unreal Engine",
+      "description": "A comprehensive Model Context Protocol (MCP) server that enables AI assistants to control Unreal Engine via Remote Control API. Built with TypeScript and designed for game development automation.",
+      "category": "games",
+      "icon": "https://raw.githubusercontent.com/ChiR24/Unreal_mcp/main/Public/icon.png",
+      "repository": "https://github.com/ChiR24/Unreal_mcp",
+      "registryName": "ai.smithery/ChiR24-unreal_mcp",
+      "needs": [],
+      "transport": "http",
+      "url": "https://server.smithery.ai/@ChiR24/unreal_mcp/mcp"
+    },
+    {
+      "id": "veyrax",
+      "title": "VeyraX",
+      "description": "VeyraX MCP is the only connection you need to access all your tools in any MCP-compatible environment.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/201344226?s=200&v=4",
+      "repository": "https://github.com/VeyraX/veyrax-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "VEYRAX_API_KEY",
+          "description": "e.g. your-veyrax-api-key-here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "VEYRAX_API_KEY",
+        "mcp/veyrax"
+      ],
+      "container": true
+    },
+    {
+      "id": "victoriametrics",
+      "title": "VictoriaMetrics",
+      "description": "Provides access to your VictoriaMetrics instance and seamless integration with VictoriaMetrics APIs and documentation. It can give you a comprehensive interface for monitoring, observability, and debugging tasks related to your VictoriaMetrics instances, enable advanced automation and interaction capabilities for engineers and tools.",
+      "category": "monitoring",
+      "icon": "https://github.com/user-attachments/assets/1c060750-370a-4440-b619-78b78c7abd7a",
+      "repository": "https://github.com/VictoriaMetrics-Community/mcp-victoriametrics",
+      "registryName": "io.github.VictoriaMetrics-Community/mcp-victoriametrics",
+      "needs": [
+        {
+          "name": "VM_INSTANCE_ENTRYPOINT",
+          "description": "URL to VictoriaMetrics instance (it should be root URL of vmsingle or vmselect), for example http://localhost:8428 or https://play.victoriametrics.com"
+        },
+        {
+          "name": "VM_INSTANCE_TYPE",
+          "description": "Type of VictoriaMetrics instance (single / cluster)"
+        },
+        {
+          "name": "VM_INSTANCE_BEARER_TOKEN",
+          "description": "Authentication token for VictoriaMetrics API"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "VM_INSTANCE_ENTRYPOINT",
+        "-e",
+        "VM_INSTANCE_TYPE",
+        "-e",
+        "VM_INSTANCE_BEARER_TOKEN",
+        "ghcr.io/victoriametrics-community/mcp-victoriametrics"
+      ],
+      "container": true
+    },
+    {
+      "id": "vizro",
+      "title": "Vizro",
+      "description": "provides tools and templates to create a functioning Vizro chart or dashboard step by step",
+      "category": "data",
+      "icon": "https://avatars.githubusercontent.com/u/4265350?v=4",
+      "repository": "https://github.com/mckinsey/vizro",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/vizro"
+      ],
+      "container": true
+    },
+    {
+      "id": "vuln-nist-mcp-server",
+      "title": "Vuln NIST",
+      "description": "This MCP server exposes tools to query the NVD/CVE REST API and return formatted text results suitable for LLM consumption via the MCP protocol. It includes automatic query chunking for large date ranges and parallel processing for improved performance.",
+      "category": "search",
+      "icon": "https://raw.githubusercontent.com/HaroldFinchIFT/vuln-nist-mcp-server/refs/heads/main/nvd_logo.png",
+      "repository": "https://github.com/HaroldFinchIFT/vuln-nist-mcp-server",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/vuln-nist-mcp-server"
+      ],
+      "container": true
+    },
+    {
+      "id": "webflow",
+      "title": "Webflow",
+      "description": "Model Context Protocol (MCP) server for the Webflow Data API.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/1229663?s=200&v=4",
+      "repository": "https://github.com/slimslenderslacks/mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "WEBFLOW_TOKEN",
+          "description": "e.g. your_api_token"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "WEBFLOW_TOKEN",
+        "mcp/webflow"
+      ],
+      "container": true
+    },
+    {
+      "id": "wikipedia-mcp",
+      "title": "Wikipedia",
+      "description": "A Model Context Protocol (MCP) server that retrieves information from Wikipedia to provide context to LLMs.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/56668?s=200&v=4",
+      "repository": "https://github.com/Rudra-ravi/wikipedia-mcp",
+      "registryName": null,
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/wikipedia-mcp"
+      ],
+      "container": true
+    },
+    {
+      "id": "wolfram-alpha",
+      "title": "WolframAlpha",
+      "description": "Connect your chat repl to wolfram alpha computational intelligence.",
+      "category": "devops",
+      "icon": "https://cdn.jsdelivr.net/npm/simple-icons@v7/icons/wolfram.svg",
+      "repository": "https://github.com/SecretiveShell/MCP-wolfram-alpha",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "WOLFRAM_API_KEY",
+          "description": "e.g. your-app-id"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "WOLFRAM_API_KEY",
+        "mcp/wolfram-alpha"
+      ],
+      "container": true
+    },
+    {
+      "id": "youtube_transcript",
+      "title": "YouTube Transcripts",
+      "description": "Retrieves transcripts for given YouTube video URLs",
+      "category": "search",
+      "icon": "https://avatars.githubusercontent.com/u/4052902?s=200&v=4",
+      "repository": "https://github.com/jkawamoto/mcp-youtube-transcript",
+      "registryName": "io.github.jkawamoto/mcp-youtube-transcript",
+      "needs": [],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "mcp/youtube-transcript"
+      ],
+      "container": true
+    },
+    {
+      "id": "zen",
+      "title": "Zen",
+      "description": "Bridges multiple AI models and CLIs, enabling orchestrated workflows across Claude Code, Gemini CLI, Codex CLI, and other AI development tools.",
+      "category": "devops",
+      "icon": "https://avatars.githubusercontent.com/u/26299964?s=200&v=4",
+      "repository": "https://github.com/beehiveinnovations/zen-mcp-server",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "OPENROUTER_API_KEY",
+          "description": "e.g. sk-or-v1-****"
+        },
+        {
+          "name": "GEMINI_API_KEY",
+          "description": "e.g. AIza****"
+        },
+        {
+          "name": "OPENAI_API_KEY",
+          "description": "e.g. sk-proj-****"
+        },
+        {
+          "name": "XAI_API_KEY",
+          "description": "e.g. xai-****"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "OPENROUTER_API_KEY",
+        "-e",
+        "GEMINI_API_KEY",
+        "-e",
+        "OPENAI_API_KEY",
+        "-e",
+        "XAI_API_KEY",
+        "mcp/zen"
+      ],
+      "container": true
+    },
+    {
+      "id": "zerodha-kite",
+      "title": "Zerodha Kite Connect",
+      "description": "MCP server for Zerodha Kite Connect API - India's leading stock broker trading platform. Execute trades, manage portfolios, and access real-time market data for NSE, BSE, and other Indian exchanges.",
+      "category": "finance",
+      "icon": "https://avatars.githubusercontent.com/u/34680622?s=300&v=4",
+      "repository": "https://github.com/anshuljain90/zerodha-kite-mcp",
+      "registryName": null,
+      "needs": [
+        {
+          "name": "KITE_API_SECRET",
+          "description": "e.g. your_api_secret_here"
+        }
+      ],
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "KITE_API_SECRET",
+        "mcp/zerodha-kite"
+      ],
+      "container": true
+    },
+    {
+      "id": "zscaler-mcp-server",
+      "title": "Zscaler",
+      "description": ">-",
+      "category": "security",
+      "icon": "https://www.google.com/s2/favicons?domain=zscaler.com&sz=64",
+      "repository": "https://github.com/zscaler/zscaler-mcp-server",
+      "registryName": "io.github.zscaler/zscaler-mcp-server",
+      "needs": [
+        {
+          "name": "ZSCALER_CLIENT_ID",
+          "description": "Zscaler OneAPI Client ID from ZIdentity console."
+        },
+        {
+          "name": "ZSCALER_CLIENT_SECRET",
+          "description": "Zscaler OneAPI Client Secret from ZIdentity console."
+        },
+        {
+          "name": "ZSCALER_CUSTOMER_ID",
+          "description": "Zscaler Customer ID from ZIdentity console."
+        },
+        {
+          "name": "ZSCALER_VANITY_DOMAIN",
+          "description": "Zscaler vanity domain (e.g. mycompany.zscloud.net)."
+        }
+      ],
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "zscaler-mcp"
+      ]
+    }
+  ]
+}

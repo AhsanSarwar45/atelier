@@ -5,6 +5,7 @@ use super::agent_files;
 use super::browser::{self, BrowserCapture, BrowserRecipe};
 use super::extensions;
 use super::external::{self, ProviderHold};
+use super::mcp_catalogue;
 use super::mcp_servers;
 use super::media;
 use super::profiles::Profiles;
@@ -1300,6 +1301,31 @@ impl WorkbenchRegistry {
                 ];
                 self.claude_plugin_cli(command, words, extensions::QUICK_CLI)
                     .await
+            }
+            CommandKind::McpCatalogue => {
+                let search = Self::maybe(command, "search");
+                let listing = mcp_catalogue::browse(search).await;
+                serde_json::to_value(listing).map_err(|e| e.to_string())
+            }
+            CommandKind::McpAddFromCatalogue => {
+                let brand = Self::field(command, "brand")?;
+                let scope = Self::settings_scope(command)?;
+                let source = Self::mcp_source(command)?;
+                let entry: mcp_catalogue::Entry =
+                    serde_json::from_value(command.at("entry").clone())
+                        .map_err(|e| format!("entry is not a catalogue entry: {e}"))?;
+                let id = Self::maybe(command, "id").unwrap_or(&entry.id).to_string();
+                let supplied = command
+                    .at("env")
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default();
+                let config = mcp_catalogue::config(brand, &entry, &supplied);
+                let chosen = Self::maybe(command, "profileId");
+                let account = self.mcp_account(brand, chosen);
+                let listing = mcp_servers::add(brand, &scope, &account, source, &id, &config)?;
+                serde_json::to_value(self.with_elsewhere(brand, &scope, chosen, listing))
+                    .map_err(|e| e.to_string())
             }
             CommandKind::McpList => {
                 let brand = Self::field(command, "brand")?;
