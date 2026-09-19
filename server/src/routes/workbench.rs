@@ -2347,6 +2347,10 @@ pub(crate) async fn snapshot(database: &ChatDb, session_id: &str) -> Result<Valu
     view["lastSeq"] = json!(snapshot.page.newest_seq);
     view["historyCursor"] = json!(snapshot.page.cursor);
     view["hasOlder"] = json!(snapshot.page.has_older);
+    // What the chat is holding is read from where it is kept rather than
+    // folded out of the history, so a chat whose oldest events have scrolled
+    // out of the loaded window still opens on every waiting message.
+    view["held"] = json!(database.held_messages(session_id.to_string()).await?);
     Ok(view)
 }
 

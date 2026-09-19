@@ -146,6 +146,133 @@ async fn reconcile_session(
     super::status::reconcile(database, session_id, None).await
 }
 
+/// The command one held message becomes when it is finally sent.
+fn held_as_prompt(session_id: &str, held: &Value) -> Result<Command, String> {
+    let mut fields = serde_json::Map::new();
+    fields.insert("sessionId".into(), json!(session_id));
+    fields.insert("text".into(), held["text"].clone());
+    fields.insert("images".into(), held["images"].clone());
+    if held["parts"].is_array() {
+        fields.insert("parts".into(), held["parts"].clone());
+    }
+    serde_json::from_value(Value::Object({
+        let mut map = fields;
+        map.insert("type".into(), json!("prompt.send"));
+        map
+    }))
+    .map_err(|error| error.to_string())
+}
+
+/// Note that a held message has left the queue, one way or the other.
+async fn note_released(
+    database: &ChatDb,
+    session_id: &str,
+    held_id: &str,
+    reason: &str,
+) -> Result<(), String> {
+    let event = serde_json::from_value(json!({
+        "type":"prompt.released", "sessionId":session_id, "seq":0,
+        "at":chrono::Utc::now().to_rfc3339(), "heldId":held_id, "reason":reason
+    }))
+    .map_err(|error| error.to_string())?;
+    database.append(event).await.map(|_| ())
+}
+
+/**
+ * Send a message the chat was holding, and put it back if the send is refused.
+ *
+ * The reader wrote this line and chose to wait with it. A provider that will
+ * not take it — the steering call a brand does not answer, a driver that died
+ * between the claim and the send — must leave it exactly where it was, still
+ * held and still sendable, rather than swallowing it (bw-r54j.3).
+ */
+async fn send_held(
+    database: &ChatDb,
+    drivers: &RwLock<HashMap<String, Driver>>,
+    session_id: &str,
+    held: &Value,
+) -> Result<Value, String> {
+    let held_id = held["id"].as_str().unwrap_or_default().to_string();
+    let prompt = held_as_prompt(session_id, held)?;
+    let result = {
+        let live = drivers.read().await;
+        let driver = live
+            .get(session_id)
+            .filter(|driver| !driver.is_closed())
+            .cloned();
+        drop(live);
+        match driver {
+            Some(driver) => {
+                let (reply, answer) = oneshot::channel();
+                match driver.send(DriverRequest::Command(prompt, reply)) {
+                    Ok(()) => answer
+                        .await
+                        .map_err(|_| "the agent stopped before taking the message".to_string())
+                        .and_then(|result| result),
+                    Err(_) => Err("the agent is no longer attached to this chat".to_string()),
+                }
+            }
+            None => Err("this chat has no agent attached to send to".to_string()),
+        }
+    };
+    match result {
+        Ok(value) => {
+            database.forget_held(held_id.clone()).await?;
+            note_released(database, session_id, &held_id, "sent").await?;
+            Ok(value)
+        }
+        Err(error) => {
+            database.release_held(held_id).await?;
+            Err(error)
+        }
+    }
+}
+
+/**
+ * Send the oldest held message the moment the chat has nothing in flight.
+ *
+ * Called after every reconciliation of an attached chat, which is what makes
+ * this provider-neutral: the queue drains on the settled status every brand
+ * already reports, not on any one adapter's idea of a finished turn. One
+ * message per settle, in the order they were held.
+ */
+async fn drain_held(
+    database: &ChatDb,
+    drivers: &RwLock<HashMap<String, Driver>>,
+    session_id: &str,
+) {
+    let attached = drivers
+        .read()
+        .await
+        .get(session_id)
+        .is_some_and(|driver| !driver.is_closed());
+    if !attached {
+        return;
+    }
+    let Ok(Some(session)) = database.get_session(session_id.to_string()).await else {
+        return;
+    };
+    // Ready, and nothing else. A chat that stopped, failed or went to sleep
+    // has not finished a turn — it lost one — and pushing the reader's next
+    // message into that is the opposite of holding it for them. Those wait
+    // where they are until the reader sends them by hand.
+    if session.state != "idle" {
+        return;
+    }
+    let Ok(Some(held)) = database.take_held(session_id.to_string(), None).await else {
+        return;
+    };
+    if let Err(error) = send_held(database, drivers, session_id, &held).await {
+        if let Ok(event) = serde_json::from_value(json!({
+            "type":"error", "sessionId":session_id, "seq":0,
+            "at":chrono::Utc::now().to_rfc3339(), "fatal":false,
+            "message":format!("The waiting message could not be sent, and is still waiting: {error}")
+        })) {
+            let _ = database.append(event).await;
+        }
+    }
+}
+
 struct LaunchGuard(Arc<std::sync::atomic::AtomicUsize>);
 impl Drop for LaunchGuard {
     fn drop(&mut self) {
@@ -286,6 +413,7 @@ impl WorkbenchRegistry {
                         // registered. Attached runtimes alone own event refreshes.
                         if live.read().await.contains_key(&id) {
                             let _ = reconcile_session(&db, &live, &starts, &id).await;
+                            drain_held(&db, &live, &id).await;
                         }
                     } else if let Ok(active) = db.active_session_ids().await {
                         // The chats mid-turn and the ones with a runtime
@@ -300,6 +428,7 @@ impl WorkbenchRegistry {
                         }
                         for id in due {
                             let _ = reconcile_session(&db, &live, &starts, &id).await;
+                            drain_held(&db, &live, &id).await;
                         }
                     }
                 }
@@ -1628,6 +1757,98 @@ impl WorkbenchRegistry {
                 self.prepare_unattached(command, false).await?;
                 self.launch(command).await
             }
+            // Hold a message rather than interrupt the turn with it.
+            //
+            // Nothing here is brand-aware, and that is the point: what the
+            // reader wrote is kept by the app, and every provider gets it as
+            // the ordinary prompt it would have got anyway, once its turn is
+            // over (bw-r54j.1).
+            CommandKind::PromptHold => {
+                let session_id = Self::field(command, "sessionId")?;
+                let text = command.at("text").as_str().unwrap_or_default().to_string();
+                let images = match command.at("images") {
+                    Value::Array(images) => Value::Array(images.clone()),
+                    _ => json!([]),
+                };
+                if text.trim().is_empty() && images.as_array().is_some_and(Vec::is_empty) {
+                    return Err("there is nothing in the message to hold".into());
+                }
+                if self.database.get_session(session_id.to_string()).await?.is_none() {
+                    return Err(format!("no session {session_id}"));
+                }
+                let parts = match command.at("parts") {
+                    Value::Array(parts) => Some(Value::Array(parts.clone())),
+                    _ => None,
+                };
+                let held = self
+                    .database
+                    .hold_message(
+                        session_id.to_string(),
+                        format!("held-{}", uuid::Uuid::new_v4()),
+                        text,
+                        images,
+                        parts,
+                        chrono::Utc::now()
+                            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                    )
+                    .await?;
+                self.database
+                    .append(
+                        serde_json::from_value(json!({
+                            "type":"prompt.held", "sessionId":session_id, "seq":0,
+                            "at":chrono::Utc::now().to_rfc3339(), "held":held
+                        }))
+                        .map_err(|error| error.to_string())?,
+                    )
+                    .await?;
+                Ok(json!({"ok":true,"held":held}))
+            }
+            CommandKind::PromptDrop => {
+                let session_id = Self::field(command, "sessionId")?;
+                let held_id = Self::field(command, "heldId")?;
+                let dropped = self
+                    .database
+                    .drop_held(session_id.to_string(), held_id.to_string())
+                    .await?;
+                if dropped.is_none() {
+                    return Err("that message is no longer waiting".into());
+                }
+                note_released(&self.database, session_id, held_id, "dropped").await?;
+                Ok(json!({"ok":true}))
+            }
+            // Push a waiting message through now, into the running turn.
+            //
+            // The same road an unheld message takes: every brand's driver
+            // decides for itself whether a turn is open, and steers or prompts
+            // accordingly. Nothing here knows which it will be.
+            CommandKind::PromptPush => {
+                let session_id = Self::field(command, "sessionId")?;
+                let held_id = Self::maybe(command, "heldId").map(str::to_string);
+                let held = self
+                    .database
+                    .take_held(session_id.to_string(), held_id)
+                    .await?
+                    .ok_or_else(|| "that message is no longer waiting".to_string())?;
+                // A chat can be held for one that went to sleep in the
+                // meantime, and pushing is the reader asking for it now: the
+                // first prompt wakes its provider here exactly as an unheld
+                // one does.
+                if !self.has_driver(session_id).await {
+                    let attached = async {
+                        self.prepare_unattached(command, command.at("takeover") == &json!(true))
+                            .await?;
+                        self.launch(command).await
+                    }
+                    .await;
+                    if let Err(error) = attached {
+                        self.database
+                            .release_held(held["id"].as_str().unwrap_or_default().to_string())
+                            .await?;
+                        return Err(error);
+                    }
+                }
+                send_held(&self.database, &self.drivers, session_id, &held).await
+            }
             CommandKind::SessionStop
                 if !self.has_driver(Self::field(command, "sessionId")?).await =>
             {
@@ -1767,6 +1988,236 @@ mod tests {
             kind,
             fields: fields.as_object().cloned().unwrap_or_else(Map::new),
         }
+    }
+
+    /// A driver that takes nothing, for the turn a provider will not accept.
+    struct RefusingDriver;
+    impl ProviderDriver for RefusingDriver {
+        fn brand(&self) -> &'static str {
+            "claude"
+        }
+        fn command<'a>(&'a mut self, _: &'a Command) -> DriverFuture<'a> {
+            Box::pin(async { Err("this agent does not take steering".to_string()) })
+        }
+        fn close<'a>(&'a mut self) -> DriverFuture<'a> {
+            Box::pin(async { Ok(json!({"ok":true})) })
+        }
+    }
+
+    struct OneDriverFactory {
+        driver: std::sync::Mutex<Option<Box<dyn ProviderDriver>>>,
+    }
+    impl SessionFactory for OneDriverFactory {
+        fn launch<'a>(&'a self, _: ChatDb, _: &'a Command) -> LaunchFuture<'a> {
+            let driver = self.driver.lock().unwrap().take();
+            Box::pin(async move {
+                Ok(LaunchedSession {
+                    session_id: "session-1".into(),
+                    reply: json!({"id":"session-1","brand":"claude"}),
+                    driver,
+                })
+            })
+        }
+    }
+
+    fn a_chat(state: &str) -> crate::workbench::store::Session {
+        crate::workbench::store::Session {
+            id: "session-1".into(),
+            brand: "claude".into(),
+            external_id: None,
+            project_id: "project".into(),
+            project_path: "/project".into(),
+            cwd: "/project".into(),
+            model: None,
+            permission_mode: "default".into(),
+            effort: None,
+            collaboration_mode: None,
+            profile: None,
+            title: Some("Working".into()),
+            state: state.into(),
+            origin: "app".into(),
+            created_at: "2026-09-19T00:00:00Z".into(),
+            last_active_at: "2026-09-19T00:00:00Z".into(),
+            last_spoke_at: None,
+            begun_by: Some("person".into()),
+        }
+    }
+
+    fn paths(root: &Path) -> RegistryPaths {
+        RegistryPaths {
+            home: root.join("home"),
+            claude_config: root.join("claude"),
+            codex_home: root.join("codex"),
+            profiles: root.join("profiles"),
+            media: root.join("media"),
+        }
+    }
+
+    /// A driver that writes down every message it was handed, in order.
+    struct RecordingDriver {
+        sent: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+    impl ProviderDriver for RecordingDriver {
+        fn brand(&self) -> &'static str {
+            "claude"
+        }
+        fn command<'a>(&'a mut self, command: &'a Command) -> DriverFuture<'a> {
+            if command.kind == CommandKind::PromptSend {
+                self.sent
+                    .lock()
+                    .unwrap()
+                    .push(command.at("text").as_str().unwrap_or_default().to_string());
+            }
+            Box::pin(async { Ok(json!({"ok":true,"messageId":"message-1"})) })
+        }
+        fn close<'a>(&'a mut self) -> DriverFuture<'a> {
+            Box::pin(async { Ok(json!({"ok":true})) })
+        }
+    }
+
+    async fn say_state(database: &ChatDb, state: &str) {
+        database
+            .append(
+                serde_json::from_value(json!({
+                    "type":"session.state","sessionId":"session-1","seq":0,
+                    "at":"2026-09-19T00:00:02Z","state":state,"label":state
+                }))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+
+    /// Wait for the queue to empty, or give up so the test fails on the
+    /// assertion that follows rather than on a timeout.
+    async fn until_nothing_waits(database: &ChatDb) {
+        for _ in 0..100 {
+            if database
+                .held_messages("session-1".into())
+                .await
+                .unwrap()
+                .is_empty()
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// bw-r54j.1, bw-r54j.2: a message written into a working chat waits, is
+    /// still waiting after the server is restarted, and goes out by itself —
+    /// once each, oldest first — as soon as the chat says it has settled.
+    #[tokio::test]
+    async fn a_held_message_outlives_a_restart_and_sends_itself_when_the_turn_ends() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("workbench.db");
+        let database = ChatDb::open(&file).unwrap();
+        let registry = WorkbenchRegistry::new(
+            database.clone(),
+            paths(root.path()),
+            Arc::new(FakeFactory { calls: Arc::new(AtomicUsize::new(0)) }),
+        );
+        database.create_session(a_chat("thinking")).await.unwrap();
+        registry
+            .execute(&command(CommandKind::SessionStart, json!({"sessionId":"session-1","brand":"claude"})))
+            .await
+            .unwrap();
+        say_state(&database, "thinking").await;
+
+        for text in ["first thing", "second thing"] {
+            registry
+                .execute(&command(CommandKind::PromptHold, json!({"sessionId":"session-1","text":text})))
+                .await
+                .unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let waiting = database.held_messages("session-1".into()).await.unwrap();
+        assert_eq!(waiting.len(), 2, "a working chat is not interrupted: {waiting:?}");
+        assert_eq!(waiting[0]["text"], json!("first thing"));
+
+        // The reader's own words, kept where a restart cannot lose them.
+        drop(registry);
+        drop(database);
+        let database = ChatDb::open(&file).unwrap();
+        assert_eq!(
+            database.held_messages("session-1".into()).await.unwrap().len(),
+            2,
+            "a restarted server still holds what was written"
+        );
+
+        let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let registry = WorkbenchRegistry::new(
+            database.clone(),
+            paths(root.path()),
+            Arc::new(OneDriverFactory {
+                driver: std::sync::Mutex::new(Some(Box::new(RecordingDriver { sent: sent.clone() }))),
+            }),
+        );
+        registry
+            .execute(&command(CommandKind::SessionStart, json!({"sessionId":"session-1","brand":"claude"})))
+            .await
+            .unwrap();
+        say_state(&database, "thinking").await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(sent.lock().unwrap().is_empty(), "still working, still waiting");
+
+        say_state(&database, "idle").await;
+        until_nothing_waits(&database).await;
+        assert_eq!(
+            *sent.lock().unwrap(),
+            vec!["first thing".to_string(), "second thing".to_string()],
+            "each message sent once, oldest first, with nobody clicking anything"
+        );
+        let events = database.events_since("session-1".into(), 0).await.unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.kind == super::super::protocol::EventKind::PromptReleased
+                    && event.fields.get("reason") == Some(&json!("sent")))
+                .count(),
+            2,
+            "the queue says both messages left it"
+        );
+    }
+
+    /// bw-r54j.3: a provider that refuses the message leaves it waiting, not
+    /// stranded with nothing under it.
+    #[tokio::test]
+    async fn a_refused_push_leaves_the_message_waiting() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let registry = WorkbenchRegistry::new(
+            database.clone(),
+            paths(root.path()),
+            Arc::new(OneDriverFactory {
+                driver: std::sync::Mutex::new(Some(Box::new(RefusingDriver))),
+            }),
+        );
+        database.create_session(a_chat("thinking")).await.unwrap();
+        registry
+            .execute(&command(CommandKind::SessionStart, json!({"sessionId":"session-1","brand":"claude"})))
+            .await
+            .unwrap();
+        let held = registry
+            .execute(&command(CommandKind::PromptHold, json!({"sessionId":"session-1","text":"say this now"})))
+            .await
+            .unwrap();
+        let held_id = held["held"]["id"].as_str().unwrap().to_string();
+
+        let refused = registry
+            .execute(&command(CommandKind::PromptPush, json!({"sessionId":"session-1","heldId":held_id})))
+            .await;
+        assert!(refused.is_err(), "the refusal is the reader's to see: {refused:?}");
+        let waiting = database.held_messages("session-1".into()).await.unwrap();
+        assert_eq!(waiting.len(), 1, "it is still waiting, and still sendable");
+        assert_eq!(waiting[0]["text"], json!("say this now"));
+
+        // And it can still be dropped, which a claimed message could not be.
+        registry
+            .execute(&command(CommandKind::PromptDrop, json!({"sessionId":"session-1","heldId":held_id})))
+            .await
+            .unwrap();
+        assert!(database.held_messages("session-1".into()).await.unwrap().is_empty());
     }
 
     #[tokio::test]
