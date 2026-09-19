@@ -116,7 +116,8 @@ are not repository writes. Unresolved shell variables must be reported as
 unresolved, not interpreted as literal paths. Use an explicit path if needed.
 
 If a gate is wrong, carry only the refused command through a reasoned bypass:
-`ATELIER_BYPASS='specific incorrect refusal' COMMAND`. It is logged. Record the
+`ATELIER_BYPASS='specific incorrect refusal' COMMAND`. It is logged. Session actor stamping survives the bypass; do not manually
+reassign the card to the Git user. Record the
 actual refusal in `docs/hook-friction.md` or `docs/hook-friction-2.md`. Do not
 export a standing bypass or use it to override truthful completion. Declared
 suites run without an inherited bypass. An old installed binary needs an

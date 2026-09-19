@@ -1,0 +1,68 @@
+{
+  "binary": "/home/linuxbrew/.linuxbrew/bin/atelier",
+  "sha256": "e9eade203425e84444f7621ce6478cde3f11cd528affbbdead56d616b4aa0f8b",
+  "version": "Atelier workflow hooks 0.22.8 (protocol 3)",
+  "cases": [
+    {
+      "hook": "workflow-gate",
+      "event": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "ATELIER_BYPASS='dispatcher reproduction' bd update bw-9vv9.6 --claim",
+          "workdir": "/home/ahsan/dev/beads-web/worktrees/bw-9vv9"
+        },
+        "cwd": "/home/ahsan/dev/beads-web/worktrees/bw-9vv9",
+        "session_id": "regression-proof"
+      },
+      "stdout": "",
+      "stderr": "atelier workflow-gate stood down \u2014 dispatcher reproduction (via ATELIER_BYPASS on the command being run)\n",
+      "exit_code": 0
+    },
+    {
+      "hook": "board-actor",
+      "event": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "ATELIER_BYPASS='dispatcher reproduction' bd update bw-9vv9.6 --claim",
+          "workdir": "/home/ahsan/dev/beads-web/worktrees/bw-9vv9"
+        },
+        "cwd": "/home/ahsan/dev/beads-web/worktrees/bw-9vv9",
+        "session_id": "regression-proof"
+      },
+      "stdout": "",
+      "stderr": "atelier board-actor stood down \u2014 dispatcher reproduction (via ATELIER_BYPASS on the command being run)\n",
+      "exit_code": 0
+    },
+    {
+      "hook": "workflow-gate",
+      "event": {
+        "tool_name": "functions.exec_command",
+        "tool_input": {
+          "cmd": "ATELIER_BYPASS='dispatcher reproduction' bd update bw-9vv9.6 --claim",
+          "workdir": "/home/ahsan/dev/beads-web/worktrees/bw-9vv9"
+        },
+        "cwd": "/home/ahsan/dev/beads-web/worktrees/bw-9vv9",
+        "session_id": "regression-proof"
+      },
+      "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Beads issue bw-9vv9.6 is owned by AhsanSarwar45, not this session.\"},\"decision\":\"block\",\"reason\":\"Beads issue bw-9vv9.6 is owned by AhsanSarwar45, not this session.\"}\n",
+      "stderr": "",
+      "exit_code": 0
+    },
+    {
+      "hook": "board-actor",
+      "event": {
+        "tool_name": "functions.exec_command",
+        "tool_input": {
+          "cmd": "ATELIER_BYPASS='dispatcher reproduction' bd update bw-9vv9.6 --claim",
+          "workdir": "/home/ahsan/dev/beads-web/worktrees/bw-9vv9"
+        },
+        "cwd": "/home/ahsan/dev/beads-web/worktrees/bw-9vv9",
+        "session_id": "regression-proof"
+      },
+      "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"permissionDecisionReason\":\"board identity\",\"updatedInput\":{\"cmd\":\"ATELIER_BYPASS='dispatcher reproduction' bd --actor s-regression-proof update bw-9vv9.6 --claim --add-label copy:bw-9vv9\",\"workdir\":\"/home/ahsan/dev/beads-web/worktrees/bw-9vv9\"}}}\n",
+      "stderr": "",
+      "exit_code": 0
+    }
+  ],
+  "finding": "Protocol 3 skips actor stamping on Claude command bypass and misses Codex cmd bypass. These are real executable hook calls, not inferred source behavior."
+}

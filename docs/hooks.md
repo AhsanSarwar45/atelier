@@ -21,7 +21,10 @@ add/update/delete/move target. File descriptor duplication names no file.
 ## When a gate is wrong
 
 Use `ATELIER_BYPASS='specific reason' COMMAND` only for the refused command.
-The bypass is logged. Add the real refusal to either hook-friction journal.
+The bypass is logged. Session identity stamping still runs: a bypassed claim
+and its later ordinary landing must use the same actor. This applies to Claude
+`command`, Codex `cmd`, environment switches and marker files. Add the real
+refusal to either hook-friction journal.
 Do not export a standing bypass. Tests strip inherited bypasses. Unknown hook
 names fail visibly; explicitly retired presentation hooks remain compatible.
 
@@ -32,3 +35,7 @@ fixture together. Exercise the installed-format binary with real provider
 payloads and a disposable Git/Beads repository. A source-only test does not
 prove that the currently installed binary has changed. Never test against the
 owner's app or data. Review the dry-run before repairing historical tickets.
+
+Protocol 4 fixes dispatcher-level bypass identity loss. Check the executable
+actually on the agent's PATH with `atelier hook workflow-gate --version`; the
+application version alone cannot distinguish hook revisions.

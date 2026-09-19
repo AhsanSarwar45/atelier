@@ -525,6 +525,11 @@ pub fn hook(name: &str, rest: &[String]) -> Result<i32, String> {
     } else {
         serde_json::from_str(&heard).map_err(|e| format!("Cannot decode {name} hook event: {e}"))?
     };
+    // Identity is not a workflow refusal. Skipping this rewrite during a
+    // bypass makes bd claim as the Git user and native landing as the session.
+    if matches!(name, "board-actor" | "board-actor.py") {
+        return Ok(crate::lifecycle::run(name, &event));
+    }
     if let Some(bypass) = crate::hook_bypass::asked(&event) {
         crate::hook_bypass::record(name, &bypass);
         return Ok(0);

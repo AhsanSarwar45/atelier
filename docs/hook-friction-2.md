@@ -1817,3 +1817,34 @@ the assignee the unbypassed claim would have written.
 Either half would end this: `workflow-gate` accepting a claimed descendant of
 the card its directory names, or the actor injection surviving a bypass, since
 who the session is is not what any bypass is asking to set aside.
+
+
+### Dispatcher fix and installed reproduction (bw-9vv9.6)
+
+Reproduced against the reinstalled 0.22.8 protocol-3 executable: a Claude
+`command` bypass skipped board-actor entirely. Codex `cmd` did not recognise the
+same command-local bypass. Earlier actor/workflow unit tests bypassed the common
+hook dispatcher, and direct native landing tests manually supplied one actor, so
+neither exercised this failure. This was a missing integration boundary, not an
+agent compliance problem.
+
+The current installed executable accepted both provider child claims in the
+job worktree without a bypass. The old exact-card refusal quoted above was not
+reproduced against this executable; it is not evidence that every session uses
+the same executable. Protocol 4 now stamps identity before gate bypass handling,
+recognises both input keys, and retains identity for environment and marker
+bypasses too. Executable dispatcher tests and real Git/Beads claim-to-land tests
+cover normal and bypassed child claims for both providers. A bypass does not
+permit claiming another session's identity.
+
+The real fixture also exposed nested worktree lookup choosing the outer job's
+first `worktrees/` component, refusing valid inner jobs with another Beads prefix.
+Lookup now chooses the innermost worktree; the claim-to-land fixture exercises
+this using `ld-` cards inside the `bw-9vv9` job copy.
+
+Executing the rewritten native command also caught quoted binary paths being
+stamped inside their opening quote, turning the assignment into part of the
+executable name. The lexer now retains the raw token start across quotes and
+escapes. Both quote styles are covered by dispatcher tests; the real landing
+integration executes the quoted worktree-built binary, rather than only
+asserting that a returned string mentions the actor.

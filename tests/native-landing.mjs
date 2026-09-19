@@ -90,6 +90,48 @@ assert.ok(!row(repo, 'ld-job.land').labels.includes('cancelled'));
 assert.equal(JSON.parse(bd(repo, 'list', '--parent', 'ld-job', '--status', 'all', '--json')).length, 4, 'no generated post-land checks or cleanup tickets');
 console.log('PASS recursive completion and partial epic state without generated blockers');
 
+// Go through the executable hook dispatcher, including its bypass handling.
+// Direct actor()/workflow() unit tests cannot catch a dispatcher that skips identity.
+for (const provider of ['claude', 'codex']) {
+  const id = `ld-${provider}`; make(id, 'epic');
+  make(`${id}.1`, 'task', id); make(`${id}.2`, 'task', id);
+  const path = copy(id);
+  const who = `s-${provider}-hook-session`;
+  const input = command => provider === 'claude' ? { command } : { cmd: command, workdir: path };
+  const event = command => ({ session_id: `${provider}-hook-session`, cwd: provider === 'claude' ? path : repo,
+    tool_name: provider === 'claude' ? 'Bash' : 'functions.exec_command', tool_input: input(command) });
+  const hook = (name, data) => {
+    const result = spawnSync(binary, ['hook', name], { cwd: path, env, input: JSON.stringify(data), encoding: 'utf8', timeout: 120_000 });
+    assert.equal(result.status, 0, result.stderr);
+    const output = result.stdout.trim() ? JSON.parse(result.stdout) : {};
+    assert.notEqual(output.hookSpecificOutput?.permissionDecision, 'deny', JSON.stringify(output));
+    return output.hookSpecificOutput?.updatedInput;
+  };
+  const throughHooks = command => {
+    const data = event(command);
+    hook('workflow-gate', data);
+    data.tool_input = hook('board-actor', data) ?? data.tool_input;
+    hook('board-status-gate', data); hook('board-merge-gate', data);
+    const stamped = data.tool_input.command ?? data.tool_input.cmd;
+    cmd(path, 'sh', ['-c', stamped]);
+  };
+  for (const child of [1, 2]) {
+    const card = `${id}.${child}`;
+    const prefix = child === 1 ? '' : "ATELIER_BYPASS='exercise documented escape hatch' ";
+    throughHooks(`${prefix}bd update ${card} --claim`);
+    assert.equal(row(repo, card).assignee, who, 'bypassed and ordinary claims must keep the session owner');
+    assert.ok(row(repo, card).labels.includes(`copy:${id}`));
+    hook('workflow-gate', event(`touch ${provider}-${child}.txt`));
+    commit(path, card, `${provider}-${child}.txt`);
+    throughHooks(`'${binary}' tool board/land ${card}`);
+    assert.equal(row(repo, card).status, 'closed');
+  }
+  assert.equal(row(repo, id).status, 'closed');
+  tool(repo, 'board/cleanup', id);
+  console.log(`PASS ${provider} executable hooks: ordinary and bypassed child claims, owned writes and ordinary native landings`);
+}
+
+
 make('ld-recover'); const recovery = copy('ld-recover'); bd(recovery, 'update', 'ld-recover', '--claim'); commit(recovery, 'ld-recover', 'recovery.txt');
 const tip = git(recovery, 'rev-parse', 'HEAD'); const tree = git(recovery, 'rev-parse', 'HEAD^{tree}');
 const journals = join(repo, '.git/atelier-landings'); mkdirSync(journals, { recursive: true });

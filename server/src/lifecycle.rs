@@ -71,7 +71,7 @@ const REDIRECTS: &[&str] = &[
 /// The redirect operators that name a file to be written.
 const WRITE_REDIRECTS: &[&str] = &[">", ">>", "&>", "&>>", ">|"];
 
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 pub fn version() -> String {
     format!(
@@ -299,7 +299,7 @@ struct Lexer<'a> {
     segments: Vec<Segment>,
     words: Vec<Word>,
     text: String,
-    start: usize,
+    start: Option<usize>,
     /// The word after `<<` names where the heredoc body ends.
     expect_delimiter: bool,
     strip_tabs: bool,
@@ -314,7 +314,7 @@ impl<'a> Lexer<'a> {
             segments: Vec::new(),
             words: Vec::new(),
             text: String::new(),
-            start: 0,
+            start: None,
             expect_delimiter: false,
             strip_tabs: false,
             pending: Vec::new(),
@@ -322,22 +322,17 @@ impl<'a> Lexer<'a> {
     }
 
     fn push(&mut self, at: usize, character: char) {
-        if self.text.is_empty() {
-            self.start = at;
-        }
+        self.start.get_or_insert(at);
         self.text.push(character);
     }
 
     fn finish_word(&mut self, at: usize) {
-        if self.text.is_empty() {
-            return;
-        }
+        let Some(start) = self.start.take() else { return; };
         let text = std::mem::take(&mut self.text);
         if self.expect_delimiter {
             self.expect_delimiter = false;
             self.pending.push((text.clone(), self.strip_tabs));
         }
-        let start = self.start;
         self.words.push(Word {
             text,
             start,
@@ -432,17 +427,13 @@ fn shell_segments(command: &str) -> Vec<Segment> {
             continue;
         }
         if quote != b'\'' && byte == b'\\' {
-            if lexer.text.is_empty() {
-                lexer.start = at;
-            }
+            lexer.start.get_or_insert(at);
             escaped = true;
             at += 1;
             continue;
         }
         if quote == 0 && matches!(byte, b'\'' | b'"') {
-            if lexer.text.is_empty() {
-                lexer.start = at;
-            }
+            lexer.start.get_or_insert(at);
             quote = byte;
             at += 1;
             continue;
@@ -1244,7 +1235,9 @@ fn worktree_issue(path: &Path) -> Option<String> {
         .components()
         .filter_map(|part| part.as_os_str().to_str())
         .collect();
-    parts.windows(2).find_map(|pair| match pair[0] {
+    // A disposable repository may itself live inside another job's copy.
+    // The innermost worktree owns this path, not the enclosing job.
+    parts.windows(2).rev().find_map(|pair| match pair[0] {
         "worktrees" => Some(pair[1].to_string()),
         ".worktrees" => Some(pair[1].strip_prefix("bd-").unwrap_or(pair[1]).to_string()),
         _ => None,
@@ -1941,9 +1934,15 @@ mod tests {
     }
 
     #[test]
+    fn native_machinery_nested_repository_uses_its_own_worktree_job() {
+        assert_eq!(worktree_issue(Path::new("/repo/worktrees/bw-outer/tests/repo/worktrees/ld-job/src")), Some("ld-job".into()));
+        assert_eq!(worktree_issue(Path::new("/repo/worktrees/bw-outer/tests/repo/.worktrees/bd-ld-job/src")), Some("ld-job".into()));
+    }
+
+    #[test]
     fn native_machinery_hook_protocol_has_an_installed_provenance_number() {
-        assert_eq!(PROTOCOL_VERSION, 3);
-        assert!(version().contains("protocol 3"));
+        assert_eq!(PROTOCOL_VERSION, 4);
+        assert!(version().contains("protocol 4"));
     }
 
     #[test]

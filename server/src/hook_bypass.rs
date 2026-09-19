@@ -3,8 +3,8 @@
 //! A gate that cannot be stood down is a gate that can strand a session. The
 //! refusals in `lifecycle.rs` are deliberately narrow, but "narrow" is a claim
 //! about the cases we thought of, and `docs/hook-friction.md` is the record of
-//! the ones we did not. So every hook — gate, stamper or bookkeeper — asks this
-//! first, and stands down when the answer is yes.
+//! the ones we did not. Gates and bookkeepers ask this first and stand down
+//! when the answer is yes. Session identity stamping always runs.
 //!
 //! There are four ways to say yes, and all four are loud: the reason is written
 //! to standard error and appended to `hook-bypass.log` in the application data
@@ -26,9 +26,9 @@
 //!      an agent that a gate has cornered can say so, in one word, and keep
 //!      working.
 //!
-//! A bypass stands the whole hook down, not one of its checks. A bypassed
-//! `bd` command is therefore not actor-stamped either; pass `--actor` yourself
-//! when that matters.
+//! A bypass excuses a gate, not the session's identity. The board-actor hook
+//! still stamps bd and native workflow commands so a bypassed claim and a
+//! subsequent ordinary landing use the same owner.
 
 use serde_json::Value;
 use std::io::Write;
@@ -133,7 +133,7 @@ fn from_event(event: &Value) -> Option<Bypass> {
     let command = event
         .get("tool_input")
         .or_else(|| event.get("toolInput"))
-        .and_then(|input| input.get("command"))
+        .and_then(|input| input.get("command").or_else(|| input.get("cmd")))
         .and_then(Value::as_str)
         .unwrap_or("");
     if let Some(reason) = crate::lifecycle::leading_assignment(command, TOKEN) {
