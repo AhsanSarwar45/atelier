@@ -6,8 +6,8 @@
  * step needing a password is offered to copy rather than half-done, that a
  * refusal is drawn as the server wrote it, that a refusal with somewhere to go
  * is drawn as a step rather than as a fault, that the wait is visible while it
- * is happening, and that what the switch says is what came back rather than
- * what was asked for. Whether Tailscale is actually
+ * is happening, that the address is shown with where it came from, and that
+ * what the switch says is what came back rather than what was asked for. Whether Tailscale is actually
  * there, and whether a host can be bound, are the server's questions and are
  * answered in server/src/remote.rs and server/src/routes/remote_access.rs.
  */
@@ -89,6 +89,29 @@ describe('the Remote access section', () => {
     await waitFor(() => expect(button).toHaveTextContent('Disable'));
     expect(save).toHaveBeenCalledWith({ serving: true });
     expect(screen.getByTestId('remote-address')).toHaveTextContent('https://desk.tailnet.ts.net');
+  });
+
+  it('shows the address before it is on, and says where the name came from', async () => {
+    // The address is the whole point of the section and the thing a reader
+    // decides on, so waiting for the switch to be on hides it exactly when it
+    // would be read. And it is a name nobody chose, so the screen says whose
+    // name it is rather than leaving a box that looks like it sets it
+    // (bw-t2m2).
+    read.mockResolvedValue(ready);
+
+    render(<RemoteAccessSettings />);
+
+    expect(await screen.findByTestId('remote-address')).toHaveTextContent(
+      'https://desk.tailnet.ts.net',
+    );
+    expect(screen.getByTestId('remote-serving')).toHaveTextContent('Enable');
+    expect(screen.getByTestId('remote-address-source')).toHaveTextContent(
+      'rename the computer in Tailscale',
+    );
+    expect(screen.getByTestId('remote-rename-link')).toHaveAttribute(
+      'href',
+      'https://login.tailscale.com/admin/machines',
+    );
   });
 
   it('says off when the server says off, whatever the switch was asked to do', async () => {

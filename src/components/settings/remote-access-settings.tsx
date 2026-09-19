@@ -47,6 +47,14 @@
  * where it can really be changed. Anybody genuinely running this behind their
  * own domain sets ATELIER_PUBLIC_URL, which is where that reader already was.
  *
+ * ## Why the address is drawn before the switch is on, and says where it came from
+ *
+ * The address is the whole point of this section and the thing a reader wants
+ * to know before they commit to anything, so it is drawn as soon as Tailscale
+ * has one rather than only once serving is on. And because it is a name
+ * nobody chose and nobody can remember, it says whose name it is and where to
+ * change it — a machine renamed in Tailscale changes the address here too.
+ *
  * ## Why one refusal is drawn as a step and not in red
  *
  * Serve is off for an entire Tailscale network until its owner allows it once,
@@ -75,6 +83,9 @@ import {
 
 /** The one command that needs a password, spelled once. */
 const INSTALL = 'atelier remote install';
+
+/** Where a reader renames the computer the address is made out of. */
+const MACHINES = 'https://login.tailscale.com/admin/machines';
 
 /** A refusal, and anywhere it left to go. */
 interface Turned {
@@ -222,20 +233,35 @@ export function RemoteAccessSettings() {
           </Panel>
         )}
 
-        {held.serving && held.address && (
-          <div className="mt-3 flex items-center gap-2" data-testid="remote-address">
-            <Badge asChild variant="secondary" appearance="light" size="sm" className="flex-1 justify-start font-mono">
-              <code>{held.address}</code>
-            </Badge>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => copy(held.address ?? '')}
-              aria-label="Copy the address"
-              data-testid="remote-copy-address"
-            >
-              {copied === held.address ? <Check className="size-4" /> : <Copy className="size-4" />}
-            </Button>
+        {held.address && (
+          <div className="mt-3" data-testid="remote-address">
+            <div className="flex items-center gap-2">
+              <Badge asChild variant="secondary" appearance="light" size="sm" className="flex-1 justify-start font-mono">
+                <code>{held.address}</code>
+              </Badge>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => copy(held.address ?? '')}
+                aria-label="Copy the address"
+                data-testid="remote-copy-address"
+              >
+                {copied === held.address ? <Check className="size-4" /> : <Copy className="size-4" />}
+              </Button>
+            </div>
+            <p className="mt-2 text-xs text-t-muted" data-testid="remote-address-source">
+              Tailscale made this address out of your computer&rsquo;s name. To get a shorter
+              one, rename the computer in Tailscale and it changes here too.{' '}
+              <a
+                href={MACHINES}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="underline underline-offset-2 hover:text-t-secondary"
+                data-testid="remote-rename-link"
+              >
+                Rename it in Tailscale
+              </a>
+            </p>
           </div>
         )}
 
