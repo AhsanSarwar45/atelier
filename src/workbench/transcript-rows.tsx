@@ -242,6 +242,9 @@ function cutSize(text: string): number | null {
   return ending ? text.length - ending[0].length + Number(ending[1]) : null;
 }
 
+/** How many lines of a diff are drawn before the reader asks for the rest. */
+const COLLAPSED = 12;
+
 /**
  * How much changed, as the header says it.
  *
@@ -268,6 +271,7 @@ function Counts({ added, removed }: { added: number; removed: number }) {
  * this falls back to the measurement that was all it ever carried (bw-vl3q.3).
  */
 function DiffView({ diff }: { diff: NonNullable<TranscriptTool['diff']> }) {
+  const [open, setOpen] = useState(false);
   const { path, before, after, line, hunks, added, removed, omittedHunks, omittedLines } = diff;
   const beforeSize = cutSize(before);
   const afterSize = cutSize(after);
@@ -279,6 +283,11 @@ function DiffView({ diff }: { diff: NonNullable<TranscriptTool['diff']> }) {
   const cut = beforeSize !== null || afterSize !== null;
   const rows = hunks ? hunksToRows(hunks) : cut ? [] : diffLines(before, after, line ?? 1);
   const counted = added !== undefined && removed !== undefined;
+  // A diff longer than this opens on its first lines and is asked for in full,
+  // the way a long diff reads anywhere else. Short of it there is nothing to
+  // ask for, so no control is drawn at all (bw-vl3q.4).
+  const long = rows.length > COLLAPSED;
+  const shown = !long || open ? rows : rows.slice(0, COLLAPSED);
   const language = languageOf(path);
   // What the hunks could not carry, said rather than implied. A change left out
   // whole is the loss worth naming when there is one; lines are named only when
@@ -306,9 +315,24 @@ function DiffView({ diff }: { diff: NonNullable<TranscriptTool['diff']> }) {
       </div>
       {rows.length > 0 ? (
         <>
-          <div className="max-h-64 overflow-auto">
-            <DiffTable rows={rows} language={language} />
+          {/* Open, the diff still scrolls inside itself rather than pushing the
+              conversation off the screen — a change of four hundred lines is
+              a change the reader should be able to skim past. */}
+          <div className={open ? 'max-h-[36rem] overflow-auto' : 'overflow-hidden'}>
+            <DiffTable rows={shown} language={language} />
           </div>
+          {long && (
+            <Button
+              variant="dim"
+              size="none"
+              data-testid="diff-expand"
+              aria-expanded={open}
+              onClick={() => setOpen(!open)}
+              className="w-full justify-start rounded-none border-t border-border/40 bg-muted/30 px-2 py-1 font-mono text-[11px] hover:bg-muted/60"
+            >
+              {open ? 'Show fewer lines' : `Show all ${rows.length.toLocaleString('en-US')} lines`}
+            </Button>
+          )}
           {left && (
             <div data-testid="diff-omitted" className="border-t border-border/40 bg-muted/20 px-2 py-1 font-mono text-[11px] text-muted-foreground">
               … and {left} not shown

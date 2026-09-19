@@ -22,6 +22,10 @@ import { discardFixture, makeFixtureProject } from './fixture-board';
 /** A file large enough that the wire's four-thousand-character bound bites. */
 const FILE = Array.from({ length: 1500 }, (_, at) => `const line${at + 1} = ${at + 1};`).join('\n') + '\n';
 const CHANGED = FILE.replace('const line1400 = 1400;', 'const line1400 = 1401;');
+/** A change too long for the dozen lines a card opens on. */
+const REWRITTEN = FILE.split('\n')
+  .map((l, at) => (at >= 1000 && at < 1020 ? `const line${at + 1} = 0;` : l))
+  .join('\n');
 
 /** A body as the wire delivers it: cut, and saying how much was cut. */
 const asDelivered = (text: string) => `${text.slice(0, 4000)}\n… and ${text.length - 4000} more characters`;
@@ -33,15 +37,15 @@ const asDelivered = (text: string) => `${text.slice(0, 4000)}\n… and ${text.le
  * server worked out before it cut the text, and without it the event is the
  * bare three fields an older stored one has.
  */
-function snapshotOf(chat: string, edited: string, counted: boolean) {
+function snapshotOf(chat: string, edited: string, counted: boolean, after = CHANGED) {
   const base = { sessionId: chat, at: new Date(0).toISOString() };
   const events: WbpEvent[] = [
     { ...base, seq: 1, type: 'session.started', brand: 'codex', externalId: 'fixture', model: 'gpt-5', cwd: join(edited, '..', '..'), permissionMode: 'on-request' },
     { ...base, seq: 2, type: 'tool.started', toolCallId: 'edit', name: 'Write', input: { file_path: edited }, title: `Changed ${edited}`, parentToolCallId: null },
     {
       ...base, seq: 3, type: 'diff', toolCallId: 'edit', path: edited,
-      before: asDelivered(FILE), after: asDelivered(CHANGED), line: 1,
-      ...(counted ? changeOf(FILE, CHANGED) : {}),
+      before: asDelivered(FILE), after: asDelivered(after), line: 1,
+      ...(counted ? changeOf(FILE, after) : {}),
     },
     { ...base, seq: 4, type: 'tool.completed', toolCallId: 'edit', ok: true, output: 'The file has been updated.' },
     { ...base, seq: 5, type: 'session.state', state: 'idle', label: 'Ready' },
@@ -50,10 +54,10 @@ function snapshotOf(chat: string, edited: string, counted: boolean) {
 }
 
 /** The fixture chat, opened, with its one edit card on the screen. */
-async function openTheChat(page: Page, request: APIRequestContext, chat: string, counted: boolean, run: string) {
+async function openTheChat(page: Page, request: APIRequestContext, chat: string, counted: boolean, run: string, after = CHANGED) {
   const projectPath = makeFixtureProject(join(run, 'project'), join(run, 'reporting'));
   const edited = join(projectPath, 'src', 'git-view.tsx');
-  const view = snapshotOf(chat, edited, counted);
+  const view = snapshotOf(chat, edited, counted, after);
 
   await page.addInitScript(({ chat, view }) => {
     class FixtureSocket {
@@ -127,6 +131,41 @@ test('a large edit reads in lines and draws the lines that changed', async ({ pa
     // …and not the top of the file, which is all the cut text ever held.
     await expect(view).not.toContainText('const line1 = 1;');
     await view.screenshot({ path: 'tests/results/bw-vl3q-after.png' });
+  } finally {
+    if (project) await request.delete(`/api/projects/${project.id}`);
+    discardFixture(run);
+  }
+});
+
+test('a long diff opens to the whole change and closes again', async ({ page, request }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1100, height: 900 });
+  const run = join(process.cwd(), 'tests', '.workbench-run-long-diff-opens');
+
+  let project: { id: string } | null = null;
+  try {
+    const opened = await openTheChat(page, request, 'long-diff', true, run, REWRITTEN);
+    project = opened.project;
+
+    // Closed: the first lines, and a control that says how much there is.
+    const control = page.getByTestId('diff-expand');
+    await expect(control).toHaveText(/Show all \d+ lines/);
+    await expect(control).toHaveAttribute('aria-expanded', 'false');
+    const view = page.getByTestId('diff-view');
+    await expect(view).not.toContainText('const line1020 = 0;');
+    await view.screenshot({ path: 'tests/results/bw-vl3q-closed.png' });
+
+    // Open: the whole change, and a way back.
+    await control.click();
+    await expect(control).toHaveAttribute('aria-expanded', 'true');
+    await expect(control).toHaveText('Show fewer lines');
+    await expect(view).toContainText('const line1020 = 0;');
+    await view.screenshot({ path: 'tests/results/bw-vl3q-open.png' });
+
+    // And the card itself is still open — opening the diff is not shutting it.
+    await expect(page.getByTestId('tool-row').first()).toHaveAttribute('data-open', 'true');
+    await control.click();
+    await expect(view).not.toContainText('const line1020 = 0;');
   } finally {
     if (project) await request.delete(`/api/projects/${project.id}`);
     discardFixture(run);

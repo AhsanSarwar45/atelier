@@ -7,7 +7,7 @@
  * diff out before that cut, and the card reads +X −Y and draws the hunks
  * (bw-vl3q.3).
  */
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { ToolRow } from '@/workbench/transcript-rows';
@@ -91,5 +91,59 @@ describe('a large edit card', () => {
 
     expect(screen.getByTestId('diff-counts')).toHaveTextContent('+0');
     expect(screen.getByTestId('diff-summary')).toHaveTextContent('No lines changed');
+  });
+});
+
+/**
+ * A diff worth scrolling is worth putting away. It opens on its first lines
+ * and the rest are asked for, rather than a fixed window the reader scrolls
+ * inside without ever being told how much is in there (bw-vl3q.4).
+ */
+describe('a long diff opens and closes', () => {
+  // Twenty changed lines in a row, which with context is far past the dozen
+  // a card opens on.
+  const before = big(200);
+  const after = before
+    .split('\n')
+    .map((l, at) => (at >= 100 && at < 120 ? `const line${at + 1} = 0;` : l))
+    .join('\n');
+
+  it('opens on its first lines and says how many there are in all', () => {
+    render(<ToolRow item={largeEdit(before, after)} nested={false} />);
+
+    const control = screen.getByTestId('diff-expand');
+    expect(control).toHaveTextContent(/Show all \d+ lines/);
+    expect(control).toHaveAttribute('aria-expanded', 'false');
+    // The first lines are drawn; the last of the change is not, yet.
+    expect(screen.getByTestId('diff-view')).toHaveTextContent('const line95 = 95;');
+    expect(screen.getByTestId('diff-view')).not.toHaveTextContent('const line126 = 126;');
+  });
+
+  it('opens to the whole diff and closes again', () => {
+    render(<ToolRow item={largeEdit(before, after)} nested={false} />);
+    const control = screen.getByTestId('diff-expand');
+
+    fireEvent.click(control);
+    expect(control).toHaveAttribute('aria-expanded', 'true');
+    expect(control).toHaveTextContent('Show fewer lines');
+    expect(screen.getByTestId('diff-view')).toHaveTextContent('const line126 = 126;');
+
+    fireEvent.click(control);
+    expect(control).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByTestId('diff-view')).not.toHaveTextContent('const line126 = 126;');
+  });
+
+  it('offers nothing to open on a diff already drawn whole', () => {
+    const small = big(20);
+    render(<ToolRow item={largeEdit(small, small.replace('const line5 = 5;', 'const line5 = 6;'))} nested={false} />);
+
+    expect(screen.queryByTestId('diff-expand')).toBeNull();
+    expect(screen.getByTestId('diff-view')).toHaveTextContent('const line5 = 6;');
+  });
+
+  it('does not shut the card when the diff is opened', () => {
+    render(<ToolRow item={largeEdit(before, after)} nested={false} />);
+    fireEvent.click(screen.getByTestId('diff-expand'));
+    expect(screen.getByTestId('tool-row')).toHaveAttribute('data-open', 'true');
   });
 });
