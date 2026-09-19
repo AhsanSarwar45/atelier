@@ -102,7 +102,7 @@ function getStatusBadgeClasses(variant: StatusBadgeInfo['variant']): string {
  */
 export const BeadCard = memo(function BeadCard({ bead, statusById, worktreeStatus, isSelected = false, onSelect, projectPath, onUpdate }: BeadCardProps) {
   const { layout } = useTheme();
-  const { isMarking, signOff } = useSignOff(bead.id, bead.title, projectPath, onUpdate);
+  const { isMarking, signOff } = useSignOff(bead.id, bead.title, projectPath, onUpdate, bead.metadata?.manager_review_tree);
   const blocked = isBlockedBy(bead, statusById);
   const commentCount = commentCountOf(bead);
   const relatedCount = (bead.relates_to ?? []).length;
@@ -156,13 +156,9 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, worktreeStatu
   // read as two different things depending on the theme in use.
   const isSettled = !standing(bead.status);
 
-  // Manager Review is the one column a session may not move a card out of, so
-  // the screen is the only place a card there can be finished. Every other
-  // column draws nothing: a card still being worked on, or waiting to be read,
-  // has been signed by nobody yet. A plain card carries no pieces to count, so
-  // unlike a job there is nothing to weigh before offering it — and if the
-  // board refuses the close anyway, it says why in a toast.
-  const canSignOff = bead.status === 'manager_review';
+  // Approval belongs to the exact proposed tree and does not move work to Done.
+  const canSignOff = bead.status === 'manager_review' && !!bead.metadata?.manager_review_tree
+    && bead.metadata.manager_approved_tree !== bead.metadata.manager_review_tree;
   /**
    * @param className - Each shape gives the button its own room: the two block
    *   shapes hand it the width of the card, the dense row keeps it beside the

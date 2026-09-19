@@ -79,10 +79,10 @@ test('landed and nested work agree across the board and detail', async ({ page, 
       await request.patch('/api/beads/update',{data:{path,id:'wl-approval',title:'Change awaiting your approval'}});
       await page.reload();
       await page.getByText('Change awaiting your approval',{exact:true}).first().click();
-      await expect(page.getByRole('button',{name:'Approve reviewed change'})).toBeVisible({timeout:30_000});
+      await expect(page.getByRole('dialog').getByRole('button',{name:'Approve reviewed change'})).toBeVisible({timeout:30_000});
       await page.screenshot({path:join(output,'approval-after.png'),animations:'disabled'});
-      await page.getByRole('button',{name:'Approve reviewed change'}).click();
-      await expect(page.getByRole('button',{name:'Approve reviewed change'})).toBeHidden();
+      await page.getByRole('dialog').getByRole('button',{name:'Approve reviewed change'}).click();
+      await expect(page.getByRole('dialog').getByRole('button',{name:'Approve reviewed change'})).toBeHidden();
       const approved = await (await request.get(`/api/beads?path=${encodeURIComponent(path)}`)).json();
       const card = approved.beads.find((b:{id:string}) => b.id === 'wl-approval');
       expect(card.metadata.manager_approved_tree).toBe(tree);
