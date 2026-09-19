@@ -223,3 +223,28 @@ describe('Markdown images', () => {
     expect(screen.getByAltText('Private file')).toHaveAttribute('src', '/tmp/private.png');
   });
 });
+
+describe('Copying a fenced block', () => {
+  const writeText = vi.fn();
+
+  beforeEach(() => {
+    writeText.mockReset();
+    writeText.mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  });
+
+  it('puts the code the writer typed on the clipboard, highlighting and all', async () => {
+    render(<MarkdownBody>{'```ts\nconst a = 1;\nconst b = a + 1;\n```'}</MarkdownBody>);
+
+    fireEvent.click(screen.getByTestId('markdown-copy-code'));
+
+    expect(writeText).toHaveBeenCalledWith('const a = 1;\nconst b = a + 1;\n');
+    expect(await screen.findByLabelText('Code copied')).toBeInTheDocument();
+  });
+
+  it('gives every fenced block its own button and leaves an inline word alone', () => {
+    render(<MarkdownBody>{'```\nfirst\n```\n\nSome `inline` words.\n\n```\nsecond\n```'}</MarkdownBody>);
+
+    expect(screen.getAllByTestId('markdown-copy-code')).toHaveLength(2);
+  });
+});

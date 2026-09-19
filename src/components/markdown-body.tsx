@@ -5,14 +5,16 @@
  * a fenced block or an address looks the same wherever it was written. There is
  * no second renderer; a place that needs different spacing passes `tight`.
  */
-import { useState, type ReactNode } from "react";
+import { useState, type ComponentPropsWithoutRef, type ReactNode } from "react";
 
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import {
+  Check,
   CircleDot,
+  Copy,
   GitCommitHorizontal,
   GitPullRequest,
   Globe2,
@@ -22,6 +24,7 @@ import {
 import "highlight.js/styles/github-dark.css";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { FILE_BADGE_CLASS, FILE_KINDS, fileKind } from "@/components/file-kinds";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -105,6 +108,67 @@ function textOf(children: ReactNode): string {
   if (typeof children === 'string') return children;
   if (Array.isArray(children)) return children.map(textOf).join('');
   return '';
+}
+
+/**
+ * The exact text of a fenced block, read off the parsed markdown rather than
+ * off what is drawn. By the time it is drawn, highlighting has cut the code
+ * into coloured spans and a path written inside it may have become a chip, so
+ * the drawn children no longer spell out what the writer typed (bw-o4rj.1).
+ */
+function writtenCode(node: unknown): string {
+  const part = node as { type?: string; value?: string; children?: unknown[] } | null | undefined;
+  if (!part) return '';
+  if (part.type === 'text') return part.value ?? '';
+  return (part.children ?? []).map(writtenCode).join('');
+}
+
+/**
+ * A fenced block with the one thing a reader most often wants from it: a
+ * button in its corner that takes the code away whole (bw-o4rj.1).
+ *
+ * The button sits in a box around the block and not inside it, because the
+ * block is its own sideways scroller and anything inside would slide off with
+ * the long line it was pinned beside. It is drawn faintly at rest rather than
+ * on hover alone, so a reader on a touch screen -- who never hovers -- can
+ * still see that the code can be taken.
+ */
+function CodeBlock({ code, children, className, ...props }: ComponentPropsWithoutRef<'pre'> & {
+  code: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    const done = navigator.clipboard?.writeText(code);
+    if (!done) return;
+    void done.then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+  return (
+    // The prose preset takes the margin off its own first and last child, and
+    // the block is no longer that child; the box it now sits in passes that
+    // same reset down to it.
+    <div className="group relative [&:first-child>pre]:mt-0 [&:last-child>pre]:mb-0">
+      <pre className={className} {...props}>{children}</pre>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label={copied ? 'Code copied' : 'Copy code'}
+        data-testid="markdown-copy-code"
+        className={cn(
+          'absolute right-2 top-2 size-7 rounded-md border border-zinc-700 bg-zinc-800/90',
+          'text-zinc-300 opacity-70 transition hover:bg-zinc-700 hover:text-zinc-50',
+          'focus-visible:opacity-100 group-hover:opacity-100',
+          copied && 'text-success opacity-100',
+        )}
+        onClick={copy}
+      >
+        {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+      </Button>
+    </div>
+  );
 }
 
 /**
@@ -402,6 +466,11 @@ export function MarkdownBody({
         remarkPlugins={[remarkGfm, remarkBreaks]}
         rehypePlugins={mentions ? [rehypeHighlight, [rehypeMentions, mentions.split]] : [rehypeHighlight]}
         components={{
+          // Every fenced block is a box with a copy button in its corner; an
+          // inline `word` is not a block and is untouched (bw-o4rj.1).
+          pre: ({ node, ...props }) => (
+            <CodeBlock code={writtenCode(node)} {...props} />
+          ),
           img: ({ node, ...props }) => {
             const src = String(props.src ?? '');
             const local = localImageSource(src, base);
