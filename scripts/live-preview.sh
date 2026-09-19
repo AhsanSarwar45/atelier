@@ -16,9 +16,8 @@ BOARD="${BEADS_BOARD_URL:-http://127.0.0.1:3008}"
 PORT="${PORT:-3007}"
 
 if ! curl -sf -o /dev/null "$BOARD/api/projects"; then
-  echo "No board answering at $BOARD."
-  echo "The preview reads its projects, cards and chats from a running instance;"
-  echo "start one (systemctl --user start atelier) or point BEADS_BOARD_URL at it."
+  echo "Atelier is unavailable at $BOARD."
+  echo "Start Atelier there, or set BEADS_BOARD_URL to a running instance."
   exit 1
 fi
 

@@ -77,7 +77,7 @@ const printed = await row.getByTestId('tool-output').first().boundingBox();
 const said = await answer.boundingBox();
 const inFrame = (box) => box && box.y >= 0 && box.y + box.height <= view.height;
 if (!inFrame(printed) || !inFrame(said)) {
-  console.log(`both halves are not in the frame (printed=${JSON.stringify(printed)}, answer=${JSON.stringify(said)})`);
+  console.log(`frame is incomplete (command=${JSON.stringify(printed)}, answer=${JSON.stringify(said)})`);
   await browser.close();
   process.exit(1);
 }

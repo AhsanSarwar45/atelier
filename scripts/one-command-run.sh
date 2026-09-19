@@ -96,10 +96,10 @@ else
   printf '%s\n' "$HELP" | sed 's/^/      /'
 fi
 
-if printf '%s' "$HELP" | grep -q 'nothing else to start'; then
-  pass "it says there is no second thing for the reader to start"
+if printf '%s' "$HELP" | grep -q 'project boards and agent chats'; then
+  pass "help identifies the app and chat surfaces"
 else
-  fail "'--help' never says the frontend needs no separate process"
+  fail "'--help' does not identify the app and chat surfaces"
 fi
 
 # The port a reader who configures nothing is told to open. It is a sentence

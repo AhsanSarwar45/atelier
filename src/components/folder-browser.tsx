@@ -331,7 +331,7 @@ export function FolderBrowser({
             <ReadFailed
               className="m-2"
               data-testid="folders-error"
-              what="This folder could not be read."
+              what="Couldn’t load folder."
               why={error}
               onRetry={() => setAttempt((n) => n + 1)}
             />

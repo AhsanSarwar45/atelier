@@ -317,8 +317,8 @@ impl Shell {
             // Named, because the one thing a person can do about this is change
             // it, and they cannot change what they are not told.
             Some(chosen) => std::io::Error::other(format!(
-                "{} is the shell chosen in Settings, and it would not start: {why}. \
-                 Choose another in Settings.",
+                "Could not start the shell selected in Settings ({}): {why}. \
+                 Choose another shell in Settings.",
                 chosen.display()
             )),
             None => other(why),

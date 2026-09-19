@@ -41,9 +41,9 @@ export const PROJECT_SETTINGS_SECTIONS: SettingsSectionDef[] = [
   { id: 'workflow', label: 'Workflow', hint: 'Cards, branches', icon: <GitBranch /> },
   { id: 'review', label: 'Review', hint: 'Evidence, checks', icon: <ShieldCheck /> },
   { id: 'development', label: 'Development', hint: 'Commands', icon: <Hammer /> },
-  { id: 'claude', label: 'Claude Code', hint: 'This project', icon: <BrandIcon brand="claude" /> },
-  { id: 'codex', label: 'Codex', hint: 'This project', icon: <BrandIcon brand="codex" /> },
-  { id: 'files', label: 'Agent files', hint: 'This project', icon: <ScrollText /> },
+  { id: 'claude', label: 'Claude Code', hint: 'Project settings', icon: <BrandIcon brand="claude" /> },
+  { id: 'codex', label: 'Codex', hint: 'Project settings', icon: <BrandIcon brand="codex" /> },
+  { id: 'files', label: 'Agent files', hint: 'Project settings', icon: <ScrollText /> },
 ];
 
 const commaList = (value: string) => value.split(',').map((item) => item.trim()).filter(Boolean);
@@ -139,7 +139,7 @@ export function ProjectSettingsScreen({
     const trimmedPath = path.trim().replace(/\\/g, '/');
     const trimmedLocalPath = localPath.trim().replace(/\\/g, '/');
     if (!trimmedName) {
-      toast({ title: 'The project needs a name', variant: 'destructive' });
+      toast({ title: 'Enter a project name', variant: 'destructive' });
       return;
     }
     setSaving(true);
@@ -175,7 +175,7 @@ export function ProjectSettingsScreen({
         onGone?.();
         router.push('/');
       } catch (err) {
-        toast({ title: 'That did not happen', description: err instanceof Error ? err.message : String(err), variant: 'destructive' });
+        toast({ title: 'Action failed', description: err instanceof Error ? err.message : String(err), variant: 'destructive' });
       }
     },
     [router, toast, onGone],
@@ -353,7 +353,7 @@ export function ProjectSettingsScreen({
               <SettingRow label="Work areas" htmlFor="settings-areas" description="Comma separated">
                 <Input id="settings-areas" value={manifest.beads.work_areas.join(', ')} onChange={(e) => patch('beads', { work_areas: commaList(e.target.value) })} className="w-full sm:w-72" />
               </SettingRow>
-              <SettingRow label="Completed-work branch" htmlFor="settings-branch">
+              <SettingRow label="Merge into" htmlFor="settings-branch">
                 <BranchSelect id="settings-branch" value={manifest.git.completed_work_branch} branches={branches} onChange={(name) => patch('git', { completed_work_branch: name })} testid="settings-branch" />
               </SettingRow>
               <SettingRow label="Agents may merge" htmlFor="settings-merge">
@@ -419,7 +419,7 @@ export function ProjectSettingsScreen({
       )}
 
       {(open === 'workflow' || open === 'review' || open === 'development') && !manifest && (
-        <p className="text-sm text-t-tertiary">This project keeps no policy file yet.</p>
+        <p className="text-sm text-t-tertiary">No project settings file.</p>
       )}
 
       {open === 'claude' && provider('claude')}

@@ -98,7 +98,7 @@ export function RemoteAccessSettings() {
     return (
       <ReadFailed
         data-testid="remote-access-error"
-        what="Whether the board can be reached from away could not be read."
+        what="Couldn’t load remote access settings."
         why={unread}
         onRetry={() => setAttempt((n) => n + 1)}
       />
@@ -106,7 +106,7 @@ export function RemoteAccessSettings() {
   }
 
   if (!held) {
-    return <p className="text-sm text-t-tertiary">Loading the remote access setting…</p>;
+    return <p className="text-sm text-t-tertiary">Loading remote access…</p>;
   }
 
   const ready = held.standing === 'ready';
@@ -116,10 +116,9 @@ export function RemoteAccessSettings() {
       <div>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm font-medium text-t-secondary">Reach it from anywhere</p>
+            <p className="text-sm font-medium text-t-secondary">Private remote access</p>
             <p className="mt-1 text-sm text-t-tertiary">
-              Puts the board on your own private network, so your phone opens it from outside the
-              house. Nothing is opened to the internet, and speed at home is unchanged.
+              Open Atelier from devices on your Tailscale network.
             </p>
           </div>
           <Button
@@ -138,7 +137,7 @@ export function RemoteAccessSettings() {
           <Panel tone="info" inset="md" className="mt-3" data-testid="remote-wrong">
             <p className="text-sm text-t-secondary">
               {held.standing === 'not-installed'
-                ? 'Tailscale is not installed. It is the one step that needs a password, so it is run in a terminal:'
+                ? 'Install Tailscale from a terminal:'
                 : held.wrong}
             </p>
             {held.standing === 'not-installed' && (
@@ -186,11 +185,10 @@ export function RemoteAccessSettings() {
 
       <div>
         <label htmlFor="remote-host" className="block text-sm font-medium text-t-secondary">
-          Answer on
+          Listen on
         </label>
         <p className="mt-1 text-sm text-t-tertiary">
-          Which network the app listens on. Leave it empty to answer on every one, or use
-          127.0.0.1 to answer only on this computer. It takes effect the next time the app starts.
+          Leave blank for all networks, or use 127.0.0.1 for this computer only. Applies after restart.
         </p>
         <div className="mt-2 flex items-center gap-2">
           <Input
@@ -213,11 +211,10 @@ export function RemoteAccessSettings() {
 
       <div>
         <label htmlFor="remote-url" className="block text-sm font-medium text-t-secondary">
-          Tell people to open
+          Public URL
         </label>
         <p className="mt-1 text-sm text-t-tertiary">
-          The address the app shows first when it starts. Leave it empty and it shows the ones it
-          works out on its own.
+          Shown at startup. Leave blank to detect it automatically.
         </p>
         <div className="mt-2 flex items-center gap-2">
           <Input
@@ -238,7 +235,7 @@ export function RemoteAccessSettings() {
         </div>
         {held.publishing && (
           <p className="mt-2 text-xs text-t-muted" data-testid="remote-publishing">
-            It will say: {held.publishing}
+            Startup message: {held.publishing}
           </p>
         )}
       </div>

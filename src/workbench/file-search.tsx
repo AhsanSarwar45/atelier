@@ -118,8 +118,8 @@ export function useFileSearch(root: string): SearchSource<FileMatch, FoundFile> 
     const go = (file: string, line: number | null) => router.push(addressWith(params, { tab: 'files', file, line }));
     return {
       words: {
-        label: 'Search the files',
-        placeholder: 'Search the files…',
+        label: 'Search files',
+        placeholder: 'Search files…',
         nothing: 'No files.',
         grammar: FILE_GRAMMAR,
         scopes: FILE_SCOPES,
@@ -180,8 +180,8 @@ export function useFileSearch(root: string): SearchSource<FileMatch, FoundFile> 
           })),
       },
       ask: {
-        label: 'Describe the file',
-        placeholder: 'Describe the file…',
+        label: 'Ask about files',
+        placeholder: 'Ask about files…',
         nothing: 'No files.',
         url: '/api/fs/search/ask',
         body: { root },

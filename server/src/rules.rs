@@ -89,7 +89,7 @@ fn remove_retired_rule_files(dir: &Path) -> Result<(), String> {
 /// Lay the rules down beside the data, and say where they went.
 pub fn install() -> Result<PathBuf, String> {
     let Some(dir) = crate::identity::rules_dir() else {
-        return Err("this computer names no folder for a program's data".to_string());
+        return Err("Could not find the application data folder".to_string());
     };
     let files = crate::laid_down::gather::<Machinery>(MACHINERY)?;
     crate::laid_down::install(&dir, &files)?;
@@ -221,7 +221,7 @@ fn init_with(
         .map_err(|e| format!("that folder cannot be read: {e}"))?;
 
     let data_dir = crate::identity::data_dir()
-        .ok_or_else(|| "this computer names no folder for Atelier's data".to_string())?;
+        .ok_or_else(|| "Could not find the Atelier data folder".to_string())?;
     let existing = crate::project_manifest::locate(&root, &data_dir);
     let mut manifest = existing
         .as_ref()
@@ -494,7 +494,7 @@ pub fn project_beads(rest: &[String]) -> Result<String, String> {
     let root = std::fs::canonicalize(rest.first().cloned().unwrap_or_else(|| ".".to_string()))
         .map_err(|e| format!("that folder cannot be read: {e}"))?;
     let data_dir = crate::identity::data_dir()
-        .ok_or_else(|| "this computer names no folder for Atelier's data".to_string())?;
+        .ok_or_else(|| "Could not find the Atelier data folder".to_string())?;
     Ok(match crate::project_manifest::locate(&root, &data_dir) {
         Some(found) if found.manifest.project.use_beads => "enabled",
         _ => "disabled",

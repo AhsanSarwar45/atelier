@@ -27,7 +27,7 @@ describe('project onboarding', () => {
     fireEvent.change(screen.getByLabelText('Folder'), { target: { value: '/dev/keystone' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
-    expect(await screen.findByLabelText('Project Name')).toHaveValue('Keystone');
+    expect(await screen.findByLabelText('Project name')).toHaveValue('Keystone');
     expect(screen.getByLabelText('Use task tracking for project work')).toBeChecked();
     expect(screen.getByLabelText('Card ID prefix')).toHaveValue('key');
     expect(screen.getByLabelText('Finished work lands on')).toHaveValue('ours');
@@ -49,12 +49,12 @@ describe('project onboarding', () => {
     render(<AddProjectDialog open onOpenChange={vi.fn()} onInitialized={vi.fn()} />);
     fireEvent.change(screen.getByLabelText('Folder'), { target: { value: '/dev/keystone' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    expect(await screen.findByLabelText('Project Name')).toHaveValue('Keystone');
+    expect(await screen.findByLabelText('Project name')).toHaveValue('Keystone');
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Project' }));
 
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith(expect.objectContaining({
-      title: 'Project could not be added',
+      title: 'Couldn’t add project',
       description: 'Keystone is already on the home screen',
       variant: 'destructive',
     })));

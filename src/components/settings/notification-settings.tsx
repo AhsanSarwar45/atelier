@@ -63,7 +63,7 @@ export function NotificationSettings() {
         : 'Show outside the Atelier window';
 
   return <>
-    <SettingsGroup title="Notify me about" description="What reaches the bell and this device">
+    <SettingsGroup title="Notifications">
       <SettingRow label="Needs action" description="Permission requests and errors" htmlFor="notify-action">
         <Checkbox id="notify-action" checked={preferences.needsAction} onCheckedChange={(v) => choose('needsAction', v === true)} />
       </SettingRow>
@@ -71,7 +71,7 @@ export function NotificationSettings() {
         <Checkbox id="notify-updates" checked={preferences.updates} onCheckedChange={(v) => choose('updates', v === true)} />
       </SettingRow>
     </SettingsGroup>
-    <SettingsGroup title="Desktop and mobile" description="Set per device">
+    <SettingsGroup title="This device">
       <SettingRow label="Device notifications" description={deviceDescription}>
         <Button
           size="sm"
@@ -81,7 +81,7 @@ export function NotificationSettings() {
           onClick={() => void device()}
         >{preferences.device ? 'Enabled' : 'Enable'}</Button>
       </SettingRow>
-      <SettingRow label="Use on a phone" description="Add to home screen first, then enable above" />
+      <SettingRow label="Mobile notifications" description="Add Atelier to your home screen, then enable notifications" />
     </SettingsGroup>
   </>;
 }

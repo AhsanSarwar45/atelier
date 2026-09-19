@@ -209,7 +209,7 @@ export default function ProjectsPage() {
             <ReadFailed
               className="mx-auto"
               data-testid="projects-error"
-              what="Your projects could not be read."
+              what="Couldn’t load projects."
               why={`${error.message}\n\nCheck that the Atelier server is still running.`}
               onRetry={() => void refetch()}
             />

@@ -153,19 +153,19 @@ const statusLines = drawn.slice(beforeStatus).map(loud).filter((t) => /compact/i
 await driver.close();
 
 const kinds = [...new Set(drawn.filter((e) => e.type === 'note').map((e) => e.kind))].sort();
-console.log(`a turn was answered: ${answered ? 'yes' : 'no'}`);
+console.log(`answered: ${answered ? 'yes' : 'no'}`);
 console.log(`kinds of line drawn: ${kinds.join(', ') || 'none'}`);
-console.log(`the compact answer, in the live chat: ${compactLines.length} line(s)`);
+console.log(`compact answer: ${compactLines.length} line(s)`);
 for (const line of compactLines) console.log(`  ${line.slice(0, 160)}`);
-console.log(`an unheard-of kind drew: ${unknownDrew} event(s)`);
-console.log(`a message with no stream behind it drew: ${syntheticLines.length} line(s)`);
-console.log(`a compact status drew: ${statusLines.length} line(s)`);
-console.log(`a 60,000-character argument was stored as: ${askedSize} characters`);
-console.log(`the same file, as a diff, was stored as: ${diffSize} characters`);
-console.log(`a 500-character quiet line kept a body of: ${longBody} characters`);
-console.log(`a mode the tool changed by itself said: ${modeSaid.length} line(s), repinned ${modeRepinned} time(s)`);
-console.log(`the same mode again said: ${modeSaidAgain} line(s)`);
-console.log(`a 60,000-character permission card carried: ${cardSize} characters`);
+console.log(`unknown events rendered: ${unknownDrew}`);
+console.log(`synthetic message: ${syntheticLines.length} line(s)`);
+console.log(`compact status: ${statusLines.length} line(s)`);
+console.log(`60,000-character argument stored: ${askedSize} characters`);
+console.log(`file diff stored: ${diffSize} characters`);
+console.log(`500-character quiet line body: ${longBody} characters`);
+console.log(`automatic mode change: ${modeSaid.length} line(s), ${modeRepinned} repin(s)`);
+console.log(`unchanged mode: ${modeSaidAgain} line(s)`);
+console.log(`60,000-character permission card stored: ${cardSize} characters`);
 
 const wrong = [];
 if (!answered) wrong.push('the session never answered a turn');

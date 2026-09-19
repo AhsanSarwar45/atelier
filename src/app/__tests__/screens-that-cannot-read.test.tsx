@@ -112,7 +112,7 @@ describe('the list of projects', () => {
     render(<ProjectsPage />);
 
     expect(screen.getByTestId('projects-error')).toBeInTheDocument();
-    expect(screen.getByText(/could not be read/i)).toBeInTheDocument();
+    expect(screen.getByText(/couldn’t load/i)).toBeInTheDocument();
     expect(screen.getByText(/the server did not answer/)).toBeInTheDocument();
     // Not "No projects yet": a list nobody could read is not an empty one.
     expect(screen.queryByText(/no projects yet/i)).not.toBeInTheDocument();

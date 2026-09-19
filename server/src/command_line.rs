@@ -143,7 +143,7 @@ pub fn asked<I: IntoIterator<Item = String>>(args: I) -> Ask {
 pub fn help() -> String {
     format!(
         "\
-{DISPLAY} — the board, the screens and the chat, in one program.
+{DISPLAY} — project boards and agent chats.
 
 Usage:
   atelier run                 Start Atelier and open it
@@ -155,8 +155,8 @@ Usage:
   atelier tool <name> [...]   Run an Atelier tool
   atelier where               Show app addresses
   atelier tools               Show dependencies
-  atelier remote install      Set this computer up to be reached from away
-  atelier remote              Show how far along that setup is
+  atelier remote install      Install private remote access
+  atelier remote              Show remote access status
   atelier service install     Start at login
   atelier service uninstall   Disable start at login
   atelier service status      Show service status
@@ -164,17 +164,15 @@ Usage:
   atelier --version           Show the version
   atelier --help              Show help
 
-`atelier run` starts the app and chat service.
+`atelier run` starts the board and chat service.
 
-`init` asks whether the project uses Beads. Use `--beads` or `--chat` to skip
-that question. Run `atelier tools` to check Beads dependencies.
+`init` asks whether the project uses Beads. Pass `--beads` or `--chat` to choose
+without a prompt. Run `atelier tools` to check dependencies.
 
-`remote install` installs Tailscale and hands it to you, so that reaching the
-board from away is afterwards a switch on Settings > Remote access and never
-asks for a password again.
+`remote install` installs Tailscale. After setup, manage access in
+Settings > Remote access.
 
-Settings > Remote access also holds the host the server binds and the address
-it tells people to open. Environment:
+Environment:
   ATELIER_PORT                Port (default {PORT})
 
 Use `atelier where` to show available addresses.
@@ -439,7 +437,7 @@ mod tests {
     #[test]
     fn the_help_screen_says_run_starts_both_services() {
         assert!(
-            help().contains("`atelier run` starts the app and chat service"),
+            help().contains("`atelier run` starts the board and chat service"),
             "the help screen does not describe what run starts"
         );
     }

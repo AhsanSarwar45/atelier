@@ -80,7 +80,7 @@ function linesInTheRecord() {
   // the run comes back green having looked at nothing — which is what it did
   // on this machine for as long as its default path was wrong (bw-cx70.4).
   if (!existsSync(STORE)) {
-    console.error(`There is no record at ${STORE}.`);
+    console.error(`Record not found: ${STORE}`);
     console.error('Set STORE to the chat database');
     process.exit(2);
   }
@@ -121,7 +121,7 @@ const chats = linesInTheRecord();
 // Opened, and empty. The same fault one step further in: a store with no chats
 // in it grades nothing, so it says so rather than printing ten green ticks.
 if (chats.size === 0) {
-  console.error(`The record at ${STORE} holds no chats, so there is nothing here to grade.`);
+  console.error(`No chats found in ${STORE}.`);
   process.exit(2);
 }
 

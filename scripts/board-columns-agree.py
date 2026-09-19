@@ -288,7 +288,7 @@ def main():
         print(f"  {column} says {said} and drew {drew}")
     if miscounted:
         return 1
-    print("every column heading counts the cards it drew")
+    print("column counts match rendered cards")
 
     # The manager is waited on, so his column is the oldest first: nothing sits in
     # it quietly for a week. Every other column keeps the order the board gave.
@@ -308,25 +308,25 @@ def main():
     outside = [r for r in reports if not r["inside"]]
     print(f"\nreports on cards  {len(reports):>3}   drawn outside their card  {len(outside):>3}")
     if not reports:
-        print("no card on this board carries a report, so that rule checked nothing")
+        print("SKIP: no cards have reports")
         return 1
     if outside:
         for r in outside:
             print(f"  a report is drawn outside its card ({r['id']}) — {r['why']}")
         return 1
-    print("every card's report is drawn inside the card")
+    print("card reports render inside their cards")
 
     offered, columns = menu.get("offered"), menu.get("columns") or []
     print(f"\nstates on the board {len(columns):>3}   offered by the menu  "
           f"{len(offered) if offered else 0:>3}")
     if offered is None:
-        print("no card opened a menu that sets its state, so that rule checked nothing")
+        print("SKIP: no card state menu opened")
         return 1
     missing = [c for c in columns if c not in offered]
     if missing:
         print("  the menu cannot set: " + ", ".join(missing))
         return 1
-    print("the menu offers every state the board draws")
+    print("card menu includes every board state")
     return 0
 
 

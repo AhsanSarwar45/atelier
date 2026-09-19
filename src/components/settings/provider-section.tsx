@@ -116,7 +116,7 @@ export function ProviderSection({
       <div className="flex flex-col gap-1">
         <span className="text-xs font-medium text-t-tertiary">Account</span>
         {unread ? (
-          <ReadFailed what={`${brandName(brand)}'s accounts could not be listed.`} why={unread} />
+          <ReadFailed what={`Couldn’t load ${brandName(brand)} accounts.`} why={unread} />
         ) : profiles ? (
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <AccountPicker brand={brand} profiles={profiles} value={account} onChange={onAccount} />

@@ -70,11 +70,11 @@ const week = page.getByTestId('plan-chip-week');
 await week.waitFor({ timeout: 60_000 });
 const said = (await chip.textContent())?.trim() ?? '';
 const saidWeek = (await week.textContent())?.trim() ?? '';
-console.log(`the line says: ${said} | ${saidWeek}`);
+console.log(`usage: ${said} | ${saidWeek}`);
 // Both figures, drawn: the week was once in a hover tooltip only, which is a
 // figure the reader does not have and a screenshot cannot show (bw-malh.5).
 if (!/\d+%/.test(said) || !/\d+%/.test(saidWeek)) {
-  console.log('the line is missing one of the two percentages');
+  console.log('missing session or weekly percentage');
   process.exit(1);
 }
 
@@ -90,7 +90,7 @@ await page.locator('[data-testid="chat-tab"] > div').first().screenshot({ path: 
 await chip.focus();
 const focused = await page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? '');
 if (focused !== 'plan-chip') {
-  console.log(`the chip does not take focus: focus sat on ${focused || 'nothing'}`);
+  console.log(`usage chip is not focused; focused element: ${focused || 'none'}`);
   process.exit(1);
 }
 await page.keyboard.press('Enter');
@@ -98,7 +98,7 @@ const panel = page.getByTestId('usage-view');
 await panel.waitFor({ timeout: 30_000 });
 await page.waitForTimeout(400);
 const windows = await page.getByTestId('usage-window').count();
-console.log(`the panel draws ${windows} window(s)`);
+console.log(`usage windows: ${windows}`);
 await panel.screenshot({ path: panelOut });
 
 await browser.close();

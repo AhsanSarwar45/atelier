@@ -41,7 +41,7 @@ const SECTIONS: SettingsSectionDef[] = [
   { id: 'files', label: 'Agent files', hint: 'Per account', icon: <FileCode2 /> },
   { id: 'search', label: 'Search', hint: 'AI search', icon: <Search /> },
   { id: 'terminal', label: 'Terminal', hint: 'Shell', icon: <SquareTerminal /> },
-  { id: 'remote', label: 'Remote access', hint: 'Reach it from away', icon: <Globe /> },
+  { id: 'remote', label: 'Remote access', hint: 'Network access', icon: <Globe /> },
   { id: 'dependencies', label: 'Dependencies', hint: 'Tools', icon: <Puzzle /> },
   { id: 'tags', label: 'Tags', hint: 'Projects', icon: <Tag /> },
 ];

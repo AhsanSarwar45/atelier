@@ -158,7 +158,7 @@ pub async fn watch(
     let Some(session) = Uuid::parse_str(&id).ok().and_then(|named| shells.get(named)) else {
         return (
             StatusCode::NOT_FOUND,
-            "There is no shell here by that name.",
+            "Shell not found.",
         )
             .into_response();
     };

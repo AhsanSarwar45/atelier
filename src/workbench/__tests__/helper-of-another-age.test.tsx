@@ -142,7 +142,7 @@ describe('when the helper behind the list is older than the page', () => {
     await waitFor(() =>
       expect(line(), 'the page lost every mark and said nothing about why').not.toBeNull(),
     );
-    expect(line()!.textContent, 'the line does not say what to do about it').toMatch(/out of date/i);
+    expect(line()!.textContent, 'the line does not say what to do about it').toMatch(/Restart Atelier/i);
     expect(rows(), 'a frame the page could not read took the list down with it').toHaveLength(2);
   });
 

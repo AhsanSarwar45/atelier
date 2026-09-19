@@ -199,7 +199,7 @@ export const CLAUDE_PAGES: ProviderPageDef[] = [
           // sandbox mode. It was drawn as a choice between two strings the
           // provider accepts neither of, so whichever the reader picked the
           // setting did nothing at all (bw-6ecp.8).
-          { key: 'sandbox.allowUnsandboxedCommands', label: 'Retry outside the sandbox', description: 'Off refuses the retry, so every command must run sandboxed', control: yesNo },
+          { key: 'sandbox.allowUnsandboxedCommands', label: 'Retry outside the sandbox', description: 'Off requires sandboxing', control: yesNo },
           { key: 'sandbox.excludedCommands', label: 'Never sandbox', description: 'Commands', control: { kind: 'list', placeholder: 'docker' } },
           { key: 'sandbox.network.allowedDomains', label: 'Allowed domains', description: '', control: { kind: 'list', placeholder: 'github.com' } },
           { key: 'sandbox.network.deniedDomains', label: 'Denied domains', description: '', control: { kind: 'list' } },
@@ -284,7 +284,7 @@ export const CODEX_PAGES: ProviderPageDef[] = [
         id: 'env',
         title: 'Environment',
         settings: [
-          { key: 'shell_environment_policy.inherit', label: 'Inherit the shell environment', description: '', control: { kind: 'choice', choices: [{ value: 'all', label: 'All of it' }, { value: 'core', label: 'The core variables' }, { value: 'none', label: 'None' }] } },
+          { key: 'shell_environment_policy.inherit', label: 'Shell environment', description: '', control: { kind: 'choice', choices: [{ value: 'all', label: 'All' }, { value: 'core', label: 'Core variables' }, { value: 'none', label: 'None' }] } },
           { key: 'shell_environment_policy.set', label: 'Set variables', description: '', control: { kind: 'map' } },
         ],
       },
@@ -311,7 +311,7 @@ export const CODEX_PAGES: ProviderPageDef[] = [
         // The reference says not to combine these with `default_permissions`
         // at all. Calling it an override said the profile quietly wins, which
         // is not what happens (bw-6ecp.14).
-        description: 'Do not set these and a permission profile together',
+        description: 'Cannot be combined with a permission profile',
         settings: [
           { key: 'sandbox_mode', label: 'Sandbox', description: '', control: { kind: 'choice', choices: [{ value: 'read-only', label: 'Read only' }, { value: 'workspace-write', label: 'Write in the workspace' }, { value: 'danger-full-access', label: 'Full access' }] } },
           { key: 'sandbox_workspace_write.network_access', label: 'Network access', description: 'While writing', control: yesNo },
@@ -323,7 +323,7 @@ export const CODEX_PAGES: ProviderPageDef[] = [
       {
         id: 'profile',
         title: 'Permission profile',
-        description: 'Do not set this and the sandbox above together',
+        description: 'Cannot be combined with sandbox settings',
         settings: [
           { key: 'default_permissions', label: 'Profile', description: 'Or :read-only, :workspace, :danger-full-access', control: { kind: 'text', placeholder: ':workspace', mono: true } },
         ],

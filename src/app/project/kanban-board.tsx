@@ -297,7 +297,7 @@ export default function KanbanBoard() {
       <div className="flex flex-col items-center justify-center min-h-dvh bg-surface-base">
         <ReadFailed
           data-testid="project-error"
-          what="This project could not be read."
+          what="Couldn’t load project."
           why={projectError.message}
           onRetry={() => void refetchProject()}
         >
@@ -419,7 +419,7 @@ export default function KanbanBoard() {
           <div className="flex items-center justify-center h-full">
             <ReadFailed
               data-testid="board-error"
-              what="This project’s cards could not be read."
+              what="Couldn’t load cards."
               why={beadsError.message}
               onRetry={() => void refreshBeads()}
             />

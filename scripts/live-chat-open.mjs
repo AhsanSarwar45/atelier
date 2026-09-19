@@ -146,7 +146,7 @@ try {
   const second = await click();
 
   const drawn = rowsDrawn();
-  console.log(`a live chat of ${LINES} lines (${(said.join('\n').length / 1e6).toFixed(1)} MB), ${drawn} rows drawn`);
+  console.log(`live chat: ${LINES} lines, ${(said.join('\n').length / 1e6).toFixed(1)} MB, ${drawn} rows`);
   console.log(`  first click   ${first}ms`);
   console.log(`  second click  ${second}ms`);
   if (drawn === 0) {
@@ -158,7 +158,7 @@ try {
     console.log(`OVER the ${BUDGET_MS}ms budget: ${over.join('ms, ')}ms`);
     stop(1);
   }
-  console.log(`both under the ${BUDGET_MS}ms budget`);
+  console.log(`runs completed within ${BUDGET_MS}ms`);
   stop(0);
 } catch (err) {
   console.error(String(err));

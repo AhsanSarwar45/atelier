@@ -192,7 +192,7 @@ async fn run() {
     // reads the settings, so a person who upgrades finds their projects where
     // they left them rather than an empty list (bw-8um.3.8).
     if let Err(e) = identity::adopt_earlier_install() {
-        eprintln!("the earlier install could not be carried over: {e}");
+        eprintln!("Could not migrate the previous installation: {e}");
     }
 
     match command_line::asked(env::args().skip(1)) {
@@ -271,14 +271,14 @@ async fn run() {
         command_line::Ask::DataDir => match identity::data_dir() {
             Some(dir) => println!("{}", dir.display()),
             None => {
-                eprintln!("this computer names no folder for a program's data");
+                eprintln!("Could not find the application data folder.");
                 std::process::exit(1);
             }
         },
         // It used to start the server for anything it did not recognise, so a
         // mistyped flag looked like it had been taken and quietly wasn't.
         command_line::Ask::Unknown(word) => {
-            eprintln!("{}: `{word}` is not something it does.\n", identity::NAME);
+            eprintln!("{}: unknown command `{word}`.\n", identity::NAME);
             eprint!("{}", command_line::help());
             std::process::exit(2);
         }

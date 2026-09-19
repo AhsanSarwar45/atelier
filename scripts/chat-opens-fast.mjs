@@ -107,7 +107,7 @@ console.log(JSON.stringify({ base, runs }, null, 2));
 let wrong = false;
 for (const run of runs) {
   if (run.drawnMs > MOST) {
-    console.error(`a chat of ${run.messages} messages took ${run.drawnMs}ms to draw; ${MOST}ms is the most it may take`);
+    console.error(`Slow chat render: ${run.messages} messages in ${run.drawnMs}ms (limit: ${MOST}ms)`);
     wrong = true;
   }
   if (run.piecesOfScreen > PIECES) {

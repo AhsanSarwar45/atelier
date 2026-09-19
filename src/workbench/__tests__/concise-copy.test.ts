@@ -1,22 +1,21 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import ts from 'typescript';
 
 import { describe, expect, it } from 'vitest';
 
+function sourceFiles(root: string, extensions = /\.(?:ts|tsx)$/): string[] {
+  return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) return entry.name === '__tests__' ? [] : sourceFiles(path, extensions);
+    return extensions.test(entry.name) && !entry.name.endsWith('.test.ts') ? [path] : [];
+  });
+}
+
 const USER_FACING_FILES = [
-  'src/workbench/agent-view.tsx',
-  'src/workbench/chat-right-rail.tsx',
-  'src/workbench/sent-away.tsx',
-  'src/workbench/token-view.tsx',
-  'src/workbench/usage-view.tsx',
-  'src/workbench/accounts-settings.tsx',
-  'src/workbench/paths-in-html.ts',
-  'src/workbench/terminal-window.tsx',
-  'src/app/page.tsx',
-  'src/app/settings/page.tsx',
-  'src/components/settings/provider-schema.ts',
-  'scripts/spend-counted-once.mjs',
-  'server/src/command_line.rs',
-  'server/src/main.rs',
+  ...sourceFiles('src'),
+  ...sourceFiles('scripts', /\.(?:js|mjs|py|sh)$/),
+  ...sourceFiles('server/src', /\.rs$/),
 ];
 
 const OVERWRITTEN_COPY = [
@@ -51,11 +50,38 @@ const OVERWRITTEN_COPY = [
   'Put ${title} back',
   'Fill the screen with ${title}',
   'Click to open this file in the Files tab',
+  'Reach it from away',
+  'That did not happen',
+  'Not there yet',
+  'Every account',
+  'What reaches the bell and this device',
+  'Give this chat a name that is easy to find in the sidebar',
+  'This project keeps no policy file yet',
+  'Writing it to the board. This can take a moment while agents are working.',
+  'The helper behind this list is out of date, so no chat here can say what it is doing.',
+  'the board, the screens and the chat',
+  'Set this computer up to be reached from away',
+  'Show how far along that setup is',
+  'turning reaching-from-away on and off',
+  'There is nothing at',
+  'is not a file, so there is no shell',
+  'This computer will not say where your home folder is',
+  'is not something it does',
+  'this computer names no folder',
 ];
 
 describe('user-facing copy', () => {
   it('does not restore the audited narrative labels', () => {
-    const source = USER_FACING_FILES.map((file) => readFileSync(file, 'utf8')).join('\n');
-    for (const phrase of OVERWRITTEN_COPY) expect(source).not.toContain(phrase);
+    const strings: string[] = [];
+    for (const file of USER_FACING_FILES) {
+      const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, false, file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+      const visit = (node: ts.Node) => {
+        if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isJsxText(node)) strings.push(node.text);
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+    }
+    const copy = strings.join('\n');
+    for (const phrase of OVERWRITTEN_COPY) expect(copy).not.toContain(phrase);
   });
 });

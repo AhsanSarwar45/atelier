@@ -273,7 +273,7 @@ function ProjectTabs() {
         <div className="flex min-h-0 flex-1 items-center justify-center p-6">
           <ReadFailed
             data-testid="project-error"
-            what="This project could not be read."
+            what="Couldn’t load project."
             why={projectError.message}
             onRetry={() => void refetch()}
           >

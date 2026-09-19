@@ -137,16 +137,16 @@ fn why_not(named: &str) -> Option<String> {
     let path = Path::new(named);
     if !path.is_absolute() {
         return Some(format!(
-            "A shell has to be named by its whole path from the root, and {named} is not."
+            "Enter an absolute shell path. `{named}` is relative."
         ));
     }
     match std::fs::metadata(path) {
-        Err(_) => Some(format!("There is nothing at {named} to open a shell from.")),
+        Err(_) => Some(format!("Shell not found: {named}")),
         Ok(what) if !what.is_file() => {
-            Some(format!("{named} is not a file, so there is no shell there to open."))
+            Some(format!("Shell path is not a file: {named}"))
         }
         Ok(_) if !shell::runnable(path) => Some(format!(
-            "{named} is not something this computer will run, so no shell could start from it."
+            "Shell is not executable: {named}"
         )),
         Ok(_) => None,
     }

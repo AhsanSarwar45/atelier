@@ -382,7 +382,7 @@ def main():
     failures.extend(downloads_named(files))
     failures.extend(account_named(files))
 
-    print("the product is named %r, read as %r, defined in %s" % (name, display, IDENTITY))
+    print("name=%r display=%r source=%s" % (name, display, IDENTITY))
     print("%d places must agree, %d tracked files swept, and %d built pages read as the"
           " reader meets them; every download a manifest names checked against the"
           " releases that exist, and every address of its own repositories against"

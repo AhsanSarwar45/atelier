@@ -66,7 +66,7 @@ const quiet = CLAUDE_PERMISSION_MODES.filter((m) => !said.some((line) => line.in
 
 console.log(`refused: ${refused.length}${refused.length ? ` — ${refused.join(', ')}` : ''}`);
 console.log(`changed in silence: ${quiet.length}${quiet.length ? ` — ${quiet.join(', ')}` : ''}`);
-console.log(`the same mode picked twice said so ${twice} time(s)`);
+console.log(`unchanged mode notices: ${twice}`);
 const failed = refused.length > 0 || quiet.length > 0 || twice !== 2;
 console.log(failed ? 'FAIL' : 'PASS');
 process.exit(failed ? 1 : 0);

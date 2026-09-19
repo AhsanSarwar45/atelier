@@ -582,7 +582,7 @@ function SignInSteps({ brand, progress }: { brand: Brand; progress: SignInProgre
       </div>
       {progress.code && (
         <>
-          <p className="mb-1 mt-4 text-xs text-t-muted">Type this code into that page</p>
+          <p className="mb-1 mt-4 text-xs text-t-muted">Verification code</p>
           <p className="font-mono text-lg tracking-wide text-t-primary" data-testid="account-signin-onetime">
             {progress.code}
           </p>
@@ -590,7 +590,7 @@ function SignInSteps({ brand, progress }: { brand: Brand; progress: SignInProgre
       )}
       <p className="mt-4 flex items-center gap-2 text-xs text-t-muted">
         <Loader2 className="h-3 w-3 animate-spin" />
-        {progress.code ? 'Waiting for that code to be entered.' : 'Waiting for that page to finish.'}
+        {progress.code ? 'Waiting for verification…' : 'Waiting for sign-in…'}
       </p>
     </div>
   );

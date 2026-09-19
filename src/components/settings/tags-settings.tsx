@@ -86,7 +86,7 @@ export function TagsSettings() {
         <div className="p-3">
           <ReadFailed
             data-testid="tags-error"
-            what="Your tags could not be read."
+            what="Couldn’t load tags."
             why={error}
             onRetry={() => setAttempt((n) => n + 1)}
           />

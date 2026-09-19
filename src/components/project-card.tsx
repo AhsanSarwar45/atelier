@@ -101,7 +101,7 @@ export function ProjectCard({
       console.error("Error opening project:", err);
       toast({
         title: "Could not open project",
-        description: err instanceof Error ? err.message : "Could not open the project. Make sure the application is installed.",
+        description: err instanceof Error ? err.message : "Couldn’t open project. Check that the required app is installed.",
         variant: "destructive",
       });
     } finally {

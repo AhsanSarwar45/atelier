@@ -911,7 +911,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitV
               screen reader and to anything looking for it by that name. */}
           <DialogHeader>
             <DialogTitle className="text-base text-t-primary">Unlock your SSH key</DialogTitle>
-            <DialogDescription>Used for this one call and not kept.</DialogDescription>
+            <DialogDescription>Used once and never saved.</DialogDescription>
           </DialogHeader>
           <form
             className="flex flex-col gap-3"

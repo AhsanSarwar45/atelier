@@ -126,7 +126,7 @@ async fn open(
                 return Err((
                     StatusCode::BAD_REQUEST,
                     format!(
-                        "A shell cannot start in {}, because there is no folder there.",
+                        "Shell folder not found: {}",
                         named.display()
                     ),
                 ));
@@ -142,7 +142,7 @@ async fn open(
     let chosen = settings.terminal_shell().map_err(|why| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("The shell chosen in Settings could not be read: {why}"),
+            format!("Could not read the shell setting: {why}"),
         )
     })?;
 
@@ -151,7 +151,7 @@ async fn open(
         .map_err(|why| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("The shell would not start: {why}"),
+                format!("Could not start the shell: {why}"),
             )
         })?;
 
@@ -203,7 +203,7 @@ async fn history(Extension(settings): Extension<Arc<Database>>) -> Result<Json<H
     let chosen = settings.terminal_shell().map_err(|why| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("The shell chosen in Settings could not be read: {why}"),
+            format!("Could not read the shell setting: {why}"),
         )
     })?;
     let shell = chosen.unwrap_or_else(crate::terminal::shell::system_default);
@@ -230,7 +230,7 @@ async fn close(
     } else {
         Err((
             StatusCode::NOT_FOUND,
-            "There is no shell by that name.".to_string(),
+            "Shell not found.".to_string(),
         ))
     }
 }
@@ -242,8 +242,7 @@ fn home() -> Result<PathBuf, Refusal> {
         .ok_or_else(|| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "This computer will not say where your home folder is, so a shell \
-                 with no folder named has nowhere to start."
+                "Could not find your home folder."
                     .to_string(),
             )
         })

@@ -372,7 +372,7 @@ export function ProviderSettingsPanel({
   const target = view?.files.find((f) => f.layer === layer);
 
   if (unread) {
-    return <ReadFailed what="The settings could not be read." why={unread} onRetry={() => setAttempt((n) => n + 1)} />;
+    return <ReadFailed what="Couldn’t load settings." why={unread} onRetry={() => setAttempt((n) => n + 1)} />;
   }
   if (!view || !drawn) {
     return (

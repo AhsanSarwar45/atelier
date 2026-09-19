@@ -97,7 +97,7 @@ describe('the Remote access section', () => {
     save.mockRejectedValue(new Error('my-desk is not an address this computer can listen on.'));
 
     render(<RemoteAccessSettings />);
-    const field = await screen.findByLabelText('Answer on');
+    const field = await screen.findByLabelText('Listen on');
     fireEvent.change(field, { target: { value: 'my-desk' } });
     fireEvent.click(screen.getByTestId('remote-host-save'));
 

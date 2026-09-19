@@ -68,22 +68,20 @@ impl Standing {
                     .to_string()
             }
             Standing::NotAnswering { said } => format!(
-                "Tailscale is installed but not answering. Run `atelier remote install` in a \
-                 terminal to start it and hand it to this user. It said: {said}"
+                "Tailscale is not responding. Run `atelier remote install` in a terminal. \
+                 Details: {said}"
             ),
             Standing::NeedsSignIn => {
-                "Tailscale is running but this computer has not joined your network. Run \
-                 `tailscale up` and sign in."
+                "This computer is not connected to Tailscale. Run `tailscale up` and sign in."
                     .to_string()
             }
             Standing::Stopped => {
-                "Tailscale is installed and signed in but switched off. Run `tailscale up`."
+                "Tailscale is off. Run `tailscale up`."
                     .to_string()
             }
             Standing::Starting => "Tailscale is still starting up.".to_string(),
             Standing::Unnamed => {
-                "This computer has no name on your Tailscale network, so there is no address to \
-                 give a phone. Turn MagicDNS on in the Tailscale admin console."
+                "No Tailscale hostname is available. Enable MagicDNS in the Tailscale admin console."
                     .to_string()
             }
             Standing::Ready { .. } => return None,
@@ -313,8 +311,8 @@ fn say_standing() {
     match standing.wrong() {
         None => {
             if let Standing::Ready { address } = &standing {
-                println!("Reachable from anywhere at {address}");
-                println!("Turn it on in Settings > Remote access.");
+                println!("Remote address: {address}");
+                println!("Enable it in Settings > Remote access.");
             }
         }
         Some(wrong) => println!("{wrong}"),
@@ -335,23 +333,21 @@ fn install(without_asking: bool) -> Result<(), String> {
     }
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
-        .map_err(|_| "this computer does not say who you are, so operation cannot be handed over")?;
+        .map_err(|_| "Could not determine the current user")?;
     let Some(plan) = install_plan(manager_here(), &user) else {
         return Err(format!(
-            "no package manager this knows is on this computer, so Tailscale has to be installed \
-             by hand: {DOWNLOAD}"
+            "No supported package manager found. Install Tailscale from {DOWNLOAD}"
         ));
     };
 
-    println!("This will run, and will ask for your password:");
+    println!("Commands to run (password required):");
     for step in &plan {
         println!("  {}", step.join(" "));
     }
     println!();
-    println!("The last one hands Tailscale to {user}, so that turning reaching-from-away on and");
-    println!("off afterwards needs no password and can be a switch on the settings screen.");
+    println!("Tailscale access will be assigned to {user}.");
     if !without_asking && !agreed()? {
-        println!("Nothing was run.");
+        println!("Cancelled.");
         return Ok(());
     }
     for step in &plan {
@@ -372,7 +368,7 @@ fn agreed() -> Result<bool, String> {
     let mut said = String::new();
     std::io::stdin()
         .read_line(&mut said)
-        .map_err(|e| format!("nothing could be read from the terminal: {e}"))?;
+        .map_err(|e| format!("Could not read from the terminal: {e}"))?;
     Ok(matches!(said.trim().to_lowercase().as_str(), "y" | "yes"))
 }
 
@@ -424,7 +420,7 @@ pub fn serving_now(port: u16) -> bool {
 /// the switch on the settings screen can call it directly.
 pub fn set_serving(on: bool, port: u16) -> Result<(), String> {
     let program = looked_up().ok_or_else(|| {
-        format!("Tailscale is not installed, so there is nothing to serve through. Run `atelier remote install` in a terminal, or get it from {DOWNLOAD}.")
+        format!("Tailscale is not installed. Run `atelier remote install`, or install it from {DOWNLOAD}.")
     })?;
     // Turning it on with the daemon down would leave the switch saying on
     // and nothing reachable, which is the one answer worse than a refusal.

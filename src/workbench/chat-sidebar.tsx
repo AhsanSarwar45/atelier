@@ -716,7 +716,7 @@ export function ChatSidebar({
       */}
       {outOfStep && (
         <p data-testid="helper-stale" className="border-b border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
-          The helper behind this list is out of date, so no chat here can say what it is doing. Restart the app.
+          Chat status is unavailable. Restart Atelier.
         </p>
       )}
 
@@ -1082,7 +1082,7 @@ export function ChatSidebar({
         <DialogContent className="sm:max-w-md" data-testid="chat-rename-dialog">
           <DialogHeader>
             <DialogTitle>Rename chat</DialogTitle>
-            <DialogDescription>Give this chat a name that is easy to find in the sidebar.</DialogDescription>
+            <DialogDescription>Enter a new name.</DialogDescription>
           </DialogHeader>
           <form onSubmit={(event) => { event.preventDefault(); void rename(); }}>
             <Input

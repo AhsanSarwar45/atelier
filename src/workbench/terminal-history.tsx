@@ -227,7 +227,7 @@ export function HistoryPanel({
     if (!told.readable) {
       return `${told.shell} keeps its history in a form this app cannot read, so there is nothing to search.`;
     }
-    if (!told.commands.length) return 'Your shell has not written down any commands yet.';
+    if (!told.commands.length) return 'No command history.';
     return 'Nothing you have run matches that.';
   };
 

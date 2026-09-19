@@ -106,7 +106,7 @@ export function SearchSettings() {
     return (
       <ReadFailed
         data-testid="search-settings-error"
-        what="The search settings could not be read."
+        what="Couldn’t load search settings."
         why={unread}
         onRetry={() => setAttempt((n) => n + 1)}
       />

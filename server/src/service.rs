@@ -176,7 +176,7 @@ pub fn systemd_unit(exe: &str, carried: &[(String, String)]) -> String {
     let exe = format!("\"{}\"", as_typed(exe).replace('\\', "\\\\").replace('"', "\\\""));
     format!(
         "[Unit]\n\
-         Description={DISPLAY} — the board, the screens and the chat\n\
+         Description={DISPLAY} — project boards and agent chats\n\
          After=network.target graphical-session.target\n\
          \n\
          [Service]\n\
@@ -411,7 +411,7 @@ fn install(exe: &str) -> Result<(), String> {
         }
         std::fs::write(&path, body)
             .map_err(|e| format!("{} could not be written: {e}", path.display()))?;
-        println!("wrote {}", path.display());
+        println!("Registered: {}", path.display());
     }
 
     for step in install_steps(exe) {
@@ -425,7 +425,7 @@ fn install(exe: &str) -> Result<(), String> {
     // reinstalling — which is why this asks the rule rather than the
     // environment it happens to have been installed from (bw-hdor.1).
     let host = crate::reachable::bind_host();
-    println!("{DISPLAY} will start with this computer.");
+    println!("{DISPLAY} will start at login.");
     let network = crate::reachable::on_this_network();
     let name = crate::reachable::name_on_this_network(network);
     let public = crate::reachable::published_url();
@@ -443,9 +443,9 @@ fn uninstall() -> Result<(), String> {
     }
     if let Some(path) = definition_path() {
         match std::fs::remove_file(&path) {
-            Ok(()) => println!("removed {}", path.display()),
+            Ok(()) => println!("Removed: {}", path.display()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                println!("nothing registered at {}", path.display())
+                println!("Not registered: {}", path.display())
             }
             Err(e) => return Err(format!("{} could not be removed: {e}", path.display())),
         }
@@ -453,7 +453,7 @@ fn uninstall() -> Result<(), String> {
     for step in after_uninstall_steps() {
         let _ = say(&step);
     }
-    println!("{DISPLAY} no longer starts with this computer");
+    println!("{DISPLAY} will no longer start at login.");
     Ok(())
 }
 

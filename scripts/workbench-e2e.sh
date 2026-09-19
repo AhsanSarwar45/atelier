@@ -161,7 +161,7 @@ if [ "${BEADS_E2E_NO_NODE:-0}" = 1 ]; then
   SERVER_PATH="$SERVER_BIN"
   for retired in node npm python python3; do
     if PATH="$SERVER_PATH" command -v "$retired" >/dev/null 2>&1; then
-      echo "the isolated server PATH unexpectedly contains $retired"; exit 1
+      echo "isolated server PATH contains retired runtime: $retired"; exit 1
     fi
   done
   echo "server PATH contains no node, npm, Python, or python3"
@@ -250,7 +250,7 @@ npx playwright test "${specs[@]}" ${rest[@]+"${rest[@]}"} || ran=$?
 if [ "${BEADS_E2E_NO_NODE:-0}" = 1 ]; then
   retired_children="$(for pid in $(descendants_of "$SERVER_PID"); do ps -o args= -p "$pid" 2>/dev/null; done | grep -E '(^|/)(node|npm|python|python3)( |$)' || true)"
   if [ -n "$retired_children" ]; then
-    echo "the isolated app started a retired runtime child: $retired_children"
+    echo "isolated app started a retired runtime child: $retired_children"
     ran=1
   else
     echo "isolated app process tree contains no Node/npm or Python/python3 child"
@@ -265,7 +265,7 @@ listed=$(curl -sf "$BEADS_E2E_URL/api/projects?include_test=true" || true)
 # the run under `set -e -o pipefail`.
 left=$(printf '%s' "$listed" | { grep -o '"local_path":"[^"]*\.held-run[^"]*"' || true; } | wc -l)
 if [ "${left:-0}" -ne 0 ]; then
-  echo "the run left $left project(s) of its own on the list"
+  echo "run left $left test project(s) in the list"
   exit 1
 fi
 exit "$ran"

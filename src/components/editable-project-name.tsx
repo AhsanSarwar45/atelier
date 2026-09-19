@@ -50,8 +50,7 @@ export function EditableProjectName({
 
     if (!trimmedName) {
       toast({
-        title: "Invalid name",
-        description: "Project name cannot be empty.",
+        title: "Enter a project name",
         variant: "destructive",
       });
       return;
@@ -69,7 +68,7 @@ export function EditableProjectName({
 
       toast({
         title: "Project renamed",
-        description: `Project has been renamed to "${trimmedName}".`,
+        description: trimmedName,
       });
 
       setIsOpen(false);
@@ -77,8 +76,7 @@ export function EditableProjectName({
     } catch (err) {
       console.error("Error updating project name:", err);
       toast({
-        title: "Error",
-        description: "Failed to update project name. Please try again.",
+        title: "Couldn’t rename project",
         variant: "destructive",
       });
     } finally {

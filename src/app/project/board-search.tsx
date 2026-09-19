@@ -114,8 +114,8 @@ const FILTERS: FilterSpec[] = [
 ];
 
 const TIPS = [
-  { example: 'under:bw-12', meaning: 'Under a card' },
-  { example: 'after:2026-09-01', meaning: 'Changed since a day' },
+  { example: 'under:bw-12', meaning: 'Child cards' },
+  { example: 'after:2026-09-01', meaning: 'Changed after date' },
 ];
 
 const FIELD: Record<CardSnippet['field'], string> = {
@@ -183,8 +183,8 @@ export function useBoardSearch(projectPath: string): SearchSource<CardMatch, Fou
     };
     return {
       words: {
-        label: 'Search the board',
-        placeholder: 'Search the board…',
+        label: 'Search cards',
+        placeholder: 'Search cards…',
         nothing: 'No cards.',
         grammar: BOARD_GRAMMAR,
         scopes: CARD_SCOPES,
@@ -232,8 +232,8 @@ export function useBoardSearch(projectPath: string): SearchSource<CardMatch, Fou
           })),
       },
       ask: {
-        label: 'Describe the card',
-        placeholder: 'Describe the card…',
+        label: 'Ask about cards',
+        placeholder: 'Ask about cards…',
         nothing: 'No cards.',
         url: '/api/beads/search/ask',
         body: { path: projectPath },

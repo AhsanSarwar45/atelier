@@ -62,7 +62,7 @@ describe('the project screen', () => {
     render(<ProjectPage />);
 
     expect(screen.getByTestId('project-error')).toBeInTheDocument();
-    expect(screen.getByText(/could not be read/i)).toBeInTheDocument();
+    expect(screen.getByText(/couldn’t load/i)).toBeInTheDocument();
     expect(screen.getByText(/the server did not answer/)).toBeInTheDocument();
     // The body used to hold nothing at all, and still does not hold a tab.
     expect(screen.queryByTestId('board')).not.toBeInTheDocument();

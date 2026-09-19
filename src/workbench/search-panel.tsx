@@ -85,7 +85,7 @@ const FILTERS: FilterSpec[] = [
   },
 ];
 
-const TIPS = [{ example: 'after:2026-09-01', meaning: 'Active since a day' }];
+const TIPS = [{ example: 'after:2026-09-01', meaning: 'Active after date' }];
 
 const folderName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) || path;
 
@@ -127,8 +127,8 @@ export function useChatSearch(): SearchSource<ChatMatch, FoundChat> {
     };
     return {
       words: {
-        label: 'Search every conversation',
-        placeholder: 'Search every conversation…',
+        label: 'Search chats',
+        placeholder: 'Search chats…',
         nothing: 'No chats.',
         grammar: { ...CHAT_GRAMMAR, values: { ...CHAT_GRAMMAR.values, project: projects.map((p) => p.name) } },
         scopes: SCOPES,
@@ -190,8 +190,8 @@ export function useChatSearch(): SearchSource<ChatMatch, FoundChat> {
           })),
       },
       ask: {
-        label: 'Describe the chat',
-        placeholder: 'Describe the chat…',
+        label: 'Ask about chats',
+        placeholder: 'Ask about chats…',
         nothing: 'No chats.',
         url: '/api/workbench/search/ask',
         row: (chat) => ({

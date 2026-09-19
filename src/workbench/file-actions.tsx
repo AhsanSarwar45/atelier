@@ -315,17 +315,15 @@ export function useFileActions(onMoved?: PathMoved, onMade?: (path: string) => v
           data-testid="path-delete-dialog"
         >
           <DialogHeader>
-            <DialogTitle>Move {asked.target.kind === 'dir' ? 'folder' : 'file'} to Trash?</DialogTitle>
+            <DialogTitle>Move to Trash?</DialogTitle>
             {/* Where it goes, in the sentence the reader answers — not in a
                 toast afterwards. This is the only call in the app that cannot
                 be undone from inside it, so what "delete" means here is said
                 out loud: the desktop's trash, restorable from the file manager,
                 and a folder takes everything in it. */}
             <DialogDescription className="break-words">
-              {nameOf(asked.target.path)}
-              {asked.target.kind === 'dir' ? ', and everything in it,' : ''} goes to your desktop&apos;s
-              Trash. Nothing is erased — you can put it back from your file manager. Atelier itself
-              cannot undo this.
+              {nameOf(asked.target.path)}{asked.target.kind === 'dir' ? ' and its contents' : ''} will move to Trash.
+              Restore it from your file manager if needed.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">

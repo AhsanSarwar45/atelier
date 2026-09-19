@@ -109,7 +109,7 @@ export function AddProjectDialog({
   const validateAndProceed = async (pathToValidate?: string) => {
     const path = pathToValidate || projectPath;
     if (!path.trim()) {
-      setPathError("Please enter a project path.");
+      setPathError("Enter a project folder.");
       return;
     }
 
@@ -137,8 +137,8 @@ export function AddProjectDialog({
       console.error("Error validating path:", err);
       const message = err instanceof Error ? err.message : String(err);
       setPathError(message.includes("API error")
-        ? "Could not access the specified path. Please check it exists and is on a local drive."
-        : "Could not access the specified path. Please check it exists.");
+        ? "Folder unavailable. Choose a local folder."
+        : "Folder unavailable. Check the path.");
     } finally {
       setIsValidating(false);
     }
@@ -186,7 +186,7 @@ export function AddProjectDialog({
     } catch (err) {
       console.error("Error adding project:", err);
       toast({
-        title: "Project could not be added",
+        title: "Couldn’t add project",
         description: err instanceof Error ? refusal(err) : "Please try again.",
         variant: "destructive",
       });
@@ -202,8 +202,8 @@ export function AddProjectDialog({
           <DialogTitle>Add Project</DialogTitle>
           <DialogDescription>
             {showNameInput
-              ? "Check the details, then add it."
-              : "Choose your project's folder."}
+              ? "Review the project details."
+              : "Choose a project folder."}
           </DialogDescription>
         </DialogHeader>
 
@@ -214,7 +214,7 @@ export function AddProjectDialog({
               <div className="space-y-2">
                 <label className="flex items-center gap-1.5 text-sm font-medium text-t-secondary">
                   <Database className="size-3.5" />
-                  Boards on this computer
+                  Local boards
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {newDoltDatabases.map((db) => (
@@ -231,7 +231,7 @@ export function AddProjectDialog({
                   ))}
                 </div>
                 <p className="text-xs text-t-muted">
-                  Choose one to add it.
+                  Select a board to add.
                 </p>
               </div>
             )}
@@ -239,7 +239,7 @@ export function AddProjectDialog({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-medium text-t-secondary">
-                    Browse Folders
+                    Browse folders
                   </label>
                   <Button
                     type="button"
@@ -301,7 +301,7 @@ export function AddProjectDialog({
                   {isValidating ? (
                     <>
                       <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                      Validating...
+                      Checking…
                     </>
                   ) : (
                     "Continue"
@@ -321,7 +321,7 @@ export function AddProjectDialog({
               </div>
               <div className="space-y-2">
                 <label htmlFor="name" className="text-sm font-medium text-t-secondary">
-                  Project Name
+                  Project name
                 </label>
                 <Input
                   id="name"
@@ -384,7 +384,7 @@ export function AddProjectDialog({
                 Back
               </Button>
               <Button type="submit" disabled={isSubmitting || !projectName.trim()}>
-                {isSubmitting ? "Adding..." : "Add Project"}
+                {isSubmitting ? "Adding…" : "Add Project"}
               </Button>
             </DialogFooter>
           </form>

@@ -50,7 +50,7 @@ async function firstProject() {
 
 const project = process.env.PROJECT ?? (await firstProject());
 if (!project) {
-  console.error(`no project to open: pass PROJECT=<id>, or point BOARD at an instance that lists one (${BOARD})`);
+  console.error(`No project found. Set PROJECT=<id> or use a BOARD URL with projects (${BOARD}).`);
   process.exit(1);
 }
 

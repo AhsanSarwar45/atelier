@@ -44,10 +44,8 @@ say()  { printf '\n%s\n' "$*"; }
 # --------------------------------------------------- is there one to talk to
 
 if [ "$(uname -s)" != "Linux" ] || ! command -v systemctl >/dev/null 2>&1; then
-  echo "skipped: this machine has no systemd user manager to register with."
-  echo "The definitions for launchd and Task Scheduler are checked by the"
-  echo "server's own tests, which run everywhere; this round trip needs the"
-  echo "real service manager and can only run where it exists."
+  echo "SKIP: systemd user services are unavailable."
+  echo "Launchd and Task Scheduler definitions are covered by server tests."
   exit 0
 fi
 
@@ -355,14 +353,13 @@ for _ in $(seq 1 120); do
 done
 
 if [ "$chat" = "1" ]; then
-  pass "the chat helper is answering, started by a copy nobody logged in for"
+  pass "chat helper responds without an interactive login"
 elif [ -n "$(lost_tool)" ]; then
-  fail "the chat helper could not be started — the copy could not find a tool it was handed no place to look for:"
+  fail "chat helper failed to start because a required tool was not found:"
   lost_tool | sed 's/^/      /'
 else
-  echo "  · the chat helper is still fetching its kit, which is a network"
-  echo "    install and not this registration's doing; the reach above is what"
-  echo "    proves it looked in the right place."
+  echo "  · chat helper setup is still downloading"
+  echo "    service registration and tool lookup passed"
 fi
 
 # ------------------------------------------------------ taking it back off

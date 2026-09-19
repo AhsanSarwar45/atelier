@@ -136,7 +136,7 @@ export const EpicCard = memo(function EpicCard({
     setIsClosing(true);
     toast({
       title: `Marking ${epic.id} done…`,
-      description: 'Writing it to the board. This can take a moment while agents are working.',
+      description: 'Updating the board…',
     });
     try {
       await closeBead(epic.id, projectPath);
