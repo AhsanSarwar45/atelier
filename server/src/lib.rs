@@ -22,6 +22,7 @@ pub mod project_manifest;
 pub mod push;
 pub mod published;
 pub mod reachable;
+pub mod remote;
 pub mod routes;
 pub mod rules;
 pub mod search;

@@ -252,6 +252,14 @@ async fn run() {
         // Every outside program the app starts, and whether this computer has
         // it. Nothing is started to answer it.
         command_line::Ask::Tools => print!("{}", needs::printed()),
+        // The one step of reaching-from-away that needs a password, and so
+        // the one step a settings screen cannot do for itself (bw-hdor.2).
+        command_line::Ask::Remote(ask) => {
+            if let Err(e) = atelier::remote::run(ask) {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
         // A copy the computer started at login printed its addresses into a
         // log nobody reads. Asking it where it is has to be something a person
         // can type, and it must not bring a second server up to answer
