@@ -157,8 +157,8 @@ const DOORS = [
  * changed, so the reader is told the thing they are waiting for rather than
  * that something, somewhere, is pending.
  */
-function nextAddress(held: RemoteAccess): string {
-  if (held.nextPort === null) return 'the access you picked';
+function nextAddress(held: RemoteAccess): string | null {
+  if (held.nextPort === null) return null;
   const home = held.homeAddress ?? `http://localhost:${held.port}`;
   return home.replace(/:\d+$/, `:${held.nextPort}`);
 }
@@ -448,7 +448,7 @@ export function RemoteAccessSettings() {
           description={
             held.canRestart
               ? nextAddress(held)
-              : `Quit Atelier and start it again to use ${nextAddress(held)}`
+              : `Quit Atelier and start it again${nextAddress(held) ? ` to use ${nextAddress(held)}` : ''}`
           }
           data-testid="remote-restart"
         >
