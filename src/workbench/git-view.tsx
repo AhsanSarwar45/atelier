@@ -350,12 +350,18 @@ function FileLine({
 /**
  * One file row's height, and how much of a long list is drawn at a time.
  *
- * A row is one line — a chip, a name and its buttons, at `py-0.5` around a
- * `size="xs"` badge — and every row in every one of these lists is that same
- * height, which is the case a virtualiser is cheapest in. The same 22 the
- * file tree next door holds for the same reason.
+ * A guess, not a rule: the rows are measured as they are drawn. A row is a
+ * chip, a name and a `size="xs" mode="icon"` button at `py-0.5`, and that
+ * button is 28px, so a row comes out around 32 — but the number that decides
+ * where rows sit has to be the height the browser actually gives them, or a
+ * list of thousands is laid out against an arithmetic that a change of padding
+ * anywhere in the row quietly breaks. The guess only decides how far the
+ * scrollbar thinks it can go before anything has been measured.
+ *
+ * This is not the file tree's 22 next door, and cannot be: a tree row is an
+ * icon and a `text-[13px]` name, with no button in it.
  */
-const FILE_ROW_HEIGHT = 22;
+const FILE_ROW_HEIGHT = 32;
 
 /** Rows just outside the box, mounted before they are scrolled to. */
 const FILE_OVERSCAN = 12;
@@ -432,10 +438,17 @@ function FileRows<T>({
     >
       <div className="relative w-full" style={{ height: `${virtual.getTotalSize()}px` }}>
         {virtual.getVirtualItems().map((item) => (
+          // No height of its own: `measureElement` reads the height the row
+          // came out at and the virtualiser lays the rest out against that, so
+          // a row a little taller than the guess pushes its neighbour down
+          // instead of being drawn over by it. The diff table beside this does
+          // the same with its rows.
           <div
             key={item.key}
+            data-index={item.index}
+            ref={virtual.measureElement}
             className="absolute left-0 top-0 w-full"
-            style={{ height: `${FILE_ROW_HEIGHT}px`, transform: `translateY(${item.start}px)` }}
+            style={{ transform: `translateY(${item.start}px)` }}
           >
             {row(files[item.index]!)}
           </div>
