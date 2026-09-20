@@ -447,10 +447,10 @@
  * alone by the same rule that fixes the bars (bw-81wt.12).
  */
 @media (pointer: coarse) {
-  button:not(:where([data-slot='badge'], [data-reach='own'])),
+  button:not(:where([data-slot='badge'], [data-reach='own'], [data-reach='band'])),
   select,
   textarea,
-  [role='button']:not(:where([data-slot='badge'], [data-reach='own'])),
+  [role='button']:not(:where([data-slot='badge'], [data-reach='own'], [data-reach='band'])),
   [role='tab'],
   [role='menuitem'],
   [role='menuitemcheckbox'],
@@ -465,9 +465,9 @@
   /* A dropdown is in the width list as well as the height one: with its arrow
      stripped off, a picker whose whole label is "P0" is seventeen pixels wide
      and forty-four tall, which is a line to hit rather than a target (bw-81wt.21). */
-  button:not(:where([data-slot='badge'], [data-reach='own'])),
+  button:not(:where([data-slot='badge'], [data-reach='own'], [data-reach='band'])),
   select,
-  [role='button']:not(:where([data-slot='badge'], [data-reach='own'])),
+  [role='button']:not(:where([data-slot='badge'], [data-reach='own'], [data-reach='band'])),
   [role='tab'],
   [role='switch'],
   [role='checkbox'] {
@@ -478,7 +478,7 @@
      minimum size does not apply to an inline box, so a link inside a sentence
      is untouched while a link that has been laid out as a button — the house
      in the project bar, the back arrow, a card — grows. */
-  a[href]:not(:where([data-slot='badge'], [data-reach='own'])) {
+  a[href]:not(:where([data-slot='badge'], [data-reach='own'], [data-reach='band'])) {
     min-height: 44px;
     min-width: 44px;
   }
@@ -634,6 +634,60 @@
     right: 0;
     height: 44px;
     transform: translateY(-50%);
+  }
+
+  /* `band` is the third of the mark's three answers, and the one for a small
+     control standing ON a line of text.
+
+     The floor at the top of this block is a painted one: it makes the control
+     itself 44 pixels. That is right for a button in a bar, where the bar is as
+     tall as its buttons and nothing else is on the line. It is wrong for an
+     icon sitting at the end of a line of words, because a 44-pixel control
+     makes the LINE 44 pixels — and the words on it, twenty pixels tall, are
+     then centred in a band of air they did not ask for.
+
+     The chat rail is where the manager met it. A row there is a name over a
+     status and a time, eight pixels of padding either side; the menu button at
+     the end of the name's line was floored to 44, so the name sat with twelve
+     pixels of nothing above it and the time had eight below, and the same
+     twelve pixels opened a seam between the two lines wide enough to read as
+     the gap BETWEEN two rows. His words off the running rail: 'the padding on
+     top and on bottom of each card is very different. the visual gap between
+     the name row and the time row is also too much. gives it a weird rough
+     look' (bw-2fhj).
+
+     So this mark does what `row` above does and for the same reason — the
+     painted box is left alone and an invisible one is grown around it — but
+     centred on the control in BOTH directions rather than stretched across
+     the line. `row` is for a line-wide target and takes its width from the
+     element's own edges; an icon is a point, so its band is square.
+
+     The band is grown from the middle, so a control whose paint matches the
+     line it stands on keeps the line's height and still answers a thumb. What
+     that costs is room: 44 pixels of band around a 20-pixel icon reach twelve
+     pixels past it on every side, so a control marked this way must have that
+     much room to spare — nothing else pressable within twelve pixels, and the
+     edge of the pane no closer, or the band is clipped by the pane and the
+     target is smaller than it measures. The one place it is used sits in the
+     row's own right-hand padding, which is exactly what that padding is.
+
+     The honest measurement of what it buys is not the painted rectangle: it is
+     `elementFromPoint` walked outwards from the control's middle, which is
+     what tests/e2e/the-app-on-a-phone.spec.ts does to every control on every
+     screen, and what tests/e2e/a-chat-row-sits-evenly-on-a-phone.spec.ts does
+     to this one. */
+  [data-reach='band'] {
+    position: relative;
+  }
+
+  [data-reach='band']::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    height: 44px;
+    width: 44px;
+    transform: translate(-50%, -50%);
   }
 
   /* A slider is two pixels of track and a dot; the dot is what you drag, and

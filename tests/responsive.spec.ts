@@ -187,6 +187,16 @@ async function tooSmall(page: Page, floor: number): Promise<string[]> {
       // area a thumb actually lands on, probed with `elementFromPoint` — is
       // made in tests/e2e/a-chip-stays-a-chip.spec.ts.
       if (el.closest('[data-slot="badge"]')) continue;
+      // A control the app has marked for reach is the same case as the chip
+      // above, and marked so that a rule can find it: `data-reach` says the
+      // painted box is deliberately the size of the thing it sits on — a line
+      // of text, a picture's corner — and that what a thumb lands on is an
+      // invisible box grown around it, or the larger target it is pinned to
+      // (globals.css, the coarse-pointer block). The painted rectangle is
+      // therefore the wrong question here for exactly the reason it is wrong
+      // for a chip. What these actually reach is walked out with
+      // `elementFromPoint` in tests/e2e/the-app-on-a-phone.spec.ts.
+      if (el.closest('[data-reach]')) continue;
       const r = el.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) continue;
       // A control inside another control is one target, not two.

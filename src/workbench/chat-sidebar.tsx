@@ -811,7 +811,7 @@ export function ChatSidebar({
                       baseline dropped it visibly below the middle of the name
                       beside it — the two boxes are the same height, so centring
                       them is what puts the clock on the name's own line. */}
-                  <div className="flex items-center gap-2">
+                  <div data-testid="row-line-name" className="flex items-center gap-2">
                     {row.brand === 'local'
                       ? <ModelIcon brand={row.brand} model={row.model} className="text-muted-foreground" />
                       : <BrandIcon brand={row.brand} className="text-muted-foreground" />}
@@ -945,7 +945,19 @@ export function ChatSidebar({
                       size="xs"
                       data-testid="row-menu"
                       aria-label={`Actions for ${row.title ?? 'Untitled chat'}`}
-                      className="-mr-1.5 shrink-0 md:hidden"
+                      // Painted the height of the line it stands on, and given
+                      // an invisible 44px band instead of a 44px box
+                      // (globals.css, `data-reach='band'`). Floored the usual
+                      // way, this one button made the name's line 44px tall on
+                      // a phone: the name floated in the middle of it with
+                      // twelve pixels of air above and eight below the time,
+                      // and the same twelve opened a seam between the row's
+                      // two lines — 'a weird rough look' (bw-2fhj). Nothing
+                      // else on the row is pressable within twelve pixels of
+                      // it and the band ends exactly on the row's padding, so
+                      // it takes no press meant for the name beside it.
+                      data-reach="band"
+                      className="size-5 shrink-0 md:hidden"
                       onClick={(event) => {
                         event.stopPropagation();
                         // Anchored under the button rather than at the finger:
@@ -982,6 +994,7 @@ export function ChatSidebar({
                     chip would be an empty one and stays away (bw-8kk4.1).
                   */}
                   <div
+                    data-testid="row-line-status"
                     className={cn(
                       'mt-1 flex min-w-0 items-center gap-1 overflow-hidden',
                       !says && 'md:hidden',
