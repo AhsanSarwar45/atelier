@@ -37,6 +37,7 @@
 import { useCallback, useEffect } from 'react';
 
 import { git } from '@/lib/api';
+import { repositoryMayHaveMoved } from '@/workbench/repository-status';
 import { useSerialReads } from '@/workbench/use-serial-reads';
 
 /**
@@ -70,7 +71,14 @@ export function useRepositoryReads(path: string | null, read: () => Promise<void
   // pointed at.
   useEffect(() => {
     if (!path) return;
-    return git.watch(path, () => void readAgain());
+    return git.watch(path, () => {
+      // The held status is about a repository that has just moved, so it is
+      // thrown away before the caller reads — every reader of this repository
+      // does this before any of them reads, so they still share the one run
+      // that follows rather than each running git over the news (bw-o5i3.4).
+      repositoryMayHaveMoved(path);
+      void readAgain();
+    });
   }, [path, readAgain]);
 
   // Coming back to the window, and the slow look while it is here.
@@ -80,15 +88,23 @@ export function useRepositoryReads(path: string | null, read: () => Promise<void
       if (document.visibilityState === 'hidden') return;
       void readAgain();
     };
+    // Coming back is the one moment a reader is owed a fresh answer rather
+    // than a shared one: they have been away, possibly in a terminal doing the
+    // very thing they are coming back to look at. So what is held about this
+    // repository goes, and the readers share the run that replaces it.
+    const backAgain = () => {
+      repositoryMayHaveMoved(path);
+      lookAgain();
+    };
     const woken = () => {
-      if (document.visibilityState === 'visible') void readAgain();
+      if (document.visibilityState === 'visible') backAgain();
     };
     const slowly = setInterval(lookAgain, WORKING_TREE_MS);
-    window.addEventListener('focus', lookAgain);
+    window.addEventListener('focus', backAgain);
     document.addEventListener('visibilitychange', woken);
     return () => {
       clearInterval(slowly);
-      window.removeEventListener('focus', lookAgain);
+      window.removeEventListener('focus', backAgain);
       document.removeEventListener('visibilitychange', woken);
     };
   }, [path, readAgain]);

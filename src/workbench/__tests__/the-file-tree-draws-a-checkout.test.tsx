@@ -65,6 +65,8 @@ import { iconForFile, iconForFolder } from '@/components/file-icon';
 import type { FsTreeEntry, GitStatus } from '@/lib/api';
 // eslint-disable-next-line import/first
 import FileTree, { ancestorsOf, rowsOf, statusByPath } from '@/workbench/file-tree';
+// eslint-disable-next-line import/first
+import { forgetRepositoryStatus } from '@/workbench/repository-status';
 
 const ROOT = '/work/atelier';
 
@@ -131,6 +133,11 @@ beforeEach(() => {
   disk.clear();
   asked = [];
   says = blank();
+  // One `git status` is shared by everything drawn from a repository, and the
+  // answer is held for a moment (`repository-status.ts`). A bench that rewrites
+  // what git says between cases has to say so, or the next case is shown the
+  // last one's checkout.
+  forgetRepositoryStatus();
   localStorage.clear();
   folder(ROOT, entry(`${ROOT}/src`, 'dir'), entry(`${ROOT}/README.md`, 'file'));
   folder(`${ROOT}/src`, entry(`${ROOT}/src/lib`, 'dir'), entry(`${ROOT}/src/main.ts`, 'file'));

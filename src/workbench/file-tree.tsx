@@ -48,11 +48,12 @@ import { FileIcon } from '@/components/file-icon';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent } from '@/components/ui/dropdown-menu';
 import { Tooltip } from '@/components/ui/tooltip';
-import { git, fs as fsApi, type FsTreeEntry, type GitStatus } from '@/lib/api';
+import { fs as fsApi, type FsTreeEntry, type GitStatus } from '@/lib/api';
 import { type PathMoved } from '@/workbench/file-actions';
 import { STATUS_LOOK, type FileState } from '@/workbench/git-view';
 import { PointerAnchor } from '@/workbench/menu-anchor';
 import { usePathMenuItems } from '@/workbench/path-menu';
+import { readRepositoryStatus } from '@/workbench/repository-status';
 import { useFolderReads } from '@/workbench/use-folder-reads';
 import { useRepositoryReads } from '@/workbench/use-repository-reads';
 
@@ -243,7 +244,11 @@ export default function FileTree({ root, selected, onOpen, onMoved }: FileTreePr
   const readStatus = useCallback(async () => {
     if (!root) return;
     try {
-      setStatus(statusByPath(await git.status(root), root));
+      // Through the shared reader, not `git.status` directly: the Git rail
+      // beside this tree is drawn from the same answer and asks on the same
+      // rule, so the two share one run instead of each making their own
+      // (bw-o5i3.4).
+      setStatus(statusByPath(await readRepositoryStatus(root), root));
     } catch {
       // No repository, or git would not answer. Names go uncoloured, which is
       // what a folder that is not a checkout should look like anyway.

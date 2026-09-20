@@ -73,7 +73,7 @@ describe('a diff of thousands of lines', () => {
 
     // Three drawn rows in the middle of the window, whatever their place in
     // the file happens to be — which is the whole point: the row says.
-    const lines = [...table.querySelectorAll('tr[data-row-at]')];
+    const lines = [...table.querySelectorAll<HTMLElement>('tr[data-row-at]')];
     const from = lines[2]!;
     const to = lines[4]!;
     const range = document.createRange();

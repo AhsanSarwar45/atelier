@@ -68,6 +68,7 @@ import {
   type GitDeed,
 } from '@/workbench/git-deeds';
 import { usePathActions } from '@/workbench/path-menu';
+import { readRepositoryStatus } from '@/workbench/repository-status';
 import { useRepositoryReads } from '@/workbench/use-repository-reads';
 
 /**
@@ -579,7 +580,13 @@ export function GitView({
       if (!quietly) setReading(true);
       try {
         const [state, history] = await Promise.all([
-          git.status(path, signal),
+          // The status goes through the shared reader so that the file tree
+          // beside this rail, drawn from the same answer on the same rule,
+          // does not run git a second time a few milliseconds later
+          // (bw-o5i3.4). A read the reader asked for — a refresh, or the read
+          // after a stage or a commit — asks for a fresh one, because the
+          // point of reading again after a write is to see the write.
+          readRepositoryStatus(path, { fresh: !quietly }),
           git.log(path, LOG_LIMIT, signal),
         ]);
         if (signal?.aborted) return;
