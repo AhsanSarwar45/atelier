@@ -1848,3 +1848,37 @@ executable name. The lexer now retains the raw token start across quotes and
 escapes. Both quote styles are covered by dispatcher tests; the real landing
 integration executes the quoted worktree-built binary, rather than only
 asserting that a returned string mentions the actor.
+
+## A claim outlives the session that made it
+
+The account changed mid-conversation. The same work continued under a new
+session id, so every card in `bw-t2m2` was still assigned to
+`s-25950812-...`, a session that no longer exists and whose id cannot be
+re-created.
+
+Both gates refused, and neither refusal had an exit:
+
+- `bd update bw-t2m2.1 --claim` → "Beads issue bw-t2m2.1 is owned by
+  s-25950812-..., not this session."
+- `atelier tool board/land bw-t2m2.1` → "bw-t2m2.1 belongs to another actor;
+  invoke with the claiming session's BEADS_ACTOR"
+
+The lander's advice cannot be followed. `board_landing::actor` does read
+`BEADS_ACTOR`, but the Bash hook rewrites every `atelier tool` call to
+`BEADS_ACTOR=<this session> atelier tool ...` immediately before the
+executable, so a value supplied by the caller is always overridden. That is
+correct against impersonation, and fatal here.
+
+`bd reclaim` did not apply either: it reaps *expired leases*, and these cards
+carried `lease_expires_at = null`. A claim with no lease never goes stale, so
+the reaper never sees it.
+
+Resolution: the claims were genuinely abandoned, which is the documented use
+of `bd update <id> -a <me> --force`. The hook still refused the command, so it
+was carried through a command-local `ATELIER_BYPASS` naming the exact refusal.
+All four cards then landed normally, with checks re-run on the landed tree.
+
+Worth fixing: a claim with no lease has no recovery path at all when its
+session dies. Either claims should always carry a lease, or the ownership
+refusal should name `bd update -a <me> --force` as the way out instead of
+naming an actor the caller cannot become.
