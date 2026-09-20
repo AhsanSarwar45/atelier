@@ -24,6 +24,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { formatDistanceToNow } from 'date-fns';
 import {
   ArrowDown,
@@ -341,6 +342,104 @@ function FileLine({
       >
         {action === 'stage' ? <Plus aria-hidden="true" /> : <Minus aria-hidden="true" />}
       </Button>
+    </div>
+  );
+}
+
+/**
+ * One file row's height, and how much of a long list is drawn at a time.
+ *
+ * A row is one line — a chip, a name and its buttons, at `py-0.5` around a
+ * `size="xs"` badge — and every row in every one of these lists is that same
+ * height, which is the case a virtualiser is cheapest in. The same 22 the
+ * file tree next door holds for the same reason.
+ */
+const FILE_ROW_HEIGHT = 22;
+
+/** Rows just outside the box, mounted before they are scrolled to. */
+const FILE_OVERSCAN = 12;
+
+/**
+ * The length at which a list stops drawing itself whole.
+ *
+ * Under this a section is drawn exactly as it always was, in the rail's own
+ * scroll, because that is what an ordinary checkout is and a nested scrollbar
+ * around nine files is a worse panel than nine files. Over it the section
+ * becomes a box of its own with a screenful in it.
+ *
+ * The number this exists for is not nine. A checkout whose `.gitignore` does
+ * not name its virtualenv, its caches and its build output has thousands of
+ * untracked paths — 5,099 measured on one — and `--untracked-files=all` lists
+ * every one of them. Drawing a row each left 81,661 nodes in the document and
+ * took 6,245 ms against 141 nodes and 68 ms for a checkout with four, and it
+ * happened with the rail SHUT, in the Files tab and the Chat tab alike, every
+ * five seconds for as long as either was open (bw-o5i3).
+ */
+const MANY_FILES = 50;
+
+/** How tall a list that windows itself is: twelve rows, then it scrolls. */
+const MOST_ROWS_DRAWN = 12;
+
+/**
+ * A section's file rows: drawn whole while there are few, a screenful at a
+ * time once there are many.
+ *
+ * Both shapes draw the same rows from the same `row` function, so crossing the
+ * threshold changes how much of a list is in the document and nothing else
+ * about it — the same row, the same buttons, in the same order.
+ */
+function FileRows<T>({
+  files,
+  keyOf,
+  row,
+  testId,
+}: {
+  files: T[];
+  keyOf: (file: T) => string;
+  row: (file: T) => React.ReactNode;
+  testId?: string;
+}) {
+  const pane = useRef<HTMLDivElement>(null);
+  const many = files.length > MANY_FILES;
+  // Counted zero while the list is short: the hook cannot be called
+  // conditionally, and a virtualiser over nothing measures nothing.
+  const virtual = useVirtualizer({
+    count: many ? files.length : 0,
+    getScrollElement: () => pane.current,
+    estimateSize: () => FILE_ROW_HEIGHT,
+    getItemKey: (index) => keyOf(files[index]!),
+    overscan: FILE_OVERSCAN,
+  });
+
+  if (!many) {
+    return (
+      <div className="flex flex-col" data-testid={testId} data-drawn="all">
+        {files.map((file) => (
+          <div key={keyOf(file)}>{row(file)}</div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={pane}
+      className="overflow-y-auto"
+      style={{ maxHeight: `${MOST_ROWS_DRAWN * FILE_ROW_HEIGHT}px` }}
+      data-testid={testId}
+      data-drawn="window"
+    >
+      <div className="relative w-full" style={{ height: `${virtual.getTotalSize()}px` }}>
+        {virtual.getVirtualItems().map((item) => (
+          <div
+            key={item.key}
+            className="absolute left-0 top-0 w-full"
+            style={{ height: `${FILE_ROW_HEIGHT}px`, transform: `translateY(${item.start}px)` }}
+          >
+            {row(files[item.index]!)}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1048,11 +1147,13 @@ export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitV
 
       {conflicted.length > 0 && (
         <Section title="Conflicted" count={conflicted.length} testId="git-conflicted">
-          <div className="flex flex-col">
-            {conflicted.map((file) => (
+          <FileRows
+            files={conflicted}
+            keyOf={(file) => file.path}
+            testId="git-conflicted-rows"
+            row={(file) => (
               <FileLine
                 showsDiff={Boolean(onShowFile)}
-                key={file.path}
                 path={file.path}
                 absolute={under(path, file.path)}
                 state="conflicted"
@@ -1065,8 +1166,8 @@ export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitV
                   )
                 }
               />
-            ))}
-          </div>
+            )}
+          />
         </Section>
       )}
 
@@ -1094,11 +1195,13 @@ export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitV
             </Button>
           }
         >
-          <div className="flex flex-col">
-            {staged.map((file) => (
+          <FileRows
+            files={staged}
+            keyOf={(file) => file.path}
+            testId="git-staged-rows"
+            row={(file) => (
               <FileLine
                 showsDiff={Boolean(onShowFile)}
-                key={file.path}
                 path={file.path}
                 absolute={under(path, file.path)}
                 state={file.status}
@@ -1112,8 +1215,8 @@ export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitV
                   )
                 }
               />
-            ))}
-          </div>
+            )}
+          />
         </Section>
       )}
 
@@ -1161,11 +1264,13 @@ export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitV
             </>
           }
         >
-          <div className="flex flex-col">
-            {unstaged.map((file) => (
+          <FileRows
+            files={unstaged}
+            keyOf={(file) => file.path}
+            testId="git-unstaged-rows"
+            row={(file) => (
               <FileLine
                 showsDiff={Boolean(onShowFile)}
-                key={file.path}
                 path={file.path}
                 absolute={under(path, file.path)}
                 state={file.status}
@@ -1201,8 +1306,8 @@ export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitV
                   </Tooltip>
                 }
               />
-            ))}
-          </div>
+            )}
+          />
         </Section>
       )}
 
@@ -1227,11 +1332,13 @@ export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitV
             </Button>
           }
         >
-          <div className="flex flex-col">
-            {untracked.map((file) => (
+          <FileRows
+            files={untracked}
+            keyOf={(file) => file.path}
+            testId="git-untracked-rows"
+            row={(file) => (
               <FileLine
                 showsDiff={Boolean(onShowFile)}
-                key={file.path}
                 path={file.path}
                 absolute={under(path, file.path)}
                 state="untracked"
@@ -1266,8 +1373,8 @@ export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitV
                   </Tooltip>
                 }
               />
-            ))}
-          </div>
+            )}
+          />
         </Section>
       )}
 
