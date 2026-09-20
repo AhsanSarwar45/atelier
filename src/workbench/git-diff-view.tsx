@@ -21,8 +21,9 @@
  */
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronRight } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -51,6 +52,33 @@ import { useRepositoryReads } from '@/workbench/use-repository-reads';
  */
 const OPEN_AT_MOST = 20;
 const LONG_ENOUGH_TO_WAIT = 2_000;
+
+/**
+ * How many files a diff may hold before the column draws a screenful of them
+ * at a time.
+ *
+ * Under this every section is mounted, which is what an ordinary worktree is
+ * and what keeps a plain column plainly scrollable. Over it the column draws
+ * the sections it can see and holds the scroll open with a spacer around them.
+ *
+ * The number this exists for: a checkout git reported 5,104 changed and
+ * untracked paths for put 74,318 nodes in the document and cost one long task
+ * of 1,622 ms just to open one file's diff — about a third of a millisecond a
+ * heading, so a hundred milliseconds is somewhere near three hundred of them.
+ * Two hundred leaves room for a slower machine and is far past any worktree a
+ * person is reading rather than scanning (bw-o5i3.5).
+ */
+const MANY_FILES = 200;
+
+/**
+ * A shut heading's height before one has been measured, and the sections kept
+ * mounted either side of the window.
+ *
+ * Only a starting guess: an open section is as tall as its diff, so every
+ * drawn section measures itself and the virtualiser corrects as it goes.
+ */
+const FILE_GUESS = 44;
+const FILE_OVERSCAN = 6;
 
 /** One changed file: its heading line, and its lines behind that line's click. */
 function FileDiff({
@@ -218,6 +246,18 @@ export function GitDiffView({ path, focus = null }: { path: string | null; focus
   }, [read]);
   useRepositoryReads(path, quietly);
 
+  const shown = useMemo(() => files ?? [], [files]);
+  const many = shown.length > MANY_FILES;
+  // Counted zero while the list is short: the hook cannot be called
+  // conditionally, and a virtualiser over nothing measures nothing.
+  const virtual = useVirtualizer({
+    count: many ? shown.length : 0,
+    getScrollElement: () => column.current,
+    estimateSize: () => FILE_GUESS,
+    getItemKey: (index) => shown[index]!.path,
+    overscan: FILE_OVERSCAN,
+  });
+
   // A pick is answered once the file is on screen: the diff may still be on
   // its first read when the panel's click arrives. A file the reader shut, or
   // one long enough to start shut, is opened, because they asked to read it.
@@ -233,16 +273,28 @@ export function GitDiffView({ path, focus = null }: { path: string | null; focus
   // where the heading is with its lines drawn and not where it was before.
   useEffect(() => {
     if (bringing === null) return;
-    const section = [...(column.current?.querySelectorAll<HTMLElement>('[data-testid="git-diff-file"]') ?? [])].find(
-      (one) => one.dataset.path === bringing,
-    );
-    section?.scrollIntoView?.({ block: 'start' });
+    // A section that is not drawn cannot be scrolled to: while the column is
+    // drawing a screenful at a time, the virtualiser is the one that knows
+    // where the file is and it is asked by number instead.
+    const at = many ? shown.findIndex((file) => file.path === bringing) : -1;
+    if (at >= 0) virtual.scrollToIndex(at, { align: 'start' });
+    else {
+      const drawn = [...(column.current?.querySelectorAll<HTMLElement>('[data-testid="git-diff-file"]') ?? [])].find(
+        (one) => one.dataset.path === bringing,
+      );
+      drawn?.scrollIntoView?.({ block: 'start' });
+    }
     setBringing(null);
-  }, [bringing]);
+  }, [bringing, many, shown, virtual]);
 
   const flip = useCallback((file: string, now: boolean) => {
     setSaid((before) => ({ ...before, [file]: !now }));
   }, []);
+
+  const section = (file: GitDiffFile) => {
+    const open = said[file.path] ?? shape.current[file.path] ?? true;
+    return <FileDiff root={path ?? ''} file={file} open={open} onFlip={() => flip(file.path, open)} />;
+  };
 
   return (
     <div
@@ -278,18 +330,35 @@ export function GitDiffView({ path, focus = null }: { path: string | null; focus
           Nothing has changed
         </p>
       )}
-      {(files ?? []).map((file) => {
-        const open = said[file.path] ?? shape.current[file.path] ?? true;
-        return (
-          <FileDiff
-            key={file.path}
-            root={path ?? ''}
-            file={file}
-            open={open}
-            onFlip={() => flip(file.path, open)}
-          />
-        );
-      })}
+      {!many && shown.map((file) => <div key={file.path}>{section(file)}</div>)}
+      {many && (
+        // `shrink-0`: the column is a flex column, and a flex child is free to
+        // shrink past the height it was given — the spacer holding a quarter of
+        // a million pixels of scroll open was being squashed to the height of
+        // what happened to be drawn, so nothing below the first screenful could
+        // be scrolled to at all.
+        <div
+          data-testid="git-diff-window"
+          className="relative w-full shrink-0"
+          style={{ height: `${virtual.getTotalSize()}px` }}
+        >
+          {virtual.getVirtualItems().map((item) => (
+            // No height of its own: `measureElement` reads the height the
+            // section came out at — a shut heading and an open diff are
+            // nothing like each other — and the virtualiser lays the rest out
+            // against that, so opening one pushes its neighbours down.
+            <div
+              key={item.key}
+              data-index={item.index}
+              ref={virtual.measureElement}
+              className="absolute left-0 top-0 w-full"
+              style={{ transform: `translateY(${item.start}px)` }}
+            >
+              {section(shown[item.index]!)}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
