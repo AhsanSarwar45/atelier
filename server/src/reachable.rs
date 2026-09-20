@@ -224,22 +224,57 @@ pub fn bind_host_from(for_this_run: Option<String>, stored: Option<String>) -> S
 /// the copy answering `atelier where` and the service that registers one have
 /// to reach the same number or two of them send a reader to a dead address.
 pub fn port() -> u16 {
-    port_from(
+    port_from_either(
         for_this_run(&["ATELIER_PORT", "BEADS_WEB_PORT", "PORT"]),
         crate::db::setting_at_rest(PORT_SETTING),
+        crate::handover::started_by_this_computer(),
     )
 }
 
-/// The rule behind [`port`], with both answers handed to it.
+/// Which of the two answers is listened to first, and why it depends on who
+/// started this copy.
+///
+/// A copy started by hand was handed `ATELIER_PORT` by a person, at the moment
+/// they started it, and that is this run's answer in the ordinary sense: it
+/// wins.
+///
+/// A copy the service manager started was handed the same variable by its own
+/// registration, which [`crate::service::settings_from`] wrote down when the
+/// reader installed and has not looked at since. That is a record of what the
+/// port was, not an instruction for this run, and a port saved on the screen
+/// afterwards is the newer answer — so the screen wins. Without this the
+/// Restart button is a lie in exactly the case it is offered in: the service
+/// brings the app back on the old port while the screen sends the browser to
+/// the new one.
+///
+/// The registration is still read when nothing is stored, because an install
+/// done on a chosen port must not quietly move to the default.
+pub fn port_from_either(for_this_run: Option<String>, stored: Option<String>, service: bool) -> u16 {
+    if service {
+        port_from(stored, for_this_run)
+    } else {
+        port_from(for_this_run, stored)
+    }
+}
+
+/// The rule behind [`port`], with the two answers in the order they count.
 ///
 /// Anything that is not a port this program could be reached on falls through
 /// to the default rather than stopping the start. A stored number nobody can
 /// connect to is a mistake to ignore, not one to refuse to boot over.
-pub fn port_from(for_this_run: Option<String>, stored: Option<String>) -> u16 {
-    chosen(for_this_run, stored)
-        .and_then(|said| said.parse().ok())
-        .filter(|&number| usable_port(number))
+pub fn port_from(first: Option<String>, then: Option<String>) -> u16 {
+    // Each answer is tried in turn rather than only the first one present. A
+    // stored port nobody can connect to should hand the question to whoever
+    // else has an answer, not knock the app back to the default and lose a
+    // port the registration was right about.
+    a_port(first)
+        .or_else(|| a_port(then))
         .unwrap_or(crate::command_line::PORT)
+}
+
+/// One answer read as a port, or nothing if it is not one this program can take.
+fn a_port(said: Option<String>) -> Option<u16> {
+    said?.trim().parse().ok().filter(|&number| usable_port(number))
 }
 
 /// Whether a number is a port this program can be asked to take.
@@ -729,6 +764,30 @@ mod tests {
     #[test]
     fn a_port_that_is_not_a_number_is_not_a_port() {
         assert_eq!(port_from(None, Some("soon".into())), crate::command_line::PORT);
+    }
+
+    #[test]
+    fn a_hand_started_copy_is_told_its_port_by_the_person_who_started_it() {
+        assert_eq!(port_from_either(Some("5000".into()), Some("4100".into()), false), 5000);
+    }
+
+    #[test]
+    fn a_service_started_copy_takes_the_port_the_screen_saved_since() {
+        // The registration handed it 5000 when the reader installed. They have
+        // since asked for 4100 on the screen and pressed Restart. Coming back
+        // on 5000 would land them on a dead address.
+        assert_eq!(port_from_either(Some("5000".into()), Some("4100".into()), true), 4100);
+    }
+
+    #[test]
+    fn a_service_started_copy_with_nothing_saved_keeps_the_port_it_was_installed_on() {
+        assert_eq!(port_from_either(Some("5000".into()), None, true), 5000);
+    }
+
+    #[test]
+    fn a_service_started_copy_with_a_nonsense_saved_port_is_not_moved_by_it() {
+        assert_eq!(port_from_either(Some("5000".into()), Some("80".into()), true), 5000);
+        assert_eq!(port_from_either(Some("5000".into()), Some("soon".into()), true), 5000);
     }
 
     #[test]
