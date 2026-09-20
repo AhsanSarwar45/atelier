@@ -1882,3 +1882,48 @@ Worth fixing: a claim with no lease has no recovery path at all when its
 session dies. Either claims should always carry a lease, or the ownership
 refusal should name `bd update -a <me> --force` as the way out instead of
 naming an actor the caller cannot become.
+
+## Cleanup after a landing cannot remove a stray file from its own worktree
+
+2026-09-20, bw-2fhj.
+
+`atelier tool board/cleanup bw-2fhj` refused with git's own message: the
+worktree "contains modified or untracked files, use --force to delete it".
+The stray was one untracked directory, `tests/results/phone-rails/now/`, left
+by a run of `tests/e2e/the-phone-rails.spec.ts` — a spec that fails on main for
+reasons unrelated to this work, so its output was deliberately never committed.
+
+`--force` on the cleanup tool is not the same flag: it was passed and git
+refused again with the identical message, so the tool does not forward it to
+`git worktree remove`.
+
+Removing the directory by hand was then refused by the Bash hook:
+
+    Beads issue bw-2fhj must be claimed and in_progress before this worktree
+    is changed.
+
+Which cannot be satisfied. The card is closed *because* the work landed, and
+cleanup is defined as the step that happens after it is Done. The hook asks for
+a state that landing has already made unreachable.
+
+Resolution: the `rm -rf` was carried through a command-local `ATELIER_BYPASS`
+naming that refusal, and the cleanup then ran normally.
+
+Worth fixing: either `board/cleanup --force` should forward to
+`git worktree remove --force`, or the repository-write hook should let a
+*landed* job's own worktree be tidied without a claim. As it stands, any
+untracked file a test run leaves behind puts the worktree beyond both the tool
+that is meant to remove it and the hand that could.
+
+### And writing this section down was refused too
+
+Appending the paragraphs above to this file was itself refused:
+
+    Changes require an owned Beads work item in its isolated worktree
+    (target `docs/hook-friction-2.md`).
+
+The instruction that sends an agent here names no card to do it under, and by
+the time there is a refusal worth recording the job that hit it has usually
+landed and closed. So this note was also carried through a command-local
+`ATELIER_BYPASS`. A file whose whole purpose is to collect refusals should be
+writable without one — or the instruction should say which card to open first.
