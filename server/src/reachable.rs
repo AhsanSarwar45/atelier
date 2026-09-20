@@ -155,6 +155,9 @@ fn published(public: Option<&str>) -> Option<String> {
 /// Where the screen keeps who may reach this program.
 pub const BIND_HOST_SETTING: &str = "server.bind-host";
 
+/// Where the screen keeps the port this program answers on.
+pub const PORT_SETTING: &str = "server.port";
+
 /// Where a stored address in front of this program used to be kept.
 ///
 /// Nothing reads it any more. It had a box on the settings screen, and that
@@ -212,6 +215,58 @@ pub fn bind_host() -> String {
 /// The rule behind [`bind_host`], with both answers handed to it.
 pub fn bind_host_from(for_this_run: Option<String>, stored: Option<String>) -> String {
     chosen(for_this_run, stored).unwrap_or_else(|| "0.0.0.0".to_string())
+}
+
+/// The port this program answers on: this run's answer, else the screen's,
+/// else the one it has always used.
+///
+/// Same rule as [`bind_host`], and for the same reason: the copy that serves,
+/// the copy answering `atelier where` and the service that registers one have
+/// to reach the same number or two of them send a reader to a dead address.
+pub fn port() -> u16 {
+    port_from(
+        for_this_run(&["ATELIER_PORT", "BEADS_WEB_PORT", "PORT"]),
+        crate::db::setting_at_rest(PORT_SETTING),
+    )
+}
+
+/// The rule behind [`port`], with both answers handed to it.
+///
+/// Anything that is not a port this program could be reached on falls through
+/// to the default rather than stopping the start. A stored number nobody can
+/// connect to is a mistake to ignore, not one to refuse to boot over.
+pub fn port_from(for_this_run: Option<String>, stored: Option<String>) -> u16 {
+    chosen(for_this_run, stored)
+        .and_then(|said| said.parse().ok())
+        .filter(|&number| usable_port(number))
+        .unwrap_or(crate::command_line::PORT)
+}
+
+/// Whether a number is a port this program can be asked to take.
+///
+/// Zero is "pick one for me", which would leave the reader with an address
+/// nobody wrote down. Below 1024 needs privileges this program does not ask
+/// for, and asking for them to serve a board is the wrong trade.
+pub fn usable_port(number: u16) -> bool {
+    number >= 1024
+}
+
+/// The address to type on this computer's own network, when there is one.
+///
+/// The name before the number, because the name still works next week and a
+/// leased address does not. Nothing when this program answers only here:
+/// there is no home network address then, and printing one would be a lie the
+/// reader finds out about from their phone.
+pub fn home_address(host: &str, port: u16, network: Option<IpAddr>, name: Option<&str>) -> Option<String> {
+    match Listening::from(host) {
+        Listening::OnlyHere => None,
+        Listening::AtOneAddress => Some(format!("http://{host}:{port}")),
+        Listening::Everywhere => match (name, network) {
+            (Some(name), _) => Some(format!("http://{name}:{port}")),
+            (None, Some(address)) => Some(format!("http://{}:{port}", shown(address))),
+            (None, None) => None,
+        },
+    }
 }
 
 /// The address in front of this program, when this run was given one.
@@ -647,6 +702,66 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn the_port_nobody_chose_is_the_one_the_program_was_built_with() {
+        assert_eq!(port_from(None, None), crate::command_line::PORT);
+    }
+
+    #[test]
+    fn the_screens_port_is_used_when_this_run_has_none() {
+        assert_eq!(port_from(None, Some("4100".into())), 4100);
+    }
+
+    #[test]
+    fn this_runs_port_outranks_the_screens() {
+        assert_eq!(port_from(Some("5000".into()), Some("4100".into())), 5000);
+    }
+
+    #[test]
+    fn a_port_this_program_may_not_take_is_not_taken() {
+        // Below 1024 needs privileges the app does not have, so a stored 80
+        // would make every later start fail to bind with nothing on screen
+        // explaining why. Fall back rather than refuse to run.
+        assert_eq!(port_from(None, Some("80".into())), crate::command_line::PORT);
+        assert!(!usable_port(1023));
+        assert!(usable_port(1024));
+    }
+
+    #[test]
+    fn a_port_that_is_not_a_number_is_not_a_port() {
+        assert_eq!(port_from(None, Some("soon".into())), crate::command_line::PORT);
+    }
+
+    #[test]
+    fn the_home_address_is_the_name_a_phone_on_the_wifi_can_type() {
+        assert_eq!(
+            home_address("0.0.0.0", 3008, None, Some("desk.local")),
+            Some("http://desk.local:3008".into())
+        );
+    }
+
+    #[test]
+    fn the_home_address_falls_back_to_the_number_when_there_is_no_name() {
+        let network = Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 40)));
+        assert_eq!(
+            home_address("0.0.0.0", 3008, network, None),
+            Some("http://192.168.1.40:3008".into())
+        );
+    }
+
+    #[test]
+    fn keeping_to_itself_has_no_home_address_to_offer() {
+        assert_eq!(home_address("127.0.0.1", 3008, None, Some("desk.local")), None);
+    }
+
+    #[test]
+    fn one_address_it_was_told_to_answer_on_is_the_home_address() {
+        assert_eq!(
+            home_address("192.168.1.40", 3008, None, None),
+            Some("http://192.168.1.40:3008".into())
+        );
+    }
+
     fn the_name_this_computer_answers_to_is_its_own() {
         // The parts that ask the operating system. A machine with no
         // multicast answerer has no name, and then there is nothing to check.

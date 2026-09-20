@@ -70,10 +70,33 @@ pub fn agent_label() -> String {
 /// A service has no shell and inherits nothing, so a port left to be picked up
 /// from the environment would silently become the default on the next reboot.
 pub fn port() -> u16 {
-    std::env::var("ATELIER_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(crate::command_line::PORT)
+    running_port()
+}
+
+/// What this process actually bound, set once the door is open.
+///
+/// The stored answers can change under a running copy — that is the whole
+/// point of the settings screen — so the screen cannot ask the settings what
+/// this copy is answering on. It has to ask the copy.
+static RUNNING: std::sync::OnceLock<(String, u16)> = std::sync::OnceLock::new();
+
+/// Remember what was bound. Called once, by whoever opened the door.
+pub fn running_at(host: String, port: u16) {
+    let _ = RUNNING.set((host, port));
+}
+
+/// The port this copy is answering on, or the one it would take. The fallback
+/// is for the copies that never bound anything: `atelier where`, the installer.
+pub fn running_port() -> u16 {
+    RUNNING.get().map(|(_, port)| *port).unwrap_or_else(crate::reachable::port)
+}
+
+/// What this copy is answering on, by the same rule.
+pub fn running_host() -> String {
+    RUNNING
+        .get()
+        .map(|(host, _)| host.clone())
+        .unwrap_or_else(crate::reachable::bind_host)
 }
 
 /// The settings that have to travel into the definition, because the thing

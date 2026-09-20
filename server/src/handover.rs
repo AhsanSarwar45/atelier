@@ -132,6 +132,34 @@ pub fn started_by_this_computer() -> bool {
     )
 }
 
+/// Whether this copy can bring itself back by stopping.
+///
+/// Two things have to be true: something is watching it, and that something
+/// starts it again however it stops rather than only when it crashes. Both are
+/// already the conditions for handing over to a newer build, and a restart the
+/// reader asked for is the same move made on purpose.
+///
+/// A copy started by hand in a terminal answers false. Exiting there would
+/// take the board away and leave nobody to bring it back, which is not a
+/// restart — it is a stop with a friendly name on the button.
+pub fn can_come_back() -> bool {
+    started_by_this_computer()
+        && crate::service::registration_comes_back_however_it_stops() == Some(true)
+}
+
+/// Stop, so the thing watching starts this program again.
+///
+/// The wait is for the answer already on its way to the browser: exiting
+/// underneath it would show the reader a failed request for a restart that
+/// actually worked.
+pub fn come_back_now() {
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        tracing::info!("restarting at the reader's request");
+        std::process::exit(0);
+    });
+}
+
 /// Watch the program this copy would be restarted from, and stand down when a
 /// newer one is installed over it.
 ///

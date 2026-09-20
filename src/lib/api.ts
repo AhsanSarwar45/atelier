@@ -1270,15 +1270,20 @@ export interface RemoteAccess {
   wrong: string | null;
   serving: boolean;
   address: string | null;
+  homeAddress: string | null;
   bindHost: string | null;
   bindHostDefault: string;
   port: number;
+  nextPort: number | null;
+  needsRestart: boolean;
+  canRestart: boolean;
 }
 
 /** What the switch and the field may change; absent means unchanged. */
 export interface RemoteAccessChange {
   serving?: boolean;
   bindHost?: string;
+  port?: number;
 }
 
 /**
@@ -1345,6 +1350,17 @@ export async function saveRemoteAccess(change: RemoteAccessChange): Promise<Remo
   });
   if (!answer.ok) throw await remoteRefusal(answer);
   return (await answer.json()) as RemoteAccess;
+}
+
+/**
+ * Ask the app to stop, so whatever starts it brings it back on what was saved.
+ *
+ * It answers before it goes, so this resolving means the restart began — not
+ * that the app is back. The screen waits for the door to reopen itself.
+ */
+export async function restartApp(): Promise<void> {
+  const answer = await request('/api/settings/remote/restart', { method: 'POST' });
+  if (!answer.ok) throw await remoteRefusal(answer);
 }
 
 export interface SearchSettings {

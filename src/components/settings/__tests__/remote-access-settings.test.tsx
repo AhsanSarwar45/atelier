@@ -20,6 +20,7 @@ import { RemoteAccessSettings, shutsTheDoor } from '@/components/settings/remote
 import {
   remoteAccess,
   RemoteAccessRefused,
+  restartApp,
   saveRemoteAccess,
   type RemoteAccess,
 } from '@/lib/api';
@@ -27,6 +28,7 @@ import {
 vi.mock('@/lib/api', () => ({
   remoteAccess: vi.fn(),
   saveRemoteAccess: vi.fn(),
+  restartApp: vi.fn(),
   // The real one, because the section tells a refusal it can act on from one
   // it cannot by asking what kind it is.
   RemoteAccessRefused: class extends Error {
@@ -46,9 +48,13 @@ const nothing: RemoteAccess = {
   wrong: 'Tailscale is not installed. Run `atelier remote install` in a terminal.',
   serving: false,
   address: null,
+  homeAddress: 'http://desk.local:3008',
   bindHost: null,
   bindHostDefault: '0.0.0.0',
   port: 3008,
+  nextPort: null,
+  needsRestart: false,
+  canRestart: true,
 };
 
 /** The same computer once the command has been run and it has signed in. */
@@ -107,13 +113,49 @@ describe('the Remote access section', () => {
       'https://desk.tailnet.ts.net',
     );
     expect(screen.getByTestId('remote-serving')).toHaveTextContent('Enable');
-    expect(screen.getByTestId('remote-address-source')).toHaveTextContent(
-      'Set by Tailscale',
-    );
-    expect(screen.getByTestId('remote-rename-link')).toHaveAttribute(
+    // Every address is the same three controls, and the edit for this one
+    // goes where the address is really changed (bw-t2m2.4).
+    expect(screen.getByLabelText('Rename this computer in Tailscale')).toHaveAttribute(
       'href',
       'https://login.tailscale.com/admin/machines',
     );
+  });
+
+  it('offers a restart, rather than telling the reader a change applies later', async () => {
+    // "Applies after restart" is a note, not a control. If the change cannot
+    // take effect now, the screen has to offer the restart it is waiting for.
+    read.mockResolvedValue({ ...ready, nextPort: 4000, needsRestart: true });
+
+    render(<RemoteAccessSettings />);
+
+    const row = await screen.findByTestId('remote-restart');
+    expect(row).toHaveTextContent('http://desk.local:4000');
+    fireEvent.click(screen.getByTestId('remote-restart-now'));
+
+    await waitFor(() => expect(restartApp).toHaveBeenCalled());
+  });
+
+  it('says what to do instead when nothing would start it again', async () => {
+    // Started by hand in a terminal: stopping is not restarting, and a button
+    // saying otherwise would take the board away.
+    read.mockResolvedValue({ ...ready, nextPort: 4000, needsRestart: true, canRestart: false });
+
+    render(<RemoteAccessSettings />);
+
+    expect(await screen.findByTestId('remote-restart')).toHaveTextContent('Quit Atelier');
+    expect(screen.queryByTestId('remote-restart-now')).not.toBeInTheDocument();
+  });
+
+  it('changes the port from the address it belongs to', async () => {
+    read.mockResolvedValue(ready);
+    save.mockResolvedValue({ ...ready, nextPort: 4000, needsRestart: true });
+
+    render(<RemoteAccessSettings />);
+    fireEvent.click(await screen.findByLabelText('Change the port'));
+    fireEvent.change(screen.getByTestId('remote-port-input'), { target: { value: '4000' } });
+    fireEvent.click(screen.getByTestId('remote-port-save'));
+
+    await waitFor(() => expect(save).toHaveBeenCalledWith({ port: 4000 }));
   });
 
   it('says off when the server says off, whatever the switch was asked to do', async () => {

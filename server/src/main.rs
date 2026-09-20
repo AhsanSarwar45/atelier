@@ -294,14 +294,12 @@ fn bind_host() -> String {
     reachable::bind_host()
 }
 
-/// The port it listens on, as the environment was left.
+/// The port it listens on: this run's answer, else the screen's.
+///
+/// Beside [`bind_host`] and for the same reason — the rule lives next to the
+/// addresses it decides, so every copy reaches the same number.
 fn bind_port() -> u16 {
-    env::var("ATELIER_PORT")
-        .or_else(|_| env::var("BEADS_WEB_PORT"))
-        .or_else(|_| env::var("PORT"))
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(command_line::PORT)
+    reachable::port()
 }
 
 /// Where it can be opened, and whether anything is there.
@@ -359,7 +357,12 @@ async fn serve(open_browser: bool) {
     // was the point (bw-8um.3.10.2).
     let addr = format!("{}:{}", host, port);
     let listener = match tokio::net::TcpListener::bind(&addr).await {
-        Ok(listener) => listener,
+        Ok(listener) => {
+            // What was bound, not what is stored. The settings can change
+            // under this copy; what it is answering on cannot.
+            service::running_at(host.clone(), port);
+            listener
+        }
         Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
             let network = reachable::on_this_network();
             let name = reachable::name_on_this_network(network);

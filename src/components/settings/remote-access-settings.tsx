@@ -84,19 +84,30 @@
  */
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Check, Copy, ExternalLink, Loader2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { AddressRow } from '@/components/settings/address-row';
 import { SettingRow, SettingsGroup } from '@/components/settings/section';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { RadioGroup, RadioGroupOption } from '@/components/ui/radio-group';
 import { ReadFailed } from '@/components/ui/read-failed';
 import {
   remoteAccess,
   RemoteAccessRefused,
+  restartApp,
   saveRemoteAccess,
   type RemoteAccess,
   type RemoteAccessChange,
@@ -107,6 +118,9 @@ const INSTALL = 'atelier remote install';
 
 /** What the screen says while a door is being saved, in one place. */
 const SAVING = 'Saving…';
+
+/** How long to leave the app to stop and be started again before reloading. */
+const RESTART_WAIT_MS = 4000;
 
 /** Where a reader renames the computer the address is made out of. */
 const MACHINES = 'https://login.tailscale.com/admin/machines';
@@ -132,6 +146,19 @@ const DOORS = [
   },
 ] as const;
 
+/**
+ * The address the next start will answer on, for the line offering a restart.
+ *
+ * The home address with the saved port swapped into it when that is what
+ * changed, so the reader is told the thing they are waiting for rather than
+ * that something, somewhere, is pending.
+ */
+function nextAddress(held: RemoteAccess): string {
+  if (held.nextPort === null) return 'the access you picked';
+  const home = held.homeAddress ?? `http://localhost:${held.port}`;
+  return home.replace(/:\d+$/, `:${held.nextPort}`);
+}
+
 /** Whether a stored bind address shuts the door on everything but this computer. */
 export function shutsTheDoor(bindHost: string | null): boolean {
   return bindHost === '127.0.0.1' || bindHost === '::1' || bindHost === 'localhost';
@@ -152,6 +179,9 @@ export function RemoteAccessSettings() {
   const [saving, setSaving] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [copied, setCopied] = useState<string | null>(null);
+  const [editingPort, setEditingPort] = useState<string | null>(null);
+  const portField = useRef<HTMLInputElement>(null);
+  const [restarting, setRestarting] = useState(false);
 
   const take = useCallback((it: RemoteAccess) => {
     setHeld(it);
@@ -189,6 +219,37 @@ export function RemoteAccessSettings() {
     },
     [take],
   );
+
+  // The app answers, then stops. Nothing here can watch it come back over the
+  // connection it is about to lose, so the page waits for the door to reopen
+  // and then reloads onto whatever is now behind it.
+  const restart = useCallback(async () => {
+    setRestarting(true);
+    setRefused(null);
+    try {
+      await restartApp();
+    } catch (e) {
+      setRestarting(false);
+      setRefused({
+        said: e instanceof Error ? e.message : String(e),
+        link: e instanceof RemoteAccessRefused ? e.link : null,
+      });
+      return;
+    }
+    setTimeout(() => window.location.reload(), RESTART_WAIT_MS);
+  }, []);
+
+  const savePort = useCallback(async () => {
+    // Read the field rather than mirroring it in state. It lives for one
+    // dialog, it is read once, and a ref is the shorter way to say that.
+    const wanted = Number(portField.current?.value);
+    if (!Number.isInteger(wanted) || wanted < 1024 || wanted > 65535) {
+      setRefused({ said: 'A port is a whole number from 1024 to 65535.', link: null });
+      return;
+    }
+    setEditingPort(null);
+    await change({ port: wanted }, SAVING);
+  }, [change]);
 
   const copy = useCallback((said: string) => {
     void navigator.clipboard?.writeText(said).then(() => {
@@ -302,54 +363,35 @@ export function RemoteAccessSettings() {
       )}
 
       {held.address && (
-        <SettingRow
-          label="Address"
-          stack
-          description={
-            <span data-testid="remote-address-source">
-              Set by Tailscale.{' '}
-              <a
-                href={MACHINES}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="underline underline-offset-2 hover:text-t-secondary"
-                data-testid="remote-rename-link"
-              >
-                Rename this computer
-              </a>{' '}
-              to change it.
-            </span>
-          }
-        >
-          <div className="flex w-full items-center gap-2" data-testid="remote-address">
-            <Badge asChild variant="secondary" appearance="light" size="sm" className="flex-1 justify-start font-mono">
-              <code>{held.address}</code>
-            </Badge>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => copy(held.address ?? '')}
-              aria-label="Copy the address"
-              data-testid="remote-copy-address"
-            >
-              {copied === held.address ? <Check className="size-4" /> : <Copy className="size-4" />}
-            </Button>
-          </div>
+        <SettingRow label="Tailscale address" stack>
+          <AddressRow
+            address={held.address}
+            editLabel="Rename this computer in Tailscale"
+            editHref={MACHINES}
+            copied={copied}
+            onCopy={copy}
+            data-testid="remote-address"
+          />
+        </SettingRow>
+      )}
+
+      {held.homeAddress && (
+        <SettingRow label="Home network address" stack>
+          <AddressRow
+            address={held.homeAddress}
+            editLabel="Change the port"
+            onEdit={() => setEditingPort(String(held.nextPort ?? held.port))}
+            copied={copied}
+            onCopy={copy}
+            data-testid="remote-home-address"
+          />
         </SettingRow>
       )}
 
       <SettingRow
         label="Access"
         stack
-        description={
-          odd ? (
-            <span data-testid="remote-host-odd">
-              Currently {held.bindHost}. Applies after restart.
-            </span>
-          ) : (
-            'Applies after restart'
-          )
-        }
+        description={odd ? <span data-testid="remote-host-odd">Currently {held.bindHost}</span> : undefined}
       >
         <RadioGroup
           className="w-full"
@@ -380,6 +422,61 @@ export function RemoteAccessSettings() {
           </p>
         </div>
       )}
+
+      {held.needsRestart && (
+        <SettingRow
+          label="Restart to apply"
+          description={
+            held.canRestart
+              ? nextAddress(held)
+              : `Quit Atelier and start it again to use ${nextAddress(held)}`
+          }
+          data-testid="remote-restart"
+        >
+          {held.canRestart && (
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={restarting}
+              onClick={() => void restart()}
+              data-testid="remote-restart-now"
+            >
+              {restarting && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
+              {restarting ? 'Restarting…' : 'Restart now'}
+            </Button>
+          )}
+        </SettingRow>
+      )}
+
+      <Dialog open={editingPort !== null} onOpenChange={(open) => !open && setEditingPort(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Port</DialogTitle>
+            <DialogDescription>1024 or higher. Used the next time Atelier starts.</DialogDescription>
+          </DialogHeader>
+          <Input
+            ref={portField}
+            type="number"
+            min={1024}
+            max={65535}
+            defaultValue={editingPort ?? ''}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void savePort();
+            }}
+            aria-label="Port"
+            className="font-mono"
+            data-testid="remote-port-input"
+          />
+          <DialogFooter>
+            <Button size="sm" variant="ghost" onClick={() => setEditingPort(null)}>
+              Cancel
+            </Button>
+            <Button size="sm" variant="primary" onClick={() => void savePort()} data-testid="remote-port-save">
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </SettingsGroup>
   );
 }

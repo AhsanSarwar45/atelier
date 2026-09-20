@@ -26,10 +26,10 @@
 //! that allowlist admits the names this machine answers to on its own
 //! network, so the phone in the next room still reaches it.
 
-use axum::{extract::State, http::StatusCode, middleware, routing::get, Json, Router};
+use axum::{extract::State, http::StatusCode, middleware, routing::{get, post}, Json, Router};
 use serde::{Deserialize, Serialize};
 
-use crate::reachable::BIND_HOST_SETTING;
+use crate::reachable::{BIND_HOST_SETTING, PORT_SETTING};
 use crate::remote::{self, Standing, SERVING_SETTING};
 use crate::routes::projects::AppState;
 
@@ -112,13 +112,24 @@ pub struct RemoteAccess {
     pub serving: bool,
     /// The https address a phone opens, once there is one.
     pub address: Option<String>,
+    /// The address to type on this computer's own network, when it answers
+    /// there at all.
+    pub home_address: Option<String>,
     /// What the server binds, as stored. `null` for the default.
     pub bind_host: Option<String>,
     /// What this computer binds with nothing stored, so the field can say what
     /// leaving it empty means.
     pub bind_host_default: String,
-    /// The port being served, so the screen can say what is being exposed.
+    /// The port this copy is answering on right now.
     pub port: u16,
+    /// The port the next start will take, when that is not this one. The
+    /// screen says so rather than drawing an address nothing answers yet.
+    pub next_port: Option<u16>,
+    /// Whether something saved here is waiting on a restart to take effect.
+    pub needs_restart: bool,
+    /// Whether this copy can restart itself, so the screen offers a button
+    /// rather than a sentence about terminals.
+    pub can_restart: bool,
 }
 
 /// What the screen sends. Every field is optional and absent means unchanged,
@@ -129,6 +140,25 @@ pub struct RemoteAccess {
 struct Choosing {
     serving: Option<bool>,
     bind_host: Option<String>,
+    port: Option<u16>,
+}
+
+/// POST /api/settings/remote/restart
+///
+/// Answers first and stops second, so the browser sees the restart it asked
+/// for succeed rather than the connection it was riding on disappear.
+async fn restart() -> Result<StatusCode, Refusal> {
+    if !crate::handover::can_come_back() {
+        return Err(refused(
+            StatusCode::CONFLICT,
+            format!(
+                "This copy was started by hand, so stopping it would leave nothing running.                  Quit it and run `{} run` again.",
+                crate::identity::NAME
+            ),
+        ));
+    }
+    crate::handover::come_back_now();
+    Ok(StatusCode::ACCEPTED)
 }
 
 /// GET /api/settings/remote
@@ -154,6 +184,15 @@ async fn write_remote(
         }
         store(&db, BIND_HOST_SETTING, kept)?;
     }
+    if let Some(wanted) = asked.port {
+        if !crate::reachable::usable_port(wanted) {
+            return Err(refused(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("{wanted} is below 1024, which this app is not allowed to take. Pick 1024 or higher."),
+            ));
+        }
+        store(&db, PORT_SETTING, Some(wanted.to_string().as_str()))?;
+    }
     if let Some(on) = asked.serving {
         // Tailscale first. If it refuses, nothing is remembered, because a
         // switch drawn on over a board nobody can reach is worse than a
@@ -177,6 +216,9 @@ fn as_it_stands(
 ) -> Result<RemoteAccess, Refusal> {
     let port = crate::service::port();
     let bind_host = read(db, BIND_HOST_SETTING)?;
+    let next_port = read(db, PORT_SETTING)?.and_then(|said| said.parse::<u16>().ok());
+    let network = crate::reachable::on_this_network();
+    let name = crate::reachable::name_on_this_network(network);
     Ok(RemoteAccess {
         standing: named(&standing),
         wrong: standing.wrong(),
@@ -185,9 +227,19 @@ fn as_it_stands(
             Standing::Ready { address } => Some(address.clone()),
             _ => None,
         },
+        home_address: crate::reachable::home_address(
+            &crate::reachable::bind_host(),
+            port,
+            network,
+            name.as_deref(),
+        ),
         bind_host,
         bind_host_default: crate::reachable::bind_host_from(None, None),
         port,
+        next_port: next_port.filter(|&wanted| wanted != port),
+        needs_restart: next_port.is_some_and(|wanted| wanted != port)
+            || crate::reachable::bind_host() != crate::service::running_host(),
+        can_restart: crate::handover::can_come_back(),
     })
 }
 
@@ -249,6 +301,7 @@ fn unreadable(what: &str, why: impl std::fmt::Display) -> Refusal {
 pub fn remote_access_routes() -> Router<AppState> {
     Router::new()
         .route("/settings/remote", get(read_remote).put(write_remote))
+        .route("/settings/remote/restart", post(restart))
         .layer(middleware::from_fn(crate::local_host::require_local_host))
 }
 
