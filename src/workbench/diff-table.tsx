@@ -98,6 +98,20 @@ function endsOfRange(table: HTMLTableElement, range: Range): { from: number; to:
   return to < from ? null : { from, to };
 }
 
+/**
+ * The line a node is part of, or null when the node is not in a drawn row.
+ *
+ * Used on the selection's anchor — the row the reader pressed in — which is
+ * the one end of a drag that does not move while the other one does.
+ */
+function rowOf(table: HTMLTableElement, node: Node | null): number | null {
+  if (!node) return null;
+  const from = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+  const row = from?.closest?.('tr[data-row-at]');
+  if (!row || !table.contains(row)) return null;
+  return Number((row as HTMLElement).dataset.rowAt);
+}
+
 /** The one range a reader has dragged inside this table, or nothing. */
 function rangeInside(table: HTMLTableElement | null): Range | null {
   if (!table) return null;
@@ -237,23 +251,24 @@ export function DiffTable({
   const [offer, setOffer] = useState<{ at: { left: number; top: number }; copied: CopiedDiff } | null>(null);
 
   /**
-   * The furthest the selection being dragged right now has reached.
+   * The line the selection being dragged right now was begun in.
    *
    * A drag down a long diff scrolls as it goes and unmounts the rows it began
-   * in, so at any moment only part of it can be asked about. Every
-   * `selectionchange` on the way down can see where the selection then was,
-   * and the widest pair of ends seen while it has been the same selection is
-   * the whole of it. Thrown away when the selection is let go of or begun
-   * somewhere else, which is what the anchor tells us.
+   * in, so at any moment the drawn part of it may be missing its own start.
+   * The start is the one end that does not move, so it is enough to have seen
+   * it once — while it was still drawn — and to keep it for as long as it is
+   * the same selection, which is what the anchor tells us. The other end is
+   * read fresh every time, so a drag that overshoots and comes back names
+   * where it came back to and not how far it went.
    */
-  const reached = useRef<{ anchor: Node | null; at: number | null; from: number; to: number } | null>(null);
+  const began = useRef<{ anchor: Node | null; at: number | null; row: number } | null>(null);
 
   /** What the reader has selected inside this table right now, if anything. */
   const selected = useCallback((): { range: Range; copied: CopiedDiff } | null => {
     if (!path || !table.current) return null;
     const range = rangeInside(table.current);
     if (!range) {
-      reached.current = null;
+      began.current = null;
       return null;
     }
     const ends = endsOfRange(table.current, range);
@@ -261,11 +276,16 @@ export function DiffTable({
     const selection = window.getSelection();
     const anchor = selection?.anchorNode ?? null;
     const at = selection?.anchorOffset ?? null;
-    const before = reached.current;
+    const before = began.current;
     const same = before !== null && before.anchor === anchor && before.at === at;
-    const from = same ? Math.min(before.from, ends.from) : ends.from;
-    const to = same ? Math.max(before.to, ends.to) : ends.to;
-    reached.current = { anchor, at, from, to };
+    const start = rowOf(table.current, anchor) ?? (same ? before.row : null);
+    if (start !== null) began.current = { anchor, at, row: start };
+    else began.current = null;
+    // The start reaches out to wherever the other end is now, above it or
+    // below it; when the start is drawn it is already one of these two ends
+    // and this changes nothing.
+    const from = start === null ? ends.from : Math.min(start, ends.from);
+    const to = start === null ? ends.to : Math.max(start, ends.to);
     // Sliced out of `rows` and not out of the tbody: the lines between the two
     // ends are owed to the reader whether they are drawn at this moment or not.
     const copied = copiedFromRows(rows.slice(from, to + 1), path);

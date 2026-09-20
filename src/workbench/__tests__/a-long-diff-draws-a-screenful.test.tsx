@@ -183,6 +183,24 @@ describe('a diff of thousands of lines', () => {
     expect(copyFrom(table)).toBe(`@src/a.ts:${first}-${Number(ended.dataset.rowAt) + 1}`);
   }, 60_000);
 
+  it('names where a drag came back to, not how far it went', () => {
+    // A short diff, where no row is ever taken down: the reference has to be
+    // exactly what is highlighted, and it was before a drag was allowed to be
+    // remembered at all.
+    render(<DiffTable rows={fileOf(40)} language="typescript" path="src/a.ts" />);
+    const table = screen.getByTestId('diff-table');
+    const lines = [...table.querySelectorAll<HTMLElement>('tr[data-row-at]')];
+    const pressed = lines[12]!;
+    const anchor = { anchorNode: pressed, anchorOffset: 0 };
+
+    select(pressed, lines[20]!, anchor);
+    expect(copyFrom(table)).toBe('@src/a.ts:13-21');
+
+    // Back up the way it came, without letting go.
+    select(pressed, lines[14]!, anchor);
+    expect(copyFrom(table)).toBe('@src/a.ts:13-15');
+  });
+
   it('leaves an ordinary diff drawn whole', () => {
     render(<DiffTable rows={fileOf(40)} language="typescript" path="src/a.ts" />);
 

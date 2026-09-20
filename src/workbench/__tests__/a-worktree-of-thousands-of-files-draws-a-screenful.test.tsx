@@ -12,7 +12,7 @@
  * drawn a window at a time, and a file picked out of the rail is still reached
  * when it is one the window is nowhere near.
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { GitDiffFile } from '@/lib/api';
@@ -32,6 +32,19 @@ vi.mock('@/lib/api', async (whatItReallyIs) => ({
 }));
 
 vi.mock('@/workbench/open-local-path', () => ({ openLocalPath: vi.fn() }));
+
+const paint = vi.hoisted(() => ({ lines: vi.fn() }));
+
+vi.mock('@/workbench/colouring', async (whatItReallyIs) => {
+  const real = await whatItReallyIs<Record<string, unknown>>();
+  return {
+    ...real,
+    paintLines: (...said: unknown[]) => {
+      paint.lines(...said);
+      return (real.paintLines as (...a: unknown[]) => string[] | null)(...said);
+    },
+  };
+});
 
 /**
  * jsdom has no layout, so every box is nought high — and a virtualiser told
@@ -69,6 +82,27 @@ function oneLine(path: string): GitDiffFile {
   };
 }
 
+/** A tracked file with `count` changed lines, which is a thing worth colouring. */
+function changed(path: string, count: number): GitDiffFile {
+  return {
+    path,
+    oldPath: null,
+    status: 'modified',
+    additions: count,
+    deletions: 0,
+    binary: false,
+    hunks: [
+      {
+        oldStart: 1,
+        oldLines: 0,
+        newStart: 1,
+        newLines: count,
+        lines: Array.from({ length: count }, (_, at) => ({ kind: 'added' as const, text: `const named${at} = ${at};` })),
+      },
+    ],
+  };
+}
+
 function manyFiles(howMany: number): GitDiffFile[] {
   return Array.from({ length: howMany }, (_, at) => oneLine(`.cache/thing-${String(at).padStart(4, '0')}.dat`));
 }
@@ -101,6 +135,27 @@ describe('a worktree with thousands of changed files', () => {
     expect(drawn).toBeLessThan(200);
     expect(document.querySelectorAll('*').length).toBeLessThan(6_000);
   }, 60_000);
+
+  it('does not colour a file again when the five-second re-read brings no news', async () => {
+    // A diff re-reads itself while the reader is looking at it. Every read
+    // parses fresh objects, and colouring is the expensive thing hanging off
+    // them, so a file nothing has happened to has to come back as the file it
+    // already was or every open section is coloured again on every tick.
+    const files = [changed('src/one.ts', 8)];
+    draw(files);
+    await waitFor(() => expect(screen.getAllByTestId('git-diff-file')).toHaveLength(1));
+    const first = paint.lines.mock.calls.length;
+    expect(first).toBeGreaterThan(0);
+
+    // The same news, freshly parsed, exactly as the server would send it back.
+    calls.diff.mockResolvedValue({ files: JSON.parse(JSON.stringify(files)) });
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(paint.lines.mock.calls.length).toBe(first);
+  });
 
   it('leaves an ordinary worktree drawn whole', async () => {
     draw(manyFiles(30));

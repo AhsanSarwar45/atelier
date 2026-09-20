@@ -92,7 +92,11 @@ function FileDiff({
   open: boolean;
   onFlip: () => void;
 }) {
-  const rows = file.binary ? [] : hunksToRows(file.hunks);
+  // Worked out once a file: the read below runs every five seconds and the
+  // rows are what the colouring is worked out from, so a file nothing has
+  // happened to must come back as the same rows or every open diff on the
+  // screen is coloured again on every tick (bw-o5i3.3).
+  const rows = useMemo(() => (file.binary ? [] : hunksToRows(file.hunks)), [file]);
   const look = STATUS_LOOK[file.status];
   return (
     // `gap-1.5` and not `gap-1`: the disclosure line below is 24px painted and
@@ -168,6 +172,54 @@ function FileDiff({
   );
 }
 
+/**
+ * The files just read, with the ones nothing has happened to given back as
+ * the objects they already were.
+ *
+ * A diff is re-read every five seconds. Every read parses fresh objects, and
+ * everything downstream — the rows, the colouring, the memo that is supposed
+ * to hold both — is keyed on their identity, so without this every open file
+ * on the screen is parsed and coloured again on every tick for no news at all.
+ * The comparison is the file's own summary first — a changed file almost
+ * always counts differently — and only then the text of its hunks, walked
+ * rather than stringified so that a worktree of thousands of them costs a
+ * comparison and not a second copy of itself.
+ */
+function unchanged(old: GitDiffFile, now: GitDiffFile): boolean {
+  if (
+    old.status !== now.status ||
+    old.additions !== now.additions ||
+    old.deletions !== now.deletions ||
+    old.binary !== now.binary ||
+    old.oldPath !== now.oldPath ||
+    old.hunks.length !== now.hunks.length
+  ) {
+    return false;
+  }
+  for (let at = 0; at < old.hunks.length; at++) {
+    const was = old.hunks[at]!;
+    const is = now.hunks[at]!;
+    if (was.oldStart !== is.oldStart || was.newStart !== is.newStart || was.lines.length !== is.lines.length) {
+      return false;
+    }
+    for (let line = 0; line < was.lines.length; line++) {
+      if (was.lines[line]!.kind !== is.lines[line]!.kind || was.lines[line]!.text !== is.lines[line]!.text) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function sameAgain(before: GitDiffFile[] | null, now: GitDiffFile[]): GitDiffFile[] {
+  if (!before) return now;
+  const had = new Map(before.map((file) => [file.path, file]));
+  return now.map((file) => {
+    const old = had.get(file.path);
+    return old && unchanged(old, file) ? old : file;
+  });
+}
+
 /** Which files a reader has shut, and which ones started shut. */
 function firstShape(files: GitDiffFile[]): Record<string, boolean> {
   const shape: Record<string, boolean> = {};
@@ -215,7 +267,7 @@ export function GitDiffView({ path, focus = null }: { path: string | null; focus
         const answer = await git.diff(path, signal);
         if (signal?.aborted) return;
         shape.current = { ...firstShape(answer.files), ...shape.current };
-        setFiles(answer.files);
+        setFiles((before) => sameAgain(before, answer.files));
         setFault(null);
       } catch (trouble) {
         if (signal?.aborted) return;
