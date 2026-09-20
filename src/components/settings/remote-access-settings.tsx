@@ -480,7 +480,12 @@ export function RemoteAccessSettings() {
               data-testid="remote-port-input"
             />
           </SettingRow>
-          <SettingRow label="Name" stack className="px-0 py-0">
+          <SettingRow
+            label="Name"
+            description="Run this command in your terminal to change the host name"
+            stack
+            className="px-0 py-0"
+          >
             <AddressRow
               address={held.renameCommand}
               copied={copied}
