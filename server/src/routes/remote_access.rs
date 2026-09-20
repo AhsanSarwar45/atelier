@@ -229,8 +229,13 @@ fn as_it_stands(
             Standing::Ready { address } => Some(address.clone()),
             _ => None,
         },
+        // Built from what this copy actually bound, not from what is stored.
+        // The port beside it already comes from the running process, and an
+        // address made half of one and half of the other is an address that
+        // answers nowhere. What is stored but not yet bound is the restart's
+        // business, not this line's.
         home_address: crate::reachable::home_address(
-            &crate::reachable::bind_host(),
+            &crate::service::running_host(),
             port,
             network,
             name.as_deref(),

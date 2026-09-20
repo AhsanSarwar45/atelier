@@ -100,7 +100,6 @@ import { SettingRow, SettingsGroup } from '@/components/settings/section';
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -286,7 +285,15 @@ export function RemoteAccessSettings() {
   }
 
   const ready = held.standing === 'ready';
-  const openTo = shutsTheDoor(held.bindHost) ? 'here' : 'everyone';
+  // A stored address that is neither door checks neither of them. Checking
+  // "Home network and Tailscale" would be a claim about who can reach this
+  // board, made from a value that says something else; the row above says
+  // what it really is instead.
+  const openTo = shutsTheDoor(held.bindHost)
+    ? 'here'
+    : held.bindHost === null || held.bindHost === '0.0.0.0'
+      ? 'everyone'
+      : undefined;
   // A value from the old text box that is neither door. Saying so beats
   // drawing one of the two as if it were the truth.
   const odd = held.bindHost !== null && !shutsTheDoor(held.bindHost) && held.bindHost !== '0.0.0.0';
@@ -461,7 +468,7 @@ export function RemoteAccessSettings() {
       )}
 
       <Dialog open={editingPort !== null} onOpenChange={(open) => !open && setEditingPort(null)}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-sm" aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>Home network address</DialogTitle>
           </DialogHeader>

@@ -136,6 +136,18 @@ describe('the Remote access section', () => {
     await waitFor(() => expect(restartApp).toHaveBeenCalled());
   });
 
+  it('checks neither door when the stored address is neither of them', async () => {
+    // Checking the open one would be a claim about who can reach this board,
+    // made from a value that says something else.
+    read.mockResolvedValue({ ...ready, bindHost: '192.168.1.13' });
+
+    render(<RemoteAccessSettings />);
+
+    expect(await screen.findByTestId('remote-host-odd')).toHaveTextContent('192.168.1.13');
+    expect(screen.getByTestId('remote-reach-everyone')).not.toBeChecked();
+    expect(screen.getByTestId('remote-reach-here')).not.toBeChecked();
+  });
+
   it('shows the command for the half of the address it cannot change itself', async () => {
     // The port is this app's. The name is the computer's, and renaming it
     // needs root, so the box hands over the command rather than the job.
