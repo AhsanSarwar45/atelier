@@ -164,6 +164,21 @@ function nextAddress(held: RemoteAccess): string {
   return home.replace(/:\d+$/, `:${held.nextPort}`);
 }
 
+/**
+ * The name half of the home address, which is not the app's to change.
+ *
+ * The port is Atelier's; the name is whatever this computer calls itself, read
+ * from `hostname` and published on the network by the system's own responder.
+ * The dialog says so, because a pencil that opens a box titled Port reads as
+ * though the rest of the address were fixed forever, and it is not — it is
+ * changed somewhere else, the same as the Tailscale one.
+ */
+function homeName(held: RemoteAccess): string {
+  const home = held.homeAddress;
+  if (home === null) return 'The name in the address';
+  return home.replace(/^\w+:\/\//, '').replace(/:\d+$/, '');
+}
+
 /** Whether a stored bind address shuts the door on everything but this computer. */
 export function shutsTheDoor(bindHost: string | null): boolean {
   return bindHost === '127.0.0.1' || bindHost === '::1' || bindHost === 'localhost';
@@ -464,7 +479,10 @@ export function RemoteAccessSettings() {
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Port</DialogTitle>
-            <DialogDescription>1024 or higher. Used the next time Atelier starts.</DialogDescription>
+            <DialogDescription>
+              1024 or higher. {homeName(held)} is this computer&rsquo;s own name, changed in your
+              system settings.
+            </DialogDescription>
           </DialogHeader>
           <Input
             ref={portField}

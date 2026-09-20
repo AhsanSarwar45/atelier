@@ -135,6 +135,17 @@ describe('the Remote access section', () => {
     await waitFor(() => expect(restartApp).toHaveBeenCalled());
   });
 
+  it('says which half of the home address it is not offering to change', async () => {
+    // The pencil opens a box titled Port. Without this the reader is left to
+    // guess whether the name is fixed forever; it is not, it is just not ours.
+    read.mockResolvedValue(ready);
+
+    render(<RemoteAccessSettings />);
+    fireEvent.click(await screen.findByLabelText('Change the port'));
+
+    expect(screen.getByText(/desk\.local is this computer/)).toBeInTheDocument();
+  });
+
   it('goes to the new port after the restart, not the one nothing answers on', async () => {
     // The restart the reader pressed is the one that moves the app. Reloading
     // this address would land on the port it just left.
