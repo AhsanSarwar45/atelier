@@ -477,14 +477,22 @@ pub(crate) fn checks(rest: &[String]) -> Result<i32, String> {
     Ok(if failure.is_some() { 1 } else { 0 })
 }
 
-fn bounded_output(command: &mut Command) -> Result<std::process::Output, String> {
-    use std::{io::{Read, Seek, SeekFrom}, process::Stdio, time::{Duration, Instant}};
+fn bounded_output(command: &mut Command, said: &[u8]) -> Result<std::process::Output, String> {
+    use std::{io::{Read, Seek, SeekFrom, Write}, process::Stdio, time::{Duration, Instant}};
     let mut stdout = tempfile::tempfile().map_err(|e| e.to_string())?;
     let mut stderr = tempfile::tempfile().map_err(|e| e.to_string())?;
     #[cfg(unix)] { use std::os::unix::process::CommandExt; command.process_group(0); }
-    let mut child = command.stdout(Stdio::from(stdout.try_clone().map_err(|e| e.to_string())?))
+    let mut child = command.stdin(Stdio::piped())
+        .stdout(Stdio::from(stdout.try_clone().map_err(|e| e.to_string())?))
         .stderr(Stdio::from(stderr.try_clone().map_err(|e| e.to_string())?))
         .spawn().map_err(|e| e.to_string())?;
+    // Written on its own thread and closed straight after. A prompt this size
+    // does not fit a pipe buffer, so writing it here would block until the
+    // provider had read it all — and the provider cannot start reading until
+    // it has been spawned, which is the loop below.
+    let mut pipe = child.stdin.take().ok_or("could not reach the reader's input")?;
+    let said = said.to_vec();
+    let writing = std::thread::spawn(move || { let _ = pipe.write_all(&said); });
     let started = Instant::now(); let mut heartbeat = Instant::now();
     let status = loop {
         if let Some(status) = child.try_wait().map_err(|e| e.to_string())? { break status; }
@@ -500,6 +508,7 @@ fn bounded_output(command: &mut Command) -> Result<std::process::Output, String>
         }
         std::thread::sleep(Duration::from_millis(100));
     };
+    let _ = writing.join();
     stdout.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
     stderr.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
     let mut out = Vec::new(); let mut err = Vec::new();
@@ -547,15 +556,23 @@ fn review(rest: &[String]) -> Result<i32, String> {
     if git(&root, &["rev-parse", "HEAD^{tree}"])? != reviewed_tree { return Err("The tree changed while preparing review".into()); }
     let mut command = Command::new(program);
     if provider == "claude" {
-        command.args(["--agents", r#"{"reviewer":{"description":"Independent code review","prompt":"Review the supplied immutable scope. Do not edit files or mutate Git, Beads, applications or processes. Return only the requested JSON verdict.","tools":["Read","Grep","Glob"]}}"#, "--agent", "reviewer", "-p", &prompt, "--setting-sources", "user", "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--no-session-persistence", "--output-format", "json", "--json-schema", r#"{"type":"object","required":["verdict","summary","findings"],"properties":{"verdict":{"enum":["PASS","NEEDS_WORK"]},"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object"}}}}"#]);
+        command.args(["--agents", r#"{"reviewer":{"description":"Independent code review","prompt":"Review the supplied immutable scope. Do not edit files or mutate Git, Beads, applications or processes. Return only the requested JSON verdict.","tools":["Read","Grep","Glob"]}}"#, "--agent", "reviewer", "-p", "--setting-sources", "user", "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--no-session-persistence", "--output-format", "json", "--json-schema", r#"{"type":"object","required":["verdict","summary","findings"],"properties":{"verdict":{"enum":["PASS","NEEDS_WORK"]},"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object"}}}}"#]);
     } else if provider == "codex" {
-        command.args(["exec", "--sandbox", "read-only", "--color", "never", &prompt]);
+        command.args(["exec", "--sandbox", "read-only", "--color", "never", "-"]);
     } else { return Err("Review provider must be claude or codex".into()); }
     command.current_dir(&root).env_remove("ATELIER_BYPASS");
     let evidence = crate::board_landing::common_root(&root).join(".git/atelier-reviews").join(format!("{id}-{head}"));
     std::fs::create_dir_all(&evidence).map_err(|e| e.to_string())?;
     std::fs::write(evidence.join("packet.txt"), &prompt).map_err(|e| e.to_string())?;
-    let output = bounded_output(&mut command)?;
+    // The prompt is handed over on stdin, not as an argument. It carries the
+    // job's card, every comment on it and up to 300_000 bytes of diff, and
+    // Linux refuses a single argument longer than MAX_ARG_STRLEN — 131072 on
+    // a 4K page. Passing it as `-p <prompt>` worked until a job accumulated
+    // enough review history to cross that, and then every review of that job
+    // failed with "Argument list too long" and no verdict at all (bw-6mar).
+    // Both providers read the prompt from stdin: `claude -p` with nothing
+    // after it, and `codex exec -`.
+    let output = bounded_output(&mut command, prompt.as_bytes())?;
     std::fs::write(evidence.join("stdout.json"), &output.stdout).map_err(|e| e.to_string())?;
     std::fs::write(evidence.join("stderr.txt"), &output.stderr).map_err(|e| e.to_string())?;
     eprint!("{}", String::from_utf8_lossy(&output.stderr));
@@ -598,6 +615,25 @@ fn claude_verdict(envelope: &Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A prompt too long to be an argument still reaches the reader.
+    ///
+    /// The review prompt carries the job's card, every comment on it and up to
+    /// 300_000 bytes of diff. Linux refuses a single argument longer than
+    /// MAX_ARG_STRLEN — 131072 where a page is 4K — so once a job had gathered
+    /// enough review history, every review of it died with "Argument list too
+    /// long" before the provider was ever started (bw-6mar). `cat` stands in
+    /// for the provider: what it prints is what the provider would have read.
+    #[test]
+    #[cfg(unix)]
+    fn native_machinery_a_prompt_too_long_for_an_argument_still_reaches_the_reader() {
+        let long = "x".repeat(300_000);
+        assert!(long.len() > 131_072, "the case only bites above MAX_ARG_STRLEN");
+        let mut command = Command::new("cat");
+        let output = bounded_output(&mut command, long.as_bytes()).expect("cat could not be run");
+        assert_eq!(output.stdout.len(), long.len());
+        assert!(output.status.success());
+    }
 
     #[test]
     fn native_machinery_review_accepts_json_envelopes_but_not_prose_or_errors() {
