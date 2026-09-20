@@ -120,9 +120,14 @@ function FileDiff({
             Renamed, contents unchanged
           </p>
         ) : (
-          /* No height of its own: the column below scrolls, so a long file is
-             read by scrolling the page rather than by scrolling a box inside
-             a page that also scrolls. */
+          /* No height of its own, up to a point: the column below scrolls, so
+             a file is read by scrolling the page rather than by scrolling a
+             box inside a page that also scrolls. Past six hundred rows the
+             table takes a height and scrolls itself, because drawing that many
+             rows costs the whole hundred milliseconds and everything else on
+             the screen waits for it (bw-o5i3.3). A box inside a box is worse
+             to read than a page; a screen that will not answer is worse than
+             either. Where the line falls, and why, is in DiffTable. */
           <Panel tone="frame" inset="none" className="overflow-hidden">
             {/* The path the table copies with is the repository-relative one
                 the chat's own worktree knows this file by, which is the path a

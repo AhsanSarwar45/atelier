@@ -71,7 +71,7 @@ export function copiedFromRows(rows: DiffRow[], path: string): CopiedDiff | null
 }
 
 /**
- * The rows a range reaches into, in the order they are drawn.
+ * The first and last row of `rows` a range reaches, or nothing.
  *
  * Each row carries its own place in `rows` on itself. It used to be read off
  * the row's position in the tbody instead, which said the same thing right up
@@ -79,13 +79,23 @@ export function copiedFromRows(rows: DiffRow[], path: string): CopiedDiff | null
  * that hold the scroll open are in the tbody and are not lines, and one of
  * them sits above everything, so every index would have been one out and a
  * copy would have named the wrong lines (bw-o5i3.3).
+ *
+ * Two ends and not a list, because only the drawn rows can be asked. A
+ * selection dragged down a long diff scrolls as it goes, and the rows it
+ * started in are unmounted by the time it stops — a list of what is drawn
+ * would be a copy missing its own beginning. The ends are enough: what lies
+ * between them is in `rows`, whether it is on the screen or not.
  */
-function rowsInRange(table: HTMLTableElement, range: Range, rows: DiffRow[]): DiffRow[] {
-  const drawn = [...(table.tBodies[0]?.rows ?? [])];
-  return drawn
-    .filter((tr) => tr.dataset.rowAt !== undefined && range.intersectsNode(tr))
-    .map((tr) => rows[Number(tr.dataset.rowAt)])
-    .filter((r): r is DiffRow => !!r);
+function endsOfRange(table: HTMLTableElement, range: Range): { from: number; to: number } | null {
+  let from = Infinity;
+  let to = -Infinity;
+  for (const tr of table.tBodies[0]?.rows ?? []) {
+    if (tr.dataset.rowAt === undefined || !range.intersectsNode(tr)) continue;
+    const at = Number(tr.dataset.rowAt);
+    if (at < from) from = at;
+    if (at > to) to = at;
+  }
+  return to < from ? null : { from, to };
 }
 
 /** The one range a reader has dragged inside this table, or nothing. */
@@ -129,11 +139,17 @@ const OTHER_SIDE = 'max-md:hidden';
  * scrolling around it, because that is what nearly every diff is. Over it the
  * table becomes a box of its own with a window of rows in it.
  *
- * The numbers this exists for: a 10,000-row diff drew 150,011 nodes and took
- * 2,430 ms to appear and 597 ms to redraw; even 2,000 rows — which is where a
- * file stops opening itself — was 30,011 nodes and 537 ms (bw-o5i3.3).
+ * Where the line falls is a measurement, not a taste. Opened in a browser
+ * against a checkout with nothing else changed, an un-windowed table cost one
+ * long task of: nothing at 202 rows, 97 ms at 802, 245 ms at 2,002 and 433 ms
+ * at 10,002, drawing 2,199, 7,599, 18,399 and 50,399 nodes. Eight hundred rows
+ * is already the whole hundred milliseconds, so the line sits below it with
+ * room to spare for a slower machine (bw-o5i3.3).
+ *
+ * Six hundred rows is around three hundred changed lines, so nearly every diff
+ * anyone reads still draws whole, in the page that was already scrolling.
  */
-const MANY_ROWS = 150;
+const MANY_ROWS = 600;
 
 /**
  * How long a diff may be before it is drawn without colouring.
@@ -220,12 +236,39 @@ export function DiffTable({
   /** Where the floating button sits, and what it would copy, while there is one. */
   const [offer, setOffer] = useState<{ at: { left: number; top: number }; copied: CopiedDiff } | null>(null);
 
+  /**
+   * The furthest the selection being dragged right now has reached.
+   *
+   * A drag down a long diff scrolls as it goes and unmounts the rows it began
+   * in, so at any moment only part of it can be asked about. Every
+   * `selectionchange` on the way down can see where the selection then was,
+   * and the widest pair of ends seen while it has been the same selection is
+   * the whole of it. Thrown away when the selection is let go of or begun
+   * somewhere else, which is what the anchor tells us.
+   */
+  const reached = useRef<{ anchor: Node | null; at: number | null; from: number; to: number } | null>(null);
+
   /** What the reader has selected inside this table right now, if anything. */
   const selected = useCallback((): { range: Range; copied: CopiedDiff } | null => {
     if (!path || !table.current) return null;
     const range = rangeInside(table.current);
-    if (!range) return null;
-    const copied = copiedFromRows(rowsInRange(table.current, range, rows), path);
+    if (!range) {
+      reached.current = null;
+      return null;
+    }
+    const ends = endsOfRange(table.current, range);
+    if (!ends) return null;
+    const selection = window.getSelection();
+    const anchor = selection?.anchorNode ?? null;
+    const at = selection?.anchorOffset ?? null;
+    const before = reached.current;
+    const same = before !== null && before.anchor === anchor && before.at === at;
+    const from = same ? Math.min(before.from, ends.from) : ends.from;
+    const to = same ? Math.max(before.to, ends.to) : ends.to;
+    reached.current = { anchor, at, from, to };
+    // Sliced out of `rows` and not out of the tbody: the lines between the two
+    // ends are owed to the reader whether they are drawn at this moment or not.
+    const copied = copiedFromRows(rows.slice(from, to + 1), path);
     return copied ? { range, copied } : null;
   }, [path, rows]);
 
