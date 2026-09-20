@@ -20,8 +20,9 @@
  */
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { Copy } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -69,10 +70,22 @@ export function copiedFromRows(rows: DiffRow[], path: string): CopiedDiff | null
   };
 }
 
-/** The rows a range reaches into, in the order they are drawn. */
+/**
+ * The rows a range reaches into, in the order they are drawn.
+ *
+ * Each row carries its own place in `rows` on itself. It used to be read off
+ * the row's position in the tbody instead, which said the same thing right up
+ * until the table started drawing a screenful at a time: the two spacer rows
+ * that hold the scroll open are in the tbody and are not lines, and one of
+ * them sits above everything, so every index would have been one out and a
+ * copy would have named the wrong lines (bw-o5i3.3).
+ */
 function rowsInRange(table: HTMLTableElement, range: Range, rows: DiffRow[]): DiffRow[] {
   const drawn = [...(table.tBodies[0]?.rows ?? [])];
-  return drawn.map((tr, at) => (range.intersectsNode(tr) ? rows[at] : undefined)).filter((r): r is DiffRow => !!r);
+  return drawn
+    .filter((tr) => tr.dataset.rowAt !== undefined && range.intersectsNode(tr))
+    .map((tr) => rows[Number(tr.dataset.rowAt)])
+    .filter((r): r is DiffRow => !!r);
 }
 
 /** The one range a reader has dragged inside this table, or nothing. */
@@ -109,6 +122,42 @@ const STACKED_ROW = 'max-md:grid max-md:grid-cols-[calc(var(--diff-gutter)_+_0.5
  */
 const OTHER_SIDE = 'max-md:hidden';
 
+/**
+ * How long a diff may be before it draws a screenful of itself at a time.
+ *
+ * Under this the table is exactly the table it always was, in whatever is
+ * scrolling around it, because that is what nearly every diff is. Over it the
+ * table becomes a box of its own with a window of rows in it.
+ *
+ * The numbers this exists for: a 10,000-row diff drew 150,011 nodes and took
+ * 2,430 ms to appear and 597 ms to redraw; even 2,000 rows — which is where a
+ * file stops opening itself — was 30,011 nodes and 537 ms (bw-o5i3.3).
+ */
+const MANY_ROWS = 150;
+
+/**
+ * How long a diff may be before it is drawn without colouring.
+ *
+ * Both sides are coloured whole — a row coloured on its own reads the inside
+ * of every block comment as fresh code — so the cost is the file's, not the
+ * window's, and windowing the rows does not take it away. Measured: 32 ms a
+ * side at 2,000 lines, 70 ms at 5,000, 149 ms at 10,000. Three thousand is
+ * where two sides still fit inside a tenth of a second.
+ *
+ * A file this long already waits for a click before it opens at all.
+ */
+const TOO_LONG_TO_COLOUR = 3_000;
+
+/**
+ * A row's height before one has been measured, and the rows kept mounted
+ * either side of the window.
+ *
+ * Only a starting guess: a line that wraps is taller than one that does not,
+ * so every drawn row measures itself and the virtualiser corrects as it goes.
+ */
+const ROW_GUESS = 20;
+const ROW_OVERSCAN = 20;
+
 export function DiffTable({
   rows,
   language,
@@ -128,22 +177,46 @@ export function DiffTable({
   // Each side is coloured whole and only then cut into its rows: painting a
   // row on its own left the inside of every block comment and every long
   // string read as fresh code (bw-4wcd.16).
-  const leftLines = paintLines(rows.filter((r) => r.left !== null).map((r) => r.left!).join('\n'), language);
-  const rightLines = paintLines(rows.filter((r) => r.right !== null).map((r) => r.right!).join('\n'), language);
-  let li = 0;
-  let ri = 0;
-  const painted = rows.map((r) => {
-    const cell = {
-      left: r.left === null || leftLines === null ? null : (leftLines[li] ?? null),
-      right: r.right === null || rightLines === null ? null : (rightLines[ri] ?? null),
-    };
-    if (r.left !== null) li++;
-    if (r.right !== null) ri++;
-    return cell;
-  });
-  const gutter = gutterFor(rows);
+  //
+  // Held for the rows it was worked out from. It used to be worked out again
+  // on every render, and the panel around this one re-reads itself every five
+  // seconds (bw-o5i3.3).
+  const painted = useMemo(() => {
+    if (rows.length > TOO_LONG_TO_COLOUR) return rows.map(() => ({ left: null, right: null }));
+    const leftLines = paintLines(rows.filter((r) => r.left !== null).map((r) => r.left!).join('\n'), language);
+    const rightLines = paintLines(rows.filter((r) => r.right !== null).map((r) => r.right!).join('\n'), language);
+    let li = 0;
+    let ri = 0;
+    return rows.map((r) => {
+      const cell = {
+        left: r.left === null || leftLines === null ? null : (leftLines[li] ?? null),
+        right: r.right === null || rightLines === null ? null : (rightLines[ri] ?? null),
+      };
+      if (r.left !== null) li++;
+      if (r.right !== null) ri++;
+      return cell;
+    });
+  }, [rows, language]);
+  const gutter = useMemo(() => gutterFor(rows), [rows]);
 
   const table = useRef<HTMLTableElement>(null);
+  /** The box a long diff scrolls inside. Null while the diff is short. */
+  const pane = useRef<HTMLDivElement>(null);
+  const many = rows.length > MANY_ROWS;
+  // Counted zero while the diff is short: the hook cannot be called
+  // conditionally, and a virtualiser over nothing measures nothing.
+  const virtual = useVirtualizer({
+    count: many ? rows.length : 0,
+    getScrollElement: () => pane.current,
+    estimateSize: () => ROW_GUESS,
+    overscan: ROW_OVERSCAN,
+  });
+  const window_ = virtual.getVirtualItems();
+  /** Which rows are drawn: a window of them when there are many, else all. */
+  const drawn = many ? window_.map((item) => item.index) : rows.map((_, at) => at);
+  /** The scroll the window is not filling, held open above it and below it. */
+  const above = many ? (window_[0]?.start ?? 0) : 0;
+  const below = many ? virtual.getTotalSize() - (window_[window_.length - 1]?.end ?? 0) : 0;
   /** Where the floating button sits, and what it would copy, while there is one. */
   const [offer, setOffer] = useState<{ at: { left: number; top: number }; copied: CopiedDiff } | null>(null);
 
@@ -178,97 +251,130 @@ export function DiffTable({
 
   return (
     <>
-      <table
-        ref={table}
-        data-testid="diff-table"
-        // The copy a reader presses is answered with the reference, because
-        // that is what they are about to paste into the chat; the lines
-        // themselves are one click away and never further.
-        onCopy={(event) => {
-          const now = selected();
-          if (!now) return;
-          event.clipboardData.setData('text/plain', now.copied.reference);
-          event.preventDefault();
-        }}
-        // The gutter is a `col` width above the breakpoint and a grid track
-        // below it, and it is the same measurement either way, so it is worked
-        // out once and read from here by both. The `0.5rem` the track adds is
-        // the number cell's own `px-1`, which a `col` width already allows for.
-        style={{ '--diff-gutter': gutter } as CSSProperties}
-        className={cn(
-          'w-full table-fixed border-collapse font-mono text-[11px] leading-relaxed text-foreground/80 max-md:block',
-          className,
-        )}
+      {/* The box a long diff scrolls inside. Always here, so the table's own
+          markup is one shape rather than two, and only a box when there is
+          something to bound: a short diff scrolls with whatever is around it,
+          which is what every diff used to do. */}
+      <div
+        ref={pane}
+        data-testid="diff-pane"
+        data-drawn={many ? 'window' : 'all'}
+        className={cn(many && 'overflow-y-auto')}
+        style={many ? { maxHeight: '70vh' } : undefined}
       >
-        {/* Column widths belong to a table, and below the breakpoint this is
-            not one. */}
-        <colgroup className="max-md:hidden">
-          <col style={{ width: gutter }} />
-          <col />
-          <col style={{ width: gutter }} />
-          <col />
-        </colgroup>
-        <tbody className="max-md:block">
-          {rows.map((r, i) =>
-            r.kind === 'gap' ? (
-              <tr key={i} data-diff-kind="gap" className={STACKED_ROW}>
-                <td colSpan={4} className="bg-muted/30 px-2 py-0.5 text-center text-t-faint select-none max-md:col-span-2">
-                  {r.count} unchanged {r.count === 1 ? 'line' : 'lines'}
-                </td>
-              </tr>
-            ) : (
-              <tr key={i} data-diff-kind={r.kind} className={STACKED_ROW}>
-                <td
-                  className={cn(
-                    'px-1 py-0.5 text-right align-top tabular-nums text-t-faint select-none',
-                    r.kind === 'removed' || r.kind === 'changed' ? 'bg-red-500/15' : '',
-                    r.left === null && 'bg-muted/20',
-                    (r.left === null || r.kind === 'same') && OTHER_SIDE,
-                  )}
-                >
-                  {r.leftNo ?? ''}
-                </td>
-                <td
-                  className={cn(
-                    // A word is broken only where it will not fit at all, and
-                    // `break-all` — which cuts one wherever the line happens to
-                    // end — is kept for the narrow columns that need it.
-                    'whitespace-pre-wrap break-words md:break-all px-2 py-0.5 align-top',
-                    r.kind === 'removed' || r.kind === 'changed' ? 'bg-red-500/15' : '',
-                    r.left === null && 'bg-muted/20',
-                    (r.left === null || r.kind === 'same') && OTHER_SIDE,
-                  )}
-                >
-                  {r.left === null ? '' : <Line text={r.left} language={language} html={painted[i]!.left} />}
-                </td>
-                <td
-                  className={cn(
-                    'border-l border-border/40 px-1 py-0.5 text-right align-top tabular-nums text-t-faint select-none',
-                    // The rule divides two columns; below the breakpoint there
-                    // are not two.
-                    'max-md:border-l-0',
-                    r.kind === 'added' || r.kind === 'changed' ? 'bg-emerald-500/15' : '',
-                    r.right === null && 'bg-muted/20',
-                    r.right === null && OTHER_SIDE,
-                  )}
-                >
-                  {r.rightNo ?? ''}
-                </td>
-                <td
-                  className={cn(
-                    'whitespace-pre-wrap break-words md:break-all px-2 py-0.5 align-top',
-                    r.kind === 'added' || r.kind === 'changed' ? 'bg-emerald-500/15' : '',
-                    r.right === null && 'bg-muted/20',
-                    r.right === null && OTHER_SIDE,
-                  )}
-                >
-                  {r.right === null ? '' : <Line text={r.right} language={language} html={painted[i]!.right} />}
-                </td>
-              </tr>
-            ),
+        <table
+          ref={table}
+          data-testid="diff-table"
+          // The copy a reader presses is answered with the reference, because
+          // that is what they are about to paste into the chat; the lines
+          // themselves are one click away and never further.
+          onCopy={(event) => {
+            const now = selected();
+            if (!now) return;
+            event.clipboardData.setData('text/plain', now.copied.reference);
+            event.preventDefault();
+          }}
+          // The gutter is a `col` width above the breakpoint and a grid track
+          // below it, and it is the same measurement either way, so it is worked
+          // out once and read from here by both. The `0.5rem` the track adds is
+          // the number cell's own `px-1`, which a `col` width already allows for.
+          style={{ '--diff-gutter': gutter } as CSSProperties}
+          className={cn(
+            'w-full table-fixed border-collapse font-mono text-[11px] leading-relaxed text-foreground/80 max-md:block',
+            className,
           )}
-        </tbody>
-      </table>
+        >
+          {/* Column widths belong to a table, and below the breakpoint this is
+              not one. */}
+          <colgroup className="max-md:hidden">
+            <col style={{ width: gutter }} />
+            <col />
+            <col style={{ width: gutter }} />
+            <col />
+          </colgroup>
+          <tbody className="max-md:block">
+            {/* The scroll above the window, as one row of nothing. A table cannot
+                hold its rows anywhere but in order, so the space a windowed
+                table is not drawing is held by a row rather than by the
+                absolute placing a list would use. */}
+            {above > 0 && <tr aria-hidden="true" style={{ height: `${above}px` }} />}
+            {drawn.map((i) => {
+              const r = rows[i]!;
+              return r.kind === 'gap' ? (
+                <tr
+                  key={i}
+                  data-diff-kind="gap"
+                  data-row-at={i}
+                  data-index={i}
+                  ref={many ? virtual.measureElement : undefined}
+                  className={STACKED_ROW}
+                >
+                  <td colSpan={4} className="bg-muted/30 px-2 py-0.5 text-center text-t-faint select-none max-md:col-span-2">
+                    {r.count} unchanged {r.count === 1 ? 'line' : 'lines'}
+                  </td>
+                </tr>
+              ) : (
+                <tr
+                  key={i}
+                  data-diff-kind={r.kind}
+                  data-row-at={i}
+                  data-index={i}
+                  ref={many ? virtual.measureElement : undefined}
+                  className={STACKED_ROW}
+                >
+                  <td
+                    className={cn(
+                      'px-1 py-0.5 text-right align-top tabular-nums text-t-faint select-none',
+                      r.kind === 'removed' || r.kind === 'changed' ? 'bg-red-500/15' : '',
+                      r.left === null && 'bg-muted/20',
+                      (r.left === null || r.kind === 'same') && OTHER_SIDE,
+                    )}
+                  >
+                    {r.leftNo ?? ''}
+                  </td>
+                  <td
+                    className={cn(
+                      // A word is broken only where it will not fit at all, and
+                      // `break-all` — which cuts one wherever the line happens to
+                      // end — is kept for the narrow columns that need it.
+                      'whitespace-pre-wrap break-words md:break-all px-2 py-0.5 align-top',
+                      r.kind === 'removed' || r.kind === 'changed' ? 'bg-red-500/15' : '',
+                      r.left === null && 'bg-muted/20',
+                      (r.left === null || r.kind === 'same') && OTHER_SIDE,
+                    )}
+                  >
+                    {r.left === null ? '' : <Line text={r.left} language={language} html={painted[i]!.left} />}
+                  </td>
+                  <td
+                    className={cn(
+                      'border-l border-border/40 px-1 py-0.5 text-right align-top tabular-nums text-t-faint select-none',
+                      // The rule divides two columns; below the breakpoint there
+                      // are not two.
+                      'max-md:border-l-0',
+                      r.kind === 'added' || r.kind === 'changed' ? 'bg-emerald-500/15' : '',
+                      r.right === null && 'bg-muted/20',
+                      r.right === null && OTHER_SIDE,
+                    )}
+                  >
+                    {r.rightNo ?? ''}
+                  </td>
+                  <td
+                    className={cn(
+                      'whitespace-pre-wrap break-words md:break-all px-2 py-0.5 align-top',
+                      r.kind === 'added' || r.kind === 'changed' ? 'bg-emerald-500/15' : '',
+                      r.right === null && 'bg-muted/20',
+                      r.right === null && OTHER_SIDE,
+                    )}
+                  >
+                    {r.right === null ? '' : <Line text={r.right} language={language} html={painted[i]!.right} />}
+                  </td>
+                </tr>
+              );
+            })}
+            {below > 0 && <tr aria-hidden="true" style={{ height: `${below}px` }} />}
+          </tbody>
+        </table>
+      </div>
       {offer && (
         <div
           data-testid="diff-copy-text"
