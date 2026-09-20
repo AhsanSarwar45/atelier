@@ -66,19 +66,22 @@ test('the bar leaves the same gap between each of its controls', async ({ page, 
     // button, not the button. The name is its own text. The run ends at the
     // project menu: what follows it is the free space of the bar, which is
     // meant to be there and is not a gap between neighbours.
-    const RUN = [
+    const RUN: { of: string; what: string; whole?: boolean }[] = [
       { of: 'back-arrow', what: 'the arrow' },
       { of: 'home-button', what: 'the home button' },
-      { of: 'project-name', what: 'the project name' },
+      // The name and the chevron beside it are one control and read as one
+      // thing, so the pair is measured from the name's left edge to the
+      // chevron's right rather than as two neighbours (bw-r8dg.2).
+      { of: 'project-switch', what: 'the project name', whole: true },
       { of: 'project-menu', what: 'the project menu' },
     ];
     const drawn = [];
     for (const step of RUN) {
-      const box = await page.getByTestId(step.of).evaluate((el) => {
-        const picture = el.querySelector('svg') ?? el;
+      const box = await page.getByTestId(step.of).evaluate((el, whole) => {
+        const picture = whole ? el : (el.querySelector('svg') ?? el);
         const r = picture.getBoundingClientRect();
         return { left: r.left, right: r.right };
-      });
+      }, Boolean(step.whole));
       drawn.push({ ...step, ...box });
     }
 
@@ -99,7 +102,7 @@ test('the bar leaves the same gap between each of its controls', async ({ page, 
     // painted small and given an invisible band instead, so the reach is
     // checked rather than the paint — and each control must own its own
     // middle, because bands this close overlap at their edges.
-    for (const step of RUN.filter((s) => s.of !== 'project-name')) {
+    for (const step of RUN) {
       const control = page.getByTestId(step.of);
       const reach = await control.evaluate((el) => {
         const band = getComputedStyle(el, '::before');
@@ -119,6 +122,9 @@ test('the bar leaves the same gap between each of its controls', async ({ page, 
         Math.round(reach.wide),
         `${step.what} is only ${Math.round(reach.wide)}px wide to a thumb`,
       ).toBeGreaterThanOrEqual(TAP);
+      // The name's own band is as wide as the name, which is wider than a
+      // thumb here; what has to be checked of it is the height the floor was
+      // turned off for.
       expect(reach.ownsMiddle, `a press on the middle of ${step.what} lands on a neighbour`).toBe(
         true,
       );

@@ -9,6 +9,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { EllipsisVertical, Folder, Home, MessageSquare, SquareKanban } from 'lucide-react';
 
 import { BackLink } from '@/components/back-link';
+import { ProjectSwitcher } from '@/components/project-switcher';
 import { ModalLayer } from '@/components/modal-layer';
 // Only drawn once a card is opened, and it brings the markdown and code
 // highlighter with it, so the board draws without them (bw-fbzd.7).
@@ -217,21 +218,25 @@ function ProjectTabs() {
               </Link>
             </Button>
           </div>
-          <h1
-            data-testid="project-name"
-            className={cn(
-              // Six pixels either side on top of the bar's own eight: the name
-              // is a word and its neighbours are pictures carrying ten pixels
-              // of padding apiece, so this is what makes the gap beside it the
-              // same as the gap between two of them (bw-r8dg.1).
-              'mx-1.5 truncate',
-              // The neo-brutalist theme spells a project's name its own way; the
-              // bar it sits in is the same bar.
-              terminal ? 'font-mono text-lg font-bold uppercase tracking-wide' : 'text-lg font-semibold',
-            )}
-          >
-            {project?.name ?? ''}
-            {terminal ? '_' : ''}
+          {/* The name is also the way to another project (bw-r8dg.2), and
+              still the heading this screen is named by, with the control
+              inside it. Six
+              pixels either side on top of the bar's own eight: the name is a
+              word and its neighbours are pictures carrying ten pixels of
+              padding apiece, so this is what makes the gap beside it the same
+              as the gap between two of them (bw-r8dg.1). */}
+          <h1 className="mx-1.5 min-w-0">
+            <ProjectSwitcher
+              projectId={projectId}
+              name={`${project?.name ?? ''}${terminal ? '_' : ''}`}
+              // The neo-brutalist theme spells a project's name its own way;
+              // the bar it sits in is the same bar.
+              nameClassName={
+                terminal
+                  ? 'font-mono text-lg font-bold uppercase tracking-wide'
+                  : 'text-lg font-semibold'
+              }
+            />
           </h1>
           <Button
             variant="ghost"
