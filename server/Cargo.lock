@@ -291,7 +291,7 @@ dependencies = [
 
 [[package]]
 name = "atelier"
-version = "0.22.9"
+version = "0.22.10"
 dependencies = [
  "agent-client-protocol",
  "axum",
