@@ -1927,3 +1927,38 @@ the time there is a refusal worth recording the job that hit it has usually
 landed and closed. So this note was also carried through a command-local
 `ATELIER_BYPASS`. A file whose whole purpose is to collect refusals should be
 writable without one — or the instruction should say which card to open first.
+
+
+## Abandoned claims, post-land cleanup and reporting (bw-9vv9.7, protocol 5)
+
+The three reports added after the protocol-4 repair described paths its tests
+had missed: recovery after an account/session change, cleanup with non-ignored
+untracked output, and reporting after a card was closed. The installed 0.22.10
+protocol-4 cleanup refusal was reproduced in a disposable Git/Beads repository.
+
+- `board/reclaim CARD-ID --from OLD-ACTOR --abandoned --reason TEXT` now gives
+  confirmed abandoned work a guarded recovery path inside the job copy. It
+  preserves the work and records the transfer as the current actor, including
+  legacy claims with no lease. Live leases, changed owners, manager review and
+  completed work remain protected. Retry refreshes a transfer already owned by
+  this session. `bd` rejects combining `--force` with `--if-assignee`; the actual
+  guarded reassignment therefore uses the owner/status guards without `--force`.
+- `board-touch` was passing every owned card to one `bd heartbeat`, which accepts
+  one ID. It now refreshes each card separately. This is covered with two legacy
+  owned cards whose missing leases must both become live.
+- `board/cleanup JOB-ID --force` now archives non-ignored untracked files under
+  the common Git directory before removing the worktree. Ignored build scratch
+  is removed. Modified tracked files, unlanded work and unfinished descendants
+  cannot be discarded through cleanup. The raw Git cleanup gate also refuses
+  modified tracked files. The test reads a filename with spaces and a newline
+  back from the archive and checks its exact content.
+- Record friction immediately on the original card with `bd update CARD-ID
+  --append-notes='Hook friction: ...'`, even after cleanup. The repository journals
+  are updated by the owned repair. Reporting no longer instructs an agent to
+  write into main after landing or create a procedural reporting card.
+
+The canonical lifecycle, hook instructions and both distributed Beads skills
+state these paths. `tests/native-recovery-cleanup.mjs` exercises actual Claude and
+Codex hook envelopes, recovery, heartbeat, landing, protected cleanup and
+post-cleanup notes against real isolated Git/Beads state. This repair does not
+replace the owner's running app; the revised executable identifies as protocol 5.

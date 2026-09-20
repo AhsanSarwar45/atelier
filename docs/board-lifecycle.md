@@ -38,9 +38,7 @@ If the branch already exists, use `git worktree add worktrees/JOB-ID JOB-ID`.
 Keep evidence and concrete blockers on the card with `bd update ID
 --append-notes='...'`. An external blocker needs status blocked, its cause and
 the exact input or external change needed to resume. A question mark in a reply
-is not a blocker record. Continue owned work until it lands or has that record. If Beads remains unavailable
-after a blocked stop and retry, report the outage as the concrete blocker; do not
-report completion or loop indefinitely.
+is not a blocker record. Continue owned work until it lands or has that record.
 
 Create scoped deliverables with native commands:
 
@@ -90,7 +88,16 @@ Cancelled. Cancelled is reserved for withdrawn scope. `--retire-steps` remains
 an alias for this reconciliation; it no longer blanket-cancels workflow records.
 
 After the job is Done, run `atelier tool board/cleanup JOB-ID` from another
-checkout. Cleanup removes only merged work; it requires no dummy commit.
+checkout. If untracked files remain, use `board/cleanup JOB-ID --force`: it
+archives non-ignored untracked files under the common Git directory before removal;
+ignored build scratch is removed. Tracked changes
+are always refused. Cleanup requires no dummy commit or reopened card.
+
+If an account/session change strands a claim, confirm the old session has stopped,
+then run `atelier tool board/reclaim CARD-ID --from OLD-ACTOR --abandoned --reason
+"why it is abandoned"` inside the job copy. It preserves the work and claims it
+as this session, including legacy claims without leases. Live leases and changed
+owners are refused. Do not impersonate the previous actor or take active work.
 
 ## Live checklist
 
@@ -113,8 +120,13 @@ are not repository writes. Unresolved shell variables must be reported as
 unresolved, not interpreted as literal paths. Use an explicit path if needed.
 
 If a gate is wrong, carry only the refused command through a reasoned bypass:
-`ATELIER_BYPASS='specific incorrect refusal' COMMAND`. It is logged. Record the
-actual refusal in `docs/hook-friction.md` or `docs/hook-friction-2.md`. Do not
+`ATELIER_BYPASS='specific incorrect refusal' COMMAND`. It is logged. Session actor stamping survives the bypass; do not manually
+reassign the card to the Git user. Immediately record the refusal on the original
+card with `bd update CARD-ID --append-notes='Hook friction: command; refusal;
+expected behavior; workaround'`. Notes can be appended after landing without
+reopening the card or creating a reporting task. Copy that evidence into either
+hook-friction journal while working on the owned repair; do not edit the main
+checkout after completion just to satisfy a logging instruction. Do not
 export a standing bypass or use it to override truthful completion. Declared
 suites run without an inherited bypass. An old installed binary needs an
 explicit upgrade; source tests alone do not prove that the active hooks changed.
@@ -139,3 +151,17 @@ explicit upgrade; source tests alone do not prove that the active hooks changed.
 Historical friction entries describe the behavior at their recorded date. They
 are evidence, not exceptions to this contract. This contract supersedes older
 acceptance that permits forced Done without landing or requires post-land review.
+
+## Abandoned sessions and post-land operations
+
+Use `board/reclaim CARD-ID --from OLD-ACTOR --abandoned --reason TEXT` inside
+the job copy only after confirming the previous session stopped. It changes
+ownership with a compare-and-set guard and preserves the work; live leases,
+manager review and settled work cannot be recovered this way.
+
+Cleanup of a merged, completed job can use `board/cleanup JOB-ID --force` to
+archive non-ignored untracked files before removing its worktree; ignored build
+scratch is removed. Tracked changes are never
+silently discarded. Report post-land friction with `bd update CARD-ID
+--append-notes='Hook friction: ...'`; copying it into a repository journal belongs
+to the owned repair, not an unowned write or a new procedural card after landing.

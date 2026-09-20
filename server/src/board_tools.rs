@@ -7,7 +7,7 @@ use std::process::Command;
 
 pub fn run(name: &str, rest: &[String]) -> Option<Result<i32, String>> {
     let tool = match name {
-        "board/job" | "board/land" | "board/reconcile" | "board/status" | "board/cleanup" | "checks" | "review" => name,
+        "board/job" | "board/land" | "board/reconcile" | "board/status" | "board/cleanup" | "board/reclaim" | "checks" | "review" => name,
         _ => return None,
     };
     if asks_for_help(rest) {
@@ -21,6 +21,7 @@ pub fn run(name: &str, rest: &[String]) -> Option<Result<i32, String>> {
         "board/reconcile" => crate::board_landing::reconcile_command(rest),
         "board/status" => crate::board_landing::status_command(rest),
         "board/cleanup" => crate::board_landing::cleanup(rest),
+        "board/reclaim" => crate::board_landing::reclaim(rest),
         _ => review(rest),
     })
 }
@@ -68,7 +69,8 @@ Safe to run twice: if the commits already landed it says so and finishes the
 close. The actor is BEADS_ACTOR, or the Git user; another actor cannot land owned work.",
         "board/reconcile" => "usage: atelier tool board/reconcile [--apply] [--legacy] [--retire-steps]\n\nDry-run by default. Recover interrupted landings, derive parents, and complete historical workflow subtasks with delivered work, and optionally audit explicit legacy commit headers.",
         "board/status" => "usage: atelier tool board/status [CARD-ID]\n\nPrint stored and recursively derived status, including hierarchy errors.",
-        "board/cleanup" => "usage: atelier tool board/cleanup JOB-ID\n\nRemove a completed job worktree and its merged branch. No delivery commit is required for cleanup.",
+        "board/cleanup" => "usage: atelier tool board/cleanup JOB-ID [--force]\n\nRemove a completed, merged job worktree. --force preserves untracked files in a common-Git archive before removal; tracked changes are always refused. Run outside the job copy.",
+        "board/reclaim" => "usage: atelier tool board/reclaim CARD-ID --from OLD-ACTOR --abandoned --reason TEXT\n\nRecover confirmed abandoned work in its job copy as the current session. Refuses live leases, changed owners and settled or manager-owned cards. Never impersonates the old actor.",
         "checks" => "usage: atelier tool checks [CARD-ID] [options]
 
 Runs the project's declared verification suites against the current tree,
@@ -103,7 +105,7 @@ pub(crate) fn bd(root: &Path, args: &[String]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn flag(rest: &[String], name: &str) -> Option<String> {
+pub(crate) fn flag(rest: &[String], name: &str) -> Option<String> {
     rest.iter().position(|word| word == name).and_then(|at| rest.get(at + 1)).cloned()
         .or_else(|| rest.iter().find_map(|word| word.strip_prefix(&format!("{name}=")).map(str::to_string)))
 }

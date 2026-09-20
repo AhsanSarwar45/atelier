@@ -71,7 +71,7 @@ const REDIRECTS: &[&str] = &[
 /// The redirect operators that name a file to be written.
 const WRITE_REDIRECTS: &[&str] = &[">", ">>", "&>", "&>>", ">|"];
 
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 pub fn version() -> String {
     format!(
@@ -1155,6 +1155,8 @@ fn tidies(call: &GitCall<'_>) -> bool {
                 return false;
             }
             worktree_issue(&destination).is_some_and(|issue| already_landed(&project, &issue))
+                && command(&destination, "git", &["status", "--porcelain", "--untracked-files=no"])
+                    .is_some_and(|(out, ok)| ok && out.is_empty())
         }
         "branch"
             if arguments
@@ -1465,7 +1467,7 @@ fn workflow(data: &Value) -> Option<Value> {
             return None;
         }
         return deny(format!(
-            "Beads issue {issue} is owned by {}, not this session.",
+            "Beads issue {issue} is owned by {}. If that session has stopped, use atelier tool board/reclaim {issue} --from OLD-ACTOR --abandoned --reason TEXT in its job worktree.",
             card["assignee"].as_str().unwrap_or("another session")
         ));
     }
@@ -1834,13 +1836,13 @@ fn touch(data: &Value) {
             .collect();
         if !ids.is_empty() {
             if let Some(path) = crate::routes::find_bd() {
-                let _ = Command::new(path)
-                    .arg("--actor")
-                    .arg(&who)
-                    .arg("heartbeat")
-                    .args(&ids)
-                    .current_dir(&project)
-                    .status();
+                // bd heartbeat accepts one card, not a list. Refresh every owned
+                // child so a session holding several cards does not lose all leases.
+                for id in &ids {
+                    let _ = Command::new(&path)
+                        .arg("--actor").arg(&who).arg("heartbeat").arg(id)
+                        .current_dir(&project).status();
+                }
             }
         }
         crate::board_tools::advance_all(&project);
@@ -1941,8 +1943,8 @@ mod tests {
 
     #[test]
     fn native_machinery_hook_protocol_has_an_installed_provenance_number() {
-        assert_eq!(PROTOCOL_VERSION, 4);
-        assert!(version().contains("protocol 4"));
+        assert_eq!(PROTOCOL_VERSION, 5);
+        assert!(version().contains("protocol 5"));
     }
 
     #[test]

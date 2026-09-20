@@ -93,7 +93,16 @@ Cancelled. Cancelled is reserved for withdrawn scope. `--retire-steps` remains
 an alias for this reconciliation; it no longer blanket-cancels workflow records.
 
 After the job is Done, run `atelier tool board/cleanup JOB-ID` from another
-checkout. Cleanup removes only merged work; it requires no dummy commit.
+checkout. If untracked files remain, use `board/cleanup JOB-ID --force`: it
+archives non-ignored untracked files under the common Git directory before removal;
+ignored build scratch is removed. Tracked changes
+are always refused. Cleanup requires no dummy commit or reopened card.
+
+If an account/session change strands a claim, confirm the old session has stopped,
+then run `atelier tool board/reclaim CARD-ID --from OLD-ACTOR --abandoned --reason
+"why it is abandoned"` inside the job copy. It preserves the work and claims it
+as this session, including legacy claims without leases. Live leases and changed
+owners are refused. Do not impersonate the previous actor or take active work.
 
 ## Live checklist
 
@@ -117,8 +126,12 @@ unresolved, not interpreted as literal paths. Use an explicit path if needed.
 
 If a gate is wrong, carry only the refused command through a reasoned bypass:
 `ATELIER_BYPASS='specific incorrect refusal' COMMAND`. It is logged. Session actor stamping survives the bypass; do not manually
-reassign the card to the Git user. Record the
-actual refusal in `docs/hook-friction.md` or `docs/hook-friction-2.md`. Do not
+reassign the card to the Git user. Immediately record the refusal on the original
+card with `bd update CARD-ID --append-notes='Hook friction: command; refusal;
+expected behavior; workaround'`. Notes can be appended after landing without
+reopening the card or creating a reporting task. Copy that evidence into either
+hook-friction journal while working on the owned repair; do not edit the main
+checkout after completion just to satisfy a logging instruction. Do not
 export a standing bypass or use it to override truthful completion. Declared
 suites run without an inherited bypass. An old installed binary needs an
 explicit upgrade; source tests alone do not prove that the active hooks changed.

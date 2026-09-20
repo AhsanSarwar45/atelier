@@ -489,7 +489,7 @@ pub fn land(rest: &[String]) -> Result<i32, String> {
         .is_some_and(|owner| !owner.is_empty() && owner != caller)
     {
         return Err(format!(
-            "{id} belongs to another actor; invoke with the claiming session's BEADS_ACTOR"
+            "{id} belongs to another actor; if that session has stopped, use board/reclaim {id} --from OLD-ACTOR --abandoned --reason TEXT in this job copy"
         ));
     }
     let rows = all(&work)?;
@@ -797,27 +797,111 @@ pub fn reconcile_command(rest: &[String]) -> Result<i32, String> {
     Ok(0)
 }
 
+/// Explicit recovery for an abandoned session, including legacy claims without a lease.
+/// No time heuristic or knowledge of the previous actor grants ownership on its own.
+pub fn reclaim(rest: &[String]) -> Result<i32, String> {
+    let id = rest.first().filter(|id| !id.starts_with('-')).ok_or("board/reclaim needs a card id")?;
+    let from = crate::board_tools::flag(rest, "--from").filter(|s| !s.trim().is_empty()).ok_or("Name the previous owner with --from")?;
+    let reason = crate::board_tools::flag(rest, "--reason").filter(|s| !s.trim().is_empty()).ok_or("Record why this session is abandoned with --reason")?;
+    if !rest.iter().any(|s| s == "--abandoned") {
+        return Err("Confirm the previous session has stopped with --abandoned; do not take active work".into());
+    }
+    let work = root()?;
+    let job = git(&work, &["branch", "--show-current"])?;
+    if job == landing_branch(&work) || !belongs_to(&work, id, &job)
+        || main_copy(&work, &job)? != work {
+        return Err("Recover the card inside its own job worktree".into());
+    }
+    let row = card(&work, id)?;
+    let who = actor(&work)?;
+    if status(&row) == "in_progress" && row["assignee"].as_str() == Some(&who) {
+        // Recovery can stop after the ownership transfer but before lease refresh.
+        bd(&work, &["update".into(), id.clone(), "--claim".into()])?;
+        bd(&work, &["heartbeat".into(), id.clone()])?;
+        reconcile_parents(&work)?;
+        println!("{id} is already owned by {who}; lease refreshed");
+        return Ok(0);
+    }
+    recovery_allowed(&row, &from, &who)?;
+    // Compare-and-set the owner and state: a concurrent reassignment cannot be stolen.
+    // The explicit abandonment declaration is required even for lease-less records.
+    bd(&work, &["update".into(), id.clone(), "--assignee".into(), who.clone(),
+        "--if-assignee".into(), from.clone(), "--if-status".into(), "in_progress".into(),
+        "--append-notes".into(), format!("Abandoned claim recovered from {from} by {who}: {reason}")])?;
+    bd(&work, &["update".into(), id.clone(), "--claim".into(), "--add-label".into(), format!("copy:{job}")])?;
+    bd(&work, &["heartbeat".into(), id.clone()])?;
+    reconcile_parents(&work)?;
+    println!("Recovered {id} as {who}; existing work is preserved in {}", work.display());
+    Ok(0)
+}
+
+fn recovery_allowed(row: &Value, from: &str, who: &str) -> Result<(), String> {
+    if status(row) != "in_progress" { return Err("Only abandoned in-progress work can be recovered; manager review and settled cards are not claimable".into()); }
+    if row["assignee"].as_str() != Some(from) || from == who {
+        return Err("The previous owner changed or is this session; inspect the card before recovering it".into());
+    }
+    if let Some(raw) = row["lease_expires_at"].as_str() {
+        let lease = chrono::DateTime::parse_from_rfc3339(raw).map_err(|_| "Cannot verify an unreadable lease")?;
+        if lease > chrono::Utc::now() { return Err("The previous owner has a live lease; wait for expiry and confirm the session has stopped".into()); }
+    }
+    Ok(())
+}
+
 pub fn cleanup(rest: &[String]) -> Result<i32, String> {
-    let id = rest.first().ok_or("board/cleanup needs a job id")?;
+    let id = rest.first().filter(|id| !id.starts_with('-')).ok_or("board/cleanup needs a job id")?;
+    if rest.iter().skip(1).any(|s| s != "--force") { return Err("usage: board/cleanup JOB-ID [--force]".into()); }
+    let force = rest.iter().any(|s| s == "--force");
     let work = root()?;
     let base = common_root(&work);
-    let row = card(&work, id)?;
-    if !matches!(status(&row), "closed" | "cancelled") {
-        return Err(format!("{id} still has required work"));
+    let rows = all(&work)?;
+    let projection = board_state::project(&nodes(&rows));
+    if projection.errors.contains_key(id) || !projection.states.get(id).is_some_and(|s| matches!(s.as_str(), "closed" | "cancelled")) {
+        return Err(format!("{id} still has required work or an invalid hierarchy"));
     }
-    git(
-        &work,
-        &["merge-base", "--is-ancestor", id, &landing_branch(&work)],
-    )?;
+    git(&work, &["merge-base", "--is-ancestor", id, &landing_branch(&work)])?;
     let path = main_copy(&work, id)?;
-    git(
-        &base,
-        &[
-            "worktree",
-            "remove",
-            path.to_str().ok_or("Non-UTF8 worktree path")?,
-        ],
-    )?;
+    if work == path { return Err("Run board/cleanup from another checkout, outside the job being removed".into()); }
+    if !git(&path, &["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
+        return Err("Cleanup refuses tracked changes, even with --force; preserve or land them first".into());
+    }
+    let output = std::process::Command::new(crate::routes::find_git().ok_or("Git is unavailable")?)
+        .args(["ls-files", "--others", "--exclude-standard", "-z"])
+        .current_dir(&path).output().map_err(|e| e.to_string())?;
+    if !output.status.success() { return Err("Cannot enumerate untracked files; cleanup refused".into()); }
+    // Do not trim: leading spaces and embedded newlines are valid filenames.
+    let untracked = String::from_utf8(output.stdout).map_err(|_| "Cannot archive non-UTF8 paths; cleanup refused")?;
+    if !untracked.is_empty() {
+        if !force { return Err(format!("{id} has untracked files; run board/cleanup {id} --force to archive them before removal")); }
+        let common = git(&work, &["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
+        let directory = Path::new(&common).join("atelier-cleanup");
+        std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+        let archive = directory.join(format!("{id}-{}.tar", chrono::Utc::now().timestamp_nanos_opt().ok_or("Clock out of range")?));
+        let file = std::fs::OpenOptions::new().write(true).create_new(true).open(&archive).map_err(|e| e.to_string())?;
+        let mut tar = tar::Builder::new(file);
+        tar.follow_symlinks(false);
+        for name in untracked.split('\0').filter(|s| !s.is_empty()) {
+            let relative = Path::new(name);
+            if relative.is_absolute() || relative.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+                return Err("Git returned an unsafe untracked path; cleanup refused".into());
+            }
+            let source = path.join(relative);
+            if std::fs::symlink_metadata(&source).map_err(|e| e.to_string())?.is_dir() {
+                tar.append_dir_all(relative, source).map_err(|e| e.to_string())?;
+            } else { tar.append_path_with_name(source, relative).map_err(|e| e.to_string())?; }
+        }
+        let file = tar.into_inner().map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+        println!("Preserved untracked files in {}", archive.display());
+    }
+    // Archiving may take time. Check the worktree again before allowing Git's force flag.
+    if !git(&path, &["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
+        return Err("Tracked files changed during cleanup; the worktree was preserved".into());
+    }
+    git(&path, &["merge-base", "--is-ancestor", "HEAD", &landing_branch(&work)])?;
+    let mut args = vec!["worktree", "remove"];
+    if force { args.push("--force"); }
+    args.push(path.to_str().ok_or("Non-UTF8 worktree path")?);
+    git(&base, &args)?;
     git(&base, &["branch", "-d", id])?;
     println!("Removed finished job worktree {id}");
     Ok(0)
@@ -826,6 +910,24 @@ pub fn cleanup(rest: &[String]) -> Result<i32, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn recovery_requires_the_expected_abandoned_owner_and_no_live_lease() {
+        let row = json!({"status":"in_progress","assignee":"old"});
+        assert!(recovery_allowed(&row, "old", "new").is_ok());
+        assert!(recovery_allowed(&row, "other", "new").is_err());
+        assert!(recovery_allowed(&row, "old", "old").is_err());
+        for state in ["closed", "manager_review", "open", "cancelled"] {
+            let mut next = row.clone(); next["status"] = json!(state);
+            assert!(recovery_allowed(&next, "old", "new").is_err());
+        }
+        let mut next = row.clone(); next["lease_expires_at"] = json!("2999-01-01T00:00:00Z");
+        assert!(recovery_allowed(&next, "old", "new").is_err());
+        next["lease_expires_at"] = json!("2000-01-01T00:00:00Z");
+        assert!(recovery_allowed(&next, "old", "new").is_ok());
+        next["lease_expires_at"] = json!("unreadable");
+        assert!(recovery_allowed(&next, "old", "new").is_err());
+    }
+
     #[test]
     fn historical_operations_complete_with_delivered_work_including_prior_retirement() {
         let rows = vec![

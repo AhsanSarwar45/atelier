@@ -24,7 +24,10 @@ Use `ATELIER_BYPASS='specific reason' COMMAND` only for the refused command.
 The bypass is logged. Session identity stamping still runs: a bypassed claim
 and its later ordinary landing must use the same actor. This applies to Claude
 `command`, Codex `cmd`, environment switches and marker files. Add the real
-refusal to either hook-friction journal.
+refusal to the original card with `bd update ID --append-notes="Hook friction: ..."`,
+even after it lands. Include the command, refusal, expected behavior and workaround.
+Update either hook-friction journal as part of an owned repair; recording a refusal
+does not require reopening delivered work or writing to the main checkout.
 Do not export a standing bypass. Tests strip inherited bypasses. Unknown hook
 names fail visibly; explicitly retired presentation hooks remain compatible.
 
@@ -39,3 +42,17 @@ owner's app or data. Review the dry-run before repairing historical tickets.
 Protocol 4 fixes dispatcher-level bypass identity loss. Check the executable
 actually on the agent's PATH with `atelier hook workflow-gate --version`; the
 application version alone cannot distinguish hook revisions.
+
+## Recovery and cleanup (protocol 5)
+
+- Abandoned session: `atelier tool board/reclaim CARD-ID --from OLD-ACTOR
+  --abandoned --reason TEXT` in its job copy. Confirm abandonment first. Recovery
+  refuses live leases, changed owners, settled work and manager review; it records
+  the transfer and refreshes the new owner's lease. Lease-less history is supported.
+- Multiple owned children receive separate `bd heartbeat ID` calls; that command
+  accepts one card per invocation.
+- Completed job with untracked files: `atelier tool board/cleanup JOB-ID --force`
+  from another checkout. Non-ignored untracked files are archived in `.git/atelier-cleanup`
+  before removal; ignored build scratch is removed. Tracked modifications remain protected even with `--force`.
+- A post-land friction note belongs on the original card immediately; the next
+  owned repair can add it to the repository journal without a reporting-only card.
