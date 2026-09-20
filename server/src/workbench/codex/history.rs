@@ -120,13 +120,24 @@ fn last_row_timestamp(path: &Path, accept: impl Fn(&Value) -> bool) -> Option<St
 /// `{"subagent":{"other":"guardian"}}` is what every one of the owner's 144
 /// guardian review threads carried. The index's `thread/list` answers the
 /// same field on the thread when it has it, and is asked first (bw-p61.17).
+///
+/// `"exec"` is the exception, and is asked again: a non-interactive run is
+/// listed as `"exec"` whoever began it, and the app itself begins one for
+/// every external review. The kind it was given is in the record instead, so
+/// an `"exec"` thread with a record is placed by the record (bw-s7cd).
 pub fn begun_by(thread: &Value) -> &'static str {
-    let source = match thread.get("source").filter(|source| !source.is_null()) {
-        Some(source) => source.clone(),
-        None => thread["path"]
+    let listed = thread.get("source").filter(|source| !source.is_null());
+    let recorded = || {
+        thread["path"]
             .as_str()
             .and_then(|path| session_source(Path::new(path)))
-            .unwrap_or(Value::Null),
+    };
+    let source = match listed {
+        Some(source) if source.as_str() == Some("exec") => {
+            recorded().unwrap_or_else(|| source.clone())
+        }
+        Some(source) => source.clone(),
+        None => recorded().unwrap_or(Value::Null),
     };
     match source {
         Value::Null => "unknown",
@@ -146,7 +157,14 @@ fn by_a_subagent(source: &Value) -> bool {
     }
 }
 
-/// The `source` of a rollout's `session_meta`, its first line.
+/// What a rollout's `session_meta`, its first line, says began the thread.
+///
+/// Two fields carry that now. `codex exec` keeps `source` at `"exec"` and
+/// files the kind it was handed under `thread_source` — measured against
+/// codex-cli 0.153.4, where `codex exec --thread-source subAgentReview` wrote
+/// `"source":"exec","thread_source":"subAgentReview"`. Whichever of the two
+/// names a subagent is the answer; `source` is the answer otherwise, as it
+/// always was.
 fn session_source(path: &Path) -> Option<Value> {
     let file = File::open(path).ok()?;
     let mut line = String::new();
@@ -154,6 +172,10 @@ fn session_source(path: &Path) -> Option<Value> {
     let row: Value = serde_json::from_str(line.trim()).ok()?;
     if row["type"] != "session_meta" {
         return None;
+    }
+    let handed = row["payload"]["thread_source"].clone();
+    if by_a_subagent(&handed) {
+        return Some(handed);
     }
     let source = row["payload"]["source"].clone();
     (!source.is_null()).then_some(source)
@@ -565,6 +587,44 @@ mod tests {
         assert_eq!(begun_by(&json!({"path": terminal, "source": "subAgentReview"})), "agent");
         assert_eq!(begun_by(&json!({"source": "vscode"})), "person");
         assert_eq!(begun_by(&json!({"path": directory.path().join("missing.jsonl")})), "unknown");
+    }
+
+    /*
+     * A review worker the app spawns runs `codex exec`, and the CLI files its
+     * kind under `thread_source`, keeping `source` at `"exec"` — measured
+     * against codex-cli 0.153.4 on 2026-09-20, where
+     * `codex exec --thread-source subAgentReview` wrote
+     * `"source":"exec","thread_source":"subAgentReview"`. Reading `source`
+     * alone made every external review the owner's own chat and drew eight of
+     * them in the sidebar with the switch off (bw-s7cd).
+     */
+    #[test]
+    fn a_review_worker_naming_its_thread_a_subagents_is_the_agents_own() {
+        use super::begun_by;
+        use serde_json::json;
+        let directory = tempfile::tempdir().unwrap();
+        let worker = directory.path().join("worker.jsonl");
+        std::fs::write(
+            &worker,
+            "{\"timestamp\":\"t\",\"type\":\"session_meta\",\"payload\":{\"id\":\"w\",\"source\":\"exec\",\"thread_source\":\"subAgentReview\",\"originator\":\"codex_exec\"}}\n",
+        )
+        .unwrap();
+        let by_hand = directory.path().join("by-hand.jsonl");
+        std::fs::write(
+            &by_hand,
+            "{\"timestamp\":\"t\",\"type\":\"session_meta\",\"payload\":{\"id\":\"h\",\"source\":\"exec\",\"thread_source\":\"user\",\"originator\":\"codex_exec\"}}\n",
+        )
+        .unwrap();
+        assert_eq!(begun_by(&json!({"path": worker})), "agent");
+        // A person's own `codex exec` run is still a person's chat.
+        assert_eq!(begun_by(&json!({"path": by_hand})), "person");
+        // The index lists every non-interactive run as "exec" whoever began
+        // it, so that answer is not the end of the question: the record is
+        // still read, and it is the record that separates the two.
+        assert_eq!(begun_by(&json!({"path": worker, "source": "exec"})), "agent");
+        assert_eq!(begun_by(&json!({"path": by_hand, "source": "exec"})), "person");
+        // An "exec" thread with no record left says only what the index said.
+        assert_eq!(begun_by(&json!({"source": "exec"})), "person");
     }
 
     use super::*;

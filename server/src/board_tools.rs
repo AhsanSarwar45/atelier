@@ -519,6 +519,26 @@ fn bounded_output(command: &mut Command, said: &[u8]) -> Result<std::process::Ou
     Ok(std::process::Output { status, stdout: out, stderr: err })
 }
 
+/// How the Codex review worker is run.
+///
+/// `--thread-source` names the kind of thread this is. Without it the rollout
+/// is filed as an ordinary `"exec"` run, which is what a person's own
+/// `codex exec` is too, and the review worker was drawn in the sidebar as a
+/// chat of the owner's own (bw-s7cd).
+fn codex_review_args() -> [&'static str; 8] {
+    [
+        "exec",
+        "--sandbox",
+        "read-only",
+        "--color",
+        "never",
+        "--thread-source",
+        "subAgentReview",
+        // The prompt is read from stdin; see the note in `review`.
+        "-",
+    ]
+}
+
 fn review(rest: &[String]) -> Result<i32, String> {
     let asked = rest.first().filter(|word| !word.starts_with('-'))
         .ok_or_else(|| "review needs a job id".to_string())?;
@@ -560,7 +580,7 @@ fn review(rest: &[String]) -> Result<i32, String> {
     if provider == "claude" {
         command.args(["--agents", r#"{"reviewer":{"description":"Independent code review","prompt":"Review the supplied immutable scope. Do not edit files or mutate Git, Beads, applications or processes. Return only the requested JSON verdict.","tools":["Read","Grep","Glob"]}}"#, "--agent", "reviewer", "-p", "--setting-sources", "user", "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--no-session-persistence", "--output-format", "json", "--json-schema", r#"{"type":"object","required":["verdict","summary","findings"],"properties":{"verdict":{"enum":["PASS","NEEDS_WORK"]},"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object"}}}}"#]);
     } else if provider == "codex" {
-        command.args(["exec", "--sandbox", "read-only", "--color", "never", "-"]);
+        command.args(codex_review_args());
     } else { return Err("Review provider must be claude or codex".into()); }
     command.current_dir(&root).env_remove("ATELIER_BYPASS");
     let evidence = crate::board_landing::common_root(&root).join(".git/atelier-reviews").join(format!("{id}-{head}"));
@@ -635,6 +655,31 @@ mod tests {
         let output = bounded_output(&mut command, long.as_bytes()).expect("cat could not be run");
         assert_eq!(output.stdout.len(), long.len());
         assert!(output.status.success());
+    }
+
+    /// The review worker's own chat stays out of the sidebar.
+    ///
+    /// The Claude worker is run with `--no-session-persistence` and leaves no
+    /// chat at all. The Codex worker leaves a rollout, and a rollout is listed
+    /// as `"exec"` whoever began it — so eight review workers were drawn in
+    /// the owner's sidebar as chats of his own, with the agents' switch off
+    /// (bw-s7cd). The run names its own kind, and `codex::history::begun_by`
+    /// reads that name back off the record.
+    #[test]
+    fn native_machinery_the_codex_review_worker_names_itself_the_agents_own() {
+        let args = codex_review_args();
+        let at = args.iter().position(|arg| *arg == "--thread-source").expect(
+            "the codex review worker must name its thread source",
+        );
+        let kind = args[at + 1];
+        assert_eq!(args.last(), Some(&"-"), "the prompt is still read from stdin");
+        assert_eq!(
+            crate::workbench::codex::history::begun_by(&serde_json::json!({
+                "source": kind,
+            })),
+            "agent",
+            "the kind the worker asks for must read back as the agents' own",
+        );
     }
 
     #[test]
