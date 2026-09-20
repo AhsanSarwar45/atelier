@@ -66,6 +66,12 @@ export function BackLink({
     <Button
       variant="ghost"
       size="icon"
+      // The paint stays the size it is drawn and a thumb gets an invisible
+      // 44px box around it (globals.css, `data-reach`). The painted floor is
+      // for a button that has a bar to itself; this one stands next to other
+      // controls and a name, and floored to 44 it carried fourteen pixels of
+      // its own padding into every gap around it (bw-r8dg.1).
+      data-reach="band"
       className={cn('shrink-0 text-t-tertiary hover:bg-surface-overlay hover:text-t-primary', className)}
       asChild
     >
