@@ -191,41 +191,38 @@ function ProjectTabs() {
       barClassName={terminal ? 'terminal-header' : undefined}
       bar={
         <>
-          {/* Two pictures side by side, so they are spaced as a pair rather
-              than at the bar's own stride: the bar leaves room for a control
-              to meet a WORD, and between two icons that room lands on top of
-              the padding each of them already carries. Four pixels here and
-              six either side of the name below put the same twenty-four
-              between every neighbour in the row (bw-r8dg.1). */}
-          <div className="flex shrink-0 items-center gap-1">
-            <BackLink href="/" />
-            {/* The way out that is always the same one. The arrow beside it is
-                where the reader came from, which is a different question and by
-                now a different answer, so the project list has a control of its
-                own rather than being whatever the history happens to hold
-                (bw-430t). Nothing is intercepted here: it is the plain link it
-                looks like, at any depth. */}
-            <Button
-              variant="ghost"
-              size="icon"
-              data-reach="band"
-              className="shrink-0 text-t-tertiary hover:bg-surface-overlay hover:text-t-primary"
-              asChild
-            >
-              <Link href="/" data-testid="home-button">
-                <Home className="h-4 w-4 opacity-100" />
-                <span className="sr-only">All projects</span>
-              </Link>
-            </Button>
-          </div>
+          <BackLink href="/" />
+          {/* The way out that is always the same one. The arrow beside it is
+              where the reader came from, which is a different question and by
+              now a different answer, so the project list has a control of its
+              own rather than being whatever the history happens to hold
+              (bw-430t). Nothing is intercepted here: it is the plain link it
+              looks like, at any depth. */}
+          <Button
+            variant="ghost"
+            size="icon"
+            data-reach="band"
+            className="shrink-0 text-t-tertiary hover:bg-surface-overlay hover:text-t-primary"
+            asChild
+          >
+            <Link href="/" data-testid="home-button">
+              <Home className="h-4 w-4 opacity-100" />
+              <span className="sr-only">All projects</span>
+            </Link>
+          </Button>
           {/* The name is also the way to another project (bw-r8dg.2), and
               still the heading this screen is named by, with the control
-              inside it. Six
-              pixels either side on top of the bar's own eight: the name is a
-              word and its neighbours are pictures carrying ten pixels of
-              padding apiece, so this is what makes the gap beside it the same
-              as the gap between two of them (bw-r8dg.1). */}
-          <h1 className="mx-1.5 min-w-0">
+              inside it.
+
+              Ten pixels either side on top of the bar's own eight: the name is
+              a WORD and its neighbours are pictures carrying ten pixels of
+              their own padding, so this is what makes the gap beside the name
+              the same as the gap between two pictures — twenty-eight from one
+              drawn thing to the next, the whole way along the bar (bw-r8dg.1).
+              Eight between the two pictures and no less: their invisible
+              thumb bands are 44px around a 36px paint, so anything tighter has
+              one band reaching over its neighbour's middle. */}
+          <h1 className="mx-2.5 min-w-0">
             <ProjectSwitcher
               projectId={projectId}
               name={`${project?.name ?? ''}${terminal ? '_' : ''}`}
