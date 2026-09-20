@@ -110,11 +110,11 @@ fn driving(span: &'static str, raw: Option<&Value>) -> Option<Driving> {
         .filter_map(|row| {
             let key = text(&row["key"])?;
             let label = match key.as_str() {
-                "cache_miss" => "Cache misses",
-                "long_context" => "Long conversations",
-                "subagent_heavy" => "Agents sent off",
-                "high_parallel" => "Several at once",
-                "cron" => "Scheduled runs",
+                "cache_miss" => "Requests without cached context",
+                "long_context" => "Long context requests",
+                "subagent_heavy" => "Requests using subagents",
+                "high_parallel" => "Parallel agent tasks",
+                "cron" => "Scheduled task requests",
                 _ => &key,
             }
             .to_string();

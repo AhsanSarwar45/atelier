@@ -72,7 +72,7 @@ describe('the answer the kit actually gives', () => {
     const week = usage.driving.find((d) => d.span === 'week');
     expect(week?.requests).toBe(37_672);
     expect(week?.sessions).toBe(606);
-    expect(week?.traits[0]).toEqual({ key: 'subagent_heavy', label: 'Agents sent off', pct: 68 });
+    expect(week?.traits[0]).toEqual({ key: 'subagent_heavy', label: 'Requests using subagents', pct: 68 });
     expect(week?.agents.map((a) => a.name)).toEqual(['general-purpose', 'builder', 'lead']);
     expect(week?.skills).toEqual([{ name: 'report', pct: 5 }]);
     expect(week?.plugins).toEqual([]);

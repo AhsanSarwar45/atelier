@@ -183,11 +183,11 @@ export const NOTHING_KNOWN: PlanUsage = {
 
 /** The kit's own words for what is driving the spend, in ours. */
 const TRAIT_LABELS: Record<string, string> = {
-  cache_miss: 'Cache misses',
-  long_context: 'Long conversations',
-  subagent_heavy: 'Agents sent off',
-  high_parallel: 'Several at once',
-  cron: 'Scheduled runs',
+  cache_miss: 'Requests without cached context',
+  long_context: 'Long context requests',
+  subagent_heavy: 'Requests using subagents',
+  high_parallel: 'Parallel agent tasks',
+  cron: 'Scheduled task requests',
 };
 
 const RANK: Record<Severity, number> = { normal: 0, warning: 1, critical: 2 };

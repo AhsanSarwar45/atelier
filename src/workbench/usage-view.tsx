@@ -81,17 +81,85 @@ function Window({ window: w, now }: { window: PlanWindow; now: Date }) {
 function Names({ title, rows }: { title: string; rows: { name: string; pct: number }[] }) {
   if (rows.length === 0) return null;
   return (
-    <div className="min-w-0">
-      <h4 className="text-[11px] uppercase tracking-wide text-muted-foreground">{title}</h4>
-      <ul className="mt-1 space-y-0.5">
+    <Panel className="min-w-0" inset="md">
+      <h4 className="text-xs font-medium text-foreground">{title}</h4>
+      <ul className="mt-2 space-y-1.5">
         {rows.map((r) => (
-          <li key={r.name} className="flex gap-2 text-xs">
-            <span className="truncate text-foreground">{r.name}</span>
-            <span className="ml-auto shrink-0 font-mono text-muted-foreground">{r.pct}%</span>
-          </li>
+          <Tooltip
+            key={r.name}
+            side="bottom"
+            label={`${readableName(r.name)} appeared in ${r.pct}% of requests during this period.`}
+          >
+            <li
+              tabIndex={0}
+              className="flex gap-2 rounded-sm text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={`${readableName(r.name)}: ${r.pct}% of requests`}
+            >
+              <span className="truncate text-foreground">{readableName(r.name)}</span>
+              <span className="ml-auto shrink-0 font-mono text-muted-foreground">{r.pct}%</span>
+            </li>
+          </Tooltip>
         ))}
       </ul>
-    </div>
+    </Panel>
+  );
+}
+
+const TRAIT_HELP: Record<string, { label: string; detail: string }> = {
+  cache_miss: {
+    label: 'Requests without cached context',
+    detail: 'Requests that could not reuse cached conversation context.',
+  },
+  long_context: {
+    label: 'Long context requests',
+    detail: 'Requests from conversations with a large amount of prior context.',
+  },
+  subagent_heavy: {
+    label: 'Requests using subagents',
+    detail: 'Requests from sessions that delegated work to subagents.',
+  },
+  high_parallel: {
+    label: 'Parallel agent tasks',
+    detail: 'Requests from sessions that ran several agent tasks at the same time.',
+  },
+  cron: {
+    label: 'Scheduled task requests',
+    detail: 'Requests started by scheduled tasks.',
+  },
+};
+
+/** Turn identifiers such as `general-purpose` into labels meant for people. */
+export function readableName(name: string): string {
+  return name
+    .trim()
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => part.toLowerCase() === 'devtools' ? 'DevTools' : part[0]?.toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function Trait({ trait }: { trait: Driving['traits'][number] }) {
+  const copy = TRAIT_HELP[trait.key] ?? {
+    label: trait.label || readableName(trait.key),
+    detail: 'Requests with this usage pattern.',
+  };
+  const explanation = `${copy.detail} ${trait.pct}% of requests matched this pattern. Percentages can overlap.`;
+  return (
+    <Tooltip label={explanation} side="bottom" align="start">
+      <Panel
+        tabIndex={0}
+        className="outline-none transition-colors hover:border-border focus-visible:ring-2 focus-visible:ring-ring"
+        data-testid="usage-trait"
+        data-trait={trait.key}
+        aria-label={`${copy.label}: ${trait.pct}% of requests. ${copy.detail}`}
+      >
+        <div className="flex items-baseline gap-2">
+          <span className="min-w-0 text-xs font-medium text-foreground">{copy.label}</span>
+          <span className="ml-auto shrink-0 font-mono text-sm font-semibold text-foreground">{trait.pct}%</span>
+        </div>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">of requests</p>
+      </Panel>
+    </Tooltip>
   );
 }
 
@@ -106,20 +174,30 @@ function Spending({ driving }: { driving: Driving }) {
         </span>
       </div>
       {driving.traits.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {driving.traits.map((t) => (
-            <Badge key={t.key} variant="secondary" appearance="light" size="sm" data-testid="usage-trait" data-trait={t.key}>
-              {t.label} {t.pct}%
-            </Badge>
-          ))}
+        <div className="mt-3">
+          <div className="mb-2 flex items-baseline gap-2">
+            <h4 className="text-xs font-medium text-foreground">Request patterns</h4>
+            <span className="text-[11px] text-muted-foreground">Percentages can overlap</span>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {driving.traits.map((trait) => <Trait key={trait.key} trait={trait} />)}
+          </div>
         </div>
       )}
-      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Names title="Agents" rows={driving.agents} />
-        <Names title="Skills" rows={driving.skills} />
-        <Names title="Plugins" rows={driving.plugins} />
-        <Names title="Servers" rows={driving.servers} />
-      </div>
+      {[driving.agents, driving.skills, driving.plugins, driving.servers].some((rows) => rows.length > 0) && (
+        <div className="mt-3">
+          <div className="mb-2 flex items-baseline gap-2">
+            <h4 className="text-xs font-medium text-foreground">Tools used</h4>
+            <span className="text-[11px] text-muted-foreground">Share of requests</span>
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <Names title="Agent types" rows={driving.agents} />
+            <Names title="Skills" rows={driving.skills} />
+            <Names title="Plugins" rows={driving.plugins} />
+            <Names title="Tool servers" rows={driving.servers} />
+          </div>
+        </div>
+      )}
     </Panel>
   );
 }
@@ -135,7 +213,7 @@ export function UsageView({ brand = 'claude', profile, onClose }: { brand?: Bran
           runs off the bottom of the window the moment the account has enough
           models to list (bw-3ug7.14). */}
       <div
-        className={cn(overlayPanel, 'max-w-2xl')}
+        className={cn(overlayPanel, 'max-w-3xl')}
         data-available={usage.available}
       >
         <div className="flex items-center gap-2 border-b border-border/60 p-4">

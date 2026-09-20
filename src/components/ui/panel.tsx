@@ -42,19 +42,19 @@ const panelVariants = cva('rounded-md border', {
   defaultVariants: { tone: 'default', inset: 'sm' },
 });
 
-export function Panel({
+export const Panel = React.forwardRef<HTMLDivElement, React.ComponentProps<'div'> & VariantProps<typeof panelVariants> & { asChild?: boolean }>(function Panel({
   className,
   tone,
   inset,
   asChild = false,
   ...props
-}: React.ComponentProps<'div'> & VariantProps<typeof panelVariants> & { asChild?: boolean }) {
+}, ref) {
   // `asChild` is how a panel becomes something that is also a control: the
   // clickable report card is one box, and a <button> wrapped in a <div> would
   // be two — with the paint on the outer one and the click on the inner
   // (bw-dks8.10).
   const Comp = asChild ? SlotPrimitive.Slot : 'div';
-  return <Comp data-slot="panel" className={cn(panelVariants({ tone, inset }), className)} {...props} />;
-}
+  return <Comp ref={ref} data-slot="panel" className={cn(panelVariants({ tone, inset }), className)} {...props} />;
+});
 
 export { panelVariants };
