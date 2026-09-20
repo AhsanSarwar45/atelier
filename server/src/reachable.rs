@@ -702,7 +702,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn the_port_nobody_chose_is_the_one_the_program_was_built_with() {
         assert_eq!(port_from(None, None), crate::command_line::PORT);
     }
@@ -762,6 +761,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn the_name_this_computer_answers_to_is_its_own() {
         // The parts that ask the operating system. A machine with no
         // multicast answerer has no name, and then there is nothing to check.

@@ -13,7 +13,7 @@
  * server's questions and are answered in server/src/remote.rs and
  * server/src/routes/remote_access.rs.
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RemoteAccessSettings, shutsTheDoor } from '@/components/settings/remote-access-settings';
@@ -133,6 +133,28 @@ describe('the Remote access section', () => {
     fireEvent.click(screen.getByTestId('remote-restart-now'));
 
     await waitFor(() => expect(restartApp).toHaveBeenCalled());
+  });
+
+  it('goes to the new port after the restart, not the one nothing answers on', async () => {
+    // The restart the reader pressed is the one that moves the app. Reloading
+    // this address would land on the port it just left.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const where = { port: '3008', reload: vi.fn() };
+    const own = Object.getOwnPropertyDescriptor(window, 'location');
+    Object.defineProperty(window, 'location', { value: where, writable: true, configurable: true });
+    read.mockResolvedValue({ ...ready, port: 3008, nextPort: 4000, needsRestart: true });
+
+    render(<RemoteAccessSettings />);
+    fireEvent.click(await screen.findByTestId('remote-restart-now'));
+    await waitFor(() => expect(restartApp).toHaveBeenCalled());
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+
+    expect(where.port).toBe('4000');
+    expect(where.reload).not.toHaveBeenCalled();
+    vi.useRealTimers();
+    if (own) Object.defineProperty(window, 'location', own);
   });
 
   it('says what to do instead when nothing would start it again', async () => {

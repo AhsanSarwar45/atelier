@@ -47,13 +47,18 @@
  * where it can really be changed. Anybody genuinely running this behind their
  * own domain sets ATELIER_PUBLIC_URL, which is where that reader already was.
  *
- * ## Why the address is drawn before the switch is on, and says where it came from
+ * ## Why the address is drawn before the switch is on
  *
  * The address is the whole point of this section and the thing a reader wants
  * to know before they commit to anything, so it is drawn as soon as Tailscale
- * has one rather than only once serving is on. And because it is a name
- * nobody chose and nobody can remember, it says whose name it is and where to
- * change it — a machine renamed in Tailscale changes the address here too.
+ * has one rather than only once serving is on.
+ *
+ * Where it came from is carried by the row's shape rather than a sentence
+ * under the label: both addresses wear the same address, copy and edit, and
+ * the Tailscale one's edit opens the Tailscale admin console because that is
+ * where its name is really changed. A line of prose saying the same thing was
+ * what the row used to have, and it was the thing that made this screen read
+ * as an explanation instead of a setting.
  *
  * ## Why access is two named options and not an address to type
  *
@@ -221,8 +226,11 @@ export function RemoteAccessSettings() {
   );
 
   // The app answers, then stops. Nothing here can watch it come back over the
-  // connection it is about to lose, so the page waits for the door to reopen
-  // and then reloads onto whatever is now behind it.
+  // connection it is about to lose, so the page waits and then goes to where
+  // it will be. Where it will be is not always here: a restart asked for
+  // because the port changed brings the app back on the new port, and
+  // reloading this address would land on the old one, which nothing is
+  // listening on any more.
   const restart = useCallback(async () => {
     setRestarting(true);
     setRefused(null);
@@ -236,8 +244,12 @@ export function RemoteAccessSettings() {
       });
       return;
     }
-    setTimeout(() => window.location.reload(), RESTART_WAIT_MS);
-  }, []);
+    const moving = held?.nextPort != null && held.nextPort !== held.port;
+    setTimeout(() => {
+      if (moving) window.location.port = String(held!.nextPort);
+      else window.location.reload();
+    }, RESTART_WAIT_MS);
+  }, [held]);
 
   const savePort = useCallback(async () => {
     // Read the field rather than mirroring it in state. It lives for one
