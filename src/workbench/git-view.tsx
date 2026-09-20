@@ -463,9 +463,31 @@ export interface GitViewProps {
    * the file like every other path in the app.
    */
   onShowFile?: (file: string) => void;
+  /**
+   * Whether the column this panel is in is open.
+   *
+   * The rail keeps its body mounted whether or not it is showing, so that the
+   * fold has something to fade — a panel that unmounts on the way out leaves
+   * the shut to happen as a jump. That is right for the fold and wrong for
+   * everything else: a shut rail was still asking git for the status of the
+   * whole working tree every five seconds and still drawing a row for every
+   * path it named. On a checkout with 5,099 untracked paths that was 81,661
+   * nodes in a column nobody could see (bw-o5i3).
+   *
+   * So the panel is told. Shut, it asks nothing and draws no file rows; its
+   * own state — a half-written commit message above all — is untouched, which
+   * is why this is a flag and not an unmount.
+   */
+  shown?: boolean;
 }
 
-export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitViewProps) {
+export function GitView({
+  path,
+  diffOpen = false,
+  onFlipDiff,
+  onShowFile,
+  shown = true,
+}: GitViewProps) {
   // The rail's file names are file chips, answered by the one set of handlers
   // every other file chip in the app is answered by (bw-g3o3.9).
   const paths = usePathActions();
@@ -579,10 +601,11 @@ export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitV
   );
 
   useEffect(() => {
+    if (!shown) return;
     const stop = new AbortController();
     void read(stop.signal);
     return () => stop.abort();
-  }, [read]);
+  }, [read, shown]);
 
   /**
    * What this checkout could move to, read again whenever it moves — a branch
@@ -595,7 +618,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitV
    * showing.
    */
   useEffect(() => {
-    if (!path) {
+    if (!path || !shown) {
       setBranches([]);
       return;
     }
@@ -609,7 +632,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitV
       }
     })();
     return () => stop.abort();
-  }, [path, status?.branch]);
+  }, [path, shown, status?.branch]);
 
   /**
    * Staying current: the git directory moving, the window being come back to,
@@ -623,7 +646,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitV
   const quietly = useCallback(async () => {
     await read(undefined, true);
   }, [read]);
-  useRepositoryReads(path, quietly);
+  useRepositoryReads(shown ? path : null, quietly);
 
   /**
    * One thing that changes the repository, and then a fresh look at it. The
@@ -1145,7 +1168,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitV
         </div>
       )}
 
-      {conflicted.length > 0 && (
+      {shown && conflicted.length > 0 && (
         <Section title="Conflicted" count={conflicted.length} testId="git-conflicted">
           <FileRows
             files={conflicted}
@@ -1171,7 +1194,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitV
         </Section>
       )}
 
-      {staged.length > 0 && (
+      {shown && staged.length > 0 && (
         <Section
           title="Staged"
           count={staged.length}
@@ -1220,7 +1243,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitV
         </Section>
       )}
 
-      {unstaged.length > 0 && (
+      {shown && unstaged.length > 0 && (
         <Section
           title="Not staged"
           count={unstaged.length}
@@ -1311,7 +1334,7 @@ export function GitView({ path, diffOpen = false, onFlipDiff, onShowFile }: GitV
         </Section>
       )}
 
-      {untracked.length > 0 && (
+      {shown && untracked.length > 0 && (
         <Section
           title="Untracked"
           count={untracked.length}

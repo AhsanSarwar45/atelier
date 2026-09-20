@@ -366,6 +366,7 @@ export function ChatRightRail({
             <GitView
               key={gitPath ?? ''}
               path={gitPath}
+              shown={open}
               diffOpen={diffOpen}
               onFlipDiff={onFlipDiff}
               onShowFile={onShowFile}
