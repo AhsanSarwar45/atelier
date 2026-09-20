@@ -3011,7 +3011,10 @@ mod tests {
 
         let ownership = registry.provider_ownership(Path::new("/proc"), 1_000);
         assert_eq!(ownership.ours.len(), 1);
-        assert!(ownership.external.is_empty());
+        assert!(ownership.ours[0].pids.contains(&provider_pid));
+        // /proc also contains unrelated live terminal agents. This fixture
+        // proves that its owned provider is never classified as external.
+        assert!(ownership.external.iter().all(|hold| !hold.pids.contains(&provider_pid)));
         let sent = registry
             .execute(&command(
                 CommandKind::PromptSend,
