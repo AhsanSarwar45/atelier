@@ -51,6 +51,40 @@ import { useSerialReads } from '@/workbench/use-serial-reads';
 export const WORKING_TREE_MS = 5_000;
 
 /**
+ * Everything waiting on the slow look, and the one clock they all wait on.
+ *
+ * One interval for the whole window rather than one per caller, so that every
+ * caller's slow look falls on the same tick. The Files tab draws the tree and
+ * the Git rail from one `git status`, and they share the run only if they ask
+ * within a moment of each other (`repository-status.ts`). Intervals of their
+ * own would put them wherever their mounts happened to fall — the rail can be
+ * opened halfway through a cycle — and two readers two and a half seconds
+ * apart are two readers running git twice, which is the thing this exists to
+ * stop. A shared beat has no offset to drift by.
+ *
+ * The clock runs only while something is waiting on it, and stops when the
+ * last caller lets go.
+ */
+const waiting = new Set<() => void>();
+let beat: ReturnType<typeof setInterval> | null = null;
+
+function onTheSlowLook(look: () => void): () => void {
+  waiting.add(look);
+  beat ??= setInterval(() => {
+    // Copied first: a caller that lets go while the beat is being served must
+    // not change the set being walked.
+    for (const each of [...waiting]) each();
+  }, WORKING_TREE_MS);
+  return () => {
+    waiting.delete(look);
+    if (waiting.size === 0 && beat !== null) {
+      clearInterval(beat);
+      beat = null;
+    }
+  };
+}
+
+/**
  * Keep something drawn from `path` current, and hand back the re-read so the
  * caller can also ask for one itself (after a commit, say).
  *
@@ -99,11 +133,11 @@ export function useRepositoryReads(path: string | null, read: () => Promise<void
     const woken = () => {
       if (document.visibilityState === 'visible') backAgain();
     };
-    const slowly = setInterval(lookAgain, WORKING_TREE_MS);
+    const slowly = onTheSlowLook(lookAgain);
     window.addEventListener('focus', backAgain);
     document.addEventListener('visibilitychange', woken);
     return () => {
-      clearInterval(slowly);
+      slowly();
       window.removeEventListener('focus', backAgain);
       document.removeEventListener('visibilitychange', woken);
     };

@@ -128,6 +128,37 @@ describe('one reader of a repository', () => {
     expect(ran).toEqual([REPO]);
   }, 30_000);
 
+  it('runs git once even for a rail opened halfway through a cycle', async () => {
+    // The offset the slow look must not have. A rail opened two and a half
+    // seconds into the tree's cycle would, with an interval of its own, sit
+    // halfway between the tree's looks for as long as both were drawn — two
+    // readers, two runs of git, every five seconds. They share one clock.
+    vi.useFakeTimers();
+    render(<FileTree root={REPO} selected={null} onOpen={() => {}} />);
+    await settled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(WORKING_TREE_MS / 2);
+    });
+    await settled();
+    render(<GitView path={REPO} />);
+    await settled();
+    ran.length = 0;
+
+    // Two whole cycles, wound on in small steps with each read let finish
+    // before the clock moves again. Winding a whole cycle on at once would
+    // answer two ticks with one read that is still in flight, which proves
+    // nothing about where the ticks fell.
+    for (let step = 0; step < 20; step += 1) {
+      await act(async () => {
+        vi.advanceTimersByTime(WORKING_TREE_MS / 10);
+      });
+      await settled();
+    }
+
+    expect(ran).toEqual([REPO, REPO]);
+  }, 30_000);
+
   it('still runs git for a read somebody asked for', async () => {
     await readRepositoryStatus(REPO);
     ran.length = 0;
