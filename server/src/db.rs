@@ -181,6 +181,22 @@ pub fn setting_at_rest(key: &str) -> Option<String> {
     setting_in(&crate::identity::settings_db()?, key)
 }
 
+/// Clear one setting, before anything else is running.
+///
+/// The mirror of [`setting_at_rest`], and used for the same reason: a start
+/// that could not take the port it was told to has to be able to forget it,
+/// and at that point there is no application state to go through.
+pub fn forget_at_rest(key: &str) -> bool {
+    let Some(path) = crate::identity::settings_db() else {
+        return false;
+    };
+    let Ok(conn) = Connection::open(&path) else {
+        return false;
+    };
+    conn.execute("DELETE FROM settings WHERE key = ?1", params![key])
+        .is_ok()
+}
+
 /// The same read, of a named file, so it can be tried against one that is not
 /// there and one that is.
 pub fn setting_in(path: &Path, key: &str) -> Option<String> {

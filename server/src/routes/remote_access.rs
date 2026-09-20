@@ -166,7 +166,7 @@ async fn restart() -> Result<StatusCode, Refusal> {
 /// GET /api/settings/remote
 async fn read_remote(State(db): State<AppState>) -> Result<Json<RemoteAccess>, Refusal> {
     let (standing, serving) = from_tailscale(crate::service::port()).await?;
-    Ok(Json(as_it_stands(&db, standing, serving)?))
+    Ok(Json(as_it_stands(&db, standing, serving).await?))
 }
 
 /// PUT /api/settings/remote
@@ -193,6 +193,15 @@ async fn write_remote(
                 format!("{wanted} is below 1024, which this app is not allowed to take. Pick 1024 or higher."),
             ));
         }
+        let host = crate::service::running_host();
+        if wanted != crate::service::running_port()
+            && !crate::reachable::port_is_free(&host, wanted)
+        {
+            return Err(refused(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("Port {wanted} is already in use by something else. Pick another one."),
+            ));
+        }
         store(&db, PORT_SETTING, Some(wanted.to_string().as_str()))?;
     }
     if let Some(on) = asked.serving {
@@ -206,12 +215,12 @@ async fn write_remote(
     }
 
     let (standing, serving) = from_tailscale(port).await?;
-    Ok(Json(as_it_stands(&db, standing, serving)?))
+    Ok(Json(as_it_stands(&db, standing, serving).await?))
 }
 
 /// Everything the section draws, put together out of what the settings hold
 /// and what Tailscale was just asked.
-fn as_it_stands(
+async fn as_it_stands(
     db: &AppState,
     standing: Standing,
     serving: bool,
@@ -219,8 +228,17 @@ fn as_it_stands(
     let port = crate::service::port();
     let bind_host = read(db, BIND_HOST_SETTING)?;
     let next_port = read(db, PORT_SETTING)?.and_then(|said| said.parse::<u16>().ok());
-    let network = crate::reachable::on_this_network();
-    let name = crate::reachable::name_on_this_network(network);
+    // Asking the network what this computer is called shells out to
+    // `hostname` and then waits up to 1200ms on a multicast answer. Both are
+    // blocking, and an async worker parked on them is a worker not serving
+    // anyone else, so they are handed to a thread that is allowed to wait.
+    let (network, name) = tokio::task::spawn_blocking(|| {
+        let network = crate::reachable::on_this_network();
+        let name = crate::reachable::name_on_this_network(network);
+        (network, name)
+    })
+    .await
+    .unwrap_or((None, None));
     Ok(RemoteAccess {
         standing: named(&standing),
         wrong: standing.wrong(),

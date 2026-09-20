@@ -87,27 +87,27 @@
  * report, it is the next thing to do, so it is drawn as one — with the link as
  * a link, because a URL inside a red sentence is something to retype.
  */
-'use client';
+"use client";
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Check, Copy, ExternalLink, Loader2 } from 'lucide-react';
+import { Check, Copy, ExternalLink, Loader2 } from "lucide-react";
 
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { AddressRow } from '@/components/settings/address-row';
-import { SettingRow, SettingsGroup } from '@/components/settings/section';
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { AddressRow } from "@/components/settings/address-row";
+import { SettingRow, SettingsGroup } from "@/components/settings/section";
 import {
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Panel } from '@/components/ui/panel';
-import { RadioGroup, RadioGroupOption } from '@/components/ui/radio-group';
-import { ReadFailed } from '@/components/ui/read-failed';
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Panel } from "@/components/ui/panel";
+import { RadioGroup, RadioGroupOption } from "@/components/ui/radio-group";
+import { ReadFailed } from "@/components/ui/read-failed";
 import {
   remoteAccess,
   RemoteAccessRefused,
@@ -115,19 +115,19 @@ import {
   saveRemoteAccess,
   type RemoteAccess,
   type RemoteAccessChange,
-} from '@/lib/api';
+} from "@/lib/api";
 
 /** The one command that needs a password, spelled once. */
-const INSTALL = 'atelier remote install';
+const INSTALL = "atelier remote install";
 
 /** What the screen says while a door is being saved, in one place. */
-const SAVING = 'Saving…';
+const SAVING = "Saving…";
 
 /** How long to leave the app to stop and be started again before reloading. */
 const RESTART_WAIT_MS = 4000;
 
 /** Where a reader renames the computer the address is made out of. */
-const MACHINES = 'https://login.tailscale.com/admin/machines';
+const MACHINES = "https://login.tailscale.com/admin/machines";
 
 /**
  * The two doors, named by what each one lets in.
@@ -137,16 +137,16 @@ const MACHINES = 'https://login.tailscale.com/admin/machines';
  */
 const DOORS = [
   {
-    value: 'everyone',
-    bindHost: '',
-    label: 'Home network and Tailscale',
-    means: 'Anyone on your Wi-Fi can open it',
+    value: "everyone",
+    bindHost: "",
+    label: "Home network and Tailscale",
+    means: "Anyone on your Wi-Fi can open it",
   },
   {
-    value: 'here',
-    bindHost: '127.0.0.1',
-    label: 'Tailscale only',
-    means: 'No access from your Wi-Fi',
+    value: "here",
+    bindHost: "127.0.0.1",
+    label: "Tailscale only",
+    means: "No access from your Wi-Fi",
   },
 ] as const;
 
@@ -165,7 +165,9 @@ function nextAddress(held: RemoteAccess): string | null {
 
 /** Whether a stored bind address shuts the door on everything but this computer. */
 export function shutsTheDoor(bindHost: string | null): boolean {
-  return bindHost === '127.0.0.1' || bindHost === '::1' || bindHost === 'localhost';
+  return (
+    bindHost === "127.0.0.1" || bindHost === "::1" || bindHost === "localhost"
+  );
 }
 
 /** A refusal, and anywhere it left to go. */
@@ -185,6 +187,7 @@ export function RemoteAccessSettings() {
   const [copied, setCopied] = useState<string | null>(null);
   const [editingPort, setEditingPort] = useState<string | null>(null);
   const portField = useRef<HTMLInputElement>(null);
+  const [portWrong, setPortWrong] = useState<string | null>(null);
   const [restarting, setRestarting] = useState(false);
 
   const take = useCallback((it: RemoteAccess) => {
@@ -207,16 +210,18 @@ export function RemoteAccessSettings() {
   }, [attempt, take]);
 
   const change = useCallback(
-    async (what: RemoteAccessChange, doing: string) => {
+    async (what: RemoteAccessChange, doing: string): Promise<boolean> => {
       setSaving(doing);
       setRefused(null);
       try {
         take(await saveRemoteAccess(what));
+        return true;
       } catch (e) {
         setRefused({
           said: e instanceof Error ? e.message : String(e),
           link: e instanceof RemoteAccessRefused ? e.link : null,
         });
+        return false;
       } finally {
         setSaving(null);
       }
@@ -254,12 +259,18 @@ export function RemoteAccessSettings() {
     // Read the field rather than mirroring it in state. It lives for one
     // dialog, it is read once, and a ref is the shorter way to say that.
     const wanted = Number(portField.current?.value);
+    // A refusal about the field stays with the field. The section's own
+    // refusal line is behind the overlay, so putting it there is the same as
+    // not saying it: Save would look like it did nothing.
     if (!Number.isInteger(wanted) || wanted < 1024 || wanted > 65535) {
-      setRefused({ said: 'A port is a whole number from 1024 to 65535.', link: null });
+      setPortWrong("A port is a whole number from 1024 to 65535.");
       return;
     }
-    setEditingPort(null);
-    await change({ port: wanted }, SAVING);
+    setPortWrong(null);
+    // The box stays up until the app has taken the port. It is the app that
+    // knows whether something else already holds it, and closing first would
+    // put that answer behind the overlay and throw away what they typed.
+    if (await change({ port: wanted }, SAVING)) setEditingPort(null);
   }, [change]);
 
   const copy = useCallback((said: string) => {
@@ -284,22 +295,25 @@ export function RemoteAccessSettings() {
     return <p className="text-sm text-t-tertiary">Loading remote access…</p>;
   }
 
-  const ready = held.standing === 'ready';
+  const ready = held.standing === "ready";
   // A stored address that is neither door checks neither of them. Checking
   // "Home network and Tailscale" would be a claim about who can reach this
   // board, made from a value that says something else; the row above says
   // what it really is instead.
   const openTo = shutsTheDoor(held.bindHost)
-    ? 'here'
-    : held.bindHost === null || held.bindHost === '0.0.0.0'
-      ? 'everyone'
+    ? "here"
+    : held.bindHost === null || held.bindHost === "0.0.0.0"
+      ? "everyone"
       : undefined;
   // A value from the old text box that is neither door. Saying so beats
   // drawing one of the two as if it were the truth.
-  const odd = held.bindHost !== null && !shutsTheDoor(held.bindHost) && held.bindHost !== '0.0.0.0';
+  const odd =
+    held.bindHost !== null &&
+    !shutsTheDoor(held.bindHost) &&
+    held.bindHost !== "0.0.0.0";
   // Only the switch's own wait is drawn on the switch. Choosing a door below
   // is a different wait and says so down there.
-  const flipping = saving?.startsWith('Turning') ? saving : null;
+  const flipping = saving?.startsWith("Turning") ? saving : null;
 
   return (
     <SettingsGroup title="Remote access" data-testid="remote-access">
@@ -309,25 +323,31 @@ export function RemoteAccessSettings() {
       >
         <Button
           size="sm"
-          variant={held.serving ? 'outline' : 'primary'}
+          variant={held.serving ? "outline" : "primary"}
           disabled={saving !== null || (!ready && !held.serving)}
           aria-pressed={held.serving}
           onClick={() =>
             void change(
               { serving: !held.serving },
-              held.serving ? 'Turning it off…' : 'Turning it on…',
+              held.serving ? "Turning it off…" : "Turning it on…",
             )
           }
           data-testid="remote-serving"
         >
-          {flipping && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
-          {flipping ? flipping : held.serving ? 'Disable' : 'Enable'}
+          {flipping && (
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+          )}
+          {flipping ? flipping : held.serving ? "Disable" : "Enable"}
         </Button>
       </SettingRow>
 
       {flipping && (
         <div className="px-3 py-2">
-          <p className="text-xs text-t-muted" role="status" data-testid="remote-working">
+          <p
+            className="text-xs text-t-muted"
+            role="status"
+            data-testid="remote-working"
+          >
             Contacting Tailscale…
           </p>
         </div>
@@ -337,11 +357,19 @@ export function RemoteAccessSettings() {
         <div className="px-3 py-3">
           <Panel tone="info" inset="md" data-testid="remote-wrong">
             <p className="text-sm text-t-secondary">
-              {held.standing === 'not-installed' ? 'Install Tailscale from a terminal' : held.wrong}
+              {held.standing === "not-installed"
+                ? "Install Tailscale from a terminal"
+                : held.wrong}
             </p>
-            {held.standing === 'not-installed' && (
+            {held.standing === "not-installed" && (
               <div className="mt-2 flex items-center gap-2">
-                <Badge asChild variant="secondary" appearance="light" size="sm" className="flex-1 justify-start font-mono">
+                <Badge
+                  asChild
+                  variant="secondary"
+                  appearance="light"
+                  size="sm"
+                  className="flex-1 justify-start font-mono"
+                >
                   <code>{INSTALL}</code>
                 </Badge>
                 <Button
@@ -351,7 +379,11 @@ export function RemoteAccessSettings() {
                   aria-label="Copy the install command"
                   data-testid="remote-copy-install"
                 >
-                  {copied === INSTALL ? <Check className="size-4" /> : <Copy className="size-4" />}
+                  {copied === INSTALL ? (
+                    <Check className="size-4" />
+                  ) : (
+                    <Copy className="size-4" />
+                  )}
                 </Button>
               </div>
             )}
@@ -363,7 +395,13 @@ export function RemoteAccessSettings() {
         <div className="px-3 py-3">
           <Panel tone="info" inset="md" data-testid="remote-next-step">
             <p className="text-sm text-t-secondary">{refused.said}</p>
-            <Button size="sm" variant="outline" className="mt-2" asChild data-testid="remote-next-step-link">
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-2"
+              asChild
+              data-testid="remote-next-step-link"
+            >
               <a href={refused.link} target="_blank" rel="noreferrer noopener">
                 <ExternalLink className="size-4" aria-hidden="true" />
                 Open Tailscale
@@ -373,9 +411,15 @@ export function RemoteAccessSettings() {
         </div>
       )}
 
-      {refused && !refused.link && (
+      {/* Not while the box is up: it is showing this same refusal itself, and
+          the copy out here is behind the overlay anyway. */}
+      {refused && !refused.link && editingPort === null && (
         <div className="px-3 py-2">
-          <p role="alert" className="text-sm text-danger" data-testid="remote-refused">
+          <p
+            role="alert"
+            className="text-sm text-danger"
+            data-testid="remote-refused"
+          >
             {refused.said}
           </p>
         </div>
@@ -410,7 +454,11 @@ export function RemoteAccessSettings() {
       <SettingRow
         label="Access"
         stack
-        description={odd ? <span data-testid="remote-host-odd">Currently {held.bindHost}</span> : undefined}
+        description={
+          odd ? (
+            <span data-testid="remote-host-odd">Currently {held.bindHost}</span>
+          ) : undefined
+        }
       >
         <RadioGroup
           className="w-full"
@@ -436,7 +484,11 @@ export function RemoteAccessSettings() {
 
       {saving === SAVING && (
         <div className="px-3 py-2">
-          <p role="status" className="text-xs text-t-muted" data-testid="remote-reach-saving">
+          <p
+            role="status"
+            className="text-xs text-t-muted"
+            data-testid="remote-reach-saving"
+          >
             Saving…
           </p>
         </div>
@@ -448,7 +500,7 @@ export function RemoteAccessSettings() {
           description={
             held.canRestart
               ? nextAddress(held)
-              : `Quit Atelier and start it again${nextAddress(held) ? ` to use ${nextAddress(held)}` : ''}`
+              : `Quit Atelier and start it again${nextAddress(held) ? ` to use ${nextAddress(held)}` : ""}`
           }
           data-testid="remote-restart"
         >
@@ -460,32 +512,52 @@ export function RemoteAccessSettings() {
               onClick={() => void restart()}
               data-testid="remote-restart-now"
             >
-              {restarting && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
-              {restarting ? 'Restarting…' : 'Restart now'}
+              {restarting && (
+                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+              )}
+              {restarting ? "Restarting…" : "Restart now"}
             </Button>
           )}
         </SettingRow>
       )}
 
-      <Dialog open={editingPort !== null} onOpenChange={(open) => !open && setEditingPort(null)}>
+      <Dialog
+        open={editingPort !== null}
+        onOpenChange={(open) => {
+          if (open) return;
+          setEditingPort(null);
+          setPortWrong(null);
+        }}
+      >
         <DialogContent className="sm:max-w-sm" aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>Home network address</DialogTitle>
           </DialogHeader>
           <SettingRow label="Port" stack className="px-0 py-0">
-            <Input
-              ref={portField}
-              type="number"
-              min={1024}
-              max={65535}
-              defaultValue={editingPort ?? ''}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void savePort();
-              }}
-              aria-label="Port"
-              className="font-mono"
-              data-testid="remote-port-input"
-            />
+            <div className="w-full space-y-1.5">
+              <Input
+                ref={portField}
+                type="number"
+                min={1024}
+                max={65535}
+                defaultValue={editingPort ?? ""}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void savePort();
+                }}
+                aria-label="Port"
+                className="font-mono"
+                data-testid="remote-port-input"
+              />
+              {(portWrong ?? (editingPort !== null ? refused?.said : null)) && (
+                <p
+                  className="text-xs text-danger"
+                  role="alert"
+                  data-testid="remote-port-wrong"
+                >
+                  {portWrong ?? refused?.said}
+                </p>
+              )}
+            </div>
           </SettingRow>
           <SettingRow
             label="Name"
@@ -501,10 +573,19 @@ export function RemoteAccessSettings() {
             />
           </SettingRow>
           <DialogFooter>
-            <Button size="sm" variant="ghost" onClick={() => setEditingPort(null)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setEditingPort(null)}
+            >
               Cancel
             </Button>
-            <Button size="sm" variant="primary" onClick={() => void savePort()} data-testid="remote-port-save">
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => void savePort()}
+              data-testid="remote-port-save"
+            >
               Save
             </Button>
           </DialogFooter>

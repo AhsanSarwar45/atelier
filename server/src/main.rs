@@ -345,7 +345,7 @@ async fn serve(open_browser: bool) {
 
     // Where it listens, read the one way `atelier where` reads it too.
     let host = bind_host();
-    let port = bind_port();
+    let mut port = bind_port();
 
     // The door is taken first, before a line of the rest of it runs.
     //
@@ -362,6 +362,36 @@ async fn serve(open_browser: bool) {
             // under this copy; what it is answering on cannot.
             service::running_at(host.clone(), port);
             listener
+        }
+        // A port the reader saved on the screen is checked when they save it,
+        // but something else can take it between then and here. Exiting would
+        // leave them with no board and no screen to correct it on, so the
+        // stored answer is dropped and the start carries on where it can be
+        // reached. This is only for the stored one: a port given on the
+        // command line or by the registration is an instruction from outside,
+        // and quietly moving off it would hide a real conflict.
+        Err(e)
+            if e.kind() == std::io::ErrorKind::AddrInUse
+                && reachable::db_chose_the_port()
+                && reachable::forget_stored_port() =>
+        {
+            let fallback = reachable::port();
+            let addr = format!("{host}:{fallback}");
+            tracing::warn!("port {port} was taken; falling back to {fallback}");
+            match tokio::net::TcpListener::bind(&addr).await {
+                Ok(listener) => {
+                    service::running_at(host.clone(), fallback);
+                    port = fallback;
+                    listener
+                }
+                Err(_) => {
+                    eprintln!(
+                        "{} could not listen on {host}:{port} or {host}:{fallback}",
+                        identity::DISPLAY
+                    );
+                    std::process::exit(1);
+                }
+            }
         }
         Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
             let network = reachable::on_this_network();

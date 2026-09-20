@@ -148,6 +148,38 @@ describe('the Remote access section', () => {
     expect(screen.getByTestId('remote-reach-here')).not.toBeChecked();
   });
 
+  it('says a bad port is bad where the reader can see it', async () => {
+    // The section's own refusal line is behind the dialog's overlay, so a
+    // refusal put there reads as Save doing nothing at all.
+    read.mockResolvedValue(ready);
+
+    render(<RemoteAccessSettings />);
+    fireEvent.click(await screen.findByLabelText('Change the port'));
+    fireEvent.change(screen.getByTestId('remote-port-input'), { target: { value: '80' } });
+    fireEvent.click(screen.getByTestId('remote-port-save'));
+
+    expect(screen.getByTestId('remote-port-wrong')).toHaveTextContent('1024 to 65535');
+    expect(screen.getByTestId('remote-port-input')).toBeInTheDocument();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('keeps the box up when the app refuses the port, with the reason in it', async () => {
+    // The app is the one that knows a port is already taken. Closing first
+    // would put its answer behind the overlay and lose what they typed.
+    read.mockResolvedValue(ready);
+    save.mockRejectedValue(new Error('Port 4100 is already in use by something else.'));
+
+    render(<RemoteAccessSettings />);
+    fireEvent.click(await screen.findByLabelText('Change the port'));
+    fireEvent.change(screen.getByTestId('remote-port-input'), { target: { value: '4100' } });
+    fireEvent.click(screen.getByTestId('remote-port-save'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('remote-port-wrong')).toHaveTextContent('already in use'),
+    );
+    expect(screen.getByTestId('remote-port-input')).toBeInTheDocument();
+  });
+
   it('shows the command for the half of the address it cannot change itself', async () => {
     // The port is this app's. The name is the computer's, and renaming it
     // needs root, so the box hands over the command rather than the job.

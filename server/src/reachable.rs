@@ -243,6 +243,29 @@ pub fn port() -> u16 {
     )
 }
 
+/// Whether the port this copy is about to bind came from the screen.
+///
+/// Only a stored answer is dropped when the port turns out to be taken. One
+/// given on the command line or written into the registration came from
+/// outside this program, and moving off it quietly would hide a real clash
+/// rather than recover from a stale setting.
+pub fn db_chose_the_port() -> bool {
+    let stored = crate::db::setting_at_rest(PORT_SETTING);
+    stored.is_some()
+        && port()
+            == port_from_either(
+                None,
+                crate::db::setting_at_rest(PORT_SETTING),
+                crate::handover::started_by_this_computer(),
+            )
+        && a_port(stored) == Some(port())
+}
+
+/// Forget a stored port, for a start that could not take it.
+pub fn forget_stored_port() -> bool {
+    crate::db::forget_at_rest(PORT_SETTING)
+}
+
 /// Which of the two answers is listened to first, and why it depends on who
 /// started this copy.
 ///
@@ -287,6 +310,26 @@ pub fn port_from(first: Option<String>, then: Option<String>) -> u16 {
 /// One answer read as a port, or nothing if it is not one this program can take.
 fn a_port(said: Option<String>) -> Option<u16> {
     said?.trim().parse().ok().filter(|&number| usable_port(number))
+}
+
+/// Whether a port can actually be taken on the address this copy binds.
+///
+/// A port saved on the screen is a port some later start has to bind, and a
+/// start that cannot bind exits. Asking now, while there is a reader looking
+/// at a dialog and able to pick another number, is the only moment the answer
+/// is any use to them.
+///
+/// It is a snapshot, not a promise: whatever holds the port could let go a
+/// second later, and something else could take it before the restart. It
+/// catches the case that actually happens, which is a reader typing the port
+/// of a thing they already run.
+pub fn port_is_free(host: &str, port: u16) -> bool {
+    let host = if host == "0.0.0.0" || host.is_empty() { "127.0.0.1" } else { host };
+    match format!("{host}:{port}").parse::<std::net::SocketAddr>() {
+        Ok(at) => std::net::TcpListener::bind(at).is_ok(),
+        // Not an address this can be asked about — the bind at start will say.
+        Err(_) => true,
+    }
 }
 
 /// Whether a number is a port this program can be asked to take.
