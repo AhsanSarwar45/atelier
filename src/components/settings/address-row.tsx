@@ -27,8 +27,9 @@ export function AddressRow({
   ...rest
 }: {
   address: string;
-  /** What editing this one means, for the button's label. */
-  editLabel: string;
+  /** What editing this one means, for the button's label. Left out when the
+   *  row is something to copy and run rather than something to change here. */
+  editLabel?: string;
   /** Where the address is really changed, when that is somewhere else. */
   editHref?: string;
   /** What changing it does, when it is done here. */
@@ -58,7 +59,7 @@ export function AddressRow({
       >
         {copied === address ? <Check className="size-4" /> : <Copy className="size-4" />}
       </Button>
-      {editHref ? (
+      {!editLabel ? null : editHref ? (
         <Button size="sm" variant="outline" asChild aria-label={editLabel} data-testid="address-edit">
           <a href={editHref} target="_blank" rel="noreferrer noopener">
             <Pencil className="size-4" />

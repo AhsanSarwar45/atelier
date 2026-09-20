@@ -130,6 +130,8 @@ pub struct RemoteAccess {
     /// Whether this copy can restart itself, so the screen offers a button
     /// rather than a sentence about terminals.
     pub can_restart: bool,
+    /// What renames this computer, which is the name half of the home address.
+    pub rename_command: &'static str,
 }
 
 /// What the screen sends. Every field is optional and absent means unchanged,
@@ -240,6 +242,7 @@ fn as_it_stands(
         needs_restart: next_port.is_some_and(|wanted| wanted != port)
             || crate::reachable::bind_host() != crate::service::running_host(),
         can_restart: crate::handover::can_come_back(),
+        rename_command: crate::reachable::rename_command(),
     })
 }
 

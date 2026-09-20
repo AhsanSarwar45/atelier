@@ -55,6 +55,7 @@ const nothing: RemoteAccess = {
   nextPort: null,
   needsRestart: false,
   canRestart: true,
+  renameCommand: 'sudo hostnamectl set-hostname new-name',
 };
 
 /** The same computer once the command has been run and it has signed in. */
@@ -135,15 +136,17 @@ describe('the Remote access section', () => {
     await waitFor(() => expect(restartApp).toHaveBeenCalled());
   });
 
-  it('says which half of the home address it is not offering to change', async () => {
-    // The pencil opens a box titled Port. Without this the reader is left to
-    // guess whether the name is fixed forever; it is not, it is just not ours.
+  it('shows the command for the half of the address it cannot change itself', async () => {
+    // The port is this app's. The name is the computer's, and renaming it
+    // needs root, so the box hands over the command rather than the job.
     read.mockResolvedValue(ready);
 
     render(<RemoteAccessSettings />);
     fireEvent.click(await screen.findByLabelText('Change the port'));
 
-    expect(screen.getByText(/desk\.local is this computer/)).toBeInTheDocument();
+    expect(screen.getByTestId('remote-rename-command')).toHaveTextContent(
+      'sudo hostnamectl set-hostname new-name',
+    );
   });
 
   it('goes to the new port after the restart, not the one nothing answers on', async () => {

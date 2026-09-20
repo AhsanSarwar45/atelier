@@ -155,6 +155,18 @@ fn published(public: Option<&str>) -> Option<String> {
 /// Where the screen keeps who may reach this program.
 pub const BIND_HOST_SETTING: &str = "server.bind-host";
 
+/// The command that renames this computer, which is the other half of the
+/// home address and not this program's to change.
+pub fn rename_command() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "sudo scutil --set HostName new-name"
+    } else if cfg!(target_os = "windows") {
+        "Rename-Computer -NewName new-name"
+    } else {
+        "sudo hostnamectl set-hostname new-name"
+    }
+}
+
 /// Where the screen keeps the port this program answers on.
 pub const PORT_SETTING: &str = "server.port";
 

@@ -1277,6 +1277,7 @@ export interface RemoteAccess {
   nextPort: number | null;
   needsRestart: boolean;
   canRestart: boolean;
+  renameCommand: string;
 }
 
 /** What the switch and the field may change; absent means unchanged. */
