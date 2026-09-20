@@ -464,7 +464,8 @@ fn claude_import_menu(_session: &Session) -> Value {
         "commands":[],
         "skills":[],
         "models":[],
-        "permissionModes":["default","acceptEdits","bypassPermissions","plan","dontAsk","auto"],
+        "permissionModes":["default","acceptEdits","bypassPermissions","plan","dontAsk","auto",
+            super::answering::ATELIER_AUTO],
         "efforts":[],
         "agentDefinitions":[],
         "agentControls":["stop","park","say"]

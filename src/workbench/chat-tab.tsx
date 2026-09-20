@@ -93,7 +93,7 @@ import type { SessionMenu } from '@/workbench/fold';
 
 /** The brands a chat can run on somebody's account. `local` has none. */
 const ACCOUNTED_BRANDS: readonly Brand[] = ['claude', 'codex'];
-import { BRAND_DEFAULT_MODEL, newChatId, startingChat } from '@/workbench/protocol';
+import { BRAND_DEFAULT_MODEL, newChatId, offeringAtelierAuto, startingChat } from '@/workbench/protocol';
 import { SectionHeading } from '@/workbench/section-heading';
 import { heldElsewhere, sessionOwnership, streamStillAnswers } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
@@ -146,11 +146,15 @@ const CODEX_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh'].map((value) 
  */
 export function composerMenu(menu: SessionMenu, brand: Brand, model: string | null, collaborationMode: string | null): SessionMenu {
   if (brand === 'local') return menu;
-  const permissionModes = menu.permissionModes.length
+  // The app's own mode is offered before the provider has said anything, the
+  // same as it is in the menu the server builds afterwards: it is this app
+  // that carries it out, so it does not wait on a provider to list it.
+  const permissionModes = offeringAtelierAuto(menu.permissionModes.length
     ? menu.permissionModes
     : brand === 'codex'
       ? ['on-request', 'never']
-      : ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto'];
+      : ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']
+  );
   const models = menu.models.length
     ? menu.models
     : [

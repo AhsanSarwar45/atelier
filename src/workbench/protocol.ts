@@ -90,6 +90,35 @@ export interface AskOption {
  */
 export const NOBODY_ANSWERED = 'provider_stopped';
 
+/**
+ * The permission mode in which this app answers the cards itself.
+ *
+ * The only mode in the picker that is not a word the provider understands.
+ * The provider is left in the mode that asks, and the app presses its
+ * allow-once button. It exists for accounts whose organisation has taken the
+ * provider's own automatic modes away: without it, every tool call waits on a
+ * person pressing Yes. Kept in step with `ATELIER_AUTO` in
+ * `server/src/workbench/answering.rs`.
+ */
+export const ATELIER_AUTO = 'atelierAuto';
+
+/**
+ * What a card answered by the app is marked with.
+ *
+ * Kept in step with `ANSWERED_BY_APP` in `server/src/workbench/answering.rs`.
+ */
+export const ANSWERED_BY_APP = 'atelier';
+
+/**
+ * A list of permission modes with the app's own on the end.
+ *
+ * No provider lists it, so it is added wherever a menu is built — and added
+ * once, however many times a menu is rebuilt from one that already carries it.
+ */
+export function offeringAtelierAuto(modes: readonly string[]): string[] {
+  return modes.includes(ATELIER_AUTO) ? [...modes] : [...modes, ATELIER_AUTO];
+}
+
 /** Whether a button on a permission card is the one that refuses. */
 export function refuses(kind: AskOption['kind']): boolean {
   return kind === 'reject_once' || kind === 'reject_always' || kind === 'deny';
@@ -678,7 +707,7 @@ export type WbpEvent = EventBase &
         href?: string;
         parentToolCallId?: string;
       }
-    | { type: 'ask.resolved'; askId: string; chosen: string }
+    | { type: 'ask.resolved'; askId: string; chosen: string; by?: typeof ANSWERED_BY_APP }
     | {
         type: 'question.requested';
         requestId: string;

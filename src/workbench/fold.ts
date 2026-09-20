@@ -23,6 +23,7 @@ import type {
   AgentDefinition,
   AgentKind,
   AgentState,
+  ANSWERED_BY_APP,
   ApiProvider,
   AskOption,
   Audience,
@@ -177,6 +178,13 @@ export interface TranscriptAsk {
   secret?: boolean;
   href?: string;
   chosen: string | null;
+  /**
+   * Who pressed the button. Absent for every card the owner answered himself,
+   * which is all of them outside the app's own permission mode. The card reads
+   * it so an answer the app gave is never drawn as one he gave
+   * (`ANSWERED_BY_APP`, bw-0z25.1).
+   */
+  chosenBy?: typeof ANSWERED_BY_APP;
   /**
    * The call that sent the agent which raised this question, or null when the
    * chat's own agent raised it. Named `parentId` because that is what every
@@ -896,7 +904,9 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
 
     case 'ask.resolved': {
       const asked = items.find((it) => it.kind === 'ask' && it.id === e.askId) as TranscriptAsk | undefined;
-      next.items = items.map((it) => (it.kind === 'ask' && it.id === e.askId ? { ...it, chosen: e.chosen } : it));
+      next.items = items.map((it) =>
+        it.kind === 'ask' && it.id === e.askId ? { ...it, chosen: e.chosen, chosenBy: e.by } : it,
+      );
       next.agents = nowWaiting(view.agents, asked?.parentId ?? null, false);
       return next;
     }
@@ -1418,6 +1428,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         if (at !== undefined) {
           const asked = items[at] as TranscriptAsk;
           asked.chosen = e.chosen;
+          asked.chosenBy = e.by;
           waited(agents, asked.parentId ?? null, false);
         }
         break;

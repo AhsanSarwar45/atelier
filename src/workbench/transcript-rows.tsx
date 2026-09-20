@@ -47,7 +47,7 @@ import { ChatWidgetView } from '@/workbench/chat-widget-view';
 import { widgetSpecs } from '@/workbench/chat-widgets';
 import { colourOfBand, lookOfRan, markOfRan } from '@/workbench/ran-look';
 import { ranOfAcp, whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
-import { NOBODY_ANSWERED, refuses } from '@/workbench/protocol';
+import { ANSWERED_BY_APP, NOBODY_ANSWERED, refuses } from '@/workbench/protocol';
 import type { AskOption, ImagePayload, LookableImage } from '@/workbench/protocol';
 import { Chipped, Line, SplitPaths, withChips } from '@/workbench/split-paths';
 import { PathChip } from '@/workbench/path-chip';
@@ -72,6 +72,7 @@ export const PermissionCard = memo(function PermissionCard({
   secret,
   href,
   chosen,
+  chosenBy,
   sentBy,
   askedBy,
 }: {
@@ -85,6 +86,7 @@ export const PermissionCard = memo(function PermissionCard({
   secret?: boolean;
   href?: string;
   chosen: string | null;
+  chosenBy?: typeof ANSWERED_BY_APP;
   sentBy?: string | null;
   askedBy?: string | null;
 }) {
@@ -110,6 +112,11 @@ export const PermissionCard = memo(function PermissionCard({
     // nothing here and fell through the `?? 'allow_once'` below to be drawn as
     // ALLOWED. A card saying the owner allowed a tool he never answered is the
     // one thing a permission card exists to prevent (bw-t26l.20).
+    // A card the app answered says so. "Allowed" is a sentence about the
+    // owner — it is what every other resolved card on this screen means — and
+    // in the app's own permission mode he was never asked. A record of
+    // approvals he cannot tell apart from his own is the thing that would make
+    // the mode untrustworthy (bw-0z25.1).
     const answered =
       chosen === NOBODY_ANSWERED
         ? 'Stopped'
@@ -117,12 +124,15 @@ export const PermissionCard = memo(function PermissionCard({
           ? 'Answered'
           : refuses(options.find((o) => o.id === chosen)?.kind ?? 'allow_once')
             ? 'Denied'
-            : 'Allowed';
+            : chosenBy === ANSWERED_BY_APP
+              ? 'Approved automatically'
+              : 'Allowed';
     return (
       <Panel
         data-testid="permission-card"
         data-ask-state="resolved"
         data-ask-id={askId}
+        data-answered-by={chosenBy ?? undefined}
         data-tool-name={toolName}
         data-sent-by={sentBy ?? undefined}
         className="text-sm text-muted-foreground"
@@ -1515,6 +1525,7 @@ export const TranscriptRow = memo(function TranscriptRow({
           secret={item.secret}
           href={item.href}
           chosen={item.chosen}
+          chosenBy={item.chosenBy}
           sentBy={item.parentId}
           askedBy={item.askedBy}
         />

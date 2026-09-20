@@ -597,7 +597,12 @@ enum Control {
         reply: Reply,
     },
     Mode {
+        /// The mode the agent is told to enter.
         value: String,
+        /// The mode the owner picked, which for the app's own mode is not a
+        /// word the agent was told. It is what the chat is pinned to and what
+        /// the chips draw.
+        selected: String,
         reply: Reply,
     },
     Config {
@@ -627,6 +632,14 @@ enum ConfigTarget {
 struct PermissionBroker {
     pending: Mutex<HashMap<String, PendingPermission>>,
     plan_options: Mutex<HashMap<String, (String, String)>>,
+    /// Whether the chat is in the app's own permission mode, in which the app
+    /// presses the allow option instead of drawing a card and waiting.
+    ///
+    /// Kept here rather than read from the chat record on each question: the
+    /// question is answered on the reading loop, the record is behind the
+    /// database, and the one thing that has to be known is a single bit that
+    /// changes only when the owner changes the mode.
+    answers_itself: std::sync::atomic::AtomicBool,
 }
 
 struct PendingPermission {
@@ -663,6 +676,19 @@ struct PendingElicitation {
 }
 
 impl PermissionBroker {
+    /// Record the mode the chat is now in, as the owner picked it.
+    fn set_mode(&self, mode: &str) {
+        self.answers_itself.store(
+            mode == super::super::answering::ATELIER_AUTO,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+
+    fn answers_itself(&self) -> bool {
+        self.answers_itself
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     async fn is_pending(&self, id: &str) -> bool {
         self.pending.lock().await.contains_key(id)
     }
@@ -937,16 +963,49 @@ async fn permission(
         .as_object()
         .cloned()
         .unwrap_or_default();
+    let plan = raw
+        .pointer("/toolCall/rawInput/plan")
+        .and_then(Value::as_str)
+        .filter(|plan| !plan.trim().is_empty());
+    // In the app's own permission mode the card is not put to the owner: it is
+    // drawn already answered, and the agent is told to go ahead before it has
+    // stopped. A plan is not a tool call and is never answered this way — it
+    // is the one question in the transcript that asks which direction the work
+    // should take, and the mode is about not being asked to confirm work that
+    // has already been decided (bw-0z25.1).
+    let answered_by_app = (plan.is_none() && broker.answers_itself())
+        .then(|| super::super::answering::allow_option(&options))
+        .flatten();
+    if let Some(chosen) = answered_by_app {
+        database
+            .append_many(vec![
+                event(json!({
+                    "type":"ask.permission", "sessionId":local_session_id, "seq":0, "at":now(),
+                    "askId":ask_id, "toolName":tool_title,
+                    "title":tool_title, "input":tool_input,
+                    "parentToolCallId":sent_by,
+                    "options":options, "acp":raw
+                }))?,
+                event(json!({
+                    "type":"ask.resolved", "sessionId":local_session_id, "seq":0, "at":now(),
+                    "askId":ask_id, "chosen":chosen,
+                    "by":super::super::answering::ANSWERED_BY_APP
+                }))?,
+            ])
+            .await
+            .map_err(acp_error)?;
+        return Ok(Box::pin(async move {
+            Ok(RequestPermissionResponse::new(
+                RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(chosen)),
+            ))
+        }));
+    }
     let (answer, receive) = oneshot::channel();
     broker
         .pending
         .lock()
         .await
         .insert(ask_id.clone(), PendingPermission { answer });
-    let plan = raw
-        .pointer("/toolCall/rawInput/plan")
-        .and_then(Value::as_str)
-        .filter(|plan| !plan.trim().is_empty());
     let asked = if let Some(markdown) = plan {
         let allowed = raw["options"]
             .as_array()
@@ -1817,6 +1876,11 @@ pub(super) fn mode_from_acp(brand: &str, mode: &str) -> String {
 }
 
 fn mode_to_acp(brand: &str, mode: &str) -> String {
+    // "Atelier automatic" is the app's own mode and no agent has ever heard of
+    // it. What the agent is handed is the mode that still asks; the asking is
+    // what the app then answers (`workbench::answering`).
+    let mode = super::super::answering::provider_mode(brand, mode);
+    let mode = mode.as_str();
     if brand != "codex" {
         return mode.to_string();
     }
@@ -1883,13 +1947,17 @@ pub(super) fn menu_fields(
     agent_definitions: &Value,
 ) -> Value {
     let options = options_for_menu(brand, seed_model, options);
-    let permission_modes = modes["availableModes"]
+    let mut permission_modes = modes["availableModes"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(|mode| mode["id"].as_str())
         .map(|mode| mode_from_acp(brand, mode))
         .collect::<Vec<_>>();
+    // The app's own mode is offered wherever the provider's are, whatever the
+    // agent lists — it is the app that carries it out, so no agent has to
+    // support it for it to work (`workbench::answering`).
+    super::super::answering::offer_in_menu(&mut permission_modes);
     json!({
         "commands":[], "skills":[], "agentDefinitions":agent_definitions, "agentControls":agent_controls,
         "permissionModes":permission_modes,
@@ -2529,7 +2597,12 @@ impl AcpDriver {
                             let response = connection.send_request(SetSessionConfigOptionRequest::new(remote_id.clone(), key, desired)).block_task().await?;
                             config_options = serde_json::to_value(response.config_options).map_err(acp_error)?;
                         }
-                        let pinned_mode = mode_from_acp(brand, modes["currentModeId"].as_str().unwrap_or_default());
+                        let pinned_mode = super::super::answering::read_back(
+                            &task_session.permission_mode,
+                            brand,
+                            &mode_from_acp(brand, modes["currentModeId"].as_str().unwrap_or_default()),
+                        );
+                        task_permissions.set_mode(&pinned_mode);
                         let pinned_model = current_option(&config_options, &["model"]).as_str().map(|model| {
                             local_model.as_deref().and_then(super::super::local::decode_model)
                                 .map(|(runtime, _)| super::super::local::encode_model(runtime, model))
@@ -2701,8 +2774,7 @@ impl AcpDriver {
                                         .map_err(|error| error.to_string());
                                     let _ = reply.send(result);
                                 }
-                                Control::Mode { value, reply } => {
-                                    let selected = mode_from_acp(brand, &value);
+                                Control::Mode { value, selected, reply } => {
                                     let result = connection
                                         .send_request(SetSessionModeRequest::new(remote_id.clone(), value))
                                         .block_task()
@@ -2710,6 +2782,11 @@ impl AcpDriver {
                                         .map_err(|error| error.to_string());
                                     let result = match result {
                                         Ok(_) => {
+                                            // The bit the question-answering
+                                            // path reads moves with the pin,
+                                            // so a mode changed mid-turn takes
+                                            // effect on the next question.
+                                            task_permissions.set_mode(&selected);
                                             task_database.append(serde_json::from_value(json!({
                                                 "type":"session.pinned", "sessionId":task_session.id,
                                                 "seq":0, "at":now(), "permissionMode":selected,
@@ -3071,11 +3148,10 @@ impl AcpDriver {
                 Ok(result)
             }
             CommandKind::SessionMode => {
-                let value = mode_to_acp(
-                    self.brand,
-                    command.at("mode").as_str().unwrap_or_default(),
-                );
-                self.control(|reply| Control::Mode { value, reply }).await
+                let selected = command.at("mode").as_str().unwrap_or_default().to_string();
+                let value = mode_to_acp(self.brand, &selected);
+                self.control(|reply| Control::Mode { value, selected, reply })
+                    .await
             }
             CommandKind::SessionModel => {
                 let value = command.at("model").clone();
@@ -3924,6 +4000,126 @@ mod tests {
             .unwrap();
     }
 
+    /// The card the app answered for him.
+    ///
+    /// The agent is told to go ahead without anything being put to the owner,
+    /// and the transcript still carries both halves of the exchange — what was
+    /// asked, and that it was the app rather than the owner that answered.
+    #[tokio::test]
+    async fn the_apps_own_mode_answers_the_card_and_says_who_answered_it() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let session = test_session("working");
+        database.create_session(session.clone()).await.unwrap();
+        let broker = Arc::new(PermissionBroker::default());
+        broker.set_mode(crate::workbench::answering::ATELIER_AUTO);
+
+        let answering = permission(
+            asking_to_run_a_tool(),
+            database.clone(),
+            session.id.clone(),
+            broker.clone(),
+            None,
+        )
+        .await
+        .expect("the question is taken");
+        let response = serde_json::to_value(answering.await.expect("it is answered")).unwrap();
+
+        // The agent is let through, on the once-only option.
+        assert_eq!(response["outcome"]["outcome"], "selected");
+        assert_eq!(response["outcome"]["optionId"], "allow-once");
+        // Nobody was left waiting on it.
+        assert!(
+            broker.pending.lock().await.is_empty(),
+            "a card the app answered was also parked for the owner"
+        );
+
+        let events = database.events_since(session.id.clone(), 0).await.unwrap();
+        let asked = events
+            .iter()
+            .find(|event| event.kind == crate::workbench::protocol::EventKind::AskPermission)
+            .expect("what was asked is still written down");
+        assert_eq!(asked.fields["toolName"], "Run a command");
+        let resolved = events
+            .iter()
+            .find(|event| event.kind == crate::workbench::protocol::EventKind::AskResolved)
+            .expect("and so is the answer");
+        assert_eq!(resolved.fields["chosen"], "allow-once");
+        assert_eq!(resolved.fields["by"], "atelier");
+    }
+
+    /// Every other mode still asks.
+    #[tokio::test]
+    async fn a_chat_in_a_providers_own_mode_still_waits_for_the_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let session = test_session("working");
+        database.create_session(session.clone()).await.unwrap();
+        let broker = Arc::new(PermissionBroker::default());
+        broker.set_mode("default");
+
+        let _answering = permission(
+            asking_to_run_a_tool(),
+            database.clone(),
+            session.id.clone(),
+            broker.clone(),
+            None,
+        )
+        .await
+        .expect("the question is taken");
+
+        assert!(
+            broker.pending.lock().await.contains_key("call-1"),
+            "the card was answered without anyone being asked"
+        );
+        let events = database.events_since(session.id.clone(), 0).await.unwrap();
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.kind == crate::workbench::protocol::EventKind::AskResolved),
+            "an unanswered card was recorded as settled"
+        );
+    }
+
+    /// A card with no way to say yes is still the owner's to answer.
+    #[tokio::test]
+    async fn the_app_only_presses_a_button_the_agent_offered() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let session = test_session("working");
+        database.create_session(session.clone()).await.unwrap();
+        let broker = Arc::new(PermissionBroker::default());
+        broker.set_mode(crate::workbench::answering::ATELIER_AUTO);
+
+        let request = serde_json::from_value(json!({
+            "sessionId":"remote-1",
+            "toolCall":{"toolCallId":"call-1","title":"Run a command","rawInput":{"command":"ls"}},
+            "options":[{"optionId":"reject","name":"No","kind":"reject_once"}]
+        }))
+        .unwrap();
+        let _answering = permission(request, database.clone(), session.id.clone(), broker.clone(), None)
+            .await
+            .expect("the question is taken");
+
+        assert!(
+            broker.pending.lock().await.contains_key("call-1"),
+            "a refuse-only card was settled by the app"
+        );
+    }
+
+    fn asking_to_run_a_tool() -> RequestPermissionRequest {
+        serde_json::from_value(json!({
+            "sessionId":"remote-1",
+            "toolCall":{"toolCallId":"call-1","title":"Run a command","rawInput":{"command":"ls"}},
+            "options":[
+                {"optionId":"allow-always","name":"Yes, and do not ask again","kind":"allow_always"},
+                {"optionId":"allow-once","name":"Yes","kind":"allow_once"},
+                {"optionId":"reject","name":"No","kind":"reject_once"}
+            ]
+        }))
+        .unwrap()
+    }
+
     /// Stopping a turn cancels the cards it left open. It does not refuse them.
     ///
     /// This used to send the agent's own rejection option, which reads to the
@@ -4250,9 +4446,11 @@ mod tests {
         );
         let menu = menu_event("local", menu).unwrap();
         let menu = serde_json::to_value(menu).unwrap();
+        // The agent's own three, then the app's, which the agent never
+        // listed because it belongs to the app (`workbench::answering`).
         assert_eq!(
             menu["permissionModes"],
-            json!(["untrusted", "on-request", "never"])
+            json!(["untrusted", "on-request", "never", "atelierAuto"])
         );
         assert_eq!(menu["models"][0]["value"], "gpt-5.6-sol");
         assert_eq!(menu["efforts"][0]["value"], "high");

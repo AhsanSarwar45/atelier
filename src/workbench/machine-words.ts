@@ -242,6 +242,15 @@ export const PERMISSION_MODE: Record<string, { label: string; said: string; tone
     said: 'skip every permission check',
     tone: 'destructive',
   },
+  // The app's own mode, and the only one here the provider does not enforce.
+  // It reads as a warning for the same reason `dontAsk` does: nothing will
+  // stop to ask him. What it says is the whole of the difference — the
+  // provider still asks, and this app answers (bw-0z25.1).
+  atelierAuto: {
+    label: 'Atelier automatic',
+    said: 'let Atelier answer the permission questions for you',
+    tone: 'warning',
+  },
 };
 
 /**

@@ -21,6 +21,16 @@ pub struct OwnerSettings {
     pub effort: Option<String>,
 }
 
+/// Where the app keeps a default that is the app's own.
+///
+/// "Atelier automatic" is not a word Claude or Codex understands. Starring it
+/// must not put it in `settings.json` or `config.toml`: those files are read
+/// by the owner's own terminal and by whatever his organisation audits, and a
+/// mode neither tool can parse is at best ignored and at worst a broken
+/// config he did not write. It is kept beside them instead, in the same
+/// account directory, so it still belongs to the account it was starred under.
+const OUR_DEFAULTS: &str = "atelier-defaults.json";
+
 pub(crate) fn managed_claude_settings() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
@@ -41,6 +51,43 @@ pub(crate) fn managed_claude_settings() -> PathBuf {
 
 /// Claude's own settings cascade, lowest precedence first. These files are
 /// read only: steering one chat must never rewrite the owner's global config.
+/// The app's own starred permission mode for an account directory, if any.
+fn our_permission_default(directory: &Path) -> Option<String> {
+    fs::read(directory.join(OUR_DEFAULTS))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())?
+        .get("permissionMode")?
+        .as_str()
+        .filter(|mode| !mode.is_empty())
+        .map(str::to_string)
+}
+
+/// Write, or clear, the app's own starred permission mode.
+fn write_our_permission_default(directory: &Path, mode: Option<&str>) -> Result<(), String> {
+    let path = directory.join(OUR_DEFAULTS);
+    let mut settings = json_settings(&path)?;
+    match mode {
+        Some(mode) => {
+            settings.insert("permissionMode".into(), Value::String(mode.into()));
+        }
+        None => {
+            settings.remove("permissionMode");
+        }
+    }
+    if settings.is_empty() {
+        // Nothing of ours left to say. The file is removed rather than left
+        // as an empty object, so an account that never used the app's own
+        // mode looks exactly as it did before (bw-0z25.1).
+        if path.exists() {
+            fs::remove_file(&path).map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+    let mut bytes = serde_json::to_vec_pretty(&settings).map_err(|e| e.to_string())?;
+    bytes.push(b'\n');
+    atomic_write(&path, &bytes)
+}
+
 pub fn read_owner_settings(claude_config: &Path, project: &Path) -> OwnerSettings {
     let layers = [
         claude_config.join("settings.json"),
@@ -80,6 +127,12 @@ pub fn read_owner_settings(claude_config: &Path, project: &Path) -> OwnerSetting
         {
             answer.permission_mode = Some(value.to_string());
         }
+    }
+    // The app's own mode outranks the cascade. It is only ever there because
+    // he starred it, and he starred it in this app; Claude's own files cannot
+    // hold it to be overridden by.
+    if let Some(mode) = our_permission_default(claude_config) {
+        answer.permission_mode = Some(mode);
     }
     answer
 }
@@ -196,7 +249,28 @@ impl ProviderDefaultFiles {
         Self::new(directory, directory)
     }
 
+    /// The account directory the app keeps its own defaults in, which is the
+    /// one the brand's own settings file sits in.
+    fn our_directory(&self, brand: &str) -> Result<PathBuf, String> {
+        let file = match brand {
+            "claude" => &self.claude,
+            "codex" => &self.codex,
+            _ => return Err("brand must be claude or codex".into()),
+        };
+        file.parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| "settings path has no parent".to_string())
+    }
+
     pub fn read(&self, brand: &str) -> Result<ProviderDefaults, String> {
+        let mut defaults = self.read_provider(brand)?;
+        if let Some(mode) = our_permission_default(&self.our_directory(brand)?) {
+            defaults.permission_mode = Some(mode);
+        }
+        Ok(defaults)
+    }
+
+    fn read_provider(&self, brand: &str) -> Result<ProviderDefaults, String> {
         match brand {
             "claude" => {
                 let settings = json_settings(&self.claude)?;
@@ -229,6 +303,20 @@ impl ProviderDefaultFiles {
     pub fn write(&self, brand: &str, kind: &str, value: &str) -> Result<ProviderDefaults, String> {
         if !matches!(kind, "model" | "effort" | "permission") || value.is_empty() || value.len() > 200 {
             return Err("provider default is invalid".into());
+        }
+        if kind == "permission" {
+            let directory = self.our_directory(brand)?;
+            if value == super::answering::ATELIER_AUTO {
+                // The provider's own default is left exactly as it was. It is
+                // what the chat runs in while the app answers, and it is what
+                // the owner's terminal keeps using outside the app.
+                write_our_permission_default(&directory, Some(value))?;
+                return self.read(brand);
+            }
+            // Starring any other mode is the owner taking the app back out of
+            // answering for him. Ours is cleared first, or the star would not
+            // move (bw-0z25.1).
+            write_our_permission_default(&directory, None)?;
         }
         match brand {
             "claude" => {
@@ -308,5 +396,78 @@ mod tests {
         assert_eq!(defaults.read("claude").unwrap().permission_mode.as_deref(), Some("bypassPermissions"));
         defaults.write("codex", "permission", "never").unwrap();
         assert_eq!(defaults.read("codex").unwrap().permission_mode.as_deref(), Some("never"));
+    }
+
+    /// Starring the app's own mode leaves the provider's settings file alone.
+    ///
+    /// Claude reads `permissions.defaultMode` itself and has never heard of
+    /// "atelierAuto"; writing it there would put a mode Claude cannot parse
+    /// into the file the owner's own terminal reads.
+    #[test]
+    fn the_apps_own_default_is_not_written_into_the_providers_settings() {
+        let root = tempfile::tempdir().unwrap();
+        let claude = root.path().join("claude");
+        let codex = root.path().join("codex");
+        let defaults = ProviderDefaultFiles::new(&claude, &codex);
+
+        defaults.write("claude", "permission", "plan").unwrap();
+        defaults
+            .write("claude", "permission", super::super::answering::ATELIER_AUTO)
+            .unwrap();
+
+        let settings = fs::read_to_string(claude.join("settings.json")).unwrap();
+        assert!(
+            settings.contains("\"defaultMode\": \"plan\""),
+            "Claude's own default was rewritten: {settings}"
+        );
+        assert!(!settings.contains("atelierAuto"), "{settings}");
+        assert_eq!(
+            defaults.read("claude").unwrap().permission_mode.as_deref(),
+            Some(super::super::answering::ATELIER_AUTO)
+        );
+    }
+
+    /// The star has to be able to move back off the app's own mode.
+    #[test]
+    fn starring_a_providers_mode_takes_the_app_back_out_of_answering() {
+        let root = tempfile::tempdir().unwrap();
+        let claude = root.path().join("claude");
+        let codex = root.path().join("codex");
+        let defaults = ProviderDefaultFiles::new(&claude, &codex);
+
+        defaults
+            .write("claude", "permission", super::super::answering::ATELIER_AUTO)
+            .unwrap();
+        defaults.write("claude", "permission", "acceptEdits").unwrap();
+
+        assert_eq!(
+            defaults.read("claude").unwrap().permission_mode.as_deref(),
+            Some("acceptEdits")
+        );
+        assert!(
+            !claude.join(OUR_DEFAULTS).exists(),
+            "an account back on a provider mode still carries the app's file"
+        );
+    }
+
+    /// A chat started on the starred mode has to start in it. New Claude chats
+    /// take their mode from the settings cascade, which is why the app's own
+    /// default is overlaid onto it rather than kept somewhere only the star
+    /// reads.
+    #[test]
+    fn a_new_chat_starts_in_the_starred_mode() {
+        let root = tempfile::tempdir().unwrap();
+        let claude = root.path().join("claude");
+        let project = root.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let defaults = ProviderDefaultFiles::new(&claude, &root.path().join("codex"));
+        defaults
+            .write("claude", "permission", super::super::answering::ATELIER_AUTO)
+            .unwrap();
+
+        assert_eq!(
+            read_owner_settings(&claude, &project).permission_mode.as_deref(),
+            Some(super::super::answering::ATELIER_AUTO)
+        );
     }
 }
