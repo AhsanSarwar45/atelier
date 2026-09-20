@@ -117,7 +117,7 @@ export function SearchSettings() {
   const hosted = held.provider === 'claude' || held.provider === 'codex';
   return (
     <SettingsGroup title="AI search" data-testid="search-settings">
-      <SettingRow label="Provider" htmlFor="search-provider">
+      <SettingRow label="Provider" description="Agent used to answer AI search questions" htmlFor="search-provider">
         <Choose
           id="search-provider"
           value={held.provider}
@@ -134,7 +134,7 @@ export function SearchSettings() {
         />
       </SettingRow>
       {hosted && profiles && (
-        <SettingRow label="Account">
+        <SettingRow label="Account" description="Provider account used for AI search">
           <AccountPicker
             brand={brand}
             profiles={profiles}
@@ -144,7 +144,7 @@ export function SearchSettings() {
         </SettingRow>
       )}
       {held.provider && (
-        <SettingRow label="Model" htmlFor="search-model">
+        <SettingRow label="Model" description="Model used for AI search answers" htmlFor="search-model">
           {hosted ? (
             <Choose
               id="search-model"
@@ -167,7 +167,7 @@ export function SearchSettings() {
         </SettingRow>
       )}
       {hosted && (
-        <SettingRow label="Effort" htmlFor="search-effort">
+        <SettingRow label="Effort" description="Reasoning used for each AI search" htmlFor="search-effort">
           <Choose
             id="search-effort"
             value={held.effort}
@@ -176,7 +176,7 @@ export function SearchSettings() {
           />
         </SettingRow>
       )}
-      <SettingRow label="Time limit" htmlFor="search-time-limit">
+      <SettingRow label="Time limit" description="Maximum time allowed for one AI search" htmlFor="search-time-limit">
         <Select
           value={String(held.timeLimitSeconds)}
           onValueChange={(seconds) => void save({ timeLimitSeconds: Number(seconds) })}
