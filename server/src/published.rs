@@ -113,7 +113,33 @@ where
     B: AsRef<[u8]>,
     E: std::fmt::Display,
 {
-    let outcome = hash_into(stream, dest).await;
+    write_if_it_matches_watched(stream, published, file, dest, None, &|_, _| {}).await
+}
+
+/// The same as [`write_if_it_matches`], reporting how much has arrived.
+///
+/// `watch` is called once per chunk with the running total and whatever total
+/// was expected, so a screen can draw a real bar rather than a spinner. It is
+/// called on the download's own task, so it must not block: the callers here
+/// only publish into a lock and a broadcast channel.
+///
+/// Progress is reported for bytes *received*, which is not the same as bytes
+/// proved. Nothing is kept until the whole file has been hashed and matched,
+/// so a bar that reaches the end still has a verifying step after it.
+pub async fn write_if_it_matches_watched<S, B, E>(
+    stream: S,
+    published: &str,
+    file: &str,
+    dest: &Path,
+    total: Option<u64>,
+    watch: &(dyn Fn(u64, Option<u64>) + Sync),
+) -> Result<u64, Unproved>
+where
+    S: Stream<Item = Result<B, E>>,
+    B: AsRef<[u8]>,
+    E: std::fmt::Display,
+{
+    let outcome = hash_into(stream, dest, total, watch).await;
     let (written, found) = match outcome {
         Ok(both) => both,
         Err(e) => {
@@ -136,7 +162,12 @@ where
 }
 
 /// Streams into `dest`, returning how much was written and what it hashed to.
-async fn hash_into<S, B, E>(stream: S, dest: &Path) -> Result<(u64, String), Unproved>
+async fn hash_into<S, B, E>(
+    stream: S,
+    dest: &Path,
+    total: Option<u64>,
+    watch: &(dyn Fn(u64, Option<u64>) + Sync),
+) -> Result<(u64, String), Unproved>
 where
     S: Stream<Item = Result<B, E>>,
     B: AsRef<[u8]>,
@@ -159,6 +190,7 @@ where
             .await
             .map_err(|e| Unproved::Interrupted(format!("Failed to write download: {}", e)))?;
         written += chunk.len() as u64;
+        watch(written, total);
     }
 
     file.flush()
@@ -187,6 +219,24 @@ pub async fn download(
     checksums_url: Option<&str>,
     file: &str,
     dest: &Path,
+) -> Result<u64, Unproved> {
+    download_watched(client, asset_url, checksums_url, file, dest, &|_, _| {}).await
+}
+
+/// The same as [`download`], reporting how much of the asset has arrived.
+///
+/// `watch` is handed the running byte count and the size the server said to
+/// expect, which is `None` when the response carries no length. Everything
+/// else — the refusals, the deletion of a part-written file, the proof against
+/// the release's own checksums — is unchanged, because a download that reports
+/// its progress is still a download that has to be proved before it is kept.
+pub async fn download_watched(
+    client: &reqwest::Client,
+    asset_url: &str,
+    checksums_url: Option<&str>,
+    file: &str,
+    dest: &Path,
+    watch: &(dyn Fn(u64, Option<u64>) + Sync),
 ) -> Result<u64, Unproved> {
     let checksums_url = match checksums_url {
         Some(url) => url,
@@ -223,7 +273,8 @@ pub async fn download(
         )));
     }
 
-    write_if_it_matches(response.bytes_stream(), &published, file, dest).await
+    let total = response.content_length();
+    write_if_it_matches_watched(response.bytes_stream(), &published, file, dest, total, watch).await
 }
 
 #[cfg(test)]
