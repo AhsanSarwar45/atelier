@@ -4,6 +4,11 @@
 //! finds the chats with `search_chats` and `read_chat` and names them. The run
 //! itself, and the tools' endpoint, are shared with every search
 //! (search/agent.rs); this says what the tools are and checks every chat named.
+//!
+//! An ask made from inside a project stays in it (bw-c1ti.2). It is held here
+//! rather than suggested to the agent, because an agent handed a suggestion
+//! drops it: whatever project its own query names, the search is made in the
+//! project the panel was opened on.
 
 use super::{projects_named, ApiError, WorkbenchState};
 use crate::routes::search_settings::{search_settings, SearchSettings, DEFAULT_TIME_LIMIT};
@@ -23,6 +28,17 @@ const SKILL: &str = include_str!("../../../../machinery/skills/chat-search/SKILL
 struct Chats {
     index: SearchIndex,
     projects: Option<Arc<crate::db::Database>>,
+    /// The project the panel was opened on: its id, and its name for the agent.
+    here: Option<(String, String)>,
+}
+
+/// Where a search is made: the project it is held in, or the ones its own words
+/// named. A held search cannot be talked out of where it is.
+fn searched_in(here: Option<&(String, String)>, named: Vec<String>) -> Vec<String> {
+    match here {
+        Some((id, _)) => vec![id.clone()],
+        None => named,
+    }
 }
 
 impl Source for Chats {
@@ -35,10 +51,14 @@ impl Source for Chats {
     }
 
     fn tools(&self) -> Value {
+        let searches = match &self.here {
+            Some((_, name)) => format!("Search the chats of the {name} project; chats of other projects cannot be reached from here."),
+            None => "Search every chat.".to_string(),
+        };
         json!([
             {
                 "name": "search_chats",
-                "description": "Search every chat. Every word must appear somewhere in a chat. Supports \"phrases\", -word, title:, me:, agent:, tool:, project:, provider:, after:, before: and card:. Returns each chat once with its id, title, project, provider, last activity, match count and up to three snippets.",
+                "description": format!("{searches} Every word must appear somewhere in a chat. Supports \"phrases\", -word, title:, me:, agent:, tool:, project:, provider:, after:, before: and card:. Returns each chat once with its id, title, project, provider, last activity, match count and up to three snippets."),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -85,10 +105,11 @@ impl Source for Chats {
                 let found = tokio::task::spawn_blocking(move || {
                     let parsed =
                         crate::workbench::search_query::parse(query.trim_start(), chrono::Local::now());
-                    let ids = match (&self.projects, parsed.projects.is_empty()) {
+                    let named = match (&self.projects, parsed.projects.is_empty()) {
                         (Some(projects), false) => projects_named(projects, &parsed.projects),
                         _ => Vec::new(),
                     };
+                    let ids = searched_in(self.here.as_ref(), named);
                     self.index.search_chats(&parsed, &ids, sort, offset, limit)
                 })
                 .await
@@ -161,6 +182,9 @@ impl Source for Chats {
 #[derive(Deserialize)]
 pub(super) struct Asking {
     question: String,
+    /// The project the panel was opened on, if it was opened on one.
+    #[serde(default)]
+    project: Option<String>,
 }
 
 pub(super) async fn ask(
@@ -186,9 +210,22 @@ pub(super) async fn ask(
             time_limit_seconds: DEFAULT_TIME_LIMIT,
         },
     };
+    // A project the app cannot name is still searched: an id that names no
+    // chats finds nothing, which is the safe way to be wrong about where you
+    // are. Wandering into every other project is not.
+    let here = asking.project.as_ref().map(|id| {
+        let name = state
+            .projects
+            .as_ref()
+            .and_then(|db| db.get_project(id).ok())
+            .map(|project| project.name)
+            .unwrap_or_else(|| "this".to_string());
+        (id.clone(), name)
+    });
     let source = Arc::new(Chats {
         index,
         projects: state.projects.clone(),
+        here,
     });
     let registry = &state.registry;
     agent::start(source, &asking.question, settings, |brand| {
@@ -215,9 +252,44 @@ mod tests {
             Arc::new(|_: &str| Vec::new()),
         );
         let Ok(index) = index else { return };
-        let tools = Chats { index, projects: None }.tools();
+        let tools = Chats { index, projects: None, here: None }.tools();
         let tools = tools.as_array().unwrap();
         assert_eq!(tools.len(), 2);
         assert!(tools.iter().all(|tool| tool["annotations"]["readOnlyHint"] == true));
+    }
+
+    #[test]
+    fn an_ask_made_inside_a_project_searches_that_project_whatever_its_agent_asks_for() {
+        let here = ("p-1".to_string(), "beads-web".to_string());
+        // The agent named another project; it is searched here all the same.
+        assert_eq!(
+            searched_in(Some(&here), vec!["p-2".to_string()]),
+            vec!["p-1".to_string()],
+        );
+        // And naming none does not widen it either.
+        assert_eq!(searched_in(Some(&here), Vec::new()), vec!["p-1".to_string()]);
+        // An ask made outside a project still goes where its words say.
+        assert_eq!(
+            searched_in(None, vec!["p-2".to_string()]),
+            vec!["p-2".to_string()],
+        );
+    }
+
+    #[test]
+    fn the_agent_is_told_which_project_it_is_searching() {
+        let index = SearchIndex::open(
+            &tempfile::tempdir().unwrap().keep().join("search.db"),
+            &tempfile::tempdir().unwrap().keep().join("workbench.db"),
+            Arc::new(|_: &str| Vec::new()),
+        );
+        let Ok(index) = index else { return };
+        let chats = Chats {
+            index,
+            projects: None,
+            here: Some(("p-1".to_string(), "beads-web".to_string())),
+        };
+        let tools = chats.tools();
+        let said = tools[0]["description"].as_str().unwrap().to_string();
+        assert!(said.starts_with("Search the chats of the beads-web project"), "{said}");
     }
 }

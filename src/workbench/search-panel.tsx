@@ -215,8 +215,9 @@ export function useChatSearch(here: Here | null): { source: SearchSource<ChatMat
         nothing: 'No chats.',
         url: '/api/workbench/search/ask',
         // Said to the server, not to the agent: an agent handed a suggestion
-        // drops it. While this is sent, every search it makes stays here.
-        body: mine ? { project: mine } : undefined,
+        // drops it. While this is sent, every search it makes stays here. The
+        // id, not the name, because nothing has to guess which project it is.
+        body: here ? { project: here.projectId } : undefined,
         row: (chat) => ({
           key: chat.sessionId,
           testId: 'ai-search-chat',
