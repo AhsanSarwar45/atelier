@@ -88,9 +88,84 @@ describe('the reads', () => {
   it('carries the limit it was given', async () => {
     mockFetch.mockResolvedValue(mockResponse({ commits: [] }));
 
-    await api.git.log(REPO, 20);
+    await api.git.log(REPO, { limit: 20 });
 
     expect(theCall().url).toContain('&limit=20');
+  });
+
+  it('carries every filter the search box set, encoded', async () => {
+    mockFetch.mockResolvedValue(mockResponse({ commits: [] }));
+
+    await api.git.log(REPO, {
+      limit: 30,
+      skip: 30,
+      grep: 'paint(text)',
+      author: 'someone else',
+      since: '2 weeks ago',
+      until: '2026-01-01',
+      sha: 'abc1234',
+      file: 'src/workbench',
+      ref: 'main',
+    });
+
+    const asked = new URL(theCall().url, 'http://x').searchParams;
+    expect(asked.get('limit')).toBe('30');
+    expect(asked.get('skip')).toBe('30');
+    expect(asked.get('grep')).toBe('paint(text)');
+    expect(asked.get('author')).toBe('someone else');
+    expect(asked.get('since')).toBe('2 weeks ago');
+    expect(asked.get('until')).toBe('2026-01-01');
+    expect(asked.get('sha')).toBe('abc1234');
+    expect(asked.get('file')).toBe('src/workbench');
+    expect(asked.get('ref')).toBe('main');
+  });
+
+  it('leaves a filter that was cleared off the request rather than sending it empty', async () => {
+    mockFetch.mockResolvedValue(mockResponse({ commits: [] }));
+
+    // `--grep=` matches every commit there is, so a blank must not be sent:
+    // a search box that has just been emptied means the whole history back,
+    // not a filter that happens to match all of it.
+    await api.git.log(REPO, { grep: '   ', author: '', skip: 0 });
+
+    const asked = new URL(theCall().url, 'http://x').searchParams;
+    expect(asked.has('grep')).toBe(false);
+    expect(asked.has('author')).toBe(false);
+    expect(asked.has('skip')).toBe(false);
+  });
+
+  it('asks for one commit by the name it was handed', async () => {
+    mockFetch.mockResolvedValue(
+      mockResponse({
+        commit: {
+          sha: 'a'.repeat(40),
+          shortSha: 'aaaaaaa',
+          author: 'Someone',
+          email: 'someone@example.test',
+          date: '2026-09-21T10:00:00+00:00',
+          committer: 'Someone Else',
+          committerEmail: 'else@example.test',
+          committerDate: '2026-09-21T11:00:00+00:00',
+          subject: 'What it does',
+          body: 'What it does\n\nWhy.',
+          parents: ['b'.repeat(40)],
+          refs: ['HEAD -> main'],
+          merge: false,
+          comparedWith: 'b'.repeat(40),
+        },
+        files: [],
+      }),
+    );
+
+    const shown = await api.git.show(REPO, 'abc 123');
+
+    expect(theCall().method).toBe('GET');
+    expect(theCall().url).toBe(
+      `/api/git/show?path=${encodeURIComponent(REPO)}&sha=${encodeURIComponent('abc 123')}`,
+    );
+    expect(shown.commit.committer).toBe('Someone Else');
+    expect(shown.commit.comparedWith).toBe('b'.repeat(40));
+    expect(shown.commit.merge).toBe(false);
   });
 
   it('asks for the diff at the agreed path, and reads back every field of it', async () => {

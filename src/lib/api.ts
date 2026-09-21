@@ -681,11 +681,75 @@ export interface GitCommit {
   /** ISO 8601, as git's own `%aI` gives it. */
   date: string;
   subject: string;
+  /** What it was built on, oldest parent first. Two or more means a merge. */
+  parents: string[];
+  /** The names standing here: `HEAD -> main`, `origin/main`, `tag: v1`. */
+  refs: string[];
 }
 
 /** Recent saved changes, newest first. */
 export interface GitLogResponse {
   commits: GitCommit[];
+}
+
+/**
+ * How much of the history to read, and which part of it (bw-g6zy.2).
+ *
+ * Every field but `limit` and `skip` is a filter, and git answers all of them
+ * itself. Sieving the commits already in hand would only ever search as far
+ * back as the panel happens to have read, which is not what a person typing
+ * into a search box is asking for.
+ */
+export interface GitLogQuery {
+  /** How many to read. */
+  limit?: number;
+  /** How many to step over first, so the list can walk further back. */
+  skip?: number;
+  /** Words to find in the message. Matched as plain text, not as a pattern. */
+  grep?: string;
+  /** Any part of the author's name or email. */
+  author?: string;
+  /** The earliest to read: `2026-01-01` and `2 weeks ago` both work. */
+  since?: string;
+  /** The latest to read, same spelling. */
+  until?: string;
+  /** One commit by name or by any prefix, looked up beside the words. */
+  sha?: string;
+  /** Only commits that touched this path, relative to the repository root. */
+  file?: string;
+  /** The line of work to walk, instead of the one checked out. */
+  ref?: string;
+}
+
+/**
+ * One commit, in full: everything the log carries, plus the whole message,
+ * the committer, and which commit the patch beside it was taken against.
+ */
+export interface GitCommitDetail extends GitCommit {
+  /**
+   * Who committed it. The same person as the author until the change has been
+   * rebased, cherry-picked or applied from a patch — which is the only time
+   * the panel draws this at all.
+   */
+  committer: string;
+  committerEmail: string;
+  /** ISO 8601. */
+  committerDate: string;
+  /** The whole message, subject line and all, newlines kept. */
+  body: string;
+  /** Two parents or more. */
+  merge: boolean;
+  /**
+   * The commit the patch was taken against: the first parent ordinarily, and
+   * null for a first commit, which is compared with nothing at all.
+   */
+  comparedWith: string | null;
+}
+
+/** One commit and what it changed, in the same shape `diff` gives. */
+export interface GitShowResponse {
+  commit: GitCommitDetail;
+  files: GitDiffFile[];
 }
 
 /**
@@ -975,9 +1039,39 @@ export const git = {
     signal ? { signal } : undefined,
   ),
 
-  /** Recent saved changes, newest first. */
-  log: (path: string, limit = 50, signal?: AbortSignal) => fetchApi<GitLogResponse>(
-    `/api/git/log?path=${encodeURIComponent(path)}&limit=${limit}`,
+  /**
+   * Recent saved changes, newest first, narrowed by whatever was asked for.
+   *
+   * A filter left empty is left off the request entirely rather than sent as
+   * a blank: `--grep=` matches every commit there is, and a search box that
+   * has just been cleared means the opposite of that.
+   */
+  log: (path: string, query: GitLogQuery = {}, signal?: AbortSignal) => {
+    // Built by hand rather than with URLSearchParams, which spells a space as
+    // `+`: every other call in this file encodes its path the one way, and a
+    // project path is the last thing that should read differently here.
+    const asked = [
+      `path=${encodeURIComponent(path)}`,
+      `limit=${query.limit ?? 50}`,
+    ];
+    if (query.skip) asked.push(`skip=${query.skip}`);
+    for (const name of ['grep', 'author', 'since', 'until', 'sha', 'file', 'ref'] as const) {
+      const value = query[name]?.trim();
+      if (value) asked.push(`${name}=${encodeURIComponent(value)}`);
+    }
+    return fetchApi<GitLogResponse>(
+      `/api/git/log?${asked.join('&')}`,
+      signal ? { signal } : undefined,
+    );
+  },
+
+  /**
+   * One commit: who made it, what they said, and the patch it carries
+   * (bw-g6zy.2). `sha` may be any prefix long enough for git to resolve, so
+   * the name a person pasted out of the log opens the commit it came from.
+   */
+  show: (path: string, sha: string, signal?: AbortSignal) => fetchApi<GitShowResponse>(
+    `/api/git/show?path=${encodeURIComponent(path)}&sha=${encodeURIComponent(sha)}`,
     signal ? { signal } : undefined,
   ),
 };

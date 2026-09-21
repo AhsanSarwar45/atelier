@@ -600,7 +600,7 @@ export function GitView({
           // after a stage or a commit — asks for a fresh one, because the
           // point of reading again after a write is to see the write.
           readRepositoryStatus(path, { fresh: !quietly }),
-          git.log(path, LOG_LIMIT, signal),
+          git.log(path, { limit: LOG_LIMIT }, signal),
         ]);
         if (signal?.aborted) return;
         setStatus(state);
