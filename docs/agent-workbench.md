@@ -2412,10 +2412,18 @@ loopback and the RFC1918 private ranges — "home network only" implemented as
 a check rather than as a hope. Plus a responsive chat layout: the sidebar
 collapses to a drawer under 768px and the composer stays reachable.
 
-**(e) Search across all conversations.** `GET /search?q=` over `message.text`,
+**(e) Search across conversations.** `GET /search?q=` over `message.text`,
 results grouped by session with the matched sentence highlighted and its
 project and date; clicking jumps to the chat scrolled to that message.
-Cross-project, reachable from the header.
+Reachable from the header.
+
+Opened from inside a project, it starts in that project, the way the board and
+the files searches always did (bw-c1ti). The box opens already reading
+`project:<name>`, which the Project menu reads back and which can be deleted to
+search every project again — the scope is a word in the query, never a hidden
+setting. The AI ask has no box to read, so it is held to the project on the
+server instead: it carries the project id, and every search its agent makes is
+made there whatever its own query names.
 
 **(f) Spend per project per day.** `GET /spend` aggregates the `turn` table.
 Rendered with `recharts` (already a dependency) as **two charts, never one**: a
