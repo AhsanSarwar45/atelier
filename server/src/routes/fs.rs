@@ -1209,6 +1209,119 @@ fn first_working_launcher(commands: Vec<std::process::Command>) -> Result<(), St
     })
 }
 
+/// A file URI's text as one GVariant string literal, quotes and all.
+///
+/// `gdbus` is handed its arguments as GVariant source text rather than as
+/// plain words, so the URI has to carry its own quoting. Double quotes are
+/// used because `Url::from_file_path` leaves an apostrophe in a file name
+/// alone but percent-encodes a quotation mark, and the backslash is escaped
+/// for the one case that could still arrive.
+fn gvariant_string(text: &str) -> String {
+    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// The commands that raise the reader's file manager with `path` picked out.
+///
+/// Revealing a file is its own verb on every desktop and has to be asked for
+/// by name. [`open::commands`] answers a different question — "hand this path
+/// to whatever opens it" — which for a file is the editor, the image viewer or
+/// whatever else the desktop has registered, and never the file manager. That
+/// is why every Reveal button in the app opened the wrong program (bw-31sl.1).
+///
+/// A folder is its own answer: a reader asking to reveal a folder means "show
+/// me what is inside it", so that one is opened rather than picked out of its
+/// parent.
+///
+/// The list ends with the launchers for the containing folder. On a desktop
+/// where nothing here can select a file, landing the reader in the right
+/// folder is still the place they were trying to get to.
+fn reveal_commands(path: &std::path::Path) -> Vec<std::process::Command> {
+    if path.is_dir() {
+        return open::commands(path);
+    }
+
+    let mut commands = Vec::new();
+
+    #[cfg(target_os = "macos")]
+    {
+        let mut finder = std::process::Command::new("open");
+        finder.arg("-R").arg(path);
+        commands.push(finder);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // `/select,<path>` is a single argument: Explorer splits at the comma
+        // itself, and passing the two apart opens the reader's home instead.
+        let mut explorer = std::process::Command::new("explorer");
+        explorer.arg(format!("/select,{}", path.display()));
+        commands.push(explorer);
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        // The freedesktop interface that Dolphin, Nautilus, Nemo, Thunar and
+        // PCManFM all answer. Asking over the session bus means whichever file
+        // manager the reader actually uses is the one that comes up, without
+        // this list having to know its name. `gdbus` and `dbus-send` ship with
+        // glib and dbus respectively, and a machine usually has one or other.
+        if let Ok(uri) = reqwest::Url::from_file_path(path) {
+            let mut gdbus = std::process::Command::new("gdbus");
+            gdbus
+                .args([
+                    "call",
+                    "--session",
+                    "--dest",
+                    "org.freedesktop.FileManager1",
+                    "--object-path",
+                    "/org/freedesktop/FileManager1",
+                    "--method",
+                    "org.freedesktop.FileManager1.ShowItems",
+                ])
+                .arg(format!("[{}]", gvariant_string(uri.as_str())))
+                .arg("\"\"");
+            commands.push(gdbus);
+
+            let mut dbus_send = std::process::Command::new("dbus-send");
+            dbus_send
+                .args([
+                    "--session",
+                    "--print-reply",
+                    "--dest=org.freedesktop.FileManager1",
+                    "/org/freedesktop/FileManager1",
+                    "org.freedesktop.FileManager1.ShowItems",
+                ])
+                .arg(format!("array:string:{uri}"))
+                .arg("string:");
+            commands.push(dbus_send);
+        }
+
+        // A file manager named outright, for a desktop that answers no such
+        // bus name. Each is asked to select the file where it knows how.
+        for (program, select) in [
+            ("dolphin", Some("--select")),
+            ("nautilus", Some("--select")),
+            ("nemo", None),
+            ("caja", Some("--select")),
+            ("thunar", None),
+            ("pcmanfm", None),
+        ] {
+            let mut manager = std::process::Command::new(program);
+            if let Some(select) = select {
+                manager.arg(select);
+            }
+            manager.arg(path);
+            commands.push(manager);
+        }
+    }
+
+    if let Some(parent) = path.parent() {
+        commands.extend(open::commands(parent));
+    }
+
+    commands
+}
+
 /// POST /api/fs/open-external
 ///
 /// Opens a path in an external application (VS Code, Cursor, or Finder/Explorer).
@@ -1279,11 +1392,11 @@ pub async fn open_external(Json(request): Json<OpenExternalRequest>) -> impl Int
             }
         }
         "finder" => {
-            // The `open` crate's launcher list gives the cross-platform support
-            // (macOS: Finder, Linux: file manager, Windows: Explorer); walking it
+            // `reveal_commands` gives the cross-platform list (macOS: Finder,
+            // Linux: the session's file manager, Windows: Explorer); walking it
             // here rather than through `open::that` is what lets a launcher that
             // exits non-zero fall through to the next one.
-            return match first_working_launcher(open::commands(&path)) {
+            return match first_working_launcher(reveal_commands(&path)) {
                 Ok(()) => (
                     StatusCode::OK,
                     Json(serde_json::json!({ "success": true })),
@@ -1291,7 +1404,7 @@ pub async fn open_external(Json(request): Json<OpenExternalRequest>) -> impl Int
                 Err(e) => (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(serde_json::json!({
-                        "error": format!("Failed to open: {}", e)
+                        "error": format!("Failed to reveal: {}", e)
                     })),
                 ),
             };
@@ -2379,6 +2492,92 @@ mod tests {
         assert!(complaint.contains("all 2 launchers"), "{complaint}");
         assert!(complaint.contains("exited with"), "{complaint}");
         assert!(complaint.contains("atelier-no-such-launcher-bw-1hmu"), "{complaint}");
+    }
+
+    /// Each command as it would be printed, so a list can be stated without
+    /// running anything.
+    #[cfg(unix)]
+    fn described(commands: Vec<std::process::Command>) -> Vec<String> {
+        commands.iter().map(|command| format!("{command:?}")).collect()
+    }
+
+    /// Revealing a file asks for the file manager by name. Before bw-31sl.1
+    /// the button ran the desktop's default handler for the file, so a `.md`
+    /// opened in an editor and a `.png` in an image viewer — anywhere but the
+    /// file manager the button's own label promised.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn revealing_a_file_asks_the_file_manager_to_select_it() {
+        let scratch = tempfile::tempdir().unwrap();
+        let file = scratch.path().join("notes.md");
+        std::fs::write(&file, "hello").unwrap();
+
+        let lines = described(reveal_commands(&file));
+        let uri = format!("file://{}", file.display());
+
+        let first = &lines[0];
+        assert!(first.contains("gdbus"), "{first}");
+        assert!(first.contains("org.freedesktop.FileManager1.ShowItems"), "{first}");
+        assert!(first.contains(&uri), "{first}");
+
+        assert!(
+            lines.iter().any(|line| line.contains("dbus-send")
+                && line.contains("org.freedesktop.FileManager1.ShowItems")),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().any(|line| line.contains("dolphin") && line.contains("--select")),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().any(|line| line.contains("nautilus") && line.contains("--select")),
+            "{lines:?}"
+        );
+        assert!(
+            !lines.iter().any(|line| line.contains("xdg-open") && line.contains("notes.md")),
+            "the file itself was still handed to the default handler: {lines:?}"
+        );
+    }
+
+    /// When no launcher on the machine can pick a file out, the folder holding
+    /// it is still where the reader was trying to get to.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn revealing_a_file_falls_back_to_opening_its_folder() {
+        let scratch = tempfile::tempdir().unwrap();
+        let file = scratch.path().join("notes.md");
+        std::fs::write(&file, "hello").unwrap();
+
+        let lines = described(reveal_commands(&file));
+        let folder = scratch.path().display().to_string();
+
+        let last = lines.last().unwrap();
+        assert!(last.contains(&folder), "{last}");
+        assert!(!last.contains("notes.md"), "{last}");
+    }
+
+    /// A reader who asks to reveal a folder means "show me what is inside it",
+    /// so the folder is opened rather than picked out of its parent. This is
+    /// what the project card's own button has always asked for.
+    #[cfg(unix)]
+    #[test]
+    fn revealing_a_folder_opens_that_folder() {
+        let scratch = tempfile::tempdir().unwrap();
+        let folder = scratch.path().to_path_buf();
+
+        assert_eq!(
+            described(reveal_commands(&folder)),
+            described(open::commands(&folder)),
+        );
+    }
+
+    /// A file name with a quotation mark in it must not be able to end the
+    /// GVariant string `gdbus` is handed and have the rest read as source.
+    #[test]
+    fn a_gvariant_string_carries_its_own_quoting() {
+        assert_eq!(gvariant_string("file:///a/b"), "\"file:///a/b\"");
+        assert_eq!(gvariant_string("a\"b"), "\"a\\\"b\"");
+        assert_eq!(gvariant_string("a\\b"), "\"a\\\\b\"");
     }
 
     /// The real route, carrying a real request, against whatever launchers this
