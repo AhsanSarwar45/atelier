@@ -74,6 +74,16 @@ test('a new chat is offered the project, a worktree of it, or one made here', as
     await expect(dialog.getByTestId('where-missing')).toHaveCount(0);
     await dialog.screenshot({ path: 'tests/results/bw-ov7a3-a-new-worktree.png' });
 
+    // A name with a separator in it is a name, not a folder inside a folder
+    // (bw-dejg.1). The name a worktree gets usually follows its branch, and
+    // branches are named like this, so it is taken as typed and the one flat
+    // folder it lands in is said underneath.
+    await dialog.getByTestId('where-new-name').fill('feat/login');
+    await expect(dialog.getByTestId('where-branch-name')).toHaveValue('feat/login');
+    await expect(dialog.getByTestId('where-missing')).toHaveCount(0);
+    await expect(dialog.getByTestId('where-new-folder')).toHaveText('Folder: feat-login');
+    await dialog.screenshot({ path: 'tests/results/bw-dejg1-a-name-with-a-separator.png' });
+
     // A name another worktree already has is refused where it is typed,
     // rather than after the chat has been asked for.
     await dialog.getByTestId('where-new-name').fill('reading-room');
