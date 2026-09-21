@@ -87,6 +87,62 @@ pub fn print_of(seen: &Seen) -> String {
     format!("{:016x}", seen.mark)
 }
 
+/// What the file system already knows about a program file, without opening it.
+///
+/// A build is tens of megabytes. Reading and hashing all of it every ten
+/// seconds to ask "has it changed?" costs megabytes a second forever and
+/// answers no every single time — on the owner's machine that one question was
+/// 87 MB of reading in every half minute the app sat idle. Installing a build
+/// writes a different file: its length, the time it was last written and its
+/// identity on this disk cannot all stay as they were. So the cheap three are
+/// asked first, and the whole file is read only once they say something moved
+/// (bw-y18u.2).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Glance {
+    pub len: u64,
+    pub written_at: Option<std::time::SystemTime>,
+    pub file: Option<(u64, u64)>,
+}
+
+/// Glance at a program file. Nothing if it is not there or cannot be asked
+/// about — which is not the same answer as "unchanged", and is never read as
+/// one.
+pub fn glance(path: &Path) -> Option<Glance> {
+    let about = std::fs::metadata(path).ok()?;
+    Some(Glance {
+        len: about.len(),
+        written_at: about.modified().ok(),
+        file: file_identity(&about),
+    })
+}
+
+/// Which file this is on this disk, where the computer says so. An install
+/// that writes a new file and renames it over the old one keeps the name and
+/// changes this.
+#[cfg(unix)]
+fn file_identity(about: &std::fs::Metadata) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    Some((about.dev(), about.ino()))
+}
+
+#[cfg(not(unix))]
+fn file_identity(_about: &std::fs::Metadata) -> Option<(u64, u64)> {
+    None
+}
+
+/// Whether a glance is worth the price of reading the whole file.
+///
+/// Anything but the same three facts seen at the same file counts as worth
+/// looking at, including a glance that found nothing: a program file that has
+/// gone is exactly the case the full look is there to confirm.
+pub fn worth_a_look(before: Option<Glance>, now: Option<Glance>) -> bool {
+    match (before, now) {
+        (Some(was), Some(is)) => was != is,
+        (Some(_), None) => true,
+        (None, _) => true,
+    }
+}
+
 /* ------------------------------------------------------------------ *
  * Handing over to a newer build.
  * ------------------------------------------------------------------ */
@@ -193,11 +249,22 @@ pub fn stand_down_for_a_newer_build(registered: PathBuf) {
         );
         return;
     };
+    let mut quiet = glance(&registered);
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(LOOK_EVERY).await;
+            // The cheap question first. While the program file sits exactly as
+            // it was, this whole check costs one look at its directory entry.
+            let seen_now = glance(&registered);
+            if !worth_a_look(quiet, seen_now) {
+                continue;
+            }
             let now = look(&registered);
             if !a_newer_build_is_there(Some(at_start), now) {
+                // Something about the file moved without the build changing —
+                // a touch, a reinstall of the same bytes. Take the new glance
+                // as the quiet one, so it is not read again every ten seconds.
+                quiet = seen_now;
                 continue;
             }
             // Let it settle, then look once more. A half-written file is not a
@@ -205,6 +272,9 @@ pub fn stand_down_for_a_newer_build(registered: PathBuf) {
             tokio::time::sleep(SETTLE).await;
             let settled = look(&registered);
             if !a_newer_build_is_there(Some(at_start), settled) {
+                // Back to the build already running, whatever happened in
+                // between. This is the file to sit quietly on now.
+                quiet = glance(&registered);
                 continue;
             }
             if settled.is_none() {
@@ -494,5 +564,50 @@ mod tests {
     #[test]
     fn a_look_at_nothing_is_nothing() {
         assert!(look(Path::new("/nowhere/at/all/atelier")).is_none());
+    }
+
+    #[test]
+    fn a_program_file_nobody_has_touched_is_not_worth_reading_again() {
+        let dir = tempfile::tempdir().expect("a temporary folder");
+        let build = dir.path().join("atelier");
+        std::fs::write(&build, b"a build").unwrap();
+        let quiet = glance(&build).expect("the build is there");
+        assert_eq!(glance(&build), Some(quiet), "nothing happened to it");
+        assert!(!worth_a_look(Some(quiet), glance(&build)));
+    }
+
+    #[test]
+    fn a_build_installed_over_the_old_one_is_worth_reading() {
+        let dir = tempfile::tempdir().expect("a temporary folder");
+        let build = dir.path().join("atelier");
+        std::fs::write(&build, b"the old build").unwrap();
+        let quiet = glance(&build).expect("the build is there");
+
+        // How an install arrives: the new program is written beside the old
+        // one and renamed over it, so the name is the same file no longer.
+        let arriving = dir.path().join("atelier.new");
+        std::fs::write(&arriving, b"the new build").unwrap();
+        std::fs::rename(&arriving, &build).unwrap();
+
+        assert!(
+            worth_a_look(Some(quiet), glance(&build)),
+            "a newer build must not be able to hide behind a cheap glance"
+        );
+    }
+
+    #[test]
+    fn a_program_file_that_has_gone_is_worth_reading() {
+        let dir = tempfile::tempdir().expect("a temporary folder");
+        let build = dir.path().join("atelier");
+        std::fs::write(&build, b"a build").unwrap();
+        let quiet = glance(&build).expect("the build is there");
+        std::fs::remove_file(&build).unwrap();
+
+        assert_eq!(glance(&build), None);
+        assert!(worth_a_look(Some(quiet), None), "gone is a change, not a silence");
+        assert!(
+            worth_a_look(None, glance(&build)),
+            "a glance that never landed can settle nothing, so the full look decides"
+        );
     }
 }
