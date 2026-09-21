@@ -9,12 +9,20 @@ test.beforeAll(() => {
   const claude = process.env.CLAUDE_CONFIG_DIR!;
   const codex = process.env.CODEX_HOME!;
   mkdirSync(join(claude, 'agents'), { recursive: true });
-  mkdirSync(join(claude, 'skills', 'review'), { recursive: true });
+  mkdirSync(join(claude, 'skills', 'review', 'scripts'), { recursive: true });
+  mkdirSync(join(claude, 'skills', 'synced', 'bundle-1a600a93', 'docx'), { recursive: true });
   mkdirSync(join(codex, 'agents'), { recursive: true });
   writeFileSync(join(claude, 'CLAUDE.md'), '# Personal instructions\n\n- Prefer focused changes.\n- Run the relevant tests.\n');
   writeFileSync(join(claude, 'settings.json'), '{\n  "model": "sonnet"\n}\n');
   writeFileSync(join(claude, 'agents', 'reviewer.md'), '---\nname: reviewer\n---\nReview changed code.\n');
   writeFileSync(join(claude, 'skills', 'review', 'SKILL.md'), '---\nname: review\ndescription: Review a change\n---\nReview carefully.\n');
+  // What a real skill carries beside its SKILL.md, and what a marketplace
+  // sync leaves under `synced`. Neither is a thing anyone edits here.
+  writeFileSync(join(claude, 'skills', 'review', 'LICENSE.txt'), 'MIT\n');
+  writeFileSync(join(claude, 'skills', 'review', 'scripts', 'review.py'), 'pass\n');
+  writeFileSync(join(claude, 'skills', 'synced', 'bundle-1a600a93', 'docx', 'SKILL.md'), '---\nname: docx\n---\nWrite Word files.\n');
+  writeFileSync(join(claude, 'skills', 'synced', 'bundle-1a600a93', 'manifest.json'), '{}\n');
+  writeFileSync(join(claude, 'skills', 'synced', '.bucket-1a600a93'), '\n');
   writeFileSync(join(codex, 'AGENTS.md'), '# Codex instructions\n\nKeep reports concise.\n');
   writeFileSync(join(codex, 'config.toml'), 'model = "gpt-5.6-sol"\n');
   writeFileSync(join(codex, 'agents', 'researcher.toml'), 'name = "researcher"\nsandbox_mode = "read-only"\n');
@@ -90,4 +98,31 @@ test('uses file-list then reader navigation on a phone', async ({ page }) => {
   const saveBox = await line('agent-file-save');
   expect(Math.abs(nameBox.y - saveBox.y)).toBeLessThan(saveBox.height);
   await page.screenshot({ path: join(results, 'phone.png'), fullPage: true });
+});
+
+test('a skill is one row named for the skill, not every file inside it', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/settings?section=files');
+  const list = page.getByRole('complementary', { name: 'Agent files' });
+  // Pictured before anything is asserted, so a run against the old discovery
+  // still leaves the screenful it drew.
+  await expect(list.getByTestId('agent-file-CLAUDE.md')).toBeVisible();
+  await expect(list.getByText('Skills').first()).toBeVisible();
+  await page.screenshot({ path: join(results, 'skills.png'), fullPage: true });
+  await expect(list.getByTestId('agent-file-review')).toBeVisible();
+
+  // The skill's own assets, and the marketplace's copies under `synced`, used
+  // to be rows of their own — two hundred of them on a real machine, most
+  // titled `SKILL.md` (bw-xnvs.1).
+  await expect(list.getByTestId('agent-file-SKILL.md')).toHaveCount(0);
+  await expect(list.getByTestId('agent-file-LICENSE.txt')).toHaveCount(0);
+  await expect(list.getByTestId('agent-file-review.py')).toHaveCount(0);
+  await expect(list.getByTestId('agent-file-manifest.json')).toHaveCount(0);
+  await expect(list.getByTestId('agent-file-docx')).toHaveCount(0);
+  await expect(list.getByText('synced')).toHaveCount(0);
+
+  // The row opens the skill's own text, and the title is the skill.
+  await list.getByTestId('agent-file-review').click();
+  await expect(page.getByTestId('agent-file-name')).toHaveText('review');
+  await expect(page.getByTestId('agent-file-editor')).toContainText('Review carefully.');
 });

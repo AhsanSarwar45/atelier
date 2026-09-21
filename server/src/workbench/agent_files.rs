@@ -172,6 +172,58 @@ fn below(root: &Path, extensions: Option<&[&str]>) -> Vec<PathBuf> {
     out
 }
 
+/// The directory a marketplace sync owns. Everything under it is rewritten
+/// wholesale by the next sync, so it holds nothing a person edits here.
+const SYNCED: &str = "synced";
+
+/// One row per skill rather than one per file inside it.
+///
+/// A skill is a directory holding a `SKILL.md`; its references, scripts,
+/// licence and manifest belong to that skill and are not separate things to
+/// edit. Walking every file instead turned one machine's skills into two
+/// hundred rows, most of them named `SKILL.md` or `__init__.py` (bw-xnvs.1).
+fn skills(root: &Path) -> Vec<PathBuf> {
+    fn visit(dir: &Path, visited: &mut HashSet<PathBuf>, out: &mut Vec<PathBuf>) {
+        if out.len() >= MAX_FILES {
+            return;
+        }
+        let Ok(real) = fs::canonicalize(dir) else {
+            return;
+        };
+        if !visited.insert(real) {
+            return;
+        }
+        let manifest = dir.join("SKILL.md");
+        if manifest.is_file() {
+            out.push(manifest);
+            return;
+        }
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        let mut children: Vec<PathBuf> = entries
+            .flatten()
+            .filter(|entry| {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                !name.starts_with('.') && name != SYNCED && !SKIP.contains(&name.as_ref())
+            })
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .collect();
+        children.sort();
+        for child in children {
+            visit(&child, visited, out);
+            if out.len() >= MAX_FILES {
+                return;
+            }
+        }
+    }
+    let mut out = Vec::new();
+    visit(root, &mut HashSet::new(), &mut out);
+    out
+}
+
 fn locations(project: Option<&Path>, home: &Path, claude: &Path, codex: &Path) -> Vec<Location> {
     let loc = |provider, scope, category, root: PathBuf, files, legacy| Location {
         provider,
@@ -228,7 +280,7 @@ fn locations(project: Option<&Path>, home: &Path, claude: &Path, codex: &Path) -
             Scope::Personal,
             Category::Skills,
             claude.join("skills"),
-            below(&claude.join("skills"), None),
+            skills(&claude.join("skills")),
             false,
         ),
         loc(
@@ -293,7 +345,7 @@ fn locations(project: Option<&Path>, home: &Path, claude: &Path, codex: &Path) -
                 Scope::Personal,
                 Category::Skills,
                 home.join(".agents/skills"),
-                below(&home.join(".agents/skills"), None),
+                skills(&home.join(".agents/skills")),
                 false,
             )
         },
@@ -386,7 +438,7 @@ fn locations(project: Option<&Path>, home: &Path, claude: &Path, codex: &Path) -
             Scope::Project,
             Category::Skills,
             project.join(".agents/skills"),
-            below(&project.join(".agents/skills"), None),
+            skills(&project.join(".agents/skills")),
             false,
         ),
     ]);
@@ -403,12 +455,16 @@ fn locations(project: Option<&Path>, home: &Path, claude: &Path, codex: &Path) -
         ),
     ] {
         let root = project.join(".claude").join(name);
+        let files = match category {
+            Category::Skills => skills(&root),
+            _ => below(&root, extensions),
+        };
         rows.push(loc(
             Provider::Claude,
             Scope::Project,
             category,
             root.clone(),
-            below(&root, extensions),
+            files,
             legacy,
         ));
     }
@@ -443,20 +499,26 @@ pub fn discover(
                 location.scope.wire(),
                 absolute.display()
             );
+            // A skill is named and placed by its directory, not by the
+            // `SKILL.md` every one of them holds (bw-xnvs.1).
+            let named = match location.category {
+                Category::Skills => path.parent().unwrap_or(&path),
+                _ => &path,
+            };
             files.push(AgentFile {
                 id: base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw_id),
                 provider: location.provider,
                 scope: location.scope,
                 category: location.category,
-                name: path
+                name: named
                     .file_name()
                     .unwrap_or_default()
                     .to_string_lossy()
                     .into_owned(),
                 path: path.clone(),
-                relative_path: path
+                relative_path: named
                     .strip_prefix(&location.root)
-                    .unwrap_or(&path)
+                    .unwrap_or(named)
                     .to_path_buf(),
                 format: format_of(&path),
                 legacy: location.legacy,
@@ -681,20 +743,18 @@ mod tests {
         fs::write(project.path().join("package.json"), "{}").unwrap();
         let files = discover(Some(project.path()), home.path(), None, None);
         assert!(files.iter().any(|f| f.name == "old.md" && f.legacy));
+        // A skill is one row, named for the skill.
         assert!(files
             .iter()
-            .any(|f| f.name == "SKILL.md" && f.provider == Provider::Codex));
+            .any(|f| f.name == "shared" && f.provider == Provider::Codex));
         // Codex's personal skills are under `$HOME/.agents`, which CODEX_HOME
         // does not move, so they are the same for every Codex account and are
         // marked as such. Everything else personal follows the account and is
         // not (bw-6ecp.15).
         assert!(files
             .iter()
-            .any(|f| f.name == "SKILL.md" && f.provider == Provider::Codex && f.shared));
-        assert!(files
-            .iter()
-            .filter(|f| f.name != "SKILL.md")
-            .all(|f| !f.shared));
+            .any(|f| f.name == "shared" && f.provider == Provider::Codex && f.shared));
+        assert!(files.iter().filter(|f| f.name != "shared").all(|f| !f.shared));
         let agent = project.path().join(".codex/agents/reviewer.toml");
         assert_eq!(
             read(&agent, Some(project.path()), home.path(), None, None).unwrap(),
@@ -708,6 +768,52 @@ mod tests {
             None
         )
         .is_err());
+    }
+
+    #[test]
+    fn native_workbench_services_agent_files_lists_a_skill_once_not_every_file_in_it() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join(".claude/skills");
+        // A hand-written skill, with the assets a real one carries.
+        fs::create_dir_all(root.join("external-review/scripts")).unwrap();
+        fs::create_dir_all(root.join("external-review/references")).unwrap();
+        fs::write(root.join("external-review/SKILL.md"), "review").unwrap();
+        fs::write(root.join("external-review/LICENSE.txt"), "mit").unwrap();
+        fs::write(root.join("external-review/scripts/run.py"), "pass").unwrap();
+        fs::write(root.join("external-review/references/how.md"), "how").unwrap();
+        // The marketplace's own copies, which the next sync rewrites.
+        fs::create_dir_all(root.join("synced/1a600a93_b76bb31d/docx")).unwrap();
+        fs::write(root.join("synced/1a600a93_b76bb31d/docx/SKILL.md"), "docx").unwrap();
+        fs::write(root.join("synced/1a600a93_b76bb31d/manifest.json"), "{}").unwrap();
+        fs::write(root.join("synced/.bucket-1a600a93_b76bb31d"), "").unwrap();
+        // A directory that holds no SKILL.md is not a skill.
+        fs::create_dir_all(root.join("report")).unwrap();
+
+        let listed: Vec<_> = discover(None, home.path(), None, None)
+            .into_iter()
+            .filter(|f| f.category == Category::Skills && f.provider == Provider::Claude)
+            .collect();
+        assert_eq!(
+            listed.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+            ["external-review"]
+        );
+        let skill = &listed[0];
+        assert_eq!(skill.path, root.join("external-review/SKILL.md"));
+        // The row is named and placed by the skill, so the screen shows no
+        // second line of path under a title reading `SKILL.md`.
+        assert_eq!(skill.relative_path, Path::new("external-review"));
+        // Nothing inside the marketplace tree is readable through the screen.
+        for hidden in [
+            root.join("synced/1a600a93_b76bb31d/docx/SKILL.md"),
+            root.join("synced/1a600a93_b76bb31d/manifest.json"),
+            root.join("external-review/LICENSE.txt"),
+        ] {
+            assert!(
+                read(&hidden, None, home.path(), None, None).is_err(),
+                "{}",
+                hidden.display()
+            );
+        }
     }
 
     #[test]
