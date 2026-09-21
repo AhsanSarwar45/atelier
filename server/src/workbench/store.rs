@@ -545,27 +545,53 @@ fn held_in_its_project(
     crate::workbench::provider::held_in(std::path::Path::new(&session.cwd), folders)
 }
 
-    /// The chats in the middle of a turn, by id — what the registry's sweep
-    /// looks for, without loading every chat ever kept to find them.
-    pub fn active_session_ids(&self) -> rusqlite::Result<Vec<String>> {
+    /// What the sweep asks for: the chats in the middle of a turn.
+    ///
+    /// A row and its last status event can disagree — a chat put to sleep
+    /// changes the row without an event — so either one being active puts the
+    /// chat in front of the status decision (bw-1fw6).
+    ///
+    /// Each chat is asked for its own newest state row, by chat. The cost is
+    /// then one index seek per chat — a number that grows as slowly as the
+    /// chat list does — and not one pass over every state row ever written.
+    ///
+    /// It used to name `event` first, repeat `type='session.state'` outside
+    /// the join, and take the newest seq of each chat from a `GROUP BY` over
+    /// the whole type index. Both halves of that are reading the store has no
+    /// use for: the planner drove the statement from the type index and
+    /// fetched every `session.state` row ever kept off its own page to parse
+    /// as json, and even once that was corrected the grouping still walked all
+    /// of them. The sweep asks this every five seconds: on the owner's 6.1 GB
+    /// store the first cost 620 MB a tick and the second 16 MB, against 4 MB
+    /// for asking chat by chat. The plan is asserted in a test, because the
+    /// cost was entirely in the plan — the answer was always right (bw-y18u.1).
+    ///
+    /// One deliberate difference: an event left behind by a chat whose row is
+    /// gone can no longer put that chat's id in front of the sweep, which had
+    /// nothing to reconcile it against anyway.
+    fn active_session_sql() -> String {
         let placeholders = super::status::ACTIVE_STATES
             .iter()
             .map(|state| format!("'{state}'"))
             .collect::<Vec<_>>()
             .join(",");
-        // A row and its last status event can disagree — a chat put to sleep
-        // changes the row without an event — so either one being active puts
-        // the chat in front of the status decision (bw-1fw6).
-        let mut statement = self.connection.prepare(&format!(
+        format!(
             r#"SELECT id FROM session WHERE state IN ({placeholders})
                UNION
-               SELECT event.session_id FROM event
-                 JOIN (SELECT session_id, MAX(seq) AS seq FROM event
-                        WHERE type='session.state' GROUP BY session_id) AS latest
-                   ON latest.session_id=event.session_id AND latest.seq=event.seq
-                WHERE event.type='session.state'
-                  AND json_extract(event.json,'$.state') IN ({placeholders})"#
-        ))?;
+               SELECT chat.id FROM session AS chat
+                WHERE json_extract(
+                        (SELECT newest.json FROM event AS newest
+                          WHERE newest.session_id=chat.id
+                            AND newest.type='session.state'
+                          ORDER BY newest.seq DESC LIMIT 1),
+                        '$.state') IN ({placeholders})"#
+        )
+    }
+
+    /// The chats in the middle of a turn, by id — what the registry's sweep
+    /// looks for, without loading every chat ever kept to find them.
+    pub fn active_session_ids(&self) -> rusqlite::Result<Vec<String>> {
+        let mut statement = self.connection.prepare(&Self::active_session_sql())?;
         let found = statement.query_map([], |row| row.get(0))?.collect();
         found
     }
@@ -4527,6 +4553,88 @@ mod tests {
         assert!(
             plan.iter().any(|step| step.contains("event_by_type")),
             "both halves are found through the type index: {plan:?}"
+        );
+    }
+
+    /// The sweep's question — which chats are mid-turn — reads the json of
+    /// each chat's newest state row and of nothing else.
+    ///
+    /// It used to name `event` first and repeat `type='session.state'` outside
+    /// the join, which let the planner drive from the type index and fetch
+    /// every state row the store had ever kept, off its own page, to parse as
+    /// json. Measured on the owner's 6.1 GB store: 166,534 rows and 620 MB of
+    /// reading every five seconds, for ever, to name two chats. The plan is
+    /// asserted because the cost is entirely in the plan — the answer was
+    /// always right (bw-y18u.1).
+    #[test]
+    fn workbench_core_active_chats_read_only_the_newest_state_of_each() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        for id in ["working", "finished", "asleep"] {
+            store
+                .create_session(&session(id, "claude", None, "2026-08-20T00:00:00Z"))
+                .unwrap();
+        }
+        let state = |session_id: &str, seq: i64, state: &str| -> Event {
+            serde_json::from_value(json!({
+                "type":"session.state", "sessionId":session_id, "seq":seq,
+                "at":"2026-08-20T00:00:01Z", "state":state, "label":""
+            }))
+            .unwrap()
+        };
+        for event in [
+            state("working", 1, "dormant"),
+            state("working", 2, "streaming"),
+            // Busy once, and done: the older row must not put it back in front
+            // of the sweep.
+            state("finished", 1, "streaming"),
+            state("finished", 2, "dormant"),
+        ] {
+            assert!(store.append_event(&event).unwrap());
+        }
+        // The other half of the union: a chat whose row says it is working
+        // even though no event ever said so.
+        store
+            .update_session(
+                "asleep",
+                SessionPatch {
+                    state: Some("running_tool".to_string()),
+                    ..SessionPatch::default()
+                },
+                None,
+            )
+            .unwrap();
+
+        let mut found = store.active_session_ids().unwrap();
+        found.sort();
+        assert_eq!(found, ["asleep", "working"]);
+
+        let plan: Vec<String> = store
+            .connection
+            .prepare(&format!("EXPLAIN QUERY PLAN {}", Store::active_session_sql()))
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let reaching_events: Vec<&String> = plan
+            .iter()
+            .filter(|step| step.contains("event"))
+            .collect();
+        assert_eq!(
+            reaching_events.len(),
+            1,
+            "the event table is reached once, and only to answer per chat: {plan:?}"
+        );
+        assert!(
+            reaching_events[0].contains("session_id=?"),
+            "each chat is asked for its own newest state, not the whole type \
+             index walked for everyone's: {plan:?}"
+        );
+        assert!(
+            !plan.iter().any(|step| step.contains("FOR ORDER BY")),
+            "newest means last in that chat's run of the index, with nothing \
+             sorted to find it: {plan:?}"
         );
     }
 

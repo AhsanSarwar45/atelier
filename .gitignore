@@ -77,6 +77,9 @@ agentform/
 
 # Extra build targets
 /server/target2/
+# A release build kept unstripped, so a profile of the running app can name
+# its own functions (scripts/store-perf-stack.sh).
+/server/target-sym/
 
 # Dolt server runtime files
 .dolt/
