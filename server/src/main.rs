@@ -568,6 +568,9 @@ async fn serve(open_browser: bool) {
 
     // Initialize version check cache
     let version_cache = routes::version::new_cache();
+    // The state of the one update that may be running, and everyone
+    // watching it (routes/update_run.rs).
+    let update_watch = routes::update_run::new_watch();
     let bootstrap_bus = routes::environment::bootstrap_bus();
 
     // The first read of a board costs a `bd` run, and the reader used to pay
@@ -626,6 +629,12 @@ async fn serve(open_browser: bool) {
         .nest(
             "/api",
             routes::search_settings::search_settings_routes().with_state(database.clone()),
+        )
+        // The version a person asked not to be told about again. Same table,
+        // same guard (routes/update_settings.rs).
+        .nest(
+            "/api",
+            routes::update_settings::update_settings_routes().with_state(database.clone()),
         )
         // Where a device asked to be pushed to lives. Same table, same guard
         // (routes/push.rs).
@@ -728,10 +737,15 @@ async fn serve(open_browser: bool) {
         )
         .route("/api/version/check", get(routes::version::version_check))
         .route("/api/update", post(routes::version::perform_update))
+        .route(
+            "/api/update/progress",
+            get(routes::version::update_progress),
+        )
         .fallback(serve_static)
         .layer(middleware::from_fn(said_not_to_keep))
         .layer(Extension(workbench_state))
         .layer(Extension(version_cache))
+        .layer(Extension(update_watch))
         .layer(Extension(bootstrap_bus))
         .layer(Extension(database))
         .layer(Extension(dolt_manager))

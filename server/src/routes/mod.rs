@@ -19,6 +19,7 @@ pub mod remote_access;
 pub mod search_settings;
 pub mod projects;
 pub mod update_run;
+pub mod update_settings;
 pub mod version;
 pub mod watch;
 pub mod workbench;

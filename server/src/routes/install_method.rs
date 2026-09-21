@@ -84,6 +84,32 @@ fn in_a_cellar(exe: &Path) -> bool {
         .any(|pair| pair[0] == "Cellar" && pair[1] == crate::identity::NAME)
 }
 
+/// The path to start the program again by, after Homebrew has upgraded it.
+///
+/// A Homebrew install is launched through a link in brew's `bin`, which this
+/// process resolved to a versioned Cellar path at startup. Once brew has
+/// upgraded, that resolved path still names the version brew has just replaced
+/// — starting it again would run the old program, or nothing at all if brew
+/// removed it. The link is what always points at the current version, so it is
+/// what the restart names.
+///
+/// `<prefix>/Cellar/atelier/<version>/bin/atelier` becomes
+/// `<prefix>/bin/atelier`. Anything that is not laid out that way gets `None`
+/// and the caller falls back to the path it already had.
+pub fn linked(exe: &Path) -> Option<PathBuf> {
+    let name = exe.file_name()?;
+    let parts: Vec<_> = exe.components().map(|c| c.as_os_str()).collect();
+    let cellar = parts
+        .windows(2)
+        .position(|pair| pair[0] == "Cellar" && pair[1] == crate::identity::NAME)?;
+
+    let mut prefix = PathBuf::new();
+    for part in &parts[..cellar] {
+        prefix.push(part);
+    }
+    Some(prefix.join("bin").join(name))
+}
+
 /// Where `brew` is, if it is anywhere this program can reach.
 ///
 /// The app is often started at login with no shell behind it, so `PATH` cannot
@@ -180,6 +206,27 @@ mod tests {
                 "{path} is not a Homebrew Cellar entry for this app"
             );
         }
+    }
+
+    /// The restart has to name the link, not the versioned path this process
+    /// was launched from: after an upgrade that one names the old version.
+    #[test]
+    fn a_homebrew_restart_goes_through_the_link_on_the_path() {
+        assert_eq!(
+            linked(Path::new(
+                "/home/linuxbrew/.linuxbrew/Cellar/atelier/0.22.12/bin/atelier"
+            )),
+            Some(PathBuf::from("/home/linuxbrew/.linuxbrew/bin/atelier"))
+        );
+        assert_eq!(
+            linked(Path::new("/opt/homebrew/Cellar/atelier/0.22.12/bin/atelier")),
+            Some(PathBuf::from("/opt/homebrew/bin/atelier"))
+        );
+    }
+
+    #[test]
+    fn a_path_that_is_not_a_cellar_entry_has_no_link_to_offer() {
+        assert_eq!(linked(Path::new("/home/ahsan/.local/bin/atelier")), None);
     }
 
     #[test]

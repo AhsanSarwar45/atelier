@@ -150,6 +150,16 @@ impl UpdateWatcher {
         let _ = self.changes.send(now.clone());
     }
 
+    /// Say what is happening now, without changing the phase.
+    ///
+    /// The Homebrew path reports lines rather than bytes, because `brew` never
+    /// says how big a download will be.
+    pub async fn note(&self, note: impl Into<String>) {
+        let mut now = self.now.write().await;
+        now.note = Some(note.into());
+        let _ = self.changes.send(now.clone());
+    }
+
     /// Report how much of the archive has arrived.
     ///
     /// Called once per chunk, which on a fast line is often enough that sending

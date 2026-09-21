@@ -3,18 +3,39 @@
 //! Checks GitHub Releases for newer versions and caches the result.
 //! Also provides auto-update functionality via ephemeral updater scripts.
 
-use axum::{http::StatusCode, response::IntoResponse, Json};
+use axum::{
+    http::StatusCode,
+    response::{
+        sse::{Event as SseEvent, Sse},
+        IntoResponse,
+    },
+    Json,
+};
+use futures::Stream;
 use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
+use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::StreamExt;
 use tracing::{info, warn};
+
+use crate::routes::install_method::{self, InstallMethod};
+use crate::routes::update_run::{Phase, UpdateRun, UpdateWatch};
 
 /// Current version compiled into the binary.
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// GitHub repository for release checks.
 const GITHUB_REPO: &str = "AhsanSarwar45/atelier"; // the repository address, not the product name
+
+/// How much of a release's notes is kept.
+///
+/// This was 500 while the notes were only teased in a corner notice. The About
+/// section renders them, so it is the length of a real release body now — still
+/// bounded, because the field is whatever somebody typed into GitHub.
+const NOTES_LIMIT: usize = 4000;
 
 /// Cache duration in seconds (1 hour).
 const CACHE_TTL_SECS: u64 = 3600;
@@ -45,7 +66,7 @@ pub struct VersionCheckResponse {
     pub update_available: bool,
     /// Download URL for the latest release
     pub download_url: Option<String>,
-    /// Release notes (first 500 chars)
+    /// Release notes, up to `NOTES_LIMIT`
     pub release_notes: Option<String>,
     /// Direct download URL for the platform-specific binary asset
     pub asset_url: Option<String>,
@@ -53,6 +74,21 @@ pub struct VersionCheckResponse {
     /// same release as `asset_url` so a download can only ever be proved
     /// against the release it came from
     pub checksums_url: Option<String>,
+    /// The version the person asked not to be told about again, if any.
+    ///
+    /// Read from the settings table on every answer rather than kept with the
+    /// cached release, because a skip takes effect the moment it is made and
+    /// the release information behind it is an hour stale by design.
+    ///
+    /// `update_available` is left alone by a skip: an update that exists still
+    /// exists, and the About section goes on offering it. Only the notice
+    /// reads this field, and only to decide whether to keep quiet.
+    #[serde(default)]
+    pub skipped_version: Option<String>,
+    /// How this copy was installed — `homebrew` or `standalone`. What updating
+    /// will actually do depends on it.
+    #[serde(default)]
+    pub install_method: Option<String>,
 }
 
 /// Minimal GitHub release response.
@@ -71,34 +107,37 @@ struct GitHubAsset {
     browser_download_url: String,
 }
 
+/// What a caller may ask of the version check.
+#[derive(Debug, Deserialize)]
+pub struct CheckQuery {
+    /// Ask GitHub again rather than answering from the hour-old cache.
+    ///
+    /// Without this there is no way to see a release made in the last hour,
+    /// which is exactly when somebody who has just heard about one will look.
+    #[serde(default)]
+    refresh: bool,
+}
+
 /// GET /api/version/check
 ///
-/// Returns current version and checks if a newer release exists on GitHub.
-/// Caches the result for 1 hour to avoid rate limiting.
+/// The running version, the newest released one, and what updating would do.
+///
+/// The release itself is cached for an hour so GitHub is not asked on every
+/// page load; `?refresh=true` asks anyway. The two fields that are not the
+/// release — what was skipped, and how this copy was installed — are filled in
+/// on every answer, because a skip has to take effect at once and neither is
+/// GitHub's to tell us.
 pub async fn version_check(
     axum::extract::Extension(cache): axum::extract::Extension<VersionCache>,
+    axum::extract::Extension(db): axum::extract::Extension<Arc<crate::db::Database>>,
+    axum::extract::Query(asked): axum::extract::Query<CheckQuery>,
 ) -> impl IntoResponse {
-    // Check cache
-    {
-        let cached = cache.read().await;
-        if let Some(ref entry) = *cached {
-            if entry.fetched_at.elapsed().as_secs() < CACHE_TTL_SECS {
-                return (StatusCode::OK, Json(entry.result.clone()));
-            }
-        }
-    }
+    let mut result = checked(&cache, asked.refresh).await;
 
-    // Fetch from GitHub
-    let result = check_github_release().await;
-
-    // Update cache
-    {
-        let mut cached = cache.write().await;
-        *cached = Some(CachedCheck {
-            result: result.clone(),
-            fetched_at: std::time::Instant::now(),
-        });
-    }
+    result.skipped_version = crate::routes::update_settings::update_settings(&db)
+        .ok()
+        .and_then(|settings| settings.skipped_version);
+    result.install_method = Some(install_method::current().name().to_string());
 
     (StatusCode::OK, Json(result))
 }
@@ -165,8 +204,8 @@ async fn check_github_release() -> VersionCheckResponse {
         update_available,
         download_url: Some(release.html_url),
         release_notes: release.body.map(|b| {
-            if b.len() > 500 {
-                let mut end = 500;
+            if b.len() > NOTES_LIMIT {
+                let mut end = NOTES_LIMIT;
                 while !b.is_char_boundary(end) && end > 0 {
                     end -= 1;
                 }
@@ -177,6 +216,8 @@ async fn check_github_release() -> VersionCheckResponse {
         }),
         asset_url,
         checksums_url,
+        skipped_version: None,
+        install_method: None,
     }
 }
 
@@ -199,6 +240,8 @@ fn fallback_response() -> VersionCheckResponse {
         release_notes: None,
         asset_url: None,
         checksums_url: None,
+        skipped_version: None,
+        install_method: None,
     }
 }
 
@@ -221,28 +264,73 @@ fn asset_for(target_os: &str, target_arch: &str) -> Option<&'static str> {
     }
 }
 
+/// GET /api/update/progress
+///
+/// What the update running right now is doing, as it does it.
+///
+/// The state as it stands is sent the moment a watcher connects, so a screen
+/// opened halfway through an update draws the right thing instead of waiting
+/// for the next chunk to arrive. Every change after that is sent as it
+/// happens. `serving.rs` already keeps `text/event-stream` out of the
+/// compressor, so frames are not held back waiting for a buffer to fill.
+pub async fn update_progress(
+    axum::extract::Extension(watch): axum::extract::Extension<UpdateWatch>,
+) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
+    let mut changes = watch.watch();
+    let opening = watch.now().await;
+    let (tx, rx) = tokio::sync::mpsc::channel::<UpdateRun>(64);
+
+    tokio::spawn(async move {
+        if tx.send(opening).await.is_err() {
+            return;
+        }
+        loop {
+            match changes.recv().await {
+                Ok(run) => {
+                    if tx.send(run).await.is_err() {
+                        break;
+                    }
+                }
+                // A watcher too slow to keep up is caught up to the newest
+                // state rather than dropped: a progress bar only ever wants
+                // the latest figure, never the ones it missed.
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+
+    let frames = ReceiverStream::new(rx).map(|run| Ok::<_, Infallible>(frame(&run)));
+    Sse::new(frames).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(30))
+            .text("ping"),
+    )
+}
+
+/// One update's state, as an event a screen can read.
+fn frame(run: &UpdateRun) -> SseEvent {
+    SseEvent::default().json_data(run).unwrap_or_else(|_| {
+        SseEvent::default().data(r#"{"phase":"failed","failed":"could not report progress"}"#)
+    })
+}
+
 /// POST /api/update
 ///
-/// Downloads the latest release binary and creates an ephemeral updater script.
-/// The server exits after spawning the updater, which replaces the binary and restarts.
+/// Starts an update and returns at once.
+///
+/// This used to hold the request open for the whole download, unpack and
+/// restart, saying nothing until it was over. It now checks what it can check
+/// cheaply, takes the run, and hands the work to a background task that
+/// reports itself through `GET /api/update/progress`. The refusals that can be
+/// known up front — nothing to update to, no build for this platform, an
+/// update already under way — are still answered on this request, because a
+/// screen should not have to open a stream to be told it asked for nothing.
 pub async fn perform_update(
     axum::extract::Extension(cache): axum::extract::Extension<VersionCache>,
+    axum::extract::Extension(watch): axum::extract::Extension<UpdateWatch>,
 ) -> impl IntoResponse {
-    // 1. Get latest release info (use cache if fresh, otherwise re-fetch)
-    let check = {
-        let cached = cache.read().await;
-        if let Some(ref entry) = *cached {
-            if entry.fetched_at.elapsed().as_secs() < CACHE_TTL_SECS {
-                entry.result.clone()
-            } else {
-                drop(cached);
-                check_github_release().await
-            }
-        } else {
-            drop(cached);
-            check_github_release().await
-        }
-    };
+    let check = checked(&cache, false).await;
 
     if !check.update_available {
         return (
@@ -251,72 +339,135 @@ pub async fn perform_update(
         );
     }
 
-    let asset_url = match check.asset_url {
-        Some(url) => url,
-        None => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({"error": "No binary available for this platform"})),
-            )
+    // A Homebrew install upgrades through Homebrew, which needs no release
+    // asset of its own — brew fetches the same archive itself. Only a
+    // standalone install has to have an asset named for this platform.
+    let how = install_method::current();
+    if how == InstallMethod::Standalone && (check.asset_url.is_none() || current_platform_asset().is_none())
+    {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "No binary available for this platform"})),
+        );
+    }
+
+    if !watch.claim(check.latest.clone()).await {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({"error": "An update is already running"})),
+        );
+    }
+
+    tokio::spawn(run_update(check, watch, how));
+
+    (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"status": "started"})),
+    )
+}
+
+/// The release to move to, from the cache when it is fresh enough.
+async fn checked(cache: &VersionCache, refresh: bool) -> VersionCheckResponse {
+    if !refresh {
+        let cached = cache.read().await;
+        if let Some(ref entry) = *cached {
+            if entry.fetched_at.elapsed().as_secs() < CACHE_TTL_SECS {
+                return entry.result.clone();
+            }
         }
+    }
+
+    let result = check_github_release().await;
+    let mut cached = cache.write().await;
+    *cached = Some(CachedCheck {
+        result: result.clone(),
+        fetched_at: std::time::Instant::now(),
+    });
+    result
+}
+
+/// Take the update, reporting every step, and exit so the new program starts.
+///
+/// Nothing here returns a status code, because nobody is waiting on a request:
+/// every outcome is published to whoever is watching. A failure leaves the
+/// running program exactly as it was — that is true of the download because a
+/// mismatch deletes what it wrote, and true of everything after it because the
+/// program is only ever replaced by the script at the very end.
+async fn run_update(check: VersionCheckResponse, watch: UpdateWatch, how: InstallMethod) {
+    let outcome = match how {
+        InstallMethod::Homebrew => run_homebrew(&watch).await,
+        InstallMethod::Standalone => run_standalone(check, &watch).await,
     };
 
-    // 2. Determine paths
-    let current_exe = match std::env::current_exe() {
-        Ok(p) => match p.canonicalize() {
-            Ok(c) => c,
-            Err(_) => p,
-        },
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(
-                    serde_json::json!({"error": format!("Cannot determine executable path: {}", e)}),
-                ),
-            )
+    match outcome {
+        Ok(script) => {
+            watch.phase(Phase::Restarting, None).await;
+            let spawned = if cfg!(windows) {
+                std::process::Command::new("cmd")
+                    .args(["/C", "start", "/B", "", script.to_str().unwrap_or("")])
+                    .spawn()
+            } else {
+                std::process::Command::new("sh").arg(&script).spawn()
+            };
+
+            if let Err(e) = spawned {
+                warn!("Failed to spawn updater: {}", e);
+                let _ = std::fs::remove_file(&script);
+                watch
+                    .failed(format!("Failed to start the updater: {}", e))
+                    .await;
+                return;
+            }
+
+            watch.done().await;
+
+            // Long enough for the last frame to reach whoever is watching
+            // before the stream goes down with the process.
+            tokio::spawn(async {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                info!("Exiting for update...");
+                std::process::exit(0);
+            });
         }
-    };
-    let current_dir = match current_exe.parent() {
-        Some(d) => d,
-        None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Cannot determine executable directory"})),
-            )
+        Err(why) => {
+            warn!("The update did not happen: {}", why);
+            watch.failed(why).await;
         }
-    };
+    }
+}
+
+/// Download the release archive, prove it, stage it, and write the script that
+/// swaps it in. Returns the script to run.
+async fn run_standalone(
+    check: VersionCheckResponse,
+    watch: &UpdateWatch,
+) -> Result<PathBuf, String> {
+    let asset_url = check
+        .asset_url
+        .clone()
+        .ok_or("No binary available for this platform")?;
+
+    let current_exe = std::env::current_exe()
+        .map(|p| p.canonicalize().unwrap_or(p))
+        .map_err(|e| format!("Cannot determine executable path: {}", e))?;
+    let current_dir = current_exe
+        .parent()
+        .ok_or("Cannot determine executable directory")?
+        .to_path_buf();
     let current_adapters = crate::workbench::acp::adapter::find("claude")
         .and_then(|path| path.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| current_dir.join("atelier-adapters"));
 
-    let archive_name = match current_platform_asset() {
-        Some(name) => name,
-        None => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({"error": "No binary available for this platform"})),
-            )
-        }
-    };
+    let archive_name = current_platform_asset().ok_or("No binary available for this platform")?;
     let archive_path = current_dir.join("atelier-update-archive");
 
     info!("Downloading update from: {}", asset_url);
 
-    // 3. Download the platform archive, proved against the release's own
-    //    checksums, then unpack the program out of it.
-    let client = match reqwest::Client::builder()
+    let client = reqwest::Client::builder()
         .user_agent(crate::identity::NAME)
         .timeout(std::time::Duration::from_secs(300))
         .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("HTTP client error: {}", e)})),
-            )
-        }
-    };
+        .map_err(|e| format!("HTTP client error: {}", e))?;
 
     // The archive is written beside the running program under its own name and
     // hashed as it arrives, and it is kept only if it matches the checksum this
@@ -324,128 +475,240 @@ pub async fn perform_update(
     // where it lies and the reason is handed back: the running program is not
     // touched by any of this, because it is only ever replaced by the updater
     // script below, which a refusal never reaches.
-    let written = match crate::published::download(
+    //
+    // The byte count is published as it goes. It counts bytes *received*, not
+    // bytes proved, which is why `Verifying` is its own phase after the bar
+    // fills rather than part of it.
+    let counting = {
+        let watch = watch.clone();
+        move |received: u64, total: Option<u64>| {
+            let watch = watch.clone();
+            tokio::spawn(async move { watch.arrived(received, total).await });
+        }
+    };
+
+    let written = crate::published::download_watched(
         &client,
         &asset_url,
         check.checksums_url.as_deref(),
-        &archive_name,
+        archive_name,
         &archive_path,
+        &counting,
     )
     .await
-    {
-        Ok(n) => n,
-        Err(problem) => {
-            if problem.is_refusal() {
-                warn!("Refused the update download: {}", problem);
-            } else {
-                warn!("The update download did not finish: {}", problem);
-            }
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({"error": problem.reason()})),
-            );
+    .map_err(|problem| {
+        if problem.is_refusal() {
+            warn!("Refused the update download: {}", problem);
+        } else {
+            warn!("The update download did not finish: {}", problem);
         }
-    };
+        problem.reason().to_string()
+    })?;
+
+    // The proof happened inside the download, as the bytes went past. Saying so
+    // here keeps the phases honest about the order work actually happened in.
+    watch.phase(Phase::Verifying, None).await;
 
     // Unpack the program out of the proved archive, staged next to the running
     // program for the updater script to move into place. The archive is removed
     // once its contents are out, so a `.tar.gz` is never installed as the program.
-    let staged = match stage_from_archive(&archive_path, current_dir) {
-        Ok(s) => s,
-        Err(e) => {
-            let _ = std::fs::remove_file(&archive_path);
-            warn!("The update archive could not be unpacked: {}", e);
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({"error": e})),
-            );
-        }
-    };
+    watch
+        .phase(Phase::Unpacking, Some("Unpacking the new version".into()))
+        .await;
+    let staged = stage_from_archive(&archive_path, &current_dir).inspect_err(|e| {
+        let _ = std::fs::remove_file(&archive_path);
+        warn!("The update archive could not be unpacked: {}", e);
+    })?;
     let _ = std::fs::remove_file(&archive_path);
-    let new_binary = staged.program.clone();
-    let new_adapters = staged.adapters.clone();
 
-    // 4. Generate and spawn updater script
     info!(
         "Downloaded update: {} bytes -> {}",
         written,
-        new_binary.display()
+        staged.program.display()
     );
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "3008".to_string());
     let pid = std::process::id();
 
-    let script_result = if cfg!(windows) {
+    let script = if cfg!(windows) {
         generate_windows_update_script(
-            current_dir,
+            &current_dir,
             &current_exe,
-            &new_binary,
+            &staged.program,
             &current_adapters,
-            &new_adapters,
+            &staged.adapters,
             pid,
             &port,
         )
     } else {
         generate_unix_update_script(
-            current_dir,
+            &current_dir,
             &current_exe,
-            &new_binary,
+            &staged.program,
             &current_adapters,
-            &new_adapters,
+            &staged.adapters,
             pid,
             &port,
         )
     };
 
-    match script_result {
-        Ok(script_path) => {
-            info!("Spawning updater script: {}", script_path.display());
+    script.map_err(|e| {
+        let _ = std::fs::remove_file(&staged.program);
+        let _ = std::fs::remove_dir_all(&staged.adapters);
+        format!("Failed to create update script: {}", e)
+    })
+}
 
-            let spawn_result = if cfg!(windows) {
-                std::process::Command::new("cmd")
-                    .args(["/C", "start", "/B", "", script_path.to_str().unwrap_or("")])
-                    .spawn()
-            } else {
-                std::process::Command::new("sh").arg(&script_path).spawn()
-            };
+/// Upgrade through Homebrew, then write a script that only restarts.
+///
+/// Brew has already put the new files where it wants them, so there is nothing
+/// to move and no `.old` to keep — the program just has to go down and come
+/// back. Brew does not say how many bytes it is fetching, so this path reports
+/// its own output lines instead and leaves the bar indeterminate.
+async fn run_homebrew(watch: &UpdateWatch) -> Result<PathBuf, String> {
+    let brew = install_method::brew().ok_or(
+        "This copy was installed with Homebrew, but brew cannot be found to upgrade it.",
+    )?;
 
-            if let Err(e) = spawn_result {
-                warn!("Failed to spawn updater: {}", e);
-                // Clean up
-                let _ = std::fs::remove_file(&new_binary);
-                let _ = std::fs::remove_dir_all(&new_adapters);
-                let _ = std::fs::remove_file(&script_path);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": format!("Failed to spawn updater: {}", e)})),
-                );
+    // `brew upgrade` can only see a release the tap has been told about.
+    watch
+        .phase(Phase::Downloading, Some("Refreshing Homebrew".into()))
+        .await;
+    say(&brew, &["update"], watch).await?;
+
+    watch
+        .phase(
+            Phase::Downloading,
+            Some(format!("Upgrading {}", install_method::FORMULA)),
+        )
+        .await;
+    say(&brew, &["upgrade", install_method::FORMULA], watch).await?;
+
+    let current_exe = std::env::current_exe()
+        .map(|p| p.canonicalize().unwrap_or(p))
+        .map_err(|e| format!("Cannot determine executable path: {}", e))?;
+    let current_dir = current_exe
+        .parent()
+        .ok_or("Cannot determine executable directory")?
+        .to_path_buf();
+    let port = std::env::var("PORT").unwrap_or_else(|_| "3008".to_string());
+
+    // Started again through the link on the path, not through the resolved
+    // Cellar path this process was launched from: that one still names the
+    // version brew has just replaced.
+    let restart_as = install_method::linked(&current_exe).unwrap_or(current_exe);
+
+    generate_unix_restart_script(&current_dir, &restart_as, std::process::id(), &port)
+        .map_err(|e| format!("Failed to create restart script: {}", e))
+}
+
+/// Run one brew command, publishing each line it prints.
+///
+/// Brew writes its progress to stderr and its results to stdout, and a person
+/// watching wants whichever came last, so both are read as one.
+async fn say(brew: &Path, args: &[&str], watch: &UpdateWatch) -> Result<(), String> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    let mut child = tokio::process::Command::new(brew)
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Could not run brew {}: {}", args.join(" "), e))?;
+
+    let out = child.stdout.take().ok_or("Could not read brew's output")?;
+    let err = child.stderr.take().ok_or("Could not read brew's output")?;
+    let mut lines = BufReader::new(out).lines();
+    let mut trouble = BufReader::new(err).lines();
+
+    // The last thing brew said, kept so a failure can be reported in brew's own
+    // words rather than as a bare exit code.
+    let mut newest = String::new();
+
+    loop {
+        let line = tokio::select! {
+            said = lines.next_line() => said,
+            said = trouble.next_line() => said,
+        };
+        match line {
+            Ok(Some(said)) => {
+                let said = said.trim().to_string();
+                if !said.is_empty() {
+                    info!("brew: {}", said);
+                    newest = said.clone();
+                    watch.note(said).await;
+                }
             }
-
-            // Schedule server exit after 2 seconds to allow response to be sent
-            tokio::spawn(async {
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                info!("Exiting for update...");
-                std::process::exit(0);
-            });
-
-            (
-                StatusCode::OK,
-                Json(
-                    serde_json::json!({"status": "updating", "message": "Server will restart shortly"}),
-                ),
-            )
-        }
-        Err(e) => {
-            let _ = std::fs::remove_file(&new_binary);
-            let _ = std::fs::remove_dir_all(&new_adapters);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(
-                    serde_json::json!({"error": format!("Failed to create update script: {}", e)}),
-                ),
-            )
+            Ok(None) => break,
+            Err(e) => return Err(format!("Could not read brew's output: {}", e)),
         }
     }
+
+    let ended = child
+        .wait()
+        .await
+        .map_err(|e| format!("brew {} did not finish: {}", args.join(" "), e))?;
+
+    if !ended.success() {
+        return Err(if newest.is_empty() {
+            format!("brew {} failed. Nothing was replaced.", args.join(" "))
+        } else {
+            format!(
+                "brew {} failed: {}. Nothing was replaced.",
+                args.join(" "),
+                newest
+            )
+        });
+    }
+
+    Ok(())
+}
+
+/// A script that waits for this process to go and starts the program again.
+///
+/// The swapping script's sibling, for the Homebrew path, where there is
+/// nothing to swap: brew has already replaced the files. It waits for the old
+/// process to exit so the port is free, starts the program again, and removes
+/// itself. There is no rollback because nothing here was moved — if the new
+/// program will not start, brew is the thing that knows how to put the old one
+/// back, and it still has it.
+fn generate_unix_restart_script(
+    dir: &Path,
+    start: &Path,
+    pid: u32,
+    port: &str,
+) -> Result<PathBuf, String> {
+    let script_path = dir.join("beads-restart.sh");
+    let start = start.to_string_lossy();
+
+    let content = format!(
+        r#"#!/bin/sh
+# Written by the running program and removed by its last line. Waits for the
+# old process to let go of the port, then starts the new one Homebrew installed.
+set -e
+
+for _ in $(seq 1 30); do
+  kill -0 {pid} 2>/dev/null || break
+  sleep 1
+done
+
+PORT={port} "{start}" &
+
+rm -f "$0"
+"#
+    );
+
+    std::fs::write(&script_path, content)
+        .map_err(|e| format!("Failed to write restart script: {}", e))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("Failed to make the restart script runnable: {}", e))?;
+    }
+
+    Ok(script_path)
 }
 
 /// The files unpacked from the release archive, staged beside the running
