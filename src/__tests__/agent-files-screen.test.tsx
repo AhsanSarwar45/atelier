@@ -42,13 +42,17 @@ describe('Agent files browser', () => {
     expect(sendCommand).toHaveBeenCalledWith({ type: 'agent-files.list', profileId: 'work' });
   });
 
-  it('opens the file and its containing folder only after explicit clicks', async () => {
+  it('sends each header button to the program its label names', async () => {
     render(<AgentFilesBrowser />);
     await screen.findByDisplayValue('# Hello');
     fireEvent.click(screen.getByRole('button', { name: /open in external editor/i }));
     fireEvent.click(screen.getByRole('button', { name: /reveal in file manager/i }));
-    await waitFor(() => expect(openExternal).toHaveBeenCalledWith(row.path, 'finder'));
-    expect(openExternal).toHaveBeenCalledWith('/home/me/.claude', 'finder');
+    // The editor button asked for the file manager before bw-31sl.2, and the
+    // reveal button asked for the folder because the server could not pick a
+    // file out of it. Both now name what the reader was promised.
+    await waitFor(() => expect(openExternal).toHaveBeenCalledWith(row.path, 'vscode'));
+    expect(openExternal).toHaveBeenCalledWith(row.path, 'finder');
+    expect(openExternal).not.toHaveBeenCalledWith('/home/me/.claude', expect.anything());
   });
 
   it('filters files by the words the reader types', async () => {
