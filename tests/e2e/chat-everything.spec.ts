@@ -1,5 +1,6 @@
+import { rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
@@ -318,6 +319,80 @@ test.describe('the chat draws everything the agent does', () => {
     await expect(page.locator('[data-testid="permission-card"][data-ask-state="resolved"]').first()).toBeVisible({
       timeout: 60_000,
     });
+  });
+
+  /**
+   * The mode this app carries out itself, for an account that cannot use the
+   * provider's own automatic ones.
+   *
+   * Built on the same prompt as the safe-mode case above, and for the same
+   * reason: `echo` is waved through by the asking mode, so a case built on one
+   * would pass whether the mode worked or not. Writing a file is something the
+   * asking mode really does stop for — which is exactly what makes it proof
+   * that nothing stopped here (bw-0z25.1).
+   */
+  test('the app answers the permission question itself, and says that it did', async ({ page, request }) => {
+    await ensureProject(request, 'nobody-asked-me');
+    const { project } = await freshChat(request, page);
+    // A name of this run's own. The file is really written — that is the
+    // point — and a fixed name left behind by an earlier run is one the agent
+    // reads, finds already correct, and returns from without ever asking
+    // (measured 2026-09-21: the case then proves nothing at all).
+    const written = `nobody-asked-me-${Date.now()}.txt`;
+
+    // First the same question in the provider's own asking mode, so that what
+    // follows is measured against this chat rather than against a description
+    // of one. Writing a file is something that mode really does stop for; an
+    // `echo` is waved straight through, so a case built on one would pass
+    // whether any of this worked or not (bw-1u1.17).
+    await expect(page.getByTestId('mode-picker')).toHaveAttribute('data-current', 'default');
+    await say(page, 'Create a file called ask-me-first.txt here holding the word hello. Say nothing else.');
+    const waiting = page.locator('[data-testid="permission-card"][data-ask-state="open"]').first();
+    await waiting.waitFor({ timeout: TURN_MS });
+    await waiting.screenshot({ path: 'tests/results/permission-card-waiting.png' });
+    // Refused, so the turn ends here and leaves nothing running behind it.
+    // By the protocol's word for the button, never by the agent's own id for
+    // it: the ids are Claude's vocabulary and nothing else's (bw-t26l.20).
+    await waiting.locator('[data-ask-kind="reject_once"]').first().click();
+    await expect(page.locator('[data-testid="permission-card"][data-ask-state="open"]')).toHaveCount(0, {
+      timeout: 60_000,
+    });
+
+    const picker = page.getByTestId('mode-picker');
+    await picker.click();
+    const ours = page.locator('[data-testid="mode-picker-option"][data-value="atelierAuto"]');
+    await ours.waitFor({ timeout: 30_000 });
+    await ours.click();
+    await expect.poll(async () => picker.getAttribute('data-current'), { timeout: 60_000 }).toBe('atelierAuto');
+    await expect(page.getByTestId('steer-error')).toBeHidden();
+    // The mode sitting among the provider's own, which is the whole of how
+    // anyone finds it.
+    await picker.click();
+    await page.locator('[data-testid="mode-picker-option"]').first().waitFor({ timeout: 30_000 });
+    await page.screenshot({ path: 'tests/results/atelier-automatic-in-the-picker.png' });
+    await page.keyboard.press('Escape');
+
+    await say(page, `Create a file called ${written} here holding the word hello. Say nothing else.`);
+
+    // The card is answered, and marked as answered by the app rather than by
+    // him. Waiting on the resolved card first: an open card that is answered a
+    // moment later would still satisfy an assertion made the other way round.
+    const answered = page.locator('[data-testid="permission-card"][data-answered-by="atelier"]').first();
+    await answered.waitFor({ timeout: TURN_MS });
+    await expect(answered).toContainText('Approved automatically');
+    await answered.screenshot({ path: 'tests/results/atelier-automatic-card-answered.png' });
+    // And nothing was ever put to him.
+    await expect(page.locator('[data-testid="permission-card"][data-ask-state="open"]')).toHaveCount(0);
+
+    // The tool actually ran. A card that says "Approved automatically" over a
+    // request the agent never got to carry out proves only the drawing.
+    await expect(page.getByTestId('tool-toggle').filter({ hasText: written }).first()).toBeVisible({
+      timeout: TURN_MS,
+    });
+    // It was written into the project the chat is working in, so it is taken
+    // away again. A case that leaves files in the tree it ran against is a
+    // case the next run of it fails on.
+    await rm(join(project.path, written), { force: true });
   });
 
   test('compact says why it could not, instead of saying nothing', async ({ page, request }) => {
