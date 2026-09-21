@@ -139,10 +139,32 @@ async fn branches_of(dir: &TempDir) -> (StatusCode, Value) {
 }
 
 async fn log_of(dir: &TempDir, limit: u32) -> (StatusCode, Value) {
-    answered(
-        git::log(GitQuery(git::LogParams {
-            path: here(dir),
+    filtered_log(
+        dir,
+        git::LogParams {
             limit,
+            ..Default::default()
+        },
+    )
+    .await
+}
+
+/// The log with filters on it. The path and a sane limit are filled in here so
+/// a case says only what it is about.
+async fn filtered_log(dir: &TempDir, mut params: git::LogParams) -> (StatusCode, Value) {
+    params.path = here(dir);
+    if params.limit == 0 {
+        params.limit = 50;
+    }
+    answered(git::log(GitQuery(params)).await).await
+}
+
+/// One commit, with its message and its patch.
+async fn shown(dir: &TempDir, sha: &str) -> (StatusCode, Value) {
+    answered(
+        git::show(GitQuery(git::ShowParams {
+            path: here(dir),
+            sha: sha.to_string(),
         }))
         .await,
     )
@@ -1084,12 +1106,476 @@ async fn a_project_with_nothing_saved_yet_has_an_empty_history_and_still_answers
 }
 
 // ============================================================================
+// Searching the history, and opening one commit
+// ============================================================================
+
+/// Subjects, in the order the log gave them.
+fn subjects(history: &Value) -> Vec<String> {
+    history["commits"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .map(|c| c["subject"].as_str().expect("a subject").to_string())
+        .collect()
+}
+
+/// Paths, in the order the patch gave them.
+fn paths(files: &Value) -> Vec<String> {
+    files
+        .as_array()
+        .expect("a list")
+        .iter()
+        .map(|f| f["path"].as_str().expect("a path").to_string())
+        .collect()
+}
+
+/// Commit as somebody else, so an author search has two names to choose
+/// between.
+fn save_as(at: &Path, message: &str, who: &str, email: &str) -> String {
+    run(at, &["add", "-A"]);
+    run(
+        at,
+        &[
+            "-c",
+            &format!("user.name={who}"),
+            "-c",
+            &format!("user.email={email}"),
+            "commit",
+            "-q",
+            "-m",
+            message,
+        ],
+    );
+    run(at, &["rev-parse", "HEAD"])
+}
+
+/// A history with two authors, two folders and four messages in it.
+fn a_history() -> TempDir {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "src/one.ts", "one\n");
+    save_all(at, "first: the beginning");
+    put(at, "src/two.ts", "two\n");
+    save_as(
+        at,
+        "second: a fix for toasts",
+        "Someone Else",
+        "else@atelier.test",
+    );
+    put(at, "docs/note.md", "note\n");
+    save_all(at, "third: docs only");
+    put(at, "src/one.ts", "one\nmore\n");
+    save_all(at, "fourth: the end");
+    repo
+}
+
+#[tokio::test]
+async fn words_typed_into_the_search_narrow_the_log_to_the_commits_that_hold_them() {
+    let repo = a_history();
+
+    let (code, found) = filtered_log(
+        &repo,
+        git::LogParams {
+            grep: Some("toasts".to_string()),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(subjects(&found), vec!["second: a fix for toasts"]);
+
+    // Case is not something a person searching his own history should have to
+    // get right.
+    let (_, shouting) = filtered_log(
+        &repo,
+        git::LogParams {
+            grep: Some("TOASTS".to_string()),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(subjects(&shouting), vec!["second: a fix for toasts"]);
+
+    // A search that matches nothing is an empty list, not a failure.
+    let (code, none) = filtered_log(
+        &repo,
+        git::LogParams {
+            grep: Some("nothing here says this".to_string()),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK);
+    assert!(none["commits"].as_array().expect("a list").is_empty());
+}
+
+#[tokio::test]
+async fn a_search_holding_characters_a_pattern_would_choke_on_is_read_as_plain_words() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "one.ts", "one\n");
+    save_all(at, "guard paint(text) against an empty line");
+    put(at, "two.ts", "two\n");
+    save_all(at, "unrelated");
+
+    // Unescaped brackets are a bad regular expression, and a person typing the
+    // name of a function has not written one.
+    let (code, found) = filtered_log(
+        &repo,
+        git::LogParams {
+            grep: Some("paint(text)".to_string()),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(
+        subjects(&found),
+        vec!["guard paint(text) against an empty line"]
+    );
+}
+
+#[tokio::test]
+async fn the_log_can_be_narrowed_by_who_wrote_it_by_when_and_by_what_it_touched() {
+    let repo = a_history();
+
+    let (_, theirs) = filtered_log(
+        &repo,
+        git::LogParams {
+            author: Some("someone else".to_string()),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(subjects(&theirs), vec!["second: a fix for toasts"]);
+
+    let (_, touched) = filtered_log(
+        &repo,
+        git::LogParams {
+            file: Some("docs".to_string()),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(subjects(&touched), vec!["third: docs only"]);
+
+    // Everything in this repository was saved a moment ago, so a window that
+    // closed an hour ago holds none of it and one that opened an hour ago
+    // holds all of it.
+    let (_, older) = filtered_log(
+        &repo,
+        git::LogParams {
+            until: Some("1 hour ago".to_string()),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(older["commits"].as_array().expect("a list").is_empty());
+
+    let (_, recent) = filtered_log(
+        &repo,
+        git::LogParams {
+            since: Some("1 hour ago".to_string()),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(recent["commits"].as_array().expect("a list").len(), 4);
+}
+
+#[tokio::test]
+async fn the_log_can_be_walked_further_back_than_one_read() {
+    let repo = a_history();
+
+    let (_, first_two) = filtered_log(
+        &repo,
+        git::LogParams {
+            limit: 2,
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(
+        subjects(&first_two),
+        vec!["fourth: the end", "third: docs only"]
+    );
+
+    let (_, next_two) = filtered_log(
+        &repo,
+        git::LogParams {
+            limit: 2,
+            skip: 2,
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(
+        subjects(&next_two),
+        vec!["second: a fix for toasts", "first: the beginning"]
+    );
+}
+
+#[tokio::test]
+async fn a_commit_name_finds_its_commit_even_when_the_words_beside_it_do_not() {
+    let repo = a_history();
+    let at = repo.path();
+    let wanted = run(at, &["rev-parse", "HEAD~3"]);
+    let prefix = &wanted[..8];
+
+    // The words are the name itself, which no message holds: without the name
+    // being looked up in its own right the answer would be empty, and a person
+    // who pasted a commit's name would be told it is not there.
+    let (code, found) = filtered_log(
+        &repo,
+        git::LogParams {
+            grep: Some(prefix.to_string()),
+            sha: Some(prefix.to_string()),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(subjects(&found), vec!["first: the beginning"]);
+
+    // Half a name that belongs to nothing is simply no extra answer. Typing
+    // looks like this on the way to a name that does exist.
+    let (code, none) = filtered_log(
+        &repo,
+        git::LogParams {
+            grep: Some("ffffffff".to_string()),
+            sha: Some("ffffffff".to_string()),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK);
+    assert!(none["commits"].as_array().expect("a list").is_empty());
+}
+
+#[tokio::test]
+async fn a_filter_that_would_read_as_a_switch_or_climb_out_of_the_project_is_refused() {
+    let repo = a_history();
+
+    for params in [
+        git::LogParams {
+            file: Some("../elsewhere".to_string()),
+            ..Default::default()
+        },
+        git::LogParams {
+            file: Some("/etc".to_string()),
+            ..Default::default()
+        },
+        git::LogParams {
+            reference: Some("--output=/tmp/taken".to_string()),
+            ..Default::default()
+        },
+    ] {
+        let (code, _) = filtered_log(&repo, params).await;
+        assert_eq!(code, StatusCode::BAD_REQUEST);
+    }
+}
+
+#[tokio::test]
+async fn every_commit_in_the_log_says_what_it_was_built_on_and_what_points_at_it() {
+    let repo = a_history();
+    let at = repo.path();
+    run(at, &["tag", "v1"]);
+
+    let (code, history) = log_of(&repo, 50).await;
+    assert_eq!(code, StatusCode::OK);
+    let commits = history["commits"].as_array().expect("a list");
+
+    let newest = &commits[0];
+    let decorations: Vec<&str> = newest["refs"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .map(|r| r.as_str().expect("a name"))
+        .collect();
+    assert!(
+        decorations.iter().any(|r| r.contains("main")),
+        "{decorations:?} does not name the branch"
+    );
+    assert!(
+        decorations.contains(&"tag: v1"),
+        "{decorations:?} does not name the tag"
+    );
+
+    let parents = newest["parents"].as_array().expect("a list");
+    assert_eq!(parents.len(), 1);
+    assert_eq!(parents[0], run(at, &["rev-parse", "HEAD~1"]));
+
+    // The first commit of all was built on nothing.
+    let oldest = commits.last().expect("a first commit");
+    assert!(oldest["parents"].as_array().expect("a list").is_empty());
+    assert!(oldest["refs"].as_array().expect("a list").is_empty());
+}
+
+#[tokio::test]
+async fn one_commit_comes_back_with_its_whole_message_its_people_and_its_patch() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "kept.txt", "one\n");
+    save_all(at, "seed");
+    put(at, "kept.txt", "one\ntwo\n");
+    put(at, "added.txt", "new\n");
+    run(at, &["add", "-A"]);
+    run(
+        at,
+        &[
+            "commit",
+            "-q",
+            "-m",
+            "What it does",
+            "-m",
+            "Why it does it, over a second paragraph.",
+        ],
+    );
+    let sha = run(at, &["rev-parse", "HEAD"]);
+
+    let (code, body) = shown(&repo, &sha).await;
+    assert_eq!(code, StatusCode::OK);
+    let commit = &body["commit"];
+
+    assert_eq!(commit["sha"], sha);
+    assert_eq!(commit["subject"], "What it does");
+    assert_eq!(
+        commit["body"],
+        "What it does\n\nWhy it does it, over a second paragraph."
+    );
+    assert_eq!(commit["author"], "Atelier Tester");
+    assert_eq!(commit["committer"], "Atelier Tester");
+    assert_eq!(commit["merge"], false);
+    assert_eq!(commit["comparedWith"], run(at, &["rev-parse", "HEAD~1"]));
+    assert!(
+        DateTime::parse_from_rfc3339(commit["committerDate"].as_str().expect("a time")).is_ok()
+    );
+
+    assert_eq!(paths(&body["files"]), vec!["added.txt", "kept.txt"]);
+    let changed = &body["files"][1];
+    assert_eq!(changed["status"], "modified");
+    assert_eq!(changed["additions"], 1);
+    assert_eq!(changed["deletions"], 0);
+    assert_eq!(body["files"][0]["status"], "added");
+
+    // A prefix of the name opens the same commit, which is what a person
+    // pastes out of the log.
+    let (code, by_prefix) = shown(&repo, &sha[..8]).await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(by_prefix["commit"]["sha"], sha);
+}
+
+#[tokio::test]
+async fn the_first_commit_of_all_is_compared_with_nothing_and_reads_as_added() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "one.txt", "one\n");
+    let sha = save_all(at, "the beginning");
+
+    let (code, body) = shown(&repo, &sha).await;
+    assert_eq!(code, StatusCode::OK);
+    assert!(body["commit"]["comparedWith"].is_null());
+    assert!(body["commit"]["parents"]
+        .as_array()
+        .expect("a list")
+        .is_empty());
+    assert_eq!(paths(&body["files"]), vec!["one.txt"]);
+    assert_eq!(body["files"][0]["status"], "added");
+}
+
+#[tokio::test]
+async fn a_merge_is_marked_as_one_and_shows_what_it_brought_in() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "base.txt", "base\n");
+    save_all(at, "base");
+    run(at, &["checkout", "-q", "-b", "side"]);
+    put(at, "side.txt", "from the side\n");
+    save_all(at, "work on the side");
+    run(at, &["checkout", "-q", "main"]);
+    put(at, "main.txt", "from the main line\n");
+    save_all(at, "work on the main line");
+    run(
+        at,
+        &["merge", "-q", "--no-ff", "-m", "bring the side in", "side"],
+    );
+    let sha = run(at, &["rev-parse", "HEAD"]);
+
+    let (code, body) = shown(&repo, &sha).await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(body["commit"]["merge"], true);
+    assert_eq!(
+        body["commit"]["parents"].as_array().expect("a list").len(),
+        2
+    );
+
+    // `git show` prints nothing at all for a merge. Comparing it with its
+    // first parent says what the merge actually brought onto this line, which
+    // is the only answer a person clicking it is looking for (bw-g6zy.1).
+    assert_eq!(paths(&body["files"]), vec!["side.txt"]);
+}
+
+#[tokio::test]
+async fn a_commit_that_changed_a_picture_says_so_and_carries_no_lines() {
+    let repo = a_repo();
+    let at = repo.path();
+    fs::write(at.join("logo.png"), [0u8, 1, 2, 0, 3, 4, 0, 255]).expect("a picture is written");
+    let sha = save_all(at, "a picture");
+
+    let (code, body) = shown(&repo, &sha).await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(paths(&body["files"]), vec!["logo.png"]);
+    assert_eq!(body["files"][0]["binary"], true);
+    assert!(body["files"][0]["hunks"]
+        .as_array()
+        .expect("a list")
+        .is_empty());
+}
+
+#[tokio::test]
+async fn a_commit_carried_over_from_somewhere_else_names_both_people() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "one.txt", "one\n");
+    save_all(at, "base");
+    run(at, &["checkout", "-q", "-b", "side"]);
+    put(at, "two.txt", "two\n");
+    save_as(at, "written elsewhere", "Someone Else", "else@atelier.test");
+    let written = run(at, &["rev-parse", "HEAD"]);
+    run(at, &["checkout", "-q", "main"]);
+    run(at, &["cherry-pick", &written]);
+    let carried = run(at, &["rev-parse", "HEAD"]);
+
+    let (code, body) = shown(&repo, &carried).await;
+    assert_eq!(code, StatusCode::OK);
+    let commit = &body["commit"];
+    assert_eq!(commit["author"], "Someone Else");
+    assert_eq!(commit["email"], "else@atelier.test");
+    assert_eq!(commit["committer"], "Atelier Tester");
+    assert_eq!(commit["committerEmail"], "tester@atelier.test");
+}
+
+#[tokio::test]
+async fn a_commit_this_project_does_not_have_is_a_plain_not_found() {
+    let repo = a_history();
+
+    let (code, _) = shown(&repo, "ffffffffffffffffffffffffffffffffffffffff").await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+
+    let (code, _) = shown(&repo, "   ").await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+
+    let (code, _) = shown(&repo, "--output=/tmp/taken").await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+}
+
+// ============================================================================
 // The route contract itself — the URLs, the methods, and the JSON a browser
 // would actually receive
 // ============================================================================
 
 /// Every route the contract names, as `main.rs` is expected to register it.
-const CONTRACT: [(&str, &str); 16] = [
+const CONTRACT: [(&str, &str); 17] = [
     ("get", "/api/git/status"),
     ("post", "/api/git/stage"),
     ("post", "/api/git/unstage"),
@@ -1106,6 +1592,9 @@ const CONTRACT: [(&str, &str); 16] = [
     // Every working-tree change against HEAD, which the chat draws in place
     // of its transcript (bw-rx1y.2).
     ("get", "/api/git/diff"),
+    // One commit, its message and its patch, which the panel draws when a
+    // commit in the log is chosen (bw-g6zy.1).
+    ("get", "/api/git/show"),
     // A project's checkouts by name, which the place a chat works in is
     // chosen from (bw-ov7a.1).
     ("get", "/api/git/trees"),
@@ -1122,7 +1611,7 @@ const OLDER: [(&str, &str); 1] = [("get", "/api/git/branch-status")];
 fn the_server_registers_every_route_the_contract_names() {
     let handlers = [
         "status", "stage", "unstage", "discard", "remove", "commit", "fetch", "pull", "push",
-        "branches", "checkout", "log", "diff", "trees", "new_tree", "drop_tree",
+        "branches", "checkout", "log", "diff", "show", "trees", "new_tree", "drop_tree",
     ];
     let main = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1157,6 +1646,7 @@ async fn served() -> (String, tokio::task::JoinHandle<()>) {
         .route("/api/git/checkout", axum::routing::post(git::checkout))
         .route("/api/git/log", axum::routing::get(git::log))
         .route("/api/git/diff", axum::routing::get(git::diff))
+        .route("/api/git/show", axum::routing::get(git::show))
         .route("/api/git/trees", axum::routing::get(git::trees))
         .route("/api/git/trees", axum::routing::post(git::new_tree))
         .route("/api/git/trees", axum::routing::delete(git::drop_tree))

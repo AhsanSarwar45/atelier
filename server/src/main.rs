@@ -691,6 +691,7 @@ async fn serve(open_browser: bool) {
         // Every working-tree change against HEAD, hunk by hunk, so the chat
         // can stand a diff in for its transcript (routes/git.rs, bw-rx1y.2).
         .route("/api/git/diff", get(routes::git::diff))
+        .route("/api/git/show", get(routes::git::show))
         // Worktree endpoints
         .route(
             "/api/git/worktree-status",

@@ -1400,13 +1400,47 @@ pub async fn checkout(GitJson(body): GitJson<CheckoutRequest>) -> Answer {
 // ----------------------------------------------------------------------------
 
 /// Query parameters for reading recent saved changes.
-#[derive(Deserialize)]
+///
+/// Everything past `path` and `limit` is a filter, and every one of them is
+/// answered by git itself rather than by sieving what was already read: a
+/// search that only looks at the fifty commits the panel happens to be
+/// holding is a search that lies about the history behind them (bw-g6zy.1).
+#[derive(Deserialize, Default)]
 pub struct LogParams {
     /// Absolute working directory of the repository.
     pub path: String,
     /// How many to read back.
     #[serde(default = "fifty")]
     pub limit: u32,
+    /// How many to step over first, so the panel can walk further back than
+    /// one read.
+    #[serde(default)]
+    pub skip: u32,
+    /// Words to look for in the message, case insensitively.
+    #[serde(default)]
+    pub grep: Option<String>,
+    /// Who wrote it, matched the way git matches an author: any part of the
+    /// name or the email, case insensitively.
+    #[serde(default)]
+    pub author: Option<String>,
+    /// The earliest date to read, in anything git's own date parser takes —
+    /// `2026-01-01` and `2 weeks ago` are both answers.
+    #[serde(default)]
+    pub since: Option<String>,
+    /// The latest date to read, same spelling.
+    #[serde(default)]
+    pub until: Option<String>,
+    /// One commit by name or by any prefix of it. It is looked up beside the
+    /// other filters rather than instead of them, so pasting a name finds that
+    /// commit even when nothing about it matches the words typed with it.
+    #[serde(default)]
+    pub sha: Option<String>,
+    /// Only commits that touched this path, relative to the repository root.
+    #[serde(default)]
+    pub file: Option<String>,
+    /// The line of work to walk, instead of the one checked out.
+    #[serde(default, rename = "ref")]
+    pub reference: Option<String>,
 }
 
 fn fifty() -> u32 {
@@ -1429,6 +1463,12 @@ pub struct CommitEntry {
     pub date: String,
     /// The first line of the message.
     pub subject: String,
+    /// The commits this one was built on, oldest parent first. Two or more of
+    /// them means a merge.
+    pub parents: Vec<String>,
+    /// The branch and tag names standing on this commit, as git decorates
+    /// them: `HEAD -> main`, `origin/main`, `tag: v1`.
+    pub refs: Vec<String>,
 }
 
 /// Recent saved changes.
@@ -1439,19 +1479,122 @@ pub struct LogResponse {
 }
 
 /// Tab separated for the same reason as the branch format, and NUL separated
-/// between commits (`-z`) so a message can hold anything it likes.
-const LOG_FORMAT: &str = "--format=%H%x09%h%x09%an%x09%ae%x09%aI%x09%s";
+/// between commits (`-z`) so a message can hold anything it likes. The subject
+/// is last because it is the one field a person can put a tab inside; every
+/// field before it is a name, a date or a list git writes itself.
+const LOG_FORMAT: &str = "--format=%H%x09%h%x09%an%x09%ae%x09%aI%x09%P%x09%D%x09%s";
 
-/// Read recent saved changes.
+/// Split git's decoration list — `HEAD -> main, origin/main, tag: v1` — into
+/// the names it names. Empty for a commit nothing points at.
+fn read_decorations(field: &str) -> Vec<String> {
+    field
+        .split(", ")
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Split git's parent list, which is space separated and empty for a first
+/// commit.
+fn read_parents(field: &str) -> Vec<String> {
+    field.split_whitespace().map(str::to_string).collect()
+}
+
+/// One record out of `LOG_FORMAT`.
+fn read_log_record(record: &str) -> Option<CommitEntry> {
+    let mut fields = record.splitn(8, '\t');
+    Some(CommitEntry {
+        sha: fields.next()?.to_string(),
+        short_sha: fields.next()?.to_string(),
+        author: fields.next()?.to_string(),
+        email: fields.next()?.to_string(),
+        date: fields.next()?.to_string(),
+        parents: read_parents(fields.next()?),
+        refs: read_decorations(fields.next()?),
+        subject: fields.next().unwrap_or_default().to_string(),
+    })
+}
+
+/// A value a person typed, refused if git would read it as a switch.
+///
+/// Every filter below is handed to git attached to its own option — `--grep=x`
+/// rather than `--grep x` — so a value cannot become an option by itself. The
+/// two that stand alone are the revision and the pathspec, and this is the
+/// guard for them.
+fn not_a_switch(what: &str, value: &str) -> Result<(), Refused> {
+    if value.starts_with('-') {
+        return Err(Refused::new(
+            StatusCode::BAD_REQUEST,
+            format!("{what} may not begin with a dash: {value}"),
+        ));
+    }
+    Ok(())
+}
+
+/// A path a person typed, refused if it climbs out of the repository.
+fn inside_the_repo(value: &str) -> Result<(), Refused> {
+    let path = Path::new(value);
+    if path.is_absolute() || path.components().any(|part| part.as_os_str() == "..") {
+        return Err(Refused::new(
+            StatusCode::BAD_REQUEST,
+            format!("Path must be inside the repository: {value}"),
+        ));
+    }
+    not_a_switch("A path", value)
+}
+
+/// Read recent saved changes, filtered the way the panel was asked to.
 ///
 /// # Endpoint
 ///
-/// `GET /api/git/log?path=...&limit=50`
+/// `GET /api/git/log?path=...&limit=50&skip=0&grep=...&author=...&since=...&until=...&sha=...&file=...&ref=...`
 pub async fn log(GitQuery(params): GitQuery<LogParams>) -> Answer {
     let repo = checked_repo(&params.path)?;
 
     let how_many = params.limit.clamp(1, 1000).to_string();
-    let read = run_git(&repo, &["log", "-z", LOG_FORMAT, "-n", &how_many]).await?;
+    let mut args: Vec<String> = vec![
+        "log".to_string(),
+        "-z".to_string(),
+        LOG_FORMAT.to_string(),
+        "-n".to_string(),
+        how_many,
+    ];
+
+    if params.skip > 0 {
+        args.push(format!("--skip={}", params.skip));
+    }
+    if let Some(words) = filled(&params.grep) {
+        // Fixed strings, not expressions: a person searching for `foo(bar)`
+        // means those characters and would be told his own words are a bad
+        // regular expression otherwise.
+        args.push("--fixed-strings".to_string());
+        args.push("--regexp-ignore-case".to_string());
+        args.push(format!("--grep={words}"));
+    }
+    if let Some(who) = filled(&params.author) {
+        args.push("--regexp-ignore-case".to_string());
+        args.push(format!("--author={who}"));
+    }
+    if let Some(when) = filled(&params.since) {
+        args.push(format!("--since={when}"));
+    }
+    if let Some(when) = filled(&params.until) {
+        args.push(format!("--until={when}"));
+    }
+
+    if let Some(line) = filled(&params.reference) {
+        not_a_switch("A branch", line)?;
+        args.push(line.to_string());
+    }
+    if let Some(file) = filled(&params.file) {
+        inside_the_repo(file)?;
+        args.push("--".to_string());
+        args.push(file.to_string());
+    }
+
+    let spoken: Vec<&str> = args.iter().map(String::as_str).collect();
+    let read = run_git(&repo, &spoken).await?;
 
     if !read.status.success() {
         // A project nobody has saved anything in yet has an empty history,
@@ -1463,23 +1606,52 @@ pub async fn log(GitQuery(params): GitQuery<LogParams>) -> Answer {
     }
 
     let read = String::from_utf8_lossy(&read.stdout);
-    let commits = read
+    let mut commits: Vec<CommitEntry> = read
         .split('\0')
         .filter(|record| !record.is_empty())
-        .filter_map(|record| {
-            let mut fields = record.splitn(6, '\t');
-            Some(CommitEntry {
-                sha: fields.next()?.to_string(),
-                short_sha: fields.next()?.to_string(),
-                author: fields.next()?.to_string(),
-                email: fields.next()?.to_string(),
-                date: fields.next()?.to_string(),
-                subject: fields.next().unwrap_or_default().to_string(),
-            })
-        })
+        .filter_map(read_log_record)
         .collect();
 
+    // A name typed into the search box is looked up beside the words, not
+    // instead of them: `--grep` never matches a commit's own name, so a person
+    // who pastes one and gets an empty list has been told the commit is not
+    // there when it is (bw-g6zy.1). A name that resolves to nothing is simply
+    // no extra answer, not a failure — half a name is what typing looks like.
+    if let Some(named) = filled(&params.sha) {
+        if let Some(found) = one_commit(&repo, named).await? {
+            if !commits.iter().any(|seen| seen.sha == found.sha) {
+                commits.insert(0, found);
+                commits.truncate(params.limit.clamp(1, 1000) as usize);
+            }
+        }
+    }
+
     Ok(Json(LogResponse { commits }).into_response())
+}
+
+/// The value of an optional parameter, with blank counted as absent: a search
+/// box that has been cleared sends an empty string, and `--grep=` matches
+/// every commit there is.
+fn filled(value: &Option<String>) -> Option<&str> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+}
+
+/// One commit by name or by a prefix of it, or `None` when git does not know
+/// that name.
+async fn one_commit(repo: &Path, named: &str) -> Result<Option<CommitEntry>, Refused> {
+    not_a_switch("A commit name", named)?;
+    let read = run_git(repo, &["log", "-1", "-z", LOG_FORMAT, named, "--"]).await?;
+    if !read.status.success() {
+        return Ok(None);
+    }
+    let read = String::from_utf8_lossy(&read.stdout);
+    Ok(read
+        .split('\0')
+        .find(|record| !record.is_empty())
+        .and_then(read_log_record))
 }
 
 // ----------------------------------------------------------------------------
@@ -1871,6 +2043,173 @@ async fn untracked_diff(repo: &Path, path: &str) -> Result<Option<DiffFile>, Ref
     file.path = path.to_string();
     file.old_path = None;
     Ok(Some(file))
+}
+
+// ----------------------------------------------------------------------------
+// GET /api/git/show
+// ----------------------------------------------------------------------------
+
+/// Which commit to open.
+#[derive(Deserialize)]
+pub struct ShowParams {
+    /// Absolute working directory of the repository.
+    pub path: String,
+    /// The commit's name, or any prefix of it long enough to be unique.
+    pub sha: String,
+}
+
+/// Everything about one commit that the panel draws above its diff.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitDetail {
+    /// The full commit name, whatever prefix was asked for.
+    pub sha: String,
+    /// The commit name as git abbreviates it.
+    pub short_sha: String,
+    /// Who wrote it.
+    pub author: String,
+    /// Their email.
+    pub email: String,
+    /// When they wrote it, ISO 8601.
+    pub date: String,
+    /// Who committed it, which is the same person as the author until the
+    /// change has been rebased, cherry-picked or applied from a patch.
+    pub committer: String,
+    /// Their email.
+    pub committer_email: String,
+    /// When they committed it, ISO 8601.
+    pub committer_date: String,
+    /// The first line of the message.
+    pub subject: String,
+    /// The whole message, subject line and all, newlines kept.
+    pub body: String,
+    /// The commits this one was built on, oldest parent first.
+    pub parents: Vec<String>,
+    /// The branch and tag names standing on this commit.
+    pub refs: Vec<String>,
+    /// Two parents or more.
+    pub merge: bool,
+    /// The commit the patch below was taken against: the first parent
+    /// ordinarily, and `null` for a first commit, which is compared with
+    /// nothing at all.
+    pub compared_with: Option<String>,
+}
+
+/// One commit, and what it changed.
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ShowResponse {
+    /// Who wrote it, when, and what they said.
+    pub commit: CommitDetail,
+    /// Ordered by path, the same shape `/api/git/diff` gives.
+    pub files: Vec<DiffFile>,
+}
+
+/// The same fields as the log, plus the two committer ones and the whole
+/// message. `%B` is last and nothing follows it, because it is the one field
+/// that can hold tabs and newlines and anything else a person typed. The
+/// subject is not asked for separately: it is the message's first line, and
+/// taking it from there cannot come apart from the message it belongs to.
+const SHOW_FORMAT: &str =
+    "--format=%H%x09%h%x09%an%x09%ae%x09%aI%x09%cn%x09%ce%x09%cI%x09%P%x09%D%x09%B";
+
+/// One commit: who made it, what they said, and the patch it carries.
+///
+/// # Endpoint
+///
+/// `GET /api/git/show?path=...&sha=...`
+///
+/// The patch is taken against the first parent. For an ordinary commit that is
+/// the only parent and the plain answer; for a merge it is the change the
+/// merge brought in, which is what a person clicking a merge wants to see and
+/// what `git show` itself declines to print. A first commit has no parent at
+/// all, so it is compared with the empty tree and everything in it reads as
+/// added — the same stand-in `/api/git/diff` uses in a project with no
+/// history yet.
+pub async fn show(GitQuery(params): GitQuery<ShowParams>) -> Answer {
+    let repo = checked_repo(&params.path)?;
+    let named = params.sha.trim();
+    if named.is_empty() {
+        return Err(Refused::new(
+            StatusCode::BAD_REQUEST,
+            "No commit was named".to_string(),
+        ));
+    }
+    not_a_switch("A commit name", named)?;
+
+    let read = run_git(&repo, &["log", "-1", "-z", SHOW_FORMAT, named, "--"]).await?;
+    if !read.status.success() {
+        return Err(Refused::new(
+            StatusCode::NOT_FOUND,
+            format!("No commit named {named} in this repository"),
+        ));
+    }
+    let text = String::from_utf8_lossy(&read.stdout);
+    let record = text
+        .split('\0')
+        .find(|record| !record.is_empty())
+        .ok_or_else(|| {
+            Refused::new(
+                StatusCode::NOT_FOUND,
+                format!("No commit named {named} in this repository"),
+            )
+        })?;
+
+    let commit = read_show_record(record).ok_or_else(|| {
+        Refused::new(
+            StatusCode::BAD_GATEWAY,
+            "git described that commit in a shape this server does not know".to_string(),
+        )
+    })?;
+
+    let base = commit
+        .compared_with
+        .clone()
+        .unwrap_or_else(|| THE_EMPTY_TREE.to_string());
+
+    let mut args = vec!["diff", &base, &commit.sha];
+    args.extend_from_slice(PATCH_SWITCHES);
+    let patch = spoke_or_refused(run_git(&repo, &args).await?)?;
+    let mut files = read_unified_patch(&String::from_utf8_lossy(&patch.stdout));
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+
+    Ok(Json(ShowResponse { commit, files }).into_response())
+}
+
+/// One record out of `SHOW_FORMAT`.
+fn read_show_record(record: &str) -> Option<CommitDetail> {
+    let mut fields = record.splitn(11, '\t');
+    let sha = fields.next()?.to_string();
+    let short_sha = fields.next()?.to_string();
+    let author = fields.next()?.to_string();
+    let email = fields.next()?.to_string();
+    let date = fields.next()?.to_string();
+    let committer = fields.next()?.to_string();
+    let committer_email = fields.next()?.to_string();
+    let committer_date = fields.next()?.to_string();
+    let parents = read_parents(fields.next()?);
+    let refs = read_decorations(fields.next()?);
+    // `%B` keeps the trailing newline git stores; the message itself ends at
+    // the last thing the author wrote.
+    let body = fields.next().unwrap_or_default().trim_end().to_string();
+    let subject = body.lines().next().unwrap_or_default().to_string();
+
+    Some(CommitDetail {
+        merge: parents.len() > 1,
+        compared_with: parents.first().cloned(),
+        sha,
+        short_sha,
+        author,
+        email,
+        date,
+        committer,
+        committer_email,
+        committer_date,
+        subject,
+        body,
+        parents,
+        refs,
+    })
 }
 
 // ----------------------------------------------------------------------------
