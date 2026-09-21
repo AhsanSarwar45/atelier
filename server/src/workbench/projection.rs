@@ -627,6 +627,14 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
             EventKind::AskResolved => {
                 if let Some(at) = find(&items, "ask", &string(event, "askId")) {
                     items[at]["chosen"] = value(event, "chosen");
+                    // Who pressed it, when it was not the owner. A chat is
+                    // redrawn from this projection on every reload, so a card
+                    // the app answered would come back reading "Allowed" —
+                    // indistinguishable from the ones he pressed himself,
+                    // which is the record the mode stands on (bw-0z25.1).
+                    if let Some(by) = event.fields.get("by") {
+                        items[at]["chosenBy"] = by.clone();
+                    }
                 }
             }
             EventKind::QuestionRequested => {
@@ -1013,5 +1021,35 @@ mod tests {
 
         assert_eq!(view.items()[0]["input"], json!({}));
         assert_eq!(view.items()[1]["input"], json!({"file_path":"/w/a.rs"}));
+    }
+
+    /// A card the app answered still says so when the chat is reopened.
+    ///
+    /// This projection is what a chat is redrawn from on every reload. It kept
+    /// only which option was chosen, so a card "Atelier automatic" pressed
+    /// came back reading "Allowed" — the same words as one the owner pressed
+    /// himself. A record of approvals he cannot tell apart from his own is the
+    /// thing that would make the mode untrustworthy (bw-0z25.1).
+    #[test]
+    fn a_card_the_app_answered_still_says_so_when_the_chat_is_reopened() {
+        let told = |by: Value| {
+            [
+                json!({"type":"ask.permission","sessionId":"chat","seq":1,"at":"2026-09-21T00:00:00Z",
+                       "askId":"ask","toolName":"Write","title":"Write notes.txt",
+                       "options":[{"id":"allow-once","label":"Yes","kind":"allow_once"}]}),
+                json!({"type":"ask.resolved","sessionId":"chat","seq":2,"at":"2026-09-21T00:00:01Z",
+                       "askId":"ask","chosen":"allow-once","by":by}),
+            ]
+            .map(|value| serde_json::from_value::<Event>(value).unwrap())
+        };
+
+        let by_the_app = fold_all(&told(json!("atelier")));
+        assert_eq!(by_the_app.items()[0]["chosen"], json!("allow-once"));
+        assert_eq!(by_the_app.items()[0]["chosenBy"], json!("atelier"));
+
+        // A card he pressed himself carries no mark at all, rather than a mark
+        // saying nobody: the screen reads the field's absence.
+        let by_the_owner = fold_all(&told(Value::Null));
+        assert!(by_the_owner.items()[0].get("chosenBy").is_none_or(Value::is_null));
     }
 }

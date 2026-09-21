@@ -389,6 +389,16 @@ test.describe('the chat draws everything the agent does', () => {
     await expect(page.getByTestId('tool-toggle').filter({ hasText: written }).first()).toBeVisible({
       timeout: TURN_MS,
     });
+    // And it still says the app answered it after the chat is closed and
+    // opened again. A reopened chat is not replayed in the browser: the server
+    // folds the record and sends the finished transcript, and that fold was
+    // dropping the mark — the same card came back reading "Allowed", which is
+    // what it says when he pressed it himself (bw-0z25.1).
+    await page.reload();
+    const reopened = page.locator('[data-testid="permission-card"][data-answered-by="atelier"]').first();
+    await reopened.waitFor({ timeout: 60_000 });
+    await expect(reopened).toContainText('Approved automatically');
+
     // It was written into the project the chat is working in, so it is taken
     // away again. A case that leaves files in the tree it ran against is a
     // case the next run of it fails on.

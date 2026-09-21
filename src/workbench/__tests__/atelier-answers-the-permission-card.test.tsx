@@ -16,7 +16,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { composerMenu } from '@/workbench/chat-tab';
-import { foldAll, reduce, EMPTY, type TranscriptAsk } from '@/workbench/fold';
+import { asView, foldAll, reduce, EMPTY, type TranscriptAsk } from '@/workbench/fold';
 import { PERMISSION_MODE } from '@/workbench/machine-words';
 import { ATELIER_AUTO, offeringAtelierAuto, type AskOption, type WbpEvent } from '@/workbench/protocol';
 import { PermissionCard } from '@/workbench/transcript-rows';
@@ -142,6 +142,27 @@ describe('a card the app answered', () => {
     // path. A mark that survived only the live fold would vanish on refresh,
     // and the same card would then read as his (bw-0z25.1).
     const view = foldAll([asked, answeredByTheApp]);
+    expect(onlyAsk(view).chosenBy).toBe('atelier');
+  });
+
+  it('carries it through the snapshot a reopened chat is actually drawn from', () => {
+    // A chat is not reopened by replaying its events in the browser: the server
+    // folds them and sends the finished transcript, and `asView` is what the
+    // screen opens on. The mark has to survive that crossing too, which is
+    // where it was being dropped (`projection.rs`, bw-0z25.1).
+    const view = asView({
+      items: [
+        {
+          kind: 'ask',
+          id: 'ask-1',
+          toolName: 'Edit notes.txt',
+          title: 'Edit notes.txt',
+          options: AS_CLAUDE_SENDS_THEM,
+          chosen: 'allow-once',
+          chosenBy: 'atelier',
+        } as TranscriptAsk,
+      ],
+    });
     expect(onlyAsk(view).chosenBy).toBe('atelier');
   });
 
