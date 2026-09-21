@@ -68,6 +68,7 @@ import {
   type GitDeed,
 } from '@/workbench/git-deeds';
 import { usePathActions } from '@/workbench/path-menu';
+import { SplitColumn } from '@/workbench/split-column';
 import { readRepositoryStatus } from '@/workbench/repository-status';
 import { useRepositoryReads } from '@/workbench/use-repository-reads';
 
@@ -842,8 +843,19 @@ export function GitView({
     conflicted.length === 0;
 
   return (
-    <div className="flex min-h-0 flex-col divide-y divide-border/60" data-testid="git-view" {...paths.chips} onClickCapture={clicked}>
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="git-view" {...paths.chips} onClickCapture={clicked}>
       {paths.menu}
+      {/* Two panes with a divider between them, rather than the one column
+          this view used to be. What is above the divider is the working tree
+          and what is below it is the history; each scrolls inside itself, so
+          a long list of changed files can no longer push the message box, the
+          Commit button or the whole history off the bottom of the rail
+          (bw-g6zy.3). */}
+      <SplitColumn
+        storageKey={path || 'git'}
+        label="Resize the changes and the history"
+        top={
+          <>
       {/* The line of work, and how far it is from the shared copy. Both counts
           are drawn whether or not there is anything in them: "0 ahead, 0
           behind" is an answer, and a row that appears only when it is not zero
@@ -1010,6 +1022,15 @@ export function GitView({
           </Button>
         </div>
       </div>
+
+      {/* Everything that can grow without limit, and nothing else. The branch
+          above it and the message box below it stay where they are put; only
+          this scrolls, which is what keeps the Commit button on screen under a
+          list of any length at all (bw-g6zy.3). */}
+      <div
+        className="min-h-0 flex-1 overflow-y-auto divide-y divide-border/60"
+        data-testid="git-changes"
+      >
 
       {/* The way out of a refusal a key could clear (bw-k778), asked for in
           the app's own modal dialog rather than as a strip wedged into the
@@ -1427,6 +1448,9 @@ export function GitView({
         </p>
       )}
 
+      </div>
+
+      <div className="shrink-0 border-t border-border/60" data-testid="git-compose">
       <Section title="Commit">
         <Textarea
           value={message}
@@ -1474,7 +1498,11 @@ export function GitView({
               : 'Commit'}
         </Button>
       </Section>
-
+      </div>
+          </>
+        }
+        bottom={
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-testid="git-history">
       <Section title="Recent commits" testId="git-log">
         {commits.length === 0 ? (
           <p className="text-xs text-muted-foreground" data-testid="git-log-empty">
@@ -1500,6 +1528,9 @@ export function GitView({
           </ul>
         )}
       </Section>
+          </div>
+        }
+      />
     </div>
   );
 }
