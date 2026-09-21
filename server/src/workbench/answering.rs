@@ -65,11 +65,19 @@ pub fn read_back(owner_picked: &str, brand: &str, provider_says: &str) -> String
 /// Put the app's own mode in a menu of the provider's modes.
 ///
 /// It belongs to the app, not to the provider, so no provider lists it and it
-/// has to be added to every menu. It goes last: the modes above it are the
-/// ones the provider itself enforces, and this one is the fallback for an
-/// account that cannot reach them.
-pub fn offer_in_menu(modes: &mut Vec<String>) {
-    if !modes.iter().any(|mode| mode == ATELIER_AUTO) {
+/// has to be added to every menu that can honestly carry it. It goes last: the
+/// modes above it are the ones the provider itself enforces, and this one is
+/// the fallback for an account that cannot reach them.
+///
+/// `provider_still_asks` is whether this agent can actually be left asking.
+/// Offering the mode to an agent that cannot is a promise on the picker that
+/// nothing behind it keeps: an agent that lists modes but not the asking one
+/// would be left in whatever it is already in, and the app would claim to be
+/// answering questions that are never put. An agent that lists no modes at all
+/// is a different case and does qualify — it keeps whatever mode it starts in,
+/// nothing is sent to it, and any question it does ask is answered.
+pub fn offer_in_menu(modes: &mut Vec<String>, provider_still_asks: bool) {
+    if provider_still_asks && !modes.iter().any(|mode| mode == ATELIER_AUTO) {
         modes.push(ATELIER_AUTO.to_string());
     }
 }
@@ -137,9 +145,22 @@ mod tests {
     #[test]
     fn the_menu_offers_it_once_however_often_it_is_built() {
         let mut modes = vec!["default".to_string(), "plan".to_string()];
-        offer_in_menu(&mut modes);
-        offer_in_menu(&mut modes);
+        offer_in_menu(&mut modes, true);
+        offer_in_menu(&mut modes, true);
         assert_eq!(modes, ["default", "plan", ATELIER_AUTO]);
+    }
+
+    /// An agent that cannot be left asking is not offered the mode.
+    ///
+    /// Picking it there used to send the agent a mode it never listed, which
+    /// ACP answers with a fatal `Invalid params`: the pick came back as a
+    /// steer error, the chat stayed in the mode it was already in, and the app
+    /// never started answering anything (bw-0z25.1).
+    #[test]
+    fn an_agent_that_cannot_be_left_asking_is_not_offered_it() {
+        let mut modes = vec!["yolo".to_string()];
+        offer_in_menu(&mut modes, false);
+        assert_eq!(modes, ["yolo"]);
     }
 
     #[test]

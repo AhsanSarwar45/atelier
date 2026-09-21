@@ -26,12 +26,7 @@ describe('a setting on a resumed chat', () => {
       efforts: [{ value: 'live-effort', displayName: 'Live effort' }],
       collaborationModes: [{ value: 'live-collaboration', displayName: 'Live collaboration' }],
     };
-    // Everything the provider sent survives untouched. The app's own
-    // permission mode is added to the modes, and is the only addition.
-    expect(composerMenu(live, 'codex', 'old-model', 'old-mode')).toEqual({
-      ...live,
-      permissionModes: ['live-mode', ATELIER_AUTO],
-    });
+    expect(composerMenu(live, 'codex', 'old-model', 'old-mode')).toEqual(live);
   });
 
   it.each([

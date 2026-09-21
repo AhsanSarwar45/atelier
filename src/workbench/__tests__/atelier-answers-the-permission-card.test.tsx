@@ -79,6 +79,20 @@ describe('the mode is offered wherever the provider’s modes are', () => {
     expect(menu.permissionModes.filter((mode) => mode === ATELIER_AUTO)).toHaveLength(1);
   });
 
+  it('leaves it out of a live menu that left it out', () => {
+    // Whether an agent can be left asking is the server's to decide, and it
+    // decides it per agent. Adding the mode back on top of a menu that
+    // withheld it would offer it for the agents it cannot work on
+    // (`offer_in_menu`, bw-0z25.1).
+    const menu = composerMenu(
+      { ...EMPTY.menu, permissionModes: ['never'] },
+      'codex',
+      null,
+      null,
+    );
+    expect(menu.permissionModes).toEqual(['never']);
+  });
+
   it('leaves a menu that already carries it untouched', () => {
     expect(offeringAtelierAuto(['default', ATELIER_AUTO])).toEqual(['default', ATELIER_AUTO]);
     expect(offeringAtelierAuto(['default'])).toEqual(['default', ATELIER_AUTO]);

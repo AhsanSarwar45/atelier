@@ -1954,10 +1954,17 @@ pub(super) fn menu_fields(
         .filter_map(|mode| mode["id"].as_str())
         .map(|mode| mode_from_acp(brand, mode))
         .collect::<Vec<_>>();
-    // The app's own mode is offered wherever the provider's are, whatever the
-    // agent lists — it is the app that carries it out, so no agent has to
-    // support it for it to work (`workbench::answering`).
-    super::super::answering::offer_in_menu(&mut permission_modes);
+    // The app's own mode is offered wherever the provider's are: it is the app
+    // that carries it out, so no agent has to support it. What the agent does
+    // have to allow is being left asking — either by offering the asking mode,
+    // or by listing no modes at all, in which case it is asked for nothing and
+    // keeps the one it started in (`workbench::answering`, `offers_mode`).
+    let lists_no_modes = modes["availableModes"]
+        .as_array()
+        .is_none_or(Vec::is_empty);
+    let can_be_left_asking = lists_no_modes
+        || offers_mode(modes, &mode_to_acp(brand, super::super::answering::ATELIER_AUTO));
+    super::super::answering::offer_in_menu(&mut permission_modes, can_be_left_asking);
     json!({
         "commands":[], "skills":[], "agentDefinitions":agent_definitions, "agentControls":agent_controls,
         "permissionModes":permission_modes,
@@ -2775,11 +2782,27 @@ impl AcpDriver {
                                     let _ = reply.send(result);
                                 }
                                 Control::Mode { value, selected, reply } => {
-                                    let result = connection
-                                        .send_request(SetSessionModeRequest::new(remote_id.clone(), value))
-                                        .block_task()
-                                        .await
-                                        .map_err(|error| error.to_string());
+                                    // The same guard the start path has kept
+                                    // since bw-u6cl.11, which this path went
+                                    // without: `session/set_mode` names one of
+                                    // the modes the agent listed, and an agent
+                                    // asked for one it never offered answers
+                                    // with a fatal `Invalid params`. The app's
+                                    // own mode is never a word an agent
+                                    // listed, so for an agent that lists none
+                                    // at all nothing is sent — it keeps the
+                                    // mode it came up in, which is the asking
+                                    // one, and the app answers what it asks.
+                                    let result = if offers_mode(&modes, &value) {
+                                        connection
+                                            .send_request(SetSessionModeRequest::new(remote_id.clone(), value))
+                                            .block_task()
+                                            .await
+                                            .map_err(|error| error.to_string())
+                                            .map(|_| ())
+                                    } else {
+                                        Ok(())
+                                    };
                                     let result = match result {
                                         Ok(_) => {
                                             // The bit the question-answering
@@ -3998,6 +4021,38 @@ mod tests {
         validate_offered_command(&database, "chat-1", "/review please")
             .await
             .unwrap();
+    }
+
+    /// Which agents are offered the app's own permission mode.
+    ///
+    /// It is the app that answers the cards, but the agent has to be left
+    /// asking for there to be any. An agent that offers the asking mode is put
+    /// in it; an agent that offers no modes at all is asked for nothing and
+    /// keeps the one it came up in. An agent that offers modes but not that
+    /// one is neither, and offering it there would be a promise on the picker
+    /// that nothing behind it keeps (bw-0z25.1).
+    #[test]
+    fn the_apps_own_mode_is_offered_only_where_the_agent_can_be_left_asking() {
+        let menu = |modes: Value| {
+            menu_fields("codex", None, &modes, &json!([]), &json!([]), &json!([]))
+                ["permissionModes"]
+                .clone()
+        };
+
+        // Codex, which offers the asking mode under its own name.
+        assert_eq!(
+            menu(json!({"availableModes":[{"id":"read-only"},{"id":"agent"}]})),
+            json!(["untrusted", "on-request", "atelierAuto"])
+        );
+        // An agent that lists nothing, as goose does (bw-u6cl.11). Nothing is
+        // sent to it and it keeps the mode it started in.
+        assert_eq!(menu(json!({"availableModes":[]})), json!(["atelierAuto"]));
+        assert_eq!(menu(json!({})), json!(["atelierAuto"]));
+        // An agent with modes of its own, none of which leaves it asking.
+        assert_eq!(
+            menu(json!({"availableModes":[{"id":"agent-full-access"}]})),
+            json!(["never"])
+        );
     }
 
     /// The card the app answered for him.

@@ -146,15 +146,19 @@ const CODEX_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh'].map((value) 
  */
 export function composerMenu(menu: SessionMenu, brand: Brand, model: string | null, collaborationMode: string | null): SessionMenu {
   if (brand === 'local') return menu;
-  // The app's own mode is offered before the provider has said anything, the
-  // same as it is in the menu the server builds afterwards: it is this app
-  // that carries it out, so it does not wait on a provider to list it.
-  const permissionModes = offeringAtelierAuto(menu.permissionModes.length
+  // The app's own mode is offered before the provider has said anything, so
+  // that a chat is not missing it for as long as the menu takes to arrive.
+  // Only in the fallback, though: once the provider's real menu is here the
+  // server has already decided whether this agent can be left asking, and
+  // adding it back over that decision would offer it for agents it cannot
+  // work on (`workbench::answering::offer_in_menu`).
+  const permissionModes = menu.permissionModes.length
     ? menu.permissionModes
-    : brand === 'codex'
-      ? ['on-request', 'never']
-      : ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']
-  );
+    : offeringAtelierAuto(
+        brand === 'codex'
+          ? ['on-request', 'never']
+          : ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto'],
+      );
   const models = menu.models.length
     ? menu.models
     : [
