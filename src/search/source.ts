@@ -67,6 +67,13 @@ export interface WordsSearch<Item> {
   /** Said when nothing matched: "No chats." */
   nothing: string;
   grammar: Grammar;
+  /**
+   * What the box already says when the search opens, or nothing for a box that
+   * opens empty. It is ordinary text from there on: a source that searches
+   * where the reader is standing seeds that place, and deleting the word widens
+   * the search again.
+   */
+  seed?: string;
   /** The parts `in:` can aim words at. */
   scopes: Choice[];
   filters: FilterSpec[];

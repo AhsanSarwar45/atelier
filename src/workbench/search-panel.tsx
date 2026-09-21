@@ -1,11 +1,13 @@
 /**
- * One search across every conversation, in every project.
+ * One search across the conversations, starting in the project you are in.
  *
  * The box is the query: `title:loader me:"why does" -codex after:7d`. The
  * controls under it write those same words, and are drawn from them, so the
  * owner can type, click, or both. Each chat is listed once with the places in
  * it that matched, the words themselves marked, and opening one of those
- * places opens the chat at it (docs/agent-workbench.md §8.4e). The box, the
+ * places opens the chat at it (docs/agent-workbench.md §8.4e). The box opens
+ * with the project already in it, as a word that can be deleted to search every
+ * project (bw-c1ti). The box, the
  * controls and the AI search are shared with every search (src/search); this
  * is the chats as a source.
  */
@@ -19,7 +21,7 @@ import * as api from '@/lib/api';
 import { Excerpt, Heading, PLACE, TITLE } from '@/search/parts';
 import { Marked, Search } from '@/search/search';
 import type { FilterSpec, Found, SearchSource, Segment } from '@/search/source';
-import { CHAT_GRAMMAR, SCOPES } from '@/workbench/search-syntax';
+import { CHAT_GRAMMAR, SCOPES, withFilter } from '@/workbench/search-syntax';
 
 export type { Segment } from '@/search/source';
 
@@ -106,20 +108,37 @@ function Meta({ project, brand, at, matches }: { project: string; brand: string;
   );
 }
 
-/** The chats, as the shared search draws and opens them. */
-export function useChatSearch(): SearchSource<ChatMatch, FoundChat> {
+/** The project a search was opened on. */
+export interface Here {
+  projectId: string;
+  projectPath: string;
+}
+
+/**
+ * The chats, as the shared search draws and opens them, searched from `here`:
+ * the project whose screen the panel was opened on, or nothing when the panel
+ * belongs to no project. `listed` says whether the projects have answered yet,
+ * which is what tells the panel it may open on the right words.
+ */
+export function useChatSearch(here: Here | null): { source: SearchSource<ChatMatch, FoundChat>; listed: boolean } {
   const router = useRouter();
-  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
+  const [projects, setProjects] = useState<{ id: string; name: string }[] | null>(null);
 
   useEffect(() => {
     void api.projects
       .list()
       .then((rows) => setProjects(rows.map((p) => ({ id: p.id, name: p.name }))))
-      .catch(() => undefined);
+      // Nothing answered; a project is still known by its folder.
+      .catch(() => setProjects([]));
   }, []);
 
-  return useMemo(() => {
-    const names = new Map(projects.map((p) => [p.id, p.name]));
+  const source = useMemo<SearchSource<ChatMatch, FoundChat>>(() => {
+    const named = projects ?? [];
+    const names = new Map(named.map((p) => [p.id, p.name]));
+    // The name the Project menu offers, so the seeded word and the menu are the
+    // same word. A project the list never named is known by its folder, which
+    // is what its own result rows already show.
+    const mine = here ? (names.get(here.projectId) ?? folderName(here.projectPath)) : null;
     const project = (id: string, path: string) => names.get(id) ?? folderName(path);
     const go = (projectId: string, sessionId: string, messageId: string | null) => {
       const at = messageId ? `&message=${encodeURIComponent(messageId)}` : '';
@@ -130,10 +149,11 @@ export function useChatSearch(): SearchSource<ChatMatch, FoundChat> {
         label: 'Search chats',
         placeholder: 'Search chats…',
         nothing: 'No chats.',
-        grammar: { ...CHAT_GRAMMAR, values: { ...CHAT_GRAMMAR.values, project: projects.map((p) => p.name) } },
+        grammar: { ...CHAT_GRAMMAR, values: { ...CHAT_GRAMMAR.values, project: named.map((p) => p.name) } },
+        seed: mine ? withFilter('', 'project', mine) : undefined,
         scopes: SCOPES,
         filters: [
-          { key: 'project', label: 'Project', choices: projects.map((p) => ({ value: p.name, label: p.name })) },
+          { key: 'project', label: 'Project', choices: named.map((p) => ({ value: p.name, label: p.name })) },
           ...FILTERS,
         ],
         tips: TIPS,
@@ -194,6 +214,9 @@ export function useChatSearch(): SearchSource<ChatMatch, FoundChat> {
         placeholder: 'Ask about chats…',
         nothing: 'No chats.',
         url: '/api/workbench/search/ask',
+        // Said to the server, not to the agent: an agent handed a suggestion
+        // drops it. While this is sent, every search it makes stays here.
+        body: mine ? { project: mine } : undefined,
         row: (chat) => ({
           key: chat.sessionId,
           testId: 'ai-search-chat',
@@ -208,10 +231,19 @@ export function useChatSearch(): SearchSource<ChatMatch, FoundChat> {
         }),
       },
     };
-  }, [projects, router]);
+  }, [projects, router, here]);
+
+  return { source, listed: projects !== null };
 }
 
-export function SearchPanel({ onClose }: { onClose: () => void }) {
-  const source = useChatSearch();
+export function SearchPanel({ projectId, projectPath, onClose }: { projectId: string | null; projectPath: string | null; onClose: () => void }) {
+  const here = useMemo(
+    () => (projectId && projectPath ? { projectId, projectPath } : null),
+    [projectId, projectPath],
+  );
+  const { source, listed } = useChatSearch(here);
+  // The project's name is known in a moment; opening on the wrong words would
+  // show every project's chats and then take them away.
+  if (here && !listed) return null;
   return <Search source={source} onClose={onClose} />;
 }

@@ -93,7 +93,7 @@ const escape = () =>
   });
 
 const panels = [
-  ['the search panel', 'search-panel', (onClose: () => void) => <SearchPanel onClose={onClose} />],
+  ['the search panel', 'search-panel', (onClose: () => void) => <SearchPanel projectId="p1" projectPath="/tmp/a-project" onClose={onClose} />],
   ['the tokens panel', 'token-view', (onClose: () => void) => <TokenView sessionId="chat-1" onClose={onClose} />],
   ['the plan usage panel', 'usage-view', (onClose: () => void) => <UsageView onClose={onClose} />],
   // Wears the same shell as the three above and was the one left out of this

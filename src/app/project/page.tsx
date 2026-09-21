@@ -384,7 +384,7 @@ function ProjectTabs() {
           ) : shownTab === 'files' && project ? (
             <FileSearchPanel projectId={projectId} projectPath={project.path} onClose={closeSearch} />
           ) : (
-            <SearchPanel onClose={closeSearch} />
+            <SearchPanel projectId={projectId} projectPath={project?.path ?? null} onClose={closeSearch} />
           ))}
       </PathsOpenProvider>
     </SearchOpener>

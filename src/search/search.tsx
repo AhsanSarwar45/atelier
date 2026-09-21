@@ -139,7 +139,7 @@ export function Search<Item, Thing extends Found = Found>({
   onClose: () => void;
 }) {
   const { words } = source;
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(words.seed ?? '');
   const [sort, setSort] = useState(words.sorts[0]?.value ?? '');
   const [page, setPage] = useState<Page<Item>>({ items: [], next: null });
   const [searched, setSearched] = useState(false);

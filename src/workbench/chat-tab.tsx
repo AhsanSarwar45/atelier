@@ -1904,7 +1904,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         )}
       </TabTrail>
 
-      {showing === 'search' && <SearchPanel onClose={() => setShowing(null)} />}
+      {showing === 'search' && <SearchPanel projectId={projectId} projectPath={projectPath} onClose={() => setShowing(null)} />}
       {showing === 'usage' && <UsageView brand={sessionBrand} profile={view.profile} onClose={() => setShowing(null)} />}
       {showing === 'tokens' && sessionId && (
         <TokenView sessionId={sessionId} onClose={() => setShowing(null)} />
