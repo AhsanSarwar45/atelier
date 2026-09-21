@@ -229,8 +229,15 @@ export function CommitLog({ path, shown = true, openSha, onOpen, onLeave }: Comm
               const open = made.sha === openSha;
               return (
                 <li key={made.sha}>
-                  <button
+                  <Button
+                    // `inherit` because the row sets its own height, padding
+                    // and type: it is a list row that can be pressed, not a
+                    // capsule, and a second answer to any of those questions
+                    // would be settled by whichever rule the built sheet
+                    // happens to put last.
                     type="button"
+                    variant="ghost"
+                    size="inherit"
                     aria-current={open || undefined}
                     tabIndex={open || (!openSha && at === 0) ? 0 : -1}
                     data-testid="git-log-row"
@@ -238,9 +245,12 @@ export function CommitLog({ path, shown = true, openSha, onOpen, onLeave }: Comm
                     data-open={open || undefined}
                     onClick={() => onOpen?.(made)}
                     className={cn(
-                      'flex w-full flex-col gap-0.5 rounded px-1.5 py-1 text-left',
+                      'flex w-full flex-col items-stretch justify-start gap-0.5 rounded border-l-2 px-1.5 py-1 text-left',
                       'hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                      open && 'bg-surface-3',
+                      // The one being read is marked twice -- a filled row and
+                      // a bar down its edge -- because a change of background
+                      // alone is easy to miss against a list this dense.
+                      open ? 'border-primary bg-surface-3' : 'border-transparent',
                     )}
                   >
                     <div className="flex items-baseline gap-1.5">
@@ -284,7 +294,7 @@ export function CommitLog({ path, shown = true, openSha, onOpen, onLeave }: Comm
                         );
                       })}
                     </div>
-                  </button>
+                  </Button>
                 </li>
               );
             })}

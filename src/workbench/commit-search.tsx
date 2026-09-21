@@ -172,13 +172,13 @@ export function CommitSearch({ line, onLine, found, reading }: CommitSearchProps
                 asChild
                 data-testid={`commit-chip-${filter.name}`}
               >
-                <button type="button" onClick={() => set(filter.name, undefined)}>
+                <Button type="button" variant="ghost" size="none" onClick={() => set(filter.name, undefined)}>
                   <span className="max-w-28 truncate">
                     {filter.word}: {filter.value}
                   </span>
                   <X className="shrink-0" aria-hidden="true" />
                   <span className="sr-only">Remove this filter</span>
-                </button>
+                </Button>
               </Badge>
             </Tooltip>
           ))}
