@@ -31,14 +31,33 @@ type Reply = oneshot::Sender<Result<Value, String>>;
 
 const MAX_SESSION_LIST_PAGES: usize = 100;
 
-/// A Codex thread can remain readable after its local rollout was removed.
-/// Resuming that thread is impossible; only this exact provider answer should
-/// turn the next message into a fresh writable continuation.
-fn codex_rollout_is_gone(brand: &str, error: &str) -> bool {
-    brand == "codex"
-        && error
-            .to_ascii_lowercase()
-            .contains("no rollout found for thread id")
+/// The provider no longer has the session this chat was given.
+///
+/// A chat holds an id the provider handed out, and the provider is free to
+/// forget it: a Claude session that was created and never prompted is never
+/// written down at all, and a thread whose local record was removed cannot be
+/// resumed either. Reattaching to a forgotten id fails, and the next message
+/// has nowhere to go.
+///
+/// The test is the protocol's, not a provider's. ACP names this condition
+/// once — `ResourceNotFound`, -32002 — and that is read first, so a provider
+/// nobody has met yet recovers the same way without being added to a list. A
+/// provider that answers with a plain internal error instead still says which
+/// thing it could not find, and the fallback reads that sentence for the
+/// subject and the absence; it asks who sent it at no point (bw-m15v.1).
+fn remote_session_is_gone(error: &agent_client_protocol::Error, remote_id: &str) -> bool {
+    if i32::from(error.code) == crate::workbench::provider_messages::RESOURCE_NOT_FOUND {
+        return true;
+    }
+    let said = error.to_string().to_ascii_lowercase();
+    let names_the_session = said.contains("session")
+        || said.contains("thread")
+        || said.contains("rollout")
+        || (!remote_id.is_empty() && said.contains(&remote_id.to_ascii_lowercase()));
+    let says_it_is_absent = ["not found", "no rollout", "no such", "does not exist", "unknown", "missing"]
+        .iter()
+        .any(|phrase| said.contains(phrase));
+    names_the_session && says_it_is_absent
 }
 
 /// How long a chat must be silent before its turn is read as held rather than
@@ -2508,44 +2527,24 @@ impl AcpDriver {
                                 .external_id
                                 .clone()
                                 .ok_or_else(|| acp_error("saved session has no provider id"))?;
-                            if initialized.pointer("/agentCapabilities/sessionCapabilities/resume").is_some() {
-                                let response = connection
+                            // Reattaching is two methods and one outcome, so
+                            // the answer is carried rather than acted on here:
+                            // a provider that has forgotten the id refuses
+                            // either method the same way, and the recovery
+                            // below is written once for both (bw-m15v.1).
+                            let reattached = if initialized.pointer("/agentCapabilities/sessionCapabilities/resume").is_some() {
+                                connection
                                     .send_request(ResumeSessionRequest::new(
                                         remote.clone(),
                                         PathBuf::from(&task_session.cwd),
                                     ).meta(session_meta.clone()))
                                     .block_task()
-                                    .await;
-                                match response {
-                                    Ok(response) => (
-                                        remote,
+                                    .await
+                                    .and_then(|response| Ok((
+                                        remote.clone(),
                                         serde_json::to_value(response.modes).map_err(acp_error)?,
                                         serde_json::to_value(response.config_options).map_err(acp_error)?,
-                                    ),
-                                    Err(error) if codex_rollout_is_gone(brand, &error.to_string()) => {
-                                        let response = connection
-                                            .send_request(NewSessionRequest::new(PathBuf::from(
-                                                &task_session.cwd,
-                                            )).meta(session_meta.clone()))
-                                            .block_task()
-                                            .await?;
-                                        task_database
-                                            .remember_external_alias(
-                                                task_session.id.clone(),
-                                                brand.to_string(),
-                                                remote,
-                                            )
-                                            .await
-                                            .map_err(acp_error)?;
-                                        normalizer.lock().await.namespace_generated_ids();
-                                        (
-                                            response.session_id.to_string(),
-                                            serde_json::to_value(response.modes).map_err(acp_error)?,
-                                            serde_json::to_value(response.config_options).map_err(acp_error)?,
-                                        )
-                                    },
-                                    Err(error) => return Err(error),
-                                }
+                                    )))
                             } else if initialized.pointer("/agentCapabilities/loadSession") == Some(&Value::Bool(true)) {
                                 replaying.store(true, Ordering::Release);
                                 let response = connection
@@ -2556,14 +2555,39 @@ impl AcpDriver {
                                     .block_task()
                                     .await;
                                 replaying.store(false, Ordering::Release);
-                                let response = response?;
-                                (
-                                    remote,
+                                response.and_then(|response| Ok((
+                                    remote.clone(),
                                     serde_json::to_value(response.modes).map_err(acp_error)?,
                                     serde_json::to_value(response.config_options).map_err(acp_error)?,
-                                )
+                                )))
                             } else {
                                 return Err(acp_error("agent supports neither session/resume nor session/load"));
+                            };
+                            match reattached {
+                                Ok(reattached) => reattached,
+                                Err(error) if remote_session_is_gone(&error, &remote) => {
+                                    let response = connection
+                                        .send_request(NewSessionRequest::new(PathBuf::from(
+                                            &task_session.cwd,
+                                        )).meta(session_meta.clone()))
+                                        .block_task()
+                                        .await?;
+                                    task_database
+                                        .remember_external_alias(
+                                            task_session.id.clone(),
+                                            brand.to_string(),
+                                            remote,
+                                        )
+                                        .await
+                                        .map_err(acp_error)?;
+                                    normalizer.lock().await.namespace_generated_ids();
+                                    (
+                                        response.session_id.to_string(),
+                                        serde_json::to_value(response.modes).map_err(acp_error)?,
+                                        serde_json::to_value(response.config_options).map_err(acp_error)?,
+                                    )
+                                }
+                                Err(error) => return Err(error),
                             }
                         };
                         io.set_session(remote_id.clone()).await;
@@ -3395,17 +3419,37 @@ pub async fn note_adapter_answer(brand: &str, refused: bool) {
 mod tests {
     use super::*;
 
+    /// The condition is the protocol's, so every provider recovers from it.
+    ///
+    /// This used to ask the brand first and only Codex could answer yes, which
+    /// is why a Claude chat that went to sleep before its first message was
+    /// sent drew the wire's refusal in red instead of sending (bw-m15v.1).
     #[test]
-    fn only_a_missing_codex_rollout_becomes_a_new_thread() {
-        assert!(codex_rollout_is_gone(
-            "codex",
-            r#"Internal error: {\"details\":\"no rollout found for thread id 01abc\"}"#,
-        ));
-        assert!(!codex_rollout_is_gone(
-            "claude",
-            "no rollout found for thread id 01abc",
-        ));
-        assert!(!codex_rollout_is_gone("codex", "Authentication required"));
+    fn a_forgotten_session_is_read_off_the_protocol_and_not_off_the_provider() {
+        let gone = |error: agent_client_protocol::Error| {
+            remote_session_is_gone(&error, "a22f34ef-a523-4ad5-a87b-1db7aec91a41")
+        };
+
+        // What the bundled claude adapter answers for a session it never
+        // wrote down: ACP's own code, whoever asked.
+        assert!(gone(agent_client_protocol::Error::resource_not_found(Some(
+            "a22f34ef-a523-4ad5-a87b-1db7aec91a41".into()
+        ))));
+        assert!(gone(agent_client_protocol::Error::resource_not_found(None)));
+
+        // And what a provider that reaches for a plain internal error says
+        // instead. It names what it could not find; that is what is read.
+        assert!(gone(agent_client_protocol::Error::internal_error().data(
+            r#"{"details":"no rollout found for thread id 01abc"}"#
+        )));
+        assert!(gone(agent_client_protocol::Error::internal_error()
+            .data("unknown session a22f34ef-a523-4ad5-a87b-1db7aec91a41")));
+
+        // Everything else is a refusal to be shown, not a session to replace.
+        assert!(!gone(agent_client_protocol::Error::auth_required()));
+        assert!(!gone(agent_client_protocol::Error::internal_error()));
+        assert!(!gone(agent_client_protocol::Error::internal_error()
+            .data("the model is overloaded, try again")));
     }
 
     /// A refusal is drawn in the chat, so it is written for the reader.
