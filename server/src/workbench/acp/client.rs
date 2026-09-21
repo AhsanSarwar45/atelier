@@ -2581,6 +2581,25 @@ impl AcpDriver {
                                         .await
                                         .map_err(acp_error)?;
                                     normalizer.lock().await.namespace_generated_ids();
+                                    // Said only where there is something to
+                                    // lose. A chat that has drawn nothing yet
+                                    // — one opened, left while a message was
+                                    // typed, and asleep before it was sent —
+                                    // loses nothing by starting again, and a
+                                    // notice about it would be the first thing
+                                    // in a chat that has not begun (bw-m15v.2).
+                                    let drawn = task_database
+                                        .timeline_count(task_session.id.clone())
+                                        .await
+                                        .unwrap_or(0);
+                                    if drawn > 0 {
+                                        let _ = super::super::provider::append_notice(
+                                            &task_database,
+                                            &task_session.id,
+                                            crate::workbench::provider_messages::CONVERSATION_IS_GONE,
+                                        )
+                                        .await;
+                                    }
                                     (
                                         response.session_id.to_string(),
                                         serde_json::to_value(response.modes).map_err(acp_error)?,
@@ -3481,6 +3500,57 @@ mod tests {
         );
         assert!(!said.contains("errorKind"), "{said}");
         assert!(!said.is_empty());
+    }
+
+    /// Carrying on somewhere new is said only where something was lost.
+    ///
+    /// A chat that went to sleep before its first message was ever sent has
+    /// nothing above it: telling that reader the provider forgot a
+    /// conversation would be the first thing in a conversation that never
+    /// began, and it would be about nothing. A chat that had already been
+    /// answered has lost the provider's memory of it, and that is worth a
+    /// sentence. The count the recovery reads is what tells the two apart
+    /// (bw-m15v.2).
+    #[tokio::test]
+    async fn only_a_chat_with_something_above_it_is_told_the_provider_forgot() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let session = test_session("dormant");
+        database.create_session(session.clone()).await.unwrap();
+
+        // Opened, typed into, asleep before a word of it was sent.
+        assert_eq!(
+            database.timeline_count(session.id.clone()).await.unwrap(),
+            0,
+            "a chat nobody has been answered in draws nothing"
+        );
+
+        // Answered once, and now there is a conversation to lose.
+        let said: Event = serde_json::from_value(json!({
+            "type":"message.started", "sessionId":session.id, "seq":0, "at":now(),
+            "role":"assistant", "messageId":"m1"
+        }))
+        .unwrap();
+        database.append(said).await.unwrap();
+        assert!(database.timeline_count(session.id.clone()).await.unwrap() > 0);
+
+        // And what that reader is told is a sentence about their chat: no
+        // provider's name in it, no id, no wire text.
+        crate::workbench::provider::append_notice(
+            &database,
+            &session.id,
+            crate::workbench::provider_messages::CONVERSATION_IS_GONE,
+        )
+        .await
+        .unwrap();
+        let drawn = database.events_since(session.id.clone(), 0).await.unwrap();
+        let notice = drawn
+            .iter()
+            .find(|event| event.kind == crate::workbench::protocol::EventKind::Notice)
+            .expect("the reader is told");
+        let text = notice.fields["text"].as_str().unwrap();
+        assert!(text.contains("carries on in a fresh one"), "{text}");
+        assert!(!text.contains('{') && !text.contains("session"), "{text}");
     }
 
     /// One refusal answers for every endpoint that would have found it out.

@@ -64,6 +64,13 @@ pub const NO_SUCH_CONVERSATION: &str =
     "The provider could not find this conversation. It was either cleared or \
      never written down.";
 
+/// The same condition, survived rather than suffered: the chat is carrying on
+/// somewhere the provider does not remember, and the reader should know its
+/// memory starts here even though the screen still holds everything said.
+pub const CONVERSATION_IS_GONE: &str =
+    "The provider no longer has this conversation, so it carries on in a fresh \
+     one. Everything said above is still here, but the provider cannot read it.";
+
 /// What a chat is doing, in the words of the condition standing over it.
 ///
 /// The server publishes this as a canonical `session.state` event. Live
