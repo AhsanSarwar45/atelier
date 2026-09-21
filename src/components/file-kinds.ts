@@ -48,6 +48,16 @@ export function fileKind(path: string): FileKind {
 }
 
 /**
+ * Whether a name is markdown. Asked in two places that must agree — the kind a
+ * file is previewed as, and whether the viewer draws it rendered — so the pair
+ * of extensions is written once.
+ */
+export function isMarkdownPath(path: string): boolean {
+  const extension = path.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
+  return extension === 'md' || extension === 'markdown';
+}
+
+/**
  * The classes that make a span or an anchor look like a file badge. Shared so
  * the two places that build one cannot drift apart.
  *

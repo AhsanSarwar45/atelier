@@ -19,10 +19,13 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 
 import { Copy, ExternalLink, FolderOpen, Pencil } from 'lucide-react';
 
+import { isMarkdownPath } from '@/components/file-kinds';
+import { MarkdownBody } from '@/components/markdown-body';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { CodeEditor, type CopiedSelection } from '@/workbench/code-editor';
+import { SourceSwitch } from '@/workbench/file-preview';
 import { openLocalPath } from '@/workbench/open-local-path';
 import { referenceUnder, relativeToRoot } from '@/workbench/references';
 import { useFileEdits } from '@/workbench/use-file-edits';
@@ -74,6 +77,15 @@ export function tooLargeToParse(size: number, text: string): boolean {
     if (lines > PLAIN_ABOVE_LINES) return true;
   }
   return false;
+}
+
+/**
+ * The folder a file sits in — what a link written inside it is relative to, so
+ * `./notes.md` in a rendered file means what it would mean on disk (bw-ewem.1).
+ */
+function folderOf(path: string): string {
+  const cut = path.lastIndexOf('/');
+  return cut <= 0 ? '/' : path.slice(0, cut);
 }
 
 function Breadcrumb({ relative }: { relative: string }) {
@@ -169,6 +181,26 @@ export function FileViewer({
   );
   const edits = useFileEdits(editableFile ? path : null, read);
 
+  /**
+   * Markdown is read one way and written another, and the reader says which.
+   *
+   * It opens rendered, because that is what a `.md` file is usually opened FOR
+   * and it is what this file used to do before it could be edited at all. The
+   * source is a switch away, and the pencil is a shortcut to that switch —
+   * pressing Edit while looking at the rendered words means "let me type", and
+   * there is nothing to type into on that side (bw-tzg0.1).
+   */
+  const markdown = isMarkdownPath(path);
+  const [showing, setShowing] = useState<'source' | 'preview'>('preview');
+  // A different file is read before it is written, whatever the last one was.
+  useEffect(() => setShowing('preview'), [path]);
+  // Only a whole, coloured markdown file has two sides. Too large to parse is
+  // drawn plain by the branch below, and a binary has neither side.
+  const twoWays = markdown && file?.kind === 'text' && !plain;
+  const rendered = twoWays && showing === 'preview';
+  /** What the rendered side draws: the words being typed, not the saved ones. */
+  const live = file?.kind === 'text' ? (editableFile ? edits.text : file.text) : '';
+
   /** What is selected in the editor now, and where the offer beside it sits. */
   const [selection, setSelection] = useState<{ copied: CopiedSelection; at: { left: number; top: number } } | null>(
     null,
@@ -189,8 +221,10 @@ export function FileViewer({
   }, []);
 
   // A different file is a different selection; the one from the last file must
-  // not outlive it and offer up lines this file has never had.
-  useEffect(() => setSelection(null), [path]);
+  // not outlive it and offer up lines this file has never had. Turning a
+  // markdown file round to its rendered side takes the selection with it — the
+  // lines it named are not on screen any more.
+  useEffect(() => setSelection(null), [path, showing]);
 
   /**
    * The reference a copy is answered with. The whole point of the card: what
@@ -213,6 +247,7 @@ export function FileViewer({
   const opening = edits.open;
   const startEditing = useCallback(() => {
     opening();
+    setShowing('source');
     onEditing?.(path);
   }, [opening, onEditing, path]);
 
@@ -257,6 +292,7 @@ export function FileViewer({
             {edits.error}
           </span>
         )}
+        {twoWays && <SourceSwitch showing={showing} onChange={setShowing} />}
         {editableFile &&
           (edits.editable ? (
             <Button
@@ -381,6 +417,11 @@ export function FileViewer({
             </div>
           )}
           <div data-testid="file-viewer" className="min-h-0 flex-1" data-dirty={edits.dirty ? '' : undefined}>
+            {rendered ? (
+              <div data-testid="file-viewer-markdown" className="h-full overflow-auto p-6">
+                <MarkdownBody base={folderOf(path)}>{live}</MarkdownBody>
+              </div>
+            ) : (
             <CodeEditor
               text={editableFile ? edits.text : file.text}
               path={path}
@@ -393,6 +434,7 @@ export function FileViewer({
               onSelectionCopy={reference}
               className="h-full"
             />
+            )}
           </div>
           {selection && (
             <div

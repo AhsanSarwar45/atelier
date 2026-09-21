@@ -45,7 +45,7 @@ import { isPhoneScreen, usePhoneScreen } from '@/lib/screen-width';
 import { cn } from '@/lib/utils';
 import { useOpenSearch } from '@/search/opener';
 import { ChatRightRail, useGitDiff, useRightRail } from '@/workbench/chat-right-rail';
-import { FilePreview, PREVIEWS_NEEDING_TEXT, previewKind } from '@/workbench/file-preview';
+import { FilePreview, PREVIEWS_NEEDING_TEXT, previewKind, viewerDraws } from '@/workbench/file-preview';
 import FileTree from '@/workbench/file-tree';
 import { FileViewer, type ViewedFile } from '@/workbench/file-viewer';
 import { GitDiffView, type DiffFocus } from '@/workbench/git-diff-view';
@@ -535,9 +535,12 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
           <div className="flex min-h-0 flex-1 items-center justify-center">
             <p className="text-sm text-muted-foreground">Pick a file</p>
           </div>
-        ) : kind === 'text' ? (
-          // Text, binaries with no preview of their own, and files that would
-          // not read all go through the viewer, which already says so for each.
+        ) : viewerDraws(kind) ? (
+          // Text, markdown, binaries with no preview of their own, and files
+          // that would not read all go through the viewer, which already says
+          // so for each. Markdown is here rather than in the preview so that a
+          // `.md` file can be typed into and saved like any other text, with
+          // its rendered reading a switch away inside the viewer (bw-tzg0.1).
           <FileViewer
             root={root ?? ''}
             path={file}

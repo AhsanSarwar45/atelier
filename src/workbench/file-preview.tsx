@@ -25,7 +25,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 
 import { Maximize, Minus, Plus } from 'lucide-react';
 
-import { fileKind } from '@/components/file-kinds';
+import { fileKind, isMarkdownPath } from '@/components/file-kinds';
 import { MarkdownBody } from '@/components/markdown-body';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -44,13 +44,28 @@ export type PreviewKind = 'image' | 'svg' | 'video' | 'audio' | 'pdf' | 'markdow
 /** The kinds that need the file's text as well as its bytes. */
 export const PREVIEWS_NEEDING_TEXT: PreviewKind[] = ['svg', 'markdown', 'text'];
 
+/**
+ * The kinds the Files tab hands to the VIEWER rather than to this preview —
+ * which is to say, the ones a reader can edit and save.
+ *
+ * Markdown is on this side. It used to be on the other, and that single fact
+ * was the whole of "we cannot edit markdown documents": a `.md` file came with
+ * no pencil, no dirty dot and no Save, while the `.txt` beside it came with all
+ * three (bw-tzg0.1). The rendered reading is not lost by the move — the viewer
+ * draws it, with the same switch — but it is now a way of LOOKING at a file
+ * that is open, rather than the only thing that could be done with it.
+ */
+export function viewerDraws(kind: PreviewKind): boolean {
+  return kind === 'text' || kind === 'markdown';
+}
+
 export function previewKind(path: string): PreviewKind {
   const extension = path.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
   // The three exceptions to the badge table, each for the same reason: what a
   // file IS and how it is best read are not always the same answer.
   if (extension === 'svg') return 'svg';
   if (extension === 'pdf') return 'pdf';
-  if (extension === 'md' || extension === 'markdown') return 'markdown';
+  if (isMarkdownPath(path)) return 'markdown';
   switch (fileKind(path)) {
     case 'image': return 'image';
     case 'video': return 'video';
@@ -154,7 +169,7 @@ function Bar({ children }: { children: ReactNode }) {
 }
 
 /** The Source / Preview switch, for the kinds that are legibly both. */
-function SourceSwitch({ showing, onChange }: { showing: 'source' | 'preview'; onChange: (next: 'source' | 'preview') => void }) {
+export function SourceSwitch({ showing, onChange }: { showing: 'source' | 'preview'; onChange: (next: 'source' | 'preview') => void }) {
   return (
     <div data-testid="file-preview-switch" className="flex items-center gap-0.5">
       {(['preview', 'source'] as const).map((which) => (
