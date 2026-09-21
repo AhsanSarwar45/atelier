@@ -68,6 +68,7 @@ import {
   type GitDeed,
 } from '@/workbench/git-deeds';
 import { usePathActions } from '@/workbench/path-menu';
+import { CommitLog } from '@/workbench/commit-log';
 import { SplitColumn } from '@/workbench/split-column';
 import { readRepositoryStatus } from '@/workbench/repository-status';
 import { useRepositoryReads } from '@/workbench/use-repository-reads';
@@ -79,13 +80,6 @@ import { useRepositoryReads } from '@/workbench/use-repository-reads';
 export function under(root: string, file: string): string {
   return `${root.replace(/\/+$/, '')}/${file}`;
 }
-
-/**
- * How many saved changes the list asks for. Enough to recognise where the
- * branch has been this week; the rail is a column beside a conversation, not a
- * history browser.
- */
-const LOG_LIMIT = 20;
 
 /**
  * What went wrong, in git's own words.
@@ -135,15 +129,6 @@ interface Telling {
 function shortened(subject: string): string {
   const one = subject.split('\n')[0].trim();
   return one.length > 60 ? `${one.slice(0, 59)}…` : one;
-}
-
-/** When a commit was made, in the words a reader thinks in. */
-function whenMade(date: string): string {
-  try {
-    return formatDistanceToNow(new Date(date), { addSuffix: true });
-  } catch {
-    return date;
-  }
 }
 
 /**
@@ -479,6 +464,17 @@ export interface GitViewProps {
    */
   onShowFile?: (file: string) => void;
   /**
+   * Opening the diff on one commit (bw-g6zy.5). Given, a commit in the lower
+   * pane can be pressed and the diff pane draws that commit instead of the
+   * working tree; not given, the history is still searched and read but a row
+   * does nothing.
+   */
+  onShowCommit?: (sha: string) => void;
+  /** Going back to the working tree, which is what Escape in the list means. */
+  onShowWorkingTree?: () => void;
+  /** Which commit the diff pane is showing, so the list can mark it. */
+  openCommit?: string | null;
+  /**
    * Whether the column this panel is in is open.
    *
    * The rail keeps its body mounted whether or not it is showing, so that the
@@ -501,13 +497,22 @@ export function GitView({
   diffOpen = false,
   onFlipDiff,
   onShowFile,
+  onShowCommit,
+  onShowWorkingTree,
+  openCommit,
   shown = true,
 }: GitViewProps) {
   // The rail's file names are file chips, answered by the one set of handlers
   // every other file chip in the app is answered by (bw-g3o3.9).
   const paths = usePathActions();
   const [status, setStatus] = useState<GitStatus | null>(null);
-  const [commits, setCommits] = useState<GitCommit[]>([]);
+  /**
+   * The last saved change, and nothing before it. The history itself belongs
+   * to the pane below, which reads it under whatever search is in its box; all
+   * this view still needs is the subject to offer when an amend is ticked with
+   * nothing written yet.
+   */
+  const [lastCommit, setLastCommit] = useState<GitCommit | null>(null);
   /** The lines of work this checkout could move to. */
   const [branches, setBranches] = useState<GitBranch[]>([]);
   const [reading, setReading] = useState(false);
@@ -579,9 +584,17 @@ export function GitView({
   const faultFrom = useRef<'a read' | 'an operation' | null>(null);
 
   /**
-   * Ask git where things stand. Both questions at once because they are drawn
-   * together, and both cancelled together: a rail that was shut, or pointed at
-   * another project, is not owed the answer to a question nobody is asking.
+   * Ask git where things stand: the working tree, and the one commit at the
+   * top of it.
+   *
+   * The history itself belongs to the pane below, which reads it under
+   * whatever search is in its box (bw-g6zy.4). What is still read here is the
+   * last saved change alone, because ticking Amend with nothing written yet
+   * offers its wording — one commit, not a page of them.
+   *
+   * Both questions at once because they are drawn together, and both
+   * cancelled together: a rail that was shut, or pointed at another project,
+   * is not owed the answer to a question nobody is asking.
    */
   const read = useCallback(
     async (signal?: AbortSignal, quietly?: boolean) => {
@@ -593,7 +606,7 @@ export function GitView({
       // change reads as the panel doing something, not as it being current.
       if (!quietly) setReading(true);
       try {
-        const [state, history] = await Promise.all([
+        const [state, head] = await Promise.all([
           // The status goes through the shared reader so that the file tree
           // beside this rail, drawn from the same answer on the same rule,
           // does not run git a second time a few milliseconds later
@@ -601,11 +614,11 @@ export function GitView({
           // after a stage or a commit — asks for a fresh one, because the
           // point of reading again after a write is to see the write.
           readRepositoryStatus(path, { fresh: !quietly }),
-          git.log(path, { limit: LOG_LIMIT }, signal),
+          git.log(path, { limit: 1 }, signal),
         ]);
         if (signal?.aborted) return;
         setStatus(state);
-        setCommits(history.commits);
+        setLastCommit(head.commits[0] ?? null);
         if (faultFrom.current !== 'an operation') {
           setFault(null);
           faultFrom.current = null;
@@ -818,9 +831,9 @@ export function GitView({
   const wantAmend = useCallback(
     (wanted: boolean) => {
       setAmend(wanted);
-      if (wanted && message.trim() === '' && commits[0]) setMessage(commits[0].subject);
+      if (wanted && message.trim() === '' && lastCommit) setMessage(lastCommit.subject);
     },
-    [message, commits],
+    [message, lastCommit],
   );
 
   if (!path) {
@@ -1502,33 +1515,13 @@ export function GitView({
           </>
         }
         bottom={
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-testid="git-history">
-      <Section title="Recent commits" testId="git-log">
-        {commits.length === 0 ? (
-          <p className="text-xs text-muted-foreground" data-testid="git-log-empty">
-            {reading ? 'Reading…' : 'No commits yet.'}
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-1.5">
-            {commits.map((made) => (
-              <li key={made.sha} className="flex flex-col gap-0.5" data-testid="git-log-row" data-sha={made.sha}>
-                <div className="flex items-baseline gap-1.5">
-                  <span className="shrink-0 font-mono text-[10px] text-t-tertiary">{made.shortSha}</span>
-                  <Tooltip label={made.subject}>
-                    <span className="min-w-0 flex-1 truncate text-xs text-t-secondary">
-                      {made.subject}
-                    </span>
-                  </Tooltip>
-                </div>
-                <span className="text-[10px] text-t-faint">
-                  {made.author} · {whenMade(made.date)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
-          </div>
+          <CommitLog
+            path={path}
+            shown={shown}
+            openSha={openCommit ?? null}
+            onOpen={(made) => onShowCommit?.(made.sha)}
+            onLeave={onShowWorkingTree}
+          />
         }
       />
     </div>

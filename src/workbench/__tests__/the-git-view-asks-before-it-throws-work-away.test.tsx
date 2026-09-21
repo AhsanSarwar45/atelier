@@ -82,6 +82,8 @@ const HISTORY = {
       email: 'somebody@example.com',
       date: '2026-08-27T10:00:00.000Z',
       subject: 'the words the last save was made under',
+      parents: [],
+      refs: [],
     },
   ],
 };
