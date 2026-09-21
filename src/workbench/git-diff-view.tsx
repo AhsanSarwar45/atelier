@@ -29,9 +29,10 @@ import { ChevronRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
-import { git, type GitDiffFile } from '@/lib/api';
+import { git, type GitCommitDetail, type GitDiffFile } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { languageOf } from '@/workbench/colouring';
+import { CommitDetails } from '@/workbench/commit-details';
 import { DiffTable } from '@/workbench/diff-table';
 import { gitSaid, STATUS_LOOK, under } from '@/workbench/git-view';
 import { hunksToRows } from '@/workbench/line-diff';
@@ -239,12 +240,37 @@ export interface DiffFocus {
   asked: number;
 }
 
-export function GitDiffView({ path, focus = null }: { path: string | null; focus?: DiffFocus | null }) {
+export interface GitDiffViewProps {
+  path: string | null;
+  focus?: DiffFocus | null;
+  /**
+   * One commit to draw instead of the working tree (bw-g6zy.5). The pane is
+   * the same pane either way — the same sections, the same colouring, the same
+   * virtualiser — because a commit's patch and a working tree's are the same
+   * shape and drawing them twice would only mean two of everything to keep in
+   * step.
+   */
+  commit?: string | null;
+  /** Open another commit, which is what a parent's name in the header does. */
+  onShowCommit?: (sha: string) => void;
+  /** Go back to the working tree. */
+  onShowWorkingTree?: () => void;
+}
+
+export function GitDiffView({
+  path,
+  focus = null,
+  commit = null,
+  onShowCommit,
+  onShowWorkingTree,
+}: GitDiffViewProps) {
   // Every file name in here is a chip like any other, so the one set of
   // handlers that answers a chip anywhere in the app answers these too.
   const { chips, menu } = usePathActions();
   const [files, setFiles] = useState<GitDiffFile[] | null>(null);
   const [fault, setFault] = useState<string | null>(null);
+  /** Who made the commit being shown, when the pane is showing one. */
+  const [made, setMade] = useState<GitCommitDetail | null>(null);
   /**
    * Which sections are open, kept by path so that a re-read — and there is one
    * every five seconds — does not throw away what the reader opened or shut.
@@ -264,17 +290,23 @@ export function GitDiffView({ path, focus = null }: { path: string | null; focus
     async (signal?: AbortSignal) => {
       if (!path) return;
       try {
-        const answer = await git.diff(path, signal);
+        // A commit is read once and never changes; the working tree is read
+        // again every few seconds because it does. Both come back as the same
+        // list of files, so everything below this line is unaware of which it
+        // is looking at.
+        const answer = commit ? await git.show(path, commit, signal) : null;
+        const changed = answer ? answer.files : (await git.diff(path, signal)).files;
         if (signal?.aborted) return;
-        shape.current = { ...firstShape(answer.files), ...shape.current };
-        setFiles((before) => sameAgain(before, answer.files));
+        shape.current = { ...firstShape(changed), ...shape.current };
+        setFiles((before) => sameAgain(before, changed));
+        setMade(answer ? answer.commit : null);
         setFault(null);
       } catch (trouble) {
         if (signal?.aborted) return;
         setFault(gitSaid(trouble));
       }
     },
-    [path],
+    [path, commit],
   );
 
   // A new worktree is a new diff: nothing the reader said about the old one's
@@ -284,8 +316,9 @@ export function GitDiffView({ path, focus = null }: { path: string | null; focus
     shape.current = {};
     setSaid({});
     setFiles(null);
+    setMade(null);
     setFault(null);
-  }, [path]);
+  }, [path, commit]);
 
   useEffect(() => {
     const stop = new AbortController();
@@ -296,7 +329,10 @@ export function GitDiffView({ path, focus = null }: { path: string | null; focus
   const quietly = useCallback(async () => {
     await read();
   }, [read]);
-  useRepositoryReads(path, quietly);
+  // A commit is fixed: nothing that happens to the repository afterwards
+  // changes what it did, so the slow look and the watcher are for the working
+  // tree alone.
+  useRepositoryReads(commit ? null : path, quietly);
 
   const shown = useMemo(() => files ?? [], [files]);
   const many = shown.length > MANY_FILES;
@@ -361,6 +397,14 @@ export function GitDiffView({ path, focus = null }: { path: string | null; focus
       className="flex min-h-0 flex-1 flex-col overflow-y-auto"
     >
       {menu}
+      {made && (
+        <CommitDetails
+          commit={made}
+          files={shown}
+          onOpen={onShowCommit}
+          onLeave={onShowWorkingTree}
+        />
+      )}
       {fault && (
         <div className="px-3 py-2">
           {/* git's sentence, wrapped and whole, in the monospace it was written
@@ -379,7 +423,7 @@ export function GitDiffView({ path, focus = null }: { path: string | null; focus
           news. */}
       {files !== null && files.length === 0 && !fault && (
         <p data-testid="git-diff-empty" className="p-6 text-center text-[12px] text-muted-foreground">
-          Nothing has changed
+          {commit ? 'This commit changed nothing' : 'Nothing has changed'}
         </p>
       )}
       {!many && shown.map((file) => <div key={file.path}>{section(file)}</div>)}

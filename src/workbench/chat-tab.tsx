@@ -1065,11 +1065,32 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   }, [phone, diffOpen, rightOpen, flipRight, rememberDiff]);
   /** The file the Git panel last asked the diff to show (bw-pstm.1). */
   const [diffFocus, setDiffFocus] = useState<DiffFocus | null>(null);
+  /**
+   * The commit the diff pane is showing, or null for the working tree
+   * (bw-g6zy.5). One piece of state rather than a mode and a name: there is no
+   * such thing as showing a commit without saying which.
+   */
+  const [openCommit, setOpenCommit] = useState<string | null>(null);
   // Put away, the pick is spent: the diff opened later by its own button must
   // not jump to a file clicked before.
   useEffect(() => {
     if (!showDiff) setDiffFocus(null);
   }, [showDiff]);
+  /**
+   * A commit in the Git panel, pressed: the diff comes up showing that commit
+   * instead of the working tree, and the file pick from before is spent —
+   * it named a file in a diff that is no longer on the screen.
+   */
+  const showCommitInDiff = useCallback(
+    (sha: string) => {
+      if (phone && rightOpen) flipRight();
+      if (!diffOpen) rememberDiff();
+      setDiffFocus(null);
+      setOpenCommit(sha);
+    },
+    [phone, diffOpen, rightOpen, flipRight, rememberDiff],
+  );
+  const showWorkingTreeInDiff = useCallback(() => setOpenCommit(null), []);
   /**
    * A file's name in the Git panel, clicked: the diff comes up if it was put
    * away, and scrolls to that file. On a phone the sheet is shut on the way in
@@ -1079,6 +1100,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     (file: string) => {
       if (phone && rightOpen) flipRight();
       if (!diffOpen) rememberDiff();
+      // A file named in the Git panel is a file in the working tree, so
+      // asking for one is also asking to come back out of a commit.
+      setOpenCommit(null);
       setDiffFocus({ path: file, asked: Date.now() });
     },
     [phone, diffOpen, rightOpen, flipRight, rememberDiff],
@@ -2140,6 +2164,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             diffOpen={diffOpen}
             onFlipDiff={showTheDiff}
             onShowFile={showFileInDiff}
+            onShowCommit={showCommitInDiff}
+            onShowWorkingTree={showWorkingTreeInDiff}
+            openCommit={openCommit}
             onToggle={flipRight}
             onPickView={pickView}
           />
@@ -2359,7 +2386,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           {/* One diff per worktree, and never the last chat's: the open-and-shut
               state inside is kept by file path, which means nothing in another
               checkout. */}
-          <GitDiffView key={facts?.cwd ?? projectPath ?? ''} path={facts?.cwd ?? projectPath} focus={diffFocus} />
+          <GitDiffView
+            key={facts?.cwd ?? projectPath ?? ''}
+            path={facts?.cwd ?? projectPath}
+            focus={diffFocus}
+            commit={openCommit}
+            onShowCommit={showCommitInDiff}
+            onShowWorkingTree={showWorkingTreeInDiff}
+          />
         </div>
       )}
       {/* The conversation and the one way back to it, which floats over its

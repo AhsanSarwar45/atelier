@@ -237,6 +237,12 @@ export interface ChatRightRailProps {
   onFlipDiff?: () => void;
   /** Opening the diff on one of the Git panel's files (bw-pstm.1). */
   onShowFile?: (file: string) => void;
+  /** Opening the diff on one of the Git panel's commits (bw-g6zy.5). */
+  onShowCommit?: (sha: string) => void;
+  /** Putting the working tree back in the diff pane. */
+  onShowWorkingTree?: () => void;
+  /** Which commit the diff pane is showing, so the list can mark it. */
+  openCommit?: string | null;
   /**
    * Shutting it. The button that opens it is on the bar above (bw-81wt.5), and
    * on a phone that bar is behind this sheet — so the same call is what the
@@ -273,6 +279,9 @@ export function ChatRightRail({
   diffOpen = false,
   onFlipDiff,
   onShowFile,
+  onShowCommit,
+  onShowWorkingTree,
+  openCommit,
   onToggle,
   views = ['chat', 'git'],
   onPickView,
@@ -370,6 +379,9 @@ export function ChatRightRail({
               diffOpen={diffOpen}
               onFlipDiff={onFlipDiff}
               onShowFile={onShowFile}
+              onShowCommit={onShowCommit}
+              onShowWorkingTree={onShowWorkingTree}
+              openCommit={openCommit}
             />
           )}
 

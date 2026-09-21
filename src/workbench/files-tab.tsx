@@ -150,6 +150,8 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
   const phone = usePhoneScreen();
   /** The file the Git panel last asked the diff to show (bw-pstm.1). */
   const [diffFocus, setDiffFocus] = useState<DiffFocus | null>(null);
+  /** The commit the diff pane is showing, or null for the working tree. */
+  const [openCommit, setOpenCommit] = useState<string | null>(null);
   /*
    * The same rule the chat reads by: on a wide screen the diff and the panel
    * that asked for it stand side by side, and on a phone the panel is a sheet
@@ -255,10 +257,28 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
         setRailOpen(false);
       }
       if (!diffOpen) flipDiff();
+      // A file named here is a file in the working tree, so asking for one is
+      // also asking to come back out of a commit (bw-g6zy.5).
+      setOpenCommit(null);
       setDiffFocus({ path: file, asked: Date.now() });
     },
     [phone, diffOpen, rightOpen, flipRight, flipDiff],
   );
+
+  /** A commit in the Git panel, pressed: the diff comes up showing it. */
+  const showCommitInDiff = useCallback(
+    (sha: string) => {
+      if (phone) {
+        if (rightOpen) flipRight();
+        setRailOpen(false);
+      }
+      if (!diffOpen) flipDiff();
+      setDiffFocus(null);
+      setOpenCommit(sha);
+    },
+    [phone, diffOpen, rightOpen, flipRight, flipDiff],
+  );
+  const showWorkingTreeInDiff = useCallback(() => setOpenCommit(null), []);
 
   const chooseRoot = useCallback(
     (next: string) => {
@@ -529,7 +549,14 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
             path and a path means nothing in another checkout. */}
         {showDiff ? (
           <div data-testid="files-diff-pane" className="flex min-h-0 flex-1 flex-col">
-            <GitDiffView key={root ?? ''} path={root} focus={diffFocus} />
+            <GitDiffView
+              key={root ?? ''}
+              path={root}
+              focus={diffFocus}
+              commit={openCommit}
+              onShowCommit={showCommitInDiff}
+              onShowWorkingTree={showWorkingTreeInDiff}
+            />
           </div>
         ) : !file || !kind ? (
           <div className="flex min-h-0 flex-1 items-center justify-center">
@@ -570,6 +597,9 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
         diffOpen={diffOpen}
         onFlipDiff={showTheDiff}
         onShowFile={showFileInDiff}
+        onShowCommit={showCommitInDiff}
+        onShowWorkingTree={showWorkingTreeInDiff}
+        openCommit={openCommit}
         onToggle={flipRight}
       />
       {/* The sheet's scrim, as the tree's is: mounted either way and faded, so
