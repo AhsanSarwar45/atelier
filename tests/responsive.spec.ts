@@ -209,6 +209,67 @@ async function tooSmall(page: Page, floor: number): Promise<string[]> {
   }, floor);
 }
 
+/**
+ * Controls drawn on top of the words.
+ *
+ * The four faults above all ask whether something fits. None of them asks
+ * whether two things that both fit were put in the same place: a close cross
+ * floated over a heading is inside the screen, inside its box, and not cut
+ * off, so every one of them passes it. On a phone the update notice's cross
+ * sat on top of the version number, because the room reserved for it was
+ * narrower than the cross and the heading only wrapped at a phone width — the
+ * owner had to report it by eye.
+ *
+ * So this asks the one question they do not: within `where`, does any control
+ * cover any of the words? It is scoped to a region rather than swept over the
+ * app, because plenty of the app is deliberately layered — a menu over a page,
+ * a label inside its own button — and the question only means anything inside
+ * one panel that is meant to be flat.
+ */
+async function coveringTheWords(page: Page, where: string): Promise<string[]> {
+  return page.evaluate((where) => {
+    const panel = document.querySelector(where);
+    if (!panel) return [`nothing matched ${where}`];
+    const name = (el: Element) =>
+      el.getAttribute('data-testid') ??
+      el.getAttribute('aria-label') ??
+      el.textContent?.trim().slice(0, 24) ??
+      el.tagName.toLowerCase();
+    const drawn = (el: Element) => {
+      const style = getComputedStyle(el);
+      if (style.visibility === 'hidden' || style.display === 'none' || style.opacity === '0') return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const controls = Array.from(
+      panel.querySelectorAll('button, a[href], [role="button"], input, select, textarea'),
+    ).filter(drawn);
+    // Only the leaves: a paragraph's box legitimately contains the boxes of
+    // the words inside it, and a control's own label is its own business.
+    const words = Array.from(panel.querySelectorAll('*')).filter(
+      (el) =>
+        el.children.length === 0 &&
+        (el.textContent?.trim().length ?? 0) > 0 &&
+        drawn(el) &&
+        !el.closest('button, a[href], [role="button"]'),
+    );
+    const out: string[] = [];
+    for (const control of controls) {
+      const c = control.getBoundingClientRect();
+      for (const word of words) {
+        const w = word.getBoundingClientRect();
+        const over = Math.min(c.right, w.right) - Math.max(c.left, w.left);
+        const down = Math.min(c.bottom, w.bottom) - Math.max(c.top, w.top);
+        // A pixel of touching is a rounding error, not a control on a word.
+        if (over > 1 && down > 1) {
+          out.push(`${name(control)} covers "${word.textContent?.trim().slice(0, 24)}"`);
+        }
+      }
+    }
+    return out;
+  }, where);
+}
+
 /** The page itself never scrolls sideways, whatever a pane inside it does. */
 async function pageScrollsSideways(page: Page): Promise<number> {
   return page.evaluate(() => {
@@ -858,6 +919,41 @@ test.describe('overlays and dialogs', () => {
   });
 
   for (const [label, size] of [['390', PHONE], ['360', NARROW]] as const) {
+    test(`the update notice draws nothing over its own words at ${label}`, async ({ page }) => {
+      // The close cross was floated into the corner with less room reserved
+      // for it than it took, so on a phone — where the heading wraps and the
+      // second line runs the full width — it sat on the version number. It
+      // was inside the screen, inside its box and not cut off, so all four
+      // judgements above passed it and the owner had to report it by eye.
+      //
+      // On the project list rather than a chat, because the notice draws on
+      // every screen and this asks nothing of the board behind it.
+      await page.setViewportSize(size);
+      await page.route('**/api/version/check*', (route) =>
+        route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            current: '0.15.0',
+            latest: '0.16.0',
+            update_available: true,
+            download_url: 'https://example.invalid/release',
+            release_notes: null,
+            asset_url: 'https://example.invalid/asset',
+            checksums_url: 'https://example.invalid/sums',
+            skipped_version: null,
+            install_method: 'standalone',
+          }),
+        }),
+      );
+      await page.goto('/');
+      await expect(page.getByTestId('update-banner')).toBeVisible({ timeout: WAY_IN_MS });
+      await page.waitForTimeout(400);
+      await shoot(page, `update-notice-words-${label}`);
+
+      const covered = await coveringTheWords(page, '[data-testid="update-banner"]');
+      expect(covered, `update notice at ${label}: a control is drawn over the words`).toEqual([]);
+    });
+
     test(`the update notice fits a phone at ${label}`, async ({ page }) => {
       await page.setViewportSize(size);
       // The notice only draws when there is a newer release, and usually there
@@ -948,6 +1044,40 @@ test.describe('settings', () => {
     await page.waitForTimeout(1200);
     await judge(page, 'settings-390');
   });
+
+  for (const [label, size] of [['390', PHONE], ['360', NARROW], ['768', TABLET]] as const) {
+    test(`About fits a phone at ${label}`, async ({ page }) => {
+      await page.setViewportSize(size);
+      // About draws differently depending on whether a release is waiting, and
+      // usually none is. The widest version of the screen — an update offered,
+      // a version skipped, and notes long enough to need their own scroll — is
+      // the one worth measuring, so the run answers the version question
+      // itself rather than waiting for a real release.
+      await page.route('**/api/version/check*', (route) =>
+        route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            current: '0.15.0',
+            latest: '0.16.0',
+            update_available: true,
+            download_url: 'https://example.invalid/release',
+            release_notes: Array.from({ length: 12 }, (_, i) => `- a change, the ${i + 1}th`).join('\n'),
+            asset_url: 'https://example.invalid/asset',
+            checksums_url: 'https://example.invalid/sums',
+            skipped_version: '0.15.9',
+            install_method: 'homebrew',
+          }),
+        }),
+      );
+      await page.goto('/settings?section=about');
+      await expect(page.getByTestId('about-settings')).toBeVisible({ timeout: WAY_IN_MS });
+      await page.waitForTimeout(600);
+      await judge(page, `about-${label}`);
+
+      const covered = await coveringTheWords(page, '[data-testid="about-settings"]');
+      expect(covered, `About at ${label}: a control is drawn over the words`).toEqual([]);
+    });
+  }
 });
 
 // ─── The thumb ───

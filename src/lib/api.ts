@@ -1270,6 +1270,16 @@ export interface VersionCheckResponse {
   release_notes: string | null;
   asset_url: string | null;
   checksums_url: string | null;
+  /**
+   * The version the person asked not to be told about again.
+   *
+   * `update_available` is left true by a skip — the update still exists, and
+   * About goes on offering it. Only the notice reads this, and only to decide
+   * whether to keep quiet.
+   */
+  skipped_version?: string | null;
+  /** `homebrew` or `standalone`; what updating will actually do depends on it. */
+  install_method?: string | null;
 }
 
 /**
@@ -1285,18 +1295,60 @@ export interface UpdateResponse {
  * Version API
  */
 export const version = {
-  check: () => fetchApi<VersionCheckResponse>('/api/version/check'),
+  /**
+   * The running version and the newest released one.
+   *
+   * The release is cached by the server for an hour so GitHub is not asked on
+   * every page load. `refresh` asks anyway, which is what the About section's
+   * Check now does — an hour-old answer is exactly what somebody who has just
+   * heard about a release would be looking past.
+   */
+  check: (refresh = false) =>
+    fetchApi<VersionCheckResponse>(`/api/version/check${refresh ? '?refresh=true' : ''}`),
 };
 
 /**
  * Update API
  */
 export const update = {
-  perform: () => fetchApi<UpdateResponse>('/api/update', {
-    method: 'POST',
-    deadlineMs: 600_000, // a large download may take ten minutes
-  }),
+  /**
+   * Start an update. Answers as soon as it has started, not when it is done.
+   *
+   * How far it has got arrives on the window's one connection, tagged
+   * `update` (live-wire.ts `onUpdate`). This used to hold the request open for
+   * the whole download and say nothing until it was over.
+   */
+  perform: () => fetchApi<UpdateResponse>('/api/update', { method: 'POST' }),
 };
+
+/** What the person has said about updates (server/src/routes/update_settings.rs). */
+export interface UpdateSettings {
+  /** The version they asked not to be told about again, or null for none. */
+  skippedVersion: string | null;
+}
+
+/** Read what the server holds about updates. */
+export async function updateSettings(): Promise<UpdateSettings> {
+  const answer = await request('/api/settings/update');
+  if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+  return (await answer.json()) as UpdateSettings;
+}
+
+/**
+ * Skip a version, or take a skip back with null. Answers what the server holds.
+ *
+ * Kept by the server rather than in this browser: Atelier answers the whole
+ * network, so a skip made at the desk has to silence the phone too.
+ */
+export async function saveUpdateSettings(settings: UpdateSettings): Promise<UpdateSettings> {
+  const answer = await request('/api/settings/update', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+  return (await answer.json()) as UpdateSettings;
+}
 
 /**
  * Which shell the terminal opens, as the server holds it.

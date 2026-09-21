@@ -70,6 +70,22 @@ test('the arrow gives back the page the reader came from, however many sections 
   await expect(page).toHaveURL(/\/$/);
 });
 
+test('About is a section like any other, and says what is running', async ({ page }) => {
+  // Until this existed the version was nowhere on any screen, and an update
+  // could only ever be taken from a notice in the corner that a reader could
+  // dismiss and then never find again (bw-p4le).
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/settings');
+  await page.getByTestId('settings-section-about').click();
+  await expect(page).toHaveURL(/section=about/);
+  await expect(page.getByTestId('about-settings')).toBeVisible();
+
+  // The running version, whatever it is, and not a placeholder.
+  await expect(page.getByTestId('about-latest')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Version' })).toBeVisible();
+  await page.screenshot({ path: join(results, 'about.png') });
+});
+
 test('the old agent-files address still opens the files', async ({ page }) => {
   await page.goto('/settings/agent-files');
   await expect(page).toHaveURL(/section=files/);

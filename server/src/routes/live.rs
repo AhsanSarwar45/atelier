@@ -26,6 +26,7 @@
 //! | `chat.snapshot`  | the open chat's conversation as it stands          |
 //! | `chat.error`     | a readable snapshot failure while retrying          |
 //! | `bootstrap`      | dependency installation progress                   |
+//! | `update`         | how far the running update has got                 |
 //! | `git`            | this repository's git directory moved              |
 //! | `fs`             | files moved in the folder a file tree draws        |
 //!
@@ -126,6 +127,9 @@ pub struct LiveParams {
     pub workbench: Option<String>,
     /// Whether this screen is showing dependency installation progress.
     pub bootstrap: Option<String>,
+    /// Whether anything on screen is watching an update run — the About
+    /// section, or the notice that offers the update.
+    pub update: Option<String>,
     /// The repository the Git panel is open on, if it is open. One at a time:
     /// the panel is drawn beside one chat, and a chat has one project
     /// (src/workbench/git-view.tsx, bw-8nwh.2).
@@ -563,6 +567,7 @@ pub async fn live(
     Extension(db): Extension<Arc<Database>>,
     Extension(native): Extension<workbench::WorkbenchState>,
     Extension(bootstrap): Extension<BootstrapBus>,
+    Extension(updating): Extension<crate::routes::update_run::UpdateWatch>,
     Query(params): Query<LiveParams>,
     upgrade: Option<WebSocketUpgrade>,
 ) -> Response {
@@ -645,6 +650,46 @@ pub async fn live(
                             return;
                         }
                     }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                }
+            }
+        });
+    }
+
+    // An update carries its own state, not just its changes: a screen that
+    // opens halfway through one has to draw where it has got to, and the next
+    // chunk might be a second away. The state as it stands goes first, then
+    // every change after it (routes/update_run.rs).
+    if asked(&params.update) {
+        let mut changes = updating.watch();
+        let opening = updating.now().await;
+        let update_tx = tx.clone();
+        tokio::spawn(async move {
+            let say = |run: &crate::routes::update_run::UpdateRun| {
+                serde_json::to_string(run).unwrap_or_default()
+            };
+            if update_tx
+                .send(Tagged::new(Some("update"), say(&opening)))
+                .await
+                .is_err()
+            {
+                return;
+            }
+            loop {
+                match changes.recv().await {
+                    Ok(run) => {
+                        if update_tx
+                            .send(Tagged::new(Some("update"), say(&run)))
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                    // A screen too slow to keep up is caught up to the newest
+                    // state rather than dropped: a progress bar only ever
+                    // wants the latest figure, never the ones it missed.
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
                 }

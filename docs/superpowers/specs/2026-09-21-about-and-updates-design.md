@@ -71,12 +71,20 @@ date, no asset for this platform), refuses with `409` if a run is already in
 flight, then spawns the run and answers `202 {"status":"started"}`. It no longer
 holds the request open for the length of a download.
 
-**`GET /api/update/progress` is new.** An SSE stream following the pattern
-already used by `server/src/routes/watch.rs` and `routes/live.rs`
-(`axum::response::sse::{Event, Sse}` with `KeepAlive`). It emits the current
-`UpdateRun` immediately on connect, so a screen opened mid-update draws the
-right thing, then every change after. `server/src/serving.rs:119` already
-exempts `text/event-stream` from compression, so frames are not held back.
+**Progress rides the one wire.** It is not a stream of its own. A browser
+allows six connections to one address, a stream never gives its slot back, and
+this app already spent that budget once (bw-zkh4) — so `src/workbench/live-wire.ts`
+is the only place allowed to open one, and `src/workbench/__tests__/one-wire.test.ts`
+fails the build if a second appears. Progress is therefore a new feed on the
+existing connection, tagged `update`, built exactly like the `bootstrap` feed in
+`server/src/routes/live.rs`: asked for with `?update=1`, it sends the current
+`UpdateRun` first — so a screen opened mid-update draws the right thing — and
+then every change after. `onUpdate()` in `live-wire.ts` is how a component
+subscribes.
+
+(The first cut of this work did build a standalone `GET /api/update/progress`
+route before the rule was found. It was removed. The rule is recorded here
+because the route is the obvious thing to reach for and is wrong.)
 
 **Real bytes, without rewriting the download.**
 `server/src/published.rs` already streams the body chunk by chunk through
@@ -139,19 +147,30 @@ release body, still bounded.
 - `src/components/settings/about-settings.tsx` — the section, built from the
   existing `SettingsGroup` / `SettingRow` primitives in
   `src/components/settings/section.tsx`.
-- `src/lib/update-run.ts` — a `useUpdateRun()` hook owning the SSE subscription
-  and exposing `{ phase, percent, received, total, note, error, start, retry }`.
-  Both About and the notice read this one hook, so they can never disagree
-  about what the update is doing.
+- `src/lib/update-run.ts` — a `useUpdateRun()` hook that subscribes to the
+  `update` feed on the one wire and exposes `{ run, start, busy }`, beside the
+  small readings the two screens share: `howFar()` for the bar, `inWords()` for
+  the line under it, `whatTheServerSaid()` for a refusal. Both About and the
+  notice read this one hook, so they can never disagree about what the update
+  is doing. `start` is also the retry: a failure leaves the app on the version
+  it was already running.
 - `src/app/settings/page.tsx` — one entry in `SECTIONS` (`about`, label
   "About", hint "Version, updates") and one render branch. There is no registry
   to touch.
 - `src/components/update-banner.tsx` — gains "Skip this version", shows a
   compact bar driven by the same hook, and links into About for the detail.
+- `src/components/ui/progress.tsx` — the shared bar pulled `value` out of its
+  props and used it only for the inline transform, so every bar in the app told
+  assistive technology it was indeterminate however full it was drawn. The
+  value is handed to the primitive as well, and `undefined` becomes the `null`
+  that honestly means "no idea yet".
 
-The restart-and-reload wait is duplicated today, in `update-banner.tsx` and in
-`remote-access-settings.tsx:238`. Both move onto one helper, since this work
-adds a third caller and three copies of a retry loop is where they drift.
+The restart-and-reload wait moves out of `update-banner.tsx` into
+`waitForTheNewOne()` in `update-run.ts`, where About and the notice share it.
+Remote access has a wait that looks like it but is not: a restart asked for
+because the port changed brings the app back somewhere else, so it goes to the
+new port rather than polling this one for health. It is left where it is —
+merging them would mean polling an address nothing is listening on.
 
 ### Responsiveness
 

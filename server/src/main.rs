@@ -737,10 +737,6 @@ async fn serve(open_browser: bool) {
         )
         .route("/api/version/check", get(routes::version::version_check))
         .route("/api/update", post(routes::version::perform_update))
-        .route(
-            "/api/update/progress",
-            get(routes::version::update_progress),
-        )
         .fallback(serve_static)
         .layer(middleware::from_fn(said_not_to_keep))
         .layer(Extension(workbench_state))

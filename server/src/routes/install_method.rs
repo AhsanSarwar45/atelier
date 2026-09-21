@@ -156,10 +156,10 @@ mod tests {
     #[test]
     fn a_program_unpacked_anywhere_else_is_standalone() {
         for path in [
-            "/home/ahsan/.local/bin/atelier",
+            "/home/someone/.local/bin/atelier",
             "/usr/local/bin/atelier",
             "/opt/atelier/atelier",
-            "/home/ahsan/dev/beads-web/server/target/release/atelier",
+            "/home/someone/code/atelier/server/target/release/atelier",
         ] {
             assert_eq!(
                 from_path(Path::new(path), || true),
@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn a_hand_unpacked_copy_on_a_computer_that_has_brew_is_still_standalone() {
         assert_eq!(
-            from_path(Path::new("/home/ahsan/.local/bin/atelier"), || true),
+            from_path(Path::new("/home/someone/.local/bin/atelier"), || true),
             InstallMethod::Standalone
         );
     }
@@ -196,8 +196,8 @@ mod tests {
     #[test]
     fn a_path_that_only_looks_like_a_cellar_is_not_one() {
         for path in [
-            "/home/ahsan/Cellar/notes/atelier",
-            "/home/ahsan/wine-Cellar/atelier",
+            "/home/someone/Cellar/notes/atelier",
+            "/home/someone/wine-Cellar/atelier",
             "/srv/Cellar/atelier-docs/atelier",
         ] {
             assert_eq!(
@@ -226,7 +226,7 @@ mod tests {
 
     #[test]
     fn a_path_that_is_not_a_cellar_entry_has_no_link_to_offer() {
-        assert_eq!(linked(Path::new("/home/ahsan/.local/bin/atelier")), None);
+        assert_eq!(linked(Path::new("/home/someone/.local/bin/atelier")), None);
     }
 
     #[test]

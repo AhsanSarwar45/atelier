@@ -12,8 +12,9 @@ import { Suspense, useCallback, useMemo } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { Bell, FileCode2, Globe, Palette, Puzzle, Search, SquareTerminal, Tag, Users } from 'lucide-react';
+import { Bell, FileCode2, Globe, Info, Palette, Puzzle, Search, SquareTerminal, Tag, Users } from 'lucide-react';
 
+import { AboutSettings } from '@/components/settings/about-settings';
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
 import { useProfiles } from '@/components/settings/account-picker';
 import { AppearanceSettings } from '@/components/settings/appearance-settings';
@@ -44,6 +45,7 @@ const SECTIONS: SettingsSectionDef[] = [
   { id: 'remote', label: 'Remote access', hint: 'Network access', icon: <Globe /> },
   { id: 'dependencies', label: 'Dependencies', hint: 'Tools', icon: <Puzzle /> },
   { id: 'tags', label: 'Tags', hint: 'Projects', icon: <Tag /> },
+  { id: 'about', label: 'About', hint: 'Version, updates', icon: <Info /> },
 ];
 
 function Settings() {
@@ -153,6 +155,7 @@ function Settings() {
       {known === 'remote' && (
         <RemoteAccessSettings />
       )}
+      {known === 'about' && <AboutSettings />}
       {known === 'dependencies' && (
         <SettingsGroup title="Dependencies">
           <div className="p-3">

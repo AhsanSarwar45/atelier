@@ -3,26 +3,15 @@
 //! Checks GitHub Releases for newer versions and caches the result.
 //! Also provides auto-update functionality via ephemeral updater scripts.
 
-use axum::{
-    http::StatusCode,
-    response::{
-        sse::{Event as SseEvent, Sse},
-        IntoResponse,
-    },
-    Json,
-};
-use futures::Stream;
+use axum::{http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
-use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
-use tokio_stream::wrappers::ReceiverStream;
-use tokio_stream::StreamExt;
+use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 use crate::routes::install_method::{self, InstallMethod};
-use crate::routes::update_run::{Phase, UpdateRun, UpdateWatch};
+use crate::routes::update_run::{Phase, UpdateWatch};
 
 /// Current version compiled into the binary.
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -262,57 +251,6 @@ fn asset_for(target_os: &str, target_arch: &str) -> Option<&'static str> {
         ("linux", "x86_64") => Some("atelier-linux-x64.tar.gz"),
         _ => None,
     }
-}
-
-/// GET /api/update/progress
-///
-/// What the update running right now is doing, as it does it.
-///
-/// The state as it stands is sent the moment a watcher connects, so a screen
-/// opened halfway through an update draws the right thing instead of waiting
-/// for the next chunk to arrive. Every change after that is sent as it
-/// happens. `serving.rs` already keeps `text/event-stream` out of the
-/// compressor, so frames are not held back waiting for a buffer to fill.
-pub async fn update_progress(
-    axum::extract::Extension(watch): axum::extract::Extension<UpdateWatch>,
-) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
-    let mut changes = watch.watch();
-    let opening = watch.now().await;
-    let (tx, rx) = tokio::sync::mpsc::channel::<UpdateRun>(64);
-
-    tokio::spawn(async move {
-        if tx.send(opening).await.is_err() {
-            return;
-        }
-        loop {
-            match changes.recv().await {
-                Ok(run) => {
-                    if tx.send(run).await.is_err() {
-                        break;
-                    }
-                }
-                // A watcher too slow to keep up is caught up to the newest
-                // state rather than dropped: a progress bar only ever wants
-                // the latest figure, never the ones it missed.
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => break,
-            }
-        }
-    });
-
-    let frames = ReceiverStream::new(rx).map(|run| Ok::<_, Infallible>(frame(&run)));
-    Sse::new(frames).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(std::time::Duration::from_secs(30))
-            .text("ping"),
-    )
-}
-
-/// One update's state, as an event a screen can read.
-fn frame(run: &UpdateRun) -> SseEvent {
-    SseEvent::default().json_data(run).unwrap_or_else(|_| {
-        SseEvent::default().data(r#"{"phase":"failed","failed":"could not report progress"}"#)
-    })
 }
 
 /// POST /api/update

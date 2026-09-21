@@ -69,8 +69,12 @@ async fn write(
     // comes back — a silent, permanent off switch nobody asked for.
     if let Some(version) = skipping {
         if !looks_like_a_version(version) {
+            // Unprocessable, not malformed: the body was read fine, it just
+            // says something the setting cannot hold. The same answer its
+            // sibling gives a search limit no search could use
+            // (routes/search_settings.rs).
             return Err((
-                StatusCode::BAD_REQUEST,
+                StatusCode::UNPROCESSABLE_ENTITY,
                 format!("A version to skip looks like 0.22.12, not {version:?}."),
             ));
         }

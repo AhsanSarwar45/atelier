@@ -86,6 +86,7 @@ const chats = new Map<string, Set<ChatListener>>();
 const repositories = new Map<string, Set<RepositoryListener>>();
 const watchedFolders = new Map<string, Set<FolderListener>>();
 const bootstrappers = new Set<(data: string) => void>();
+const updaters = new Set<(data: string) => void>();
 
 let source: WebSocket | null = null;
 /** The shape the open connection was opened with, so a change is visible. */
@@ -133,6 +134,7 @@ function shape(): string {
   if (boards.size > 0) params.set('board', Array.from(boards.keys()).join('\n'));
   if (workbenchers.size > 0) params.set('workbench', '1');
   if (bootstrappers.size > 0) params.set('bootstrap', '1');
+  if (updaters.size > 0) params.set('update', '1');
   const repository = openRepository();
   if (repository) params.set('git', repository);
   const folder = openFolder();
@@ -315,6 +317,9 @@ function heard(raw: string): void {
     case 'bootstrap':
       bootstrappers.forEach((tell) => tell(said));
       return;
+    case 'update':
+      updaters.forEach((tell) => tell(said));
+      return;
     case 'chat': {
       const chat = frame.scope;
       if (chat) chats.get(chat)?.forEach((c) => c.event(said));
@@ -362,6 +367,7 @@ function nothingWanted(): boolean {
     workbenchers.size === 0 &&
     chats.size === 0 &&
     bootstrappers.size === 0 &&
+    updaters.size === 0 &&
     repositories.size === 0 &&
     watchedFolders.size === 0
   );
@@ -551,6 +557,21 @@ export function onBootstrap(tell: (data: string) => void): () => void {
   };
 }
 
+/**
+ * Watch the running update on the window's existing connection.
+ *
+ * The state as it stands arrives first, so a screen opened halfway through an
+ * update draws where it has got to rather than an empty bar (live.rs).
+ */
+export function onUpdate(tell: (data: string) => void): () => void {
+  updaters.add(tell);
+  reshape();
+  return () => {
+    updaters.delete(tell);
+    reshape();
+  };
+}
+
 /** Watch one chat: the conversation as it stands, then the live tail. */
 export function onChat(chat: string, listener: ChatListener): () => void {
   const listeners = chats.get(chat) ?? new Set<ChatListener>();
@@ -585,6 +606,7 @@ export function forgetEverything(): void {
   watchedFolders.clear();
   chats.clear();
   bootstrappers.clear();
+  updaters.clear();
   missed = false;
   close();
   if (again !== null) {
