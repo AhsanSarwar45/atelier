@@ -351,6 +351,27 @@ function ImagePreview({ path, src, swap }: { path: string; src?: string; swap?: 
 }
 
 /**
+ * The rendered reading of a markdown file, wherever it is framed.
+ *
+ * Two frames draw it: this preview, for the places that are only ever read —
+ * the quick view over a path, a file attached to a message — and the file
+ * VIEWER, which is the Files tab, where the same words can also be typed
+ * (bw-tzg0.1). It is one component so that the two cannot drift into two
+ * different readings of one file, which is the trap the picture stage fell
+ * into and the reason there is now only one of those too (bw-e3dw.15).
+ */
+export function MarkdownPane({ path, text, className }: { path: string; text: string; className?: string }) {
+  return (
+    <div data-testid="file-preview-markdown" className={cn('min-h-0 flex-1 overflow-auto p-6', className)}>
+      {/* The file's own folder goes with its words, so `./notes.md` and
+          `../src/a.ts` name the files a reader of this file on disk would
+          find at those addresses (bw-ewem.1). */}
+      <MarkdownBody base={folderOf(path)}>{text}</MarkdownBody>
+    </div>
+  );
+}
+
+/**
  * The kinds that are legibly a picture AND legibly source, with the switch
  * between the two.
  *
@@ -451,12 +472,7 @@ export function FilePreview({ path, kind, text = '', src: from, autoPlay = false
                 <span className="flex-1" />
                 {swap}
               </Bar>
-              <div data-testid="file-preview-markdown" className="min-h-0 flex-1 overflow-auto p-6">
-                {/* The file's own folder goes with its words, so `./notes.md`
-                    and `../src/a.ts` name the files a reader of this file on
-                    disk would find at those addresses (bw-ewem.1). */}
-                <MarkdownBody base={folderOf(path)}>{text}</MarkdownBody>
-              </div>
+              <MarkdownPane path={path} text={text} />
             </div>
           )}
         />

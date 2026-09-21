@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
@@ -15,6 +15,10 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
  * source are two views of one file that a unit test can only tell apart by
  * name. So the fixture is a real folder of real files, the app reads them off
  * the disk through its own routes, and each view is photographed.
+ *
+ * The Markdown file is typed into and saved here too (bw-tzg0.1). That it can
+ * be is the point — it could not before — and "it reached the disk" is a claim
+ * that needs the real write route, the real digest check and a real file.
  *
  * The strip is exercised on the way through: the files are opened by address,
  * one at a time, and pinned as they go — which is what a reader does when they
@@ -191,8 +195,13 @@ test('a picture, a video, an SVG and a Markdown file each open as what they are'
     await pin(page, svg);
 
     // ── Markdown, through the app's own prose ────────────────────────────
+    // Drawn by the VIEWER, not by the preview: a `.md` file is one a reader
+    // writes as well as reads, and the half of the tab that can save is this
+    // one (bw-tzg0.1). The rendered prose is the side it opens on.
     await openByAddress(page, project.id, md);
     await expect(page.getByTestId('file-preview')).toHaveAttribute('data-kind', 'markdown', { timeout: WAIT });
+    // The pencil is the difference: the read-only preview never had one.
+    await expect(page.getByTestId('file-viewer-edit')).toBeVisible({ timeout: WAIT });
     const prose = page.getByTestId('file-preview-markdown');
     await expect(prose.locator('h1')).toHaveText('Reading a file in place', { timeout: WAIT });
     await expect(prose.locator('li')).toHaveCount(3);
@@ -210,6 +219,26 @@ test('a picture, a video, an SVG and a Markdown file each open as what they are'
     await page.getByTestId('file-preview-source').click();
     await expect(page.locator('.cm-content')).toContainText('# Reading a file in place', { timeout: WAIT });
     await page.screenshot({ path: `${SHOTS}/bw-g3o314-markdown-source.png`, animations: 'disabled' });
+
+    // ── And the source is one you can TYPE into ──────────────────────────
+    // The whole of the complaint this answers: a markdown file used to be the
+    // one text file in the tree with no pencil, no unsaved dot and no Save.
+    // Typed here and saved with Ctrl-S, it has to be on the disk afterwards —
+    // which is the one claim a mounted component cannot make (bw-tzg0.1).
+    await page.locator('.cm-content').click();
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('\nEdited in the Files tab.\n');
+    await expect(page.getByTestId('file-viewer-dirty')).toBeVisible({ timeout: WAIT });
+    await page.screenshot({ path: `${SHOTS}/bw-tzg01-markdown-edited.png`, animations: 'disabled' });
+
+    await page.keyboard.press('Control+s');
+    await expect(page.getByTestId('file-viewer-dirty')).toHaveCount(0, { timeout: WAIT });
+    expect(readFileSync(md, 'utf8'), 'the typing never reached the disk').toContain('Edited in the Files tab.');
+
+    // The prose side reads back what was typed, so the two views are one file.
+    await page.getByTestId('file-preview-preview').click();
+    await expect(prose).toContainText('Edited in the Files tab.', { timeout: WAIT });
+    await page.screenshot({ path: `${SHOTS}/bw-tzg01-markdown-saved.png`, animations: 'disabled' });
 
     // ── The strip itself ─────────────────────────────────────────────────
     // A tab is a way back to a file, without going near the address bar.

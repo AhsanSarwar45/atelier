@@ -87,7 +87,7 @@ describe('a markdown file in the Files tab', () => {
 
   it('opens rendered, the way it was read before', () => {
     const view = mounted();
-    expect(view.getByTestId('file-viewer-markdown')).toHaveTextContent('Notes');
+    expect(view.getByTestId('file-preview-markdown')).toHaveTextContent('Notes');
     expect(view.container.querySelector('.cm-editor')).toBeNull();
   });
 
@@ -124,6 +124,6 @@ describe('a markdown file in the Files tab', () => {
     await waitFor(() => expect(view.getByTestId('file-viewer-dirty')).toBeTruthy());
 
     fireEvent.click(view.getByTestId('file-preview-preview'));
-    await waitFor(() => expect(view.getByTestId('file-viewer-markdown')).toHaveTextContent('Z'));
+    await waitFor(() => expect(view.getByTestId('file-preview-markdown')).toHaveTextContent('Z'));
   });
 });

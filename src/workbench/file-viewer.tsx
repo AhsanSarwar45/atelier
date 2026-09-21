@@ -20,12 +20,11 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Copy, ExternalLink, FolderOpen, Pencil } from 'lucide-react';
 
 import { isMarkdownPath } from '@/components/file-kinds';
-import { MarkdownBody } from '@/components/markdown-body';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { CodeEditor, type CopiedSelection } from '@/workbench/code-editor';
-import { SourceSwitch } from '@/workbench/file-preview';
+import { MarkdownPane, SourceSwitch } from '@/workbench/file-preview';
 import { openLocalPath } from '@/workbench/open-local-path';
 import { referenceUnder, relativeToRoot } from '@/workbench/references';
 import { useFileEdits } from '@/workbench/use-file-edits';
@@ -77,15 +76,6 @@ export function tooLargeToParse(size: number, text: string): boolean {
     if (lines > PLAIN_ABOVE_LINES) return true;
   }
   return false;
-}
-
-/**
- * The folder a file sits in — what a link written inside it is relative to, so
- * `./notes.md` in a rendered file means what it would mean on disk (bw-ewem.1).
- */
-function folderOf(path: string): string {
-  const cut = path.lastIndexOf('/');
-  return cut <= 0 ? '/' : path.slice(0, cut);
 }
 
 function Breadcrumb({ relative }: { relative: string }) {
@@ -416,10 +406,14 @@ export function FileViewer({
               </Button>
             </div>
           )}
-          <div data-testid="file-viewer" className="min-h-0 flex-1" data-dirty={edits.dirty ? '' : undefined}>
+          <div data-testid="file-viewer" className="flex min-h-0 min-w-0 flex-1 flex-col" data-dirty={edits.dirty ? '' : undefined}>
             {rendered ? (
-              <div data-testid="file-viewer-markdown" className="h-full overflow-auto p-6">
-                <MarkdownBody base={folderOf(path)}>{live}</MarkdownBody>
+              // Marked as the preview it is, and by the same names the preview
+              // uses elsewhere: what a reader — or a case — asks about "the
+              // markdown preview of this file" is this pane, whichever frame
+              // happens to be holding it.
+              <div data-testid="file-preview" data-kind="markdown" className="flex min-h-0 min-w-0 flex-1 flex-col">
+                <MarkdownPane path={path} text={live} />
               </div>
             ) : (
             <CodeEditor
