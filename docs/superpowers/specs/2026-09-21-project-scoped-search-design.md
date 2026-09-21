@@ -35,7 +35,8 @@ has a space needs nothing extra.
 
 ### The panel learns which project it is in
 
-`useChatSearch(projectId, projectPath)` resolves the project's name from the
+`useChatSearch(here)` is handed the project the panel was opened on, and
+resolves its name from the
 projects list it already fetches for the Project menu, falling back to the
 folder name its result rows already show. `SearchPanel` renders nothing until
 that lookup settles, then mounts `Search` — the guard `FileSearchPanel` already
@@ -48,11 +49,12 @@ already hold the project id and path.
 ### Ask is pinned, not seeded
 
 An agent handed a suggestion will drop it, so the AI ask is constrained on the
-server instead. The panel sends `body: { project: name }`, the way Board sends
-`{ path }` and Files sends `{ root }`. `Asking` gains `project: Option<String>`,
-resolved once through `projects_named` into ids held on `Chats`. While those ids
-are present, `search_chats` uses them in place of whatever the agent's own query
-named. The tool description is built at runtime, so it names the project and the
+server instead. The panel sends `body: { project: <id> }`, the way Board sends `{ path }` and
+Files sends `{ root }` — the id rather than the name, so nothing has to guess
+which project is meant. `Asking` gains `project: Option<String>`, held on
+`Chats`; while it is there, `search_chats` searches it in place of whatever the
+agent's own query named. A project the app cannot name is still searched by id:
+finding nothing is the safe way to be wrong about where you are. The tool description is built at runtime, so it names the project and the
 agent does not spend calls discovering the boundary.
 
 ### Opening the panel now lists the project's recent chats

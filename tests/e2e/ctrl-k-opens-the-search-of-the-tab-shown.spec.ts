@@ -10,8 +10,9 @@ import { backend } from './fixture-held';
 
 /**
  * Ctrl+K, and each tab's own search button, open the search for the tab being
- * shown: every conversation on Chat, the cards on Board, the files on Files
- * (bw-21a2.9).
+ * shown: the conversations on Chat, the cards on Board, the files on Files
+ * (bw-21a2.9). Each of them opens in the project being looked at, and the chats
+ * say so in the box: `project:<name>`, a word that can be deleted (bw-c1ti.1).
  */
 test("Ctrl+K and each tab's search button open that tab's search", async ({ page, request }) => {
   test.setTimeout(300_000);
@@ -54,24 +55,32 @@ test("Ctrl+K and each tab's search button open that tab's search", async ({ page
     await page.goto(at('board'));
     await expect(page.getByText('Draw the counts').first()).toBeVisible({ timeout: 90_000 });
     await page.keyboard.press('Control+k');
-    await opens(page, 'Search the board');
+    await opens(page, 'Search cards');
     await page.getByTestId('open-board-search').click();
-    await opens(page, 'Search the board');
+    await opens(page, 'Search cards');
 
     await page.goto(at('files'));
     await expect(page.getByTestId('files-tab')).toBeVisible({ timeout: 60_000 });
     await page.keyboard.press('Control+k');
-    await opens(page, 'Search the files');
+    await opens(page, 'Search files');
     await page.getByTestId('files-open-search').click();
-    await opens(page, 'Search the files');
+    await opens(page, 'Search files');
 
     const listed = page.waitForResponse((r) => r.url().includes('/api/workbench/restore') && r.ok(), { timeout: 60_000 });
     await page.goto(at('chat'));
     await listed;
     await page.keyboard.press('Control+k');
-    await expect(page.getByTestId('search-panel').getByTestId('search-input')).toHaveAttribute('aria-label', 'Search every conversation');
+    const box = page.getByTestId('search-panel').getByTestId('search-input');
+    await expect(box).toHaveAttribute('aria-label', 'Search chats');
+    // The project is in the box, and the Project menu is reading that same word.
+    await expect(box).toHaveValue('project:held-tabs ');
+    await expect(page.getByTestId('search-filter-project')).toContainText('held-tabs');
     await page.screenshot({ path: 'tests/results/ctrl-k-chat-tab.png' });
-    await opens(page, 'Search every conversation');
+    // Deleting the word searches every project again.
+    await box.fill('');
+    await expect(page.getByTestId('search-filter-project')).toContainText('Project');
+    await expect(page.getByTestId('search-tips')).toBeVisible();
+    await opens(page, 'Search chats');
   } finally {
     if (projectId) await request.delete(`${backend()}/api/projects/${projectId}`);
     rmSync(dir, { recursive: true, force: true });
