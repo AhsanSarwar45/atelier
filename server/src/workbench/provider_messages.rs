@@ -25,6 +25,45 @@ pub fn needs_signing_in(detail: &str) -> Value {
     })
 }
 
+/// An ACP error as a sentence a reader can act on.
+///
+/// A JSON-RPC error is written for a caller: a code, a short message, and a
+/// free-form `data` that carries whatever structure the far end wanted to
+/// hand over. `Display` for the protocol's error type prints the message and
+/// then the whole of `data`, pretty-printed, which is how a chat came to draw
+/// `Resource not found: a22f34ef-...: { "uri": "a22f34ef-..." }` in red at the
+/// foot of the screen — a sentence, an id nobody can use, and a JSON object,
+/// none of it telling the reader what happened or what to do (bw-m15v.3).
+///
+/// So structure stays out. `data` reaches the reader only when it is itself a
+/// sentence, which is what a provider puts there when it has more to say than
+/// the message held; an object or a list is for whatever reads structure. And
+/// the one condition the protocol names in a way the reader cares about gets
+/// the app's own words rather than the wire's, because the wire's are the
+/// code's name with an id after them.
+pub fn in_plain_words(code: i32, message: &str, data: Option<&Value>) -> String {
+    if code == RESOURCE_NOT_FOUND {
+        return "The provider could not find something this chat pointed it at.".into();
+    }
+    let said = message.trim();
+    match data.and_then(Value::as_str).map(str::trim).filter(|more| !more.is_empty()) {
+        Some(more) if said.is_empty() => more.into(),
+        Some(more) if !more.contains(said) => format!("{said}: {more}"),
+        Some(more) => more.into(),
+        None => said.into(),
+    }
+}
+
+/// ACP's own code for a thing that was asked for and is not there.
+pub const RESOURCE_NOT_FOUND: i32 = -32002;
+
+/// The one thing a chat cannot go on without, when it is the thing that is
+/// gone. Said where the refusal answered an attempt to take up the chat's own
+/// conversation again, rather than anything the conversation mentioned.
+pub const NO_SUCH_CONVERSATION: &str =
+    "The provider could not find this conversation. It was either cleared or \
+     never written down.";
+
 /// What a chat is doing, in the words of the condition standing over it.
 ///
 /// The server publishes this as a canonical `session.state` event. Live

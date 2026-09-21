@@ -836,23 +836,17 @@ impl AcpNormalizer {
 
     /// The error as a sentence, for the reader who gets no better account.
     ///
-    /// The crate prints its own errors this way and we cannot borrow it: what
-    /// arrives here is the object, deliberately, and `Display` belongs to the
-    /// type we took it apart from.
+    /// The crate's own `Display` is no use here and never was: it prints the
+    /// message and then the whole of `data`, pretty-printed, and this sentence
+    /// is drawn in the chat. The neutral core owns the wording; what arrives
+    /// here is the object, deliberately, so the code reaches it too
+    /// (bw-m15v.3).
     fn acp_error_reads(error: &Value) -> String {
-        let message = error["message"].as_str().unwrap_or_default().to_string();
-        match &error["data"] {
-            Value::Null => message,
-            data => {
-                let pretty =
-                    serde_json::to_string_pretty(data).unwrap_or_else(|_| data.to_string());
-                if message.is_empty() {
-                    pretty
-                } else {
-                    format!("{message}: {pretty}")
-                }
-            }
-        }
+        crate::workbench::provider_messages::in_plain_words(
+            error["code"].as_i64().unwrap_or_default() as i32,
+            error["message"].as_str().unwrap_or_default(),
+            error.get("data"),
+        )
     }
 
     fn record_signal(&mut self, signal: &Value) {

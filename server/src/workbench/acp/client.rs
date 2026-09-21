@@ -868,8 +868,24 @@ fn session_meta(brand: &str, policy: &str) -> Meta {
 /// anything that stringifies first can no longer tell -32000 from a crash. Read
 /// the code here, while it is still there.
 fn transport_failure(error: &agent_client_protocol::Error) -> (String, bool) {
-    let signing_in = i32::from(error.code) == -32000;
-    let said = error.to_string();
+    let code = i32::from(error.code);
+    let signing_in = code == -32000;
+    // Not `Display`: that prints the message and then the whole of `data`,
+    // pretty-printed, and this string is drawn in the chat (bw-m15v.3).
+    //
+    // Every refusal that reaches here answered an attempt to take up this
+    // chat's own conversation, so the one thing the provider could not find is
+    // the conversation. Elsewhere the same code can be about anything a turn
+    // named, and the neutral wording says only that.
+    let said = if code == crate::workbench::provider_messages::RESOURCE_NOT_FOUND {
+        crate::workbench::provider_messages::NO_SUCH_CONVERSATION.to_string()
+    } else {
+        crate::workbench::provider_messages::in_plain_words(
+            code,
+            &error.message,
+            error.data.as_ref(),
+        )
+    };
     if signing_in && said.trim().is_empty() {
         return ("This provider needs you to sign in.".into(), true);
     }
@@ -3390,6 +3406,37 @@ mod tests {
             "no rollout found for thread id 01abc",
         ));
         assert!(!codex_rollout_is_gone("codex", "Authentication required"));
+    }
+
+    /// A refusal is drawn in the chat, so it is written for the reader.
+    ///
+    /// `Display` for the protocol's error prints the message and then the
+    /// whole of `data`, pretty-printed. That is what put `Resource not found:
+    /// a22f34ef-...: { "uri": "a22f34ef-..." }` on the screen (bw-m15v.3).
+    #[test]
+    fn a_refusal_reaches_the_reader_in_words_and_never_as_wire_text() {
+        let (said, _) = transport_failure(&agent_client_protocol::Error::resource_not_found(
+            Some("a22f34ef-a523-4ad5-a87b-1db7aec91a41".into()),
+        ));
+        assert!(!said.contains("a22f34ef"), "an id nobody can use: {said}");
+        assert!(!said.contains('{'), "structure is not a sentence: {said}");
+        assert!(said.contains("could not find this conversation"), "{said}");
+
+        // A provider with more to say puts a sentence in `data`, and that is
+        // the one thing there the reader is given.
+        let (said, _) = transport_failure(
+            &agent_client_protocol::Error::internal_error().data("the model is overloaded"),
+        );
+        assert!(said.contains("the model is overloaded"), "{said}");
+        assert!(!said.contains('{'), "{said}");
+
+        // An object is structure and stays out of it.
+        let (said, _) = transport_failure(
+            &agent_client_protocol::Error::internal_error()
+                .data(serde_json::json!({"errorKind":"rate_limit"})),
+        );
+        assert!(!said.contains("errorKind"), "{said}");
+        assert!(!said.is_empty());
     }
 
     /// One refusal answers for every endpoint that would have found it out.
