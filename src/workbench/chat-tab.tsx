@@ -115,7 +115,7 @@ import { ModelIcon } from '@/workbench/model-icon';
 import { MemoryBadge } from '@/workbench/memory-badge';
 import { DEFAULT_PANEL_WIDTH, ResizeDivider, rememberedPanelWidth } from '@/workbench/resize-divider';
 import * as api from '@/lib/api';
-import { WhereToWork, type Where } from '@/workbench/where-to-work';
+import { WhereToWork, folderName, type Where } from '@/workbench/where-to-work';
 
 export { PictureViewer } from '@/workbench/picture-viewer';
 
@@ -886,7 +886,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       if (where.kind === 'new') {
         const made = await api.git.newTree(
           projectPath,
-          where.name.trim(),
+          folderName(where.name),
           where.branch.trim(),
           where.create,
           where.create ? where.base : undefined,

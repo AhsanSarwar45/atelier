@@ -40,13 +40,29 @@ export type Where =
   | { kind: 'new'; name: string; branch: string; create: boolean; base: string };
 
 /**
- * A worktree's name is one plain folder name — the same rule the server holds
- * the name to, said here so the reader is stopped before the round trip.
+ * The folder a typed name is made in — the same rule the server holds the
+ * name to, said here so the reader sees the answer while they type.
+ *
+ * What a person types here is a name, not a path. Branches are named
+ * `feat/login` all day, and the name a worktree is given usually follows the
+ * branch, so a slash in the box means the word "feat/login", never a folder
+ * called `feat` with a folder inside it. The separators become hyphens and
+ * the worktrees stay side by side in one flat place. `.` and `..` name
+ * nothing, so they fall out rather than climbing anywhere.
  */
-export function isPlainName(name: string): boolean {
+export function folderName(name: string): string {
+  return name
+    .split(/[\\/]+/)
+    .map((part) => part.trim())
+    .filter((part) => part && part !== '.' && part !== '..')
+    .join('-');
+}
+
+/** Whether a branch name is one git would take. */
+export function isBranchName(name: string): boolean {
   const trimmed = name.trim();
-  if (!trimmed || trimmed === '.' || trimmed === '..') return false;
-  return !/[\\/]/.test(trimmed);
+  if (!trimmed || trimmed.includes('\\')) return false;
+  return trimmed.split('/').every((part) => part && part !== '.' && part !== '..');
 }
 
 /**
@@ -58,14 +74,15 @@ export function whatIsMissing(where: Where, trees: GitTree[]): string | null {
   if (where.kind === 'existing') {
     return trees.some((tree) => tree.path === where.path) ? null : 'Select a worktree.';
   }
-  const name = where.name.trim();
-  if (!name) return 'Enter a worktree name.';
-  if (!isPlainName(name)) return 'Use a single folder name.';
-  if (trees.some((tree) => tree.name === name)) {
-    return `A worktree named "${name}" already exists.`;
+  // The folder is what one worktree can collide with another over, so it is
+  // the folder that is held to being free, not the text as it was typed.
+  const folder = folderName(where.name);
+  if (!folder) return 'Enter a worktree name.';
+  if (trees.some((tree) => tree.name === folder)) {
+    return `A worktree named "${folder}" already exists.`;
   }
   if (!where.branch.trim()) return where.create ? 'Enter a branch name.' : 'Select a branch.';
-  if (where.create && !isPlainName(where.branch.replace(/\//g, 'x'))) {
+  if (where.create && !isBranchName(where.branch)) {
     return 'Invalid branch name.';
   }
   return null;
@@ -235,6 +252,14 @@ export function WhereToWork({
               });
             }}
           />
+          {/* A name with a separator in it is taken as a name, and this is
+              the folder it lands in — said only when it differs from what
+              they typed, so the ordinary name gets no remark. */}
+          {folderName(value.name) && folderName(value.name) !== value.name.trim() && (
+            <p className="text-xs text-muted-foreground" data-testid="where-new-folder">
+              Folder: {folderName(value.name)}
+            </p>
+          )}
           <div className="flex gap-2" role="group" aria-label="Branch">
             <Button
               type="button"

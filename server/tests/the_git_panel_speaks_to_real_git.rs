@@ -2258,21 +2258,46 @@ async fn a_name_a_worktree_already_has_is_refused_rather_than_taken_over() {
 }
 
 #[tokio::test]
-async fn a_name_that_climbs_out_of_the_place_worktrees_go_is_refused() {
+async fn a_name_that_names_nothing_at_all_is_refused() {
     let repo = a_project_with_history();
     run(repo.path(), &["branch", "work"]);
 
-    for name in ["../escaped", "..", "nested/deeper", "/absolute", ""] {
+    for name in ["..", "", "   ", "/", "./.."] {
         let (code, said) = make_tree(&repo, name, "work", false, None).await;
         assert_eq!(code, StatusCode::BAD_REQUEST, "{name:?} was allowed: {said}");
     }
-    assert!(
-        !repo.path().parent().expect("a parent").join("escaped").exists(),
-        "nothing was made beside the project"
-    );
 
     let (code, said) = drop_tree(&repo, "../escaped", false).await;
-    assert_eq!(code, StatusCode::BAD_REQUEST, "removing is held to it too: {said}");
+    assert_eq!(code, StatusCode::BAD_REQUEST, "removing is held to a folder name: {said}");
+}
+
+#[tokio::test]
+async fn a_name_with_a_separator_in_it_is_a_name_and_makes_one_flat_folder() {
+    let repo = a_project_with_history();
+    let at = repo.path();
+    run(at, &["branch", "work"]);
+    run(at, &["branch", "other"]);
+
+    // The name a worktree is given usually follows its branch, and branches
+    // are named like this. The slash is part of the name, not a folder.
+    let (code, made) = make_tree(&repo, "feat/login", "work", false, None).await;
+    assert_eq!(code, StatusCode::OK, "{made}");
+    assert_eq!(made["name"], "feat-login");
+    assert!(at.join("worktrees").join("feat-login").exists());
+    assert!(
+        !at.join("worktrees").join("feat").exists(),
+        "no folder inside a folder was made: {made}"
+    );
+
+    // And a name that tries to climb still lands in the one place they go.
+    let (code, made) = make_tree(&repo, "../escaped", "other", false, None).await;
+    assert_eq!(code, StatusCode::OK, "{made}");
+    assert_eq!(made["name"], "escaped");
+    assert!(at.join("worktrees").join("escaped").exists());
+    assert!(
+        !at.parent().expect("a parent").join("escaped").exists(),
+        "nothing was made beside the project"
+    );
 }
 
 #[tokio::test]

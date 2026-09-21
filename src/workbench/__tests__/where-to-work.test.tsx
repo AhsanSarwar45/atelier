@@ -18,7 +18,7 @@ vi.mock('@/lib/api', () => ({ git: { trees: (...a: unknown[]) => trees(...a), br
 const {
   WhereToWork,
   basesAmong,
-  isPlainName,
+  folderName,
   suggestedBranch,
   whatIsMissing,
   worktreesAmong,
@@ -57,19 +57,31 @@ describe('what a choice still needs', () => {
     expect(whatIsMissing({ kind: 'existing', path: '/gone' }, there)).toBe('Select a worktree.');
   });
 
-  it('wants a name for a new worktree, and one that is a folder name', () => {
+  it('wants a name for a new worktree, and takes a separator in it as part of the name', () => {
     const half = (name: string): Where => ({ kind: 'new', name, branch: 'work', create: true, base: 'main' });
     expect(whatIsMissing(half('bw-3'), there)).toBeNull();
-    expect(whatIsMissing(half(''), there)).toBe('Enter a worktree name.');
-    expect(whatIsMissing(half('  '), there)).toBe('Enter a worktree name.');
-    for (const bad of ['../up', 'a/b', '..', '.']) {
-      expect(whatIsMissing(half(bad), there), bad).toBe('Use a single folder name.');
+    // A name that follows a branch is a name, not a folder inside a folder.
+    expect(whatIsMissing(half('feat/login'), there)).toBeNull();
+    expect(whatIsMissing(half('../up'), there)).toBeNull();
+    for (const nothing of ['', '  ', '..', '.', '/', './..']) {
+      expect(whatIsMissing(half(nothing), there), nothing).toBe('Enter a worktree name.');
     }
+  });
+
+  it('makes one flat folder name out of whatever was typed', () => {
+    expect(folderName('feat/login')).toBe('feat-login');
+    expect(folderName('  feat / login  ')).toBe('feat-login');
+    expect(folderName('a//b\\c')).toBe('a-b-c');
+    expect(folderName('../up')).toBe('up');
+    expect(folderName('bw-3')).toBe('bw-3');
+    expect(folderName('..')).toBe('');
   });
 
   it('refuses a name another worktree already has, before git has to', () => {
     const same: Where = { kind: 'new', name: 'bw-1', branch: 'work', create: true, base: 'main' };
     expect(whatIsMissing(same, there)).toBe('A worktree named "bw-1" already exists.');
+    // The folder is what they would collide over, so that is what is checked.
+    expect(whatIsMissing({ ...same, name: 'bw/1' }, there)).toBe('A worktree named "bw-1" already exists.');
   });
 
   it('says which kind of branch is missing, because they are asked for differently', () => {
@@ -81,7 +93,7 @@ describe('what a choice still needs', () => {
   it('lets a branch be named the way branches really are named', () => {
     const slashed: Where = { kind: 'new', name: 'bw-3', branch: 'feature/worktrees', create: true, base: 'main' };
     expect(whatIsMissing(slashed, there)).toBeNull();
-    expect(isPlainName('feature/worktrees')).toBe(false);
+    expect(whatIsMissing({ ...slashed, branch: '..' }, there)).toBe('Invalid branch name.');
     expect(suggestedBranch('  bw-3  ')).toBe('bw-3');
   });
 });
@@ -177,6 +189,18 @@ describe('the picker on the screen', () => {
     expect(screen.queryByTestId('where-branch-name')).toBeNull();
     expect(screen.queryByTestId('where-base')).toBeNull();
     expect(screen.getByTestId('where-missing')).toHaveTextContent('Select a branch.');
+  });
+
+  it('says which folder a name with a separator in it will be made in', async () => {
+    draw({ kind: 'new', name: 'feat/login', branch: 'feat/login', create: true, base: 'main' });
+    await waitFor(() => expect(screen.getByTestId('where-new-folder')).toHaveTextContent('Folder: feat-login'));
+    expect(screen.queryByTestId('where-missing'), 'the name is taken, not refused').toBeNull();
+  });
+
+  it('says nothing about the folder when the name is already one', async () => {
+    draw({ kind: 'new', name: 'bw-3', branch: 'bw-3', create: true, base: 'main' });
+    await waitFor(() => expect(screen.getByTestId('where-new-name')).toBeInTheDocument());
+    expect(screen.queryByTestId('where-new-folder')).toBeNull();
   });
 
   it('tells the button outside it what the choice still needs', async () => {

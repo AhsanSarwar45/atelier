@@ -2462,8 +2462,9 @@ pub async fn trees(GitQuery(params): GitQuery<PathParams>) -> Answer {
 pub struct NewTreeRequest {
     /// Absolute working directory of the repository.
     pub path: String,
-    /// What to call the worktree — one plain directory name, which becomes
-    /// both the folder and the name every chat working there is known by.
+    /// What to call the worktree. A name, not a path: separators in it become
+    /// hyphens, and what comes out is both the folder and the name every chat
+    /// working there is known by.
     pub name: String,
     /// The branch to check out in it.
     pub branch: String,
@@ -2475,6 +2476,30 @@ pub struct NewTreeRequest {
     /// nothing is named; ignored when the branch already exists.
     #[serde(default)]
     pub base: Option<String>,
+}
+
+/// The folder a name the caller chose is made in.
+///
+/// What arrives here is a name, not a path. Branches are named `feat/login`
+/// all day and a worktree's name usually follows its branch, so a separator
+/// is part of the name rather than a folder inside a folder: it becomes a
+/// hyphen and the worktrees stay side by side in one flat place. `.` and `..`
+/// name nothing and fall out, which is also what keeps a name from climbing
+/// out of the place worktrees go.
+fn folder_name(name: &str) -> Result<String, Refused> {
+    let folder = name
+        .split(['/', '\\'])
+        .map(str::trim)
+        .filter(|part| !part.is_empty() && *part != "." && *part != "..")
+        .collect::<Vec<_>>()
+        .join("-");
+    if folder.is_empty() {
+        return Err(Refused::new(
+            StatusCode::BAD_REQUEST,
+            format!("A worktree needs a name; {name:?} is not one"),
+        ));
+    }
+    Ok(folder)
 }
 
 /// A worktree's name is one directory name and nothing else: no separator, no
@@ -2533,7 +2558,8 @@ async fn ignore_the_place(repo: &Path, place: &Path) {
 /// [`TreeEntry`]
 pub async fn new_tree(GitJson(body): GitJson<NewTreeRequest>) -> Answer {
     let repo = checked_repo(&body.path)?;
-    let name = plain_name(&body.name)?;
+    let name = folder_name(&body.name)?;
+    let name = name.as_str();
     let branch = body.branch.trim();
     if branch.is_empty() {
         return Err(Refused::new(
