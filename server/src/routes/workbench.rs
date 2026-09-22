@@ -196,6 +196,11 @@ impl WorkbenchState {
     pub fn database(&self) -> &ChatDb {
         self.registry.database()
     }
+    /// Put a deleted project's chats to sleep and forget what was said about
+    /// them. See [`WorkbenchRegistry::retire_project`].
+    pub async fn retire_project(&self, project_id: &str) -> Result<usize, String> {
+        self.registry.retire_project(project_id).await
+    }
     /// The project list, when this server has one. It is the other half of
     /// every question about what a chat is worth saying: a chat in a project
     /// that has been deleted, archived or registered by a test is not news, and
@@ -3062,6 +3067,80 @@ mod tests {
             asked_for_notifications(state, "?include_test=true").await.len(),
             1,
             "a case that asked for test projects was refused them"
+        );
+    }
+
+    /// Deleting a project takes its chats' notices with it, and stops the
+    /// chats themselves streaming into a screen nobody can open.
+    ///
+    /// The chats stay. The button that deletes a project says in so many words
+    /// that its cards and files are not touched, and a transcript is the
+    /// owner's work rather than the list's. What goes is everything that only
+    /// made sense while the project existed.
+    #[tokio::test]
+    async fn deleting_a_project_leaves_nothing_of_its_chats_to_announce() {
+        let (_directory, state, projects) = fixture_with_projects();
+        let project = a_project(&projects, "keystone");
+        let other = a_project(&projects, "still-here");
+        for (id, project_id, chat_state) in [
+            ("asking", &project, "errored"),
+            ("finished", &project, "idle"),
+            ("elsewhere", &other, "errored"),
+        ] {
+            state
+                .database()
+                .create_session(a_chat(id, project_id, chat_state))
+                .await
+                .unwrap();
+        }
+        // Something has been said about one of them, so there is a notice row
+        // to be left behind if nothing removes it.
+        state
+            .database()
+            .mark_announced("asking".into(), "errored".into(), "2026-01-01T00:00:00Z".into())
+            .await
+            .unwrap();
+        assert_eq!(asked_for_notifications(state.clone(), "").await.len(), 3);
+
+        // Through the handler the browser actually calls, so the order it does
+        // its two jobs in is what is under test as much as either job.
+        let deleted = crate::routes::projects::delete_project(
+            axum::extract::State(Arc::clone(&projects)),
+            Some(axum::Extension(state.clone())),
+            axum::extract::Path(project.clone()),
+        )
+        .await
+        .map_err(|(status, _)| status)
+        .expect("the project should delete");
+        assert_eq!(deleted, StatusCode::NO_CONTENT);
+
+        let left = asked_for_notifications(state.clone(), "").await;
+        let ids: Vec<&str> = left.iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert_eq!(
+            ids, ["elsewhere"],
+            "a deleted project's chats were still being announced"
+        );
+
+        assert!(
+            state.database().notices().await.unwrap().is_empty(),
+            "a deleted project left behind a record of what had been said about its chats"
+        );
+
+        // Asleep, so nothing keeps streaming state at a screen that cannot be
+        // reached — and still there, because the delete promised as much.
+        for id in ["asking", "finished"] {
+            let session = state
+                .database()
+                .get_session(id.to_string())
+                .await
+                .unwrap()
+                .expect("a deleted project must not take its chats' transcripts");
+            assert_eq!(session.state, "dormant", "{id} was left awake");
+        }
+        assert_eq!(
+            state.database().get_session("elsewhere".into()).await.unwrap().unwrap().state,
+            "errored",
+            "a chat in another project was put to sleep by an unrelated deletion"
         );
     }
 

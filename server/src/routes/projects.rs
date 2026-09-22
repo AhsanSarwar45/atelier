@@ -434,8 +434,19 @@ pub async fn update_project(
 /// DELETE /api/projects/:id - Delete a project
 pub async fn delete_project(
     State(db): State<AppState>,
+    workbench: Option<axum::Extension<crate::routes::workbench::WorkbenchState>>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    // Before the project goes, and not after: its chats are found by its id,
+    // and once the row is gone there is nothing left to find them by. Failing
+    // to tidy them is logged rather than refused — the owner asked for the
+    // project to be taken off the list, and one chat that will not close may
+    // not stand in the way of that (bw-altj).
+    if let Some(axum::Extension(workbench)) = workbench {
+        if let Err(why) = workbench.retire_project(&id).await {
+            tracing::warn!("a deleted project's chats could not be retired: {why}");
+        }
+    }
     db.delete_project(&id).map_err(db_error_response)?;
     Ok(StatusCode::NO_CONTENT)
 }

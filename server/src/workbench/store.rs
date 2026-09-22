@@ -434,6 +434,21 @@ impl Store {
         transaction.commit()
     }
 
+    /// Forget everything said about every chat in one project.
+    ///
+    /// For when the project itself is deleted. The chats stay — the button that
+    /// deletes a project promises its cards and files are untouched, and a
+    /// transcript is the owner's work, not the list's — but nothing will ever
+    /// announce them again, so a row saying who has heard what about them is
+    /// dead weight that only grows (bw-altj).
+    pub fn forget_notices_for_project(&self, project_id: &str) -> rusqlite::Result<usize> {
+        self.connection.execute(
+            "DELETE FROM session_notice
+             WHERE session_id IN (SELECT id FROM session WHERE project_id = ?1)",
+            [project_id],
+        )
+    }
+
     /// Write down that a device has been told about this chat, in this state.
     pub fn mark_announced(&self, session_id: &str, state: &str, at: &str) -> rusqlite::Result<()> {
         self.connection.execute(

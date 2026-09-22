@@ -1921,6 +1921,51 @@ impl WorkbenchRegistry {
         }
     }
 
+    /// Put a deleted project's chats to sleep, and forget what was said about
+    /// them.
+    ///
+    /// The chats themselves stay: the button that deletes a project says it
+    /// takes the project off the list and leaves its cards and files alone, and
+    /// a transcript is the owner's work rather than the list's. What must not
+    /// stay is the rest of it. A chat in a project nothing can name is a chat
+    /// nothing can open, so one still running is running where nobody can reach
+    /// it and still streaming state at every screen; and a row recording who
+    /// has heard what about a chat nothing will ever announce again is dead
+    /// weight that only grows (bw-altj).
+    ///
+    /// Closing is the ordinary close, the same one the chat's own button sends,
+    /// so a live one is shut down through its driver and a saved one merely
+    /// goes to sleep. A chat that refuses to close is logged and passed over:
+    /// the owner asked for the project to go, and one stuck agent may not stand
+    /// in the way of the rest.
+    pub async fn retire_project(&self, project_id: &str) -> Result<usize, String> {
+        let sessions = self
+            .database
+            .list_sessions(Some(project_id.to_string()))
+            .await?;
+        let mut retired = 0usize;
+        for session in &sessions {
+            let command = Command {
+                kind: CommandKind::SessionClose,
+                fields: serde_json::Map::from_iter([(
+                    "sessionId".into(),
+                    json!(session.id.clone()),
+                )]),
+            };
+            match self.execute(&command).await {
+                Ok(_) => retired += 1,
+                Err(why) => tracing::warn!(
+                    "a chat in a deleted project would not close ({}): {why}",
+                    session.id
+                ),
+            }
+        }
+        self.database
+            .forget_notices_for_project(project_id.to_string())
+            .await?;
+        Ok(retired)
+    }
+
     pub async fn shutdown(&self) {
         let drivers = std::mem::take(&mut *self.drivers.write().await);
         for (session_id, driver) in drivers {

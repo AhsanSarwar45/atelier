@@ -51,6 +51,7 @@ enum Command {
     Notices(Reply<HashMap<String, Notice>>),
     MarkRead(Vec<(String, String)>, String, Reply<()>),
     MarkAnnounced(String, String, String, Reply<()>),
+    ForgetNoticesForProject(String, Reply<usize>),
     GetSession(String, Reply<Option<Session>>),
     SessionByExternalId(String, Reply<Option<Session>>),
     RememberExternalAlias(String, String, String, Reply<()>),
@@ -209,6 +210,13 @@ impl ChatDb {
     /// Write down that the owner has read these chats, in the states given.
     pub async fn mark_read(&self, states: Vec<(String, String)>, at: String) -> Result<(), String> {
         self.request(|reply| Command::MarkRead(states, at, reply))
+            .await
+    }
+
+    /// Forget everything said about every chat in one project, for when the
+    /// project is deleted and nothing will announce them again.
+    pub async fn forget_notices_for_project(&self, project_id: String) -> Result<usize, String> {
+        self.request(|reply| Command::ForgetNoticesForProject(project_id, reply))
             .await
     }
 
@@ -922,6 +930,9 @@ fn run(
             Command::GetSession(id, reply) => respond(reply, store.get_session(&id)),
             Command::Notices(reply) => respond(reply, store.notices()),
             Command::MarkRead(states, at, reply) => respond(reply, store.mark_read(&states, &at)),
+            Command::ForgetNoticesForProject(project_id, reply) => {
+                respond(reply, store.forget_notices_for_project(&project_id))
+            }
             Command::MarkAnnounced(session_id, state, at, reply) => {
                 respond(reply, store.mark_announced(&session_id, &state, &at))
             }
