@@ -38,6 +38,15 @@ export interface Notification {
   says: string;
   href: string;
   needsAction: boolean;
+  /**
+   * When this appeared: the moment the chat reached the state being announced,
+   * as the server recorded it when it happened (`session_notice.since`).
+   *
+   * Not worked out here, and deliberately. A row that timed itself from when
+   * the page happened to ask would reset every reload, and two tabs open at
+   * once would disagree about when the same chat stopped (bw-zvgc).
+   */
+  at: string;
 }
 
 export async function readNotifications(): Promise<Notification[]> {

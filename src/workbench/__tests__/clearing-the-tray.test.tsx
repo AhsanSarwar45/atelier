@@ -53,6 +53,7 @@ function worthSaying() {
       says: chat.says,
       href: `/projects/project-1?chat=${chat.id}`,
       needsAction: chat.state === 'waiting_permission' || chat.state === 'errored',
+      at: '2026-09-22T08:15:00.000Z',
     }))
     .sort((a, b) => Number(b.needsAction) - Number(a.needsAction));
 }

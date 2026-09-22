@@ -20,10 +20,12 @@ import { Button } from '@/components/ui/button';
 import { panelVariants } from '@/components/ui/panel';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Row } from '@/components/ui/row';
+import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useLiveSessions } from '@/workbench/live';
 import { readNotificationPreferences, showDeviceNotification, useNotificationPreferences } from '@/workbench/notification-preferences';
 import { useAlreadyToldThisPage, useNotifications, type Notification } from '@/workbench/notifications';
+import { whenItAppeared } from '@/workbench/when';
 
 /**
  * What a row says it is waiting for.
@@ -158,7 +160,14 @@ function WaitingTray({ rows, clear }: { rows: Notification[]; clear: () => void 
               router.push(row.href);
             }}
           >
-            <div className="truncate text-sm text-foreground">{row.name}</div>
+            <div className="flex items-baseline gap-2">
+              <div className="truncate text-sm text-foreground">{row.name}</div>
+              <Tooltip label={new Date(row.at).toLocaleString()}>
+                <span data-testid="tray-when" className="ml-auto shrink-0 text-[11px] text-t-muted">
+                  {whenItAppeared(row.at)}
+                </span>
+              </Tooltip>
+            </div>
             <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
               <span data-testid="tray-project" className="truncate font-medium">
                 {row.projectName}
@@ -172,7 +181,14 @@ function WaitingTray({ rows, clear }: { rows: Notification[]; clear: () => void 
         {updates.length > 0 && <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-t-muted">Other updates</div>}
         {updates.map((row) => (
           <Row key={row.id} ruled data-testid="tray-row" data-notification-type="update" onClick={() => { setOpen(false); router.push(row.href); }}>
-            <div className="truncate text-sm text-foreground">{row.name}</div>
+            <div className="flex items-baseline gap-2">
+              <div className="truncate text-sm text-foreground">{row.name}</div>
+              <Tooltip label={new Date(row.at).toLocaleString()}>
+                <span data-testid="tray-when" className="ml-auto shrink-0 text-[11px] text-t-muted">
+                  {whenItAppeared(row.at)}
+                </span>
+              </Tooltip>
+            </div>
             <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
               <span data-testid="tray-project" className="truncate font-medium">{row.projectName}</span><span className="truncate">· {row.says}</span>
             </div>

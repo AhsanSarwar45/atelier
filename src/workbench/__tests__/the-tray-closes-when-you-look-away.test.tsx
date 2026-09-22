@@ -27,6 +27,7 @@ const ASKING = {
   says: 'It is waiting on you',
   href: '/projects/project-1?chat=chat-1',
   needsAction: true,
+  at: '2026-09-22T08:15:00.000Z',
 };
 const FINISHED = {
   ...ASKING,

@@ -60,6 +60,7 @@ import { BrandIcon, brandName } from '@/workbench/brand-icon';
 import { useProviders, whyUnavailable } from '@/workbench/providers';
 import { ModelIcon } from '@/workbench/model-icon';
 import { PointerAnchor, type PointerAt } from '@/workbench/menu-anchor';
+import { clockTime, dayHeading } from '@/workbench/when';
 
 /**
  * How many rows are drawn before the reader asks for more. A 288px rail shows
@@ -67,24 +68,6 @@ import { PointerAnchor, type PointerAt } from '@/workbench/menu-anchor';
  * the growth is never what he is waiting for.
  */
 const SCREENFUL = 40;
-
-/** Today, Yesterday, then the date itself. */
-export function dayHeading(iso: string, now = new Date()): string {
-  const then = new Date(iso);
-  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const days = Math.round((midnight(now) - midnight(then)) / 86_400_000);
-  if (days <= 0) return 'Today';
-  if (days === 1) return 'Yesterday';
-  return then.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-}
-
-/**
- * The clock alone. The day is already the heading above the row, and a full
- * date in a 288px rail is cut off mid-year, which tells the owner nothing.
- */
-export function clockTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-}
 
 /**
  * What stands over the chats another program is holding, in place of a date.

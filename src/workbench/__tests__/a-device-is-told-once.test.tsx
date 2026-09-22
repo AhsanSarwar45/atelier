@@ -43,6 +43,7 @@ const ASKING = {
   says: 'permission to use a tool',
   href: '/project?id=project-1&tab=chat&chat=chat-1',
   needsAction: true,
+  at: '2026-09-22T08:15:00.000Z',
 };
 let rows = [ASKING];
 

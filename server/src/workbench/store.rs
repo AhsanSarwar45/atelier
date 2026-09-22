@@ -188,6 +188,15 @@ pub struct Notice {
     pub read_state: Option<String>,
     /// The state last pushed to a device.
     pub announced_state: Option<String>,
+    /// When the chat reached `since_state`, which is when whatever the tray
+    /// has to say about it appeared. `None` for a chat that was already
+    /// sitting in its state before this was written down.
+    pub since: Option<String>,
+    /// The state `since` is the arrival time of. Kept beside it for the same
+    /// reason the two above are states rather than flags: a time without the
+    /// state it belongs to would be read as the arrival of whatever the chat
+    /// happens to be doing later.
+    pub since_state: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -404,13 +413,15 @@ impl Store {
     pub fn notices(&self) -> rusqlite::Result<HashMap<String, Notice>> {
         let mut statement = self
             .connection
-            .prepare("SELECT session_id, read_state, announced_state FROM session_notice")?;
+            .prepare("SELECT session_id, read_state, announced_state, since, since_state FROM session_notice")?;
         let rows = statement.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 Notice {
                     read_state: row.get(1)?,
                     announced_state: row.get(2)?,
+                    since: row.get(3)?,
+                    since_state: row.get(4)?,
                 },
             ))
         })?;
@@ -481,6 +492,7 @@ impl Store {
         nullable("collaboration_mode", patch.collaboration_mode);
         nullable("profile", patch.profile);
         if let Some(state) = patch.state {
+            self.note_when_it_appeared(id, &state)?;
             sets.push("state = ?".to_string());
             values.push(SqlValue::Text(state));
         }
@@ -511,6 +523,41 @@ impl Store {
         self.connection.execute(
             &format!("UPDATE session SET {} WHERE id = ?", sets.join(", ")),
             params_from_iter(values),
+        )?;
+        Ok(())
+    }
+
+    /// Write down when a chat reached a state there is something to say about.
+    ///
+    /// Called from `update_session`, which is the one path every state change
+    /// takes, so there is no way for a chat to arrive somewhere announceable
+    /// without the moment being kept. Only an arrival counts: a chat told it is
+    /// still doing what it was already doing has not appeared again, and
+    /// restamping it would make every notification read as new (bw-zvgc).
+    ///
+    /// The clock is this machine's, at the moment the state changed, and not
+    /// the event's own: a replayed record carries the times of the day it was
+    /// written, and a chat whose history is loaded at noon would otherwise tell
+    /// the tray it had been waiting since last Tuesday.
+    fn note_when_it_appeared(&self, id: &str, state: &str) -> rusqlite::Result<()> {
+        if !crate::workbench::notice::worth_announcing(state) {
+            return Ok(());
+        }
+        let was: Option<String> = self
+            .connection
+            .query_row("SELECT state FROM session WHERE id = ?1", [id], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        if was.as_deref() == Some(state) {
+            return Ok(());
+        }
+        let at = chrono::Utc::now().to_rfc3339();
+        self.connection.execute(
+            "INSERT INTO session_notice (session_id, since, since_state, updated_at)
+             VALUES (?1, ?2, ?3, ?2)
+             ON CONFLICT(session_id) DO UPDATE SET since = ?2, since_state = ?3, updated_at = ?2",
+            params![id, at, state],
         )?;
         Ok(())
     }
@@ -2764,6 +2811,19 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
          );",
     )?;
 
+    // When each chat reached the state it is being announced in, and which
+    // state that was. Added after the table (bw-zvgc): a notification that
+    // cannot say when it appeared leaves the owner unable to tell a chat that
+    // stopped a minute ago from one that stopped last night, and nothing
+    // anywhere was writing that time down.
+    let notice_columns = columns(transaction, "session_notice")?;
+    for column in ["since", "since_state"] {
+        if !notice_columns.iter().any(|name| name == column) {
+            transaction
+                .execute_batch(&format!("ALTER TABLE session_notice ADD COLUMN {column} TEXT;"))?;
+        }
+    }
+
     let event_columns = columns(transaction, "event")?;
     for column in ["provider", "provider_thread_id", "provider_event_id"] {
         if !event_columns.iter().any(|name| name == column) {
@@ -2926,7 +2986,7 @@ fn one_row_per_external_chat(transaction: &Transaction<'_>) -> rusqlite::Result<
 fn columns(transaction: &Transaction<'_>, table: &str) -> rusqlite::Result<Vec<String>> {
     debug_assert!(matches!(
         table,
-        "session" | "event" | "transcript_projection"
+        "session" | "event" | "transcript_projection" | "session_notice"
     ));
     let mut statement = transaction.prepare(&format!("PRAGMA table_info({table})"))?;
     let found = statement
@@ -3026,6 +3086,8 @@ mod tests {
             Some(&Notice {
                 read_state: Some("errored".to_string()),
                 announced_state: Some("idle".to_string()),
+                since: None,
+                since_state: None,
             }),
             "what had been said about the chat did not outlive the process"
         );
@@ -3053,6 +3115,8 @@ mod tests {
             Some(&Notice {
                 read_state: Some("idle".to_string()),
                 announced_state: Some("idle".to_string()),
+                since: None,
+                since_state: None,
             }),
             "one of the two facts wrote over the other"
         );
@@ -3064,6 +3128,92 @@ mod tests {
             store.notices().unwrap()["chat"].announced_state.as_deref(),
             Some("errored")
         );
+    }
+
+    /// When a notification appeared is written down the moment it appears.
+    ///
+    /// A tray row said what a chat wanted and never when it started wanting it,
+    /// so a chat that stopped a minute ago and one that stopped last night read
+    /// exactly alike, and nothing anywhere held the difference (bw-zvgc). The
+    /// moment is kept here, where every state change passes, and only an
+    /// arrival counts: a chat told again what it is already doing has not
+    /// appeared again.
+    #[test]
+    fn a_chat_reaching_something_worth_saying_writes_down_when() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(&root.path().join("workbench.db")).unwrap();
+        store
+            .create_session(&session("chat", "claude", None, "2026-09-22T00:00:00Z"))
+            .unwrap();
+
+        // Working is not news, so there is nothing yet to time.
+        store
+            .update_session("chat", patched_state("streaming"), None)
+            .unwrap();
+        assert!(
+            store.notices().unwrap().get("chat").is_none(),
+            "a chat that was merely working was timed as a notification"
+        );
+
+        store
+            .update_session("chat", patched_state("errored"), None)
+            .unwrap();
+        let first = store.notices().unwrap()["chat"].clone();
+        assert_eq!(first.since_state.as_deref(), Some("errored"));
+        let appeared = first.since.expect("the arrival was not written down");
+
+        // Told again what it is already doing. Nothing appeared, so nothing
+        // may be restamped — every notification would read as new otherwise.
+        store
+            .update_session("chat", patched_state("errored"), None)
+            .unwrap();
+        assert_eq!(
+            store.notices().unwrap()["chat"].since.as_deref(),
+            Some(appeared.as_str()),
+            "a chat sitting in the state it was already in was timed again"
+        );
+
+        // A new thing to say about the same chat is timed from the new thing.
+        store
+            .update_session("chat", patched_state("idle"), None)
+            .unwrap();
+        let second = store.notices().unwrap()["chat"].clone();
+        assert_eq!(second.since_state.as_deref(), Some("idle"));
+        assert!(
+            second.since.as_deref() > Some(appeared.as_str()),
+            "a chat that went on to say something else kept the old time: {second:?}"
+        );
+    }
+
+    /// When it appeared outlives the process that saw it appear.
+    #[test]
+    fn when_a_notification_appeared_survives_a_restart() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("workbench.db");
+        let appeared = {
+            let store = Store::open(&file).unwrap();
+            store
+                .create_session(&session("chat", "claude", None, "2026-09-22T00:00:00Z"))
+                .unwrap();
+            store
+                .update_session("chat", patched_state("errored"), None)
+                .unwrap();
+            store.notices().unwrap()["chat"].since.clone()
+        };
+
+        let store = Store::open(&file).unwrap();
+        assert_eq!(
+            store.notices().unwrap()["chat"].since, appeared,
+            "when the notification appeared did not outlive the process"
+        );
+        assert!(appeared.is_some());
+    }
+
+    fn patched_state(state: &str) -> SessionPatch {
+        SessionPatch {
+            state: Some(state.to_string()),
+            ..SessionPatch::default()
+        }
     }
 
     /// A chat that is gone has nothing left to say.

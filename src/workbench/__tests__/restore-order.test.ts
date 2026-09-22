@@ -12,7 +12,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { clockTime, groupRows, OPEN_ELSEWHERE } from '@/workbench/chat-sidebar';
+import { groupRows, OPEN_ELSEWHERE } from '@/workbench/chat-sidebar';
+import { clockTime } from '@/workbench/when';
 import { byWhatIsWorking, laterOf, whenHeSpoke, type RestoreRow } from '@/workbench/protocol';
 
 function row(over: Partial<RestoreRow> = {}): RestoreRow {

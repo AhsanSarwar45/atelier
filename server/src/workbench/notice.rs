@@ -125,6 +125,27 @@ pub struct Row {
     pub href: String,
     /// Whether this belongs under "needs action" rather than "other updates".
     pub needs_action: bool,
+    /// When this appeared: the moment the chat reached the state being
+    /// announced, as the database recorded it (`session_notice.since`).
+    ///
+    /// A tray row used to say what a chat wanted and never when it started
+    /// wanting it, so a chat that stopped a minute ago and one that stopped
+    /// last night read exactly alike (bw-zvgc). Falls back to the chat's own
+    /// activity clock for a chat that was already sitting in its state before
+    /// any of this was written down — the closest true thing, and never empty.
+    pub at: String,
+}
+
+/// When what the tray has to say about this chat appeared.
+///
+/// The recorded arrival, but only if it is the arrival of the state being
+/// announced now: a chat that has moved on since is timed from the new thing
+/// it has to say, not the old one.
+fn appeared(notice: Option<&crate::workbench::store::Notice>, state: &str, fallback: &str) -> String {
+    notice
+        .filter(|notice| notice.since_state.as_deref() == Some(state))
+        .and_then(|notice| notice.since.clone())
+        .unwrap_or_else(|| fallback.to_string())
 }
 
 /// Which projects can be named right now, by id.
@@ -170,7 +191,13 @@ pub async fn worth_saying(
         })
         .filter_map(|session| {
             let project_name = names.get(&session.project_id)?.clone();
+            let at = appeared(
+                notices.get(&session.id),
+                &session.state,
+                &session.last_active_at,
+            );
             Some(Row {
+                at,
                 href: chat_href(&session.project_id, &session.id),
                 needs_action: waits_on_you(&session.state),
                 says: wording(&session.state).to_string(),
@@ -237,6 +264,7 @@ pub async fn worth_pushing(
     };
 
     Ok(Some(Row {
+        at: appeared(notices.get(session_id), state, &session.last_active_at),
         href: chat_href(&session.project_id, session_id),
         needs_action: waits_on_you(state),
         says: wording(state).to_string(),
@@ -486,6 +514,67 @@ mod tests {
             worth_pushing(&board, &projects, "never-existed", "errored").await.unwrap().is_none(),
             "a chat that is not on the board was pushed"
         );
+    }
+
+    /// A row says when it appeared, and says it from the record.
+    ///
+    /// The time is the moment the chat reached the state being announced, not
+    /// the moment the page asked. A tray that timed itself from the asking
+    /// would reset on every reload, and two tabs open at once would disagree
+    /// about when the same chat stopped (bw-zvgc).
+    #[tokio::test]
+    async fn a_row_says_when_the_chat_reached_the_state_it_is_announcing() {
+        let directory = tempfile::tempdir().unwrap();
+        let projects = Database::new_in_memory().unwrap();
+        let project = a_project(&projects, "keystone", false);
+        let board = a_board(directory.path());
+        // Working, so there is nothing to say and nothing to time yet.
+        board
+            .create_session(a_chat("chat-1", &project, "streaming"))
+            .await
+            .unwrap();
+
+        board
+            .update_session(
+                "chat-1".to_string(),
+                crate::workbench::store::SessionPatch {
+                    state: Some("errored".to_string()),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await
+            .unwrap();
+
+        let rows = worth_saying(&board, &projects, false).await.unwrap();
+        let recorded = board.notices().await.unwrap()["chat-1"]
+            .since
+            .clone()
+            .expect("the arrival was not written down");
+        assert_eq!(rows[0].at, recorded, "the row did not say the recorded time");
+        assert_ne!(
+            rows[0].at, "2026-01-01T00:00:00Z",
+            "the row fell back to the chat's own clock when a real arrival was on record"
+        );
+    }
+
+    /// A chat that was already sitting in its state before any of this was
+    /// written down still says when — the closest true thing it has.
+    #[tokio::test]
+    async fn a_chat_from_before_the_record_falls_back_to_its_own_clock() {
+        let directory = tempfile::tempdir().unwrap();
+        let projects = Database::new_in_memory().unwrap();
+        let project = a_project(&projects, "keystone", false);
+        let board = a_board(directory.path());
+        // Straight into the database in the state it is in, the way a chat
+        // that stopped before this column existed sits there now.
+        board
+            .create_session(a_chat("chat-1", &project, "errored"))
+            .await
+            .unwrap();
+
+        let rows = worth_saying(&board, &projects, false).await.unwrap();
+        assert_eq!(rows[0].at, "2026-01-01T00:00:00Z");
     }
 
     /// What the push says is what the tray says, because it is the same row.
