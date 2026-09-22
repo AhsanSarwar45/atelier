@@ -8,7 +8,7 @@
  */
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { useRouter } from 'next/navigation';
 
@@ -20,113 +20,39 @@ import { Button } from '@/components/ui/button';
 import { panelVariants } from '@/components/ui/panel';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Row } from '@/components/ui/row';
-import * as api from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { useLiveSessions, waitsOnYou, type LiveSession } from '@/workbench/live';
+import { useLiveSessions } from '@/workbench/live';
 import { readNotificationPreferences, showDeviceNotification, useNotificationPreferences } from '@/workbench/notification-preferences';
-
-/** Project ids to their names, fetched once — the tray names a project, not a path. */
-function useProjectNames(): Map<string, string> {
-  const [names, setNames] = useState<Map<string, string>>(new Map());
-  useEffect(() => {
-    let alive = true;
-    void api.projects
-      .list()
-      .then((rows) => {
-        if (alive) setNames(new Map(rows.map((p) => [p.id, p.name])));
-      })
-      .catch(() => {
-        // The tray still reads without names; it just shows the chat's own title.
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-  return names;
-}
-
-/** What a row says it is waiting for, in the owner's words rather than a state name. */
-export function whatItWaitsFor(s: LiveSession): string {
-  if (s.waitingFor) return s.waitingFor;
-  if (s.state === 'waiting_permission') return 'permission to use a tool';
-  if (s.state === 'errored') return 'it stopped with an error';
-  return 'your turn';
-}
-
-function chatHref(s: LiveSession): string {
-  return `/project?id=${encodeURIComponent(s.projectId)}&tab=chat&chat=${encodeURIComponent(s.id)}`;
-}
-
-/** What the reader has already read: chat id to the state it was in when cleared. */
-const CLEARED_KEY = 'atelier.notifications-cleared';
-
-export function readCleared(): Record<string, string> {
-  if (typeof window === 'undefined') return {};
-  try {
-    return JSON.parse(localStorage.getItem(CLEARED_KEY) ?? '{}') as Record<string, string>;
-  } catch {
-    // A tray that cannot read what was cleared shows everything, which is the
-    // safe way to be wrong: nothing waiting on the owner goes missing.
-    return {};
-  }
-}
+import { useAlreadyToldThisPage, useNotifications, type Notification } from '@/workbench/notifications';
 
 /**
- * Whether a chat is still cleared.
+ * What a row says it is waiting for.
  *
- * Against the state it was cleared IN, not against the id alone. These rows are
- * not messages that arrive and stay — they are a live reading of what each chat
- * is doing, so a chat cleared while it waits on permission must come back the
- * moment it goes on to want something else. Clearing by id would have silenced
- * that chat for the rest of the tab.
+ * The server sends the words with the row, so a page and a phone say the same
+ * thing about the same chat. The live stream sometimes knows better — the tool
+ * a chat is actually asking to run, the message an error actually carried —
+ * and when it does, that wins: it is the same fact, said more precisely.
  */
-export function stillCleared(cleared: Record<string, string>, s: LiveSession): boolean {
-  return cleared[s.id] === s.state;
+function whatItSays(row: Notification, live: Map<string, string | null>): string {
+  return live.get(row.id) ?? row.says;
 }
 
-/**
- * What the tray has been told to forget, and the way to tell it.
- *
- * Kept for the browser rather than the tab (`localStorage`), beside the states
- * the device notifications are judged against. It was kept for the tab, on the
- * reading that "I have read these" is a thing about the sitting it was said in
- * — and on a phone that made the button useless. A phone browser throws a tab
- * away whenever it wants the memory and builds a fresh one on return, so the
- * record went with it and every row came back: chats that stopped with an error
- * days ago, already read, already dismissed, waiting again every time the app
- * was opened (bw-poyg). Having read something is a fact about the reader, and
- * it outlives the tab he read it in.
- *
- * Nothing here grows without bound: each clearing writes the chats on screen
- * over whatever was there before, so the record can never hold more than there
- * are chats.
- */
-function useCleared(): { cleared: Record<string, string>; clear: (sessions: LiveSession[]) => void } {
-  const [cleared, setCleared] = useState<Record<string, string>>({});
-  // Read after mount, not during: the server renders this too, and it has no
-  // localStorage to read.
-  useEffect(() => setCleared(readCleared()), []);
-  const clear = useCallback((sessions: LiveSession[]) => {
-    // Only the chats on screen are remembered, so the record cannot grow past
-    // the number of chats there are.
-    const next = Object.fromEntries(sessions.map((s) => [s.id, s.state]));
-    localStorage.setItem(CLEARED_KEY, JSON.stringify(next));
-    setCleared(next);
-  }, []);
-  return { cleared, clear };
-}
-
-function WaitingTray({ names }: { names: Map<string, string> }) {
+function WaitingTray({ rows, clear }: { rows: Notification[]; clear: () => void }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
-  const sessions = useLiveSessions();
   const { preferences } = useNotificationPreferences();
-  const { cleared, clear } = useCleared();
-  const unread = (s: LiveSession) => !stillCleared(cleared, s);
-  const waiting = preferences.needsAction ? sessions.filter(waitsOnYou).filter(unread) : [];
-  const updates = preferences.updates
-    ? sessions.filter((s) => !waitsOnYou(s) && (s.state === 'idle' || s.state === 'stopped')).filter(unread)
-    : [];
+  // What the stream knows about a chat that the row cannot carry: the tool it
+  // is asking to run, the message its error came with.
+  const sessions = useLiveSessions();
+  const said = useMemo(
+    () => new Map(sessions.map((s) => [s.id, s.waitingFor])),
+    [sessions],
+  );
+
+  // Which kinds the owner wants to hear about is still his own browser's
+  // business — it is a setting, not a fact about the chats.
+  const waiting = preferences.needsAction ? rows.filter((row) => row.needsAction) : [];
+  const updates = preferences.updates ? rows.filter((row) => !row.needsAction) : [];
 
   if (!waiting.length && !updates.length) return null;
 
@@ -212,7 +138,7 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
             size="xs"
             data-testid="tray-clear"
             onClick={() => {
-              clear(sessions);
+              clear();
               setOpen(false);
             }}
           >
@@ -221,34 +147,34 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
           </Button>
         </div>
         {waiting.length > 0 && <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-t-muted">Needs action</div>}
-        {waiting.map((s) => (
+        {waiting.map((row) => (
           <Row
-            key={s.id}
+            key={row.id}
             ruled
             data-testid="tray-row"
-            data-session-id={s.id}
+            data-session-id={row.id}
             onClick={() => {
               setOpen(false);
-              router.push(chatHref(s));
+              router.push(row.href);
             }}
           >
-            <div className="truncate text-sm text-foreground">{s.title ?? 'Untitled chat'}</div>
+            <div className="truncate text-sm text-foreground">{row.title ?? 'Untitled chat'}</div>
             <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
               <span data-testid="tray-project" className="truncate font-medium">
-                {names.get(s.projectId) ?? 'Unknown project'}
+                {row.projectName}
               </span>
               <span data-testid="tray-waiting-for" className="truncate">
-                · {whatItWaitsFor(s)}
+                · {whatItSays(row, said)}
               </span>
             </div>
           </Row>
         ))}
         {updates.length > 0 && <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-t-muted">Other updates</div>}
-        {updates.map((s) => (
-          <Row key={s.id} ruled data-testid="tray-row" data-notification-type="update" onClick={() => { setOpen(false); router.push(chatHref(s)); }}>
-            <div className="truncate text-sm text-foreground">{s.title ?? 'Untitled chat'}</div>
+        {updates.map((row) => (
+          <Row key={row.id} ruled data-testid="tray-row" data-notification-type="update" onClick={() => { setOpen(false); router.push(row.href); }}>
+            <div className="truncate text-sm text-foreground">{row.title ?? 'Untitled chat'}</div>
             <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
-              <span className="truncate font-medium">{names.get(s.projectId) ?? 'Unknown project'}</span><span className="truncate">· Ready to read</span>
+              <span data-testid="tray-project" className="truncate font-medium">{row.projectName}</span><span className="truncate">· {row.says}</span>
             </div>
           </Row>
         ))}
@@ -260,32 +186,39 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
 /**
  * What follows the owner, drawn inline in the shell's first bar: the tray of
  * chats waiting on him. It takes no room at all when there is nothing to say.
+ *
+ * Everything it draws comes from the server, which is also what decides there
+ * is nothing to say. Nothing about what has been read is kept in this browser
+ * any more: it was kept in two places here, in two storages, and neither
+ * outlived the tab a phone threw away (bw-altj).
  */
 export function WorkbenchStatus() {
-  const names = useProjectNames();
-  const sessions = useLiveSessions();
-  // Deliberately blind to what has been cleared: this is the cheap gate, and
-  // reading localStorage during a render the server also does would have the
-  // two of them disagree. The tray itself draws nothing once everything in it
-  // is cleared, so the bell goes with it either way.
-  const relevant = sessions.filter((s) => waitsOnYou(s) || s.state === 'idle' || s.state === 'stopped').length;
+  const { notifications, loaded, clear } = useNotifications();
+  const { preferences } = useNotificationPreferences();
+  const unheard = useAlreadyToldThisPage();
 
   useEffect(() => {
-    const preferences = readNotificationPreferences();
-    const previous = JSON.parse(sessionStorage.getItem('atelier.notification-states') ?? '{}') as Record<string, string>;
-    if (preferences.device) for (const session of sessions) {
-      if (previous[session.id] && previous[session.id] !== session.state) {
-        const action = waitsOnYou(session);
-        const update = session.state === 'idle' || session.state === 'stopped';
-        if ((action && preferences.needsAction) || (update && preferences.updates)) void showDeviceNotification(session.title ?? 'Atelier chat', action ? whatItWaitsFor(session) : 'Ready to read', chatHref(session));
+    // Nothing is news until the server has actually answered: the empty list
+    // this starts on is the question not yet asked, and taking it as the last
+    // reading would make every row of the first answer a fresh announcement on
+    // every page load.
+    if (!loaded) return;
+    if (!readNotificationPreferences().device) {
+      // Still take the reading, so that turning the setting on mid-sitting does
+      // not then announce everything that was already sitting there.
+      unheard(notifications);
+      return;
+    }
+    for (const row of unheard(notifications)) {
+      if (row.needsAction ? preferences.needsAction : preferences.updates) {
+        void showDeviceNotification(row.title ?? 'Atelier chat', row.says, row.href);
       }
     }
-    sessionStorage.setItem('atelier.notification-states', JSON.stringify(Object.fromEntries(sessions.map((s) => [s.id, s.state]))));
-  }, [sessions]);
+  }, [loaded, notifications, preferences, unheard]);
 
   return (
     <div data-testid="workbench-globals" className="flex min-w-0 flex-1 items-center justify-end gap-3">
-      {relevant > 0 && <WaitingTray names={names} />}
+      {notifications.length > 0 && <WaitingTray rows={notifications} clear={() => void clear()} />}
     </div>
   );
 }

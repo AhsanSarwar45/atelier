@@ -1243,11 +1243,16 @@ struct SessionsQuery {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct NotificationsQuery {
     /// Test projects are hidden for the same reason the project list hides
     /// them, and shown here on the same terms: a case proving this endpoint
     /// has any business naming them.
+    ///
+    /// Spelled the way `/api/projects` spells it, and deliberately not in the
+    /// camel case the bodies on this router use. It is the same word about the
+    /// same projects, so a caller that knows one spelling knows both — and a
+    /// second spelling is not a second meaning, it is a parameter that silently
+    /// does nothing, which is exactly how this went out wrong the first time.
     include_test: Option<bool>,
 }
 
@@ -3047,7 +3052,7 @@ mod tests {
             "a test fixture's chat reached the owner's tray"
         );
         assert_eq!(
-            asked_for_notifications(state, "?includeTest=true").await.len(),
+            asked_for_notifications(state, "?include_test=true").await.len(),
             1,
             "a case that asked for test projects was refused them"
         );

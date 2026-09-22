@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -80,6 +80,25 @@ async function projectAt(request: APIRequestContext, path: string, name?: string
   });
   expect(created.status(), await created.text()).toBe(201);
   return (await created.json()) as { id: string };
+}
+
+/**
+ * Let the tray speak about the test projects this file makes.
+ *
+ * The server decides what the tray says, and it leaves test projects out — so
+ * without this every case here would find an empty bell. That exclusion is the
+ * point of the server owning the question: before it did, a chat whose project
+ * the tray could not name drew a row reading "Unknown project" instead of not
+ * drawing at all (bw-altj), and this case passed on exactly that bug, because
+ * "Unknown project" is not an empty name.
+ */
+async function showTestProjects(page: Page): Promise<void> {
+  await page.route(/\/api\/workbench\/notifications(\?[^/]*)?$/, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const url = new URL(route.request().url());
+    url.searchParams.set('include_test', 'true');
+    await route.continue({ url: url.toString() });
+  });
 }
 
 test.describe('workbench', () => {
@@ -716,6 +735,7 @@ test.describe('workbench', () => {
   test('tray counts what waits on you across projects', async ({ page, request }) => {
     test.setTimeout(600_000);
     mkdirSync(SHOTS, { recursive: true });
+    await showTestProjects(page);
 
     const started: { id: string; projectId: string }[] = [];
     // Tracked apart from `started`, which is keyed on the chat session and
@@ -758,12 +778,33 @@ test.describe('workbench', () => {
       }
       await page.screenshot({ path: join(SHOTS, 'tray.png'), fullPage: false });
 
+      // A row lands on its own chat, with the ask on screen.
+      await page.locator(`[data-testid="tray-row"][data-session-id="${started[0]!.id}"]`).click();
+      await expect(page.getByTestId('chat-tab')).toHaveAttribute('data-session-id', started[0]!.id, {
+        timeout: 60_000,
+      });
+      await expect(page.locator('[data-testid="permission-card"][data-ask-state="open"]').first()).toBeVisible({
+        timeout: 60_000,
+      });
+      await page.screenshot({ path: join(SHOTS, 'tray-landed.png'), fullPage: false });
+
       /*
         Being done with them. Two chats are genuinely waiting on the owner here,
         so this is the real question the button answers: having read that they
         are waiting, he can put the tray away without answering either one, and
         it stays away until one of them does something else (bw-k22y.1).
+
+        Last in the case rather than in the middle of it, because clearing is
+        now written down by the server and there is no way back from it while
+        the chats sit still — which is the whole of what bw-altj fixed. It used
+        to be undone here by deleting a key out of `localStorage`, which was
+        possible only because the record was kept in the browser, and wrong for
+        the same reason: the phone that threw that key away brought every
+        dismissed row back.
       */
+      await page.goto('/');
+      await expect(badge).toHaveAttribute('data-count', '2', { timeout: 60_000 });
+      await badge.click();
       await page.getByTestId('tray-clear').click();
       await expect(page.getByTestId('tray-panel')).toHaveCount(0);
       // The bell goes with the rows: an empty tray is no tray, not a zero.
@@ -779,23 +820,6 @@ test.describe('workbench', () => {
       // meant to prevent.
       await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
       await expect(badge).toHaveCount(0);
-
-      // Brought back to answer them, which is how the rest of this case goes on.
-      await page.evaluate(() => localStorage.removeItem('atelier.notifications-cleared'));
-      await page.reload();
-      await expect(badge).toHaveAttribute('data-count', '2', { timeout: 60_000 });
-      await badge.click();
-      await expect(rows).toHaveCount(2);
-
-      // A row lands on its own chat, with the ask on screen.
-      await page.locator(`[data-testid="tray-row"][data-session-id="${started[0]!.id}"]`).click();
-      await expect(page.getByTestId('chat-tab')).toHaveAttribute('data-session-id', started[0]!.id, {
-        timeout: 60_000,
-      });
-      await expect(page.locator('[data-testid="permission-card"][data-ask-state="open"]').first()).toBeVisible({
-        timeout: 60_000,
-      });
-      await page.screenshot({ path: join(SHOTS, 'tray-landed.png'), fullPage: false });
     } finally {
       for (const id of projectIds) {
         await request.delete(`/api/projects/${id}`);

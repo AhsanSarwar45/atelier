@@ -14,38 +14,50 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { LiveSession } from '@/workbench/live';
-
 const push = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 
-/** One chat, stopped and asking its owner something. */
+/** One chat, stopped and asking its owner something, as the server sends it. */
 const ASKING = {
   id: 'chat-1',
-  projectId: 'project-1',
   title: 'Waiting chat',
-  state: 'waiting',
-  waitingFor: 'permission',
-} as unknown as LiveSession;
-const FINISHED = { ...ASKING, id: 'chat-2', title: 'Finished chat', state: 'idle' } as LiveSession;
-let sessions = [ASKING];
+  projectId: 'project-1',
+  projectName: 'Keystone',
+  state: 'waiting_permission',
+  says: 'It is waiting on you',
+  href: '/projects/project-1?chat=chat-1',
+  needsAction: true,
+};
+const FINISHED = {
+  ...ASKING,
+  id: 'chat-2',
+  title: 'Finished chat',
+  state: 'idle',
+  says: 'Ready to read',
+  href: '/projects/project-1?chat=chat-2',
+  needsAction: false,
+};
+let rows = [ASKING];
 
-vi.mock('@/workbench/live', () => ({
-  useLiveSessions: () => sessions,
-  waitsOnYou: (session: LiveSession) => session.id === ASKING.id,
+// The tray draws what the server hands it, so that is what stands in for a
+// server here. The live stream is only its cue to ask again.
+vi.mock('@/lib/api', () => ({
+  request: async (path: string) =>
+    ({ ok: true, status: path.endsWith('/read') ? 204 : 200, json: async () => rows }) as unknown as Response,
 }));
-vi.mock('@/lib/api', () => ({ projects: { list: () => Promise.resolve([]) } }));
+vi.mock('@/workbench/live', () => ({ useLiveSessions: () => [] }));
 
 async function openTheTray() {
   const { WorkbenchStatus } = await import('@/workbench/globals');
   await act(async () => void render(<WorkbenchStatus />));
+  await waitFor(() => expect(screen.queryByTestId('tray-badge')).not.toBeNull());
   await act(async () => void fireEvent.click(screen.getByTestId('tray-badge')));
   await waitFor(() => expect(screen.queryByTestId('tray-panel')).not.toBeNull());
 }
 
 beforeEach(() => {
   push.mockClear();
-  sessions = [ASKING];
+  rows = [ASKING];
 });
 
 afterEach(() => {
@@ -91,7 +103,7 @@ describe('the tray of chats waiting on you', () => {
   });
 
   it('separates work that needs action from other updates', async () => {
-    sessions = [ASKING, FINISHED];
+    rows = [ASKING, FINISHED];
     await openTheTray();
 
     expect(screen.getByText('Needs action')).toBeVisible();

@@ -12,12 +12,13 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
  * stopped with an error days ago, already read, already dismissed. Nothing had
  * changed about those chats, so nothing should have brought them back.
  *
- * What brought them back was where the record of having read them was kept.
- * A phone browser throws a tab away the moment it needs the memory and rebuilds
- * it on return, and a record kept for the tab goes with it. This drives that
- * exact shape: clear the tray in one tab, then read the tray in another tab of
- * the same browser — which is what the phone hands back — and the rows must
- * still be gone.
+ * What brought them back was where the record of having read them was kept: in
+ * the browser, for the tab. A phone throws a tab away the moment it needs the
+ * memory and rebuilds it on return, and a record kept for the tab goes with it.
+ * The record is the server's now (bw-altj), which is why a second tab knows
+ * about a clearing it never saw. This drives that exact shape: clear the tray
+ * in one tab, then read the tray in another tab of the same browser — which is
+ * what the phone hands back — and the rows must still be gone.
  *
  * Run: scripts/workbench-e2e.sh tests/e2e/a-cleared-tray-stays-cleared.spec.ts
  */
@@ -76,12 +77,18 @@ async function fixtureProject(request: APIRequestContext): Promise<{ id: string;
 }
 
 /**
- * The project this case makes is a test project, and the list the tray reads
- * names to out of leaves those out. Without this the rows still draw, under
- * "Unknown project" — which is its own bug, and not the one being proved here.
+ * The project this case makes is a test project, and test projects are left out
+ * of both answers this case needs: the project list the screen is drawn from,
+ * and the notifications the tray says. Each leaves them out for its own good
+ * reason, and each takes the same one parameter to ask for them back.
+ *
+ * The tray's half used to be the project list alone, because the tray did the
+ * naming itself out of that list — and a chat it could not name drew a row
+ * reading "Unknown project" rather than not drawing at all. The server answers
+ * that question now (bw-altj), so this asks the server.
  */
 async function showTestProjects(page: Page): Promise<void> {
-  await page.route(/\/api\/projects(\?[^/]*)?$/, async (route) => {
+  await page.route(/\/api\/(projects|workbench\/notifications)(\?[^/]*)?$/, async (route) => {
     if (route.request().method() !== 'GET') return route.continue();
     const url = new URL(route.request().url());
     url.searchParams.set('include_test', 'true');
