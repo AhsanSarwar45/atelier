@@ -8,7 +8,7 @@
  */
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { useVirtualizer } from '@tanstack/react-virtual';
 
@@ -39,7 +39,20 @@ const rowKey = (row: DrawnRow): string => row.row === 'machine'
   ? `machine:${row.id}`
   : `${row.item.kind}:${row.item.id}`;
 
-export function DrawnTranscript({
+/**
+ * The conversation, drawn.
+ *
+ * Remembered against its props, because the component that renders it also
+ * holds the line being typed: without this, every character the manager types
+ * redrew the whole transcript — the virtualiser measured its rows again and
+ * every visible message was rebuilt — before the character itself could be
+ * drawn. Typing cost the conversation rather than the word (bw-zez4).
+ *
+ * Every prop it is given is already stable across a keystroke: `rows` and
+ * `mentions` are memoised by the parent, `pane` is a ref, `onLook` and
+ * `onOlder` are held callbacks, and the rest are numbers and strings.
+ */
+export const DrawnTranscript = memo(function DrawnTranscript({
   rows,
   loadedItems,
   primaryItems = loadedItems,
@@ -412,4 +425,4 @@ export function DrawnTranscript({
       })}
     </div>
   );
-}
+});

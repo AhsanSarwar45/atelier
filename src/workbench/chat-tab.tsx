@@ -7,7 +7,7 @@
  */
 'use client';
 
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type KeyboardEvent, type ReactNode, type RefObject, type SetStateAction } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -65,7 +65,13 @@ import { ChatRightRail, useGitDiff, useGitPanel, useLeftRail, useRightRail, type
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { ComposerEditor, type ComposerHandle } from '@/workbench/composer-editor';
 import { fileCompletions } from '@/workbench/composer-files';
-import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
+import {
+  readUnsentLine,
+  useTypedSomething,
+  useUnsentLineText,
+  useUnsentPictures,
+  writeUnsentLine,
+} from '@/workbench/drafts';
 import { AttachmentTile } from '@/workbench/attachment-tile';
 import { draftFiles, withoutFile } from '@/workbench/draft-files';
 import { FileDropTarget } from '@/workbench/file-drop';
@@ -743,6 +749,288 @@ export function enterPushesThrough(event: ComposerKey): boolean {
   return event.key === 'Enter' && !event.shiftKey && (event.metaKey || event.ctrlKey);
 }
 
+
+/**
+ * The writing box itself: the line, the files it names, and the `/` menu.
+ *
+ * Its own component, and the ONLY thing on this screen that follows the line
+ * character by character. The chat tab above it draws the conversation, the
+ * rails, the header and a row of ten pickers, and none of that has anything to
+ * do with what is being typed — but while the line was a piece of the tab's
+ * own state, every keystroke redrew all of it. On a phone that cost more than
+ * a frame, so the letters arrived behind the finger (bw-zez4).
+ *
+ * The line lives in `drafts.ts` instead, and what reads it is this box and the
+ * Send button, each following it on its own. A keystroke now costs the box.
+ */
+function ComposerBody({
+  sessionId,
+  where,
+  attached,
+  setAttached,
+  onLook,
+  commands,
+  steerError,
+  sendError,
+  picker,
+  typing,
+  absorb,
+  completeFiles,
+  onKey,
+}: {
+  sessionId: string;
+  where: Rooted;
+  attached: DraftPicture[];
+  setAttached: Dispatch<SetStateAction<DraftPicture[]>>;
+  onLook: (picture: LookableImage) => void;
+  commands: CommandInfo[];
+  steerError: string | null;
+  sendError: string | null;
+  picker: RefObject<HTMLInputElement>;
+  typing: RefObject<ComposerHandle>;
+  absorb: (files: FileList | File[] | null, at?: number) => void;
+  completeFiles: Parameters<typeof ComposerEditor>[0]['extra'];
+  onKey: (e: ComposerKey) => boolean;
+}) {
+  const draft = useUnsentLineText(sessionId);
+  const setDraft = useCallback<Dispatch<SetStateAction<string>>>(
+    (next) => writeUnsentLine(sessionId, next),
+    [sessionId],
+  );
+  /** Which entry the `/` menu has under the cursor. */
+  const [pick, setPick] = useState(0);
+  /** The `/` menu, put away by hand until the next keystroke. */
+  const [shut, setShut] = useState(false);
+
+  /**
+   * Every file this message carries, attached or typed, in writing order.
+   *
+   * Derived rather than held: the draft is the record of what the message
+   * names, and a second list kept alongside it is a second thing to go stale.
+   */
+  const tray = useMemo(() => draftFiles(draft, attached, where), [draft, attached, where]);
+
+  /** The `/` menu is open only while the draft is one unfinished word starting with a slash. */
+  const typedCommand = /^\/(\S*)$/.exec(draft)?.[1] ?? null;
+  const found = useMemo(() => {
+    if (typedCommand === null) return [];
+    const wanted = typedCommand.toLowerCase();
+    return commands.filter((c) => c.name.toLowerCase().startsWith(wanted)).slice(0, 40);
+  }, [typedCommand, commands]);
+  // Put away by hand, until the next thing he types. Escape used to empty the
+  // whole box instead, so dismissing the list threw away the line — and a
+  // command he meant to send as it stands could not be (bw-1u1.14).
+  const matches = shut ? [] : found;
+  useEffect(() => setPick(0), [typedCommand]);
+
+  function take(command: CommandInfo) {
+    // Written into the box rather than sent: he may want to add an argument, and
+    // a command is ordinary prompt text either way (§7).
+    setDraft(`/${command.name} `);
+    typing.current?.focus();
+  }
+
+  /**
+   * What a keystroke means to the `/` menu. Anything the menu does not want is
+   * handed up to the chat, which decides what Enter and Escape mean to a
+   * conversation. True means the keystroke has been dealt with.
+   */
+  function composerKey(e: ComposerKey): boolean {
+    if (matches.length) {
+      if (e.key === 'ArrowDown') {
+        setPick((n) => (n + 1) % matches.length);
+        return true;
+      }
+      if (e.key === 'ArrowUp') {
+        setPick((n) => (n - 1 + matches.length) % matches.length);
+        return true;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        take(matches[pick] ?? matches[0]!);
+        return true;
+      }
+      if (e.key === 'Escape') {
+        setShut(true);
+        return true;
+      }
+    }
+    return onKey(e);
+  }
+
+  return (
+    <>
+      {/* One list, drawn twice: this strip and the badges inside the box
+          are both `draftFiles`, so a path the reader typed has a tile and
+          a badge, and taking either away takes the characters out of the
+          line — which takes the other away with them (bw-oamr.8). */}
+      {tray.length > 0 && (
+        <div data-testid="attachment-tray" className="mb-2 flex flex-wrap gap-2">
+          {tray.map((named) => (
+            <AttachmentTile
+              key={named.key}
+              file={named.file}
+              onOpen={() => onLook(named.file)}
+              onRemove={() => {
+                if (named.picture) setAttached((all) => all.filter((picture) => picture.id !== named.picture!.id));
+                setDraft((text) => withoutFile(text, named));
+              }}
+            />
+          ))}
+        </div>
+      )}
+      {/* His own commands and skills, as this session announced them (§7). */}
+      <CommandMenu matches={matches} active={pick} onPick={take} />
+      {steerError && (
+        <p data-testid="steer-error" className="mb-2 text-xs text-red-500">
+          {steerError}
+        </p>
+      )}
+      {sendError && (
+        <p data-testid="send-error" className="mb-2 text-xs text-red-500">
+          {sendError}
+        </p>
+      )}
+      {/* Out of sight rather than `display: none`. A phone browser will not
+          open its chooser for a control that was never laid out, so the
+          paperclip's click reached nothing and attaching on a phone looked
+          simply broken (bw-ad3r.5). The same argument the writing box makes
+          for its own mirror at composer-editor.tsx. The value is cleared on
+          the way out so choosing the same picture twice running still
+          raises a change event. */}
+      <input
+        ref={picker}
+        data-testid="image-input"
+        type="file"
+        multiple
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden
+        onChange={(e) => {
+          const chosen = e.target.files;
+          void Promise.resolve(absorb(chosen)).finally(() => {
+            e.target.value = '';
+          });
+        }}
+      />
+      <ComposerEditor
+        ref={typing}
+        value={draft}
+        onChange={(text) => {
+          setShut(false);
+          setDraft(text);
+          // The SAME list back when nothing was taken out of it. A fresh array
+          // every keystroke is a fresh value for the chat screen above to
+          // follow, and the screen redrew the whole conversation because a
+          // character was typed — which is the cost this job is about
+          // (bw-zez4).
+          setAttached((pictures) => {
+            if (!pictures.length) return pictures;
+            const kept = new Set(imageIds(text));
+            const left = pictures.filter((picture) => kept.has(picture.id));
+            return left.length === pictures.length ? pictures : left;
+          });
+        }}
+        onFiles={(files, at) => absorb(files, at)}
+        pictures={attached}
+        onOpenPicture={onLook}
+        onKey={composerKey}
+        extra={completeFiles}
+        // No held case here: a held chat draws no box at all, so a disabled
+        // one with a sentence in it is unreachable — and the sentence it
+        // still carried claimed the holder was working, which is the whole
+        // thing this job took out of the screens (bw-96is.13).
+        placeholder="Ask the agent to do something…"
+        // The frame is the box; the writing area inside it carries no second
+        // edge, no shadow and no colour of its own.
+        className="w-full leading-6"
+      />
+    </>
+  );
+}
+
+/**
+ * Send, Send now and Queue.
+ *
+ * Apart from the row of pickers beside them for the same reason the box is
+ * apart from the screen: these three are the only other controls that care
+ * what has been typed, and they care only whether anything has been. So they
+ * follow that answer rather than the line, and redraw when the box goes from
+ * empty to not — twice a message, instead of once a key (bw-zez4).
+ */
+function SendButtons({
+  sessionId,
+  blocked,
+  busy,
+  onSend,
+  onHold,
+}: {
+  sessionId: string;
+  blocked: boolean;
+  busy: boolean;
+  onSend: () => void;
+  onHold: () => void;
+}) {
+  /**
+   * Whether there is a message to do anything with. One reading for all three
+   * buttons, so Send, Send now and Queue can never disagree about whether
+   * there is something in the box (bw-r54j.4).
+   */
+  const sendable = useTypedSomething(sessionId) && !blocked;
+  return (
+    <>
+      {busy && sendable && (
+        <Tooltip label="Send now, into the turn that is running (Ctrl/Cmd + Enter)">
+          <Button
+            variant="outline"
+            mode="icon"
+            size="sm"
+            aria-label="Send now"
+            data-testid="send-now-button"
+            className="rounded-full"
+            onClick={onSend}
+          >
+            <ArrowUp className="h-4 w-4" />
+          </Button>
+        </Tooltip>
+      )}
+      {busy && sendable && (
+        <Tooltip label="Hold it until this turn is over (Enter)">
+          <Button
+            variant="primary"
+            size="sm"
+            aria-label="Queue"
+            data-testid="queue-button"
+            className="rounded-full"
+            onClick={onHold}
+          >
+            <Clock3 className="h-4 w-4" />
+            Queue
+          </Button>
+        </Tooltip>
+      )}
+      {!busy && (
+        <Button
+          variant="primary"
+          mode="icon"
+          size="sm"
+          aria-label="Send"
+          data-testid="send-button"
+          className="rounded-full"
+          onClick={onSend}
+          // Nothing about who holds the chat here: a held one draws no
+          // box at all a few lines up, so a second half to this test
+          // could never come out true. What stops a send while someone
+          // else is in there is the composer not being drawn at all,
+          // which is what the browser checks measure (bw-96is.23).
+          disabled={!sendable}
+        >
+          <ArrowUp className="h-4 w-4" />
+        </Button>
+      )}
+    </>
+  );
+}
+
 export default function ChatTab({ projectId, projectPath, openSessionId }: ChatTabProps) {
   // One set of handlers for every file chip in the conversation, wherever it
   // was drawn: in a message, in a command, or on a tool row's own line.
@@ -990,18 +1278,20 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // Both are held against THIS chat's id, out where the tab bar cannot reach
   // them: leaving the chat for the board takes this whole screen down, and
   // switching chats does not take it down at all (src/workbench/drafts.ts).
-  const [draft, setDraft] = useUnsentLine(sessionId ?? '');
+  const chatId = sessionId ?? '';
+  /**
+   * The line is followed by the box and the Send button, each on its own, and
+   * NOT by this screen: see `ComposerBody`. Everything up here reads it when it
+   * acts rather than while it draws, so a keystroke leaves the tab alone.
+   */
+  const draftNow = useCallback(() => readUnsentLine(chatId), [chatId]);
+  const setDraft = useCallback<Dispatch<SetStateAction<string>>>(
+    (next) => writeUnsentLine(chatId, next),
+    [chatId],
+  );
   const [attached, setAttached] = useUnsentPictures(sessionId ?? '');
   /** The picture being looked at, from the tray or from a message. */
   const [looking, setLooking] = useState<LookableImage | null>(null);
-
-  /**
-   * Every file this message carries, attached or typed, in writing order.
-   *
-   * Derived rather than held: the draft is the record of what the message
-   * names, and a second list kept alongside it is a second thing to go stale.
-   */
-  const tray = useMemo(() => draftFiles(draft, attached, where), [draft, attached, where]);
   /** Which sent-off agent's own conversation is open, by the call that sent it. */
   const [openAgent, setOpenAgent] = useState<string | null>(null);
   /**
@@ -1015,10 +1305,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     () => (openAgent ? (view.agents.find((a) => a.id === openAgent) ?? null) : null),
     [openAgent, view.agents],
   );
-  /** Which entry the `/` menu has under the cursor. */
-  const [pick, setPick] = useState(0);
-  /** The `/` menu, put away by hand until the next keystroke. */
-  const [shut, setShut] = useState(false);
   /** The sheet a narrow screen opens the chat list in. */
   const [railOpen, setRailOpen] = useState(false);
   /** The chat list's column on a wide screen, remembered between visits. */
@@ -1403,12 +1689,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // first frame it draws (live.ts, LiveSession.externalId).
   const live = useLiveSessions().find((s) => s.id === sessionId);
   const sessionBrand = live?.brand ?? facts?.brand ?? 'claude';
-  /**
-   * Whether there is a message to do anything with. One reading for all three
-   * buttons, so Send, Send now and Queue can never disagree about whether
-   * there is something in the box (bw-r54j.4).
-   */
-  const sendable = Boolean(draft.trim()) && !(sessionBrand === 'local' && !view.model);
+  /** A local chat with no model chosen cannot send anything, typed or not. */
+  const cannotSend = sessionBrand === 'local' && !view.model;
   const composer = composerMenu(view.menu, sessionBrand, view.model, view.collaborationMode);
   const selectedModel = composer.models.find((model) => model.value === view.model);
   // The chat's own accounts are needed even on the system account: that is the
@@ -1589,28 +1871,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     typicalMs: holder?.typicalMs ?? null,
   });
 
-  /** The `/` menu is open only while the draft is one unfinished word starting with a slash. */
-  const typedCommand = /^\/(\S*)$/.exec(draft)?.[1] ?? null;
-  const found = useMemo(() => {
-    if (typedCommand === null) return [];
-    const wanted = typedCommand.toLowerCase();
-    return view.menu.commands.filter((c) => c.name.toLowerCase().startsWith(wanted)).slice(0, 40);
-  }, [typedCommand, view.menu.commands]);
-  // Put away by hand, until the next thing he types. Escape used to empty the
-  // whole box instead, so dismissing the list threw away the line — and a
-  // command he meant to send as it stands could not be (bw-1u1.14).
-  const matches = shut ? [] : found;
-  useEffect(() => setPick(0), [typedCommand]);
-
-  function take(command: CommandInfo) {
-    // Written into the box rather than sent: he may want to add an argument, and
-    // a command is ordinary prompt text either way (§7).
-    setDraft(`/${command.name} `);
-    typing.current?.focus();
-  }
-
   /**
-   * What a keystroke in the writing box means, and whether the chat took it.
+   * What a keystroke in the writing box means to the CHAT, once the `/` menu
+   * has had its say (`ComposerBody`).
    *
    * One reading for both surfaces the box has — the drawn line and the form
    * control underneath it (`composer-editor.tsx`) — because the answer to Enter
@@ -1618,24 +1881,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    * dealt with it and nothing else may.
    */
   function composerKey(e: ComposerKey): boolean {
-    if (matches.length) {
-      if (e.key === 'ArrowDown') {
-        setPick((n) => (n + 1) % matches.length);
-        return true;
-      }
-      if (e.key === 'ArrowUp') {
-        setPick((n) => (n - 1 + matches.length) % matches.length);
-        return true;
-      }
-      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
-        take(matches[pick] ?? matches[0]!);
-        return true;
-      }
-      if (e.key === 'Escape') {
-        setShut(true);
-        return true;
-      }
-    }
     if (e.key === 'Escape' && recallableNow.current) {
       void recallLastPrompt();
       return true;
@@ -1659,9 +1904,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   async function submit() {
     // The words and the pictures come out of the draft together: each picture
     // carries where its badge sat, so the sent message can draw it there.
+    const draft = draftNow();
     const { text, images } = promptFromDraft(draft, attached);
     if ((!text && attached.length === 0) || !sessionId) return;
-    if (sessionBrand === 'local' && !view.model) {
+    if (cannotSend) {
       setSendError('Choose a local model before sending.');
       return;
     }
@@ -1714,6 +1960,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    * `prompt.held` event, which is what draws it (bw-r54j.1).
    */
   async function hold() {
+    const draft = draftNow();
     const { text, images } = promptFromDraft(draft, attached);
     if ((!text && attached.length === 0) || !sessionId) return;
     const written = draft;
@@ -1840,7 +2087,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    * A file that fails to read or that the store will not keep is said out loud
    * too, rather than left as an unhandled rejection.
    */
-  async function absorb(files: FileList | File[] | null, at = typing.current?.cursor() ?? draft.length) {
+  async function absorb(files: FileList | File[] | null, at = typing.current?.cursor() ?? draftNow().length) {
     const chosen = Array.from(files ?? []);
     if (!chosen.length) return;
     const refused = chosen.map((file) => whyNot(file)).filter((why): why is string => why !== null);
@@ -2535,81 +2782,20 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             'focus-within:border-primary/60 focus-within:ring-1 focus-within:ring-primary/30',
           )}
         >
-          {/* One list, drawn twice: this strip and the badges inside the box
-              are both `draftFiles`, so a path the reader typed has a tile and
-              a badge, and taking either away takes the characters out of the
-              line — which takes the other away with them (bw-oamr.8). */}
-          {tray.length > 0 && (
-            <div data-testid="attachment-tray" className="mb-2 flex flex-wrap gap-2">
-              {tray.map((named) => (
-                <AttachmentTile
-                  key={named.key}
-                  file={named.file}
-                  onOpen={() => setLooking(named.file)}
-                  onRemove={() => {
-                    if (named.picture) setAttached((all) => all.filter((picture) => picture.id !== named.picture!.id));
-                    setDraft((text) => withoutFile(text, named));
-                  }}
-                />
-              ))}
-            </div>
-          )}
-          {/* His own commands and skills, as this session announced them (§7). */}
-          <CommandMenu matches={matches} active={pick} onPick={take} />
-          {steerError && (
-            <p data-testid="steer-error" className="mb-2 text-xs text-red-500">
-              {steerError}
-            </p>
-          )}
-          {sendError && (
-            <p data-testid="send-error" className="mb-2 text-xs text-red-500">
-              {sendError}
-            </p>
-          )}
-          {/* Out of sight rather than `display: none`. A phone browser will not
-              open its chooser for a control that was never laid out, so the
-              paperclip's click reached nothing and attaching on a phone looked
-              simply broken (bw-ad3r.5). The same argument the writing box makes
-              for its own mirror at composer-editor.tsx. The value is cleared on
-              the way out so choosing the same picture twice running still
-              raises a change event. */}
-          <input
-            ref={picker}
-            data-testid="image-input"
-            type="file"
-            multiple
-            className="sr-only"
-            tabIndex={-1}
-            aria-hidden
-            onChange={(e) => {
-              const chosen = e.target.files;
-              void absorb(chosen).finally(() => {
-                e.target.value = '';
-              });
-            }}
-          />
-          <ComposerEditor
-            ref={typing}
-            value={draft}
-            onChange={(text) => {
-              setShut(false);
-              setDraft(text);
-              const kept = new Set(imageIds(text));
-              setAttached((pictures) => pictures.filter((picture) => kept.has(picture.id)));
-            }}
-            onFiles={(files, at) => void absorb(files, at)}
-            pictures={attached}
-            onOpenPicture={setLooking}
+          <ComposerBody
+            sessionId={chatId}
+            where={where}
+            attached={attached}
+            setAttached={setAttached}
+            onLook={setLooking}
+            commands={view.menu.commands}
+            steerError={steerError}
+            sendError={sendError}
+            picker={picker}
+            typing={typing}
+            absorb={(files, at) => void absorb(files, at)}
+            completeFiles={completeFiles}
             onKey={composerKey}
-            extra={completeFiles}
-            // No held case here: a held chat draws no box at all, so a disabled
-            // one with a sentence in it is unreachable — and the sentence it
-            // still carried claimed the holder was working, which is the whole
-            // thing this job took out of the screens (bw-96is.13).
-            placeholder="Ask the agent to do something…"
-            // The frame is the box; the writing area inside it carries no second
-            // edge, no shadow and no colour of its own.
-            className="w-full leading-6"
           />
           {/* The row asks its OWN width, not the window's, and that is what
               `[container-type:inline-size]` is here for. Above `md` the chat's
@@ -2830,55 +3016,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 <Square className="h-4 w-4" />
               </Button>
             ) : null}
-            {busy && sendable && (
-              <Tooltip label="Send now, into the turn that is running (Ctrl/Cmd + Enter)">
-                <Button
-                  variant="outline"
-                  mode="icon"
-                  size="sm"
-                  aria-label="Send now"
-                  data-testid="send-now-button"
-                  className="rounded-full"
-                  onClick={() => void submit()}
-                >
-                  <ArrowUp className="h-4 w-4" />
-                </Button>
-              </Tooltip>
-            )}
-            {busy && sendable && (
-              <Tooltip label="Hold it until this turn is over (Enter)">
-                <Button
-                  variant="primary"
-                  size="sm"
-                  aria-label="Queue"
-                  data-testid="queue-button"
-                  className="rounded-full"
-                  onClick={() => void hold()}
-                >
-                  <Clock3 className="h-4 w-4" />
-                  Queue
-                </Button>
-              </Tooltip>
-            )}
-            {!busy && (
-              <Button
-                variant="primary"
-                mode="icon"
-                size="sm"
-                aria-label="Send"
-                data-testid="send-button"
-                className="rounded-full"
-                onClick={() => void submit()}
-                // Nothing about who holds the chat here: a held one draws no
-                // box at all a few lines up, so a second half to this test
-                // could never come out true. What stops a send while someone
-                // else is in there is the composer not being drawn at all,
-                // which is what the browser checks measure (bw-96is.23).
-                disabled={!sendable}
-              >
-                <ArrowUp className="h-4 w-4" />
-              </Button>
-            )}
+            <SendButtons
+              sessionId={chatId}
+              blocked={cannotSend}
+              busy={busy}
+              onSend={() => void submit()}
+              onHold={() => void hold()}
+            />
           </div>
         </Panel>
         )}

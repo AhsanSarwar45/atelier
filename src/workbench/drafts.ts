@@ -17,7 +17,14 @@
  * in text and one screenshot runs to megabytes, so they live in IndexedDB,
  * whose quota is meant for blobs and records of that size.
  */
-import { type Dispatch, type SetStateAction, useCallback, useEffect, useState } from 'react';
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 
 import type { DraftPicture } from '@/workbench/composer-attachments';
 
@@ -131,39 +138,110 @@ export function rememberUnsentLine(sessionId: string, line: string): void {
 }
 
 /**
- * The line he has typed into this chat and not sent, and the way to change it.
+ * Who is watching each chat's line.
  *
- * Shaped like `useState` so the box using it reads as it always did, updater
- * and all.
+ * This exists because the line is read in more than one place on the screen —
+ * the writing area, the file tray, the `/` menu, the Send button — and each of
+ * those has to be able to follow it WITHOUT the whole chat screen following it
+ * too. A keystroke has to cost the word, not the conversation: the screen that
+ * draws the transcript must not redraw because a character was typed into the
+ * box below it (bw-zez4).
  */
+const WATCHERS = new Map<string, Set<() => void>>();
+
+/** What THIS window has typed into each chat, as it typed it. */
+const OURS = new Map<string, string>();
+
+/**
+ * The line this chat is holding.
+ *
+ * Two windows can be open on the same conversation, and each is a person
+ * writing. So what this window typed is what this window gets back, and the
+ * other one's line — written to the same key a moment ago — does not appear
+ * under the cursor mid-sentence.
+ *
+ * But only while the browser is still holding something under that key. The
+ * cap above throws the oldest lines out from under everybody, and a store that
+ * has been emptied has been emptied; either way the key is gone, and so is what
+ * this window remembers about it. That is the difference between "somebody else
+ * wrote here" and "this is no longer kept", and it is the only question asked.
+ */
+export function readUnsentLine(sessionId: string): string {
+  const kept = store();
+  // No browser to ask — the page is still a file being built, or this one was
+  // told to allow no storage. Then the line lives for as long as the tab does.
+  if (!kept) return OURS.get(sessionId) ?? '';
+  const stored = kept.getItem(LINE + sessionId);
+  const ours = OURS.get(sessionId);
+  if (ours !== undefined) {
+    if (stored !== null) return ours;
+    OURS.delete(sessionId);
+  }
+  return stored ?? '';
+}
+
+/**
+ * Writes this chat's line and tells whoever is watching it.
+ *
+ * Shaped like a `useState` setter, updater and all, because that is how the
+ * box has always spoken to it.
+ */
+export function writeUnsentLine(sessionId: string, next: SetStateAction<string>): void {
+  const was = readUnsentLine(sessionId);
+  const now = typeof next === 'function' ? next(was) : next;
+  if (now === was) return;
+  OURS.set(sessionId, now);
+  // Written where it CHANGES, never mirrored back from an effect: an effect
+  // that writes the state out runs once with the value the screen opened on,
+  // and overwrites what was remembered before the effect that reads it has
+  // run. That is the fault that lost the reader's kind filter on every reload
+  // (bw-qdim, chat-right-rail.tsx).
+  rememberUnsentLine(sessionId, now);
+  for (const told of WATCHERS.get(sessionId) ?? []) told();
+}
+
+function watchUnsentLine(sessionId: string, told: () => void): () => void {
+  const watching = WATCHERS.get(sessionId) ?? new Set<() => void>();
+  WATCHERS.set(sessionId, watching);
+  watching.add(told);
+  return () => {
+    watching.delete(told);
+    if (!watching.size) WATCHERS.delete(sessionId);
+  };
+}
+
+/**
+ * The line he has typed into this chat and not sent.
+ *
+ * Whoever calls this follows every character. Anything that only needs to know
+ * whether there is a line at all should ask `useTypedSomething` instead, which
+ * follows the answer rather than the text and so redraws twice a message
+ * instead of once a key.
+ */
+export function useUnsentLineText(sessionId: string): string {
+  return useSyncExternalStore(
+    useCallback((told: () => void) => watchUnsentLine(sessionId, told), [sessionId]),
+    () => readUnsentLine(sessionId),
+    () => '',
+  );
+}
+
+/** Whether this chat has anything in its box worth sending. */
+export function useTypedSomething(sessionId: string): boolean {
+  return useSyncExternalStore(
+    useCallback((told: () => void) => watchUnsentLine(sessionId, told), [sessionId]),
+    () => readUnsentLine(sessionId).trim() !== '',
+    () => false,
+  );
+}
+
+/** The line, and the way to change it, shaped like `useState`. */
 export function useUnsentLine(sessionId: string): [string, Dispatch<SetStateAction<string>>] {
-  const [line, setLine] = useState('');
-  const key = LINE + sessionId;
-
-  // Read after the first draw rather than in the opening value: this app is
-  // built as files a server hands over, and that first pass has no browser to
-  // ask. Keyed on the chat, so opening another one brings back ITS line instead
-  // of carrying this one across.
-  useEffect(() => {
-    setLine(store()?.getItem(key) ?? '');
-  }, [key]);
-
+  const line = useUnsentLineText(sessionId);
   const write = useCallback<Dispatch<SetStateAction<string>>>(
-    (next) => {
-      setLine((was) => {
-        const now = typeof next === 'function' ? next(was) : next;
-        // Written where it CHANGES, never mirrored back from an effect: an
-        // effect that writes the state out runs once with the value the screen
-        // opened on, and overwrites what was remembered before the effect that
-        // reads it has run. That is the fault that lost the reader's kind
-        // filter on every reload (bw-qdim, chat-right-rail.tsx).
-        rememberUnsentLine(sessionId, now);
-        return now;
-      });
-    },
+    (next) => writeUnsentLine(sessionId, next),
     [sessionId],
   );
-
   return [line, write];
 }
 
@@ -213,6 +291,8 @@ export function useUnsentPictures(
 /** Everything this module is holding, dropped. Only a test wants this. */
 export function forgetEveryDraft(): void {
   TRAYS.clear();
+  OURS.clear();
+  for (const watching of WATCHERS.values()) for (const told of watching) told();
   if (typeof indexedDB !== 'undefined') indexedDB.deleteDatabase(PICTURES);
   const kept = store();
   if (!kept) return;
