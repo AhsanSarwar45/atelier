@@ -2,7 +2,7 @@
 
 # ATELIER
 
-**Visual command center for beads task tracking.**
+**A workbench for coding agents.**
 
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
 
@@ -12,7 +12,7 @@
 
 <br>
 
-[Why](#why) · [Origin](#origin) · [Features](#features) · [Themes](#themes) · [Installation](#installation) · [Development](#development) · [FAQ](#faq) · [Troubleshooting](docs/troubleshooting/README.md)
+[Why](#why) · [Features](#features) · [Themes](#themes) · [Installation](#installation) · [Development](#development) · [FAQ](#faq) · [Troubleshooting](docs/troubleshooting/README.md)
 
 **[Русская версия](README-ru.md)**
 
@@ -22,48 +22,37 @@
 
 ## Why
 
-Beads CLI is powerful for task tracking, but:
-- No visual overview of task status across columns
-- No drag-and-drop to move tasks between states
-- No way to see epic progress at a glance
-- No visual diff between blocked, ready, and in-progress
+Claude Code and Codex are good at the work and poor at everything around it.
+Run three of them in three terminals and you cannot see which one is waiting on
+you, what any of them changed, or whether the one that says it is done was ever
+checked.
 
-Atelier gives you a real-time Kanban board, multi-project dashboard, and git operations — without leaving the browser.
+Atelier runs them for you. Each job gets its own worktree, each chat is a tab
+you can close and come back to, and work reaches your shipping branch only after
+its checks ran and a reviewer signed off.
 
-## Origin
-
-Inspired by [Beads-Kanban-UI](https://github.com/AvivK5498/Beads-Kanban-UI) by Aviv Kaplan. The original author appears to have stopped development — PRs go unreviewed for months.
-
-This fork has diverged significantly: 84 files changed, ~9500 lines added.
-
-<details>
-<summary>What changed (summary)</summary>
-
-- 11 visual themes with persistence and flash prevention
-- Inline editing for bead fields (click to edit title, description, notes)
-- Click-to-copy bead IDs
-- Dolt direct SQL integration (no filesystem needed)
-- One-click project discovery from Dolt databases
-- Windows multi-drive path support
-- File browser for adding projects
-- Decomposed components (bead-detail, epic-card, etc.)
-- Vitest test setup
-- Full component decomposition and refactoring
-- Drag-and-drop status updates
-
-</details>
-
-Full changelog with rationale: [docs/changelog.md](docs/changelog.md)
+It drives the agent you already installed and signed in. There is no API key to
+add, and no model charge from us.
 
 ## Features
 
-- **Multi-project dashboard** — all projects in one place with status donut charts
-- **Kanban board** — Open → In Progress → In Review → Closed with drag-to-update
-- **Epic support** — group tasks with visual progress bars, view subtasks
-- **GitOps** — create, view, and merge PRs from the board. CI status, merge conflicts, auto-close
-- **11 themes** — Default Dark, Glassmorphism, Neo-Brutalist, Linear Minimal, Soft Light, Notion Warm, GitHub Clean, plus Catppuccin Latte, Frappe, Macchiato, and Mocha
-- **Dolt integration** — connect to Dolt databases directly, no filesystem path needed
-- **Real-time sync** — SSE file watcher for local projects, polling for Dolt
+- **Chat with agents** — Claude Code, Codex CLI, and local models through Goose.
+  Chats survive a closed browser, and ones you began in a terminal are picked up
+  too
+- **A worktree per job** — cut by the app, cleaned up by it
+- **Board** — Open → In Progress → In Review → Closed, with epics, drag to
+  update, and the same rules the command line obeys
+- **Checks, review and landing** — declared suites run against the exact commit,
+  an independent reviewer agent reads the diff, and landing rebases and
+  fast-forwards under a merge slot
+- **Visual proof** — screenshots of a real browser or a real window, before and
+  after, taken by the agent and shown in the transcript
+- **Files and terminal** — an editor and a real shell that outlive the page
+- **Accounts** — more than one provider login signed in at once, each with its
+  own plan usage and spend
+- **MCP and plugins** — browse a catalogue, add servers, manage Claude
+  extensions, and edit skills, hooks and agent files from Settings
+- **11 themes**, and a board that opens on your phone
 
 ## Themes
 
@@ -99,6 +88,7 @@ Latte, Frappe, Macchiato, and Mocha are available from the theme switcher.
 
 - **Frontend**: Next.js 14, React 18, TypeScript, Tailwind CSS, Radix UI, dnd-kit
 - **Backend**: Rust (Axum), SQLite, Dolt SQL
+- **Agents**: Claude Code, Codex CLI and Goose, driven over the Agent Client Protocol
 - **Build**: Static export embedded into Rust binary via rust-embed
 
 ## Installation
@@ -381,11 +371,28 @@ Run the binary and open **http://localhost:3008**:
 
 ## FAQ
 
+**Q: Do I need an API key?**
+A: No. Atelier starts the `claude` or `codex` you already installed and signed
+in, so the work goes through your own plan. Atelier adds no charge of its own.
+
+**Q: Do I need Beads?**
+A: Only for a project that wants a board. `atelier init` asks; answering no
+leaves the project chat-only and writes nothing into it.
+
 **Q: Do I need Dolt?**
-A: No. Atelier works with local filesystem projects using `bd` CLI. Dolt adds direct SQL access and remote database support.
+A: No. Atelier works with local filesystem projects using the `bd` CLI. Dolt
+adds direct SQL access and remote database support.
 
 **Q: How do I add a project?**
-A: Click "Add Project" on the dashboard. Browse to your project folder or enter a `dolt://` URL.
+A: Run `atelier init` in the folder, or click "Add Project" on the dashboard and
+browse to it.
+
+## Origin
+
+Atelier began as a fork of
+[Beads-Kanban-UI](https://github.com/AvivK5498/Beads-Kanban-UI) by Aviv Kaplan,
+a board for the Beads CLI. Little of that shape remains — the board is now one
+tab of three. Full history, with rationale: [docs/changelog.md](docs/changelog.md).
 
 ## Credits
 
