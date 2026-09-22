@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 
 import { useRouter } from 'next/navigation';
 
-import { Archive, ArchiveRestore, FolderSearch, GitBranch, Hammer, Loader2, ScrollText, Settings2, ShieldCheck, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, FolderSearch, GitBranch, Loader2, NotebookPen, ScrollText, Settings2, ShieldCheck, Trash2 } from 'lucide-react';
 
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
 import { FolderBrowser } from '@/components/folder-browser';
@@ -39,8 +39,8 @@ import { BrandIcon } from '@/workbench/brand-icon';
 export const PROJECT_SETTINGS_SECTIONS: SettingsSectionDef[] = [
   { id: 'project', label: 'Project', hint: 'Name, folder', icon: <Settings2 /> },
   { id: 'workflow', label: 'Workflow', hint: 'Cards, branches', icon: <GitBranch /> },
-  { id: 'review', label: 'Review', hint: 'Evidence, checks', icon: <ShieldCheck /> },
-  { id: 'development', label: 'Development', hint: 'Commands', icon: <Hammer /> },
+  { id: 'review', label: 'Review', hint: 'Checks', icon: <ShieldCheck /> },
+  { id: 'instructions', label: 'Instructions', hint: 'Agent prompt', icon: <NotebookPen /> },
   { id: 'claude', label: 'Claude Code', hint: 'Project settings', icon: <BrandIcon brand="claude" /> },
   { id: 'codex', label: 'Codex', hint: 'Project settings', icon: <BrandIcon brand="codex" /> },
   { id: 'files', label: 'Agent files', hint: 'Project settings', icon: <ScrollText /> },
@@ -99,6 +99,8 @@ export function ProjectSettingsScreen({
   const [browserPath, setBrowserPath] = useState('');
   const [saving, setSaving] = useState(false);
   const [manifest, setManifest] = useState<ProjectManifest | null>(null);
+  const [instructions, setInstructions] = useState('');
+  const [savedInstructions, setSavedInstructions] = useState('');
   const [saved, setSaved] = useState<string>('');
   const [beadsAvailable, setBeadsAvailable] = useState(true);
   const [storage, setStorage] = useState<ManifestStorage>('personal');
@@ -118,6 +120,8 @@ export function ProjectSettingsScreen({
         setBeadsAvailable(answer.beadsAvailable !== false);
         setManifest(answer.manifest);
         setSaved(JSON.stringify(answer.manifest));
+        setInstructions(answer.instructions || '');
+        setSavedInstructions(answer.instructions || '');
         setStorage(answer.storage);
         setStoredAs(answer.storage);
       })
@@ -132,6 +136,7 @@ export function ProjectSettingsScreen({
     path.trim() !== projectPath ||
     localPath.trim() !== (projectLocalPath || '') ||
     storage !== storedAs ||
+    instructions !== savedInstructions ||
     (manifest !== null && JSON.stringify(manifest) !== saved);
 
   const save = useCallback(async () => {
@@ -146,10 +151,12 @@ export function ProjectSettingsScreen({
     try {
       if (manifest) {
         const updated = { ...manifest, project: { ...manifest.project, display_name: trimmedName } };
-        const answer = await api.projects.updateSettings(projectId, updated);
+        const answer = await api.projects.updateSettings(projectId, updated, instructions);
         if (answer.storage !== storage) await api.projects.moveSettings(projectId, storage);
         setManifest(updated);
         setSaved(JSON.stringify(updated));
+        setInstructions(answer.instructions || '');
+        setSavedInstructions(answer.instructions || '');
         setStoredAs(storage);
       }
       await updateProject({
@@ -165,7 +172,7 @@ export function ProjectSettingsScreen({
     } finally {
       setSaving(false);
     }
-  }, [name, path, localPath, manifest, storage, projectId, projectName, projectPath, projectLocalPath, toast, onUpdated]);
+  }, [name, path, localPath, manifest, instructions, storage, projectId, projectName, projectPath, projectLocalPath, toast, onUpdated]);
 
   const leave = useCallback(
     async (act: () => Promise<void>, done: string) => {
@@ -384,41 +391,26 @@ export function ProjectSettingsScreen({
               </SelectContent>
             </Select>
           </SettingRow>
-          <SettingRow label="Evidence required" htmlFor="settings-evidence" stack>
-            <Input id="settings-evidence" value={manifest.review.evidence_requirements} onChange={(e) => patch('review', { evidence_requirements: e.target.value })} />
-          </SettingRow>
-          <SettingRow label="Visual proof for interface changes" htmlFor="settings-visual">
-            <Checkbox id="settings-visual" checked={manifest.verification.visual_proof_for_ui_changes} onCheckedChange={(c) => patch('verification', { visual_proof_for_ui_changes: c === true })} />
-          </SettingRow>
           <SettingRow label="Checks" htmlFor="settings-checks" description="name | command | paths" stack>
             <Textarea id="settings-checks" className="min-h-24 font-mono text-xs" value={manifest.verification.commands.map((c) => `${c.name} | ${c.command} | ${(c.paths || []).join(',')}`).join('\n')} onChange={(e) => patch('verification', { commands: verificationLines(e.target.value) })} />
           </SettingRow>
         </SettingsGroup>
       )}
 
-      {open === 'development' && manifest && (
-        <SettingsGroup title="Development">
-          {(
-            [
-              ['setup_command', 'Set up'],
-              ['start_command', 'Start'],
-              ['build_command', 'Build'],
-            ] as const
-          ).map(([key, label]) => (
-            <SettingRow key={key} label={label} htmlFor={`settings-${key}`}>
-              <Input id={`settings-${key}`} value={manifest.development[key]} onChange={(e) => patch('development', { [key]: e.target.value })} className="w-full font-mono text-xs sm:w-80" />
-            </SettingRow>
-          ))}
-          <SettingRow label="Deploy" htmlFor="settings-deploy">
-            <Input id="settings-deploy" value={manifest.deployment.command} onChange={(e) => patch('deployment', { command: e.target.value })} className="w-full font-mono text-xs sm:w-80" />
-          </SettingRow>
-          <SettingRow label="Confirm before deploying" htmlFor="settings-deploy-confirm">
-            <Checkbox id="settings-deploy-confirm" checked={manifest.deployment.requires_confirmation} onCheckedChange={(c) => patch('deployment', { requires_confirmation: c === true })} />
+      {open === 'instructions' && manifest && (
+        <SettingsGroup title="Instructions">
+          <SettingRow label="Added to every prompt" htmlFor="settings-instructions" stack>
+            <Textarea
+              id="settings-instructions"
+              className="min-h-64 font-mono text-xs"
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+            />
           </SettingRow>
         </SettingsGroup>
       )}
 
-      {(open === 'workflow' || open === 'review' || open === 'development') && !manifest && (
+      {(open === 'workflow' || open === 'review' || open === 'instructions') && !manifest && (
         <p className="text-sm text-t-tertiary">No project settings file.</p>
       )}
 

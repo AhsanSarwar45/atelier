@@ -39,6 +39,9 @@ pub struct ProbeProjectInput { pub path: String }
 #[serde(rename_all = "camelCase")]
 pub struct ProjectProbe {
     pub manifest: ProjectManifest,
+    /// What the project already tells its agents, or what a project of this
+    /// shape would start by telling them (bw-a9ln.4).
+    pub instructions: String,
     pub existing: bool,
     pub storage: Option<ManifestStorage>,
     pub manifest_path: Option<String>,
@@ -55,6 +58,8 @@ pub struct InitializeProjectInput {
     pub storage: ManifestStorage,
     pub manifest: ProjectManifest,
     #[serde(default)]
+    pub instructions: String,
+    #[serde(default)]
     pub is_test: bool,
 }
 
@@ -69,6 +74,14 @@ pub struct ProjectSettingsAnswer {
 
 #[derive(Deserialize)]
 pub struct MoveManifestInput { pub storage: ManifestStorage }
+
+#[derive(Deserialize)]
+pub struct UpdateSettingsInput {
+    #[serde(flatten)]
+    pub manifest: ProjectManifest,
+    #[serde(default)]
+    pub instructions: String,
+}
 
 fn manifest_error(error: String) -> (StatusCode, Json<ErrorResponse>) {
     (StatusCode::BAD_REQUEST, Json(ErrorResponse { error }))
@@ -108,7 +121,8 @@ fn located_or_created(project: &crate::db::Project, data: &std::path::Path) -> R
         let root = local_root(project)?;
         let mut manifest = project_manifest::infer(&root);
         manifest.project.display_name = project.name.clone();
-        project_manifest::create(&root, data, ManifestStorage::Personal, &manifest)?;
+        let path = project_manifest::create(&root, data, ManifestStorage::Personal, &manifest)?;
+        project_manifest::write_instructions(&path, &project_manifest::infer_instructions(&root))?;
     }
     located_for(&project.path, project.local_path.as_deref(), data)
         .ok_or_else(|| "the new settings file could not be read back".into())
@@ -142,26 +156,29 @@ pub async fn probe_project(
     if input.path.starts_with("dolt://") {
         let data = data_dir().map_err(manifest_error)?;
         if let Some(located) = project_manifest::locate_key(&input.path, &data) {
-            return Ok(Json(ProjectProbe { manifest: located.manifest, existing: true,
+            return Ok(Json(ProjectProbe { manifest: located.manifest, instructions: located.instructions, existing: true,
                 storage: Some(ManifestStorage::Personal), manifest_path: Some(located.path.to_string_lossy().to_string()),
                 beads_available }));
         }
         let name = input.path.trim_start_matches("dolt://").replace(['_', '-'], " ");
-        return Ok(Json(ProjectProbe { manifest: project_manifest::infer_virtual(&name), existing: false,
-            storage: None, manifest_path: None, beads_available }));
+        return Ok(Json(ProjectProbe { manifest: project_manifest::infer_virtual(&name), instructions: String::new(),
+            existing: false, storage: None, manifest_path: None, beads_available }));
     }
     let root = std::fs::canonicalize(&input.path)
         .map_err(|error| manifest_error(format!("{} could not be read: {error}", input.path)))?;
     if let Some(located) = project_manifest::locate(&root, &data_dir().map_err(manifest_error)?) {
         return Ok(Json(ProjectProbe {
             manifest: located.manifest,
+            instructions: located.instructions,
             existing: true,
             storage: Some(located.storage),
             manifest_path: Some(located.path.to_string_lossy().to_string()),
             beads_available,
         }));
     }
-    Ok(Json(ProjectProbe { manifest: project_manifest::infer(&root), existing: false, storage: None, manifest_path: None, beads_available }))
+    Ok(Json(ProjectProbe { manifest: project_manifest::infer(&root),
+        instructions: project_manifest::infer_instructions(&root),
+        existing: false, storage: None, manifest_path: None, beads_available }))
 }
 
 pub async fn initialize_project(
@@ -203,11 +220,13 @@ pub async fn initialize_project(
                 return Err(manifest_error(error));
             }
         }
+        project_manifest::write_instructions(&existing.path, &input.instructions).map_err(manifest_error)?;
         (input.manifest, None, previous)
     } else {
         let path = if virtual_project { project_manifest::create_key(&input.path, &data, &input.manifest) }
             else { project_manifest::create(root.as_ref().unwrap(), &data, input.storage, &input.manifest) }
             .map_err(manifest_error)?;
+        project_manifest::write_instructions(&path, &input.instructions).map_err(manifest_error)?;
         (input.manifest, Some(path), None)
     };
     if !virtual_project {
@@ -244,8 +263,9 @@ pub async fn get_project_settings(
 }
 
 pub async fn update_project_settings(
-    State(db): State<AppState>, Path(id): Path<String>, Json(manifest): Json<ProjectManifest>,
+    State(db): State<AppState>, Path(id): Path<String>, Json(input): Json<UpdateSettingsInput>,
 ) -> Result<Json<ProjectSettingsAnswer>, (StatusCode, Json<ErrorResponse>)> {
+    let UpdateSettingsInput { manifest, instructions } = input;
     let project = db.get_project(&id).map_err(db_error_response)?;
     let virtual_project = project.local_path.is_none() && project.path.starts_with("dolt://");
     let root = if virtual_project { None } else { Some(local_root(&project).map_err(manifest_error)?) };
@@ -262,6 +282,7 @@ pub async fn update_project_settings(
         return Err(manifest_error("Completed-work branch cannot change while linked worktrees exist".into()));
     }
     project_manifest::write_atomic(&located.path, &manifest).map_err(manifest_error)?;
+    project_manifest::write_instructions(&located.path, &instructions).map_err(manifest_error)?;
     if !virtual_project && located.manifest.project.use_beads != manifest.project.use_beads {
         if let Err(error) = apply_beads_mode(root.as_ref().unwrap(), &manifest) {
             let _ = project_manifest::write_atomic(&located.path, &located.manifest);
@@ -272,7 +293,7 @@ pub async fn update_project_settings(
         db.update_project(&id, UpdateProjectInput { name: Some(manifest.project.display_name.clone()), path: None, local_path: None })
             .map_err(db_error_response)?;
     }
-    Ok(Json(ProjectSettingsAnswer { located: LocatedManifest { manifest, ..located },
+    Ok(Json(ProjectSettingsAnswer { located: LocatedManifest { manifest, instructions: instructions.trim().to_string(), ..located },
         beads_available: crate::routes::find_bd().is_some() }))
 }
 
@@ -578,6 +599,7 @@ mod tests {
     fn the_probe_says_whether_this_computer_has_bd() {
         let probe = ProjectProbe {
             manifest: crate::project_manifest::infer(std::path::Path::new(".")),
+            instructions: String::new(),
             existing: false,
             storage: None,
             manifest_path: None,

@@ -8,14 +8,12 @@ const mocks = vi.hoisted(() => ({ manifest: {
   project: { display_name: 'Keystone', use_beads: true, summary: '' },
   git: { completed_work_branch: 'ours', agents_may_merge_completed_work: true, protected_branches: ['main'] },
   beads: { issue_id_prefix: 'key', work_areas: ['interface'] },
-  verification: { visual_proof_for_ui_changes: true, commands: [{ name: 'Tests', command: 'npm test', paths: ['src/'] }] },
-  review: { external_review: 'agent_decides' as const, evidence_requirements: '' },
-  development: { setup_command: 'npm install', start_command: 'npm run dev', build_command: 'npm run build' },
-  deployment: { command: '', requires_confirmation: true },
+  verification: { commands: [{ name: 'Tests', command: 'npm test', paths: ['src/'] }] },
+  review: { external_review: 'agent_decides' as const },
   cross_project: { delivery_projects: [] },
 }, initialize: vi.fn().mockResolvedValue({ id: 'p1' }), toast: vi.fn() }));
 vi.mock('@/lib/api', () => ({
-  projects: { probe: vi.fn().mockResolvedValue({ manifest: mocks.manifest, existing: false, storage: null }), initialize: mocks.initialize },
+  projects: { probe: vi.fn().mockResolvedValue({ manifest: mocks.manifest, instructions: 'Start command: npm run dev', existing: false, storage: null }), initialize: mocks.initialize },
   git: { branches: vi.fn().mockResolvedValue({ current: 'ours', branches: [{ name: 'ours' }, { name: 'main' }] }) },
   dolt: { databases: vi.fn().mockResolvedValue({ databases: [] }), servers: vi.fn().mockResolvedValue({ servers: [] }) },
 }));
@@ -33,7 +31,9 @@ describe('project onboarding', () => {
     expect(screen.getByLabelText('Finished work lands on')).toHaveValue('ours');
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Project' }));
-    await waitFor(() => expect(mocks.initialize).toHaveBeenCalledWith('/dev/keystone', 'personal', mocks.manifest));
+    // The instructions the probe inferred are added with the project, not
+    // dropped on the way through the dialog (bw-a9ln.4).
+    await waitFor(() => expect(mocks.initialize).toHaveBeenCalledWith('/dev/keystone', 'personal', mocks.manifest, 'Start command: npm run dev'));
   });
 
   /**

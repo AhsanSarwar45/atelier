@@ -12,6 +12,9 @@ use std::process::Command;
 
 pub const SCHEMA_VERSION: u32 = 1;
 pub const REPOSITORY_MANIFEST: &str = ".atelier/project.toml";
+/// The project's own instructions, kept beside its manifest so that one choice
+/// of home — the repository or this computer — governs both.
+pub const INSTRUCTIONS_FILE: &str = "instructions.md";
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ProjectManifest {
@@ -25,10 +28,6 @@ pub struct ProjectManifest {
     pub verification: VerificationSettings,
     #[serde(default)]
     pub review: ReviewSettings,
-    #[serde(default)]
-    pub development: DevelopmentSettings,
-    #[serde(default)]
-    pub deployment: DeploymentSettings,
     #[serde(default)]
     pub cross_project: CrossProjectSettings,
 }
@@ -63,8 +62,6 @@ pub struct BeadsSettings {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct VerificationSettings {
     #[serde(default)]
-    pub visual_proof_for_ui_changes: bool,
-    #[serde(default)]
     pub commands: Vec<VerificationCommand>,
 }
 
@@ -80,40 +77,14 @@ pub struct VerificationCommand {
 pub struct ReviewSettings {
     #[serde(default = "agent_decides")]
     pub external_review: String,
-    #[serde(default)]
-    pub evidence_requirements: String,
 }
 
 fn agent_decides() -> String { "agent_decides".into() }
 
 impl Default for ReviewSettings {
     fn default() -> Self {
-        Self { external_review: agent_decides(), evidence_requirements: String::new() }
+        Self { external_review: agent_decides() }
     }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct DevelopmentSettings {
-    #[serde(default)]
-    pub setup_command: String,
-    #[serde(default)]
-    pub start_command: String,
-    #[serde(default)]
-    pub build_command: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct DeploymentSettings {
-    #[serde(default)]
-    pub command: String,
-    #[serde(default = "yes")]
-    pub requires_confirmation: bool,
-}
-
-fn yes() -> bool { true }
-
-impl Default for DeploymentSettings {
-    fn default() -> Self { Self { command: String::new(), requires_confirmation: true } }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -131,6 +102,10 @@ pub struct LocatedManifest {
     pub manifest: ProjectManifest,
     pub path: PathBuf,
     pub storage: ManifestStorage,
+    /// What the project tells its agents, in its own words. Empty when the
+    /// project has not written any.
+    #[serde(default)]
+    pub instructions: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -179,8 +154,10 @@ pub fn personal_path_for_key(key: &str, data_dir: &Path) -> PathBuf {
 
 pub fn locate_key(key: &str, data_dir: &Path) -> Option<LocatedManifest> {
     let path = personal_path_for_key(key, data_dir);
+    let _ = carry_retired_fields_forward(&path);
     read(&path).ok().map(|manifest| LocatedManifest {
-        manifest, path, storage: ManifestStorage::Personal,
+        instructions: read_instructions(&path), manifest, path,
+        storage: ManifestStorage::Personal,
     })
 }
 
@@ -204,7 +181,10 @@ pub fn locate(root: &Path, data_dir: &Path) -> Option<LocatedManifest> {
         }
         (personal, ManifestStorage::Personal)
     };
-    read(&path).ok().map(|manifest| LocatedManifest { manifest, path, storage })
+    let _ = carry_retired_fields_forward(&path);
+    read(&path).ok().map(|manifest| LocatedManifest {
+        instructions: read_instructions(&path), manifest, path, storage,
+    })
 }
 
 fn old_personal_path(root: &Path, data_dir: &Path) -> PathBuf {
@@ -244,21 +224,20 @@ pub fn migrate_legacy(root: &Path, data_dir: &Path) -> Result<Option<PathBuf>, S
             work_areas: legacy.areas.unwrap_or(fallback.beads.work_areas),
         },
         verification: VerificationSettings {
-            visual_proof_for_ui_changes: fallback.verification.visual_proof_for_ui_changes,
             commands: if checks.trim().is_empty() { fallback.verification.commands } else {
                 vec![VerificationCommand { name: "Project checks".into(), command: checks, paths: vec![] }]
             },
         },
-        review: ReviewSettings {
-            external_review: agent_decides(),
-            evidence_requirements: review.proves.unwrap_or_default(),
-        },
-        development: fallback.development,
-        deployment: DeploymentSettings::default(),
+        review: ReviewSettings { external_review: agent_decides() },
         cross_project: CrossProjectSettings { delivery_projects: legacy.lands_elsewhere.unwrap_or_default() },
     };
     let destination = personal_path(root, data_dir);
     write_atomic(&destination, &manifest)?;
+    let mut carried: Vec<String> = infer_instructions(root).lines().map(str::to_string).collect();
+    if let Some(proves) = review.proves.filter(|text| !text.trim().is_empty()) {
+        carried.push(format!("Required evidence: {proves}"));
+    }
+    if !carried.is_empty() { write_instructions(&destination, &carried.join("\n"))?; }
     fs::remove_file(&source).map_err(|error| format!("{} was migrated but could not be removed: {error}", source.display()))?;
     Ok(Some(destination))
 }
@@ -297,7 +276,14 @@ pub fn write_atomic(path: &Path, manifest: &ProjectManifest) -> Result<(), Strin
     let parent = path.parent().ok_or_else(|| "manifest has no parent directory".to_string())?;
     fs::create_dir_all(parent).map_err(|error| format!("{} could not be created: {error}", parent.display()))?;
     let text = toml::to_string_pretty(manifest).map_err(|error| error.to_string())?;
-    let temporary = parent.join(format!(".project.toml.{}.tmp", std::process::id()));
+    write_text_atomic(path, &text)
+}
+
+fn write_text_atomic(path: &Path, text: &str) -> Result<(), String> {
+    let parent = path.parent().ok_or_else(|| "file has no parent directory".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| format!("{} could not be created: {error}", parent.display()))?;
+    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("settings");
+    let temporary = parent.join(format!(".{name}.{}.tmp", std::process::id()));
     let mut file = fs::File::create(&temporary).map_err(|error| error.to_string())?;
     file.write_all(text.as_bytes()).and_then(|_| file.sync_all()).map_err(|error| error.to_string())?;
     fs::rename(&temporary, path).map_err(|error| error.to_string())
@@ -336,12 +322,8 @@ pub fn infer(root: &Path) -> ProjectManifest {
         .into_iter().filter(|candidate| branches.iter().any(|branch| branch == candidate))
         .map(str::to_string).collect();
     let mut commands = Vec::new();
-    let mut development = DevelopmentSettings::default();
     if root.join("package.json").is_file() {
         commands.push(VerificationCommand { name: "JavaScript tests".into(), command: "npm test".into(), paths: vec![] });
-        development.setup_command = "npm install".into();
-        development.start_command = "npm run dev".into();
-        development.build_command = "npm run build".into();
     }
     if root.join("Cargo.toml").is_file() || root.join("server/Cargo.toml").is_file() {
         let command = if root.join("server/Cargo.toml").is_file() { "cd server && cargo test" } else { "cargo test" };
@@ -352,10 +334,22 @@ pub fn infer(root: &Path) -> ProjectManifest {
         project: ProjectSettings { display_name: name.clone(), use_beads: root.join(".beads").is_dir(), summary: String::new() },
         git: GitSettings { completed_work_branch: branch, agents_may_merge_completed_work: false, protected_branches },
         beads: BeadsSettings { issue_id_prefix: prefix(&name), work_areas: vec!["interface".into(), "server".into(), "tests".into(), "tooling".into(), "docs".into()] },
-        verification: VerificationSettings { visual_proof_for_ui_changes: root.join("package.json").is_file(), commands },
-        review: ReviewSettings::default(), development,
-        deployment: DeploymentSettings::default(), cross_project: CrossProjectSettings::default(),
+        verification: VerificationSettings { commands },
+        review: ReviewSettings::default(), cross_project: CrossProjectSettings::default(),
     }
+}
+
+/// What a freshly inferred project would have said about itself, for the
+/// instructions file the Add Project dialog offers to start from.
+pub fn infer_instructions(root: &Path) -> String {
+    let mut lines = Vec::new();
+    if root.join("package.json").is_file() {
+        lines.push("Setup command: npm install".to_string());
+        lines.push("Start command: npm run dev".to_string());
+        lines.push("Build command: npm run build".to_string());
+        lines.push("This project requires visual proof for interface changes.".to_string());
+    }
+    lines.join("\n")
 }
 
 pub fn infer_virtual(name: &str) -> ProjectManifest {
@@ -366,7 +360,6 @@ pub fn infer_virtual(name: &str) -> ProjectManifest {
         git: GitSettings { completed_work_branch: "main".into(), agents_may_merge_completed_work: false, protected_branches: vec!["main".into()] },
         beads: BeadsSettings { issue_id_prefix: prefix(name), work_areas: vec!["product".into(), "operations".into()] },
         verification: VerificationSettings::default(), review: ReviewSettings::default(),
-        development: DevelopmentSettings::default(), deployment: DeploymentSettings::default(),
         cross_project: CrossProjectSettings::default(),
     }
 }
@@ -378,12 +371,143 @@ pub fn create(root: &Path, data_dir: &Path, storage: ManifestStorage, manifest: 
     Ok(path)
 }
 
+/// The instructions file that belongs to the manifest at `manifest_path`.
+pub fn instructions_path(manifest_path: &Path) -> PathBuf {
+    manifest_path.with_file_name(INSTRUCTIONS_FILE)
+}
+
+/// A project with nothing to say reads the same as a project that has not been
+/// asked yet, so a missing file is empty text rather than an error.
+pub fn read_instructions(manifest_path: &Path) -> String {
+    fs::read_to_string(instructions_path(manifest_path))
+        .map(|text| text.trim().to_string())
+        .unwrap_or_default()
+}
+
+/// Blank instructions leave no file behind: an empty file and no file would
+/// otherwise be two spellings of the same thing.
+pub fn write_instructions(manifest_path: &Path, text: &str) -> Result<(), String> {
+    let path = instructions_path(manifest_path);
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(format!("{} could not be removed: {error}", path.display())),
+        };
+    }
+    write_text_atomic(&path, &format!("{trimmed}\n"))
+}
+
+/// The settings that existed only to become prompt text, as they were written
+/// before a project could say these things in its own words.
+#[derive(Debug, Default, Deserialize)]
+struct RetiredPromptFields {
+    #[serde(default)] development: DevelopmentSettings,
+    #[serde(default)] deployment: DeploymentSettings,
+    #[serde(default)] review: RetiredReviewFields,
+    #[serde(default)] verification: RetiredVerificationFields,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct DevelopmentSettings {
+    #[serde(default)] setup_command: String,
+    #[serde(default)] start_command: String,
+    #[serde(default)] build_command: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct DeploymentSettings {
+    #[serde(default)] command: String,
+    #[serde(default)] requires_confirmation: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RetiredReviewFields {
+    #[serde(default)] evidence_requirements: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RetiredVerificationFields {
+    #[serde(default)] visual_proof_for_ui_changes: bool,
+}
+
+fn development_lines(development: &DevelopmentSettings) -> Vec<String> {
+    [
+        ("Setup", &development.setup_command),
+        ("Start", &development.start_command),
+        ("Build", &development.build_command),
+    ]
+    .into_iter()
+    .filter(|(_, command)| !command.trim().is_empty())
+    .map(|(label, command)| format!("{label} command: {command}"))
+    .collect()
+}
+
+/// What the retired fields used to make the session say, word for word, so a
+/// project that is carried forward keeps telling its agents the same thing.
+fn retired_lines(retired: &RetiredPromptFields) -> Vec<String> {
+    let mut lines = development_lines(&retired.development);
+    if !retired.review.evidence_requirements.trim().is_empty() {
+        lines.push(format!("Required evidence: {}", retired.review.evidence_requirements));
+    }
+    // Only the requirement is carried. "Does not require visual proof" was a
+    // sentence the settings screen produced whether or not anyone meant it,
+    // and an instructions file is written by someone who meant it.
+    if retired.verification.visual_proof_for_ui_changes {
+        lines.push("This project requires visual proof for interface changes.".into());
+    }
+    if !retired.deployment.command.trim().is_empty() {
+        lines.push(format!("Deployment command: {}", retired.deployment.command));
+        if retired.deployment.requires_confirmation {
+            lines.push("Ask for explicit permission immediately before running the deployment command.".into());
+        }
+    }
+    lines
+}
+
+/// Move a manifest's retired prompt settings into its instructions file.
+///
+/// Serde drops unknown keys in silence, so without this a project that had
+/// written setup commands and evidence requirements would simply stop saying
+/// them, with nothing on screen to show what was lost. The keys are removed
+/// from the manifest as the text is written, which is what makes this run at
+/// most once per project.
+pub fn carry_retired_fields_forward(path: &Path) -> Result<bool, String> {
+    let Ok(text) = fs::read_to_string(path) else { return Ok(false) };
+    let Ok(retired) = toml::from_str::<RetiredPromptFields>(&text) else { return Ok(false) };
+    // Edited rather than re-serialised: a repository manifest is a tracked
+    // file, and a migration that reordered every section would bury the one
+    // change it made in a diff of the whole file.
+    let Ok(mut document) = text.parse::<toml_edit::DocumentMut>() else { return Ok(false) };
+    let mut stripped = document.remove("development").is_some() | document.remove("deployment").is_some();
+    for (section, key) in [("review", "evidence_requirements"), ("verification", "visual_proof_for_ui_changes")] {
+        if let Some(inner) = document.get_mut(section).and_then(|item| item.as_table_mut()) {
+            stripped |= inner.remove(key).is_some();
+        }
+    }
+    if !stripped { return Ok(false) }
+    let carried = retired_lines(&retired);
+    if !carried.is_empty() {
+        let existing = read_instructions(path);
+        let joined = if existing.is_empty() { carried.join("\n") } else { format!("{existing}\n\n{}", carried.join("\n")) };
+        write_instructions(path, &joined)?;
+    }
+    write_text_atomic(path, &document.to_string())
+        .map(|()| true)
+        .map_err(|error| format!("{} kept its retired settings: {error}", path.display()))
+}
+
 pub fn move_to(root: &Path, data_dir: &Path, storage: ManifestStorage) -> Result<PathBuf, String> {
     let located = locate(root, data_dir).ok_or_else(|| "project has no manifest".to_string())?;
     if located.storage == storage { return Ok(located.path); }
     let destination = match storage { ManifestStorage::Personal => personal_path(root, data_dir), ManifestStorage::Repository => repository_path(root) };
     if destination.exists() { return Err(format!("{} already exists", destination.display())); }
     write_atomic(&destination, &located.manifest)?;
+    // The instructions are half of what a project says about itself; a move
+    // that left them behind would look like a move that erased them.
+    write_instructions(&destination, &located.instructions)?;
+    write_instructions(&located.path, "")?;
     fs::remove_file(&located.path).map_err(|error| format!("new manifest was written but {} could not be removed: {error}", located.path.display()))?;
     Ok(destination)
 }
@@ -409,6 +533,92 @@ mod tests {
         move_to(&repo, &data, ManifestStorage::Repository).unwrap();
         assert!(!personal_path(&repo, &data).exists());
         assert_eq!(locate(&repo, &data).unwrap().storage, ManifestStorage::Repository);
+    }
+
+    /// A move changes where the settings live, not what they say. The
+    /// instructions are settings, so they travel with the manifest rather
+    /// than staying behind in the home the project just left (bw-a9ln.4).
+    #[test]
+    fn instructions_move_with_the_manifest_and_leave_nothing_behind() {
+        let held = tempdir().unwrap();
+        let repo = held.path().join("example");
+        let data = held.path().join("data");
+        fs::create_dir_all(&repo).unwrap();
+        let manifest = infer(&repo);
+        let path = create(&repo, &data, ManifestStorage::Personal, &manifest).unwrap();
+        write_instructions(&path, "Never touch port 3008.").unwrap();
+
+        let moved = move_to(&repo, &data, ManifestStorage::Repository).unwrap();
+        assert_eq!(read_instructions(&moved), "Never touch port 3008.");
+        assert!(!instructions_path(&path).exists());
+        assert_eq!(locate(&repo, &data).unwrap().instructions, "Never touch port 3008.");
+    }
+
+    /// Blank instructions and no instructions are one state, not two, so a
+    /// reader who clears the editor does not leave an empty file that the
+    /// next move would carry around (bw-a9ln.4).
+    #[test]
+    fn clearing_the_instructions_removes_the_file() {
+        let held = tempdir().unwrap();
+        let path = held.path().join("project.toml");
+        write_instructions(&path, "Something").unwrap();
+        assert!(instructions_path(&path).exists());
+        write_instructions(&path, "   \n ").unwrap();
+        assert!(!instructions_path(&path).exists());
+        assert_eq!(read_instructions(&path), "");
+    }
+
+    /// Serde drops keys it does not know without a word, so a project written
+    /// before the instructions file would have gone quiet: its setup commands
+    /// and evidence requirement would stop reaching any session, with nothing
+    /// on screen to show what was lost (bw-a9ln.3).
+    #[test]
+    fn a_manifest_written_before_instructions_keeps_saying_what_it_said() {
+        let held = tempdir().unwrap();
+        let path = held.path().join("project.toml");
+        fs::write(&path, concat!(
+            "schema_version = 1\n",
+            "[project]\ndisplay_name = \"Keystone\"\nuse_beads = false\n",
+            "[verification]\nvisual_proof_for_ui_changes = true\n",
+            "[review]\nexternal_review = \"always\"\nevidence_requirements = \"Show the screen\"\n",
+            "[development]\nsetup_command = \"npm install\"\nstart_command = \"npm run dev\"\nbuild_command = \"\"\n",
+            "[deployment]\ncommand = \"deploy it\"\nrequires_confirmation = true\n",
+        )).unwrap();
+
+        assert!(carry_retired_fields_forward(&path).unwrap());
+        let carried = read_instructions(&path);
+        assert_eq!(carried, concat!(
+            "Setup command: npm install\n",
+            "Start command: npm run dev\n",
+            "Required evidence: Show the screen\n",
+            "This project requires visual proof for interface changes.\n",
+            "Deployment command: deploy it\n",
+            "Ask for explicit permission immediately before running the deployment command.",
+        ));
+        // The policy a gate reads is untouched: only the prompt-only settings move.
+        assert_eq!(read(&path).unwrap().review.external_review, "always");
+        // And the file is edited, not rewritten: what stayed, stayed as it was.
+        let after = fs::read_to_string(&path).unwrap();
+        assert!(after.starts_with("schema_version = 1\n[project]\ndisplay_name = \"Keystone\""), "{after}");
+        assert!(!after.contains("development"), "{after}");
+
+        // Running again finds nothing to carry, so the text is not doubled.
+        assert!(!carry_retired_fields_forward(&path).unwrap());
+        assert_eq!(read_instructions(&path), carried);
+    }
+
+    /// A project that never had the retired settings must not be rewritten,
+    /// or every read would dirty a repository's tracked manifest (bw-a9ln.3).
+    #[test]
+    fn a_manifest_without_retired_settings_is_left_alone() {
+        let held = tempdir().unwrap();
+        let repo = held.path().join("example");
+        let data = held.path().join("data");
+        fs::create_dir_all(&repo).unwrap();
+        let path = create(&repo, &data, ManifestStorage::Personal, &infer(&repo)).unwrap();
+        let before = fs::read_to_string(&path).unwrap();
+        assert!(!carry_retired_fields_forward(&path).unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), before);
     }
 
     #[test]

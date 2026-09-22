@@ -8,16 +8,14 @@ const mocks = vi.hoisted(() => ({ manifest: {
   project: { display_name: 'Keystone', use_beads: true, summary: 'A workbench' },
   git: { completed_work_branch: 'ours', agents_may_merge_completed_work: true, protected_branches: ['main'] },
   beads: { issue_id_prefix: 'key', work_areas: ['interface'] },
-  verification: { visual_proof_for_ui_changes: true, commands: [{ name: 'UI', command: 'npm test', paths: ['src/'] }] },
-  review: { external_review: 'never' as const, evidence_requirements: 'Show the changed screen' },
-  development: { setup_command: 'npm install', start_command: 'npm run dev', build_command: 'npm run build' },
-  deployment: { command: 'deploy atelier', requires_confirmation: true },
+  verification: { commands: [{ name: 'UI', command: 'npm test', paths: ['src/'] }] },
+  review: { external_review: 'never' as const },
   cross_project: { delivery_projects: ['website'] },
 }, updateSettings: vi.fn() }));
-mocks.updateSettings.mockResolvedValue({ manifest: mocks.manifest, storage: 'personal' });
+mocks.updateSettings.mockResolvedValue({ manifest: mocks.manifest, instructions: 'Start command: npm run dev', storage: 'personal' });
 vi.mock('@/lib/api', () => ({
   projects: {
-    settings: vi.fn().mockResolvedValue({ manifest: mocks.manifest, storage: 'personal', path: '/data/project.toml' }),
+    settings: vi.fn().mockResolvedValue({ manifest: mocks.manifest, instructions: 'Start command: npm run dev', storage: 'personal', path: '/data/project.toml' }),
     updateSettings: mocks.updateSettings,
     moveSettings: vi.fn(),
   },
@@ -41,14 +39,28 @@ describe('project settings', () => {
     expect(screen.getByRole('combobox', { name: 'External review' })).toHaveTextContent('Never');
     expect(screen.getByDisplayValue('UI | npm test | src/')).toBeVisible();
 
-    rerender(<ProjectSettingsScreen {...shared} section="development" />);
-    expect(screen.getByDisplayValue('deploy atelier')).toBeVisible();
+    rerender(<ProjectSettingsScreen {...shared} section="instructions" />);
+    expect(screen.getByDisplayValue('Start command: npm run dev')).toBeVisible();
 
     rerender(<ProjectSettingsScreen {...shared} section="workflow" />);
     fireEvent.change(screen.getByDisplayValue('A workbench'), { target: { value: 'Updated summary' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(mocks.updateSettings).toHaveBeenCalledWith('p1', expect.objectContaining({
       project: expect.objectContaining({ summary: 'Updated summary' }),
-    })));
+    }), 'Start command: npm run dev'));
+  });
+
+  /// The instructions are the only place a project's own wording lives now, so
+  /// editing them has to reach the save the same way a manifest field does
+  /// (bw-a9ln.5).
+  it('saves an edit made to the instructions', async () => {
+    const shared = { projectId: 'p1', projectName: 'Keystone', projectPath: '/dev/keystone', tab: null, onOpen: vi.fn(), onTab: vi.fn(), backHref: '/', onUpdated: vi.fn() };
+    render(<ProjectSettingsScreen {...shared} section="instructions" />);
+
+    const editor = await screen.findByDisplayValue('Start command: npm run dev');
+    fireEvent.change(editor, { target: { value: 'Never touch port 3008.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(mocks.updateSettings).toHaveBeenCalledWith('p1', expect.anything(), 'Never touch port 3008.'));
   });
 });

@@ -61,6 +61,9 @@ export function AddProjectDialog({
   const [doltDatabases, setDoltDatabases] = useState<DoltDatabase[]>([]);
   const [doltLoading, setDoltLoading] = useState(false);
   const [manifest, setManifest] = useState<ProjectManifest | null>(null);
+  // The project's own instructions, carried from the probe so a folder that
+  // already had them keeps them when it is added (bw-a9ln.4).
+  const [instructions, setInstructions] = useState('');
   // Whether this computer has bd. A board it cannot open is not offered
   // (bw-3tkl.2).
   const [beadsAvailable, setBeadsAvailable] = useState(true);
@@ -130,6 +133,7 @@ export function AddProjectDialog({
         ? { ...probe.manifest, project: { ...probe.manifest.project, use_beads: false } }
         : probe.manifest);
       setStorage(probe.storage ?? 'personal');
+      setInstructions(probe.instructions || '');
       setBranches(gitBranches.branches.map((branch) => branch.name));
       setShowNameInput(true);
       setBrowsing(false);
@@ -173,7 +177,7 @@ export function AddProjectDialog({
 
     try {
       const ready = { ...manifest, project: { ...manifest.project, display_name: projectName.trim() } };
-      await api.projects.initialize(projectPath, storage, ready);
+      await api.projects.initialize(projectPath, storage, ready, instructions);
       await onInitialized?.();
 
       toast({

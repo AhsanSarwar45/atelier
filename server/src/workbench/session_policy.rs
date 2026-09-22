@@ -30,7 +30,13 @@ fn guidance(cwd: &Path) -> (String, bool) {
             false,
         );
     };
-    let m = found.manifest;
+    project_lines(cwd, found)
+}
+
+/// What a session is told about the project it is working in: the settings
+/// Atelier enforces, then the project in its own words.
+fn project_lines(cwd: &Path, found: crate::project_manifest::LocatedManifest) -> (String, bool) {
+    let m = found.manifest.clone();
     let mut lines = vec![format!(
         "Project: {}",
         if m.project.display_name.is_empty() {
@@ -48,42 +54,20 @@ fn guidance(cwd: &Path) -> (String, bool) {
             m.git.completed_work_branch
         ));
     }
-    if !m.review.evidence_requirements.is_empty() {
-        lines.push(format!(
-            "Required evidence: {}",
-            m.review.evidence_requirements
-        ));
-    }
-    for (label, command) in [
-        ("Setup", &m.development.setup_command),
-        ("Start", &m.development.start_command),
-        ("Build", &m.development.build_command),
-    ] {
-        if !command.is_empty() {
-            lines.push(format!("{label} command: {command}"));
-        }
-    }
-    lines.push(
-        if m.verification.visual_proof_for_ui_changes {
-            "This project requires visual proof for interface changes."
-        } else {
-            "This project does not require visual proof for interface changes."
-        }
-        .into(),
-    );
     if !m.review.external_review.is_empty() {
         lines.push(format!("External review policy: {}. This policy authorizes any review it allows; do not ask for separate permission.", m.review.external_review));
     }
-    if !m.deployment.command.is_empty() {
-        lines.push(format!("Deployment command: {}", m.deployment.command));
-        if m.deployment.requires_confirmation {
-            lines.push(
-                "Ask for explicit permission immediately before running the deployment command."
-                    .into(),
-            );
-        }
-    }
-    (lines.join("\n"), m.project.use_beads)
+    // Atelier's own facts first, then the project in its own words. The two are
+    // kept apart because only the first set is enforced: a project may say
+    // anything here, but it may not contradict the branch its work lands on or
+    // the review policy its landings are checked against (bw-a9ln.1).
+    let derived = lines.join("\n");
+    let guidance = if found.instructions.is_empty() {
+        derived
+    } else {
+        format!("{derived}\n\n{}", found.instructions)
+    };
+    (guidance, m.project.use_beads)
 }
 
 /// What a session is told about Beads, given what the project wants and what
@@ -172,6 +156,50 @@ mod tests {
         let text = body(&bundled_skills().join("beads/SKILL.md")).unwrap();
         assert!(text.contains("Live checklist"), "{text}");
         assert!(text.contains("Beads epic"), "{text}");
+    }
+
+    fn located(instructions: &str) -> crate::project_manifest::LocatedManifest {
+        let mut manifest = crate::project_manifest::infer_virtual("Keystone");
+        manifest.project.summary = "A workbench".into();
+        crate::project_manifest::LocatedManifest {
+            manifest,
+            path: std::path::PathBuf::from("/data/project.toml"),
+            storage: crate::project_manifest::ManifestStorage::Personal,
+            instructions: instructions.to_string(),
+        }
+    }
+
+    /// The project's own wording reaches the session, and it comes after the
+    /// settings Atelier enforces rather than mixed among them: a project may
+    /// say anything here, but it may not quietly restate the branch its work
+    /// lands on or the review policy its landings are checked against
+    /// (bw-a9ln.1).
+    #[test]
+    fn the_projects_own_instructions_reach_the_session_after_the_enforced_settings() {
+        let (text, _) = project_lines(Path::new("/dev/keystone"), located("Never touch port 3008."));
+        let enforced = text.find("External review policy").unwrap();
+        let own = text.find("Never touch port 3008.").unwrap();
+        assert!(enforced < own, "{text}");
+        assert!(text.contains("Completed work branch: main"), "{text}");
+    }
+
+    /// A project that has written nothing reads exactly as it did before the
+    /// instructions file existed — no stray blank block on the end
+    /// (bw-a9ln.1).
+    #[test]
+    fn a_project_with_no_instructions_says_only_what_atelier_knows() {
+        let (text, _) = project_lines(Path::new("/dev/keystone"), located(""));
+        assert!(text.ends_with("do not ask for separate permission."), "{text:?}");
+    }
+
+    /// The six settings that existed only to become these lines are gone, so
+    /// nothing generates them any more (bw-a9ln.2).
+    #[test]
+    fn no_setting_still_generates_the_retired_prompt_lines() {
+        let (text, _) = project_lines(Path::new("/dev/keystone"), located(""));
+        for retired in ["Setup command", "Start command", "Build command", "Deployment command", "Required evidence", "visual proof"] {
+            assert!(!text.contains(retired), "{retired} is still generated:\n{text}");
+        }
     }
 
     #[test]

@@ -83,10 +83,47 @@ test('a phone gets the list, then one section', async ({ page, request }) => {
     await expect(page.getByTestId('settings-nav')).toBeVisible();
     await expect(page.getByTestId('settings-body')).toBeHidden();
     await page.screenshot({ path: join(results, 'phone-list.png') });
-    await page.getByTestId('settings-section-development').click();
+    await page.getByTestId('settings-section-instructions').click();
     await expect(page.getByTestId('settings-nav')).toBeHidden();
-    await expect(page.getByRole('heading', { name: 'Development' })).toBeVisible();
+    await expect(page.getByTestId('settings-body').getByRole('heading', { name: 'Instructions' })).toBeVisible();
     await page.screenshot({ path: join(results, 'phone-section.png') });
+  } finally {
+    await request.delete(`/api/projects/${id}`);
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A project says what its agents need to know in its own words. The six boxes
+ * that only ever became prompt text are gone; what replaced them is one editor
+ * whose text survives a save and a reload, because that text is the only place
+ * that wording now lives (bw-a9ln.5).
+ */
+test('the instructions editor replaces the boxes that only became prompt text', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const { id, repo } = await project(request, 'Spoken For');
+  try {
+    await page.goto(`/project?id=${id}&settings=review`);
+    // The review section keeps only what a gate actually reads.
+    await expect(page.getByRole('combobox', { name: 'External review' })).toBeVisible();
+    await expect(page.getByLabel('Evidence required')).toHaveCount(0);
+    await expect(page.getByLabel('Visual proof for interface changes')).toHaveCount(0);
+
+    await page.getByTestId('settings-section-instructions').click();
+    await expect(page).toHaveURL(/settings=instructions/);
+    const editor = page.locator('#settings-instructions');
+    await expect(editor).toBeVisible();
+    await editor.fill('Bring the stack up on a free port of your own.\nNever touch port 3008.');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByTestId('toast-title').filter({ hasText: 'Saved' })).toBeVisible();
+    await page.screenshot({ path: join(results, 'instructions.png') });
+
+    // The server kept it: a reload reads it back rather than the page state.
+    await page.reload();
+    await expect(page.locator('#settings-instructions')).toHaveValue(/Never touch port 3008\./);
+
+    const answer = await request.get(`/api/projects/${id}/settings`);
+    expect(((await answer.json()) as { instructions: string }).instructions).toContain('Never touch port 3008.');
   } finally {
     await request.delete(`/api/projects/${id}`);
     rmSync(repo, { recursive: true, force: true });

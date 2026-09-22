@@ -29,7 +29,6 @@ work_areas = [
 ]
 
 [verification]
-visual_proof_for_ui_changes = true
 
 [[verification.commands]]
 name = "Project checks"
@@ -37,16 +36,6 @@ command = "npm test && (cd server && cargo test)"
 
 [review]
 external_review = "agent_decides"
-evidence_requirements = "drive the running screen in a browser and read the result off a screenshot; a passing unit test is not a verified change"
-
-[development]
-setup_command = "npm install"
-start_command = "npm run dev"
-build_command = "npm run build"
-
-[deployment]
-command = ""
-requires_confirmation = true
 
 [cross_project]
 delivery_projects = ["corsetta"]

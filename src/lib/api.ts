@@ -23,15 +23,15 @@ export interface ProjectManifest {
   project: { display_name: string; use_beads: boolean; summary: string };
   git: { completed_work_branch: string; agents_may_merge_completed_work: boolean; protected_branches: string[] };
   beads: { issue_id_prefix: string; work_areas: string[] };
-  verification: { visual_proof_for_ui_changes: boolean; commands: { name: string; command: string; paths?: string[] }[] };
-  review: { external_review: 'agent_decides' | 'always' | 'never'; evidence_requirements: string };
-  development: { setup_command: string; start_command: string; build_command: string };
-  deployment: { command: string; requires_confirmation: boolean };
+  verification: { commands: { name: string; command: string; paths?: string[] }[] };
+  review: { external_review: 'agent_decides' | 'always' | 'never' };
   cross_project: { delivery_projects: string[] };
 }
 
 export interface ProjectProbe {
   manifest: ProjectManifest;
+  /** What the project tells its agents, in its own words (bw-a9ln.4). */
+  instructions: string;
   existing: boolean;
   storage?: ManifestStorage;
   manifestPath?: string;
@@ -41,6 +41,8 @@ export interface ProjectProbe {
 
 export interface ProjectSettingsAnswer {
   manifest: ProjectManifest;
+  /** What the project tells its agents, in its own words (bw-a9ln.4). */
+  instructions: string;
   path: string;
   storage: ManifestStorage;
   /** See ProjectProbe.beadsAvailable. */
@@ -399,16 +401,16 @@ export const projects = {
     method: 'POST', body: JSON.stringify({ path }),
   }),
 
-  initialize: (path: string, storage: ManifestStorage, manifest: ProjectManifest) =>
+  initialize: (path: string, storage: ManifestStorage, manifest: ProjectManifest, instructions = '') =>
     fetchApi<Project>('/api/projects/initialize', {
-      method: 'POST', body: JSON.stringify({ path, storage, manifest }),
+      method: 'POST', body: JSON.stringify({ path, storage, manifest, instructions }),
     }),
 
   settings: (id: string) => fetchApi<ProjectSettingsAnswer>(`/api/projects/${id}/settings`),
 
-  updateSettings: (id: string, manifest: ProjectManifest) =>
+  updateSettings: (id: string, manifest: ProjectManifest, instructions = '') =>
     fetchApi<ProjectSettingsAnswer>(`/api/projects/${id}/settings`, {
-      method: 'PATCH', body: JSON.stringify(manifest),
+      method: 'PATCH', body: JSON.stringify({ ...manifest, instructions }),
     }),
 
   moveSettings: (id: string, storage: ManifestStorage) =>

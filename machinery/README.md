@@ -25,7 +25,18 @@ atelier tool checks CHECKS-ID
 atelier tool review JOB-ID
 ```
 
-Project-specific commands, verification paths, completed-work branch, Beads
-prefix, and provider policy live in the project manifest. They are editable in
-the app's Project Settings screen. Machine-wide executable paths and the
-single-prompt Beads installer live in Settings → Dependencies.
+The settings Atelier itself enforces — verification commands and their paths,
+the completed-work branch, the Beads prefix, and the external review policy —
+live in the project manifest. They are editable in the app's Project Settings
+screen. Machine-wide executable paths and the single-prompt Beads installer
+live in Settings → Dependencies.
+
+Everything else a project wants its agents to know — how to bring up an
+isolated stack, which ports are off limits, what counts as proof, how to
+deploy — goes in `instructions.md` beside the manifest, edited in Project
+Settings → Instructions. Its text is added to every session's prompt after the
+settings above, so a project can say anything it likes without being able to
+contradict the branch its work lands on or the policy its landings are checked
+against. A manifest written before this file existed has its setup, start,
+build, deploy, evidence and visual-proof settings moved into one the first time
+it is read.
