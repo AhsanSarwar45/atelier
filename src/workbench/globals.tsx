@@ -63,7 +63,7 @@ const CLEARED_KEY = 'atelier.notifications-cleared';
 export function readCleared(): Record<string, string> {
   if (typeof window === 'undefined') return {};
   try {
-    return JSON.parse(sessionStorage.getItem(CLEARED_KEY) ?? '{}') as Record<string, string>;
+    return JSON.parse(localStorage.getItem(CLEARED_KEY) ?? '{}') as Record<string, string>;
   } catch {
     // A tray that cannot read what was cleared shows everything, which is the
     // safe way to be wrong: nothing waiting on the owner goes missing.
@@ -87,20 +87,30 @@ export function stillCleared(cleared: Record<string, string>, s: LiveSession): b
 /**
  * What the tray has been told to forget, and the way to tell it.
  *
- * Kept for the tab rather than the machine (`sessionStorage`), beside the states
- * the device notifications are judged against: clearing says "I have read
- * these", which is a thing about this sitting rather than about this browser.
+ * Kept for the browser rather than the tab (`localStorage`), beside the states
+ * the device notifications are judged against. It was kept for the tab, on the
+ * reading that "I have read these" is a thing about the sitting it was said in
+ * — and on a phone that made the button useless. A phone browser throws a tab
+ * away whenever it wants the memory and builds a fresh one on return, so the
+ * record went with it and every row came back: chats that stopped with an error
+ * days ago, already read, already dismissed, waiting again every time the app
+ * was opened (bw-poyg). Having read something is a fact about the reader, and
+ * it outlives the tab he read it in.
+ *
+ * Nothing here grows without bound: each clearing writes the chats on screen
+ * over whatever was there before, so the record can never hold more than there
+ * are chats.
  */
 function useCleared(): { cleared: Record<string, string>; clear: (sessions: LiveSession[]) => void } {
   const [cleared, setCleared] = useState<Record<string, string>>({});
   // Read after mount, not during: the server renders this too, and it has no
-  // sessionStorage to read.
+  // localStorage to read.
   useEffect(() => setCleared(readCleared()), []);
   const clear = useCallback((sessions: LiveSession[]) => {
     // Only the chats on screen are remembered, so the record cannot grow past
     // the number of chats there are.
     const next = Object.fromEntries(sessions.map((s) => [s.id, s.state]));
-    sessionStorage.setItem(CLEARED_KEY, JSON.stringify(next));
+    localStorage.setItem(CLEARED_KEY, JSON.stringify(next));
     setCleared(next);
   }, []);
   return { cleared, clear };
@@ -255,7 +265,7 @@ export function WorkbenchStatus() {
   const names = useProjectNames();
   const sessions = useLiveSessions();
   // Deliberately blind to what has been cleared: this is the cheap gate, and
-  // reading sessionStorage during a render the server also does would have the
+  // reading localStorage during a render the server also does would have the
   // two of them disagree. The tray itself draws nothing once everything in it
   // is cleared, so the bell goes with it either way.
   const relevant = sessions.filter((s) => waitsOnYou(s) || s.state === 'idle' || s.state === 'stopped').length;

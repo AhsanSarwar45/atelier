@@ -781,7 +781,7 @@ test.describe('workbench', () => {
       await expect(badge).toHaveCount(0);
 
       // Brought back to answer them, which is how the rest of this case goes on.
-      await page.evaluate(() => sessionStorage.removeItem('atelier.notifications-cleared'));
+      await page.evaluate(() => localStorage.removeItem('atelier.notifications-cleared'));
       await page.reload();
       await expect(badge).toHaveAttribute('data-count', '2', { timeout: 60_000 });
       await badge.click();

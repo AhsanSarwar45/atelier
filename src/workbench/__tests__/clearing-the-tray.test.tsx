@@ -6,7 +6,8 @@
  * there is nothing to delete — and it cannot mean "never show this chat again"
  * either, or a chat cleared while it wanted permission would stay silent when
  * it went on to want something else. It means: I have read these, in the state
- * they are in (bw-k22y.1).
+ * they are in (bw-k22y.1), and that reading outlives the tab it was done in
+ * (bw-poyg).
  */
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -49,6 +50,7 @@ async function openTheTray() {
 
 beforeEach(() => {
   push.mockClear();
+  localStorage.clear();
   sessionStorage.clear();
   sessions = [ASKING, FINISHED];
 });
@@ -77,6 +79,23 @@ describe('clearing the notification tray', () => {
     await theBar();
 
     expect(screen.queryByTestId('tray-row'), 'a cleared chat came back unchanged').toBeNull();
+  });
+
+  it('stays cleared in the next sitting, after the tab it was cleared in is gone', async () => {
+    const first = await openTheTray();
+    await act(async () => void fireEvent.click(screen.getByTestId('tray-clear')));
+    first.unmount();
+
+    // What a phone hands back. It throws the tab away whenever it wants the
+    // memory, so the next sitting gets a tab that never saw the clearing —
+    // no sessionStorage, and nothing about those chats has changed.
+    sessionStorage.clear();
+    await theBar();
+
+    expect(
+      screen.queryByTestId('tray-row'),
+      'a chat cleared in the last sitting came back unchanged in this one',
+    ).toBeNull();
   });
 
   it('brings a cleared chat back the moment it wants something else', async () => {
