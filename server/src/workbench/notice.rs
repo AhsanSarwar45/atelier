@@ -57,6 +57,49 @@ fn encoded(value: &str) -> String {
     out
 }
 
+/// The directory's own name, which for a worktree is the worktree's.
+pub fn folder_of(path: &str) -> Option<String> {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+}
+
+/// What to call a chat, including one whose title was never written.
+///
+/// Six screens each wrote `?? 'Untitled chat'` for that case, and in the tray
+/// that row sat beside a project name saying nothing anybody could act on —
+/// half of what made the notifications read as noise (bw-altj). A chat knows
+/// two true things about itself before anything names it: the folder it is
+/// working in, which in this app is usually the worktree of the job, and the
+/// agent holding it. The folder is the one a reader recognises, and it is the
+/// one that tells two untitled chats apart, so it goes first.
+///
+/// Every list of chats asks this, wherever its rows were built, so the tray,
+/// the phone and the rail cannot call the same chat different things.
+pub fn naming(title: Option<&str>, folder: Option<&str>, brand: &str) -> String {
+    let said = |what: Option<&str>| {
+        what.map(str::trim)
+            .filter(|what| !what.is_empty())
+            .map(str::to_string)
+    };
+    said(title)
+        .or_else(|| said(folder))
+        .or_else(|| said(Some(brand)).map(|brand| format!("{} chat", capitalised(&brand))))
+        // Not reachable through any row the app builds: a chat always has a
+        // brand. Still spelled, because "" in the rail would be worse than a
+        // word that at least says what the row is.
+        .unwrap_or_else(|| "Chat".to_string())
+}
+
+fn capitalised(word: &str) -> String {
+    let mut letters = word.chars();
+    match letters.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + letters.as_str(),
+        None => String::new(),
+    }
+}
+
 pub fn chat_href(project_id: &str, session_id: &str) -> String {
     format!(
         "/project?id={}&tab=chat&chat={}",
@@ -70,7 +113,8 @@ pub fn chat_href(project_id: &str, session_id: &str) -> String {
 #[serde(rename_all = "camelCase")]
 pub struct Row {
     pub id: String,
-    pub title: Option<String>,
+    /// What to call this chat, already settled: `naming`, never a raw title.
+    pub name: String,
     pub project_id: String,
     /// Always a real project's name. A chat whose project cannot be named is
     /// not a row at all, which is why there is no "unknown" to spell here.
@@ -130,8 +174,12 @@ pub async fn worth_saying(
                 href: chat_href(&session.project_id, &session.id),
                 needs_action: waits_on_you(&session.state),
                 says: wording(&session.state).to_string(),
+                name: naming(
+                    session.title.as_deref(),
+                    folder_of(&session.cwd).as_deref(),
+                    &session.brand,
+                ),
                 id: session.id,
-                title: session.title,
                 project_id: session.project_id,
                 project_name,
                 state: session.state,
@@ -193,7 +241,11 @@ pub async fn worth_pushing(
         needs_action: waits_on_you(state),
         says: wording(state).to_string(),
         id: session_id.to_string(),
-        title: session.title,
+        name: naming(
+            session.title.as_deref(),
+            folder_of(&session.cwd).as_deref(),
+            &session.brand,
+        ),
         project_id: session.project_id,
         project_name,
         state: state.to_string(),
@@ -275,6 +327,38 @@ mod tests {
         assert_eq!(wording("waiting_permission"), "permission to use a tool");
         assert_eq!(wording("errored"), "it stopped with an error");
         assert_eq!(wording("idle"), "Ready to read");
+    }
+
+    /// What a chat is called when nothing has named it.
+    ///
+    /// One rule, asked by everything that draws a chat — the tray, the rail and
+    /// the push that reaches a phone — so the same chat cannot be three
+    /// different things depending on which screen the owner is looking at.
+    #[test]
+    fn a_chat_is_named_by_whatever_is_known_about_it() {
+        // A title, when there is one, and nothing else gets a say.
+        assert_eq!(
+            naming(Some("Rebuild the tray"), Some("bw-altj"), "claude"),
+            "Rebuild the tray"
+        );
+        // Otherwise the folder it is working in, which for this app is usually
+        // the worktree of the job — and which tells two nameless chats apart.
+        assert_eq!(naming(None, Some("bw-altj"), "claude"), "bw-altj");
+        // A title of spaces is not a title. This is what a chat renamed to
+        // nothing used to leave on the rail.
+        assert_eq!(naming(Some("   "), Some("bw-altj"), "claude"), "bw-altj");
+        // Otherwise who is holding it, which is the last true thing left.
+        assert_eq!(naming(None, None, "claude"), "Claude chat");
+        assert_eq!(naming(None, Some(""), "codex"), "Codex chat");
+        // And never nothing at all.
+        assert_eq!(naming(None, None, ""), "Chat");
+    }
+
+    /// The folder is the directory's own name, so a worktree is the worktree.
+    #[test]
+    fn the_folder_is_the_directory_it_is_working_in() {
+        assert_eq!(folder_of("/work/project/worktrees/bw-altj").as_deref(), Some("bw-altj"));
+        assert_eq!(folder_of("/").as_deref(), None);
     }
 
     /// A link a chat can actually be opened by, whatever its id is made of.

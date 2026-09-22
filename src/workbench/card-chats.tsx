@@ -60,7 +60,7 @@ export function CardChats({ beadId, projectId, projectPath }: CardChatsProps) {
                 data-session-id={c.sessionId}
                 href={`/project?id=${projectId ?? c.projectId ?? ''}&chat=${c.sessionId}&tab=chat`}
               >
-                <span className="text-foreground">{c.title ?? 'Untitled chat'}</span>
+                <span className="text-foreground">{c.name}</span>
                 <span className="ml-2 font-mono text-xs text-muted-foreground">
                   {c.brand ?? 'chat'}
                   {c.lastActiveAt ? ` · ${new Date(c.lastActiveAt).toLocaleString()}` : ''}

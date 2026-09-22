@@ -1061,7 +1061,7 @@ async fn search_chats(
     let offset = query.cursor.unwrap_or(0);
     let limit = query.limit.unwrap_or(30).clamp(1, 100);
     let projects = state.projects.clone();
-    let reply = tokio::task::spawn_blocking(move || -> Result<Value, String> {
+    let mut reply = tokio::task::spawn_blocking(move || -> Result<Value, String> {
         let project_ids = match (&projects, parsed.projects.is_empty()) {
             (Some(projects), false) => projects_named(projects, &parsed.projects),
             _ => Vec::new(),
@@ -1073,7 +1073,30 @@ async fn search_chats(
     })
     .await
     .map_err(|error| error.to_string())??;
+    name_the_chats(reply["chats"].as_array_mut());
     Ok(Json(reply))
+}
+
+/// Name every chat in an answer that knows a project path and not a directory.
+///
+/// The one naming rule (`notice::naming`), fed what this particular answer
+/// knows. The search index keeps the project a chat belongs to and not the
+/// directory the chat is working in, so a chat in a worktree is named by its
+/// project here rather than by the worktree — the same word the rail would use
+/// if the chat sat in the project itself, and in every case a name rather than
+/// the "Untitled chat" this screen used to write for itself (bw-altj.7).
+fn name_the_chats(chats: Option<&mut Vec<Value>>) {
+    let Some(chats) = chats else { return };
+    for chat in chats {
+        chat["name"] = json!(crate::workbench::notice::naming(
+            chat["title"].as_str(),
+            chat["projectPath"]
+                .as_str()
+                .and_then(crate::workbench::notice::folder_of)
+                .as_deref(),
+            chat["brand"].as_str().unwrap_or_default(),
+        ));
+    }
 }
 
 /// The ids of the projects a name picks out: its name exactly, or failing
@@ -1225,7 +1248,18 @@ async fn chats_for_bead(
     };
     Ok(Json(json!(wanted.into_iter().map(|session_id| {
         let row = cached.iter().find(|s|s.id == session_id);
-        json!({"sessionId":session_id,"title":row.and_then(|s|s.title.clone()),"brand":row.map(|s|s.brand.clone()),"lastActiveAt":row.map(|s|s.last_active_at.clone()),"projectId":row.map(|s|s.project_id.clone())})
+        json!({"sessionId":session_id,"title":row.and_then(|s|s.title.clone()),
+            // Named the one way, from the chat's own directory, which this
+            // answer has in hand (notice::naming, bw-altj.7).
+            "name":row.map(|s|crate::workbench::notice::naming(
+                s.title.as_deref(),
+                crate::workbench::notice::folder_of(&s.cwd).as_deref(),
+                &s.brand,
+            // The board can link a card to a chat this app has no record of.
+            // Nothing is known about it, so the rule's own last word names it,
+            // rather than a second word invented on the screen that draws it.
+            )).unwrap_or_else(||crate::workbench::notice::naming(None,None,"")),
+            "brand":row.map(|s|s.brand.clone()),"lastActiveAt":row.map(|s|s.last_active_at.clone()),"projectId":row.map(|s|s.project_id.clone())})
     }).collect::<Vec<_>>())))
 }
 
@@ -1389,10 +1423,24 @@ struct RestoreQuery {
 }
 
 fn folder_of(path: &str) -> Option<String> {
-    std::path::Path::new(path)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(str::to_string)
+    crate::workbench::notice::folder_of(path)
+}
+
+/// What each of these chats is called, settled once for the whole answer.
+///
+/// Last, because a row's folder is corrected after it is built — by git, which
+/// knows a worktree from a directory — and the name is drawn from the folder
+/// the reader will actually see. One pass rather than one per builder: there
+/// are four places above that make a restore row, and a name missing from any
+/// of them would put "Untitled chat" back on the rail for exactly those chats.
+fn name_the_rows(rows: &mut [Value]) {
+    for row in rows {
+        row["name"] = json!(crate::workbench::notice::naming(
+            row["title"].as_str(),
+            row["folder"].as_str(),
+            row["brand"].as_str().unwrap_or_default(),
+        ));
+    }
 }
 
 /// What checkout each of these working directories is in.
@@ -1835,6 +1883,7 @@ async fn restore(
                 restore_row(session, linked, &lately, &checkouts)
             })
             .collect();
+        name_the_rows(&mut rows);
         rows.sort_by(|a, b| restore_clock(b).cmp(restore_clock(a)));
         return Ok(Json(rows));
     }
@@ -2128,6 +2177,7 @@ async fn restore(
     if !everything {
         rows.retain(|row| row["begunBy"] != "agent");
     }
+    name_the_rows(&mut rows);
     rows.sort_by(|a, b| restore_clock(b).cmp(restore_clock(a)));
     Ok(Json(rows))
 }
@@ -3036,6 +3086,53 @@ mod tests {
         assert_eq!(
             ids, ["asking"],
             "a cleared chat did not come back when it went on to say something else"
+        );
+    }
+
+    /// A chat nobody ever named is still called something — and called the
+    /// same thing in the tray and on the rail.
+    ///
+    /// `?? 'Untitled chat'` was written into six screens separately, so what a
+    /// nameless chat was called was whatever the screen drawing it happened to
+    /// say. In the tray it was the whole row: "Untitled chat", a project, and a
+    /// line about an error, naming nothing the owner could act on (bw-altj.7).
+    /// Both lists are the server's answers now, so this takes one chat with no
+    /// title and holds the two answers against each other.
+    #[tokio::test]
+    async fn a_chat_with_no_title_is_named_the_same_in_the_tray_and_on_the_rail() {
+        let (_directory, state, projects) = fixture_with_projects();
+        let project = a_project(&projects, "Keystone");
+        let nameless = Session {
+            title: None,
+            // A worktree of the project, which is where this app's own chats
+            // mostly work, and what tells two nameless chats apart.
+            cwd: "/work/Keystone/worktrees/bw-altj".into(),
+            ..a_chat("nameless", &project, "errored")
+        };
+        state
+            .database()
+            .create_session(nameless.clone())
+            .await
+            .unwrap();
+
+        let tray = asked_for_notifications(state.clone(), "").await;
+        let row = tray
+            .iter()
+            .find(|row| row["id"] == "nameless")
+            .expect("the tray had nothing to say about a chat that stopped with an error");
+
+        // The rail's row for the same chat, named the way every restore answer
+        // names one.
+        let mut listed = vec![restore_row(nameless, Vec::new(), &[], &HashMap::new())];
+        name_the_rows(&mut listed);
+
+        assert_eq!(
+            row["name"], listed[0]["name"],
+            "the tray and the rail called the same nameless chat different things"
+        );
+        assert_eq!(
+            row["name"], "bw-altj",
+            "a chat with no title was not named by the folder it is working in"
         );
     }
 

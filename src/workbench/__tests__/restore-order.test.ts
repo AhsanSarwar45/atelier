@@ -30,6 +30,8 @@ function row(over: Partial<RestoreRow> = {}): RestoreRow {
     branch: null,
     beads: [],
     ...over,
+    // Every row the server sends is named (protocol.ts, RestoreRow.name).
+    name: over.name ?? over.title ?? 'A chat',
   };
 }
 

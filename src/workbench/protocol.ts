@@ -1252,6 +1252,16 @@ export interface RestoreRow {
   model?: string | null;
   /** What the conversation is called, in the brand's own words. */
   title: string | null;
+  /**
+   * What to call it on screen, which is never nothing.
+   *
+   * The server settles this for every row it sends (server, `notice::naming`):
+   * the title if it has one, otherwise the folder it is working in, otherwise
+   * the agent holding it. Every screen that lists chats used to write
+   * `?? 'Untitled chat'` for itself instead, and the tray drew rows that named
+   * nothing anybody could act on (bw-altj). Draw this, not `title`.
+   */
+  name: string;
   lastActiveAt: string;
   /**
    * When the PERSON last said something here, which is a different question
@@ -1438,6 +1448,8 @@ export type WatchFrame =
 export interface LinkedChat {
   sessionId: string;
   title: string | null;
+  /** What to call it, settled by the server (server, `notice::naming`). */
+  name: string;
   brand: Brand | null;
   lastActiveAt: string | null;
   projectId: string | null;

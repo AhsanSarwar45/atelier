@@ -20,7 +20,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 /** One chat, stopped and asking its owner something, as the server sends it. */
 const ASKING = {
   id: 'chat-1',
-  title: 'Waiting chat',
+  name: 'Waiting chat',
   projectId: 'project-1',
   projectName: 'Keystone',
   state: 'waiting_permission',
@@ -31,7 +31,7 @@ const ASKING = {
 const FINISHED = {
   ...ASKING,
   id: 'chat-2',
-  title: 'Finished chat',
+  name: 'Finished chat',
   state: 'idle',
   says: 'Ready to read',
   href: '/projects/project-1?chat=chat-2',

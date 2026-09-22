@@ -164,6 +164,14 @@ impl Source for Chats {
                         Some(json!({
                             "sessionId": chat.session_id,
                             "title": chat.title,
+                            // The one naming rule, fed what the index knows:
+                            // the project's folder rather than the chat's own
+                            // (notice::naming, bw-altj.7).
+                            "name": crate::workbench::notice::naming(
+                                chat.title.as_deref(),
+                                crate::workbench::notice::folder_of(&chat.project_path).as_deref(),
+                                &chat.brand,
+                            ),
                             "projectId": chat.project_id,
                             "projectPath": chat.project_path,
                             "brand": chat.brand,

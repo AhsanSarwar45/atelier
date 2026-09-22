@@ -36,7 +36,7 @@ vi.mock('@/workbench/notification-preferences', async () => {
 
 const ASKING = {
   id: 'chat-1',
-  title: 'Waiting chat',
+  name: 'Waiting chat',
   projectId: 'project-1',
   projectName: 'Keystone',
   state: 'waiting_permission',

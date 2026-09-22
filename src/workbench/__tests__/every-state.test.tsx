@@ -569,6 +569,8 @@ describe('the row and the bar say the same thing', () => {
       externalId: null,
       brand: 'claude',
       title: 'A chat of ours',
+      // Every row the server sends is named (protocol.ts, RestoreRow.name).
+      name: over.name ?? over.title ?? 'A chat of ours',
       lastActiveAt: new Date(BEGAN).toISOString(),
       state: 'dormant',
       origin: 'app',

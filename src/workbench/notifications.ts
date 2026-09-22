@@ -22,7 +22,14 @@ import { useLiveSessions } from '@/workbench/live';
 /** One thing the app has to say, as the server hands it over. */
 export interface Notification {
   id: string;
-  title: string | null;
+  /**
+   * What to call this chat, settled by the server and never nothing: its
+   * title, else the folder it works in, else the agent holding it (server,
+   * `notice::naming`). The tray used to draw a raw title and write
+   * "Untitled chat" when there was none, which named nothing anybody could
+   * act on (bw-altj.7).
+   */
+  name: string;
   projectId: string;
   /** Always a real project's name: a chat that cannot be named is not a row. */
   projectName: string;

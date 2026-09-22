@@ -284,6 +284,10 @@ export function withLive(
         // The restore row has already asked the provider for its conversation
         // name. Keep that over our live session's temporary generated label.
         title: known.title ?? session.title,
+        // And keep the server's name for it, unless the stream has just
+        // brought a title for a chat that had none — in which case a title is
+        // what the server would name it by too.
+        name: known.title ?? session.title ?? known.name,
         // Never backwards: the stream carries what our own driver has seen, and
         // the row may already hold a later time from the tool's index — a chat
         // being worked on in a terminal moves that index and not our driver.
@@ -308,6 +312,10 @@ export function withLive(
       brand: session.brand,
       model: session.model,
       title: session.title,
+      // A stand-in until the restore list arrives with the server's own name
+      // for this chat (server, `notice::naming`). A chat this new usually has
+      // no title at all, and it is the one the reader is looking straight at.
+      name: session.title ?? folderOf(session.cwd) ?? 'Chat',
       lastActiveAt: session.lastActiveAt,
       lastSpokeAt: session.lastSpokeAt,
       state: session.state,
@@ -589,7 +597,12 @@ export function ChatSidebar({
     setFailed(null);
     try {
       await sendCommand({ type: 'session.rename', sessionId, title: called });
-      setFetched((known) => known.map((row) => row.sessionId === sessionId ? { ...row, title: called } : row));
+      // The name too, and not only the title: a name is what the row draws,
+      // and a chat the owner has just named should say so before the next
+      // fetch rather than after it (protocol.ts, RestoreRow.name).
+      setFetched((known) =>
+        known.map((row) => (row.sessionId === sessionId ? { ...row, title: called, name: called } : row)),
+      );
       setRenaming(null);
     } catch (e) {
       setFailed(e instanceof Error ? e.message : String(e));
@@ -831,7 +844,7 @@ export function ChatSidebar({
                       disabled={busy === key}
                       onClick={() => enter(row)}
                     >
-                      <span className="truncate">{row.title ?? 'Untitled chat'}</span>
+                      <span className="truncate">{row.name}</span>
                     </Button>
                     {/* Said once, here, and nowhere else on the row. There
                         used to be a badge under this as well, spelling out
@@ -914,7 +927,7 @@ export function ChatSidebar({
                             mode="icon"
                             size="xs"
                             data-testid="row-close"
-                            aria-label={`Close ${row.title ?? 'Untitled chat'}`}
+                            aria-label={`Close ${row.name}`}
                             disabled={ending === key}
                             className="absolute -right-1.5 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100"
                             onClick={(e) => {
@@ -944,7 +957,7 @@ export function ChatSidebar({
                       mode="icon"
                       size="xs"
                       data-testid="row-menu"
-                      aria-label={`Actions for ${row.title ?? 'Untitled chat'}`}
+                      aria-label={`Actions for ${row.name}`}
                       // Painted the height of the line it stands on, and given
                       // an invisible 44px band instead of a 44px box
                       // (globals.css, `data-reach='band'`). Floored the usual

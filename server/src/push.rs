@@ -307,7 +307,9 @@ pub fn watch(db: Arc<Database>, workbench: crate::routes::workbench::WorkbenchSt
             }
 
             let note = Note {
-                title: row.title.unwrap_or_else(|| "Atelier chat".to_string()),
+                // Already a name rather than a raw title, and the same name
+                // the tray and the rail draw for this chat (notice::naming).
+                title: row.name,
                 body: row.says,
                 href: row.href,
                 needs_action: row.needs_action,

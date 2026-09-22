@@ -20,6 +20,7 @@ const chat: RestoreRow = {
   externalId: 'provider-session-1',
   brand: 'claude',
   title: 'Original name',
+  name: 'Original name',
   lastActiveAt: '2026-09-14T10:00:00.000Z',
   state: 'dormant',
   origin: 'app',
@@ -87,7 +88,7 @@ it('renames the chosen chat and updates its row', async () => {
 });
 
 it('copies the provider ID for a chat not imported into Atelier yet', async () => {
-  const outside = { ...chat, sessionId: null, title: 'Outside chat' };
+  const outside = { ...chat, sessionId: null, title: 'Outside chat', name: 'Outside chat' };
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => [outside] }) as Response));
   await draw('Outside chat');
   await openMenu();
@@ -109,7 +110,7 @@ it('opens the same menu from the row button, for a thumb that cannot right-click
 });
 
 it('closes a running chat from the row menu', async () => {
-  const running = { ...chat, state: 'idle' as const, title: 'Running chat' };
+  const running = { ...chat, state: 'idle' as const, title: 'Running chat', name: 'Running chat' };
   vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { method?: string; body?: string }) => {
     if (init?.method === 'POST') {
       commands.push(JSON.parse(init.body ?? '{}') as Record<string, unknown>);

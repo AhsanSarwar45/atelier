@@ -158,7 +158,7 @@ function WaitingTray({ rows, clear }: { rows: Notification[]; clear: () => void 
               router.push(row.href);
             }}
           >
-            <div className="truncate text-sm text-foreground">{row.title ?? 'Untitled chat'}</div>
+            <div className="truncate text-sm text-foreground">{row.name}</div>
             <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
               <span data-testid="tray-project" className="truncate font-medium">
                 {row.projectName}
@@ -172,7 +172,7 @@ function WaitingTray({ rows, clear }: { rows: Notification[]; clear: () => void 
         {updates.length > 0 && <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-t-muted">Other updates</div>}
         {updates.map((row) => (
           <Row key={row.id} ruled data-testid="tray-row" data-notification-type="update" onClick={() => { setOpen(false); router.push(row.href); }}>
-            <div className="truncate text-sm text-foreground">{row.title ?? 'Untitled chat'}</div>
+            <div className="truncate text-sm text-foreground">{row.name}</div>
             <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
               <span data-testid="tray-project" className="truncate font-medium">{row.projectName}</span><span className="truncate">· {row.says}</span>
             </div>
@@ -211,7 +211,7 @@ export function WorkbenchStatus() {
     }
     for (const row of unheard(notifications)) {
       if (row.needsAction ? preferences.needsAction : preferences.updates) {
-        void showDeviceNotification(row.title ?? 'Atelier chat', row.says, row.href);
+        void showDeviceNotification(row.name, row.says, row.href);
       }
     }
   }, [loaded, notifications, preferences, unheard]);

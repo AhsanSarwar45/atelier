@@ -36,6 +36,8 @@ export interface ChatMatch {
   sessionId: string;
   title: string | null;
   titleSegments: Segment[] | null;
+  /** What to call it, settled by the server (server, `notice::naming`). */
+  name: string;
   projectId: string;
   projectPath: string;
   brand: string;
@@ -49,6 +51,8 @@ export interface ChatMatch {
 export interface FoundChat extends Found {
   sessionId: string;
   title: string | null;
+  /** What to call it, settled by the server (server, `notice::naming`). */
+  name: string;
   projectId: string;
   projectPath: string;
   brand: string;
@@ -181,7 +185,7 @@ export function useChatSearch(here: Here | null): { source: SearchSource<ChatMat
                 <Heading
                   title={
                     <span data-testid="search-chat-title" className={TITLE}>
-                      {chat.titleSegments ? <Marked segments={chat.titleSegments} /> : (chat.title ?? 'Untitled chat')}
+                      {chat.titleSegments ? <Marked segments={chat.titleSegments} /> : chat.name}
                     </span>
                   }
                   meta={
@@ -225,7 +229,7 @@ export function useChatSearch(here: Here | null): { source: SearchSource<ChatMat
           open: () => go(chat.projectId, chat.sessionId, chat.at),
           body: (
             <Heading
-              title={<span className={TITLE}>{chat.title ?? 'Untitled chat'}</span>}
+              title={<span className={TITLE}>{chat.name}</span>}
               meta={<Meta project={project(chat.projectId, chat.projectPath)} brand={chat.brand} at={chat.lastActiveAt} />}
             />
           ),
