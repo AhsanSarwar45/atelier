@@ -117,9 +117,14 @@ function WaitingTray({ rows, clear }: { rows: Notification[]; clear: () => void 
         // the screen it drops onto: 384px is most of a phone, and pinned to the
         // bar's right end the overflow would have hung off the left edge
         // (bw-rpgh.2).
+        //
+        // The panel sets its own padding to nothing so that a row can run the
+        // full width and rule itself, and keeps a little back at the bottom:
+        // without it the last row's own edge is the panel's edge, and the words
+        // in it sit right against the corner.
         className={cn(
           panelVariants({ tone: 'overlay', inset: 'none' }),
-          'w-96 max-w-[calc(100vw-1rem)] overflow-hidden p-0',
+          'w-96 max-w-[calc(100vw-1rem)] overflow-hidden p-0 pb-2',
         )}
       >
         {/*
