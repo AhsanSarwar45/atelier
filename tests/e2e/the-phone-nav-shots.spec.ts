@@ -80,6 +80,25 @@ async function shoot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: `${SHOTS}/${name}.png` });
 }
 
+/**
+ * Let this file's fixture speak on both screens it has to appear on.
+ *
+ * The project it makes is a test project, and test projects are left out of
+ * both answers these cases need: the project list the screen is drawn from,
+ * and the notifications the tray says. The tray's half used to come out of the
+ * project list too, because the tray did the naming itself — the server
+ * answers that question now (bw-altj), and it hides a test project's chats for
+ * the same reason the list hides the project.
+ */
+async function showTestProjects(page: Page): Promise<void> {
+  await page.route(/\/api\/(projects|workbench\/notifications)(\?[^/]*)?$/, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const url = new URL(route.request().url());
+    url.searchParams.set('include_test', 'true');
+    await route.continue({ url: url.toString() });
+  });
+}
+
 test.describe('the navigation on a phone', () => {
   // Serial: the two cases share one seeded repository and one project, and two
   // workers racing on `beforeAll` tore the fixture out from under each other.
@@ -95,12 +114,7 @@ test.describe('the navigation on a phone', () => {
   });
 
   test('the bar, the chat row menu, and the right column', async ({ page, request }) => {
-    await page.route(/\/api\/projects(\?[^/]*)?$/, async (route) => {
-      if (route.request().method() !== 'GET') return route.continue();
-      const url = new URL(route.request().url());
-      url.searchParams.set('include_test', 'true');
-      await route.continue({ url: url.toString() });
-    });
+    await showTestProjects(page);
 
     const project = await fixtureProject(request);
     const chat = aChatSomebodyElseIsIn(REPO, 'Show me what you changed');
@@ -241,12 +255,7 @@ test.describe('the navigation on a phone', () => {
       !process.env.BEADS_E2E_ACP_ADAPTERS?.includes('tests/fixtures/acp-adapters'),
       'needs the scripted ACP agent; run with BEADS_E2E_ACP_ADAPTERS=$PWD/tests/fixtures/acp-adapters',
     );
-    await page.route(/\/api\/projects(\?[^/]*)?$/, async (route) => {
-      if (route.request().method() !== 'GET') return route.continue();
-      const url = new URL(route.request().url());
-      url.searchParams.set('include_test', 'true');
-      await route.continue({ url: url.toString() });
-    });
+    await showTestProjects(page);
 
     const project = await fixtureProject(request);
     try {
@@ -290,7 +299,13 @@ test.describe('the navigation on a phone', () => {
       // way out was to find the bell a second time (bw-l6hd.1). The press
       // lands on the conversation behind the tray, which is the thing a thumb
       // reaches for and the thing that used to swallow it.
-      await page.getByTestId('chat-tab').click({ position: { x: 8, y: 8 } });
+      // Just below where the tray ends, not at the top of the chat: on a phone
+      // the panel drops out of the bar over the whole top of the conversation,
+      // so a press at the chat's own first corner is a press ON the tray, which
+      // Playwright refuses and which would prove nothing if it landed.
+      const panel = (await page.getByTestId('tray-panel').boundingBox())!;
+      const chat = (await page.getByTestId('chat-tab').boundingBox())!;
+      await page.mouse.click(chat.x + 8, panel.y + panel.height + 8);
       await expect(page.getByTestId('tray-panel')).toHaveCount(0);
       await expect(bell).toHaveAttribute('data-open', 'false');
       await shoot(page, '12b-bell-pressed-away-phone');
