@@ -12,7 +12,6 @@
 //! OpenSSL, so only its message building is used and the send is done with the
 //! `reqwest` this server already has, which is rustls.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -230,38 +229,25 @@ pub async fn deliver(db: &Database, http: &reqwest::Client, note: &Note) -> Resu
     Ok(sent)
 }
 
-/// The words a chat is announced in live in one place now, shared with the
-/// tray that says the same things on screen (`workbench::notice`). They were
-/// written out twice, once here and once in the page's own TypeScript, and two
-/// copies of "what is worth saying about a chat" could drift apart without
-/// anything failing (bw-altj).
-use crate::workbench::notice::{chat_href, is_an_update, waits_on_you, wording};
-
 /// Watch every chat's state and push what the open page would have drawn.
 ///
 /// The page does this too, in `WorkbenchStatus`, and the two overlap while a
 /// window happens to be open — the notification carries the chat as its `tag`,
 /// so the second one drawn replaces the first rather than doubling it. What
 /// the page cannot do is this with no window, which is the whole point.
+///
+/// What has already been announced is written down (`session_notice`), not
+/// held here. It used to be a `HashMap` seeded at startup from the board as it
+/// stood — which made the record only as durable as the process, and only as
+/// correct as that one read. A restart after the read failed announced every
+/// chat on the board a second time, and the owner had no way to stop it: the
+/// clearing he had already done was kept somewhere else entirely (bw-altj).
 pub fn watch(db: Arc<Database>, workbench: crate::routes::workbench::WorkbenchState) {
     tokio::spawn(async move {
         use tokio::sync::broadcast::error::RecvError;
 
         let http = reqwest::Client::new();
         let mut updates = workbench.database().subscribe_all();
-
-        // What each chat was last seen in. Seeded from the board as it stands
-        // so that starting the server is not itself a change, and a phone is
-        // not told about every chat that was already sitting there.
-        let mut seen: HashMap<String, String> = HashMap::new();
-        match workbench.database().list_sessions(None).await {
-            Ok(sessions) => {
-                for session in sessions {
-                    seen.insert(session.id, session.state);
-                }
-            }
-            Err(why) => tracing::warn!("the chats could not be read to start watching: {why}"),
-        }
 
         loop {
             let update = match updates.recv().await {
@@ -282,18 +268,20 @@ pub fn watch(db: Arc<Database>, workbench: crate::routes::workbench::WorkbenchSt
                 continue;
             };
 
-            let was = seen.insert(update.session_id.clone(), state.to_string());
-            if was.as_deref() == Some(state) {
+            // Whether there is anything to say is one question with one answer,
+            // asked here and on the page's behalf by the notifications route.
+            let Some(projects) = workbench.projects() else {
                 continue;
-            }
-
-            let action = waits_on_you(state);
-            if !action && !is_an_update(state) {
-                continue;
-            }
-
-            let session = match workbench.database().get_session(update.session_id.clone()).await {
-                Ok(Some(session)) => session,
+            };
+            let row = match crate::workbench::notice::worth_pushing(
+                workbench.database(),
+                projects,
+                &update.session_id,
+                state,
+            )
+            .await
+            {
+                Ok(Some(row)) => row,
                 Ok(None) => continue,
                 Err(why) => {
                     tracing::warn!("a chat could not be read to push about it: {why}");
@@ -301,11 +289,28 @@ pub fn watch(db: Arc<Database>, workbench: crate::routes::workbench::WorkbenchSt
                 }
             };
 
+            // Written down before it is sent, not after. A push service that is
+            // briefly refusing must not turn into the same chat announced over
+            // and over, which is the complaint this whole job is about; a send
+            // that fails is one notification missed, and the chat's next change
+            // says so again.
+            if let Err(why) = workbench
+                .database()
+                .mark_announced(
+                    update.session_id.clone(),
+                    state.to_string(),
+                    chrono::Utc::now().to_rfc3339(),
+                )
+                .await
+            {
+                tracing::warn!("what was announced about a chat could not be written down: {why}");
+            }
+
             let note = Note {
-                title: session.title.unwrap_or_else(|| "Atelier chat".to_string()),
-                body: wording(state).to_string(),
-                href: chat_href(&session.project_id, &update.session_id),
-                needs_action: action,
+                title: row.title.unwrap_or_else(|| "Atelier chat".to_string()),
+                body: row.says,
+                href: row.href,
+                needs_action: row.needs_action,
             };
             if let Err(why) = deliver(&db, &http, &note).await {
                 tracing::warn!("a push could not be delivered: {why}");
@@ -377,38 +382,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_two_kinds_of_state_are_the_ones_the_page_notifies_on() {
-        // `waitsOnYou` and the update test in src/workbench/live.ts and
-        // globals.tsx. A phone and the bell must not disagree about which
-        // chats are worth a word.
-        for waiting in ["waiting_permission", "errored"] {
-            assert!(waits_on_you(waiting), "{waiting} should wait on the owner");
-            assert!(!is_an_update(waiting), "{waiting} is not a mere update");
-        }
-        for finished in ["idle", "stopped"] {
-            assert!(is_an_update(finished), "{finished} should be an update");
-            assert!(!waits_on_you(finished), "{finished} does not wait on the owner");
-        }
-        // Working states say nothing at all.
-        for busy in ["thinking", "streaming", "running_tool", "waiting_for_agents", "dormant"] {
-            assert!(!waits_on_you(busy) && !is_an_update(busy), "{busy} should be silent");
-        }
-    }
-
-    #[test]
-    fn a_link_opens_the_chat_the_notification_is_about() {
-        // The shape `chatHref` builds in src/workbench/globals.tsx:55.
-        assert_eq!(
-            chat_href("proj-1", "chat-9"),
-            "/project?id=proj-1&tab=chat&chat=chat-9"
-        );
-        // An id that is not URL-safe still makes one link rather than three.
-        assert_eq!(
-            chat_href("a b&c", "x/y"),
-            "/project?id=a%20b%26c&tab=chat&chat=x%2Fy"
-        );
-    }
+    // Which states are worth a word, and what a chat's link looks like, used to
+    // be asserted here as well — because the page and this file each spelled
+    // them out, once in TypeScript and once in Rust, and the pair could drift
+    // apart without anything failing. There is one spelling now
+    // (`workbench::notice`) and it is tested where it lives. A second copy of
+    // those assertions would only say the same module agrees with itself.
 
     #[test]
     fn a_payload_names_the_chat_so_one_chat_keeps_one_notification() {

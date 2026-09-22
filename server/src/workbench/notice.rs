@@ -146,9 +146,107 @@ pub async fn worth_saying(
     Ok(rows)
 }
 
+/// Whether this one chat, in the state it has just reached, is worth telling a
+/// device about — and nothing about whether any device is listening.
+///
+/// The same three questions `worth_saying` asks of the whole board, asked of
+/// one chat, so a phone and the page can never disagree about what is news:
+/// is this state worth a word at all, has the owner already been told it, and
+/// is the chat in a project he is still working in.
+///
+/// "Already told" is two separate facts, and they are kept apart on purpose.
+/// A chat the owner READ in this state needs no push — he has seen it. A chat
+/// a device was already TOLD about in this state needs no second push — and
+/// that is what makes a restart quiet, because it is written down rather than
+/// held in the watcher's memory.
+pub async fn worth_pushing(
+    chats: &ChatDb,
+    projects: &Database,
+    session_id: &str,
+    state: &str,
+) -> Result<Option<Row>, String> {
+    // First and cheapest: most events a chat emits are it working, and working
+    // is not news. Nothing is read for those.
+    if !worth_announcing(state) {
+        return Ok(None);
+    }
+
+    let notices = chats.notices().await?;
+    if let Some(notice) = notices.get(session_id) {
+        if notice.read_state.as_deref() == Some(state)
+            || notice.announced_state.as_deref() == Some(state)
+        {
+            return Ok(None);
+        }
+    }
+
+    let Some(session) = chats.get_session(session_id.to_string()).await? else {
+        return Ok(None);
+    };
+    let names = nameable(projects, false)?;
+    let Some(project_name) = names.get(&session.project_id).cloned() else {
+        return Ok(None);
+    };
+
+    Ok(Some(Row {
+        href: chat_href(&session.project_id, session_id),
+        needs_action: waits_on_you(state),
+        says: wording(state).to_string(),
+        id: session_id.to_string(),
+        title: session.title,
+        project_id: session.project_id,
+        project_name,
+        state: state.to_string(),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::store::Session;
+
+    /// A chat database on a real file, so a case can close it and open it
+    /// again — which is the only way to prove what survives a restart.
+    fn a_board(directory: &std::path::Path) -> ChatDb {
+        ChatDb::open(&directory.join("workbench.db")).expect("the board should open")
+    }
+
+    fn a_project(projects: &Database, name: &str, is_test: bool) -> String {
+        projects
+            .create_project(crate::db::CreateProjectInput {
+                name: name.to_string(),
+                path: format!("/work/{name}"),
+                local_path: None,
+                is_test,
+            })
+            .unwrap()
+            .id
+    }
+
+    fn a_chat(id: &str, project_id: &str, state: &str) -> Session {
+        Session {
+            id: id.into(),
+            brand: "codex".into(),
+            external_id: None,
+            project_id: project_id.into(),
+            project_path: "/work/project".into(),
+            cwd: "/work/project".into(),
+            model: None,
+            permission_mode: "default".into(),
+            effort: None,
+            collaboration_mode: None,
+            profile: None,
+            title: Some(format!("Chat {id}")),
+            state: state.into(),
+            origin: "app".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+            last_active_at: "2026-01-01T00:00:00Z".into(),
+            last_spoke_at: None,
+            begun_by: None,
+        }
+    }
+
+    const WHEN: &str = "2026-01-01T00:00:01Z";
 
     /// The vocabulary itself, which the route cases cannot exercise.
     ///
@@ -186,5 +284,142 @@ mod tests {
             chat_href("project one", "chat/1"),
             "/project?id=project%20one&tab=chat&chat=chat%2F1"
         );
+    }
+
+    /// The whole point of writing an announcement down.
+    ///
+    /// The watcher used to keep this in a `HashMap` it filled at startup by
+    /// reading the board. That made the record only as durable as the process
+    /// and only as correct as that one read: a restart after a failed read
+    /// announced every chat on the board a second time, which is exactly the
+    /// complaint (bw-altj). There is no seeding read now — this closes the
+    /// board and opens it again, which is a harsher restart than a failed read,
+    /// and nothing is said twice.
+    #[tokio::test]
+    async fn a_restart_does_not_announce_what_was_already_announced() {
+        let directory = tempfile::tempdir().unwrap();
+        let projects = Database::new_in_memory().unwrap();
+        let project = a_project(&projects, "keystone", false);
+
+        let board = a_board(directory.path());
+        board.create_session(a_chat("chat-1", &project, "errored")).await.unwrap();
+
+        let first = worth_pushing(&board, &projects, "chat-1", "errored").await.unwrap();
+        assert!(first.is_some(), "a chat that stopped with an error was never announced");
+        board
+            .mark_announced("chat-1".into(), "errored".into(), WHEN.into())
+            .await
+            .unwrap();
+        drop(board);
+
+        let after = a_board(directory.path());
+        assert!(
+            worth_pushing(&after, &projects, "chat-1", "errored")
+                .await
+                .unwrap()
+                .is_none(),
+            "a restart announced a chat that had already been announced"
+        );
+
+        // And the moment it goes on to do something else, it is news again:
+        // what is written down is a standing, not a silence.
+        assert!(
+            worth_pushing(&after, &projects, "chat-1", "idle")
+                .await
+                .unwrap()
+                .is_some(),
+            "a chat that moved on after being announced stayed silent"
+        );
+    }
+
+    /// A chat the owner has already read needs no push. He has seen it — on
+    /// the page, or on the phone that cleared the tray.
+    #[tokio::test]
+    async fn a_chat_already_read_in_this_state_is_not_pushed() {
+        let directory = tempfile::tempdir().unwrap();
+        let projects = Database::new_in_memory().unwrap();
+        let project = a_project(&projects, "keystone", false);
+        let board = a_board(directory.path());
+        board.create_session(a_chat("chat-1", &project, "errored")).await.unwrap();
+
+        board
+            .mark_read(vec![("chat-1".into(), "errored".into())], WHEN.into())
+            .await
+            .unwrap();
+
+        assert!(
+            worth_pushing(&board, &projects, "chat-1", "errored")
+                .await
+                .unwrap()
+                .is_none(),
+            "a chat the owner had already read was pushed to his phone"
+        );
+    }
+
+    /// The three ways a project stops being one the owner is working in. A
+    /// chat left sitting in any of them is not news, and cannot be: there is
+    /// no name to put on the notification.
+    #[tokio::test]
+    async fn a_chat_in_a_project_that_is_gone_archived_or_a_fixture_is_never_pushed() {
+        let directory = tempfile::tempdir().unwrap();
+        let projects = Database::new_in_memory().unwrap();
+        let board = a_board(directory.path());
+
+        let archived = a_project(&projects, "archived", false);
+        projects.archive_project(&archived).unwrap();
+        let fixture = a_project(&projects, "fixture", true);
+
+        board.create_session(a_chat("orphan", "a-project-deleted-long-ago", "errored")).await.unwrap();
+        board.create_session(a_chat("shelved", &archived, "errored")).await.unwrap();
+        board.create_session(a_chat("in-a-fixture", &fixture, "errored")).await.unwrap();
+
+        for chat in ["orphan", "shelved", "in-a-fixture"] {
+            assert!(
+                worth_pushing(&board, &projects, chat, "errored")
+                    .await
+                    .unwrap()
+                    .is_none(),
+                "{chat} was pushed to a phone although its project is not one being worked in"
+            );
+        }
+    }
+
+    /// Working is not news, and a chat that is not on the board at all is not
+    /// news either — a state event can outlive the chat it is about.
+    #[tokio::test]
+    async fn nothing_is_pushed_about_a_chat_that_is_working_or_gone() {
+        let directory = tempfile::tempdir().unwrap();
+        let projects = Database::new_in_memory().unwrap();
+        let project = a_project(&projects, "keystone", false);
+        let board = a_board(directory.path());
+        board.create_session(a_chat("chat-1", &project, "thinking")).await.unwrap();
+
+        assert!(
+            worth_pushing(&board, &projects, "chat-1", "thinking").await.unwrap().is_none(),
+            "a chat merely working was pushed"
+        );
+        assert!(
+            worth_pushing(&board, &projects, "never-existed", "errored").await.unwrap().is_none(),
+            "a chat that is not on the board was pushed"
+        );
+    }
+
+    /// What the push says is what the tray says, because it is the same row.
+    #[tokio::test]
+    async fn a_push_says_what_the_tray_would_have_said() {
+        let directory = tempfile::tempdir().unwrap();
+        let projects = Database::new_in_memory().unwrap();
+        let project = a_project(&projects, "keystone", false);
+        let board = a_board(directory.path());
+        board.create_session(a_chat("chat-1", &project, "waiting_permission")).await.unwrap();
+
+        let row = worth_pushing(&board, &projects, "chat-1", "waiting_permission")
+            .await
+            .unwrap()
+            .expect("a chat waiting on the owner is worth a push");
+        assert_eq!(row.says, "permission to use a tool");
+        assert_eq!(row.project_name, "keystone");
+        assert!(row.needs_action);
+        assert_eq!(row.href, chat_href(&project, "chat-1"));
     }
 }

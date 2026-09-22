@@ -196,6 +196,13 @@ impl WorkbenchState {
     pub fn database(&self) -> &ChatDb {
         self.registry.database()
     }
+    /// The project list, when this server has one. It is the other half of
+    /// every question about what a chat is worth saying: a chat in a project
+    /// that has been deleted, archived or registered by a test is not news, and
+    /// only this can tell which of those a chat is in.
+    pub fn projects(&self) -> Option<&crate::db::Database> {
+        self.projects.as_deref()
+    }
     pub(crate) async fn reconcile_status(&self, session_id: &str) -> Result<Value, String> {
         self.registry.reconcile_status(session_id).await
     }
