@@ -175,6 +175,21 @@ pub struct Store {
     connection: Connection,
 }
 
+/// What has already been said about one chat, and to whom (`session_notice`).
+///
+/// Both fields are the chat's `state` as it stood at the time, not a flag: the
+/// question a tray asks is never "has this been read" but "has this been read
+/// in the state it is in NOW", or a chat dismissed while it wanted permission
+/// would stay silent when it went on to stop with an error.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Notice {
+    /// The state the owner last read this chat in.
+    pub read_state: Option<String>,
+    /// The state last pushed to a device.
+    pub announced_state: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
@@ -377,9 +392,57 @@ impl Store {
         transaction.execute("DELETE FROM event WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM bead_link WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM session_handoff WHERE session_id = ?1", [id])?;
+        transaction.execute("DELETE FROM session_notice WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM session_external_alias WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM session WHERE id = ?1", [id])?;
         transaction.commit()
+    }
+
+    /// What has already been said about every chat that has anything said about
+    /// it. A chat with no row has had nothing said, which is the same answer as
+    /// a row of two nulls and is spelled the same way by [`Notice::default`].
+    pub fn notices(&self) -> rusqlite::Result<HashMap<String, Notice>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT session_id, read_state, announced_state FROM session_notice")?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                Notice {
+                    read_state: row.get(1)?,
+                    announced_state: row.get(2)?,
+                },
+            ))
+        })?;
+        rows.collect()
+    }
+
+    /// Write down that the owner has read these chats, in the states given.
+    ///
+    /// One transaction for the lot: clearing a tray is one act, and half of it
+    /// landing would leave the owner having read some of what he pressed once.
+    pub fn mark_read(&mut self, states: &[(String, String)], at: &str) -> rusqlite::Result<()> {
+        let transaction = self.connection.transaction()?;
+        for (session_id, state) in states {
+            transaction.execute(
+                "INSERT INTO session_notice (session_id, read_state, updated_at)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(session_id) DO UPDATE SET read_state = ?2, updated_at = ?3",
+                params![session_id, state, at],
+            )?;
+        }
+        transaction.commit()
+    }
+
+    /// Write down that a device has been told about this chat, in this state.
+    pub fn mark_announced(&self, session_id: &str, state: &str, at: &str) -> rusqlite::Result<()> {
+        self.connection.execute(
+            "INSERT INTO session_notice (session_id, announced_state, updated_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(session_id) DO UPDATE SET announced_state = ?2, updated_at = ?3",
+            params![session_id, state, at],
+        )?;
+        Ok(())
     }
 
     pub fn update_session(
@@ -2662,6 +2725,29 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
            context TEXT NOT NULL
          );",
     )?;
+    /*
+      What has already been said about a chat, and to whom.
+
+      Two different questions, which the app used to answer from three private
+      copies that could not agree: the tray kept one in the browser, the page
+      kept another in the tab, and the push watcher kept a third in memory that
+      died with the process (bw-altj). One row per chat, here, beside the chat.
+
+      `read_state` is the state the owner last READ the chat in — what the tray
+      compares against, so a chat cleared while it wanted permission comes back
+      the moment it wants something else. `announced_state` is the state last
+      PUSHED to a device. They are deliberately apart: announcing something is
+      not the owner having read it, and a push that emptied the tray would take
+      the row away before he ever looked.
+    */
+    transaction.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_notice (
+           session_id TEXT PRIMARY KEY,
+           read_state TEXT,
+           announced_state TEXT,
+           updated_at TEXT NOT NULL
+         );",
+    )?;
 
     let event_columns = columns(transaction, "event")?;
     for column in ["provider", "provider_thread_id", "provider_event_id"] {
@@ -2895,6 +2981,94 @@ mod tests {
         assert_eq!(store.get_session("stopped").unwrap().unwrap().state, "stopped");
         assert_eq!(store.get_session("errored").unwrap().unwrap().state, "errored");
         assert_eq!(store.get_session("streaming").unwrap().unwrap().state, "dormant");
+    }
+
+    /// What has been said about a chat outlives the process that said it.
+    ///
+    /// The whole reason the record moved here. It used to be kept in the
+    /// browser tab and in the watcher's memory, and both of those are thrown
+    /// away routinely — a phone discards a tab whenever it wants the memory,
+    /// and a restart empties a `HashMap` — so everything already read was
+    /// announced again the next time anybody looked (bw-altj).
+    #[test]
+    fn what_has_been_said_about_a_chat_survives_a_restart() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("workbench.db");
+        {
+            let mut store = Store::open(&file).unwrap();
+            store
+                .mark_read(&[("chat".to_string(), "errored".to_string())], "2026-09-22T00:00:00Z")
+                .unwrap();
+            store
+                .mark_announced("chat", "idle", "2026-09-22T00:00:00Z")
+                .unwrap();
+        }
+
+        let store = Store::open(&file).unwrap();
+        let notices = store.notices().unwrap();
+        assert_eq!(
+            notices.get("chat"),
+            Some(&Notice {
+                read_state: Some("errored".to_string()),
+                announced_state: Some("idle".to_string()),
+            }),
+            "what had been said about the chat did not outlive the process"
+        );
+    }
+
+    /// Reading and announcing are two facts about one chat, not one fact.
+    ///
+    /// They are written by different callers at different moments, so each has
+    /// to be able to land without wiping the other: a push that cleared the
+    /// reading would take the row out of the tray before the owner ever looked
+    /// at it, and a clearing that wiped the announcement would have the next
+    /// restart push it all over again.
+    #[test]
+    fn reading_a_chat_and_announcing_it_do_not_overwrite_each_other() {
+        let root = tempfile::tempdir().unwrap();
+        let mut store = Store::open(&root.path().join("workbench.db")).unwrap();
+
+        store.mark_announced("chat", "idle", "2026-09-22T00:00:00Z").unwrap();
+        store
+            .mark_read(&[("chat".to_string(), "idle".to_string())], "2026-09-22T00:01:00Z")
+            .unwrap();
+
+        assert_eq!(
+            store.notices().unwrap().get("chat"),
+            Some(&Notice {
+                read_state: Some("idle".to_string()),
+                announced_state: Some("idle".to_string()),
+            }),
+            "one of the two facts wrote over the other"
+        );
+
+        // And the later word on each wins, rather than a second row appearing.
+        store.mark_announced("chat", "errored", "2026-09-22T00:02:00Z").unwrap();
+        assert_eq!(store.notices().unwrap().len(), 1, "a chat grew a second row");
+        assert_eq!(
+            store.notices().unwrap()["chat"].announced_state.as_deref(),
+            Some("errored")
+        );
+    }
+
+    /// A chat that is gone has nothing left to say.
+    #[test]
+    fn deleting_a_chat_takes_what_was_said_about_it() {
+        let root = tempfile::tempdir().unwrap();
+        let mut store = Store::open(&root.path().join("workbench.db")).unwrap();
+        store
+            .create_session(&session("chat", "claude", None, "2026-09-22T00:00:00Z"))
+            .unwrap();
+        store
+            .mark_read(&[("chat".to_string(), "idle".to_string())], "2026-09-22T00:00:00Z")
+            .unwrap();
+
+        store.delete_session("chat").unwrap();
+
+        assert!(
+            store.notices().unwrap().is_empty(),
+            "a deleted chat left its notice behind"
+        );
     }
 
     fn session(id: &str, brand: &str, external_id: Option<&str>, at: &str) -> Session {
@@ -4422,6 +4596,7 @@ mod tests {
             "transcript_item",
             "transcript_projection",
             "transcript_agent",
+            "session_notice",
         ] {
             let found: i64 = store
                 .connection()

@@ -6,7 +6,8 @@
 
 use super::protocol::{Event, EventKind};
 use super::store::{
-    SearchHit, Session, SessionActivity, SessionPatch, Spend, Store, TokenStats, TranscriptItemPage,
+    Notice, SearchHit, Session, SessionActivity, SessionPatch, Spend, Store, TokenStats,
+    TranscriptItemPage,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -47,6 +48,9 @@ pub struct SnapshotParts {
 enum Command {
     CreateSession(Session, Reply<()>),
     DeleteSession(String, Reply<()>),
+    Notices(Reply<HashMap<String, Notice>>),
+    MarkRead(Vec<(String, String)>, String, Reply<()>),
+    MarkAnnounced(String, String, String, Reply<()>),
     GetSession(String, Reply<Option<Session>>),
     SessionByExternalId(String, Reply<Option<Session>>),
     RememberExternalAlias(String, String, String, Reply<()>),
@@ -195,6 +199,28 @@ impl ChatDb {
 
     pub async fn get_session(&self, id: String) -> Result<Option<Session>, String> {
         self.request(|reply| Command::GetSession(id, reply)).await
+    }
+
+    /// What has already been said about each chat, and to whom.
+    pub async fn notices(&self) -> Result<HashMap<String, Notice>, String> {
+        self.request(Command::Notices).await
+    }
+
+    /// Write down that the owner has read these chats, in the states given.
+    pub async fn mark_read(&self, states: Vec<(String, String)>, at: String) -> Result<(), String> {
+        self.request(|reply| Command::MarkRead(states, at, reply))
+            .await
+    }
+
+    /// Write down that a device has been told about this chat, in this state.
+    pub async fn mark_announced(
+        &self,
+        session_id: String,
+        state: String,
+        at: String,
+    ) -> Result<(), String> {
+        self.request(|reply| Command::MarkAnnounced(session_id, state, at, reply))
+            .await
     }
 
     pub async fn session_by_external_id(
@@ -894,6 +920,11 @@ fn run(
                 respond(reply, result)
             }
             Command::GetSession(id, reply) => respond(reply, store.get_session(&id)),
+            Command::Notices(reply) => respond(reply, store.notices()),
+            Command::MarkRead(states, at, reply) => respond(reply, store.mark_read(&states, &at)),
+            Command::MarkAnnounced(session_id, state, at, reply) => {
+                respond(reply, store.mark_announced(&session_id, &state, &at))
+            }
             Command::SessionByExternalId(id, reply) => {
                 respond(reply, store.session_by_external_id(&id))
             }
@@ -1187,6 +1218,48 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::sync::atomic::Ordering;
+
+    /// The record goes through the actor the way every other write does, so a
+    /// route can reach it without touching the connection (bw-altj).
+    #[tokio::test]
+    async fn what_has_been_said_about_a_chat_reads_back_through_the_actor() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
+
+        assert!(
+            database.notices().await.unwrap().is_empty(),
+            "a fresh database had something to say already"
+        );
+
+        database
+            .mark_read(
+                vec![
+                    ("chat-1".to_string(), "errored".to_string()),
+                    ("chat-2".to_string(), "idle".to_string()),
+                ],
+                "2026-09-22T00:00:00Z".to_string(),
+            )
+            .await
+            .unwrap();
+        database
+            .mark_announced(
+                "chat-1".to_string(),
+                "waiting_permission".to_string(),
+                "2026-09-22T00:01:00Z".to_string(),
+            )
+            .await
+            .unwrap();
+
+        let notices = database.notices().await.unwrap();
+        assert_eq!(notices.len(), 2, "clearing two chats wrote {} rows", notices.len());
+        assert_eq!(notices["chat-1"].read_state.as_deref(), Some("errored"));
+        assert_eq!(
+            notices["chat-1"].announced_state.as_deref(),
+            Some("waiting_permission")
+        );
+        assert_eq!(notices["chat-2"].read_state.as_deref(), Some("idle"));
+        assert_eq!(notices["chat-2"].announced_state, None);
+    }
 
     fn event(id: usize) -> Event {
         serde_json::from_value(json!({
