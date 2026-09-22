@@ -252,11 +252,18 @@ async fn drain_held(
     let Ok(Some(session)) = database.get_session(session_id.to_string()).await else {
         return;
     };
-    // Ready, and nothing else. A chat that stopped, failed or went to sleep
-    // has not finished a turn — it lost one — and pushing the reader's next
-    // message into that is the opposite of holding it for them. Those wait
-    // where they are until the reader sends them by hand.
-    if session.state != "idle" {
+    // Finished a turn, and nothing else. A chat that stopped, failed or went
+    // to sleep has not finished one — it lost one — and pushing the reader's
+    // next message into that is the opposite of holding it for them. Those
+    // wait where they are until the reader sends them by hand.
+    //
+    // A chat waiting on a task it sent away has finished its turn: that state
+    // is only ever reached once the reply is over (status::resolve). What it
+    // is waiting for is its own background work, which the held message is not
+    // behind and cannot be hurt by, so the queue drains here too. Holding on
+    // past the end of the reply is what left a message waiting on work nobody
+    // asked it to wait for (bw-ekpt.2).
+    if session.state != "idle" && session.state != "waiting_for_agents" {
         return;
     }
     let Ok(Some(held)) = database.take_held(session_id.to_string(), None).await else {
@@ -2222,6 +2229,53 @@ mod tests {
                 .count(),
             2,
             "the queue says both messages left it"
+        );
+    }
+
+    /// bw-ekpt.2: the queue drains when the reply ends, not when the last
+    /// task the reply sent away ends.
+    ///
+    /// `waiting_for_agents` is only ever reached once the reply is over, so a
+    /// message waiting behind that reply has nothing left to wait for. A chat
+    /// that lost its turn is the other way round, and still keeps what was
+    /// written until the reader sends it by hand.
+    #[tokio::test]
+    async fn a_waiting_message_goes_out_while_a_sent_away_task_is_still_running() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let registry = WorkbenchRegistry::new(
+            database.clone(),
+            paths(root.path()),
+            Arc::new(OneDriverFactory {
+                driver: std::sync::Mutex::new(Some(Box::new(RecordingDriver { sent: sent.clone() }))),
+            }),
+        );
+        database.create_session(a_chat("thinking")).await.unwrap();
+        registry
+            .execute(&command(CommandKind::SessionStart, json!({"sessionId":"session-1","brand":"claude"})))
+            .await
+            .unwrap();
+        say_state(&database, "thinking").await;
+        registry
+            .execute(&command(CommandKind::PromptHold, json!({"sessionId":"session-1","text":"one more thing"})))
+            .await
+            .unwrap();
+
+        // Lost its turn: what was written stays where it is.
+        say_state(&database, "stopped").await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            sent.lock().unwrap().is_empty(),
+            "a chat that lost its turn does not have the reader's next message pushed into it"
+        );
+
+        say_state(&database, "waiting_for_agents").await;
+        until_nothing_waits(&database).await;
+        assert_eq!(
+            *sent.lock().unwrap(),
+            vec!["one more thing".to_string()],
+            "the reply is over, so the message goes, though a task it started is still running"
         );
     }
 
