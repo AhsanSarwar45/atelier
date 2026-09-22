@@ -230,45 +230,12 @@ pub async fn deliver(db: &Database, http: &reqwest::Client, note: &Note) -> Resu
     Ok(sent)
 }
 
-/// A chat stopped for the owner: the front end's `waitsOnYou`, in Rust.
-fn waits_on_you(state: &str) -> bool {
-    matches!(state, "waiting_permission" | "errored")
-}
-
-/// A chat that finished and is worth reading, rather than one merely working.
-fn is_an_update(state: &str) -> bool {
-    matches!(state, "idle" | "stopped")
-}
-
-/// The words the bell would use, so a phone and the page say the same thing.
-fn wording(state: &str) -> &'static str {
-    match state {
-        "waiting_permission" => "permission to use a tool",
-        "errored" => "it stopped with an error",
-        _ => "Ready to read",
-    }
-}
-
-/// Percent-encode one id for a query string. The ids are slugs and uuids in
-/// practice, but a title-derived id would otherwise break the link.
-fn encoded(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(byte as char),
-            other => out.push_str(&format!("%{other:02X}")),
-        }
-    }
-    out
-}
-
-fn chat_href(project_id: &str, session_id: &str) -> String {
-    format!(
-        "/project?id={}&tab=chat&chat={}",
-        encoded(project_id),
-        encoded(session_id)
-    )
-}
+/// The words a chat is announced in live in one place now, shared with the
+/// tray that says the same things on screen (`workbench::notice`). They were
+/// written out twice, once here and once in the page's own TypeScript, and two
+/// copies of "what is worth saying about a chat" could drift apart without
+/// anything failing (bw-altj).
+use crate::workbench::notice::{chat_href, is_an_update, waits_on_you, wording};
 
 /// Watch every chat's state and push what the open page would have drawn.
 ///

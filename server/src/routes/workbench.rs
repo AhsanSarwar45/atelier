@@ -942,6 +942,7 @@ pub fn router(state: WorkbenchState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/sessions", get(sessions))
+        .route("/notifications", get(notifications))
         .route("/restore", get(restore))
         .route("/session/:id", get(session))
         .route("/search", get(search))
@@ -1238,6 +1239,39 @@ async fn beads_for_chat(
 #[derive(Deserialize)]
 struct SessionsQuery {
     project: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NotificationsQuery {
+    /// Test projects are hidden for the same reason the project list hides
+    /// them, and shown here on the same terms: a case proving this endpoint
+    /// has any business naming them.
+    include_test: Option<bool>,
+}
+
+/// Everything the app has to say to its owner right now.
+///
+/// The whole answer, settled here: which chats are worth a row, which project
+/// each belongs to by name, and what has already been read. The page used to
+/// work this out itself from a list of chats and a separate list of projects,
+/// which is why a chat whose project had been deleted drew a permanent row
+/// reading "Unknown project" that no amount of clearing removed (bw-altj).
+async fn notifications(
+    State(state): State<WorkbenchState>,
+    Query(query): Query<NotificationsQuery>,
+) -> Result<Json<Vec<crate::workbench::notice::Row>>, ApiError> {
+    let projects = state.projects.as_ref().ok_or_else(|| {
+        ApiError::unavailable("this server has no project list to name chats against".to_string())
+    })?;
+    Ok(Json(
+        crate::workbench::notice::worth_saying(
+            state.database(),
+            projects,
+            query.include_test.unwrap_or(false),
+        )
+        .await?,
+    ))
 }
 
 async fn sessions(
@@ -2692,6 +2726,154 @@ mod tests {
         };
         let registry = WorkbenchRegistry::new(database, paths, Arc::new(UnavailableFactory));
         (directory, WorkbenchState::new(registry))
+    }
+
+    /// The same fixture with a project list behind it, which is what naming a
+    /// chat's project needs.
+    fn fixture_with_projects() -> (tempfile::TempDir, WorkbenchState, Arc<crate::db::Database>) {
+        let (directory, state) = fixture();
+        let projects = Arc::new(crate::db::Database::new_in_memory().unwrap());
+        (directory, state.with_projects(Arc::clone(&projects)), projects)
+    }
+
+    fn a_project(projects: &crate::db::Database, name: &str) -> String {
+        projects
+            .create_project(crate::db::CreateProjectInput {
+                name: name.to_string(),
+                path: format!("/work/{name}"),
+                local_path: None,
+                is_test: false,
+            })
+            .unwrap()
+            .id
+    }
+
+    fn a_chat(id: &str, project_id: &str, state: &str) -> Session {
+        Session {
+            id: id.into(),
+            project_id: project_id.into(),
+            state: state.into(),
+            title: Some(format!("Chat {id}")),
+            // One chat per row, each its own: the saved fixture carries a
+            // provider id, and a brand may only claim one of those once.
+            external_id: None,
+            ..saved_session()
+        }
+    }
+
+    async fn asked_for_notifications(state: WorkbenchState, query: &str) -> Vec<Value> {
+        let response = router(state)
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(format!("/notifications{query}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap()
+    }
+
+    /// The tray is told what to draw, rather than working it out.
+    ///
+    /// Chats wanting an answer come above chats merely finished, and each row
+    /// arrives already carrying the name of its project — the join the page
+    /// used to attempt for itself, against a list it fetched separately.
+    #[tokio::test]
+    async fn the_server_says_which_chats_are_worth_a_row_and_names_their_project() {
+        let (_directory, state, projects) = fixture_with_projects();
+        let project = a_project(&projects, "Keystone");
+        for chat in [
+            a_chat("finished", &project, "idle"),
+            a_chat("asking", &project, "waiting_permission"),
+            // Working is not news: nothing is waiting on the owner yet.
+            a_chat("busy", &project, "streaming"),
+        ] {
+            state.database().create_session(chat).await.unwrap();
+        }
+
+        let rows = asked_for_notifications(state, "").await;
+
+        let ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["asking", "finished"], "a chat merely working was announced, or the order was wrong");
+        assert_eq!(rows[0]["needsAction"], true);
+        assert_eq!(rows[0]["says"], "permission to use a tool");
+        assert_eq!(rows[0]["projectName"], "Keystone");
+        assert_eq!(rows[1]["needsAction"], false);
+        assert_eq!(rows[1]["says"], "Ready to read");
+        assert_eq!(rows[1]["projectName"], "Keystone");
+    }
+
+    /// The rows the owner complained about: chats pointing at a project that
+    /// is not there any more.
+    ///
+    /// They drew as "Unknown project" and never went away, because nothing
+    /// deletes a chat when its project goes and the page had no way to tell the
+    /// difference between a name it had not fetched yet and a name that does
+    /// not exist (bw-altj). A project the owner has archived counts the same:
+    /// he has said he is not working there.
+    #[tokio::test]
+    async fn a_chat_whose_project_is_gone_or_put_away_is_never_announced() {
+        let (_directory, state, projects) = fixture_with_projects();
+        let live = a_project(&projects, "Keystone");
+        let deleted = a_project(&projects, "Gone");
+        let archived = a_project(&projects, "Put away");
+        projects.delete_project(&deleted).unwrap();
+        projects.archive_project(&archived).unwrap();
+
+        for (id, project) in [("kept", &live), ("orphan", &deleted), ("shelved", &archived)] {
+            state
+                .database()
+                .create_session(a_chat(id, project, "errored"))
+                .await
+                .unwrap();
+        }
+
+        let rows = asked_for_notifications(state, "").await;
+
+        let ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["kept"], "a chat with no project to name was announced anyway");
+        assert!(
+            rows.iter().all(|r| r["projectName"].as_str().is_some_and(|n| !n.is_empty())),
+            "a row arrived without a project name"
+        );
+    }
+
+    /// A test project's chats are not the owner's news either, on the same
+    /// terms the project list itself hides them.
+    #[tokio::test]
+    async fn a_test_projects_chats_are_announced_only_when_asked_for() {
+        let (_directory, state, projects) = fixture_with_projects();
+        let fixture_project = projects
+            .create_project(crate::db::CreateProjectInput {
+                name: "e2e".into(),
+                path: "/work/e2e".into(),
+                local_path: None,
+                is_test: true,
+            })
+            .unwrap()
+            .id;
+        state
+            .database()
+            .create_session(a_chat("in-a-fixture", &fixture_project, "errored"))
+            .await
+            .unwrap();
+
+        assert!(
+            asked_for_notifications(state.clone(), "").await.is_empty(),
+            "a test fixture's chat reached the owner's tray"
+        );
+        assert_eq!(
+            asked_for_notifications(state, "?includeTest=true").await.len(),
+            1,
+            "a case that asked for test projects was refused them"
+        );
     }
 
     fn saved_session() -> Session {
