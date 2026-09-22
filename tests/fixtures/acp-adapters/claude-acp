@@ -132,6 +132,33 @@ const REPLAY = {
   ],
 };
 
+/**
+ * A chat that holds more memory than it is allowed to. Set
+ * `BEADS_E2E_MEMORY_HOG` to a number of megabytes and `BEADS_E2E_MEMORY_MARKER`
+ * to a path, and the first agent started spawns a child that touches that much
+ * and keeps it. The child is deliberately a grandchild of the app rather than
+ * this process, because the claim being proved is that a chat is charged for
+ * everything below it, not only for the agent itself.
+ *
+ * The marker file makes it happen once. The agent this chat is restarted with
+ * must come back lean, or the limit would stop it again and again and the case
+ * could never read the transcript it is there to read (bw-qg8r.1).
+ */
+function holdTooMuchMemory() {
+  const megabytes = Number(process.env.BEADS_E2E_MEMORY_HOG ?? 0);
+  const marker = process.env.BEADS_E2E_MEMORY_MARKER;
+  if (!megabytes || !marker || existsSync(marker)) return;
+  writeFileSync(marker, String(process.pid));
+  const child = spawn(
+    process.execPath,
+    ['-e', `const held = Buffer.alloc(${megabytes} * 1024 * 1024, 7); setInterval(() => held[0]++, 1000);`],
+    { stdio: 'ignore', detached: false },
+  );
+  child.unref();
+}
+
+holdTooMuchMemory();
+
 function say(message) {
   process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
 }
