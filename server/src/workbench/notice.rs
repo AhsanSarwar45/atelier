@@ -145,3 +145,46 @@ pub async fn worth_saying(
     rows.sort_by_key(|row| !row.needs_action);
     Ok(rows)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The vocabulary itself, which the route cases cannot exercise.
+    ///
+    /// A chat waiting on permission is an ACTIVE state (`status::ACTIVE_STATES`),
+    /// so a fixture holding one is reconciled to `dormant` within five seconds
+    /// by a registry with no driver attached. That is right for the app and
+    /// wrong for a test bed, so what each state means is settled here instead,
+    /// where no clock can reach it.
+    #[test]
+    fn what_each_state_is_worth_saying_about() {
+        for state in ["waiting_permission", "errored"] {
+            assert!(waits_on_you(state), "{state} did not read as waiting on the owner");
+            assert!(worth_announcing(state));
+            assert!(!is_an_update(state));
+        }
+        for state in ["idle", "stopped"] {
+            assert!(is_an_update(state), "{state} did not read as finished");
+            assert!(worth_announcing(state));
+            assert!(!waits_on_you(state));
+        }
+        // Working is not news, and neither is asleep.
+        for state in ["thinking", "streaming", "running_tool", "starting", "dormant"] {
+            assert!(!worth_announcing(state), "{state} was announced while nothing waited");
+        }
+
+        assert_eq!(wording("waiting_permission"), "permission to use a tool");
+        assert_eq!(wording("errored"), "it stopped with an error");
+        assert_eq!(wording("idle"), "Ready to read");
+    }
+
+    /// A link a chat can actually be opened by, whatever its id is made of.
+    #[test]
+    fn the_link_survives_an_id_that_is_not_a_slug() {
+        assert_eq!(
+            chat_href("project one", "chat/1"),
+            "/project?id=project%20one&tab=chat&chat=chat%2F1"
+        );
+    }
+}

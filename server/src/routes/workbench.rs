@@ -943,6 +943,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/health", get(health))
         .route("/sessions", get(sessions))
         .route("/notifications", get(notifications))
+        .route("/notifications/read", post(notifications_read))
         .route("/restore", get(restore))
         .route("/session/:id", get(session))
         .route("/search", get(search))
@@ -1272,6 +1273,46 @@ async fn notifications(
         )
         .await?,
     ))
+}
+
+/// One chat the owner says he has read, in the state he read it in.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadChat {
+    id: String,
+    state: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadRequest {
+    chats: Vec<ReadChat>,
+}
+
+/// The owner has read these, in the states they were in when he read them.
+///
+/// The state travels with each chat rather than being looked up here, so that
+/// what gets written down is what he actually saw. A chat that moved on between
+/// the tray drawing it and his thumb landing is then still unread — which is
+/// the safe way to be wrong, because the alternative silences something he was
+/// never shown.
+async fn notifications_read(
+    State(state): State<WorkbenchState>,
+    Json(request): Json<ReadRequest>,
+) -> Result<StatusCode, ApiError> {
+    let at = chrono::Utc::now().to_rfc3339();
+    state
+        .database()
+        .mark_read(
+            request
+                .chats
+                .into_iter()
+                .map(|chat| (chat.id, chat.state))
+                .collect(),
+            at,
+        )
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn sessions(
@@ -2748,6 +2789,15 @@ mod tests {
             .id
     }
 
+    /// A chat in a state that stays put.
+    ///
+    /// Only `errored`, `idle` and `stopped` are safe to build a case on here.
+    /// The registry sweeps every ACTIVE state every five seconds and puts any
+    /// chat with no driver attached to sleep — right for the app, and fatal for
+    /// a fixture, because `waiting_permission` silently became `dormant`
+    /// part-way through a case and the row under test stopped being worth
+    /// announcing. What those states MEAN is proved in `workbench::notice`,
+    /// where no clock can reach it.
     fn a_chat(id: &str, project_id: &str, state: &str) -> Session {
         Session {
             id: id.into(),
@@ -2791,7 +2841,7 @@ mod tests {
         let project = a_project(&projects, "Keystone");
         for chat in [
             a_chat("finished", &project, "idle"),
-            a_chat("asking", &project, "waiting_permission"),
+            a_chat("asking", &project, "errored"),
             // Working is not news: nothing is waiting on the owner yet.
             a_chat("busy", &project, "streaming"),
         ] {
@@ -2803,7 +2853,7 @@ mod tests {
         let ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert_eq!(ids, ["asking", "finished"], "a chat merely working was announced, or the order was wrong");
         assert_eq!(rows[0]["needsAction"], true);
-        assert_eq!(rows[0]["says"], "permission to use a tool");
+        assert_eq!(rows[0]["says"], "it stopped with an error");
         assert_eq!(rows[0]["projectName"], "Keystone");
         assert_eq!(rows[1]["needsAction"], false);
         assert_eq!(rows[1]["says"], "Ready to read");
@@ -2859,7 +2909,7 @@ mod tests {
         let project = a_project(&projects, "Keystone");
         for chat in [
             a_chat("read-and-unchanged", &project, "errored"),
-            a_chat("read-but-moved-on", &project, "waiting_permission"),
+            a_chat("read-but-moved-on", &project, "stopped"),
             a_chat("only-announced", &project, "errored"),
         ] {
             state.database().create_session(chat).await.unwrap();
@@ -2869,8 +2919,8 @@ mod tests {
             .mark_read(
                 vec![
                     ("read-and-unchanged".to_string(), "errored".to_string()),
-                    // Read back when it was merely finished; it has since gone
-                    // on to want permission, which is a new thing to say.
+                    // Read back when it was still working; it has since stopped,
+                    // which is a new thing to say about a chat already read.
                     ("read-but-moved-on".to_string(), "idle".to_string()),
                 ],
                 "2026-09-22T00:00:00Z".to_string(),
@@ -2896,6 +2946,79 @@ mod tests {
             ids,
             ["only-announced", "read-but-moved-on"],
             "the wrong chats were announced: a chat already read came back, or one with something new to say was swallowed"
+        );
+    }
+
+    async fn cleared(state: WorkbenchState, chats: Value) -> StatusCode {
+        router(state)
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(axum::http::Method::POST)
+                    .uri("/notifications/read")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(json!({"chats": chats}).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    }
+
+    /// Clearing the tray goes to the server, and sticks.
+    ///
+    /// The whole round trip the browser used to do by itself in its own
+    /// storage: press clear, and the rows are gone from what the server offers
+    /// — to this browser and to every other one, and to the next tab this
+    /// phone builds after it throws the current one away (bw-altj).
+    #[tokio::test]
+    async fn clearing_the_tray_is_remembered_and_lasts_until_the_chat_moves_on() {
+        let (_directory, state, projects) = fixture_with_projects();
+        let project = a_project(&projects, "Keystone");
+        for chat in [
+            a_chat("asking", &project, "errored"),
+            a_chat("finished", &project, "idle"),
+        ] {
+            state.database().create_session(chat).await.unwrap();
+        }
+        assert_eq!(asked_for_notifications(state.clone(), "").await.len(), 2);
+
+        let answer = cleared(
+            state.clone(),
+            json!([
+                {"id": "asking", "state": "errored"},
+                {"id": "finished", "state": "idle"}
+            ]),
+        )
+        .await;
+        assert_eq!(answer, StatusCode::NO_CONTENT);
+
+        assert!(
+            asked_for_notifications(state.clone(), "").await.is_empty(),
+            "a cleared tray still had something to say"
+        );
+
+        // The chat that had stopped with an error has since been stopped
+        // outright. That is a new thing to say about a chat already read, so it
+        // comes back — clearing means "I have read this, as it stands", never
+        // "never mention this chat again".
+        state
+            .database()
+            .update_session(
+                "asking".to_string(),
+                crate::workbench::store::SessionPatch {
+                    state: Some("stopped".to_string()),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await
+            .unwrap();
+
+        let rows = asked_for_notifications(state, "").await;
+        let ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert_eq!(
+            ids, ["asking"],
+            "a cleared chat did not come back when it went on to say something else"
         );
     }
 
