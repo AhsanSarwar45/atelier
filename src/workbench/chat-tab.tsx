@@ -110,7 +110,7 @@ import { WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
 import { CHIP_GAP, ModeMark, modelName, modelWords, modeWords } from '@/workbench/what-it-runs';
-import { isBusy, readAndKeep, sendCommand, useSession, useSessionFactsRead, type TranscriptItem } from '@/workbench/use-session';
+import { isBusy, isMidTurn, readAndKeep, sendCommand, useSession, useSessionFactsRead, type TranscriptItem } from '@/workbench/use-session';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import { BrandIcon, ProfileBadge, brandName } from '@/workbench/brand-icon';
 import { workingLine } from '@/workbench/working-line';
@@ -960,13 +960,18 @@ function ComposerBody({
 function SendButtons({
   sessionId,
   blocked,
-  busy,
+  midTurn,
   onSend,
   onHold,
 }: {
   sessionId: string;
   blocked: boolean;
-  busy: boolean;
+  /**
+   * Whether the reply is still being written — not whether the chat has
+   * anything at all in flight. Send now and Queue only mean something while
+   * there is a turn to send into or wait behind (bw-ekpt.1).
+   */
+  midTurn: boolean;
   onSend: () => void;
   onHold: () => void;
 }) {
@@ -978,7 +983,7 @@ function SendButtons({
   const sendable = useTypedSomething(sessionId) && !blocked;
   return (
     <>
-      {busy && sendable && (
+      {midTurn && sendable && (
         <Tooltip label="Send now, into the turn that is running (Ctrl/Cmd + Enter)">
           <Button
             variant="outline"
@@ -993,7 +998,7 @@ function SendButtons({
           </Button>
         </Tooltip>
       )}
-      {busy && sendable && (
+      {midTurn && sendable && (
         <Tooltip label="Hold it until this turn is over (Enter)">
           <Button
             variant="primary"
@@ -1008,7 +1013,7 @@ function SendButtons({
           </Button>
         </Tooltip>
       )}
-      {!busy && (
+      {!midTurn && (
         <Button
           variant="primary"
           mode="icon"
@@ -1645,6 +1650,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   }, [sessionId]);
 
   const busy = isBusy(view.state);
+  /**
+   * Whether the reply itself is still being written. The writing box reads
+   * this and not `busy`: a task the agent sent away keeps `busy` true after
+   * the reply is over, and holding the reader's next message for work nobody
+   * is waiting on is what made a finished chat feel occupied (bw-ekpt.1).
+   */
+  const midTurn = isMidTurn(view.state);
   /** No agent attached: it is drawn, and the first message is what wakes it. */
   const asleep = view.state === 'dormant';
 
@@ -1893,9 +1905,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     }
     if (enterSubmits(e)) {
       // One key, one meaning: give it to the chat if the chat is free, and
-      // hold it if it is working. Nothing the reader types is ever thrown at
-      // a turn in progress unless they asked for that.
-      void (busy ? hold() : submit());
+      // hold it if a reply is still being written. Nothing the reader types is
+      // ever thrown at a turn in progress unless they asked for that — but a
+      // task the agent sent away is not a turn in progress, and does not hold
+      // anything back (bw-ekpt.1).
+      void (midTurn ? hold() : submit());
       return true;
     }
     return false;
@@ -2762,7 +2776,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             something they can still do. */}
         <HeldMessages
           held={view.held}
-          working={busy}
+          working={midTurn}
           busyId={heldWorking}
           onPush={(message) => void pushHeld(message)}
           onEdit={(message) => void editHeld(message)}
@@ -3019,7 +3033,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             <SendButtons
               sessionId={chatId}
               blocked={cannotSend}
-              busy={busy}
+              midTurn={midTurn}
               onSend={() => void submit()}
               onHold={() => void hold()}
             />

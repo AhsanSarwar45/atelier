@@ -428,14 +428,33 @@ export function useSession(sessionId: string | null): LoadedSessionView {
 }
 
 /**
+ * True while the reply itself is still being written — the writing box's
+ * condition.
+ *
+ * This is the narrower of the two: it is the states in which a message typed
+ * now would land in the middle of a turn, which is the only reason to hold one
+ * back. `waiting_for_agents` is deliberately not among them. That state means
+ * the reply is over and only a task it sent away is still going (status.rs,
+ * `resolve`), so there is no turn to cut into and nothing to wait for — the
+ * chat takes the message straight away (bw-ekpt.1).
+ *
+ * A chat folding itself up is mid-turn: the fold happens inside a turn the
+ * agent will carry on with afterwards.
+ */
+export function isMidTurn(state: SessionState): boolean {
+  return state === 'thinking' || state === 'streaming' || state === 'running_tool' || state === 'waiting_permission' || state === 'summarising';
+}
+
+/**
  * True while the agent owes an answer — the Stop button's condition.
  *
- * A chat folding itself up owes one too: the fold happens inside a turn the
- * agent will carry on with afterwards, and this is the clock the measured bar
- * counts from, so leaving it out drew the word with no bar under it (bw-ryh3.1).
+ * Wider than `isMidTurn` by the one state where work is still going but the
+ * reply is not: a task sent away outlives the turn that started it, and Stop
+ * has to stay on offer for it. The clock and the status line count from here
+ * too, so leaving the fold out drew the word with no bar under it (bw-ryh3.1).
  */
 export function isBusy(state: SessionState): boolean {
-  return state === 'thinking' || state === 'streaming' || state === 'waiting_for_agents' || state === 'running_tool' || state === 'waiting_permission' || state === 'summarising';
+  return isMidTurn(state) || state === 'waiting_for_agents';
 }
 
 /**

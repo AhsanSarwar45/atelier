@@ -17,11 +17,12 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { HeldMessage } from '@/workbench/protocol';
+import type { HeldMessage, SessionState } from '@/workbench/protocol';
 
-const { answering, held } = vi.hoisted(() => ({
+const { answering, held, chatState } = vi.hoisted(() => ({
   answering: vi.fn(),
   held: { current: [] as HeldMessage[] },
+  chatState: { current: 'thinking' as SessionState },
 }));
 
 vi.mock('next/navigation', () => ({
@@ -38,8 +39,8 @@ vi.mock('@/workbench/use-session', async (real) => {
     sendCommand: answering,
     useSession: () => ({
       ...EMPTY,
-      state: 'thinking' as const,
-      stateLabel: 'Thinking',
+      state: chatState.current,
+      stateLabel: chatState.current === 'thinking' ? 'Thinking' : null,
       held: held.current,
       loadOlder: null,
     }),
@@ -104,6 +105,7 @@ beforeEach(() => {
   // one case's typing into the next one's empty box.
   localStorage.clear();
   held.current = [];
+  chatState.current = 'thinking';
   answering.mockReset();
   answering.mockImplementation(async () => ({ model: null, effort: null }));
   vi.stubGlobal('WebSocket', class {
@@ -259,5 +261,48 @@ describe('the queue a chat is opened on', () => {
       reason: 'sent',
     });
     expect(sent.held.map((message) => message.id)).toEqual(['held-2']);
+  });
+});
+
+/**
+ * The reply is over and only a task the agent sent away is still going
+ * (bw-ekpt.1).
+ *
+ * The chat is not mid-turn here, so there is nothing for a message to be
+ * thrown into and nothing for it to wait behind: the box takes it as it would
+ * at rest. Stop stays, because the task that is still going can be stopped.
+ * Before this, the one word "busy" covered both this state and a reply being
+ * written, so typing here queued the message behind work nobody was waiting on.
+ */
+describe('a chat whose reply is done, with a task of its own still running', () => {
+  it('offers Send, not Queue and Send now, and still offers Stop', async () => {
+    chatState.current = 'waiting_for_agents';
+
+    await aWorkingChat('one more thing');
+
+    expect(screen.getByTestId('send-button')).toBeInTheDocument();
+    expect(screen.getByTestId('stop-button')).toBeInTheDocument();
+    expect(screen.queryByTestId('queue-button')).toBeNull();
+    expect(screen.queryByTestId('send-now-button')).toBeNull();
+  });
+
+  it('sends on Enter instead of holding', async () => {
+    chatState.current = 'waiting_for_agents';
+
+    const box = await aWorkingChat('one more thing');
+    fireEvent.keyDown(box, { key: 'Enter' });
+    await act(async () => {});
+
+    expect(asked('prompt.send')).toHaveLength(1);
+    expect(asked('prompt.hold')).toEqual([]);
+  });
+
+  it('tells a message already waiting that it is going now, not when the turn ends', async () => {
+    chatState.current = 'waiting_for_agents';
+    held.current = [aWaitingMessage('first thing')];
+
+    await aWorkingChat();
+
+    expect(screen.getAllByTestId('held-message')[0]).toHaveTextContent('Sending now');
   });
 });
