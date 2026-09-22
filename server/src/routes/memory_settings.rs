@@ -79,7 +79,10 @@ async fn write(
 ) -> Result<Json<MemorySettings>, Refusal> {
     let stored = match asked.limit_gb {
         None => None,
-        Some(gb) if sane(&gb) => Some(trimmed_number(gb)),
+        // Display already writes 8.0 as "8" and 4.5 as "4.5", so what is
+        // stored reads the way it was typed without any trimming of its own.
+        // Trimming zeros here turned 10 into 1 (bw-qg8r.1).
+        Some(gb) if sane(&gb) => Some(format!("{gb}")),
         Some(gb) => {
             return Err((
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -96,12 +99,6 @@ async fn write(
 
 fn unreadable(what: &str, why: impl std::fmt::Display) -> Refusal {
     (StatusCode::INTERNAL_SERVER_ERROR, format!("{what}: {why}"))
-}
-
-/// `8` rather than `8.0`, so what is stored reads the way it was typed.
-fn trimmed_number(gb: f64) -> String {
-    let text = format!("{gb}");
-    text.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 /// The routes, behind the guard the settings next door wear.
@@ -194,6 +191,25 @@ mod tests {
         }
         let (_, answer) = ask(&browser(&db), Method::GET, None).await;
         assert_eq!(answer, json!({ "limitGb": 8.0 }));
+    }
+
+    /// A round limit is not a tenth of itself. Stripping trailing zeros to
+    /// keep `8` from reading `8.0` turned `10` into `1`, and every chat was
+    /// then held to a gigabyte nobody asked for (bw-qg8r.1).
+    #[tokio::test]
+    async fn a_round_limit_keeps_every_digit_it_was_given() {
+        let db: AppState = Arc::new(Database::new_in_memory().unwrap());
+        for (asked, stored) in [(10.0, "10"), (20.0, "20"), (100.0, "100"), (4.5, "4.5")] {
+            let (status, answer) =
+                ask(&browser(&db), Method::PUT, Some(json!({"limitGb": asked}))).await;
+            assert_eq!(status, StatusCode::OK, "{answer}");
+            assert_eq!(answer, json!({ "limitGb": asked }));
+            assert_eq!(db.setting(LIMIT_GB).unwrap().as_deref(), Some(stored));
+            assert_eq!(
+                limit_bytes(&db).unwrap(),
+                Some((asked * 1024.0 * 1024.0 * 1024.0) as u64)
+            );
+        }
     }
 
     /// A limit written by a build that allowed more than this one does is not
