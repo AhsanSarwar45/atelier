@@ -1,0 +1,4 @@
+- mid-reply (thinking): the row holds stop-button, queue-button, send-now-button
+- mid-reply (thinking): Enter asked for prompt.hold
+- reply-over-task-still-running (waiting_for_agents): the row holds stop-button, send-button
+- reply-over-task-still-running (waiting_for_agents): Enter asked for prompt.send
