@@ -59,14 +59,19 @@ options for new, epic and upgrade:
   --parent ID        file this job under an existing card
   --steps LIST       legacy review requirements; no generated step tickets
   --judge NAME       who approves before landing (default: agent)",
-        "board/land" => "usage: atelier tool board/land CARD-ID
+        "board/land" => "usage: atelier tool board/land CARD-ID [--checks-unrelated REASON]
 
 Rebases the card's branch onto the landing branch, takes the merge slot,
 fast-forwards the landing branch and releases the slot, then closes the work
 items the landed commits name. Run it from the card's own worktree.
 
 Safe to run twice: if the commits already landed it says so and finishes the
-close. The actor is BEADS_ACTOR, or the Git user; another actor cannot land owned work.",
+close. The actor is BEADS_ACTOR, or the Git user; another actor cannot land owned work.
+
+  --checks-unrelated REASON
+                     land although a declared suite failed, saying why the
+                     failures are not this work. The reason is recorded on the
+                     card. Failures this work caused are fixed, not waived.",
         "board/reconcile" => "usage: atelier tool board/reconcile [--apply] [--legacy] [--retire-steps]\n\nDry-run by default. Recover interrupted landings, derive parents, and complete historical workflow subtasks with delivered work, and optionally audit explicit legacy commit headers.",
         "board/status" => "usage: atelier tool board/status [CARD-ID]\n\nPrint stored and recursively derived status, including hierarchy errors.",
         "board/cleanup" => "usage: atelier tool board/cleanup JOB-ID [--force]\n\nRemove a completed, merged job worktree. --force preserves untracked files in a common-Git archive before removal; tracked changes are always refused. Run outside the job copy.",
@@ -110,7 +115,7 @@ pub(crate) fn flag(rest: &[String], name: &str) -> Option<String> {
         .or_else(|| rest.iter().find_map(|word| word.strip_prefix(&format!("{name}=")).map(str::to_string)))
 }
 
-fn flags(rest: &[String], name: &str) -> Vec<String> {
+pub(crate) fn flags(rest: &[String], name: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut words = rest.iter();
     while let Some(word) = words.next() {

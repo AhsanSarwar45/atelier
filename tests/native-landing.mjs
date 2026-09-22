@@ -66,9 +66,22 @@ make('ld-one'); const one = copy('ld-one'); bd(one, 'update', 'ld-one', '--claim
 commit(one, 'ld-one', 'not-delivered.txt');
 const raw = spawnSync('git', ['update-ref','refs/heads/main',git(one,'rev-parse','HEAD')], {cwd:repo,env,encoding:'utf8'});
 assert.notEqual(raw.status, 0); assert.match(raw.stderr, /No prepared landing transaction/);
-fails(one, ['board/land', 'ld-one'], /checks failed/);
+fails(one, ['board/land', 'ld-one'], /fix them and land again[\s\S]*--checks-unrelated/);
 assert.equal(row(repo, 'ld-one').status, 'in_progress');
 assert.notEqual(git(one, 'rev-parse', 'HEAD'), git(repo, 'rev-parse', 'main'));
+
+// The other half of that refusal: work the red suite does not belong to says so
+// and lands, while the failure itself stays recorded as a failure.
+make('ld-waived'); const waived = copy('ld-waived'); bd(waived, 'update', 'ld-waived', '--claim');
+commit(waived, 'ld-waived', 'waived.txt');
+fails(waived, ['board/land', 'ld-waived'], /--checks-unrelated/);
+fails(waived, ['board/land', 'ld-waived', '--checks-unrelated', '  '], /needs the reason/);
+tool(waived, 'board/land', 'ld-waived', '--checks-unrelated', 'ld-one has not delivered delivered.txt yet');
+assert.equal(row(repo, 'ld-waived').status, 'closed');
+assert.equal(row(repo, 'ld-waived').metadata.checks_waived_reason, 'ld-one has not delivered delivered.txt yet');
+assert.equal(String(row(repo, 'ld-waived').metadata.checks_passed), 'false', 'a waiver records the failure, it does not rewrite it');
+assert.equal(git(repo, 'rev-parse', 'main'), git(waived, 'rev-parse', 'HEAD'));
+console.log('PASS a failing suite names its own way past, and the waiver is recorded not laundered');
 commit(one, 'ld-one');
 tool(one, 'board/land', 'ld-one');
 assert.equal(row(repo, 'ld-one').status, 'closed');
@@ -175,6 +188,19 @@ assert.equal(row(repo, 'ld-dependent').status, 'in_progress');
 bd(dependent, 'dep', 'remove', 'ld-dependent', 'ld-dependency');
 tool(dependent, 'board/land', 'ld-dependent');
 console.log('PASS unresolved dependencies prevent landing until explicitly resolved');
+
+// A project that declares no suite has nothing to run: the tree here also drops
+// the file the old suite demanded, so only the empty list can explain landing.
+make('ld-nochecks'); const nochecks = copy('ld-nochecks'); bd(nochecks, 'update', 'ld-nochecks', '--claim');
+writeFileSync(join(nochecks, '.atelier/project.toml'), readFileSync(join(nochecks, '.atelier/project.toml'), 'utf8')
+  .replace(/\[\[verification.commands\]\][\s\S]*$/, ''));
+git(nochecks, 'rm', '-q', 'delivered.txt'); git(nochecks, 'add', '.atelier/project.toml');
+git(nochecks, 'commit', '-qm', 'ld-nochecks: this project declares no verification suite');
+fails(nochecks, ['checks', 'ld-nochecks'], /declares no verification commands/);
+tool(nochecks, 'board/land', 'ld-nochecks');
+assert.equal(row(repo, 'ld-nochecks').status, 'closed');
+assert.equal(git(repo, 'rev-parse', 'main'), git(nochecks, 'rev-parse', 'HEAD'));
+console.log('PASS an empty verification list lands with no check step at all');
 
 tool(repo, 'board/cleanup', 'ld-job');
 assert(!git(repo, 'worktree', 'list').includes('worktrees/ld-job'));

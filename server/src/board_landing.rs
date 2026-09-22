@@ -261,6 +261,12 @@ struct Landing {
     actor: String,
     cards: Vec<String>,
     complete: bool,
+    /// Why this landing carries no passing-check evidence: an empty
+    /// verification list, or failures the work did not cause. The gate reads
+    /// the journal rather than the manifest, whose working tree is the one a
+    /// fast-forward is busy moving.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    waived: Option<String>,
 }
 fn journal_dir(root: &Path) -> Result<PathBuf, String> {
     let path = git(root, &["rev-parse", "--git-common-dir"])?;
@@ -372,7 +378,9 @@ pub fn reference_transaction(phase: &str, input: &str) -> Result<i32, String> {
                     prerequisites(&work, id, &record.cards)?;
                     verified |= current_proof(&row, "checks", &record.tree);
                 }
-                if !verified { return Err("No passing checks for this landing tree".into()); }
+                if !verified && record.waived.is_none() {
+                    return Err("No passing checks for this landing tree".into());
+                }
                 authorized = true;
                 break;
             }
@@ -450,8 +458,38 @@ fn prerequisites(root: &Path, id: &str, carried: &[String]) -> Result<(), String
     Ok(())
 }
 
+/// The card id is the first word that is neither a flag nor a flag's value: a
+/// reason that reads like an id must not be mistaken for the card.
+fn requested(rest: &[String]) -> (Option<String>, Option<String>) {
+    let mut id = None;
+    let mut words = rest.iter();
+    while let Some(word) = words.next() {
+        if word == "--checks-unrelated" {
+            words.next();
+        } else if !word.starts_with('-') && id.is_none() {
+            id = Some(word.clone());
+        }
+    }
+    (id, crate::board_tools::flags(rest, "--checks-unrelated").pop())
+}
+
+/// The refusal an agent reads when a suite fails. It has to answer the only
+/// question the agent now has: is this mine to fix, or mine to explain?
+fn failing_checks(id: &str) -> String {
+    format!(
+        "Required checks failed; nothing landed.\n\
+         If the failures are this work's doing, fix them and land again.\n\
+         If they are not, land saying why:\n  \
+         atelier tool board/land {id} --checks-unrelated 'why these failures are not this work'"
+    )
+}
+
 pub fn land(rest: &[String]) -> Result<i32, String> {
-    let id = rest.first().ok_or("board/land needs a card id")?;
+    let (asked, waiver) = requested(rest);
+    let id = &asked.ok_or("board/land needs a card id")?;
+    if waiver.as_ref().is_some_and(|reason| reason.trim().is_empty()) {
+        return Err("--checks-unrelated needs the reason the failures are not this work".into());
+    }
     if !id
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.'))
@@ -543,11 +581,24 @@ pub fn land(rest: &[String]) -> Result<i32, String> {
         let current = card(&work, id)?;
         let checked_suites: Vec<String> = current["metadata"]["checks_suites"].as_str()
             .and_then(|text| serde_json::from_str(text).ok()).unwrap_or_default();
-        if !current_proof(&current, "checks", &tree)
-            || !settings.verification.commands.iter().all(|suite| checked_suites.contains(&suite.name)) {
-            if checks(&[id.clone(), "--all".into()])? != 0 {
-                return Err("Required checks failed; nothing landed".into());
-            }
+        // Nothing declared is nothing to run and nothing to prove: a project
+        // with an empty verification list would otherwise be refused forever,
+        // for want of evidence it has no way to produce.
+        let mut waived = None;
+        if settings.verification.commands.is_empty() {
+            waived = Some("the project declares no verification suite".to_string());
+        } else if (!current_proof(&current, "checks", &tree)
+            || !settings.verification.commands.iter().all(|suite| checked_suites.contains(&suite.name)))
+            && checks(&[id.clone(), "--all".into()])? != 0
+        {
+            let Some(reason) = waiver.clone() else {
+                return Err(failing_checks(id));
+            };
+            bd(&work, &["--actor".into(), caller.clone(), "comments".into(), "add".into(), id.clone(),
+                format!("checks waived for tree {tree}: {reason}")])?;
+            metadata(&work, id, &[("checks_waived_tree", tree.clone()), ("checks_waived_reason", reason.clone())])?;
+            eprintln!("Landing {id} although its checks failed: {reason}");
+            waived = Some(format!("failures this work did not cause: {reason}"));
         }
         if settings.review.external_review == "always" && !current_proof(&card(&work, id)?, "review", &tree) {
             return Err(format!("Project policy requires external review of {id} before landing"));
@@ -606,6 +657,7 @@ pub fn land(rest: &[String]) -> Result<i32, String> {
             actor: caller.clone(),
             cards: carried.clone(),
             complete: false,
+            waived,
         };
         save(&path, &record)?;
         let main = main_copy(&work, &landing)?;
@@ -993,6 +1045,43 @@ mod tests {
         assert!(!current_proof(&json!({}), "review", "two"));
     }
     #[test]
+    fn a_failing_suite_is_told_how_to_land_work_it_did_not_break() {
+        let said = failing_checks("bw-dvaw.2");
+        assert!(said.contains("fix them and land again"));
+        assert!(said.contains("atelier tool board/land bw-dvaw.2 --checks-unrelated"));
+    }
+    #[test]
+    fn a_reason_that_reads_like_a_card_id_is_not_taken_for_one() {
+        let rest: Vec<String> = ["bw-dvaw.2", "--checks-unrelated", "bw-other.9 was already red"]
+            .iter().map(|s| s.to_string()).collect();
+        let (id, waiver) = requested(&rest);
+        assert_eq!(id.as_deref(), Some("bw-dvaw.2"));
+        assert_eq!(waiver.as_deref(), Some("bw-other.9 was already red"));
+        assert_eq!(requested(&[]).0, None);
+    }
+    #[test]
+    fn a_waiver_travels_in_the_journal_and_older_records_still_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("journal.json");
+        let record = Landing {
+            version: 1,
+            branch: "main".into(),
+            tip: "abc".into(),
+            tree: "tree".into(),
+            actor: "session".into(),
+            cards: vec!["job.1".into()],
+            complete: false,
+            waived: Some("the red suite is another card's".into()),
+        };
+        save(&path, &record).unwrap();
+        let read: Landing = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(read.waived.as_deref(), Some("the red suite is another card's"));
+        let older = json!({"version":1,"branch":"main","tip":"abc","tree":"tree",
+            "actor":"session","cards":["job.1"],"complete":false});
+        let read: Landing = serde_json::from_value(older).unwrap();
+        assert_eq!(read.waived, None);
+    }
+    #[test]
     fn receipt_file_is_durable_and_retryable() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("journal.json");
@@ -1004,6 +1093,7 @@ mod tests {
             actor: "session".into(),
             cards: vec!["job.1".into()],
             complete: false,
+            waived: None,
         };
         save(&path, &record).unwrap();
         let read: Landing = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();

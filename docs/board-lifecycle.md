@@ -69,7 +69,13 @@ atelier tool board/land CARD-ID
 External review follows the project's policy; use the external-review skill
 when an independent review is required. The native lander runs missing checks,
 verifies required review and manager approval, rebases, acquires the merge slot,
-and fast-forwards main. A durable landing record closes every named deliverable
+and fast-forwards main. A project that declares no verification suite has no
+check step at all: nothing is run and nothing is demanded. A suite that fails
+refuses the landing and says which of the two answers it wants. Failures this
+work caused are fixed and landed again. Failures it did not cause land with
+`atelier tool board/land CARD-ID --checks-unrelated 'why they are not this
+work'`, which records the reason and the still-failing result on the card
+rather than turning it green. A durable landing record closes every named deliverable
 and updates its ancestors. Retry the same command if interrupted. Never manually
 close a deliverable instead of landing it. No-code labels do not fabricate a
 landing. Review findings remain evidence on the work; resolve them before land.
