@@ -24,6 +24,7 @@ pub mod mcp_catalogue;
 pub mod mcp_servers;
 pub mod media;
 pub mod memory;
+pub mod memory_limit;
 pub mod metadata;
 pub mod notice;
 pub mod plugin_catalogue;

@@ -193,6 +193,11 @@ impl WorkbenchState {
         swept.insert(cwd.to_path_buf(), now);
         true
     }
+    /// The registry itself, for the one watcher that acts on chats without a
+    /// browser asking it to (workbench/memory_limit.rs).
+    pub fn registry(&self) -> &Arc<WorkbenchRegistry> {
+        &self.registry
+    }
     pub fn database(&self) -> &ChatDb {
         self.registry.database()
     }

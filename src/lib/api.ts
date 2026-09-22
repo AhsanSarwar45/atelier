@@ -1536,6 +1536,29 @@ export async function saveSearchSettings(settings: SearchSettings): Promise<Sear
   return (await answer.json()) as SearchSettings;
 }
 
+export interface MemorySettings {
+  /** `null` is no limit, which is what an Atelier nobody has configured does. */
+  limitGb: number | null;
+}
+
+/** How much memory one chat may hold (server/src/routes/memory_settings.rs). */
+export async function memorySettings(): Promise<MemorySettings> {
+  const answer = await request('/api/settings/memory');
+  if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+  return (await answer.json()) as MemorySettings;
+}
+
+/** Set or clear the limit; answers what the server then holds. */
+export async function saveMemorySettings(settings: MemorySettings): Promise<MemorySettings> {
+  const answer = await request('/api/settings/memory', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+  return (await answer.json()) as MemorySettings;
+}
+
 /**
  * File Watcher.
  *

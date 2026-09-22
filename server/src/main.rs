@@ -522,6 +522,11 @@ async fn serve(open_browser: bool) {
     // operating system freezing it (push.rs).
     atelier::push::watch(database.clone(), workbench_state.clone());
 
+    // What stops a chat that has grown past the limit set for it, and tells it
+    // what it spent. Does nothing at all while no limit is set
+    // (workbench/memory_limit.rs).
+    workbench::memory_limit::watch(database.clone(), workbench_state.registry().clone());
+
     // Initialize Dolt connection manager. Local boards already backed by Dolt
     // are brought up through bd before the read-ahead can fall back to stale
     // JSONL, then checked for the rest of this process's lifetime.
@@ -629,6 +634,12 @@ async fn serve(open_browser: bool) {
         .nest(
             "/api",
             routes::search_settings::search_settings_routes().with_state(database.clone()),
+        )
+        // How much memory one chat may hold. Same table, same guard
+        // (routes/memory_settings.rs).
+        .nest(
+            "/api",
+            routes::memory_settings::memory_settings_routes().with_state(database.clone()),
         )
         // The version a person asked not to be told about again. Same table,
         // same guard (routes/update_settings.rs).
