@@ -2845,6 +2845,60 @@ mod tests {
         );
     }
 
+    /// What the owner has already read is not said to him again — but only for
+    /// as long as the chat has nothing new to say.
+    ///
+    /// The comparison is against the state the chat was READ in, never the id
+    /// alone: a chat dismissed while it wanted permission has to come back the
+    /// moment it stops with an error, or clearing once would silence it for
+    /// good. It also has to be the reading that counts and not the announcing,
+    /// which is why the two are separate columns (bw-altj.1).
+    #[tokio::test]
+    async fn a_chat_read_in_the_state_it_is_still_in_is_not_announced_again() {
+        let (_directory, state, projects) = fixture_with_projects();
+        let project = a_project(&projects, "Keystone");
+        for chat in [
+            a_chat("read-and-unchanged", &project, "errored"),
+            a_chat("read-but-moved-on", &project, "waiting_permission"),
+            a_chat("only-announced", &project, "errored"),
+        ] {
+            state.database().create_session(chat).await.unwrap();
+        }
+        state
+            .database()
+            .mark_read(
+                vec![
+                    ("read-and-unchanged".to_string(), "errored".to_string()),
+                    // Read back when it was merely finished; it has since gone
+                    // on to want permission, which is a new thing to say.
+                    ("read-but-moved-on".to_string(), "idle".to_string()),
+                ],
+                "2026-09-22T00:00:00Z".to_string(),
+            )
+            .await
+            .unwrap();
+        // Telling a phone about a chat is not the owner having read it.
+        state
+            .database()
+            .mark_announced(
+                "only-announced".to_string(),
+                "errored".to_string(),
+                "2026-09-22T00:00:00Z".to_string(),
+            )
+            .await
+            .unwrap();
+
+        let rows = asked_for_notifications(state, "").await;
+
+        let mut ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
+        ids.sort_unstable();
+        assert_eq!(
+            ids,
+            ["only-announced", "read-but-moved-on"],
+            "the wrong chats were announced: a chat already read came back, or one with something new to say was swallowed"
+        );
+    }
+
     /// A test project's chats are not the owner's news either, on the same
     /// terms the project list itself hides them.
     #[tokio::test]
