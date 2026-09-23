@@ -60,6 +60,7 @@ pub struct WorkbenchState {
     discovery_cache: Arc<tokio::sync::Mutex<HashMap<String, (std::time::Instant, Vec<Value>)>>>,
     discoveries: Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     listing_refused: Arc<tokio::sync::Mutex<HashMap<String, std::time::Instant>>>,
+    listings: Listings,
     /// One usage connection per Claude account, keyed by profile id.
     claude_usage_readers: ClaudeReaders,
     /// One Codex app-server per working directory and account. `None` for the
@@ -154,6 +155,7 @@ impl WorkbenchState {
             discovery_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             discoveries: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             listing_refused: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            listings: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             claude_usage_readers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             codex_readers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             codex_records: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -1646,7 +1648,27 @@ async fn fresh_discovery(
 /// one per discovery, each paying for a process that could not help.
 const LISTING_REFUSED_FOR: Duration = Duration::from_secs(60);
 
-/// Ask one provider for its saved chats, unless it has just refused.
+/// How long a provider's `session/list` answer stands for the same folder.
+///
+/// Every answer starts one adapter process per account, and each of those
+/// loads the provider's plugins and MCP servers before it can reply — hundreds
+/// of megabytes for a list the record scan beside it already mostly holds. The
+/// chat list asks whenever a record moves, which in a busy session is every few
+/// seconds. A chat begun since the last answer is still listed at once, from
+/// the record scan; only the adapter's own guesses about it wait (bw-69sa.2).
+const LISTING_FRESH: Duration = Duration::from_secs(60);
+
+type Listings = Arc<
+    tokio::sync::Mutex<
+        HashMap<
+            (String, Option<std::path::PathBuf>),
+            (std::time::Instant, Vec<crate::workbench::acp::client::ListedSession>),
+        >,
+    >,
+>;
+
+/// Ask one provider for its saved chats, unless it has just refused or just
+/// answered.
 async fn ask_provider_to_list(
     state: &WorkbenchState,
     brand: &str,
@@ -1655,6 +1677,12 @@ async fn ask_provider_to_list(
     if let Some(refused) = state.listing_refused.lock().await.get(brand) {
         if refused.elapsed() < LISTING_REFUSED_FOR {
             return Err(format!("{brand} refused session/list a moment ago"));
+        }
+    }
+    let key = (brand.to_string(), filter.map(std::path::Path::to_path_buf));
+    if let Some((at, sessions)) = state.listings.lock().await.get(&key) {
+        if at.elapsed() < LISTING_FRESH {
+            return Ok(sessions.clone());
         }
     }
     // Each account answers for its own saved chats, so every account is asked
@@ -1680,10 +1708,18 @@ async fn ask_provider_to_list(
         }
     }
     let mut refusals = state.listing_refused.lock().await;
-    if listed.is_err() {
-        refusals.insert(brand.to_string(), std::time::Instant::now());
-    } else {
-        refusals.remove(brand);
+    match &listed {
+        Err(_) => {
+            refusals.insert(brand.to_string(), std::time::Instant::now());
+        }
+        Ok(sessions) => {
+            refusals.remove(brand);
+            state
+                .listings
+                .lock()
+                .await
+                .insert(key, (std::time::Instant::now(), sessions.clone()));
+        }
     }
     // What the list learned is worth telling the transcript, which opens next
     // and would otherwise start the same adapter to hear the same refusal.
@@ -3959,6 +3995,45 @@ mod tests {
         let answer = ask_provider_to_list(&state, "codex", None).await;
         assert!(answer.is_err_and(|why| !why.contains("a moment ago")));
         assert!(state.listing_refused.lock().await.contains_key("codex"));
+    }
+
+    /**
+     * A provider that just answered is not asked again for the same folder.
+     *
+     * Each answer is an adapter process per account, and each one loads the
+     * provider's plugins before replying (bw-69sa.2).
+     */
+    #[tokio::test]
+    async fn native_workbench_reuses_a_provider_listing_it_just_heard() {
+        let (_directory, state) = fixture();
+        let folder = std::path::PathBuf::from("/work/project");
+        let heard = crate::workbench::acp::client::ListedSession {
+            session_id: "thread-heard".into(),
+            cwd: "/work/project".into(),
+            title: Some("Heard".into()),
+            updated_at: None,
+            meta: Value::Null,
+        };
+        state.listings.lock().await.insert(
+            ("codex".into(), Some(folder.clone())),
+            (std::time::Instant::now(), vec![heard.clone()]),
+        );
+        let answer = ask_provider_to_list(&state, "codex", Some(&folder)).await;
+        assert_eq!(answer, Ok(vec![heard.clone()]));
+
+        // Another folder was never heard, and an old answer is asked afresh —
+        // here there is no adapter to ask, so both are refused.
+        let elsewhere = std::path::PathBuf::from("/work/other");
+        assert!(ask_provider_to_list(&state, "codex", Some(&elsewhere)).await.is_err());
+        state.listing_refused.lock().await.clear();
+        state.listings.lock().await.insert(
+            ("codex".into(), Some(folder.clone())),
+            (
+                std::time::Instant::now() - LISTING_FRESH - Duration::from_secs(1),
+                vec![heard],
+            ),
+        );
+        assert!(ask_provider_to_list(&state, "codex", Some(&folder)).await.is_err());
     }
 
     #[tokio::test]
