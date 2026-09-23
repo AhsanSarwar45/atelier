@@ -16,6 +16,7 @@ async function save(request: APIRequestContext, library: unknown, path?: string)
 }
 async function add(page: Page, kind: 'instruction' | 'skill' | 'output style', id: string, name: string, content: string) {
   await page.getByRole('button', { name: `Add ${kind}`, exact: true }).click();
+  await page.getByTestId('editor-advanced').locator('summary').click();
   await page.getByLabel('Item ID', { exact: true }).fill(id);
   await page.getByLabel('Item name', { exact: true }).fill(name);
   await page.getByLabel('Item content', { exact: true }).fill(content);
@@ -54,7 +55,7 @@ test('global and project editors persist conditional skills, instructions and ex
   await page.getByLabel('Item description').fill('Use when asked to perform the shared frontend review.');
   await choose(page, 'Condition', 'Package declares dependency');
   await page.getByLabel('Dependency name').fill('next');
-  await page.getByText('Parameters and supporting resources', { exact: true }).click();
+  await page.getByTestId('editor-support').locator('summary').click();
   await page.getByRole('button', { name: 'Add parameters', exact: true }).click();
   await page.getByLabel('Parameters name').fill('framework');
   await page.getByLabel('Parameters value').fill('NEXT-READY');
@@ -62,6 +63,7 @@ test('global and project editors persist conditional skills, instructions and ex
   await page.getByLabel('Resources name').fill('checklist.md');
   await page.getByLabel('Resources value').fill('The proof code is RESOURCE-READY.');
   await saved(page);
+  await page.getByText('Preview and diagnostics', { exact: true }).click();
   await choose(page, 'Evaluate for project', 'Shared guidance demo');
   const row = page.getByTestId('library-item-frontend-review');
   await expect(row).toContainText('Available');
@@ -90,7 +92,7 @@ test('global and project editors persist conditional skills, instructions and ex
   await saved(page);
   await page.getByRole('button', { name: 'Skills', exact: true }).click();
   await page.getByTestId('library-item-frontend-review').getByRole('button', { name: 'Customize', exact: true }).click();
-  await page.getByText('Parameters and supporting resources', { exact: true }).click();
+  await page.getByTestId('editor-support').locator('summary').click();
   await page.getByLabel('Parameters value').fill('PROJECT-NEXT');
   await saved(page);
   await page.getByTestId('library-item-frontend-review').getByRole('button', { name: 'Disable here', exact: true }).click();
@@ -114,6 +116,7 @@ test('global and project editors persist conditional skills, instructions and ex
   await page.getByRole('button', { name: 'Import native file', exact: true }).click();
   await page.getByRole('button', { name: 'CLAUDE.md · instructions', exact: true }).click();
   await expect(page.getByLabel('Item content')).toHaveValue('Keep documentation examples short.');
+  await page.getByTestId('editor-advanced').locator('summary').click();
   await page.getByLabel('Item ID').fill('imported-notes');
   await saved(page);
   expect(readFileSync(join(project.path, 'CLAUDE.md'), 'utf8')).toBe('Keep documentation examples short.');

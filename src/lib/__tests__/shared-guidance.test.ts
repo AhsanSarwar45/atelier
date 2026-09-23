@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { buildCustomization, nextEntryName } from '../shared-guidance';
+import { buildCustomization, nextEntryName, suggestedItemId } from '../shared-guidance';
 
 describe('lossless shared guidance editing', () => {
+  it('generates valid identifiers without colliding with inherited or local items', () => {
+    expect(suggestedItemId('Release check!', ['release-check', 'release-check-2'])).toBe('release-check-3');
+    expect(suggestedItemId('日本語', [])).toBe('new-item');
+    expect(suggestedItemId('A'.repeat(100), [])).toHaveLength(68);
+    expect(suggestedItemId('  Review docs  ', [])).toBe('review-docs');
+  });
   it.each<Record<string, string>>([{}, { 'new-2': 'keep' }, { 'new-1': 'a', 'new-3': 'b' }, { 'new-1': '', 'new-2': '' }])('adding never replaces a surviving entry: %j', entries => {
     const original = { ...entries };
     const next = { ...entries, [nextEntryName(entries)]: '' };

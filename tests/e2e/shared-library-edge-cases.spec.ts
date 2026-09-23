@@ -23,7 +23,7 @@ async function command(request: APIRequestContext, data: unknown) {
 }
 async function edit(page: Page, id: string, inherited = false) {
   await page.getByTestId(`library-item-${id}`).getByRole('button', { name: inherited ? 'Customize' : 'Edit', exact: true }).click();
-  await page.getByText('Parameters and supporting resources', { exact: true }).click();
+  await page.getByTestId('editor-support').locator('summary').click();
 }
 async function commit(page: Page) { await page.getByRole('button', { name: 'Save item', exact: true }).click(); await expect(page.getByTestId('library-editor')).toHaveCount(0); }
 async function turn(page: Page, text: string) {
@@ -150,7 +150,7 @@ test('removing global sources exposes orphan customizations and ambiguous IDs di
   await expect(page.getByRole('button', { name: 'Forget customization' })).toHaveCount(0);
 });
 
-test('global and project forms use unboxed controls and keep nested groups usable on mobile', async ({ page, request }) => {
+test('global and project forms have clear sections and keep nested groups usable on mobile', async ({ page, request }) => {
   const skill = item('layout', 'skill', 'Run {{runner}}', { parameters: { runner: 'npm test' }, resources: { 'references/check.md': 'Check release notes' } });
   await save(request, { items: [skill], overrides: {} });
   await save(request, { items: [], overrides: {} }, alpha);
@@ -159,7 +159,12 @@ test('global and project forms use unboxed controls and keep nested groups usabl
     await page.getByRole('button', { name: 'Skills', exact: true }).click();
     await edit(page, 'layout', !!project);
     const editor = page.getByTestId('library-editor');
-    await expect(editor.locator('[data-slot="panel"]')).toHaveCount(0);
+    await expect(editor.getByTestId('editor-section')).toHaveCount(2);
+    await expect(editor.getByRole('region', { name: 'What it does' })).toBeVisible();
+    await expect(editor.getByRole('region', { name: 'When it applies' })).toBeVisible();
+    await expect(editor.getByTestId('editor-advanced')).not.toHaveAttribute('open');
+    await expect(page.getByRole('group', { name: 'Library categories' })).toHaveCount(0);
+    await expect(editor.locator('[data-slot="panel"] [data-slot="panel"]')).toHaveCount(0);
     await expect(editor).not.toHaveAttribute('data-slot', 'panel');
     await expect(page.getByTestId('condition-builder').first()).toHaveCSS('border-top-width', '0px');
     await page.getByRole('combobox', { name: 'Condition', exact: true }).first().click();
@@ -188,6 +193,31 @@ test('global and project forms use unboxed controls and keep nested groups usabl
     expect(result.item.when).toMatchObject({ op: 'all', conditions: [{ op: 'file_exists', path: 'package.json' }] });
     expect(result.item.parameters.runner).toBe(project ? 'pnpm test' : 'npm run test');
   }
+});
+
+test('new guidance needs no advanced setup and explicitly chosen identifiers stay stable', async ({ page, request }) => {
+  await save(request, { items: [item('release-check', 'skill', 'existing')], overrides: {} });
+  await page.goto('/settings?section=library');
+  await page.getByRole('button', { name: 'Skills', exact: true }).click();
+  await page.getByRole('button', { name: 'Add skill', exact: true }).click();
+  await expect(page.getByTestId('editor-advanced')).not.toHaveAttribute('open');
+  await expect(page.getByTestId('editor-support')).not.toHaveAttribute('open');
+  await page.getByLabel('Item name').fill('Release check');
+  await page.getByLabel('Item content').fill('Check release notes');
+  await expect(page.getByText('/skill:release-check-2', { exact: true })).toBeVisible();
+  await commit(page);
+  expect((await held(request)).library.items.find((i: any) => i.id === 'release-check-2').content).toBe('Check release notes');
+  await page.getByRole('button', { name: 'Add skill', exact: true }).click();
+  await page.getByTestId('editor-advanced').locator('summary').click();
+  await page.getByLabel('Item ID', { exact: true }).fill('chosen-id');
+  await page.getByLabel('Item name').fill('Different name');
+  await expect(page.getByLabel('Item ID', { exact: true })).toHaveValue('chosen-id');
+  await page.getByLabel('Item content').fill('Procedure');
+  await commit(page);
+  await page.getByTestId('library-item-chosen-id').getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.getByLabel('Item name').fill('Renamed');
+  await commit(page);
+  expect((await held(request)).library.items.find((i: any) => i.id === 'chosen-id').name).toBe('Renamed');
 });
 
 for (const brand of ['claude', 'codex']) {

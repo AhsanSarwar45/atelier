@@ -1,4 +1,11 @@
 /** Keep editor operations lossless and store only explicit project differences. */
+export function suggestedItemId(name: string, used: string[]): string {
+  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 68) || 'new-item';
+  let candidate = base;
+  for (let n = 2; used.includes(candidate); n++) candidate = `${base}-${n}`;
+  return candidate;
+}
+
 export function nextEntryName(entries: Record<string, string>): string {
   let index = 1;
   while (Object.hasOwn(entries, `new-${index}`)) index++;
