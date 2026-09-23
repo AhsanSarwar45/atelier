@@ -16,6 +16,7 @@ import { Bell, FileCode2, Globe, Info, MemoryStick, Palette, Puzzle, Search, Squ
 
 import { AboutSettings } from '@/components/settings/about-settings';
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
+import { SharedLibrary } from '@/components/settings/shared-library';
 import { useProfiles } from '@/components/settings/account-picker';
 import { AppearanceSettings } from '@/components/settings/appearance-settings';
 import { NotificationSettings } from '@/components/settings/notification-settings';
@@ -38,6 +39,7 @@ const SECTIONS: SettingsSectionDef[] = [
   { id: 'appearance', label: 'Appearance', hint: 'Theme, type', icon: <Palette /> },
   { id: 'notifications', label: 'Notifications', hint: 'Alerts, devices', icon: <Bell /> },
   { id: 'accounts', label: 'Accounts', hint: 'Sign-ins', icon: <Users /> },
+  { id: 'library', label: 'Shared library', hint: 'Instructions, skills, styles', icon: <FileCode2 /> },
   { id: 'claude', label: 'Claude Code', hint: 'Per account', icon: <BrandIcon brand="claude" /> },
   { id: 'codex', label: 'Codex', hint: 'Per account', icon: <BrandIcon brand="codex" /> },
   { id: 'files', label: 'Agent files', hint: 'Per account', icon: <FileCode2 /> },
@@ -110,6 +112,7 @@ function Settings() {
     >
       {(known ?? 'appearance') === 'appearance' && <AppearanceSettings />}
       {known === 'notifications' && <NotificationSettings />}
+      {known === 'library' && <SharedLibrary />}
       {known === 'accounts' && (
         <SettingsGroup title="Accounts">
           <div className="p-3">

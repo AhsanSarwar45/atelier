@@ -298,7 +298,7 @@ export interface CommandInfo {
   argumentHint?: string;
   kind: 'command' | 'skill';
   /** How this provider executes the entry selected from the shared menu. */
-  execution?: 'native' | 'skill';
+  execution?: 'native' | 'skill' | 'shared';
 }
 
 /** One model this session could be switched to, as the brand names it. */
@@ -471,6 +471,7 @@ export type WbpEvent = EventBase &
      */
     | {
         type: 'session.menu';
+        sharedLibrary?: { revision: string; items: { id: string; name: string; kind: string; source: string; state: string }[] };
         commands: CommandInfo[];
         skills: string[];
         models: ModelChoice[];

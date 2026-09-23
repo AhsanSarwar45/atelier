@@ -179,6 +179,9 @@ fn is_over(state: &Value) -> bool {
 
 fn menu(event: &Event) -> Value {
     let mut menu = Map::new();
+    if let Some(library) = event.fields.get("sharedLibrary").filter(|value| value.is_object()) {
+        menu.insert("sharedLibrary".into(), library.clone());
+    }
     for field in [
         "commands",
         "skills",
@@ -1021,6 +1024,18 @@ mod tests {
 
         assert_eq!(view.items()[0]["input"], json!({}));
         assert_eq!(view.items()[1]["input"], json!({"file_path":"/w/a.rs"}));
+    }
+
+    #[test]
+    fn shared_library_survives_a_rebuilt_chat_view() {
+        let event: Event = serde_json::from_value(json!({
+            "type":"session.menu", "sessionId":"chat", "seq":1,
+            "sharedLibrary":{"revision":"pinned", "items":[{"id":"review","state":"available"}]},
+            "commands":[{"name":"skill:review","execution":"shared"}]
+        })).unwrap();
+        let projected = fold_all(&[event]);
+        assert_eq!(projected.view["menu"]["sharedLibrary"]["revision"], "pinned");
+        assert_eq!(projected.view["menu"]["commands"][0]["name"], "skill:review");
     }
 
     /// A card the app answered still says so when the chat is reopened.

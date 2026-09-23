@@ -425,6 +425,7 @@ export interface SessionView {
 }
 
 export interface SessionMenu {
+  sharedLibrary?: { revision: string; items: { id: string; name: string; kind: string; source: string; state: string }[] };
   commands: CommandInfo[];
   skills: string[];
   models: ModelChoice[];
@@ -506,6 +507,7 @@ function argumentsOf(sent: Record<string, unknown> | null | undefined): Record<s
  */
 function menuOf(sent: Partial<SessionMenu>): SessionMenu {
   return {
+    ...(sent.sharedLibrary ? { sharedLibrary: sent.sharedLibrary } : {}),
     commands: list(sent.commands, NO_MENU.commands),
     skills: list(sent.skills, NO_MENU.skills),
     models: list(sent.models, NO_MENU.models),

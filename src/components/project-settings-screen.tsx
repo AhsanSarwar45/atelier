@@ -15,6 +15,7 @@ import { useRouter } from 'next/navigation';
 import { Archive, ArchiveRestore, FolderSearch, GitBranch, Loader2, NotebookPen, ScrollText, Settings2, ShieldCheck, Tag, Trash2 } from 'lucide-react';
 
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
+import { SharedLibrary } from '@/components/settings/shared-library';
 import { FolderBrowser } from '@/components/folder-browser';
 import { BranchSelect, BranchesPicker } from '@/components/settings/branch-picker';
 import { ChatNameEditor } from '@/components/settings/chat-name-editor';
@@ -42,6 +43,7 @@ export const PROJECT_SETTINGS_SECTIONS: SettingsSectionDef[] = [
   { id: 'workflow', label: 'Workflow', hint: 'Cards, branches', icon: <GitBranch /> },
   { id: 'review', label: 'Review', hint: 'Checks', icon: <ShieldCheck /> },
   { id: 'instructions', label: 'Instructions', hint: 'Agent prompt', icon: <NotebookPen /> },
+  { id: 'library', label: 'Shared library', hint: 'Instructions, skills, styles', icon: <NotebookPen /> },
   { id: 'chat-names', label: 'Chat names', hint: 'Template', icon: <Tag /> },
   { id: 'claude', label: 'Claude Code', hint: 'Project settings', icon: <BrandIcon brand="claude" /> },
   { id: 'codex', label: 'Codex', hint: 'Project settings', icon: <BrandIcon brand="codex" /> },
@@ -439,6 +441,7 @@ export function ProjectSettingsScreen({
       )}
 
       {open === 'claude' && provider('claude')}
+      {open === 'library' && (folder.startsWith('dolt://') ? <p className="text-sm">Choose a local project folder to configure its shared library.</p> : manifest ? <SharedLibrary projectPath={folder} /> : <p className="text-sm">Loading project settings…</p>)}
       {open === 'codex' && provider('codex')}
       {open === 'files' && (
         <div className="-m-4 flex h-[calc(100dvh-3rem)] flex-col sm:-m-6">

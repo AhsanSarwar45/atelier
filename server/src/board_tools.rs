@@ -577,7 +577,9 @@ fn review(rest: &[String]) -> Result<i32, String> {
     }
     let base = git(&root, &["rev-parse", &trunk])?;
     let head = git(&root, &["rev-parse", "HEAD"])?;
-    let agreements = std::fs::read_to_string(root.join("AGENTS.md")).unwrap_or_default();
+    let agreements = format!("{}\n\nNative repository guidance:\n{}",
+        crate::workbench::session_policy::build(&root)?,
+        std::fs::read_to_string(root.join("AGENTS.md")).unwrap_or_default());
     let instructions = include_str!("../../machinery/workers/external-review.md");
     let prompt = format!("{instructions}\n\nImmutable scope: base {base}, head {head}. Repository: {}.\nProject instructions:\n{agreements}\n\nReturn this exact shape:\n{{\"verdict\":\"PASS or NEEDS_WORK\",\"summary\":\"one sentence\",\"verified\":[\"fact\"],\"findings\":[{{\"severity\":\"critical, high, or medium\",\"confidence\":80,\"file\":\"path\",\"line\":null,\"title\":\"failure\",\"evidence\":\"proof\",\"recommendation\":\"verifiable correction\"}}]}}\n\nJob:\n{card_json}\n\nUnlanded commits and diff:\n{change}", root.display());
     if git(&root, &["rev-parse", "HEAD^{tree}"])? != reviewed_tree { return Err("The tree changed while preparing review".into()); }

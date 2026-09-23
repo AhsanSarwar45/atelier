@@ -44,6 +44,7 @@ mime_guess = "2"
 # directory being listed; and the folder watch (`routes/fs_watch.rs`), which
 # must not redraw that tree for every file a build writes.
 ignore = "0.4"
+globset = "0.4"
 # Range responses for `/api/fs/media`, so a <video> can seek. Safari will not
 # play a source that answers a Range request with 200 and the whole file.
 axum-range = "0.4"

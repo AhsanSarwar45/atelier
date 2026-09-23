@@ -13,6 +13,7 @@ pub mod git;
 pub mod git_watch;
 pub mod install_method;
 pub mod live;
+pub mod library;
 pub mod new_chat;
 pub mod push;
 pub mod remote_access;

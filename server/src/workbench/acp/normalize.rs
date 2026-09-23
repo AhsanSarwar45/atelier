@@ -160,6 +160,8 @@ pub struct AcpNormalizer {
     active_signals: HashMap<String, String>,
     suppress_local_user: bool,
     menu: Value,
+    shared_commands: Vec<Value>,
+    shared_library: Value,
     cwd: PathBuf,
     cumulative_usage: TokenTally,
     agent_usage_tokens: HashMap<String, i64>,
@@ -205,6 +207,8 @@ impl Default for AcpNormalizer {
             agent_reports: HashMap::new(),
             active_signals: HashMap::new(),
             suppress_local_user: false,
+            shared_commands: vec![],
+            shared_library: Value::Null,
             menu: json!({"commands":[],"skills":[],"models":[],"efforts":[],"permissionModes":[],"collaborationModes":[],"agentDefinitions":[],"agentControls":[],"configOptions":[]}),
             cwd: PathBuf::from("."),
             cumulative_usage: TokenTally::default(),
@@ -214,6 +218,18 @@ impl Default for AcpNormalizer {
 }
 
 impl AcpNormalizer {
+    pub fn shared_library(&mut self, library: &super::super::library::Snapshot) {
+        self.shared_commands = library.commands();
+        self.shared_library = json!({"revision":library.revision,"items":library.items.iter().map(|r| json!({"id":r.item.id,"name":r.item.name,"kind":r.item.kind,"source":r.source,"state":r.state})).collect::<Vec<_>>()});
+    }
+
+    fn merge_shared_commands(&mut self) {
+        let mut commands = self.menu["commands"].as_array().cloned().unwrap_or_default();
+        commands.retain(|c| !c["name"].as_str().is_some_and(|name| name.starts_with("skill:")));
+        commands.extend(self.shared_commands.clone());
+        self.menu["commands"] = json!(commands);
+        if !self.shared_library.is_null() { self.menu["sharedLibrary"] = self.shared_library.clone(); }
+    }
     pub fn new(cwd: PathBuf) -> Self {
         Self {
             cwd,
@@ -318,10 +334,12 @@ impl AcpNormalizer {
                 self.menu[field] = catalogue;
             }
         }
+        self.merge_shared_commands();
         self.menu.clone()
     }
 
     fn menu_event(&mut self, session_id: &str, provider: &str, raw: &Value) -> Event {
+        self.merge_shared_commands();
         let mut menu = self.menu.clone();
         menu["type"] = json!("session.menu");
         self.envelope(session_id, provider, raw, menu)
@@ -5334,5 +5352,24 @@ mod tests {
         }));
         assert_eq!(replaced["commands"][0]["name"], "review");
         assert_eq!(replaced["commands"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn shared_skills_survive_provider_catalog_replacements_without_duplicates() {
+        let mut normalizer = AcpNormalizer::default();
+        normalizer.shared_commands = vec![json!({"name":"skill:review","kind":"skill","execution":"shared"})];
+        normalizer.shared_library = json!({"revision":"pinned","items":[]});
+        for provider in ["claude", "codex", "local"] {
+            for _ in 0..2 {
+                let events = normalizer.update("chat", provider, &json!({"sessionId":"remote","update":{
+                    "sessionUpdate":"available_commands_update","availableCommands":[{"name":"compact","description":"Compact"}]
+                }}));
+                let menu = serde_json::to_value(&events[0]).unwrap();
+                assert_eq!(menu["commands"].as_array().unwrap().iter().filter(|c| c["name"] == "skill:review").count(), 1);
+                assert_eq!(menu["sharedLibrary"]["revision"], "pinned");
+            }
+            let changed = normalizer.set_menu(json!({"models":[],"commands":[],"skills":[]}));
+            assert_eq!(changed["commands"].as_array().unwrap().len(), 2);
+        }
     }
 }

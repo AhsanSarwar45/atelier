@@ -1,10 +1,13 @@
 //! Atelier-owned provider policy, injected per session without modifying provider homes.
 
-use std::{fs, path::Path};
+use std::path::Path;
+#[cfg(test)]
+use std::fs;
 
 pub const VERSION: u8 = 1;
 pub const MARKER: &str = "ATELIER_SESSION_POLICY_V1";
 
+#[cfg(test)]
 fn body(path: &Path) -> Result<String, String> {
     let text = fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
     Ok(if let Some(rest) = text.strip_prefix("---\n") {
@@ -93,38 +96,15 @@ fn beads_tail(wants_beads: bool, reachable: bool, beads_body: &str) -> String {
 }
 
 pub fn build(cwd: &Path) -> Result<String, String> {
-    let installed = crate::identity::rules_dir().map(|rules| rules.join("machinery/skills"));
-    let bundled = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join("machinery/skills");
-    let skills = installed
-        .filter(|root| root.join("atelier/SKILL.md").is_file())
-        .or_else(|| {
-            bundled
-                .join("atelier/SKILL.md")
-                .is_file()
-                .then_some(bundled)
-        })
-        .ok_or_else(|| "Session policy unavailable. Reinstall Atelier.".to_string())?;
-    let atelier = body(&skills.join("atelier/SKILL.md"))?;
+    let snapshot = super::library::snapshot(cwd)?;
+    Ok(build_with_library(cwd, &snapshot))
+}
+
+pub fn build_with_library(cwd: &Path, snapshot: &super::library::Snapshot) -> String {
     let (project, wants_beads) = guidance(cwd);
-    // A workflow whose every command fails is worse than no workflow. The
-    // Beads skill goes in only when this computer can actually reach a board,
-    // and a project that wants one but cannot have one here is told which of
-    // the two it is — saying "does not use Beads" about a board project would
-    // be false, and saying nothing would leave the agent to find out by
-    // running a command that cannot work (bw-3tkl.3).
-    let reachable = crate::routes::find_bd().is_some();
-    let beads = if wants_beads && reachable {
-        include_str!("../../../machinery/skills/beads/SKILL.md").splitn(3, "---").nth(2).unwrap_or("").trim().to_string()
-    } else {
-        String::new()
-    };
-    let tail = beads_tail(wants_beads, reachable, &beads);
-    Ok(format!(
-        "<!-- {MARKER} -->\n\n{atelier}\n\n{project}\n\n{tail}"
-    ))
+    let reachable = snapshot.items.iter().any(|row| row.item.id == "atelier-beads" && row.state == "available");
+    let tail = beads_tail(wants_beads, reachable, "");
+    format!("<!-- {MARKER} -->\n\n{project}\n\n{}\n\n{tail}", snapshot.guidance())
 }
 
 #[cfg(test)]

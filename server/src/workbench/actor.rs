@@ -724,6 +724,21 @@ fn canonical_event(
     Ok(Some((session_id, event)))
 }
 
+/// Native discovery refreshes provider choices independently of the active
+/// connection. Its catalogue cannot remove that connection's shared guidance.
+fn preserve_shared_library(event: &mut Event, previous: Option<&Event>) {
+    if event.kind != EventKind::SessionMenu || event.fields.contains_key("sharedLibrary") { return; }
+    let Some(previous) = previous else { return };
+    let Some(library) = previous.fields.get("sharedLibrary") else { return };
+    event.fields.insert("sharedLibrary".into(), library.clone());
+    let shared = previous.fields.get("commands").and_then(serde_json::Value::as_array).into_iter().flatten()
+        .filter(|c| c["execution"] == "shared").cloned();
+    let mut commands = event.fields.get("commands").and_then(serde_json::Value::as_array).cloned().unwrap_or_default();
+    commands.retain(|c| !c["name"].as_str().is_some_and(|name| name.starts_with("skill:")));
+    commands.extend(shared);
+    event.fields.insert("commands".into(), serde_json::json!(commands));
+}
+
 fn persist_event(
     store: &Store,
     session_id: &str,
@@ -1010,7 +1025,8 @@ fn run(
                         }
                     });
                 match result {
-                    Ok(Some((session_id, seq, event))) => {
+                    Ok(Some((session_id, seq, mut event))) => {
+                        preserve_shared_library(&mut event, live_menus.get(&session_id));
                         if event.kind == EventKind::SessionMenu {
                             live_menus.insert(session_id.clone(), event.clone());
                         }
@@ -1068,9 +1084,10 @@ fn run(
                     Ok(stored)
                 });
                 match result {
-                    Ok(stored) => {
+                    Ok(mut stored) => {
                         let count = stored.len();
-                        for (session_id, _, event) in &stored {
+                        for (session_id, _, event) in &mut stored {
+                            preserve_shared_library(event, live_menus.get(session_id));
                             if event.kind == EventKind::SessionMenu {
                                 live_menus.insert(session_id.clone(), event.clone());
                             }
@@ -1300,6 +1317,20 @@ mod tests {
     }
 
     #[test]
+    fn provider_refresh_preserves_the_connections_shared_guidance() {
+        let previous: Event = serde_json::from_value(json!({"type":"session.menu","sessionId":"chat-1","sharedLibrary":{"revision":"one"},"commands":[{"name":"skill:review","execution":"shared"}]})).unwrap();
+        let mut refreshed: Event = serde_json::from_value(json!({"type":"session.menu","sessionId":"chat-1","commands":[{"name":"compact"}]})).unwrap();
+        preserve_shared_library(&mut refreshed, Some(&previous));
+        assert_eq!(refreshed.fields["sharedLibrary"]["revision"], "one");
+        assert_eq!(refreshed.fields["commands"].as_array().unwrap().len(), 2);
+        preserve_shared_library(&mut refreshed, Some(&previous));
+        assert_eq!(refreshed.fields["commands"].as_array().unwrap().len(), 2);
+        refreshed.fields.insert("sharedLibrary".into(), json!({"revision":"two"}));
+        preserve_shared_library(&mut refreshed, Some(&previous));
+        assert_eq!(refreshed.fields["sharedLibrary"]["revision"], "two");
+    }
+
+    #[test]
     fn a_saved_chat_reuses_only_its_providers_live_steering_catalogue() {
         let directory = tempfile::tempdir().unwrap();
         let store = Store::open(&directory.path().join("workbench.db")).unwrap();
@@ -1320,7 +1351,7 @@ mod tests {
             "efforts":[{"value":"high","displayName":"High"}],
             "permissionModes":["on-request","never"],
             "collaborationModes":[{"value":"default","displayName":"Default"}],
-            "commands":[{"name":"project-only"}], "skills":["private"],
+            "commands":[{"name":"project-only"}], "skills":["private"], "sharedLibrary":{"revision":"private"},
             "agentDefinitions":[{"name":"worker"}],
             "configOptions":[{"id":"fast","currentValue":true}]
         })).unwrap();
@@ -1330,7 +1361,7 @@ mod tests {
         assert_eq!(restored.fields["sessionId"], "saved");
         assert_eq!(restored.fields["models"][0]["value"], "gpt-5.6-sol");
         assert_eq!(restored.fields["efforts"][0]["value"], "high");
-        for private in ["commands", "skills", "agentDefinitions", "configOptions"] {
+        for private in ["commands", "skills", "agentDefinitions", "configOptions", "sharedLibrary"] {
             assert!(restored.fields.get(private).is_none(), "{private} leaked between chats");
         }
         assert!(live_steering_menu(&store, &live, "other").is_none());

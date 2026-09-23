@@ -564,6 +564,9 @@ pub fn hook(name: &str, rest: &[String]) -> Result<i32, String> {
 /// an arbitrary relative path here would turn a documentation convenience into
 /// a general script runner over application data.
 pub async fn tool(name: &str, rest: &[String]) -> Result<i32, String> {
+    if name == "skills" {
+        return crate::workbench::library::cli(rest);
+    }
     if name == "present" {
         return crate::workbench::cli::present(rest).await;
     }

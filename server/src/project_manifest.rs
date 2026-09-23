@@ -535,12 +535,20 @@ pub fn move_to(root: &Path, data_dir: &Path, storage: ManifestStorage) -> Result
     if located.storage == storage { return Ok(located.path); }
     let destination = match storage { ManifestStorage::Personal => personal_path(root, data_dir), ManifestStorage::Repository => repository_path(root) };
     if destination.exists() { return Err(format!("{} already exists", destination.display())); }
+    let library_source = located.path.with_file_name("library.json");
+    let library_destination = destination.with_file_name("library.json");
+    if library_source.exists() && library_destination.exists() {
+        return Err("A shared library already exists at the destination; resolve it before moving project settings".into());
+    }
+    let library = if library_source.exists() { Some(fs::read(&library_source).map_err(|e| e.to_string())?) } else { None };
+    if let Some(bytes) = &library { crate::workbench::provider_defaults::atomic_write(&library_destination, bytes)?; }
     write_atomic(&destination, &located.manifest)?;
     // The instructions are half of what a project says about itself; a move
     // that left them behind would look like a move that erased them.
     write_instructions(&destination, &located.instructions)?;
     write_instructions(&located.path, "")?;
     fs::remove_file(&located.path).map_err(|error| format!("new manifest was written but {} could not be removed: {error}", located.path.display()))?;
+    if library.is_some() { fs::remove_file(library_source).map_err(|e| e.to_string())?; }
     Ok(destination)
 }
 

@@ -2796,6 +2796,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             'focus-within:border-primary/60 focus-within:ring-1 focus-within:ring-primary/30',
           )}
         >
+          {view.menu.sharedLibrary && <details className="mb-2 text-xs text-t-secondary" data-testid="chat-shared-library"><summary className="cursor-pointer">Shared guidance · {view.menu.sharedLibrary.items.filter(i => i.state === 'available').length} available</summary><div className="max-h-40 overflow-auto py-2"><p className="break-all text-t-muted">Revision {view.menu.sharedLibrary.revision}. Settings changes apply when this chat reconnects. Skills enter context when read or selected.</p>{view.menu.sharedLibrary.items.map(item => <p key={item.id}>{item.name} · {item.source} · {item.state === 'available' ? item.kind === 'skill' ? 'Available on use' : 'Included' : item.state.replaceAll('_', ' ')}</p>)}</div></details>}
           <ComposerBody
             sessionId={chatId}
             where={where}

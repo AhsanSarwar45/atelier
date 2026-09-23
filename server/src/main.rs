@@ -635,6 +635,7 @@ async fn serve(open_browser: bool) {
             routes::remote_access::remote_access_routes().with_state(database.clone()),
         )
         // How the AI search runs. Same table, same guard (routes/search_settings.rs).
+        .nest("/api", routes::library::routes().with_state(database.clone()))
         .nest(
             "/api",
             routes::search_settings::search_settings_routes().with_state(database.clone()),

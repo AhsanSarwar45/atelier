@@ -460,12 +460,16 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
                 session.brand
             )
         })?;
-    let policy = session_policy::build(Path::new(&session.cwd))?;
+    let shared_library = super::super::library::snapshot(Path::new(&session.cwd))?;
+    let policy = session_policy::build_with_library(Path::new(&session.cwd), &shared_library);
+    let shared_servers = shared_library.mcp_servers()?;
     let meta = session_meta(&session.brand, &policy);
     let local_id = session.id.clone();
     let brand = session.brand.clone();
     let cwd = PathBuf::from(&session.cwd);
-    let normalizer = Arc::new(Mutex::new(AcpNormalizer::new(cwd.clone())));
+    let mut history_normalizer = AcpNormalizer::new(cwd.clone());
+    history_normalizer.shared_library(&shared_library);
+    let normalizer = Arc::new(Mutex::new(history_normalizer));
     let collected = Arc::new(Mutex::new(Vec::<Event>::new()));
     let update_normalizer = normalizer.clone();
     let update_events = collected.clone();
@@ -522,7 +526,7 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
                     .cloned()
                     .unwrap_or_else(|| json!([]));
                 let response = connection
-                    .send_request(LoadSessionRequest::new(remote_id.clone(), cwd).meta(meta))
+                    .send_request(LoadSessionRequest::new(remote_id.clone(), cwd).mcp_servers(shared_servers).meta(meta))
                     .block_task()
                     .await?;
                 let end = json!({"sessionId":remote_id,"stopReason":"end_turn"});
@@ -2056,6 +2060,7 @@ fn menu_event(session_id: &str, mut menu: Value) -> Result<Event, String> {
 }
 
 pub struct AcpDriver {
+    shared_library: super::super::library::Snapshot,
     brand: &'static str,
     database: ChatDb,
     session: Session,
@@ -2245,7 +2250,9 @@ impl AcpDriver {
             super::super::local::BRAND => super::super::local::BRAND,
             other => return Err(format!("ACP adapter is not configured for {other}")),
         };
-        let task_policy = session_policy::build(Path::new(&session.cwd))?;
+        let shared_library = super::super::library::snapshot(Path::new(&session.cwd))?;
+        let task_policy = session_policy::build_with_library(Path::new(&session.cwd), &shared_library);
+        let shared_servers = shared_library.mcp_servers()?;
         // Switching accounts deliberately clears the old provider id: that id
         // belongs to the old account's record directory. The local chat stays
         // the same, but its replacement provider process needs a new remote
@@ -2315,6 +2322,7 @@ impl AcpDriver {
             Value::Null
         };
         let mut task_normalizer = AcpNormalizer::new(PathBuf::from(&task_session.cwd));
+        task_normalizer.shared_library(&shared_library);
         task_normalizer.seed_usage(task_saved_cost.as_ref());
         let normalizer = Arc::new(Mutex::new(task_normalizer));
         let driver_normalizer = normalizer.clone();
@@ -2514,7 +2522,7 @@ impl AcpDriver {
                             let response = connection
                                 .send_request(NewSessionRequest::new(PathBuf::from(
                                     &task_session.cwd,
-                                )).meta(session_meta.clone()))
+                                )).mcp_servers(shared_servers.clone()).meta(session_meta.clone()))
                                 .block_task()
                                 .await?;
                             (
@@ -2537,7 +2545,7 @@ impl AcpDriver {
                                     .send_request(ResumeSessionRequest::new(
                                         remote.clone(),
                                         PathBuf::from(&task_session.cwd),
-                                    ).meta(session_meta.clone()))
+                                    ).mcp_servers(shared_servers.clone()).meta(session_meta.clone()))
                                     .block_task()
                                     .await
                                     .and_then(|response| Ok((
@@ -2551,7 +2559,7 @@ impl AcpDriver {
                                     .send_request(LoadSessionRequest::new(
                                         remote.clone(),
                                         PathBuf::from(&task_session.cwd),
-                                    ).meta(session_meta.clone()))
+                                    ).mcp_servers(shared_servers.clone()).meta(session_meta.clone()))
                                     .block_task()
                                     .await;
                                 replaying.store(false, Ordering::Release);
@@ -2569,7 +2577,7 @@ impl AcpDriver {
                                     let response = connection
                                         .send_request(NewSessionRequest::new(PathBuf::from(
                                             &task_session.cwd,
-                                        )).meta(session_meta.clone()))
+                                        )).mcp_servers(shared_servers.clone()).meta(session_meta.clone()))
                                         .block_task()
                                         .await?;
                                     task_database
@@ -3079,6 +3087,7 @@ impl AcpDriver {
             .await?
             .unwrap_or(session);
         Ok(Self {
+            shared_library,
             brand,
             database,
             session,
@@ -3106,14 +3115,18 @@ impl AcpDriver {
     async fn run(&mut self, command: &Command) -> Result<Value, String> {
         match command.kind {
             CommandKind::PromptSend => {
-                validate_offered_command(
-                    &self.database,
-                    &self.session.id,
-                    command.at("text").as_str().unwrap_or_default(),
-                )
-                .await?;
+                let expansion = self.shared_library.expand(command.at("text").as_str().unwrap_or_default())?;
+                if expansion.is_none() {
+                    validate_offered_command(
+                        &self.database,
+                        &self.session.id,
+                        command.at("text").as_str().unwrap_or_default(),
+                    ).await?;
+                }
+                let mut expanded_command = command.clone();
+                if let Some(text) = expansion { expanded_command.fields.insert("text".into(), json!(text)); }
                 let mut content =
-                    prompt_content(command, Carries::unpacked(self.carries.load(Ordering::SeqCst)))?;
+                    prompt_content(&expanded_command, Carries::unpacked(self.carries.load(Ordering::SeqCst)))?;
                 let handoff = self.database.saved_account_handoff(self.session.id.clone()).await?;
                 if let Some(context) = handoff.as_deref().filter(|context| !context.is_empty()) {
                     content.insert(0, ContentBlock::Text(TextContent::new(format!(
@@ -3977,6 +3990,7 @@ mod tests {
         let in_flight = super::super::super::status::Requests::default();
         let _request = super::super::super::status::RequestLease::new(in_flight.clone(), generation);
         let driver = AcpDriver {
+            shared_library: Default::default(),
             brand: "codex",
             database: database.clone(),
             session,
@@ -4058,6 +4072,7 @@ mod tests {
             },
         );
         let driver = AcpDriver {
+            shared_library: Default::default(),
             brand: "claude",
             database: database.clone(),
             session,
@@ -4120,6 +4135,7 @@ mod tests {
         let (controls, mut requests) = mpsc::unbounded_channel();
         let (_, ended) = mpsc::unbounded_channel();
         let driver = AcpDriver {
+            shared_library: Default::default(),
             brand: "codex",
             database: database.clone(),
             session,
@@ -4509,6 +4525,7 @@ mod tests {
         let (controls, _) = mpsc::unbounded_channel();
         let (_, ended) = mpsc::unbounded_channel();
         let driver = AcpDriver {
+            shared_library: Default::default(),
             brand: "claude",
             database: database.clone(),
             session,
@@ -4589,6 +4606,7 @@ mod tests {
         let (controls, _) = mpsc::unbounded_channel();
         let (_, ended) = mpsc::unbounded_channel();
         let mut driver = AcpDriver {
+            shared_library: Default::default(),
             brand: "claude",
             database: database.clone(),
             session,
