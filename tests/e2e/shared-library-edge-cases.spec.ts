@@ -150,6 +150,46 @@ test('removing global sources exposes orphan customizations and ambiguous IDs di
   await expect(page.getByRole('button', { name: 'Forget customization' })).toHaveCount(0);
 });
 
+test('global and project forms use unboxed controls and keep nested groups usable on mobile', async ({ page, request }) => {
+  const skill = item('layout', 'skill', 'Run {{runner}}', { parameters: { runner: 'npm test' }, resources: { 'references/check.md': 'Check release notes' } });
+  await save(request, { items: [skill], overrides: {} });
+  await save(request, { items: [], overrides: {} }, alpha);
+  for (const project of [undefined, alpha]) {
+    await page.goto(project ? `/project?id=${project.id}&settings=library` : '/settings?section=library');
+    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    await edit(page, 'layout', !!project);
+    const editor = page.getByTestId('library-editor');
+    await expect(editor.locator('[data-slot="panel"]')).toHaveCount(0);
+    await expect(editor).not.toHaveAttribute('data-slot', 'panel');
+    await expect(page.getByTestId('condition-builder').first()).toHaveCSS('border-top-width', '0px');
+    await page.getByRole('combobox', { name: 'Condition', exact: true }).first().click();
+    await page.getByRole('option', { name: 'All conditions', exact: true }).click();
+    await page.getByRole('button', { name: 'Add condition', exact: true }).click();
+    await expect(page.getByRole('combobox', { name: 'Condition', exact: true })).toHaveCount(3);
+    await page.getByLabel('Condition path').first().fill('package.json');
+    await page.getByRole('button', { name: 'Remove condition', exact: true }).last().click();
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.getByRole('combobox', { name: 'Condition', exact: true }).last().scrollIntoViewIfNeeded();
+      const bounds = await editor.evaluate(el => {
+        const rect = el.getBoundingClientRect();
+        return [...el.querySelectorAll('input, textarea, button')].every(control => {
+          const b = control.getBoundingClientRect();
+          return b.width === 0 || (b.left >= rect.left - 1 && b.right <= rect.right + 1);
+        });
+      });
+      expect(bounds, `${project ? 'project' : 'global'} controls fit at ${width}px`).toBe(true);
+      await page.screenshot({ path: `tests/results/shared-library/layout-${project ? 'project' : 'global'}-${width}.png`, animations: 'disabled' });
+    }
+    await page.getByLabel('Parameters value').fill(project ? 'pnpm test' : 'npm run test');
+    await commit(page);
+    const saved = await held(request, project);
+    const result = saved.resolved.items.find((row: any) => row.item.id === 'layout');
+    expect(result.item.when).toMatchObject({ op: 'all', conditions: [{ op: 'file_exists', path: 'package.json' }] });
+    expect(result.item.parameters.runner).toBe(project ? 'pnpm test' : 'npm run test');
+  }
+});
+
 for (const brand of ['claude', 'codex']) {
   test(`${brand}: automatic nested-resource skill, actual style, pinned edits, reconnect, manual skill and isolation`, async ({ page, request }) => {
     test.skip(process.env.BEADS_E2E_LIVE_PROVIDERS !== '1', 'requires isolated provider credential copies');
