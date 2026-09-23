@@ -81,6 +81,9 @@ enum Asked {
 #[derive(Clone)]
 struct Answered {
     len: u64,
+    /// Just past the last whole row when it was read. A row still being
+    /// written at the time is read again from its start.
+    whole: u64,
     modified: Option<SystemTime>,
     answer: Option<Value>,
 }
@@ -115,7 +118,7 @@ fn remembered(path: &Path, asked: Asked, accept: impl Fn(&Value) -> bool) -> Opt
                 .answer
                 .and_then(|answer| answer.as_str().map(str::to_string))
         }
-        Some(known) if known.len < len => last_row_timestamp(path, known.len, &accept)
+        Some(known) if known.len < len => last_row_timestamp(path, known.whole, &accept)
             .map(Value::String)
             .or(known.answer),
         _ => last_row_timestamp(path, 0, &accept).map(Value::String),
@@ -124,11 +127,34 @@ fn remembered(path: &Path, asked: Asked, accept: impl Fn(&Value) -> bool) -> Opt
         key,
         Answered {
             len,
+            whole: whole_rows_end(path, len),
             modified,
             answer: answer.clone(),
         },
     );
     answer.and_then(|answer| answer.as_str().map(str::to_string))
+}
+
+/// Where the rollout's last whole row ends, looking back from `len`: just past
+/// its last newline, or the start when there is none.
+fn whole_rows_end(path: &Path, len: u64) -> u64 {
+    const BLOCK: u64 = 64 * 1024;
+    let Ok(mut file) = File::open(path) else {
+        return 0;
+    };
+    let mut end = len;
+    while end > 0 {
+        let start = end.saturating_sub(BLOCK);
+        let mut bytes = vec![0; (end - start) as usize];
+        if file.seek(SeekFrom::Start(start)).is_err() || file.read_exact(&mut bytes).is_err() {
+            return 0;
+        }
+        if let Some(newline) = bytes.iter().rposition(|byte| *byte == b'\n') {
+            return start + newline as u64 + 1;
+        }
+        end = start;
+    }
+    0
 }
 
 /// The timestamp of the last row the test accepts, read backwards in complete
@@ -250,6 +276,7 @@ fn session_source(path: &Path) -> Option<Value> {
         key,
         Answered {
             len,
+            whole: len,
             modified: None,
             answer: answer.clone(),
         },
@@ -715,6 +742,30 @@ mod tests {
         assert_eq!(
             last_spoke_at(&path).as_deref(),
             Some("2026-01-01T00:00:12Z")
+        );
+
+        // A row caught half-written is read again whole once it is finished.
+        let row = spoke("2026-01-01T00:00:20Z");
+        let (head, rest) = row.split_at(row.len() / 2);
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        file.write_all(head.as_bytes()).unwrap();
+        drop(file);
+        assert_eq!(
+            last_spoke_at(&path).as_deref(),
+            Some("2026-01-01T00:00:12Z")
+        );
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        file.write_all(rest.as_bytes()).unwrap();
+        drop(file);
+        assert_eq!(
+            last_spoke_at(&path).as_deref(),
+            Some("2026-01-01T00:00:20Z")
         );
 
         // A rewrite that shrinks the file is read whole again.
