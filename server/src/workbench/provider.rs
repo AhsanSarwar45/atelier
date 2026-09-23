@@ -54,8 +54,8 @@ impl NativeProviderFactory {
                         if let Err(error) = loaded {
                             let fell_back = std::time::Instant::now();
                             if session.brand == "claude" {
-                                let _ =
-                                    import_claude_history(&database, &claude_config, &session).await;
+                                let _ = import_claude_history(&database, &claude_config, &session)
+                                    .await;
                             } else {
                                 let _ = import_codex_history(&database, &session).await;
                             }
@@ -288,19 +288,33 @@ fn new_session(
         .map(str::to_string)
         .unwrap_or_else(now);
     let owner = if brand == "claude" {
-        Some(super::provider_defaults::read_owner_settings(claude_config, Path::new(&project_path)))
+        Some(super::provider_defaults::read_owner_settings(
+            claude_config,
+            Path::new(&project_path),
+        ))
     } else if brand == "codex" {
-        let files = match profile.and_then(|id| super::profiles::ambient()?.directory(&brand, id).ok()) {
-            Some(directory) => super::provider_defaults::ProviderDefaultFiles::in_directory(&directory),
-            None => super::provider_defaults::ProviderDefaultFiles::new(
-                claude_config,
-                &super::profiles::system_dir("codex").ok_or("cannot resolve Codex settings directory")?,
-            ),
-        };
-        files.read("codex").ok().map(|defaults| super::provider_defaults::OwnerSettings {
-            model: defaults.model, permission_mode: defaults.permission_mode, effort: defaults.effort,
-        })
-    } else { None };
+        let files =
+            match profile.and_then(|id| super::profiles::ambient()?.directory(&brand, id).ok()) {
+                Some(directory) => {
+                    super::provider_defaults::ProviderDefaultFiles::in_directory(&directory)
+                }
+                None => super::provider_defaults::ProviderDefaultFiles::new(
+                    claude_config,
+                    &super::profiles::system_dir("codex")
+                        .ok_or("cannot resolve Codex settings directory")?,
+                ),
+            };
+        files
+            .read("codex")
+            .ok()
+            .map(|defaults| super::provider_defaults::OwnerSettings {
+                model: defaults.model,
+                permission_mode: defaults.permission_mode,
+                effort: defaults.effort,
+            })
+    } else {
+        None
+    };
     Ok(Session {
         id,
         brand: brand.clone(),
@@ -401,7 +415,11 @@ async fn append_state(
     Ok(())
 }
 
-pub(super) async fn append_notice(database: &ChatDb, session_id: &str, text: &str) -> Result<(), String> {
+pub(super) async fn append_notice(
+    database: &ChatDb,
+    session_id: &str,
+    text: &str,
+) -> Result<(), String> {
     let event: Event = serde_json::from_value(json!({
         "type":"notice", "sessionId":session_id, "seq":0, "at":now(), "text":text
     }))
@@ -847,19 +865,17 @@ impl SessionFactory for NativeProviderFactory {
             // and what this person last used, and one of those is nearly always
             // the answer — so pick it, and keep the menu for the case where the
             // runtime offers nothing at all (bw-u6cl.7).
-            let offered = if create
-                && session.brand == super::local::BRAND
-                && session.model.is_none()
-            {
-                let models = super::local::catalog().await;
-                let remembered = database
-                    .last_model_for_brand(super::local::BRAND.to_string())
-                    .await?;
-                session.model = super::local::preferred_model(&models, remembered.as_deref());
-                Some(models)
-            } else {
-                None
-            };
+            let offered =
+                if create && session.brand == super::local::BRAND && session.model.is_none() {
+                    let models = super::local::catalog().await;
+                    let remembered = database
+                        .last_model_for_brand(super::local::BRAND.to_string())
+                        .await?;
+                    session.model = super::local::preferred_model(&models, remembered.as_deref());
+                    Some(models)
+                } else {
+                    None
+                };
             let brand = session.brand.clone();
             if let Some(models) = offered.filter(|_| session.model.is_none()) {
                 database.create_session(session.clone()).await?;
@@ -1107,7 +1123,14 @@ mod tests {
         git(&["add", "-A"]);
         git(&["commit", "-qm", "seed"]);
         let tree = project.join("worktrees").join("bw-1");
-        git(&["worktree", "add", "-q", &tree.display().to_string(), "-b", "bw-1"]);
+        git(&[
+            "worktree",
+            "add",
+            "-q",
+            &tree.display().to_string(),
+            "-b",
+            "bw-1",
+        ]);
         (root, project)
     }
 
@@ -1129,7 +1152,10 @@ mod tests {
         std::fs::create_dir(tree.join("server")).unwrap();
 
         let session = started_at(&project, &tree.display().to_string()).unwrap();
-        assert_eq!(session.cwd, tree.canonicalize().unwrap().display().to_string());
+        assert_eq!(
+            session.cwd,
+            tree.canonicalize().unwrap().display().to_string()
+        );
         assert_eq!(
             session.project_path,
             project.display().to_string(),
@@ -1139,11 +1165,18 @@ mod tests {
         let inside = started_at(&project, &tree.join("server").display().to_string()).unwrap();
         assert_eq!(
             inside.cwd,
-            tree.join("server").canonicalize().unwrap().display().to_string(),
+            tree.join("server")
+                .canonicalize()
+                .unwrap()
+                .display()
+                .to_string(),
         );
 
         let root = started_at(&project, &project.display().to_string()).unwrap();
-        assert_eq!(root.cwd, project.canonicalize().unwrap().display().to_string());
+        assert_eq!(
+            root.cwd,
+            project.canonicalize().unwrap().display().to_string()
+        );
     }
 
     /// The field says where an agent will be able to write and it comes from a
@@ -1157,12 +1190,15 @@ mod tests {
         let refused = started_at(&project, &elsewhere.display().to_string()).unwrap_err();
         assert!(refused.contains("neither"), "{refused}");
 
-        let missing = started_at(&project, &project.join("no-such-tree").display().to_string())
-            .unwrap_err();
+        let missing = started_at(
+            &project,
+            &project.join("no-such-tree").display().to_string(),
+        )
+        .unwrap_err();
         assert!(missing.contains("no folder"), "{missing}");
 
-        let a_file = started_at(&project, &project.join("kept.txt").display().to_string())
-            .unwrap_err();
+        let a_file =
+            started_at(&project, &project.join("kept.txt").display().to_string()).unwrap_err();
         assert!(a_file.contains("not a folder"), "{a_file}");
     }
 
@@ -1192,7 +1228,11 @@ mod tests {
         // Each nested project lists its own, even though the home folder is
         // registered too and is above it.
         let everyone = project_roots([home.to_str().unwrap(), registered.to_str().unwrap()]);
-        assert!(held_in(&registered.join("server"), &[registered.clone()], &everyone));
+        assert!(held_in(
+            &registered.join("server"),
+            &[registered.clone()],
+            &everyone
+        ));
         assert!(held_in(&marked, &[marked.clone()], &everyone));
         // A chat begun above a project is never that project's.
         assert!(!held_in(&home, &[registered.clone()], &everyone));
@@ -1222,8 +1262,7 @@ mod tests {
             "cwd": gone.display().to_string(),
         }))
         .unwrap();
-        let session =
-            new_session(&command, "chat-1".into(), None, Path::new("/unused")).unwrap();
+        let session = new_session(&command, "chat-1".into(), None, Path::new("/unused")).unwrap();
         assert_eq!(session.cwd, gone.display().to_string());
     }
 
@@ -1236,8 +1275,7 @@ mod tests {
             "projectPath":"/project",
         }))
         .unwrap();
-        let session =
-            new_session(&command, "chat-1".into(), None, Path::new("/unused")).unwrap();
+        let session = new_session(&command, "chat-1".into(), None, Path::new("/unused")).unwrap();
         assert_eq!(session.cwd, "/project");
     }
 

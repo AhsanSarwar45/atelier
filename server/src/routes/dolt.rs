@@ -13,9 +13,7 @@ use super::beads::resolve_dolt_port;
 /// GET /api/dolt/status
 ///
 /// Returns Dolt server availability and database count.
-pub async fn dolt_status(
-    Extension(dolt): Extension<Arc<DoltManager>>,
-) -> impl IntoResponse {
+pub async fn dolt_status(Extension(dolt): Extension<Arc<DoltManager>>) -> impl IntoResponse {
     let running = dolt.check_server().await;
 
     let database_count = if running {
@@ -33,9 +31,7 @@ pub async fn dolt_status(
 /// GET /api/dolt/databases
 ///
 /// Lists all beads databases discovered via SHOW DATABASES.
-pub async fn dolt_databases(
-    Extension(dolt): Extension<Arc<DoltManager>>,
-) -> impl IntoResponse {
+pub async fn dolt_databases(Extension(dolt): Extension<Arc<DoltManager>>) -> impl IntoResponse {
     if !dolt.is_available() && !dolt.check_server().await {
         return Json(serde_json::json!({
             "error": "Dolt server not running",
@@ -68,9 +64,7 @@ pub struct DoltServer {
 /// Scans running OS processes for Dolt SQL servers and returns their details.
 /// Enriches results by matching ports to registered projects via port files,
 /// and falls back to SHOW DATABASES for unmatched servers.
-pub async fn dolt_servers(
-    Extension(db): Extension<Arc<Database>>,
-) -> impl IntoResponse {
+pub async fn dolt_servers(Extension(db): Extension<Arc<Database>>) -> impl IntoResponse {
     let mut servers = match scan_dolt_processes().await {
         Ok(s) => s,
         Err(e) => {
@@ -83,8 +77,7 @@ pub async fn dolt_servers(
     let projects = db.get_projects_filtered(true, true).unwrap_or_default();
 
     // Step 2: Build port -> project_path map from .beads/dolt-server.port files
-    let mut port_to_path: std::collections::HashMap<u16, String> =
-        std::collections::HashMap::new();
+    let mut port_to_path: std::collections::HashMap<u16, String> = std::collections::HashMap::new();
     for project in &projects {
         if project.path.is_empty() || project.path.starts_with("dolt://") {
             continue;
@@ -208,10 +201,7 @@ async fn get_dolt_processes_windows() -> Result<Vec<ProcessEntry>, String> {
         .map_err(|e| format!("wmic exec failed: {}", e))?;
 
     if !output.status.success() {
-        return Err(format!(
-            "wmic exited with code {:?}",
-            output.status.code()
-        ));
+        return Err(format!("wmic exited with code {:?}", output.status.code()));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);

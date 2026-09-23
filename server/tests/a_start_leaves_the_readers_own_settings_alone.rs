@@ -152,7 +152,9 @@ fn a_start_writes_nothing_into_a_home_folder_that_has_never_seen_it() {
         std::fs::read_to_string(&settings).unwrap_or_default()
     );
     assert!(
-        !heard.iter().any(|line| line.contains(&settings.display().to_string())),
+        !heard
+            .iter()
+            .any(|line| line.contains(&settings.display().to_string())),
         "a start announced itself into the reader's settings: {heard:?}"
     );
 }
@@ -176,7 +178,10 @@ fn a_start_leaves_settings_the_reader_already_had_exactly_as_they_were() {
     everything_said(home.path(), data.path());
 
     let after = std::fs::read_to_string(&settings).expect("the settings still there");
-    assert_eq!(after, theirs, "a start rewrote settings of the reader's own");
+    assert_eq!(
+        after, theirs,
+        "a start rewrote settings of the reader's own"
+    );
     assert!(
         !after.contains(OURS),
         "a start wrote this program's gate into the reader's own file: {after}"

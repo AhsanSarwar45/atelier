@@ -201,13 +201,22 @@ fn mockup_components(
         only_fields(
             item,
             &[
-                "id", "type", "text", "label", "placeholder", "tone", "action", "children",
+                "id",
+                "type",
+                "text",
+                "label",
+                "placeholder",
+                "tone",
+                "action",
+                "children",
             ],
             "a component",
         )?;
         let id = identifier(item.get("id"), "a component id")?;
         if !ids.insert(id.clone()) {
-            return Err(format!("two components are called {id}: component ids are unique"));
+            return Err(format!(
+                "two components are called {id}: component ids are unique"
+            ));
         }
         one_of(
             item,
@@ -348,8 +357,26 @@ pub fn artifact(value: &Value) -> Result<(), String> {
                 only_fields(
                     element,
                     &[
-                        "id", "type", "x", "y", "x1", "y1", "x2", "y2", "width", "height", "cx",
-                        "cy", "r", "rx", "ry", "d", "points", "text", "fill", "stroke",
+                        "id",
+                        "type",
+                        "x",
+                        "y",
+                        "x1",
+                        "y1",
+                        "x2",
+                        "y2",
+                        "width",
+                        "height",
+                        "cx",
+                        "cy",
+                        "r",
+                        "rx",
+                        "ry",
+                        "d",
+                        "points",
+                        "text",
+                        "fill",
+                        "stroke",
                         "strokeWidth",
                     ],
                     "an element",
@@ -363,7 +390,9 @@ pub fn artifact(value: &Value) -> Result<(), String> {
                 one_of(
                     element,
                     "type",
-                    &["rect", "circle", "ellipse", "line", "path", "polygon", "text"],
+                    &[
+                        "rect", "circle", "ellipse", "line", "path", "polygon", "text",
+                    ],
                     true,
                 )?;
                 scene_fields(
@@ -397,7 +426,15 @@ pub fn artifact(value: &Value) -> Result<(), String> {
                     let change = row(change, "changes")?;
                     only_fields(
                         change,
-                        &["element", "opacity", "x", "y", "scale", "rotate", "pathLength"],
+                        &[
+                            "element",
+                            "opacity",
+                            "x",
+                            "y",
+                            "scale",
+                            "rotate",
+                            "pathLength",
+                        ],
                         "a change",
                     )?;
                     let named = identifier(change.get("element"), "change.element")?;
@@ -433,7 +470,9 @@ pub fn artifact(value: &Value) -> Result<(), String> {
                 only_fields(screen, &["id", "title", "components"], "a screen")?;
                 let id = identifier(screen.get("id"), "a screen id")?;
                 if !screens.insert(id.clone()) {
-                    return Err(format!("two screens are called {id}: screen ids are unique"));
+                    return Err(format!(
+                        "two screens are called {id}: screen ids are unique"
+                    ));
                 }
                 required_string(screen, "title", 200)?;
                 mockup_components(
@@ -561,9 +600,17 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
         }
         "artifact" => {
             if !asset_name(object.get("asset").unwrap_or(&Value::Null), true) {
-                return Err("asset must name a stored artifact, as <64 hex characters>.artifact.json".into());
+                return Err(
+                    "asset must name a stored artifact, as <64 hex characters>.artifact.json"
+                        .into(),
+                );
             }
-            one_of(object, "kind", &["mermaid", "flow", "scene", "mockup"], true)?;
+            one_of(
+                object,
+                "kind",
+                &["mermaid", "flow", "scene", "mockup"],
+                true,
+            )?;
         }
         "metrics" => {
             for item in list(object, "items", 1, 6)? {
@@ -645,9 +692,7 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
                 ));
             }
             for cells in rows {
-                let cells = cells
-                    .as_array()
-                    .ok_or("every row is a list of cells")?;
+                let cells = cells.as_array().ok_or("every row is a list of cells")?;
                 if cells.len() != width {
                     return Err(format!(
                         "a row carries {}, but there are {}: every row matches the columns",
@@ -667,7 +712,12 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
             }
         }
         "explainer" => {
-            one_of(object, "layout", &["flow", "sequence", "cycle", "layers"], false)?;
+            one_of(
+                object,
+                "layout",
+                &["flow", "sequence", "cycle", "layers"],
+                false,
+            )?;
             optional_string(object, "summary", 200)?;
             let nodes = list(object, "nodes", 2, 12)?;
             let mut ids = std::collections::BTreeSet::new();
@@ -687,7 +737,9 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
                 for end in ["from", "to"] {
                     let named = required_string(edge, end, 200)?;
                     if !ids.contains(named) {
-                        return Err(format!("an edge names {named} as its {end}, and no node has that id"));
+                        return Err(format!(
+                            "an edge names {named} as its {end}, and no node has that id"
+                        ));
                     }
                 }
                 optional_string(edge, "label", 200)?;
@@ -720,7 +772,9 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
                     required_string(one, "label", 200)?;
                     let path = required_string(one, "path", 4096)?;
                     if !absolute(path) {
-                        return Err(format!("evidence[].path is {path}, and evidence paths are absolute"));
+                        return Err(format!(
+                            "evidence[].path is {path}, and evidence paths are absolute"
+                        ));
                     }
                     if let Some(line) = one.get("line") {
                         if line.as_u64().is_none_or(|at| at == 0) {
@@ -772,7 +826,9 @@ fn string<'a>(value: Option<&'a Value>, whose: &str, max: usize) -> Result<&'a s
         .and_then(Value::as_str)
         .ok_or_else(|| format!("{whose} is required and is text"))?;
     if text.trim().is_empty() {
-        return Err(format!("{whose} is blank, and displayed text must say something"));
+        return Err(format!(
+            "{whose} is blank, and displayed text must say something"
+        ));
     }
     if text.len() > max {
         return Err(format!(
@@ -799,7 +855,10 @@ fn optional_string(object: &Row, key: &str, max: usize) -> Result<(), String> {
 fn one_of(object: &Row, key: &str, allowed: &[&str], required: bool) -> Result<(), String> {
     match object.get(key) {
         None if !required => Ok(()),
-        None => Err(format!("{key} is required and is one of {}", allowed.join(", "))),
+        None => Err(format!(
+            "{key} is required and is one of {}",
+            allowed.join(", ")
+        )),
         Some(value) => match value.as_str() {
             Some(word) if allowed.contains(&word) => Ok(()),
             _ => Err(format!("{key} is one of {}", allowed.join(", "))),
@@ -814,7 +873,12 @@ fn number(value: Option<&Value>, whose: &str) -> Result<f64, String> {
         .ok_or_else(|| format!("{whose} is required and is a number"))
 }
 
-fn list<'a>(object: &'a Row, key: &str, least: usize, most: usize) -> Result<&'a Vec<Value>, String> {
+fn list<'a>(
+    object: &'a Row,
+    key: &str,
+    least: usize,
+    most: usize,
+) -> Result<&'a Vec<Value>, String> {
     let items = object
         .get(key)
         .and_then(Value::as_array)
@@ -833,10 +897,7 @@ fn list<'a>(object: &'a Row, key: &str, least: usize, most: usize) -> Result<&'a
 
 fn absolute(path: &str) -> bool {
     path.starts_with('/')
-        || path
-            .as_bytes()
-            .first()
-            .is_some_and(u8::is_ascii_alphabetic)
+        || path.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
             && path.as_bytes().get(1) == Some(&b':')
             && matches!(path.as_bytes().get(2), Some(b'/' | b'\\'))
 }
@@ -1230,7 +1291,10 @@ mod tests {
         assert_eq!(std::fs::read(root.path().join(&asset)).unwrap(), bytes);
         // The same file attached twice is one file, which is the whole point
         // of naming it by its content.
-        assert_eq!(import_attachment(&bytes, "notes.md", root.path()).unwrap(), asset);
+        assert_eq!(
+            import_attachment(&bytes, "notes.md", root.path()).unwrap(),
+            asset
+        );
     }
 
     /// The name is a label, never a path. Whatever the browser sends, what
@@ -1255,7 +1319,10 @@ mod tests {
         assert!(empty.contains("nothing.txt"), "{empty}");
         let huge = vec![0u8; ATTACHMENT_LIMIT + 1];
         let refused = import_attachment(&huge, "huge.mp4", root.path()).unwrap_err();
-        assert!(refused.contains("huge.mp4") && refused.contains("100 MiB"), "{refused}");
+        assert!(
+            refused.contains("huge.mp4") && refused.contains("100 MiB"),
+            "{refused}"
+        );
     }
 
     fn png(colors: &[[u8; 4]]) -> Vec<u8> {

@@ -141,7 +141,11 @@ pub struct Row {
 /// The recorded arrival, but only if it is the arrival of the state being
 /// announced now: a chat that has moved on since is timed from the new thing
 /// it has to say, not the old one.
-fn appeared(notice: Option<&crate::workbench::store::Notice>, state: &str, fallback: &str) -> String {
+fn appeared(
+    notice: Option<&crate::workbench::store::Notice>,
+    state: &str,
+    fallback: &str,
+) -> String {
     notice
         .filter(|notice| notice.since_state.as_deref() == Some(state))
         .and_then(|notice| notice.since.clone())
@@ -331,7 +335,10 @@ mod tests {
     #[test]
     fn what_each_state_is_worth_saying_about() {
         for state in ["waiting_permission", "errored"] {
-            assert!(waits_on_you(state), "{state} did not read as waiting on the owner");
+            assert!(
+                waits_on_you(state),
+                "{state} did not read as waiting on the owner"
+            );
             assert!(worth_announcing(state));
             assert!(!is_an_update(state));
         }
@@ -341,8 +348,17 @@ mod tests {
             assert!(!waits_on_you(state));
         }
         // Working is not news, and neither is asleep.
-        for state in ["thinking", "streaming", "running_tool", "starting", "dormant"] {
-            assert!(!worth_announcing(state), "{state} was announced while nothing waited");
+        for state in [
+            "thinking",
+            "streaming",
+            "running_tool",
+            "starting",
+            "dormant",
+        ] {
+            assert!(
+                !worth_announcing(state),
+                "{state} was announced while nothing waited"
+            );
         }
 
         assert_eq!(wording("waiting_permission"), "permission to use a tool");
@@ -378,7 +394,10 @@ mod tests {
     /// The folder is the directory's own name, so a worktree is the worktree.
     #[test]
     fn the_folder_is_the_directory_it_is_working_in() {
-        assert_eq!(folder_of("/work/project/worktrees/bw-altj").as_deref(), Some("bw-altj"));
+        assert_eq!(
+            folder_of("/work/project/worktrees/bw-altj").as_deref(),
+            Some("bw-altj")
+        );
         assert_eq!(folder_of("/").as_deref(), None);
     }
 
@@ -407,10 +426,18 @@ mod tests {
         let project = a_project(&projects, "keystone", false);
 
         let board = a_board(directory.path());
-        board.create_session(a_chat("chat-1", &project, "errored")).await.unwrap();
+        board
+            .create_session(a_chat("chat-1", &project, "errored"))
+            .await
+            .unwrap();
 
-        let first = worth_pushing(&board, &projects, "chat-1", "errored").await.unwrap();
-        assert!(first.is_some(), "a chat that stopped with an error was never announced");
+        let first = worth_pushing(&board, &projects, "chat-1", "errored")
+            .await
+            .unwrap();
+        assert!(
+            first.is_some(),
+            "a chat that stopped with an error was never announced"
+        );
         board
             .mark_announced("chat-1".into(), "errored".into(), WHEN.into())
             .await
@@ -445,7 +472,10 @@ mod tests {
         let projects = Database::new_in_memory().unwrap();
         let project = a_project(&projects, "keystone", false);
         let board = a_board(directory.path());
-        board.create_session(a_chat("chat-1", &project, "errored")).await.unwrap();
+        board
+            .create_session(a_chat("chat-1", &project, "errored"))
+            .await
+            .unwrap();
 
         board
             .mark_read(vec![("chat-1".into(), "errored".into())], WHEN.into())
@@ -474,9 +504,18 @@ mod tests {
         projects.archive_project(&archived).unwrap();
         let fixture = a_project(&projects, "fixture", true);
 
-        board.create_session(a_chat("orphan", "a-project-deleted-long-ago", "errored")).await.unwrap();
-        board.create_session(a_chat("shelved", &archived, "errored")).await.unwrap();
-        board.create_session(a_chat("in-a-fixture", &fixture, "errored")).await.unwrap();
+        board
+            .create_session(a_chat("orphan", "a-project-deleted-long-ago", "errored"))
+            .await
+            .unwrap();
+        board
+            .create_session(a_chat("shelved", &archived, "errored"))
+            .await
+            .unwrap();
+        board
+            .create_session(a_chat("in-a-fixture", &fixture, "errored"))
+            .await
+            .unwrap();
 
         for chat in ["orphan", "shelved", "in-a-fixture"] {
             assert!(
@@ -497,14 +536,23 @@ mod tests {
         let projects = Database::new_in_memory().unwrap();
         let project = a_project(&projects, "keystone", false);
         let board = a_board(directory.path());
-        board.create_session(a_chat("chat-1", &project, "thinking")).await.unwrap();
+        board
+            .create_session(a_chat("chat-1", &project, "thinking"))
+            .await
+            .unwrap();
 
         assert!(
-            worth_pushing(&board, &projects, "chat-1", "thinking").await.unwrap().is_none(),
+            worth_pushing(&board, &projects, "chat-1", "thinking")
+                .await
+                .unwrap()
+                .is_none(),
             "a chat merely working was pushed"
         );
         assert!(
-            worth_pushing(&board, &projects, "never-existed", "errored").await.unwrap().is_none(),
+            worth_pushing(&board, &projects, "never-existed", "errored")
+                .await
+                .unwrap()
+                .is_none(),
             "a chat that is not on the board was pushed"
         );
     }
@@ -544,7 +592,10 @@ mod tests {
             .since
             .clone()
             .expect("the arrival was not written down");
-        assert_eq!(rows[0].at, recorded, "the row did not say the recorded time");
+        assert_eq!(
+            rows[0].at, recorded,
+            "the row did not say the recorded time"
+        );
         assert_ne!(
             rows[0].at, "2026-01-01T00:00:00Z",
             "the row fell back to the chat's own clock when a real arrival was on record"
@@ -577,7 +628,10 @@ mod tests {
         let projects = Database::new_in_memory().unwrap();
         let project = a_project(&projects, "keystone", false);
         let board = a_board(directory.path());
-        board.create_session(a_chat("chat-1", &project, "waiting_permission")).await.unwrap();
+        board
+            .create_session(a_chat("chat-1", &project, "waiting_permission"))
+            .await
+            .unwrap();
 
         let row = worth_pushing(&board, &projects, "chat-1", "waiting_permission")
             .await

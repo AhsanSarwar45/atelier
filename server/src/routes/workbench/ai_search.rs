@@ -88,7 +88,12 @@ impl Source for Chats {
         ])
     }
 
-    fn call(self: Arc<Self>, tool: String, arguments: Value, steps: Steps) -> BoxFuture<'static, Called> {
+    fn call(
+        self: Arc<Self>,
+        tool: String,
+        arguments: Value,
+        steps: Steps,
+    ) -> BoxFuture<'static, Called> {
         async move {
             let number = |name: &str| arguments[name].as_u64().map(|n| n as usize);
             let offset = number("offset").unwrap_or(0);
@@ -259,17 +264,27 @@ mod tests {
     #[test]
     fn a_chat_search_gives_its_agent_two_read_only_tools_and_the_chat_skill() {
         let skill = agent::prompt(SKILL, "where we fixed the loader");
-        assert!(skill.starts_with("# Finding the chat someone describes"), "{skill}");
+        assert!(
+            skill.starts_with("# Finding the chat someone describes"),
+            "{skill}"
+        );
         let index = SearchIndex::open(
             &tempfile::tempdir().unwrap().keep().join("search.db"),
             &tempfile::tempdir().unwrap().keep().join("workbench.db"),
             Arc::new(|_: &str| Vec::new()),
         );
         let Ok(index) = index else { return };
-        let tools = Chats { index, projects: None, here: None }.tools();
+        let tools = Chats {
+            index,
+            projects: None,
+            here: None,
+        }
+        .tools();
         let tools = tools.as_array().unwrap();
         assert_eq!(tools.len(), 2);
-        assert!(tools.iter().all(|tool| tool["annotations"]["readOnlyHint"] == true));
+        assert!(tools
+            .iter()
+            .all(|tool| tool["annotations"]["readOnlyHint"] == true));
     }
 
     #[test]
@@ -281,7 +296,10 @@ mod tests {
             vec!["p-1".to_string()],
         );
         // And naming none does not widen it either.
-        assert_eq!(searched_in(Some(&here), Vec::new()), vec!["p-1".to_string()]);
+        assert_eq!(
+            searched_in(Some(&here), Vec::new()),
+            vec!["p-1".to_string()]
+        );
         // An ask made outside a project still goes where its words say.
         assert_eq!(
             searched_in(None, vec!["p-2".to_string()]),
@@ -304,6 +322,9 @@ mod tests {
         };
         let tools = chats.tools();
         let said = tools[0]["description"].as_str().unwrap().to_string();
-        assert!(said.starts_with("Search the chats of the beads-web project"), "{said}");
+        assert!(
+            said.starts_with("Search the chats of the beads-web project"),
+            "{said}"
+        );
     }
 }

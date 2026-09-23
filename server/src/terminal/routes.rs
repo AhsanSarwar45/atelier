@@ -125,10 +125,7 @@ async fn open(
             if !std::fs::metadata(&named).is_ok_and(|what| what.is_dir()) {
                 return Err((
                     StatusCode::BAD_REQUEST,
-                    format!(
-                        "Shell folder not found: {}",
-                        named.display()
-                    ),
+                    format!("Shell folder not found: {}", named.display()),
                 ));
             }
             named
@@ -228,10 +225,7 @@ async fn close(
     if gone {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err((
-            StatusCode::NOT_FOUND,
-            "Shell not found.".to_string(),
-        ))
+        Err((StatusCode::NOT_FOUND, "Shell not found.".to_string()))
     }
 }
 
@@ -242,8 +236,7 @@ fn home() -> Result<PathBuf, Refusal> {
         .ok_or_else(|| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "Could not find your home folder."
-                    .to_string(),
+                "Could not find your home folder.".to_string(),
             )
         })
 }

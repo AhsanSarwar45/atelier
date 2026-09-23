@@ -88,7 +88,11 @@ mod tests {
 
     #[test]
     fn a_line_is_a_place_whether_written_as_a_number_or_not() {
-        let found = named(r#"{"files":[{"id":"src/a.rs","line":42},{"id":"b.rs","line":"7"}]}"#, "files").unwrap();
+        let found = named(
+            r#"{"files":[{"id":"src/a.rs","line":42},{"id":"b.rs","line":"7"}]}"#,
+            "files",
+        )
+        .unwrap();
         assert_eq!(found[0].at.as_deref(), Some("42"));
         assert_eq!(found[1].at.as_deref(), Some("7"));
     }

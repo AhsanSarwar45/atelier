@@ -48,7 +48,9 @@ static INDEX: Mutex<()> = Mutex::new(());
 /// A poisoned lock means a previous writer panicked, not that the index is
 /// unusable: take it anyway rather than refusing every account from then on.
 fn index_lock() -> MutexGuard<'static, ()> {
-    INDEX.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    INDEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 pub fn variable(brand: &str) -> Option<&'static str> {

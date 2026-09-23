@@ -80,7 +80,11 @@ impl UpdateRun {
     pub fn busy(&self) -> bool {
         matches!(
             self.phase,
-            Phase::Downloading | Phase::Verifying | Phase::Unpacking | Phase::Restarting | Phase::Done
+            Phase::Downloading
+                | Phase::Verifying
+                | Phase::Unpacking
+                | Phase::Restarting
+                | Phase::Done
         )
     }
 }
@@ -227,7 +231,9 @@ mod tests {
     async fn a_failure_frees_the_run_for_a_retry() {
         let watch = new_watch();
         assert!(watch.claim(None).await);
-        watch.failed("Refused: the downloaded file is not the one we published.").await;
+        watch
+            .failed("Refused: the downloaded file is not the one we published.")
+            .await;
 
         let now = watch.now().await;
         assert_eq!(now.phase, Phase::Failed);
@@ -289,7 +295,9 @@ mod tests {
         let mut seen = watch.watch();
         watch.arrived(64, None).await;
 
-        let frame = seen.try_recv().expect("a length-less download still reports");
+        let frame = seen
+            .try_recv()
+            .expect("a length-less download still reports");
         assert_eq!(frame.received, 64);
         assert_eq!(
             frame.total, None,

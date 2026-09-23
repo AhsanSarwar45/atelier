@@ -115,7 +115,12 @@ fn person(value: Option<&Value>) -> String {
 fn words(value: Option<&Value>) -> Vec<String> {
     value
         .and_then(Value::as_array)
-        .map(|list| list.iter().filter_map(|w| w.as_str()).map(str::to_string).collect())
+        .map(|list| {
+            list.iter()
+                .filter_map(|w| w.as_str())
+                .map(str::to_string)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -123,7 +128,12 @@ fn words(value: Option<&Value>) -> Vec<String> {
 ///
 /// A plugin with no name cannot be installed by name, so it is not offered: an
 /// Install button on it would have nothing to pass to the CLI.
-pub fn from_manifest(manifest: &Value, origin: &str, known: bool, installed: &HashSet<String>) -> Vec<Offered> {
+pub fn from_manifest(
+    manifest: &Value,
+    origin: &str,
+    known: bool,
+    installed: &HashSet<String>,
+) -> Vec<Offered> {
     let market = text(manifest.get("name"));
     if market.is_empty() {
         return Vec::new();

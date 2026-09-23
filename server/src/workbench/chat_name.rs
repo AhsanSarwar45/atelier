@@ -52,7 +52,10 @@ impl<'a> Chat<'a> {
 enum Piece {
     Title,
     Text(String),
-    Extract { source: ChatNameSource, pattern: Regex },
+    Extract {
+        source: ChatNameSource,
+        pattern: Regex,
+    },
     /// A part whose pattern would not compile: it finds nothing, and so takes
     /// the text beside it with it.
     Broken,
@@ -75,7 +78,9 @@ fn pattern(text: &str) -> Result<Regex, String> {
         return Err("Enter a pattern".into());
     }
     if text.chars().count() > LONGEST {
-        return Err(format!("A pattern cannot be longer than {LONGEST} characters"));
+        return Err(format!(
+            "A pattern cannot be longer than {LONGEST} characters"
+        ));
     }
     RegexBuilder::new(text)
         .size_limit(1 << 20)
@@ -120,11 +125,19 @@ pub fn check(settings: &ChatNameSettings) -> Result<(), String> {
     if settings.parts.len() > MOST_PARTS {
         return Err(format!("A chat name can have at most {MOST_PARTS} parts"));
     }
-    if settings.parts.iter().all(|part| matches!(part, ChatNamePart::Text { .. })) {
+    if settings
+        .parts
+        .iter()
+        .all(|part| matches!(part, ChatNamePart::Text { .. }))
+    {
         return Err("A chat name needs the chat title or extracted text".into());
     }
     match problems(settings).into_iter().next() {
-        Some(problem) => Err(format!("Chat name part {}: {}", problem.index + 1, problem.message)),
+        Some(problem) => Err(format!(
+            "Chat name part {}: {}",
+            problem.index + 1,
+            problem.message
+        )),
         None => Ok(()),
     }
 }
@@ -138,8 +151,14 @@ pub fn compile(settings: &ChatNameSettings) -> Option<Template> {
         .map(|part| match part {
             ChatNamePart::Title => Piece::Title,
             ChatNamePart::Text { text } => Piece::Text(text.clone()),
-            ChatNamePart::Extract { source, pattern: text } => pattern(text)
-                .map(|pattern| Piece::Extract { source: *source, pattern })
+            ChatNamePart::Extract {
+                source,
+                pattern: text,
+            } => pattern(text)
+                .map(|pattern| Piece::Extract {
+                    source: *source,
+                    pattern,
+                })
                 .unwrap_or(Piece::Broken),
         })
         .collect();
@@ -169,7 +188,11 @@ fn branch_at(root: &Path) -> Option<String> {
         let pointer = std::fs::read_to_string(&dot_git).ok()?;
         let target = pointer.trim().strip_prefix("gitdir:")?.trim();
         let target = Path::new(target);
-        if target.is_absolute() { target.to_path_buf() } else { root.join(target) }
+        if target.is_absolute() {
+            target.to_path_buf()
+        } else {
+            root.join(target)
+        }
     };
     let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
     head.trim()
@@ -188,9 +211,10 @@ pub struct Facts {
 impl Facts {
     pub fn read(template: &Template, cwd: Option<&str>) -> Self {
         let wants = |wanted: ChatNameSource| {
-            template.pieces.iter().any(
-                |piece| matches!(piece, Piece::Extract { source, .. } if *source == wanted),
-            )
+            template
+                .pieces
+                .iter()
+                .any(|piece| matches!(piece, Piece::Extract { source, .. } if *source == wanted))
         };
         let Some(cwd) = cwd.filter(|cwd| !cwd.is_empty()) else {
             return Facts::default();
@@ -199,13 +223,15 @@ impl Facts {
             .then(|| checkout_root(cwd))
             .flatten();
         Facts {
-            worktree: wants(ChatNameSource::Worktree).then(|| {
-                root.as_deref()
-                    .and_then(|root| root.file_name())
-                    .and_then(|name| name.to_str())
-                    .map(str::to_string)
-                    .or_else(|| crate::workbench::notice::folder_of(cwd))
-            }).flatten(),
+            worktree: wants(ChatNameSource::Worktree)
+                .then(|| {
+                    root.as_deref()
+                        .and_then(|root| root.file_name())
+                        .and_then(|name| name.to_str())
+                        .map(str::to_string)
+                        .or_else(|| crate::workbench::notice::folder_of(cwd))
+                })
+                .flatten(),
             branch: wants(ChatNameSource::Branch)
                 .then(|| root.as_deref().and_then(branch_at))
                 .flatten(),
@@ -244,7 +270,9 @@ pub fn render(template: &Template, title: Option<&str>, facts: &Facts) -> Option
                 .filter(|title| !title.is_empty())
                 .map(str::to_string),
             Piece::Text(_) | Piece::Broken => None,
-            Piece::Extract { source, pattern } => facts.of(*source).and_then(|it| found(pattern, it)),
+            Piece::Extract { source, pattern } => {
+                facts.of(*source).and_then(|it| found(pattern, it))
+            }
         })
         .collect();
     let spoken = |index: usize| values[index].is_some();
@@ -353,7 +381,10 @@ mod tests {
     use super::*;
 
     fn extract(source: ChatNameSource, pattern: &str) -> ChatNamePart {
-        ChatNamePart::Extract { source, pattern: pattern.into() }
+        ChatNamePart::Extract {
+            source,
+            pattern: pattern.into(),
+        }
     }
 
     fn text(text: &str) -> ChatNamePart {
@@ -365,7 +396,10 @@ mod tests {
     }
 
     fn worktree(name: &str) -> Facts {
-        Facts { worktree: Some(name.into()), ..Default::default() }
+        Facts {
+            worktree: Some(name.into()),
+            ..Default::default()
+        }
     }
 
     fn key_then_title() -> Template {
@@ -379,7 +413,12 @@ mod tests {
     #[test]
     fn the_ticket_key_leads_the_title() {
         assert_eq!(
-            render(&key_then_title(), Some("Fix the tray"), &worktree("bw-a9ln")).as_deref(),
+            render(
+                &key_then_title(),
+                Some("Fix the tray"),
+                &worktree("bw-a9ln")
+            )
+            .as_deref(),
             Some("bw-a9ln: Fix the tray")
         );
     }
@@ -387,7 +426,12 @@ mod tests {
     #[test]
     fn a_key_that_is_not_there_takes_its_separator_with_it() {
         assert_eq!(
-            render(&key_then_title(), Some("Fix the tray"), &worktree("beads-web")).as_deref(),
+            render(
+                &key_then_title(),
+                Some("Fix the tray"),
+                &worktree("beads-web")
+            )
+            .as_deref(),
             Some("Fix the tray")
         );
     }
@@ -402,7 +446,10 @@ mod tests {
 
     #[test]
     fn nothing_found_anywhere_is_no_name_at_all() {
-        assert_eq!(render(&key_then_title(), Some("  "), &worktree("main")), None);
+        assert_eq!(
+            render(&key_then_title(), Some("  "), &worktree("main")),
+            None
+        );
     }
 
     #[test]
@@ -417,7 +464,10 @@ mod tests {
             render(&bracketed, Some("Fix"), &worktree("bw-1")).as_deref(),
             Some("Fix (bw-1)")
         );
-        assert_eq!(render(&bracketed, Some("Fix"), &worktree("x")).as_deref(), Some("Fix"));
+        assert_eq!(
+            render(&bracketed, Some("Fix"), &worktree("x")).as_deref(),
+            Some("Fix")
+        );
     }
 
     #[test]
@@ -426,23 +476,34 @@ mod tests {
             text("#"),
             extract(ChatNameSource::Branch, r"feature/(\d+)"),
         ]);
-        let facts = Facts { branch: Some("feature/1231-login".into()), ..Default::default() };
+        let facts = Facts {
+            branch: Some("feature/1231-login".into()),
+            ..Default::default()
+        };
         assert_eq!(render(&numbered, None, &facts).as_deref(), Some("#1231"));
     }
 
     #[test]
     fn a_broken_pattern_is_named_before_it_is_saved() {
-        let broken = ChatNameSettings { parts: vec![extract(ChatNameSource::Worktree, "bw-(")] };
+        let broken = ChatNameSettings {
+            parts: vec![extract(ChatNameSource::Worktree, "bw-(")],
+        };
         let found = problems(&broken);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].index, 0);
-        assert!(found[0].message.starts_with("Not a valid pattern"), "{}", found[0].message);
+        assert!(
+            found[0].message.starts_with("Not a valid pattern"),
+            "{}",
+            found[0].message
+        );
         assert!(check(&broken).is_err());
     }
 
     #[test]
     fn a_template_of_only_words_cannot_be_saved() {
-        let words = ChatNameSettings { parts: vec![text("chat")] };
+        let words = ChatNameSettings {
+            parts: vec![text("chat")],
+        };
         assert!(check(&words).is_err());
         assert!(compile(&words).is_none());
     }
@@ -450,10 +511,17 @@ mod tests {
     #[test]
     fn a_pattern_broken_by_hand_leaves_the_rest_of_the_template_working() {
         let settings = ChatNameSettings {
-            parts: vec![extract(ChatNameSource::Worktree, "("), text(": "), ChatNamePart::Title],
+            parts: vec![
+                extract(ChatNameSource::Worktree, "("),
+                text(": "),
+                ChatNamePart::Title,
+            ],
         };
         let usable = compile(&settings).expect("the title still names the chat");
-        assert_eq!(render(&usable, Some("Fix"), &worktree("bw-1")).as_deref(), Some("Fix"));
+        assert_eq!(
+            render(&usable, Some("Fix"), &worktree("bw-1")).as_deref(),
+            Some("Fix")
+        );
     }
 
     #[test]
@@ -466,7 +534,11 @@ mod tests {
         std::fs::write(private.join("HEAD"), "ref: refs/heads/bw-a9ln\n").unwrap();
         let tree = main.join("worktrees/bw-a9ln");
         std::fs::create_dir_all(tree.join("src")).unwrap();
-        std::fs::write(tree.join(".git"), format!("gitdir: {}\n", private.display())).unwrap();
+        std::fs::write(
+            tree.join(".git"),
+            format!("gitdir: {}\n", private.display()),
+        )
+        .unwrap();
 
         let both = template(vec![
             extract(ChatNameSource::Worktree, r".+"),
@@ -475,7 +547,10 @@ mod tests {
         ]);
         let inside = tree.join("src");
         let facts = Facts::read(&both, inside.to_str());
-        assert_eq!(render(&both, None, &facts).as_deref(), Some("bw-a9ln @ bw-a9ln"));
+        assert_eq!(
+            render(&both, None, &facts).as_deref(),
+            Some("bw-a9ln @ bw-a9ln")
+        );
         let facts = Facts::read(&both, main.to_str());
         assert_eq!(render(&both, None, &facts).as_deref(), Some("repo @ main"));
         std::fs::remove_dir_all(home).unwrap();

@@ -541,8 +541,14 @@ mod tests {
             &cfg.path().join("skills/report/SKILL.md"),
             "---\nname: report\n---\nBody\n",
         );
-        write(&cfg.path().join("agents/reviewer.md"), "---\nname: reviewer\n---\n");
-        write(&cfg.path().join("output-styles/terse.md"), "---\nname: Terse\n---\n");
+        write(
+            &cfg.path().join("agents/reviewer.md"),
+            "---\nname: reviewer\n---\n",
+        );
+        write(
+            &cfg.path().join("output-styles/terse.md"),
+            "---\nname: Terse\n---\n",
+        );
 
         let kinds = list("claude", &account(), cfg.path()).unwrap();
         assert_eq!(

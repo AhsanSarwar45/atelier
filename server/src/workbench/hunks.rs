@@ -65,7 +65,10 @@ fn split_lines(text: &str) -> Vec<&str> {
     if text.is_empty() {
         return Vec::new();
     }
-    text.strip_suffix('\n').unwrap_or(text).split('\n').collect()
+    text.strip_suffix('\n')
+        .unwrap_or(text)
+        .split('\n')
+        .collect()
 }
 
 /// How many lines the two sides open with in common.
@@ -147,12 +150,28 @@ fn rising(pairs: &[(usize, usize)]) -> Vec<(usize, usize)> {
 /// One side replaced wholesale by the other: true, and as coarse as this file
 /// ever gets. Only reached when there is nothing on one side to line up
 /// against, or nothing the two sides share to line up by.
-fn replaced<'a>(a: &[&'a str], b: &[&'a str], old_from: usize, new_from: usize, ops: &mut Vec<Op<'a>>) {
+fn replaced<'a>(
+    a: &[&'a str],
+    b: &[&'a str],
+    old_from: usize,
+    new_from: usize,
+    ops: &mut Vec<Op<'a>>,
+) {
     for (at, text) in a.iter().enumerate() {
-        ops.push(Op { kind: Kind::Removed, text, old_no: old_from + at, new_no: new_from });
+        ops.push(Op {
+            kind: Kind::Removed,
+            text,
+            old_no: old_from + at,
+            new_no: new_from,
+        });
     }
     for (at, text) in b.iter().enumerate() {
-        ops.push(Op { kind: Kind::Added, text, old_no: old_from + a.len(), new_no: new_from + at });
+        ops.push(Op {
+            kind: Kind::Added,
+            text,
+            old_no: old_from + a.len(),
+            new_no: new_from + at,
+        });
     }
 }
 
@@ -160,7 +179,13 @@ fn replaced<'a>(a: &[&'a str], b: &[&'a str], old_from: usize, new_from: usize, 
 ///
 /// Longest-common-subsequence, so a line that merely moved is not reported as
 /// rewritten.
-fn exactly<'a>(a: &[&'a str], b: &[&'a str], old_from: usize, new_from: usize, ops: &mut Vec<Op<'a>>) {
+fn exactly<'a>(
+    a: &[&'a str],
+    b: &[&'a str],
+    old_from: usize,
+    new_from: usize,
+    ops: &mut Vec<Op<'a>>,
+) {
     // table[i][j] is the length of the longest common subsequence of a[i..]
     // and b[j..], held as one flat row-major buffer.
     let width = b.len() + 1;
@@ -179,17 +204,32 @@ fn exactly<'a>(a: &[&'a str], b: &[&'a str], old_from: usize, new_from: usize, o
     let (mut old_no, mut new_no) = (old_from, new_from);
     while i < a.len() && j < b.len() {
         if a[i] == b[j] {
-            ops.push(Op { kind: Kind::Context, text: a[i], old_no, new_no });
+            ops.push(Op {
+                kind: Kind::Context,
+                text: a[i],
+                old_no,
+                new_no,
+            });
             old_no += 1;
             new_no += 1;
             i += 1;
             j += 1;
         } else if table[(i + 1) * width + j] >= table[i * width + j + 1] {
-            ops.push(Op { kind: Kind::Removed, text: a[i], old_no, new_no });
+            ops.push(Op {
+                kind: Kind::Removed,
+                text: a[i],
+                old_no,
+                new_no,
+            });
             old_no += 1;
             i += 1;
         } else {
-            ops.push(Op { kind: Kind::Added, text: b[j], old_no, new_no });
+            ops.push(Op {
+                kind: Kind::Added,
+                text: b[j],
+                old_no,
+                new_no,
+            });
             new_no += 1;
             j += 1;
         }
@@ -204,21 +244,44 @@ fn exactly<'a>(a: &[&'a str], b: &[&'a str], old_from: usize, new_from: usize, o
 /// pieces of a real file are small, so this almost always ends in an exact
 /// comparison of every part. Only a span with nothing unique in common — a
 /// file rewritten from end to end — is reported as replaced.
-fn span<'a>(a: &[&'a str], b: &[&'a str], old_from: usize, new_from: usize, depth: usize, ops: &mut Vec<Op<'a>>) {
+fn span<'a>(
+    a: &[&'a str],
+    b: &[&'a str],
+    old_from: usize,
+    new_from: usize,
+    depth: usize,
+    ops: &mut Vec<Op<'a>>,
+) {
     if a.is_empty() || b.is_empty() {
         return replaced(a, b, old_from, new_from, ops);
     }
     if a.len().saturating_mul(b.len()) <= MAX_CELLS {
         return exactly(a, b, old_from, new_from, ops);
     }
-    let found = if depth == 0 { Vec::new() } else { anchors(a, b) };
+    let found = if depth == 0 {
+        Vec::new()
+    } else {
+        anchors(a, b)
+    };
     if found.is_empty() {
         return replaced(a, b, old_from, new_from, ops);
     }
     let (mut i, mut j) = (0usize, 0usize);
     for (ai, bj) in found {
-        span(&a[i..ai], &b[j..bj], old_from + i, new_from + j, depth - 1, ops);
-        ops.push(Op { kind: Kind::Context, text: a[ai], old_no: old_from + ai, new_no: new_from + bj });
+        span(
+            &a[i..ai],
+            &b[j..bj],
+            old_from + i,
+            new_from + j,
+            depth - 1,
+            ops,
+        );
+        ops.push(Op {
+            kind: Kind::Context,
+            text: a[ai],
+            old_no: old_from + ai,
+            new_no: new_from + bj,
+        });
         i = ai + 1;
         j = bj + 1;
     }
@@ -296,7 +359,12 @@ pub fn summarize(before: &str, after: &str, start: usize) -> Map<String, Value> 
     let head = prefix.saturating_sub(CONTEXT);
     for (at, text) in a[head..prefix].iter().enumerate() {
         let no = head + at + start;
-        ops.push(Op { kind: Kind::Context, text, old_no: no, new_no: no });
+        ops.push(Op {
+            kind: Kind::Context,
+            text,
+            old_no: no,
+            new_no: no,
+        });
     }
     ops.extend(middle_ops(
         &a[prefix..a.len() - suffix],
@@ -365,7 +433,12 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .map(|l| (l["kind"].as_str().unwrap().into(), l["text"].as_str().unwrap().into()))
+            .map(|l| {
+                (
+                    l["kind"].as_str().unwrap().into(),
+                    l["text"].as_str().unwrap().into(),
+                )
+            })
             .collect()
     }
 
@@ -417,7 +490,9 @@ mod tests {
     #[test]
     fn changes_close_together_share_one_hunk() {
         let before: String = (1..=100).map(|n| format!("line {n}\n")).collect();
-        let after = before.replace("line 50\n", "a\n").replace("line 53\n", "b\n");
+        let after = before
+            .replace("line 50\n", "a\n")
+            .replace("line 53\n", "b\n");
 
         let change = summarize(&before, &after, 1);
         assert_eq!(change["hunks"].as_array().unwrap().len(), 1);
@@ -456,7 +531,13 @@ mod tests {
     fn a_change_everywhere_is_cut_to_a_bound_and_says_so() {
         let before: String = (1..=4000).map(|n| format!("line {n}\n")).collect();
         let after: String = (1..=4000)
-            .map(|n| if n % 40 == 0 { format!("changed {n}\n") } else { format!("line {n}\n") })
+            .map(|n| {
+                if n % 40 == 0 {
+                    format!("changed {n}\n")
+                } else {
+                    format!("line {n}\n")
+                }
+            })
             .collect();
 
         let change = summarize(&before, &after, 1);
@@ -476,7 +557,10 @@ mod tests {
         let change = summarize("", &after, 1);
         assert_eq!(change["added"], json!(3000));
         assert_eq!(change["hunks"].as_array().unwrap().len(), 1);
-        assert_eq!(change["hunks"][0]["lines"].as_array().unwrap().len(), MAX_LINES);
+        assert_eq!(
+            change["hunks"][0]["lines"].as_array().unwrap().len(),
+            MAX_LINES
+        );
         assert_eq!(change["omittedLines"], json!(3000 - MAX_LINES));
         assert!(change.get("omittedHunks").is_none());
         // Which is the whole point: it fits on the wire.
@@ -496,7 +580,10 @@ mod tests {
         assert_eq!(change["removed"], json!(3000));
         assert_eq!(change["hunks"].as_array().unwrap().len(), 1);
         // Clipped to the bound, with the counts above still exact.
-        assert_eq!(change["hunks"][0]["lines"].as_array().unwrap().len(), MAX_LINES);
+        assert_eq!(
+            change["hunks"][0]["lines"].as_array().unwrap().len(),
+            MAX_LINES
+        );
         assert_eq!(change["omittedLines"], json!(6000 - MAX_LINES));
     }
 
@@ -507,7 +594,13 @@ mod tests {
     fn a_large_file_changed_all_through_is_cut_at_its_unique_lines() {
         let before: String = (1..=4000).map(|n| format!("line {n}\n")).collect();
         let after: String = (1..=4000)
-            .map(|n| if n % 500 == 0 { format!("changed {n}\n") } else { format!("line {n}\n") })
+            .map(|n| {
+                if n % 500 == 0 {
+                    format!("changed {n}\n")
+                } else {
+                    format!("line {n}\n")
+                }
+            })
             .collect();
 
         let change = summarize(&before, &after, 1);

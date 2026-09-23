@@ -53,7 +53,12 @@ pub trait Source: Send + Sync + 'static {
     /// The MCP tool list, every one read-only.
     fn tools(&self) -> Value;
     /// Answer one tool call, telling `steps` what was searched or read.
-    fn call(self: Arc<Self>, tool: String, arguments: Value, steps: Steps) -> BoxFuture<'static, Called>;
+    fn call(
+        self: Arc<Self>,
+        tool: String,
+        arguments: Value,
+        steps: Steps,
+    ) -> BoxFuture<'static, Called>;
     /// Each named thing as the browser draws it, in order, or `None` for one
     /// that does not exist.
     fn found(self: Arc<Self>, named: Vec<Named>) -> BoxFuture<'static, Vec<Option<Value>>>;
@@ -138,7 +143,8 @@ pub fn start(
     let Some(program) = crate::routes::find_tool(&brand, &[]) else {
         return Err(refused(format!("{brand} is not installed.")));
     };
-    let home = crate::workbench::profiles::chat_dir(&brand, settings.profile.as_deref(), &system(&brand));
+    let home =
+        crate::workbench::profiles::chat_dir(&brand, settings.profile.as_deref(), &system(&brand));
 
     let token = uuid::Uuid::new_v4().to_string();
     let port = std::env::var("ATELIER_PORT")
@@ -171,7 +177,11 @@ pub fn start(
     let model = settings.model.clone();
     tokio::spawn(async move {
         let _registered = registered;
-        say(&out, json!({"type":"started","provider":brand,"model":model})).await;
+        say(
+            &out,
+            json!({"type":"started","provider":brand,"model":model}),
+        )
+        .await;
         let outcome = run(command, &brand, &answer_file, limit, &out, &mut steps).await;
         let _ = std::fs::remove_dir_all(&scratch);
         let said = match outcome {
@@ -304,9 +314,13 @@ fn agent_command(agent: &Agent) -> Command {
             .arg("-c")
             .arg(format!("mcp_servers.{name}.url={}", toml_string(url)))
             .arg("-c")
-            .arg(format!("mcp_servers.{name}.bearer_token_env_var=\"ATELIER_SEARCH_TOKEN\""))
+            .arg(format!(
+                "mcp_servers.{name}.bearer_token_env_var=\"ATELIER_SEARCH_TOKEN\""
+            ))
             .arg("-c")
-            .arg(format!("mcp_servers.{name}.default_tools_approval_mode=\"approve\""))
+            .arg(format!(
+                "mcp_servers.{name}.default_tools_approval_mode=\"approve\""
+            ))
             .arg("-o")
             .arg(answer_file);
         if let Some(model) = &settings.model {
@@ -500,9 +514,11 @@ pub async fn mcp(headers: HeaderMap, Json(message): Json<Value>) -> Response {
         "tools/call" => {
             let params = &message["params"];
             match params["name"].as_str() {
-                Some(tool) if source.tools().as_array().is_some_and(|tools| {
-                    tools.iter().any(|known| known["name"] == tool)
-                }) =>
+                Some(tool)
+                    if source
+                        .tools()
+                        .as_array()
+                        .is_some_and(|tools| tools.iter().any(|known| known["name"] == tool)) =>
                 {
                     source
                         .call(tool.to_string(), params["arguments"].clone(), steps)
@@ -542,7 +558,12 @@ mod tests {
         fn tools(&self) -> Value {
             json!([{"name":"echo","inputSchema":{"type":"object"},"annotations":read_only()}])
         }
-        fn call(self: Arc<Self>, _tool: String, arguments: Value, steps: Steps) -> BoxFuture<'static, Called> {
+        fn call(
+            self: Arc<Self>,
+            _tool: String,
+            arguments: Value,
+            steps: Steps,
+        ) -> BoxFuture<'static, Called> {
             async move {
                 let _ = steps.send("Echoed".into());
                 Ok(tool_text(arguments))
@@ -571,7 +592,10 @@ mod tests {
         let bytes = axum::body::to_bytes(answer.into_body(), 1 << 20)
             .await
             .unwrap();
-        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
     }
 
     #[test]
@@ -605,7 +629,12 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::ACCEPTED);
 
-        let (_, listed) = post_to(&app, "run-token", json!({"jsonrpc":"2.0","id":2,"method":"tools/list"})).await;
+        let (_, listed) = post_to(
+            &app,
+            "run-token",
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
+        )
+        .await;
         assert_eq!(listed["result"]["tools"][0]["name"], "echo");
 
         let (_, echoed) = post_to(

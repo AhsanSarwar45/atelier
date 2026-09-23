@@ -47,7 +47,9 @@ pub async fn ensure_registered(db: &Database, bd: &Path) {
         }
     };
 
-    let Some(data_dir) = crate::identity::data_dir() else { return; };
+    let Some(data_dir) = crate::identity::data_dir() else {
+        return;
+    };
     let starts = projects
         .into_iter()
         .filter_map(|project| {
@@ -184,7 +186,13 @@ mod tests {
             .unwrap();
             let mut manifest = crate::project_manifest::infer(path);
             manifest.project.use_beads = true;
-            crate::project_manifest::create(path, temp.path(), crate::project_manifest::ManifestStorage::Repository, &manifest).unwrap();
+            crate::project_manifest::create(
+                path,
+                temp.path(),
+                crate::project_manifest::ManifestStorage::Repository,
+                &manifest,
+            )
+            .unwrap();
         }
 
         let bd = fake_bd(temp.path());
@@ -210,10 +218,21 @@ mod tests {
         fs::create_dir_all(project.join(".beads/dolt")).unwrap();
         let mut manifest = crate::project_manifest::infer(&project);
         manifest.project.use_beads = false;
-        crate::project_manifest::create(&project, temp.path(), crate::project_manifest::ManifestStorage::Repository, &manifest).unwrap();
+        crate::project_manifest::create(
+            &project,
+            temp.path(),
+            crate::project_manifest::ManifestStorage::Repository,
+            &manifest,
+        )
+        .unwrap();
         let db = Database::new_in_memory().unwrap();
-        db.create_project(CreateProjectInput { name: "disabled".into(), path: project.to_string_lossy().into_owned(),
-            local_path: None, is_test: false }).unwrap();
+        db.create_project(CreateProjectInput {
+            name: "disabled".into(),
+            path: project.to_string_lossy().into_owned(),
+            local_path: None,
+            is_test: false,
+        })
+        .unwrap();
         let bd = fake_bd(temp.path());
 
         ensure_registered(&db, &bd).await;

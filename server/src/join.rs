@@ -7,14 +7,35 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const MANAGED: &[&str] = &[
-    "workflow-gate", "board-actor", "board-merge-gate", "board-status-gate",
-    "wait-gate", "board-touch", "board-prime", "board-push", "completion-gate",
-    "board-gate", "landing-gate",
-    "workflow-gate.py", "board-actor.py", "board-merge-gate.py",
-    "board-status-gate.py", "wait-gate.py", "board-touch.py",
-    "board-prime.py", "board-push.py", "completion-gate.py", "board-gate.py",
-    "report-gate.py", "publish-gate.py", "plan-doc-lint.py", "picture-gate.py",
-    "agent-fence.py", "slice-gate.py", "helper-proof.py", "habit-reading.py",
+    "workflow-gate",
+    "board-actor",
+    "board-merge-gate",
+    "board-status-gate",
+    "wait-gate",
+    "board-touch",
+    "board-prime",
+    "board-push",
+    "completion-gate",
+    "board-gate",
+    "landing-gate",
+    "workflow-gate.py",
+    "board-actor.py",
+    "board-merge-gate.py",
+    "board-status-gate.py",
+    "wait-gate.py",
+    "board-touch.py",
+    "board-prime.py",
+    "board-push.py",
+    "completion-gate.py",
+    "board-gate.py",
+    "report-gate.py",
+    "publish-gate.py",
+    "plan-doc-lint.py",
+    "picture-gate.py",
+    "agent-fence.py",
+    "slice-gate.py",
+    "helper-proof.py",
+    "habit-reading.py",
     // What a chat says it is doing, for chats this program does not drive.
     // Registered here rather than in the reader's global settings, which is
     // one file for every project on the computer (bw-t26l.20).
@@ -91,9 +112,21 @@ const CODEX: &[(&str, &str, &[&str])] = &[
 ///   * `SubagentStop`. Goose accepts a registration for it and never emits
 ///     it, so `board-touch` would sit on an event that does not arrive.
 const GOOSE: &[(&str, &str, &[&str])] = &[
-    ("PreToolUse", "developer__shell|developer__write|developer__edit", &["workflow-gate"]),
-    ("PreToolUse", "developer__shell", &["board-actor", "board-merge-gate", "board-status-gate"]),
-    ("PostToolUse", "developer__shell|developer__write|developer__edit", &["board-touch"]),
+    (
+        "PreToolUse",
+        "developer__shell|developer__write|developer__edit",
+        &["workflow-gate"],
+    ),
+    (
+        "PreToolUse",
+        "developer__shell",
+        &["board-actor", "board-merge-gate", "board-status-gate"],
+    ),
+    (
+        "PostToolUse",
+        "developer__shell|developer__write|developer__edit",
+        &["board-touch"],
+    ),
     ("SessionEnd", "", &["board-push"]),
     ("Stop", "", &["board-gate"]),
 ];
@@ -140,12 +173,20 @@ const GUARD_MARK: &str = "# Atelier landing guard";
 pub fn install(root: &Path, manifest: &ProjectManifest) -> Result<(), String> {
     let bd = crate::routes::find_bd().ok_or_else(|| crate::routes::BD_MISSING.to_string())?;
     if !root.join(".beads").is_dir() {
-        let status = Command::new(&bd).args(["init", "--prefix", &manifest.beads.issue_id_prefix])
-            .current_dir(root).status().map_err(|error| format!("could not start bd: {error}"))?;
-        if !status.success() { return Err("bd init did not complete".to_string()); }
+        let status = Command::new(&bd)
+            .args(["init", "--prefix", &manifest.beads.issue_id_prefix])
+            .current_dir(root)
+            .status()
+            .map_err(|error| format!("could not start bd: {error}"))?;
+        if !status.success() {
+            return Err("bd init did not complete".to_string());
+        }
     }
     if let Some(git) = crate::routes::find_git() {
-        let _ = Command::new(git).args(["config", "beads.role", "maintainer"]).current_dir(root).status();
+        let _ = Command::new(git)
+            .args(["config", "beads.role", "maintainer"])
+            .current_dir(root)
+            .status();
     }
     wire(&root.join(".claude/settings.json"), CLAUDE)?;
     wire(&root.join(".codex/hooks.json"), CODEX)?;
@@ -157,24 +198,41 @@ pub fn remove(root: &Path) -> Result<(), String> {
     strip(&root.join(".claude/settings.json"))?;
     strip(&root.join(".codex/hooks.json"))?;
     let hook = git_hook(root);
-    if std::fs::read_to_string(&hook).is_ok_and(|text| text.lines().take(2).any(|line| line == GUARD_MARK)) {
-        std::fs::remove_file(&hook).map_err(|error| format!("could not remove {}: {error}", hook.display()))?;
+    if std::fs::read_to_string(&hook)
+        .is_ok_and(|text| text.lines().take(2).any(|line| line == GUARD_MARK))
+    {
+        std::fs::remove_file(&hook)
+            .map_err(|error| format!("could not remove {}: {error}", hook.display()))?;
     }
     Ok(())
 }
 
-fn command_for(name: &str) -> String { format!("atelier hook {name}") }
+fn command_for(name: &str) -> String {
+    format!("atelier hook {name}")
+}
 fn runs(command: &Value, name: &str) -> bool {
-    command.as_str().is_some_and(|command| command.split_whitespace().any(|word|
-        Path::new(word).file_name().is_some_and(|file| file == name)))
+    command.as_str().is_some_and(|command| {
+        command
+            .split_whitespace()
+            .any(|word| Path::new(word).file_name().is_some_and(|file| file == name))
+    })
 }
 
 fn read(path: &Path) -> Result<Value, String> {
     match std::fs::read(path) {
         Ok(bytes) => {
-            let value: Value = serde_json::from_slice(&bytes)
-                .map_err(|error| format!("kept {} unchanged because it does not parse: {error}", path.display()))?;
-            if !value.is_object() { return Err(format!("kept {} unchanged because it is not an object", path.display())); }
+            let value: Value = serde_json::from_slice(&bytes).map_err(|error| {
+                format!(
+                    "kept {} unchanged because it does not parse: {error}",
+                    path.display()
+                )
+            })?;
+            if !value.is_object() {
+                return Err(format!(
+                    "kept {} unchanged because it is not an object",
+                    path.display()
+                ));
+            }
             Ok(value)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(json!({})),
@@ -183,24 +241,36 @@ fn read(path: &Path) -> Result<Value, String> {
 }
 
 fn strip_value(value: &mut Value) {
-    let Some(events) = value.get_mut("hooks").and_then(Value::as_object_mut) else { return; };
+    let Some(events) = value.get_mut("hooks").and_then(Value::as_object_mut) else {
+        return;
+    };
     for blocks in events.values_mut().filter_map(Value::as_array_mut) {
         for block in blocks.iter_mut().filter_map(Value::as_object_mut) {
             if let Some(hooks) = block.get_mut("hooks").and_then(Value::as_array_mut) {
-                hooks.retain(|hook| !MANAGED.iter().any(|name| runs(&hook["command"], name)) &&
-                    hook["command"].as_str() != Some("bd codex-hook UserPromptSubmit"));
+                hooks.retain(|hook| {
+                    !MANAGED.iter().any(|name| runs(&hook["command"], name))
+                        && hook["command"].as_str() != Some("bd codex-hook UserPromptSubmit")
+                });
             }
         }
-        blocks.retain(|block| block["hooks"].as_array().is_some_and(|hooks| !hooks.is_empty()));
+        blocks.retain(|block| {
+            block["hooks"]
+                .as_array()
+                .is_some_and(|hooks| !hooks.is_empty())
+        });
     }
 }
 
 fn strip(path: &Path) -> Result<(), String> {
-    if !path.is_file() { return Ok(()); }
+    if !path.is_file() {
+        return Ok(());
+    }
     let mut value = read(path)?;
     let before = value.clone();
     strip_value(&mut value);
-    if value != before { write(path, &value)?; }
+    if value != before {
+        write(path, &value)?;
+    }
     Ok(())
 }
 
@@ -212,54 +282,99 @@ fn wire(path: &Path, table: &[(&str, &str, &[&str])]) -> Result<(), String> {
 
 fn wire_value(value: &mut Value, table: &[(&str, &str, &[&str])], claude: bool) {
     strip_value(value);
-    if !value["hooks"].is_object() { value["hooks"] = json!({}); }
+    if !value["hooks"].is_object() {
+        value["hooks"] = json!({});
+    }
     for (event, matcher, names) in table {
-        if !value["hooks"][event].is_array() { value["hooks"][event] = json!([]); }
+        if !value["hooks"][event].is_array() {
+            value["hooks"][event] = json!([]);
+        }
         let blocks = value["hooks"][event].as_array_mut().unwrap();
-        let at = blocks.iter().position(|block| block["matcher"].as_str().unwrap_or("") == *matcher)
-            .unwrap_or_else(|| { blocks.push(if matcher.is_empty() { json!({"hooks":[]}) } else { json!({"matcher":matcher,"hooks":[]}) }); blocks.len() - 1 });
-        if !blocks[at]["hooks"].is_array() { blocks[at]["hooks"] = json!([]); }
+        let at = blocks
+            .iter()
+            .position(|block| block["matcher"].as_str().unwrap_or("") == *matcher)
+            .unwrap_or_else(|| {
+                blocks.push(if matcher.is_empty() {
+                    json!({"hooks":[]})
+                } else {
+                    json!({"matcher":matcher,"hooks":[]})
+                });
+                blocks.len() - 1
+            });
+        if !blocks[at]["hooks"].is_array() {
+            blocks[at]["hooks"] = json!([]);
+        }
         let hooks = blocks[at]["hooks"].as_array_mut().unwrap();
-        for name in *names { hooks.push(json!({"type":"command","command":command_for(name)})); }
+        for name in *names {
+            hooks.push(json!({"type":"command","command":command_for(name)}));
+        }
     }
     if claude {
-        value.as_object_mut().unwrap().entry("autoCompactWindow").or_insert(json!(200000));
+        value
+            .as_object_mut()
+            .unwrap()
+            .entry("autoCompactWindow")
+            .or_insert(json!(200000));
     }
 }
 
 fn write(path: &Path, value: &Value) -> Result<(), String> {
-    let parent = path.parent().ok_or_else(|| format!("{} has no parent", path.display()))?;
-    std::fs::create_dir_all(parent).map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("{} has no parent", path.display()))?;
+    std::fs::create_dir_all(parent)
+        .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
     let bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
     let temporary = path.with_extension("atelier-new");
     std::fs::write(&temporary, [bytes, b"\n".to_vec()].concat())
         .map_err(|error| format!("could not write {}: {error}", temporary.display()))?;
-    std::fs::rename(&temporary, path).map_err(|error| format!("could not replace {}: {error}", path.display()))
+    std::fs::rename(&temporary, path)
+        .map_err(|error| format!("could not replace {}: {error}", path.display()))
 }
 
 fn git_hook(root: &Path) -> PathBuf {
-    let output = crate::routes::find_git().and_then(|git| Command::new(git)
-        .args(["rev-parse", "--git-path", "hooks/reference-transaction"])
-        .current_dir(root).output().ok());
-    output.filter(|output| output.status.success())
+    let output = crate::routes::find_git().and_then(|git| {
+        Command::new(git)
+            .args(["rev-parse", "--git-path", "hooks/reference-transaction"])
+            .current_dir(root)
+            .output()
+            .ok()
+    });
+    output
+        .filter(|output| output.status.success())
         .map(|output| PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()))
-        .map(|path| if path.is_absolute() { path } else { root.join(path) })
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                root.join(path)
+            }
+        })
         .unwrap_or_else(|| root.join(".git/hooks/reference-transaction"))
 }
 
 fn guard(root: &Path) -> Result<(), String> {
     let path = git_hook(root);
-    if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|error| error.to_string())?; }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
     if let Ok(existing) = std::fs::read_to_string(&path) {
         if !existing.lines().take(2).any(|line| line == GUARD_MARK) {
-            return Err(format!("kept {} unchanged because it is a project-owned Git hook", path.display()));
+            return Err(format!(
+                "kept {} unchanged because it is a project-owned Git hook",
+                path.display()
+            ));
         }
     }
     let body = format!("#!/bin/sh\n{GUARD_MARK}\ncase \"$1\" in prepared|committed) ;; *) exit 0 ;; esac\ncommand -v atelier >/dev/null 2>&1 || {{ echo 'Atelier landing guard is unavailable' >&2; exit 1; }}\nexec atelier hook landing-gate \"$@\"\n");
-    std::fs::write(&path, body).map_err(|error| format!("could not write {}: {error}", path.display()))?;
-    #[cfg(unix)] {
+    std::fs::write(&path, body)
+        .map_err(|error| format!("could not write {}: {error}", path.display()))?;
+    #[cfg(unix)]
+    {
         use std::os::unix::fs::PermissionsExt;
-        let mut permissions = std::fs::metadata(&path).map_err(|error| error.to_string())?.permissions();
+        let mut permissions = std::fs::metadata(&path)
+            .map_err(|error| error.to_string())?
+            .permissions();
         permissions.set_mode(0o755);
         std::fs::set_permissions(&path, permissions).map_err(|error| error.to_string())?;
     }
@@ -283,9 +398,13 @@ mod tests {
     }
 
     fn pretool(value: &Value) -> Vec<&str> {
-        value["hooks"]["PreToolUse"].as_array().into_iter().flatten()
+        value["hooks"]["PreToolUse"]
+            .as_array()
+            .into_iter()
+            .flatten()
             .flat_map(|block| block["hooks"].as_array().into_iter().flatten())
-            .filter_map(|hook| hook["command"].as_str()).collect()
+            .filter_map(|hook| hook["command"].as_str())
+            .collect()
     }
 
     /// Every event the `doing` gate answers to is registered by joining a
@@ -313,7 +432,10 @@ mod tests {
 
         strip_value(&mut claude);
         let left = serde_json::to_string(&claude).unwrap();
-        assert!(!left.contains("hook doing"), "leaving left it behind: {left}");
+        assert!(
+            !left.contains("hook doing"),
+            "leaving left it behind: {left}"
+        );
     }
 
     #[test]
@@ -322,18 +444,29 @@ mod tests {
         let mut codex = json!({});
         wire_value(&mut claude, CLAUDE, true);
         wire_value(&mut codex, CODEX, false);
-        let required = ["atelier hook workflow-gate", "atelier hook board-actor",
-            "atelier hook board-merge-gate", "atelier hook board-status-gate"];
+        let required = [
+            "atelier hook workflow-gate",
+            "atelier hook board-actor",
+            "atelier hook board-merge-gate",
+            "atelier hook board-status-gate",
+        ];
         for command in required {
-            assert!(pretool(&claude).contains(&command), "Claude lacks {command}");
+            assert!(
+                pretool(&claude).contains(&command),
+                "Claude lacks {command}"
+            );
             assert!(pretool(&codex).contains(&command), "Codex lacks {command}");
         }
     }
 
     fn on(value: &Value, event: &str) -> Vec<String> {
-        value["hooks"][event].as_array().into_iter().flatten()
+        value["hooks"][event]
+            .as_array()
+            .into_iter()
+            .flatten()
             .flat_map(|block| block["hooks"].as_array().into_iter().flatten())
-            .filter_map(|hook| hook["command"].as_str().map(str::to_string)).collect()
+            .filter_map(|hook| hook["command"].as_str().map(str::to_string))
+            .collect()
     }
 
     /// Both providers fire these three, and both honour the answers, so a gap
@@ -352,8 +485,14 @@ mod tests {
             ("SessionEnd", "atelier hook board-push"),
             ("Stop", "atelier hook board-gate"),
         ] {
-            assert!(on(&claude, event).contains(&gate.to_string()), "Claude {event}");
-            assert!(on(&codex, event).contains(&gate.to_string()), "Codex {event}");
+            assert!(
+                on(&claude, event).contains(&gate.to_string()),
+                "Claude {event}"
+            );
+            assert!(
+                on(&codex, event).contains(&gate.to_string()),
+                "Codex {event}"
+            );
         }
     }
 
@@ -362,22 +501,30 @@ mod tests {
     /// events rather than of gates is what stops the two tables drifting.
     #[test]
     fn native_machinery_codex_lacks_only_the_gate_that_writes_for_a_claude_screen() {
-        let claude: std::collections::BTreeSet<&str> =
-            CLAUDE.iter().flat_map(|(_, _, gates)| gates.iter().copied()).collect();
-        let codex: std::collections::BTreeSet<&str> =
-            CODEX.iter().flat_map(|(_, _, gates)| gates.iter().copied()).collect();
+        let claude: std::collections::BTreeSet<&str> = CLAUDE
+            .iter()
+            .flat_map(|(_, _, gates)| gates.iter().copied())
+            .collect();
+        let codex: std::collections::BTreeSet<&str> = CODEX
+            .iter()
+            .flat_map(|(_, _, gates)| gates.iter().copied())
+            .collect();
         assert_eq!(
             claude.difference(&codex).copied().collect::<Vec<_>>(),
             vec![crate::doing::GATE],
         );
-        assert!(codex.difference(&claude).next().is_none(), "Codex has a gate Claude has not");
+        assert!(
+            codex.difference(&claude).next().is_none(),
+            "Codex has a gate Claude has not"
+        );
     }
 
     /// Codex allows a second for this one where every other event gets ten
     /// minutes, so the gate on it must be one that answers without waiting.
     #[test]
     fn native_machinery_the_codex_second_is_only_spent_on_a_gate_that_detaches() {
-        let on_end: Vec<&str> = CODEX.iter()
+        let on_end: Vec<&str> = CODEX
+            .iter()
             .filter(|(event, _, _)| *event == "SessionEnd")
             .flat_map(|(_, _, gates)| gates.iter().copied())
             .collect();
@@ -398,16 +545,20 @@ mod tests {
         assert_eq!(manifest["name"], "atelier");
         assert!(manifest["version"].as_str().is_some_and(|v| !v.is_empty()));
 
-        let hooks: Value =
-            serde_json::from_str(&std::fs::read_to_string(plugin.join("hooks/hooks.json")).unwrap())
-                .unwrap();
+        let hooks: Value = serde_json::from_str(
+            &std::fs::read_to_string(plugin.join("hooks/hooks.json")).unwrap(),
+        )
+        .unwrap();
         for (event, gate) in [
             ("PreToolUse", "atelier hook workflow-gate"),
             ("PostToolUse", "atelier hook board-touch"),
             ("SessionEnd", "atelier hook board-push"),
             ("Stop", "atelier hook board-gate"),
         ] {
-            assert!(on(&hooks, event).contains(&gate.to_string()), "{event}: {hooks}");
+            assert!(
+                on(&hooks, event).contains(&gate.to_string()),
+                "{event}: {hooks}"
+            );
         }
         // Goose accepts a SubagentStop registration and never fires it, so
         // nothing may be parked there.
@@ -420,11 +571,13 @@ mod tests {
     fn native_machinery_installing_the_goose_plugin_twice_changes_nothing() {
         let root = tempfile::tempdir().unwrap();
         goose_plugin(root.path()).unwrap();
-        let once = std::fs::read_to_string(
-            root.path().join(".agents/plugins/atelier/hooks/hooks.json")).unwrap();
+        let once =
+            std::fs::read_to_string(root.path().join(".agents/plugins/atelier/hooks/hooks.json"))
+                .unwrap();
         goose_plugin(root.path()).unwrap();
-        let twice = std::fs::read_to_string(
-            root.path().join(".agents/plugins/atelier/hooks/hooks.json")).unwrap();
+        let twice =
+            std::fs::read_to_string(root.path().join(".agents/plugins/atelier/hooks/hooks.json"))
+                .unwrap();
         assert_eq!(once, twice);
     }
 
@@ -436,7 +589,10 @@ mod tests {
         for (event, matcher, gates) in GOOSE {
             for name in matcher.split('|').filter(|name| !name.is_empty()) {
                 assert!(
-                    matches!(name, "developer__shell" | "developer__write" | "developer__edit"),
+                    matches!(
+                        name,
+                        "developer__shell" | "developer__write" | "developer__edit"
+                    ),
                     "{event} matches {name}, which Goose does not have: {gates:?}"
                 );
             }
@@ -464,16 +620,27 @@ mod tests {
         std::fs::write(&path, "#!/bin/sh\necho project\n").unwrap();
         let error = guard(root.path()).unwrap_err();
         assert!(error.contains("project-owned"));
-        assert_eq!(std::fs::read_to_string(path).unwrap(), "#!/bin/sh\necho project\n");
+        assert_eq!(
+            std::fs::read_to_string(path).unwrap(),
+            "#!/bin/sh\necho project\n"
+        );
     }
     #[test]
     fn checked_in_codex_hooks_match_generated_lifecycle_commands() {
         let checked: Value = serde_json::from_str(include_str!("../../.codex/hooks.json")).unwrap();
         let mut generated = json!({});
         wire_value(&mut generated, CODEX, false);
-        for event in ["PreToolUse", "PostToolUse", "SessionStart", "SessionEnd", "Stop"] {
-            let mut actual = on(&checked, event); actual.sort();
-            let mut expected = on(&generated, event); expected.sort();
+        for event in [
+            "PreToolUse",
+            "PostToolUse",
+            "SessionStart",
+            "SessionEnd",
+            "Stop",
+        ] {
+            let mut actual = on(&checked, event);
+            actual.sort();
+            let mut expected = on(&generated, event);
+            expected.sort();
             assert_eq!(actual, expected, "{event} drifted from installed config");
         }
     }
@@ -482,8 +649,10 @@ mod tests {
     fn generated_guard_installs_twice_with_a_valid_shebang() {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir(root.path().join(".git")).unwrap();
-        guard(root.path()).unwrap(); guard(root.path()).unwrap();
-        assert!(std::fs::read_to_string(git_hook(root.path())).unwrap().starts_with("#!/bin/sh\n"));
+        guard(root.path()).unwrap();
+        guard(root.path()).unwrap();
+        assert!(std::fs::read_to_string(git_hook(root.path()))
+            .unwrap()
+            .starts_with("#!/bin/sh\n"));
     }
-
 }

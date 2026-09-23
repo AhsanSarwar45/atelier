@@ -120,7 +120,11 @@ fn truthy_string(event: &Event, field: &str) -> Value {
 /// arrives on a message that says nothing about what was printed, and the
 /// output arrives on one that says nothing about the exit.
 fn carry_terminal(row: &mut Value, event: &Event) {
-    if let Some(terminal) = event.fields.get("terminal").filter(|value| !value.is_null()) {
+    if let Some(terminal) = event
+        .fields
+        .get("terminal")
+        .filter(|value| !value.is_null())
+    {
         row["terminal"] = terminal.clone();
     }
 }
@@ -571,7 +575,15 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                     // changed lines and how many there were (bw-vl3q.2). Only
                     // carried when it is there, so a row built from an older
                     // stored event stays exactly the shape it always was.
-                    for field in ["hunks", "added", "removed", "beforeLines", "afterLines", "omittedHunks", "omittedLines"] {
+                    for field in [
+                        "hunks",
+                        "added",
+                        "removed",
+                        "beforeLines",
+                        "afterLines",
+                        "omittedHunks",
+                        "omittedLines",
+                    ] {
                         if let Some(found) = event.fields.get(field) {
                             diff.insert(field.into(), found.clone());
                         }
@@ -845,10 +857,22 @@ mod tests {
             "alt":"Tool image"
         });
         let told = vec![
-            event(1, json!({"type":"tool.started","toolCallId":"call","name":"Read","title":"Read screenshot.png"})),
-            event(2, json!({"type":"image","messageId":null,"toolCallId":"call","image":picture})),
-            event(3, json!({"type":"tool.started","toolCallId":"call","name":"Read","title":"Read screenshot.png"})),
-            event(4, json!({"type":"tool.completed","toolCallId":"call","ok":true})),
+            event(
+                1,
+                json!({"type":"tool.started","toolCallId":"call","name":"Read","title":"Read screenshot.png"}),
+            ),
+            event(
+                2,
+                json!({"type":"image","messageId":null,"toolCallId":"call","image":picture}),
+            ),
+            event(
+                3,
+                json!({"type":"tool.started","toolCallId":"call","name":"Read","title":"Read screenshot.png"}),
+            ),
+            event(
+                4,
+                json!({"type":"tool.completed","toolCallId":"call","ok":true}),
+            ),
         ];
         let drawn = fold_all(&told);
         let rows = drawn.items();
@@ -913,8 +937,14 @@ mod tests {
             }})
         };
         let told = vec![
-            event(1, json!({"type":"message.started","messageId":"answer","role":"assistant"})),
-            event(2, json!({"type":"text.delta","messageId":"answer","text":said})),
+            event(
+                1,
+                json!({"type":"message.started","messageId":"answer","role":"assistant"}),
+            ),
+            event(
+                2,
+                json!({"type":"text.delta","messageId":"answer","text":said}),
+            ),
             event(3, json!({"type":"message.completed","messageId":"answer"})),
             // Written by a build that read every answer's prose for a
             // condition. It is in the record for good.
@@ -1050,6 +1080,8 @@ mod tests {
         // A card he pressed himself carries no mark at all, rather than a mark
         // saying nobody: the screen reads the field's absence.
         let by_the_owner = fold_all(&told(Value::Null));
-        assert!(by_the_owner.items()[0].get("chosenBy").is_none_or(Value::is_null));
+        assert!(by_the_owner.items()[0]
+            .get("chosenBy")
+            .is_none_or(Value::is_null));
     }
 }

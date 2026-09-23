@@ -32,14 +32,36 @@ pub struct ToolStatus {
 }
 
 const TOOLS: [(&str, &str, &str); 5] = [
-    ("git", "projects and history", "Install Git from https://git-scm.com/downloads."),
-    ("bd", "Beads boards", "Install here, or install Beads from https://github.com/gastownhall/beads."),
-    ("claude", "Claude chats", "Install and sign in at https://docs.anthropic.com/en/docs/claude-code."),
-    ("codex", "Codex chats", "Install and sign in at https://developers.openai.com/codex/cli."),
-    ("browser", "screen checks", "Install Chrome, Chromium, or Edge to capture browser evidence."),
+    (
+        "git",
+        "projects and history",
+        "Install Git from https://git-scm.com/downloads.",
+    ),
+    (
+        "bd",
+        "Beads boards",
+        "Install here, or install Beads from https://github.com/gastownhall/beads.",
+    ),
+    (
+        "claude",
+        "Claude chats",
+        "Install and sign in at https://docs.anthropic.com/en/docs/claude-code.",
+    ),
+    (
+        "codex",
+        "Codex chats",
+        "Install and sign in at https://developers.openai.com/codex/cli.",
+    ),
+    (
+        "browser",
+        "screen checks",
+        "Install Chrome, Chromium, or Edge to capture browser evidence.",
+    ),
 ];
 
-fn key(tool: &str) -> String { format!("tool.{tool}.path") }
+fn key(tool: &str) -> String {
+    format!("tool.{tool}.path")
+}
 
 async fn inspect(tool: &'static str, required_for: &'static str, hint: &'static str) -> ToolStatus {
     let path = if tool == "browser" {
@@ -48,17 +70,35 @@ async fn inspect(tool: &'static str, required_for: &'static str, hint: &'static 
         super::find_tool(tool, &[])
     };
     let version = if let Some(program) = path.as_ref() {
-        tokio::time::timeout(std::time::Duration::from_secs(3),
-            tokio::process::Command::new(program).arg("--version").output()).await.ok().and_then(Result::ok)
-            .map(|output| {
-                let text = if output.stdout.is_empty() { &output.stderr } else { &output.stdout };
-                String::from_utf8_lossy(text).trim().to_string()
-            })
-            .filter(|text| !text.is_empty())
-    } else { None };
+        tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            tokio::process::Command::new(program)
+                .arg("--version")
+                .output(),
+        )
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .map(|output| {
+            let text = if output.stdout.is_empty() {
+                &output.stderr
+            } else {
+                &output.stdout
+            };
+            String::from_utf8_lossy(text).trim().to_string()
+        })
+        .filter(|text| !text.is_empty())
+    } else {
+        None
+    };
     ToolStatus {
-        tool, required_for, found: path.is_some(), ok: path.is_some(),
-        path: path.map(|path| path.display().to_string()), version, hint,
+        tool,
+        required_for,
+        found: path.is_some(),
+        ok: path.is_some(),
+        path: path.map(|path| path.display().to_string()),
+        version,
+        hint,
     }
 }
 
@@ -68,49 +108,83 @@ pub async fn read(Extension(db): Extension<Arc<Database>>) -> Json<Vec<ToolStatu
             super::set_tool_override(tool, path.map(PathBuf::from));
         }
     }
-    Json(futures::future::join_all(TOOLS.map(|(tool, required_for, hint)|
-        inspect(tool, required_for, hint))).await)
+    Json(
+        futures::future::join_all(
+            TOOLS.map(|(tool, required_for, hint)| inspect(tool, required_for, hint)),
+        )
+        .await,
+    )
 }
 
 #[derive(Deserialize)]
-pub struct ToolChoice { path: Option<String> }
+pub struct ToolChoice {
+    path: Option<String>,
+}
 
 #[derive(Deserialize)]
-pub struct InstallConsent { consent: bool }
+pub struct InstallConsent {
+    consent: bool,
+}
 
 pub async fn choose(
-    Path(tool): Path<String>, Extension(db): Extension<Arc<Database>>, Json(choice): Json<ToolChoice>,
+    Path(tool): Path<String>,
+    Extension(db): Extension<Arc<Database>>,
+    Json(choice): Json<ToolChoice>,
 ) -> (StatusCode, Json<Value>) {
     if !TOOLS.iter().any(|known| known.0 == tool) {
         return (StatusCode::NOT_FOUND, Json(json!({"error":"Unknown tool"})));
     }
-    let chosen = choice.path.map(|path| path.trim().to_string()).filter(|path| !path.is_empty());
+    let chosen = choice
+        .path
+        .map(|path| path.trim().to_string())
+        .filter(|path| !path.is_empty());
     if let Some(path) = chosen.as_ref() {
         let candidate = PathBuf::from(path);
         if !super::runnable(&candidate) {
-            return (StatusCode::BAD_REQUEST, Json(json!({"error":format!("{} is not an executable file", candidate.display())})));
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error":format!("{} is not an executable file", candidate.display())})),
+            );
         }
     }
     if let Err(error) = db.set_setting(&key(&tool), chosen.as_deref()) {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error":error.to_string()})));
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error":error.to_string()})),
+        );
     }
     super::set_tool_override(&tool, chosen.map(PathBuf::from));
     (StatusCode::OK, Json(json!({"ok":true})))
 }
 
 #[derive(Deserialize)]
-struct Release { assets: Vec<Asset> }
+struct Release {
+    assets: Vec<Asset>,
+}
 #[derive(Deserialize)]
-struct Asset { name: String, browser_download_url: String }
+struct Asset {
+    name: String,
+    browser_download_url: String,
+}
 
 fn platform_words() -> Result<(&'static str, &'static str, &'static str), String> {
-    let os = match std::env::consts::OS { "macos" => "darwin", "linux" => "linux", "windows" => "windows", other => return Err(format!("Beads has no installer for {other}")) };
-    let arch = match std::env::consts::ARCH { "x86_64" => "amd64", "aarch64" => "arm64", other => return Err(format!("Beads has no installer for {other}")) };
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        "linux" => "linux",
+        "windows" => "windows",
+        other => return Err(format!("Beads has no installer for {other}")),
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        other => return Err(format!("Beads has no installer for {other}")),
+    };
     Ok((os, arch, if os == "windows" { ".zip" } else { ".tar.gz" }))
 }
 
 fn safe_relative(path: &FsPath) -> bool {
-    path.components().all(|part| matches!(part, Component::Normal(_) | Component::CurDir))
+    path.components()
+        .all(|part| matches!(part, Component::Normal(_) | Component::CurDir))
 }
 
 fn extract_bd(archive: &FsPath, destination: &FsPath, zip: bool) -> Result<(), String> {
@@ -121,7 +195,9 @@ fn extract_bd(archive: &FsPath, destination: &FsPath, zip: bool) -> Result<(), S
         let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
         for index in 0..archive.len() {
             let mut entry = archive.by_index(index).map_err(|e| e.to_string())?;
-            let Some(name) = entry.enclosed_name() else { continue };
+            let Some(name) = entry.enclosed_name() else {
+                continue;
+            };
             if entry.is_file() && name.file_name().and_then(|n| n.to_str()) == Some("bd.exe") {
                 let mut output = std::fs::File::create(&staged).map_err(|e| e.to_string())?;
                 std::io::copy(&mut entry, &mut output).map_err(|e| e.to_string())?;
@@ -136,14 +212,18 @@ fn extract_bd(archive: &FsPath, destination: &FsPath, zip: bool) -> Result<(), S
         for item in archive.entries().map_err(|e| e.to_string())? {
             let mut entry = item.map_err(|e| e.to_string())?;
             let path = entry.path().map_err(|e| e.to_string())?;
-            if entry.header().entry_type().is_file() && safe_relative(&path)
-                && path.file_name().and_then(|n| n.to_str()) == Some("bd") {
+            if entry.header().entry_type().is_file()
+                && safe_relative(&path)
+                && path.file_name().and_then(|n| n.to_str()) == Some("bd")
+            {
                 let mut output = std::fs::File::create(&staged).map_err(|e| e.to_string())?;
                 std::io::copy(&mut entry, &mut output).map_err(|e| e.to_string())?;
                 output.flush().map_err(|e| e.to_string())?;
-                #[cfg(unix)] {
+                #[cfg(unix)]
+                {
                     use std::os::unix::fs::PermissionsExt;
-                    std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+                    std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755))
+                        .map_err(|e| e.to_string())?;
                 }
                 std::fs::rename(&staged, destination).map_err(|e| e.to_string())?;
                 return Ok(());
@@ -155,47 +235,105 @@ fn extract_bd(archive: &FsPath, destination: &FsPath, zip: bool) -> Result<(), S
 }
 
 fn progress(bus: &BootstrapBus, phase: &str, detail: impl Into<String>) {
-    let _ = bus.0.send(json!({"tool":"bd","phase":phase,"detail":detail.into()}));
+    let _ = bus
+        .0
+        .send(json!({"tool":"bd","phase":phase,"detail":detail.into()}));
 }
 
 pub async fn install_bd(
-    Extension(bus): Extension<BootstrapBus>, Json(consent): Json<InstallConsent>,
+    Extension(bus): Extension<BootstrapBus>,
+    Json(consent): Json<InstallConsent>,
 ) -> (StatusCode, Json<Value>) {
     if !consent.consent {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error":"Beads installation requires explicit consent"})));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error":"Beads installation requires explicit consent"})),
+        );
     }
     if let Some(path) = super::find_bd() {
         return (StatusCode::OK, Json(json!({"ok":true,"path":path})));
     }
     progress(&bus, "checking", "Finding the latest Beads release");
-    let client = match reqwest::Client::builder().user_agent(crate::identity::NAME).timeout(std::time::Duration::from_secs(300)).build() {
+    let client = match reqwest::Client::builder()
+        .user_agent(crate::identity::NAME)
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+    {
         Ok(client) => client,
         Err(error) => return failed(&bus, error.to_string()),
     };
-    let release = match client.get("https://api.github.com/repos/gastownhall/beads/releases/latest").send().await {
-        Ok(response) => match response.error_for_status() { Ok(response) => match response.json::<Release>().await { Ok(release) => release, Err(error) => return failed(&bus, error.to_string()) }, Err(error) => return failed(&bus, error.to_string()) },
+    let release = match client
+        .get("https://api.github.com/repos/gastownhall/beads/releases/latest")
+        .send()
+        .await
+    {
+        Ok(response) => match response.error_for_status() {
+            Ok(response) => match response.json::<Release>().await {
+                Ok(release) => release,
+                Err(error) => return failed(&bus, error.to_string()),
+            },
+            Err(error) => return failed(&bus, error.to_string()),
+        },
         Err(error) => return failed(&bus, error.to_string()),
     };
-    let (os, arch, ending) = match platform_words() { Ok(value) => value, Err(error) => return failed(&bus, error) };
-    let asset = release.assets.iter().find(|asset| asset.name.contains(os) && asset.name.contains(arch) && asset.name.ends_with(ending));
-    let checksums = release.assets.iter().find(|asset| asset.name.eq_ignore_ascii_case("checksums.txt") || asset.name.eq_ignore_ascii_case(crate::published::CHECKSUMS_ASSET));
-    let Some(asset) = asset else { return failed(&bus, "No Beads archive is published for this platform".into()) };
-    let Some(checksums) = checksums else { return failed(&bus, "The Beads release publishes no checksum list; refusing an unverified install".into()) };
-    let Some(home) = UserDirs::new().map(|dirs| dirs.home_dir().to_path_buf()) else { return failed(&bus, "Could not find your home directory".into()) };
+    let (os, arch, ending) = match platform_words() {
+        Ok(value) => value,
+        Err(error) => return failed(&bus, error),
+    };
+    let asset = release.assets.iter().find(|asset| {
+        asset.name.contains(os) && asset.name.contains(arch) && asset.name.ends_with(ending)
+    });
+    let checksums = release.assets.iter().find(|asset| {
+        asset.name.eq_ignore_ascii_case("checksums.txt")
+            || asset
+                .name
+                .eq_ignore_ascii_case(crate::published::CHECKSUMS_ASSET)
+    });
+    let Some(asset) = asset else {
+        return failed(
+            &bus,
+            "No Beads archive is published for this platform".into(),
+        );
+    };
+    let Some(checksums) = checksums else {
+        return failed(
+            &bus,
+            "The Beads release publishes no checksum list; refusing an unverified install".into(),
+        );
+    };
+    let Some(home) = UserDirs::new().map(|dirs| dirs.home_dir().to_path_buf()) else {
+        return failed(&bus, "Could not find your home directory".into());
+    };
     let directory = home.join(".beads/bin");
-    if let Err(error) = std::fs::create_dir_all(&directory) { return failed(&bus, error.to_string()) }
+    if let Err(error) = std::fs::create_dir_all(&directory) {
+        return failed(&bus, error.to_string());
+    }
     let archive = directory.join(format!(".{}-download", asset.name));
     progress(&bus, "downloading", format!("Downloading {}", asset.name));
-    if let Err(error) = crate::published::download(&client, &asset.browser_download_url, Some(&checksums.browser_download_url), &asset.name, &archive).await {
+    if let Err(error) = crate::published::download(
+        &client,
+        &asset.browser_download_url,
+        Some(&checksums.browser_download_url),
+        &asset.name,
+        &archive,
+    )
+    .await
+    {
         return failed(&bus, error.to_string());
     }
     progress(&bus, "installing", "Installing the verified bd binary");
     let destination = directory.join(if cfg!(windows) { "bd.exe" } else { "bd" });
     let extracted = extract_bd(&archive, &destination, ending == ".zip");
     let _ = std::fs::remove_file(&archive);
-    if let Err(error) = extracted { return failed(&bus, error) }
+    if let Err(error) = extracted {
+        return failed(&bus, error);
+    }
     super::set_tool_override("bd", Some(destination.clone()));
-    progress(&bus, "complete", format!("Installed {}", destination.display()));
+    progress(
+        &bus,
+        "complete",
+        format!("Installed {}", destination.display()),
+    );
     (StatusCode::OK, Json(json!({"ok":true,"path":destination})))
 }
 
@@ -210,9 +348,13 @@ mod tests {
 
     #[test]
     fn environment_bootstrap_reports_every_real_external_dependency() {
-        assert_eq!(TOOLS.iter().map(|row| row.0).collect::<Vec<_>>(),
-            ["git", "bd", "claude", "codex", "browser"]);
-        assert!(TOOLS.iter().all(|row| !matches!(row.0, "node" | "npm" | "python" | "python3")));
+        assert_eq!(
+            TOOLS.iter().map(|row| row.0).collect::<Vec<_>>(),
+            ["git", "bd", "claude", "codex", "browser"]
+        );
+        assert!(TOOLS
+            .iter()
+            .all(|row| !matches!(row.0, "node" | "npm" | "python" | "python3")));
     }
 
     #[test]

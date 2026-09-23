@@ -1,5 +1,5 @@
 //! Exercise dispatch, not just lifecycle::actor: the bug was the early bypass return.
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{
     io::Write,
     path::Path,

@@ -103,14 +103,24 @@ pub fn parse(input: &str) -> FileQuery {
         let values: Vec<String> = piece
             .value
             .split(',')
-            .map(|value| if which == Trait::Ext { value.trim().trim_start_matches('.') } else { value.trim() })
+            .map(|value| {
+                if which == Trait::Ext {
+                    value.trim().trim_start_matches('.')
+                } else {
+                    value.trim()
+                }
+            })
             .filter(|value| !value.is_empty())
             .map(str::to_ascii_lowercase)
             .collect();
         if values.is_empty() {
             return Key::Unread;
         }
-        only.push(Only { which, values, negated: piece.negated });
+        only.push(Only {
+            which,
+            values,
+            negated: piece.negated,
+        });
         Key::Taken
     });
     FileQuery { words, only }
@@ -171,7 +181,10 @@ fn contents(path: &Path) -> Option<String> {
     if looks_binary(&bytes) {
         return None;
     }
-    Some(String::from_utf8(bytes).unwrap_or_else(|not| String::from_utf8_lossy(not.as_bytes()).into_owned()))
+    Some(
+        String::from_utf8(bytes)
+            .unwrap_or_else(|not| String::from_utf8_lossy(not.as_bytes()).into_owned()),
+    )
 }
 
 /// The file, if it is one the query asks for, with where it was found.
@@ -180,14 +193,32 @@ fn matched(root: &Path, candidate: &Candidate, query: &FileQuery) -> Option<Matc
         return None;
     }
     let path = candidate.path.as_str();
-    let in_path = |term: &Term<Field>| aimed(term, Field::Path) && !text::find(path, term).is_empty();
-    let reads = query.words.all.iter().flatten().chain(&query.words.none).any(|term| aimed(term, Field::Content));
-    let body = if reads { contents(&root.join(path)).unwrap_or_default() } else { String::new() };
+    let in_path =
+        |term: &Term<Field>| aimed(term, Field::Path) && !text::find(path, term).is_empty();
+    let reads = query
+        .words
+        .all
+        .iter()
+        .flatten()
+        .chain(&query.words.none)
+        .any(|term| aimed(term, Field::Content));
+    let body = if reads {
+        contents(&root.join(path)).unwrap_or_default()
+    } else {
+        String::new()
+    };
     // Most files say none of it; a byte search of the folded text turns them
     // away before a single line is split.
     let folded = body.to_ascii_lowercase();
-    let could = |term: &Term<Field>| aimed(term, Field::Content) && folded.contains(&term.text.to_ascii_lowercase());
-    if !query.words.all.iter().all(|group| group.iter().any(|term| in_path(term) || could(term))) {
+    let could = |term: &Term<Field>| {
+        aimed(term, Field::Content) && folded.contains(&term.text.to_ascii_lowercase())
+    };
+    if !query
+        .words
+        .all
+        .iter()
+        .all(|group| group.iter().any(|term| in_path(term) || could(term)))
+    {
         return None;
     }
     if query.words.none.iter().any(in_path) {
@@ -226,7 +257,10 @@ fn matched(root: &Path, candidate: &Candidate, query: &FileQuery) -> Option<Matc
                 let count = text::find(line, term).len();
                 if count > 0 {
                     any = true;
-                    let at = content_terms.iter().position(|t| std::ptr::eq(*t, term)).unwrap_or(0);
+                    let at = content_terms
+                        .iter()
+                        .position(|t| std::ptr::eq(*t, term))
+                        .unwrap_or(0);
                     found_in_body[at] += count;
                 }
             }
@@ -235,10 +269,19 @@ fn matched(root: &Path, candidate: &Candidate, query: &FileQuery) -> Option<Matc
             }
             lines_found += 1;
             if lines.len() < LINES {
-                let wanted: Vec<&Term<Field>> = query.words.all.iter().flatten().filter(|term| aimed(term, Field::Content)).collect();
+                let wanted: Vec<&Term<Field>> = query
+                    .words
+                    .all
+                    .iter()
+                    .flatten()
+                    .filter(|term| aimed(term, Field::Content))
+                    .collect();
                 let places = text::places(line, &wanted);
                 if !places.is_empty() {
-                    lines.push(Line { number: index + 1, segments: text::snippet(line, &places) });
+                    lines.push(Line {
+                        number: index + 1,
+                        segments: text::snippet(line, &places),
+                    });
                 }
             }
         }
@@ -277,29 +320,62 @@ fn matched(root: &Path, candidate: &Candidate, query: &FileQuery) -> Option<Matc
             return None;
         }
     }
-    let path_terms: Vec<&Term<Field>> = query.words.all.iter().flatten().filter(|term| aimed(term, Field::Path)).collect();
+    let path_terms: Vec<&Term<Field>> = query
+        .words
+        .all
+        .iter()
+        .flatten()
+        .filter(|term| aimed(term, Field::Path))
+        .collect();
     let places = text::places(path, &path_terms);
     let marked_path = (!places.is_empty()).then(|| text::marked(path, &places));
-    Some(Match { path: candidate.path.clone(), score, lines_found, marked_path, lines })
+    Some(Match {
+        path: candidate.path.clone(),
+        score,
+        lines_found,
+        marked_path,
+        lines,
+    })
 }
 
 /// A page of the files under `root` the query asks for, and where the next
 /// page starts. Blocking: it reads files.
-fn search(root: &Path, paths: &[Candidate], query: &FileQuery, sort: Sort, offset: usize, limit: usize) -> (Vec<Match>, Option<usize>) {
+fn search(
+    root: &Path,
+    paths: &[Candidate],
+    query: &FileQuery,
+    sort: Sort,
+    offset: usize,
+    limit: usize,
+) -> (Vec<Match>, Option<usize>) {
     if query.is_empty() {
         return (Vec::new(), None);
     }
-    let cores = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
+    let cores = std::thread::available_parallelism()
+        .map_or(4, |n| n.get())
+        .min(16);
     let share = paths.len().div_ceil(cores).max(1);
     let mut found: Vec<Match> = std::thread::scope(|scope| {
         let workers: Vec<_> = paths
             .chunks(share)
-            .map(|chunk| scope.spawn(move || chunk.iter().filter_map(|candidate| matched(root, candidate, query)).collect::<Vec<_>>()))
+            .map(|chunk| {
+                scope.spawn(move || {
+                    chunk
+                        .iter()
+                        .filter_map(|candidate| matched(root, candidate, query))
+                        .collect::<Vec<_>>()
+                })
+            })
             .collect();
-        workers.into_iter().flat_map(|worker| worker.join().unwrap_or_default()).collect()
+        workers
+            .into_iter()
+            .flat_map(|worker| worker.join().unwrap_or_default())
+            .collect()
     });
     match sort {
-        Sort::Relevance => found.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path))),
+        Sort::Relevance => {
+            found.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)))
+        }
         Sort::Path => found.sort_by(|a, b| a.path.cmp(&b.path)),
     }
     let next = (found.len() > offset + limit).then_some(offset + limit);
@@ -321,8 +397,16 @@ fn refusal((status, error): (StatusCode, String)) -> Response {
 }
 
 /// Search a root's files off the async runtime's threads.
-async fn searched(root: PathBuf, query: FileQuery, sort: Sort, offset: usize, limit: usize) -> Result<(Vec<Match>, Option<usize>, Vec<String>), String> {
-    let listing = listing(&root).await.map_err(|e| format!("Failed to search directory: {e}"))?;
+async fn searched(
+    root: PathBuf,
+    query: FileQuery,
+    sort: Sort,
+    offset: usize,
+    limit: usize,
+) -> Result<(Vec<Match>, Option<usize>, Vec<String>), String> {
+    let listing = listing(&root)
+        .await
+        .map_err(|e| format!("Failed to search directory: {e}"))?;
     tokio::task::spawn_blocking(move || {
         let (found, next) = search(&root, &listing.paths, &query, sort, offset, limit);
         (found, next, query.words.ignored)
@@ -375,7 +459,11 @@ impl Files {
     async fn listed(&self, id: &str) -> Option<String> {
         let wanted = id.trim().trim_start_matches("./").replace('\\', "/");
         let listing = listing(&self.root).await.ok()?;
-        listing.paths.iter().find(|candidate| !candidate.dir && candidate.path == wanted).map(|candidate| candidate.path.clone())
+        listing
+            .paths
+            .iter()
+            .find(|candidate| !candidate.dir && candidate.path == wanted)
+            .map(|candidate| candidate.path.clone())
     }
 }
 
@@ -421,7 +509,12 @@ impl Source for Files {
         ])
     }
 
-    fn call(self: Arc<Self>, tool: String, arguments: Value, steps: Steps) -> BoxFuture<'static, Called> {
+    fn call(
+        self: Arc<Self>,
+        tool: String,
+        arguments: Value,
+        steps: Steps,
+    ) -> BoxFuture<'static, Called> {
         async move {
             if tool == "search_files" {
                 let Some(query) = arguments["query"].as_str() else {
@@ -505,7 +598,10 @@ pub struct Asking {
 
 pub async fn ask(Extension(db): Extension<Arc<Database>>, Json(asking): Json<Asking>) -> Response {
     if asking.question.trim().is_empty() {
-        return refusal((StatusCode::UNPROCESSABLE_ENTITY, "Say what the file was about.".into()));
+        return refusal((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Say what the file was about.".into(),
+        ));
     }
     let root = match root_of(&asking.root) {
         Ok(root) => root,
@@ -515,9 +611,12 @@ pub async fn ask(Extension(db): Extension<Arc<Database>>, Json(asking): Json<Ask
         Ok(settings) => settings,
         Err(error) => return refusal((StatusCode::INTERNAL_SERVER_ERROR, error)),
     };
-    agent::start(Arc::new(Files { root }), &asking.question, settings, |brand| {
-        crate::workbench::profiles::system_dir(brand).unwrap_or_default()
-    })
+    agent::start(
+        Arc::new(Files { root }),
+        &asking.question,
+        settings,
+        |brand| crate::workbench::profiles::system_dir(brand).unwrap_or_default(),
+    )
     .unwrap_or_else(|refusal| refusal.into_response())
 }
 
@@ -526,15 +625,24 @@ mod tests {
     use super::*;
 
     fn tree() -> (tempfile::TempDir, Vec<Candidate>) {
-        let home = directories::UserDirs::new().unwrap().home_dir().to_path_buf();
-        let root = tempfile::Builder::new().prefix(".atelier-file-search-").tempdir_in(home).unwrap();
+        let home = directories::UserDirs::new()
+            .unwrap()
+            .home_dir()
+            .to_path_buf();
+        let root = tempfile::Builder::new()
+            .prefix(".atelier-file-search-")
+            .tempdir_in(home)
+            .unwrap();
         let write = |path: &str, text: &str| {
             let at = root.path().join(path);
             std::fs::create_dir_all(at.parent().unwrap()).unwrap();
             std::fs::write(at, text).unwrap();
         };
         write(".gitignore", "ignored/\n");
-        write("src/importer.rs", "fn main() {\n    // the cobalt cache\n    let cobalt = 1;\n}\n");
+        write(
+            "src/importer.rs",
+            "fn main() {\n    // the cobalt cache\n    let cobalt = 1;\n}\n",
+        );
         write("src/cobalt.ts", "export const nothing = 0;\n");
         write("docs/notes.md", "The cobalts are not the word.\nloader\n");
         write("ignored/secret.rs", "cobalt\n");
@@ -544,45 +652,95 @@ mod tests {
     }
 
     fn paths(root: &Path, candidates: &[Candidate], typed: &str) -> Vec<String> {
-        search(root, candidates, &parse(typed), Sort::Relevance, 0, 30).0.into_iter().map(|found| found.path).collect()
+        search(root, candidates, &parse(typed), Sort::Relevance, 0, 30)
+            .0
+            .into_iter()
+            .map(|found| found.path)
+            .collect()
     }
 
     #[test]
     fn a_word_is_found_on_its_lines_and_in_names_and_never_in_ignored_or_binary_files() {
         let (root, candidates) = tree();
-        let (found, _) = search(root.path(), &candidates, &parse("cobalt "), Sort::Relevance, 0, 30);
+        let (found, _) = search(
+            root.path(),
+            &candidates,
+            &parse("cobalt "),
+            Sort::Relevance,
+            0,
+            30,
+        );
         let names: Vec<&str> = found.iter().map(|found| found.path.as_str()).collect();
         assert_eq!(names, ["src/cobalt.ts", "src/importer.rs"]);
         let importer = &found[1];
-        assert_eq!(importer.lines.iter().map(|line| line.number).collect::<Vec<_>>(), [2, 3]);
-        assert!(importer.lines[0].segments.iter().any(|s| s.mark && s.text == "cobalt"));
+        assert_eq!(
+            importer
+                .lines
+                .iter()
+                .map(|line| line.number)
+                .collect::<Vec<_>>(),
+            [2, 3]
+        );
+        assert!(importer.lines[0]
+            .segments
+            .iter()
+            .any(|s| s.mark && s.text == "cobalt"));
         assert!(found[0].lines.is_empty());
-        assert!(found[0].marked_path.as_ref().unwrap().iter().any(|s| s.mark && s.text == "cobalt"));
+        assert!(found[0]
+            .marked_path
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|s| s.mark && s.text == "cobalt"));
     }
 
     #[test]
     fn keys_aim_words_and_narrow_the_files_read() {
         let (root, candidates) = tree();
         let root = root.path();
-        assert_eq!(paths(root, &candidates, "content:cobalt "), ["src/importer.rs"]);
+        assert_eq!(
+            paths(root, &candidates, "content:cobalt "),
+            ["src/importer.rs"]
+        );
         assert_eq!(paths(root, &candidates, "file:cobalt "), ["src/cobalt.ts"]);
-        assert_eq!(paths(root, &candidates, "cobalt ext:rs"), ["src/importer.rs"]);
-        assert_eq!(paths(root, &candidates, "cobalt -ext:rs"), ["src/cobalt.ts"]);
+        assert_eq!(
+            paths(root, &candidates, "cobalt ext:rs"),
+            ["src/importer.rs"]
+        );
+        assert_eq!(
+            paths(root, &candidates, "cobalt -ext:rs"),
+            ["src/cobalt.ts"]
+        );
         assert_eq!(paths(root, &candidates, "name:notes"), ["docs/notes.md"]);
-        assert_eq!(paths(root, &candidates, "path:docs cobalt"), ["docs/notes.md"]);
-        assert_eq!(paths(root, &candidates, "cobalt -cache "), ["src/cobalt.ts"]);
-        assert_eq!(paths(root, &candidates, "loader OR cache "), ["docs/notes.md", "src/importer.rs"]);
+        assert_eq!(
+            paths(root, &candidates, "path:docs cobalt"),
+            ["docs/notes.md"]
+        );
+        assert_eq!(
+            paths(root, &candidates, "cobalt -cache "),
+            ["src/cobalt.ts"]
+        );
+        assert_eq!(
+            paths(root, &candidates, "loader OR cache "),
+            ["docs/notes.md", "src/importer.rs"]
+        );
         assert!(paths(root, &candidates, "").is_empty());
     }
 
     #[tokio::test]
     async fn the_agent_reads_only_what_the_listing_holds() {
         let (root, _) = tree();
-        let files = Files { root: root.path().canonicalize().unwrap() };
-        assert_eq!(files.listed("./src/importer.rs").await.as_deref(), Some("src/importer.rs"));
+        let files = Files {
+            root: root.path().canonicalize().unwrap(),
+        };
+        assert_eq!(
+            files.listed("./src/importer.rs").await.as_deref(),
+            Some("src/importer.rs")
+        );
         assert_eq!(files.listed("ignored/secret.rs").await, None);
         assert_eq!(files.listed("../etc/passwd").await, None);
         assert_eq!(files.listed("src").await, None);
-        assert!(agent::prompt(SKILL, "the file with the cobalt cache").starts_with("# Finding the file someone describes"));
+        assert!(agent::prompt(SKILL, "the file with the cobalt cache")
+            .starts_with("# Finding the file someone describes"));
     }
 }

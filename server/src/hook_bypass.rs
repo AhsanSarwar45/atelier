@@ -90,10 +90,9 @@ fn from_environment() -> Option<Bypass> {
         }
     }
     match std::env::var(TOKEN) {
-        Ok(reason) if !reason.trim().is_empty() => Some(Bypass::new(
-            format!("{TOKEN} in the environment"),
-            reason,
-        )),
+        Ok(reason) if !reason.trim().is_empty() => {
+            Some(Bypass::new(format!("{TOKEN} in the environment"), reason))
+        }
         _ => None,
     }
 }

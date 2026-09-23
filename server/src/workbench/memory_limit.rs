@@ -265,9 +265,7 @@ mod tests {
     fn one_sample_over_the_limit_is_not_enough_to_stop_a_chat() {
         let mut standing = Standing::default();
         let now = Instant::now();
-        assert!(standing
-            .judge(&[chat("a", 9.0)], LIMIT, now)
-            .is_empty());
+        assert!(standing.judge(&[chat("a", 9.0)], LIMIT, now).is_empty());
     }
 
     #[test]
@@ -315,7 +313,10 @@ mod tests {
         let mut standing = Standing::default();
         let now = Instant::now();
         standing.judge(&[chat("a", 9.0)], LIMIT, now);
-        assert_eq!(standing.judge(&[chat("a", 9.0)], LIMIT, now + EVERY).len(), 1);
+        assert_eq!(
+            standing.judge(&[chat("a", 9.0)], LIMIT, now + EVERY).len(),
+            1
+        );
         for tick in 2..8 {
             assert!(standing
                 .judge(&[chat("a", 9.0)], LIMIT, now + EVERY * tick)
@@ -363,7 +364,10 @@ mod tests {
         let message = invoice.message();
         assert!(message.contains("9.0 GB"), "{message}");
         assert!(message.contains("8.0 GB"), "{message}");
-        assert!(message.contains("node (PID 41) holding 6.0 GB"), "{message}");
+        assert!(
+            message.contains("node (PID 41) holding 6.0 GB"),
+            "{message}"
+        );
         assert!(invoice.notice().contains("9.0 GB"));
     }
 

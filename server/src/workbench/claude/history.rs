@@ -93,7 +93,12 @@ fn jsonl_rows(text: &str) -> Vec<Value> {
         let readers: Vec<_> = lines
             .chunks(chunk)
             .map(|slice| {
-                scope.spawn(move || slice.iter().filter_map(|line| parse(line)).collect::<Vec<_>>())
+                scope.spawn(move || {
+                    slice
+                        .iter()
+                        .filter_map(|line| parse(line))
+                        .collect::<Vec<_>>()
+                })
             })
             .collect();
         readers
@@ -688,22 +693,100 @@ fn modified(path: &Path) -> String {
     DateTime::<Utc>::from(time).to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct CachedSummary {
     len: u64,
     modified: SystemTime,
     summary: ClaudeSessionSummary,
 }
 
-static SUMMARIES: OnceLock<Mutex<HashMap<PathBuf, CachedSummary>>> = OnceLock::new();
+#[derive(Default)]
+struct Summaries {
+    known: HashMap<PathBuf, CachedSummary>,
+    /// Something was learned that the file on disk does not hold yet.
+    unsaved: bool,
+    saved_at: Option<std::time::Instant>,
+}
+
+static SUMMARIES: OnceLock<Mutex<Summaries>> = OnceLock::new();
+
+/// Where the summaries are kept between runs, when the app keeps them at all.
+static SUMMARY_STORE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Keep what every record said in `store`, so a restart does not read them all.
+///
+/// Reading a record's summary means its first and last few hundred kilobytes
+/// and, for some, several megabytes more to find the first prompt. Held only in
+/// memory, that was paid for every record on the machine at every start: the
+/// first chat list after a restart read gigabytes to learn what the last run
+/// already knew. A record is read again only when its size or clock moved
+/// (bw-69sa.3).
+pub fn keep_summaries_in(store: PathBuf) {
+    let _ = SUMMARY_STORE.set(store);
+}
+
+fn summaries() -> &'static Mutex<Summaries> {
+    SUMMARIES.get_or_init(|| {
+        Mutex::new(Summaries {
+            known: SUMMARY_STORE
+                .get()
+                .map(|store| load_summaries(store))
+                .unwrap_or_default(),
+            unsaved: false,
+            saved_at: None,
+        })
+    })
+}
+
+fn load_summaries(store: &Path) -> HashMap<PathBuf, CachedSummary> {
+    fs::read(store)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Vec<(PathBuf, CachedSummary)>>(&bytes).ok())
+        .map(|known| known.into_iter().collect())
+        .unwrap_or_default()
+}
+
+/// Write what is known, leaving out records that are gone. Written beside
+/// and renamed over, so a reader never finds half a file.
+fn save_summaries(store: &Path, known: &HashMap<PathBuf, CachedSummary>) -> std::io::Result<()> {
+    let kept: Vec<(&PathBuf, &CachedSummary)> =
+        known.iter().filter(|(path, _)| path.exists()).collect();
+    let bytes = serde_json::to_vec(&kept)?;
+    let beside = store.with_extension("json.part");
+    fs::write(&beside, bytes)?;
+    fs::rename(&beside, store)
+}
+
+fn saved_summaries() {
+    let Some(store) = SUMMARY_STORE.get() else {
+        return;
+    };
+    let mut summaries = summaries()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    // A busy chat moves its record every few seconds; the file is rewritten
+    // at most twice a minute for it. What a crash loses is only re-read.
+    let recently = summaries
+        .saved_at
+        .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(30));
+    if !summaries.unsaved || recently {
+        return;
+    }
+    summaries.saved_at = Some(std::time::Instant::now());
+    match save_summaries(store, &summaries.known) {
+        Ok(()) => summaries.unsaved = false,
+        Err(error) => tracing::warn!(%error, "could not keep Claude chat summaries"),
+    }
+}
 
 fn cached_summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
     let metadata = fs::metadata(&path).ok()?;
     let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-    let cache = SUMMARIES.get_or_init(|| Mutex::new(HashMap::new()));
+    let cache = summaries();
     if let Some(summary) = cache
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .known
         .get(&path)
         .filter(|cached| cached.len == metadata.len() && cached.modified == modified)
         .map(|cached| cached.summary.clone())
@@ -711,17 +794,18 @@ fn cached_summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
         return Some(summary);
     }
     let summary = summary(path.clone())?;
-    cache
+    let mut cache = cache
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(
-            path,
-            CachedSummary {
-                len: metadata.len(),
-                modified,
-                summary: summary.clone(),
-            },
-        );
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    cache.known.insert(
+        path,
+        CachedSummary {
+            len: metadata.len(),
+            modified,
+            summary: summary.clone(),
+        },
+    );
+    cache.unsaved = true;
     Some(summary)
 }
 
@@ -850,6 +934,7 @@ pub fn list_sessions(
         })
         .collect();
     sessions.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
+    saved_summaries();
     sessions
 }
 
@@ -1518,7 +1603,11 @@ struct HelperFacts {
 
 fn helper_id(path: &Path) -> Option<String> {
     let name = path.file_name()?.to_str()?;
-    Some(name.strip_prefix("agent-")?.strip_suffix(".jsonl")?.to_string())
+    Some(
+        name.strip_prefix("agent-")?
+            .strip_suffix(".jsonl")?
+            .to_string(),
+    )
 }
 
 /// Every row of one helper record, and the byte just past the last of them —
@@ -1673,7 +1762,14 @@ fn helper_records(record: &Path) -> Vec<HelperFacts> {
     std::thread::scope(|scope| {
         let readers: Vec<_> = paths
             .chunks(chunk)
-            .map(|slice| scope.spawn(move || slice.iter().filter_map(|path| helper_facts(path)).collect::<Vec<_>>()))
+            .map(|slice| {
+                scope.spawn(move || {
+                    slice
+                        .iter()
+                        .filter_map(|path| helper_facts(path))
+                        .collect::<Vec<_>>()
+                })
+            })
             .collect();
         readers
             .into_iter()
@@ -1871,7 +1967,11 @@ impl HelperFollower {
                 self.bytes_read += fs::metadata(path).map(|meta| meta.len()).unwrap_or(through);
                 let mut tail = crate::workbench::external::LineTail::new(path);
                 tail.seek(through);
-                HelperTail { tail, rows, grew_at: std::time::Instant::now() }
+                HelperTail {
+                    tail,
+                    rows,
+                    grew_at: std::time::Instant::now(),
+                }
             }
         };
         helper.grew_at = std::time::Instant::now();
@@ -1890,7 +1990,8 @@ impl HelperFollower {
         let path = self.helper_dir()?.join(format!("agent-{agent}.jsonl"));
         let helper = helper_facts(&path)?;
         self.bytes_read += helper.size;
-        self.finishes.insert(agent.to_string(), helper.finish.clone());
+        self.finishes
+            .insert(agent.to_string(), helper.finish.clone());
         Some(helper.finish)
     }
 
@@ -1974,7 +2075,8 @@ impl HelperFollower {
                 finished.push(finish);
             }
         }
-        self.tails.retain(|_, helper| helper.grew_at.elapsed() < TAIL_KEPT);
+        self.tails
+            .retain(|_, helper| helper.grew_at.elapsed() < TAIL_KEPT);
         (updates, finished)
     }
 }
@@ -2119,6 +2221,44 @@ pub fn replay_lines(lines: &[String]) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
+    /// What the last run learned about a record is still known after a
+    /// restart, and a record that is gone is not kept (bw-69sa.3).
+    #[test]
+    fn summaries_outlive_a_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let record = directory.path().join("chat.jsonl");
+        let gone = directory.path().join("gone.jsonl");
+        fs::write(&record, "{}\n").unwrap();
+        let entry = |path: &Path| CachedSummary {
+            len: 3,
+            modified: SystemTime::UNIX_EPOCH,
+            summary: ClaudeSessionSummary {
+                session_id: "chat".into(),
+                last_modified: "2026-01-01T00:00:00Z".into(),
+                name: Some("Kept".into()),
+                cwd: Some("/work".into()),
+                git_branch: None,
+                last_spoke_at: None,
+                programmatic: false,
+                record: path.to_path_buf(),
+            },
+        };
+        let known = HashMap::from([
+            (record.clone(), entry(&record)),
+            (gone.clone(), entry(&gone)),
+        ]);
+        let store = directory.path().join("summaries.json");
+        save_summaries(&store, &known).unwrap();
+        let loaded = load_summaries(&store);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[&record].summary, entry(&record).summary);
+        assert_eq!(loaded[&record].modified, SystemTime::UNIX_EPOCH);
+
+        // A damaged file is an empty memory, not a failure.
+        fs::write(&store, "not json").unwrap();
+        assert!(load_summaries(&store).is_empty());
+    }
+
     use super::*;
     use std::fs::{create_dir_all, write, OpenOptions};
     use std::io::Write as _;
@@ -2276,7 +2416,12 @@ mod tests {
         ].iter().map(Value::to_string).collect::<Vec<_>>().join("\n")).unwrap();
         let sessions = list_sessions(home.path(), None, false);
         assert_eq!(sessions[0].cwd.as_deref(), Some(Path::new("/home/person")));
-        assert!(list_sessions(home.path(), Some(Path::new("/home/person/dev/corsetta")), false).is_empty());
+        assert!(list_sessions(
+            home.path(),
+            Some(Path::new("/home/person/dev/corsetta")),
+            false
+        )
+        .is_empty());
     }
 
     #[test]
@@ -2294,7 +2439,9 @@ mod tests {
             Some("Agent Defined Conversation Name")
         );
         // The name the chat made for itself, kept exactly as it wrote it.
-        let named = home.path().join("projects/project/11111111-2222-3333-4444-555555555555.jsonl");
+        let named = home
+            .path()
+            .join("projects/project/11111111-2222-3333-4444-555555555555.jsonl");
         write(&named, [
             json!({"type":"ai-title","aiTitle":"READY"}),
             json!({"type":"user","message":{"role":"user","content":"Reply with exactly: READY"}}),
@@ -2307,7 +2454,9 @@ mod tests {
             Some("READY")
         );
         // And one that named itself nothing still gets a name of ours.
-        let unnamed = home.path().join("projects/project/22222222-2222-3333-4444-555555555555.jsonl");
+        let unnamed = home
+            .path()
+            .join("projects/project/22222222-2222-3333-4444-555555555555.jsonl");
         write(&unnamed, [
             json!({"type":"user","message":{"role":"user","content":"Reply with exactly: READY"}}),
         ].iter().map(Value::to_string).collect::<Vec<_>>().join("\n")).unwrap();
@@ -2382,18 +2531,25 @@ mod tests {
         create_dir_all(&dir).unwrap();
         let chats = [
             // What the review machinery leaves behind: primary throughout.
-            (CHAT, json!({"type":"user","isSidechain":false,"promptSource":"sdk",
+            (
+                CHAT,
+                json!({"type":"user","isSidechain":false,"promptSource":"sdk",
                 "entrypoint":"sdk-cli","cwd":"/work/repo","timestamp":"2026-08-30T00:00:00Z",
-                "message":{"content":"You are reviewing a change you did not write"}})),
+                "message":{"content":"You are reviewing a change you did not write"}}),
+            ),
             // What he starts himself.
-            ("11111111-2222-3333-4444-555555555555",
+            (
+                "11111111-2222-3333-4444-555555555555",
                 json!({"type":"user","isSidechain":false,"origin":{"kind":"human"},
                 "promptSource":"typed","cwd":"/work/repo","timestamp":"2026-08-30T00:00:00Z",
-                "message":{"content":"Fix both and finish this work"}})),
+                "message":{"content":"Fix both and finish this work"}}),
+            ),
             // A record written before Claude marked either field at all.
-            ("99999999-8888-7777-6666-555555555555",
+            (
+                "99999999-8888-7777-6666-555555555555",
                 json!({"type":"user","isSidechain":false,"cwd":"/work/repo",
-                "timestamp":"2026-08-30T00:00:00Z","message":{"content":"An older conversation"}})),
+                "timestamp":"2026-08-30T00:00:00Z","message":{"content":"An older conversation"}}),
+            ),
         ];
         for (id, row) in &chats {
             write(dir.join(format!("{id}.jsonl")), row.to_string()).unwrap();
@@ -2410,7 +2566,11 @@ mod tests {
             std::collections::HashSet::from([chats[1].0.to_string(), chats[2].0.to_string()]),
             "a chat nobody typed in is out; one too old to say stays in"
         );
-        assert_eq!(listed(true).len(), 3, "the switch brings the agent's own back");
+        assert_eq!(
+            listed(true).len(),
+            3,
+            "the switch brings the agent's own back"
+        );
     }
 
     /**
@@ -2601,13 +2761,15 @@ mod tests {
             json!({"type":"assistant","uuid":"a1","message":{"content":[{
                 "type":"tool_use","id":"call-bg","name":"Bash",
                 "input":{"command":"python3 -c 'import time; time.sleep(240)'"}
-            }]}}).to_string(),
+            }]}})
+            .to_string(),
             json!({"type":"user","uuid":"u1","toolUseResult":{
                 "stdout":"","stderr":"","interrupted":false,"backgroundTaskId":"bvah8rxvt"
             },"message":{"content":[{
                 "type":"tool_result","tool_use_id":"call-bg",
                 "content":"Command running in background with ID: bvah8rxvt."
-            }]}}).to_string(),
+            }]}})
+            .to_string(),
         ];
         let events = replay_lines(&lines);
         let opened = events
@@ -2662,9 +2824,24 @@ mod tests {
                 "content":format!("<task-notification>\n<task-id>{id}</task-id>\n<status>{status}</status>\n<summary>{summary}</summary>\n</task-notification>")
             })
         };
-        let shell = note("enqueue", "b3ovdktbe", "completed", "Background command \"Full cargo test\" completed (exit code 0)");
-        let delivered = note("remove", "b3ovdktbe", "completed", "Background command \"Full cargo test\" completed (exit code 0)");
-        let helper = note("enqueue", "a94ba500064fc0b02", "completed", "Agent \"SSH prompt\" finished");
+        let shell = note(
+            "enqueue",
+            "b3ovdktbe",
+            "completed",
+            "Background command \"Full cargo test\" completed (exit code 0)",
+        );
+        let delivered = note(
+            "remove",
+            "b3ovdktbe",
+            "completed",
+            "Background command \"Full cargo test\" completed (exit code 0)",
+        );
+        let helper = note(
+            "enqueue",
+            "a94ba500064fc0b02",
+            "completed",
+            "Agent \"SSH prompt\" finished",
+        );
         let watch = json!({
             "type":"queue-operation","operation":"enqueue","timestamp":"2026-09-06T04:47:00Z",
             "content":"<task-notification>\n<task-id>b8amj484z</task-id>\n<summary>Monitor event: \"landing\"</summary>\n<event>LANDED</event>\n</task-notification>"
@@ -2677,7 +2854,9 @@ mod tests {
 
         let events = read_history(&record).events;
         assert!(
-            events.iter().any(|event| event["type"] == "agent.started" && event["agentId"] == "b3ovdktbe"),
+            events
+                .iter()
+                .any(|event| event["type"] == "agent.started" && event["agentId"] == "b3ovdktbe"),
             "the shell never reached the panel"
         );
         let finished: Vec<_> = events
@@ -2705,9 +2884,15 @@ mod tests {
             "<task-notification>\n<task-id>b8amj484z</task-id>\n<summary>Monitor event: \"landing\"</summary>\n<event>LANDED</event>\n</task-notification>"
         )
         .is_none());
-        assert!(about_a_helper(&json!({"result":"Agent \"SSH prompt\" finished"})));
-        assert!(!about_a_helper(&json!({"result":"Background command \"x\" completed (exit code 0)"})));
-        assert!(!about_a_helper(&json!({"result":"Monitor \"landing\" stream ended"})));
+        assert!(about_a_helper(
+            &json!({"result":"Agent \"SSH prompt\" finished"})
+        ));
+        assert!(!about_a_helper(
+            &json!({"result":"Background command \"x\" completed (exit code 0)"})
+        ));
+        assert!(!about_a_helper(
+            &json!({"result":"Monitor \"landing\" stream ended"})
+        ));
     }
 
     /// A workflow says what it is for in its own answer. The script that
@@ -2732,7 +2917,10 @@ mod tests {
             .expect("a workflow left running is nowhere on the panel");
         assert_eq!(opened["kind"], "run");
         assert_eq!(opened["agentId"], "wepek3i68");
-        assert_eq!(opened["what"], "Two agents each reply with the single word ONE");
+        assert_eq!(
+            opened["what"],
+            "Two agents each reply with the single word ONE"
+        );
     }
 
     /// What a record says about when it happened outlives the reading of it.
@@ -2911,7 +3099,9 @@ mod tests {
             "a chat that only read a file replays faithfully through ACP"
         );
 
-        let sent_off = home.path().join("11111111-1111-4111-8111-111111111111.jsonl");
+        let sent_off = home
+            .path()
+            .join("11111111-1111-4111-8111-111111111111.jsonl");
         write(
             &sent_off,
             json!({"type":"assistant","message":{"content":[{
@@ -2926,7 +3116,9 @@ mod tests {
             "the adapter drops the dispatch call, so this one is read from the record"
         );
 
-        let transcripts = home.path().join("22222222-2222-4222-8222-222222222222.jsonl");
+        let transcripts = home
+            .path()
+            .join("22222222-2222-4222-8222-222222222222.jsonl");
         write(&transcripts, "").unwrap();
         let helper_dir = transcripts
             .with_file_name("22222222-2222-4222-8222-222222222222")
@@ -2964,7 +3156,11 @@ mod tests {
             .into_iter()
             .find(|event| event["type"] == "cost")
             .expect("a chat that spent anything reports what it spent");
-        assert_eq!(cost["cost"]["total"], json!(900), "120 of its own and 780 sent away");
+        assert_eq!(
+            cost["cost"]["total"],
+            json!(900),
+            "120 of its own and 780 sent away"
+        );
         assert_eq!(cost["cost"]["delegated"], json!(780));
         // Its own halves stay its own, so the two readings can be told apart.
         assert_eq!(cost["cost"]["input"], json!(100));
@@ -3149,13 +3345,25 @@ mod tests {
         let fourth = row("busy-4", "Fourth");
         let (head, rest) = fourth.split_at(10);
         file.write_all(head.as_bytes()).unwrap();
-        assert!(!follower.poll(&[]).0.iter().any(|event| event["text"] == "Fourth"));
+        assert!(!follower
+            .poll(&[])
+            .0
+            .iter()
+            .any(|event| event["text"] == "Fourth"));
         file.write_all(rest.as_bytes()).unwrap();
-        assert!(follower.poll(&[]).0.iter().any(|event| event["text"] == "Fourth"));
+        assert!(follower
+            .poll(&[])
+            .0
+            .iter()
+            .any(|event| event["text"] == "Fourth"));
 
         // A rewritten file is read again from the start.
         write(&busy, row("busy-new", "Fresh")).unwrap();
-        assert!(follower.poll(&[]).0.iter().any(|event| event["text"] == "Fresh"));
+        assert!(follower
+            .poll(&[])
+            .0
+            .iter()
+            .any(|event| event["text"] == "Fresh"));
     }
 
     /// A helper sent to work in the background has its result as soon as it
@@ -3168,7 +3376,11 @@ mod tests {
         write(&record, "").unwrap();
         let helper_dir = record.with_file_name(CHAT).join("subagents");
         create_dir_all(&helper_dir).unwrap();
-        write(helper_dir.join("agent-bg.meta.json"), json!({"toolUseId":"call-bg"}).to_string()).unwrap();
+        write(
+            helper_dir.join("agent-bg.meta.json"),
+            json!({"toolUseId":"call-bg"}).to_string(),
+        )
+        .unwrap();
         let row = |uuid: &str, text: &str| {
             json!({"type":"assistant","uuid":uuid,"timestamp":"2026-08-30T00:00:01Z",
                 "message":{"content":[{"type":"text","text":text}]}})
@@ -3182,12 +3394,21 @@ mod tests {
         assert!(!follower.poll(&handed_off).1.is_empty(), "settled at once");
 
         let mut file = OpenOptions::new().append(true).open(&path).unwrap();
-        file.write_all(row("bg-2", "Still going").as_bytes()).unwrap();
-        assert!(follower.poll(&[]).0.iter().any(|event| event["text"] == "Still going"));
+        file.write_all(row("bg-2", "Still going").as_bytes())
+            .unwrap();
+        assert!(follower
+            .poll(&[])
+            .0
+            .iter()
+            .any(|event| event["text"] == "Still going"));
         let before = follower.bytes_read;
         let more = row("bg-3", "And more");
         file.write_all(more.as_bytes()).unwrap();
-        assert!(follower.poll(&[]).0.iter().any(|event| event["text"] == "And more"));
+        assert!(follower
+            .poll(&[])
+            .0
+            .iter()
+            .any(|event| event["text"] == "And more"));
         assert_eq!(follower.bytes_read - before, more.len() as u64);
     }
 
@@ -3210,11 +3431,17 @@ mod tests {
         .unwrap();
         let mut follower = HelperFollower::after_import(&record);
         assert_eq!(follower.poll(&[]), (vec![], vec![]));
-        write(helper_dir.join("agent-late.meta.json"), json!({"toolUseId":"call-late"}).to_string()).unwrap();
+        write(
+            helper_dir.join("agent-late.meta.json"),
+            json!({"toolUseId":"call-late"}).to_string(),
+        )
+        .unwrap();
         follower.poll(&[]);
         let parent = vec![json!({"type":"tool.completed","toolCallId":"call-late","ok":true})];
         let (_, done) = follower.poll(&parent);
-        assert!(done.iter().any(|event| event["type"] == "agent.finished" && event["agentId"] == "late"));
+        assert!(done
+            .iter()
+            .any(|event| event["type"] == "agent.finished" && event["agentId"] == "late"));
     }
 
     /// A chat reads the transcript belonging to its own account.

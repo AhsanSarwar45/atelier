@@ -254,12 +254,7 @@ impl Shell {
     /// `chosen` is the shell the person picked on the settings screen, and
     /// `None` is nobody having picked one — in which case this computer's own
     /// record decides, exactly as it did before there was a setting.
-    pub fn open(
-        cwd: &Path,
-        cols: u16,
-        rows: u16,
-        chosen: Option<&Path>,
-    ) -> std::io::Result<Self> {
+    pub fn open(cwd: &Path, cols: u16, rows: u16, chosen: Option<&Path>) -> std::io::Result<Self> {
         // Before the pty is opened, so a chosen shell that is no longer there
         // costs nothing and the person gets a sentence naming it rather than a
         // silent bash.
@@ -313,16 +308,19 @@ impl Shell {
             }
         }
 
-        let child = pair.slave.spawn_command(command).map_err(|why| match chosen {
-            // Named, because the one thing a person can do about this is change
-            // it, and they cannot change what they are not told.
-            Some(chosen) => std::io::Error::other(format!(
-                "Could not start the shell selected in Settings ({}): {why}. \
+        let child = pair
+            .slave
+            .spawn_command(command)
+            .map_err(|why| match chosen {
+                // Named, because the one thing a person can do about this is change
+                // it, and they cannot change what they are not told.
+                Some(chosen) => std::io::Error::other(format!(
+                    "Could not start the shell selected in Settings ({}): {why}. \
                  Choose another shell in Settings.",
-                chosen.display()
-            )),
-            None => other(why),
-        })?;
+                    chosen.display()
+                )),
+                None => other(why),
+            })?;
         // The child has its own handle now. Ours is what would keep the reader
         // waiting on a shell that has already gone.
         drop(pair.slave);
@@ -652,7 +650,9 @@ mod tests {
         // A login shell is one whose own name, as it was handed to it, begins
         // with a dash. That is the whole convention, and it is what the shell
         // itself reports.
-        shell.type_into(b"printf 'ARGV0[%s]\\n' \"$0\"; exit\n").unwrap();
+        shell
+            .type_into(b"printf 'ARGV0[%s]\\n' \"$0\"; exit\n")
+            .unwrap();
         let said = read_until_the_shell_is_gone(output);
 
         let reported = answered(&said, "ARGV0");
@@ -668,7 +668,9 @@ mod tests {
         let mut shell = Shell::open(&where_to, 80, 24, None).expect("a shell should start");
         let output = shell.output().unwrap();
 
-        shell.type_into(b"printf 'CWD[%s]\\n' \"$PWD\"; exit\n").unwrap();
+        shell
+            .type_into(b"printf 'CWD[%s]\\n' \"$PWD\"; exit\n")
+            .unwrap();
         let said = read_until_the_shell_is_gone(output);
 
         let reported = answered(&said, "CWD");

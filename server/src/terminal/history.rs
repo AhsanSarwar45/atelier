@@ -302,9 +302,18 @@ mod tests {
         assert_eq!(
             read,
             vec![
-                Ran { command: "git status".into(), at: Some(1_700_000_000) },
-                Ran { command: "ls -la".into(), at: None },
-                Ran { command: "cargo test".into(), at: Some(1_700_000_100) },
+                Ran {
+                    command: "git status".into(),
+                    at: Some(1_700_000_000)
+                },
+                Ran {
+                    command: "ls -la".into(),
+                    at: None
+                },
+                Ran {
+                    command: "cargo test".into(),
+                    at: Some(1_700_000_100)
+                },
             ]
         );
     }
@@ -322,9 +331,23 @@ mod tests {
 
     #[test]
     fn zsh_reads_both_its_formats_and_joins_a_continued_command() {
-        let read = read_zsh(": 1700000000:0;git status\nls -la\n: 1700000100:5;for f in *; do \\\necho $f; done\n");
-        assert_eq!(read[0], Ran { command: "git status".into(), at: Some(1_700_000_000) });
-        assert_eq!(read[1], Ran { command: "ls -la".into(), at: None });
+        let read = read_zsh(
+            ": 1700000000:0;git status\nls -la\n: 1700000100:5;for f in *; do \\\necho $f; done\n",
+        );
+        assert_eq!(
+            read[0],
+            Ran {
+                command: "git status".into(),
+                at: Some(1_700_000_000)
+            }
+        );
+        assert_eq!(
+            read[1],
+            Ran {
+                command: "ls -la".into(),
+                at: None
+            }
+        );
         assert_eq!(read[2].command, "for f in *; do \necho $f; done");
         assert_eq!(read[2].at, Some(1_700_000_100));
     }
@@ -338,9 +361,23 @@ mod tests {
 
     #[test]
     fn fish_gives_up_its_command_and_its_time_with_the_escapes_undone() {
-        let read = read_fish("- cmd: git status\n  when: 1700000000\n- cmd: echo a\\nb\n  when: 1700000100\n");
-        assert_eq!(read[0], Ran { command: "git status".into(), at: Some(1_700_000_000) });
-        assert_eq!(read[1], Ran { command: "echo a\nb".into(), at: Some(1_700_000_100) });
+        let read = read_fish(
+            "- cmd: git status\n  when: 1700000000\n- cmd: echo a\\nb\n  when: 1700000100\n",
+        );
+        assert_eq!(
+            read[0],
+            Ran {
+                command: "git status".into(),
+                at: Some(1_700_000_000)
+            }
+        );
+        assert_eq!(
+            read[1],
+            Ran {
+                command: "echo a\nb".into(),
+                at: Some(1_700_000_100)
+            }
+        );
     }
 
     #[test]
@@ -355,7 +392,9 @@ mod tests {
         let read = temporarily_without_histfile(|| recent(Path::new("/bin/bash"), home.path()));
 
         assert_eq!(
-            read.iter().map(|ran| ran.command.as_str()).collect::<Vec<_>>(),
+            read.iter()
+                .map(|ran| ran.command.as_str())
+                .collect::<Vec<_>>(),
             vec!["cargo test", "git status", "ls"],
             "newest first, each command once"
         );
@@ -381,7 +420,9 @@ mod tests {
         // The lock outlives the whole swap, and a case that panicked holding it
         // must not make every case after it panic too — the environment it left
         // behind is the one this function is about to overwrite anyway.
-        let _held = ONE_AT_A_TIME.lock().unwrap_or_else(|held| held.into_inner());
+        let _held = ONE_AT_A_TIME
+            .lock()
+            .unwrap_or_else(|held| held.into_inner());
         let was = std::env::var_os("HISTFILE");
         std::env::remove_var("HISTFILE");
         let out = run();

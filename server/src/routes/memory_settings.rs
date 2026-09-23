@@ -86,9 +86,7 @@ async fn write(
         Some(gb) => {
             return Err((
                 StatusCode::UNPROCESSABLE_ENTITY,
-                format!(
-                    "A chat can be given between {SMALLEST_GB} and {LARGEST_GB} GB, not {gb}."
-                ),
+                format!("A chat can be given between {SMALLEST_GB} and {LARGEST_GB} GB, not {gb}."),
             ))
         }
     };
@@ -174,7 +172,8 @@ mod tests {
     async fn clearing_the_limit_forgets_it_rather_than_storing_nothing() {
         let db: AppState = Arc::new(Database::new_in_memory().unwrap());
         ask(&browser(&db), Method::PUT, Some(json!({"limitGb": 4.5}))).await;
-        let (status, answer) = ask(&browser(&db), Method::PUT, Some(json!({"limitGb": null}))).await;
+        let (status, answer) =
+            ask(&browser(&db), Method::PUT, Some(json!({"limitGb": null}))).await;
         assert_eq!(status, StatusCode::OK, "{answer}");
         assert_eq!(answer, json!({ "limitGb": null }));
         assert_eq!(db.setting(LIMIT_GB).unwrap(), None);

@@ -330,7 +330,10 @@ mod tests {
             now.join("saved-pages").join("a-page.json").exists(),
             "the saved data did not come across"
         );
-        assert!(before.join("settings.db").exists(), "the earlier install was moved, not copied");
+        assert!(
+            before.join("settings.db").exists(),
+            "the earlier install was moved, not copied"
+        );
         let _ = fs::remove_dir_all(&tmp);
     }
 
@@ -361,7 +364,10 @@ mod tests {
 
         carry_over(&tmp.join("never-existed"), &now).expect("nothing to do is not a failure");
 
-        assert!(!now.exists(), "a folder was made for an install that never was");
+        assert!(
+            !now.exists(),
+            "a folder was made for an install that never was"
+        );
         let _ = fs::remove_dir_all(&tmp);
     }
 
@@ -377,7 +383,10 @@ mod tests {
 
         carry_over(&before, &now).expect("nothing to do is not a failure");
 
-        assert!(!now.exists(), "an empty folder was carried over as if it were an install");
+        assert!(
+            !now.exists(),
+            "an empty folder was carried over as if it were an install"
+        );
         let _ = fs::remove_dir_all(&tmp);
     }
 
@@ -412,5 +421,4 @@ mod tests {
         assert_eq!(resolve_data_dir(Some("  ".to_string())), data_dir());
         assert_eq!(resolve_data_dir(None), data_dir());
     }
-
 }

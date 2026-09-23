@@ -54,9 +54,19 @@ pub fn label() -> String {
 fn sanitised(name: &str) -> String {
     let cleaned: String = name
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '.' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
-    if cleaned.is_empty() { NAME.to_string() } else { cleaned }
+    if cleaned.is_empty() {
+        NAME.to_string()
+    } else {
+        cleaned
+    }
 }
 
 /// The name launchd files an agent under: a reverse domain, like everything else there.
@@ -88,7 +98,10 @@ pub fn running_at(host: String, port: u16) {
 /// The port this copy is answering on, or the one it would take. The fallback
 /// is for the copies that never bound anything: `atelier where`, the installer.
 pub fn running_port() -> u16 {
-    RUNNING.get().map(|(_, port)| *port).unwrap_or_else(crate::reachable::port)
+    RUNNING
+        .get()
+        .map(|(_, port)| *port)
+        .unwrap_or_else(crate::reachable::port)
 }
 
 /// What this copy is answering on, by the same rule.
@@ -173,7 +186,10 @@ fn as_typed(value: &str) -> String {
 /// writes a registration the machine refuses to read, and the reader is left
 /// with nothing starting and no idea why.
 fn as_text(value: &str) -> String {
-    value.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// The systemd user unit.
@@ -191,12 +207,18 @@ fn as_text(value: &str) -> String {
 /// with nothing running at all (bw-8um.3.10.1).
 pub fn systemd_unit(exe: &str, carried: &[(String, String)]) -> String {
     let args = STARTED_AS.join(" ");
-    let environment: String = carried.iter().map(|(name, value)| written_down(name, value)).collect();
+    let environment: String = carried
+        .iter()
+        .map(|(name, value)| written_down(name, value))
+        .collect();
     // Where the program sits is the reader's choice too, and this line is read
     // the same way a setting is: split on spaces, and its percent signs
     // expanded. Quoted and doubled, a folder with either in it still names one
     // program.
-    let exe = format!("\"{}\"", as_typed(exe).replace('\\', "\\\\").replace('"', "\\\""));
+    let exe = format!(
+        "\"{}\"",
+        as_typed(exe).replace('\\', "\\\\").replace('"', "\\\"")
+    );
     format!(
         "[Unit]\n\
          Description={DISPLAY} — project boards and agent chats\n\
@@ -223,7 +245,11 @@ pub fn launch_agent(exe: &str, carried: &[(String, String)], agent: &str) -> Str
     let environment: String = carried
         .iter()
         .map(|(name, value)| {
-            format!("\x20   <key>{}</key>\n\x20   <string>{}</string>\n", as_text(name), as_text(value))
+            format!(
+                "\x20   <key>{}</key>\n\x20   <string>{}</string>\n",
+                as_text(name),
+                as_text(value)
+            )
         })
         .collect();
     let exe = as_text(exe);
@@ -268,7 +294,10 @@ pub fn scheduled_command(exe: &str) -> String {
 /// nothing.
 pub fn definition_path() -> Option<PathBuf> {
     if cfg!(target_os = "macos") {
-        dirs_home().map(|h| h.join("Library/LaunchAgents").join(format!("{}.plist", agent_label())))
+        dirs_home().map(|h| {
+            h.join("Library/LaunchAgents")
+                .join(format!("{}.plist", agent_label()))
+        })
     } else if cfg!(target_os = "windows") {
         None
     } else {
@@ -295,12 +324,19 @@ fn dirs_home() -> Option<PathBuf> {
 pub fn registered_program() -> Option<String> {
     let path = definition_path()?;
     let text = std::fs::read_to_string(&path).ok()?;
-    if cfg!(target_os = "macos") { program_in_plist(&text) } else { program_in_unit(&text) }
+    if cfg!(target_os = "macos") {
+        program_in_plist(&text)
+    } else {
+        program_in_unit(&text)
+    }
 }
 
 /// The program named by a systemd unit, undoing exactly what wrote it.
 pub fn program_in_unit(text: &str) -> Option<String> {
-    let line = text.lines().map(str::trim).find(|l| l.starts_with("ExecStart="))?;
+    let line = text
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with("ExecStart="))?;
     let rest = line.strip_prefix("ExecStart=")?.trim_start();
     let quoted = rest.strip_prefix('"')?;
 
@@ -341,7 +377,9 @@ pub fn registration_comes_back_however_it_stops() -> Option<bool> {
 
 /// The rule behind it for systemd, over the text rather than the machine.
 pub fn unit_comes_back_however_it_stops(text: &str) -> bool {
-    text.lines().map(str::trim).any(|line| line == "Restart=always")
+    text.lines()
+        .map(str::trim)
+        .any(|line| line == "Restart=always")
 }
 
 /// The rule behind it for launchd.
@@ -356,7 +394,12 @@ pub fn program_in_plist(text: &str) -> Option<String> {
     let after = text.split("<key>ProgramArguments</key>").nth(1)?;
     let opened = after.split("<string>").nth(1)?;
     let named = opened.split("</string>").next()?;
-    Some(named.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
+    Some(
+        named
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&"),
+    )
 }
 
 /// Where the user's own systemd units live.
@@ -395,7 +438,10 @@ pub fn worth_registering(exe: &str, named: &[(String, String)]) -> String {
 fn program_to_register() -> Result<String, String> {
     let exe = std::env::current_exe()
         .map_err(|e| format!("Could not locate the Atelier executable: {e}"))?;
-    let exe = std::fs::canonicalize(&exe).unwrap_or(exe).display().to_string();
+    let exe = std::fs::canonicalize(&exe)
+        .unwrap_or(exe)
+        .display()
+        .to_string();
     let named: Vec<(String, String)> = std::env::var_os("PATH")
         .map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
         .unwrap_or_default()
@@ -403,7 +449,10 @@ fn program_to_register() -> Result<String, String> {
         .map(|dir| dir.join(NAME))
         .filter_map(|candidate| {
             let leads_to = std::fs::canonicalize(&candidate).ok()?;
-            Some((candidate.display().to_string(), leads_to.display().to_string()))
+            Some((
+                candidate.display().to_string(),
+                leads_to.display().to_string(),
+            ))
         })
         .collect();
     Ok(worth_registering(&exe, &named))
@@ -452,7 +501,9 @@ fn install(exe: &str) -> Result<(), String> {
     let network = crate::reachable::on_this_network();
     let name = crate::reachable::name_on_this_network(network);
     let public = crate::reachable::published_url();
-    for line in crate::reachable::openable_at(&host, port, network, name.as_deref(), public.as_deref()) {
+    for line in
+        crate::reachable::openable_at(&host, port, network, name.as_deref(), public.as_deref())
+    {
         println!("  {line}");
     }
     Ok(())
@@ -485,7 +536,11 @@ fn status() -> Result<(), String> {
         println!(
             "{}: {}",
             path.display(),
-            if path.exists() { "registered" } else { "not registered" }
+            if path.exists() {
+                "registered"
+            } else {
+                "not registered"
+            }
         );
     }
     for step in status_steps() {
@@ -522,14 +577,26 @@ fn words(parts: &[&str]) -> Vec<String> {
 fn install_steps(exe: &str) -> Vec<Vec<String>> {
     let label = label();
     if cfg!(target_os = "macos") {
-        let path = definition_path().map(|p| p.display().to_string()).unwrap_or_default();
-        vec![words(&["launchctl", "unload", &path]), words(&["launchctl", "load", "-w", &path])]
+        let path = definition_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        vec![
+            words(&["launchctl", "unload", &path]),
+            words(&["launchctl", "load", "-w", &path]),
+        ]
     } else if cfg!(target_os = "windows") {
         // The same path the other two registrars are given, not this process's
         // own a second time: Windows keeps no file to read back, so a path
         // that drifts here drifts silently.
         vec![words(&[
-            "schtasks", "/Create", "/F", "/SC", "ONLOGON", "/TN", &label, "/TR",
+            "schtasks",
+            "/Create",
+            "/F",
+            "/SC",
+            "ONLOGON",
+            "/TN",
+            &label,
+            "/TR",
             &scheduled_command(exe),
         ])]
     } else {
@@ -549,7 +616,9 @@ fn install_steps(exe: &str) -> Vec<Vec<String>> {
 fn uninstall_steps() -> Vec<Vec<String>> {
     let label = label();
     if cfg!(target_os = "macos") {
-        let path = definition_path().map(|p| p.display().to_string()).unwrap_or_default();
+        let path = definition_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
         vec![words(&["launchctl", "unload", "-w", &path])]
     } else if cfg!(target_os = "windows") {
         vec![words(&["schtasks", "/Delete", "/F", "/TN", &label])]
@@ -575,7 +644,13 @@ fn status_steps() -> Vec<Vec<String>> {
     } else if cfg!(target_os = "windows") {
         vec![words(&["schtasks", "/Query", "/TN", &label])]
     } else {
-        vec![words(&["systemctl", "--user", "status", "--no-pager", &format!("{label}.service")])]
+        vec![words(&[
+            "systemctl",
+            "--user",
+            "status",
+            "--no-pager",
+            &format!("{label}.service"),
+        ])]
     }
 }
 
@@ -597,7 +672,10 @@ mod tests {
         });
 
         let unit = systemd_unit("/usr/bin/atelier", &carried);
-        assert!(unit.contains("Environment=\"ATELIER_DATA_DIR=/somewhere/else\""), "{unit}");
+        assert!(
+            unit.contains("Environment=\"ATELIER_DATA_DIR=/somewhere/else\""),
+            "{unit}"
+        );
         assert!(unit.contains("Environment=\"ATELIER_PORT="), "{unit}");
     }
 
@@ -620,7 +698,10 @@ mod tests {
         );
 
         let unit = systemd_unit("/usr/bin/atelier", &carried);
-        assert!(unit.contains("/home/me/.nvm/versions/node/v22/bin"), "{unit}");
+        assert!(
+            unit.contains("/home/me/.nvm/versions/node/v22/bin"),
+            "{unit}"
+        );
         let plist = launch_agent("/usr/bin/atelier", &carried, "com.weselow.atelier");
         assert!(plist.contains("<key>PATH</key>"), "{plist}");
     }
@@ -635,7 +716,10 @@ mod tests {
             _ => None,
         });
         let unit = systemd_unit("/usr/bin/atelier", &carried);
-        assert!(unit.contains("Environment=\"PATH=/Users/me/My Tools/bin:/usr/bin\""), "{unit}");
+        assert!(
+            unit.contains("Environment=\"PATH=/Users/me/My Tools/bin:/usr/bin\""),
+            "{unit}"
+        );
     }
 
     #[test]
@@ -648,22 +732,40 @@ mod tests {
             _ => None,
         });
         let plist = launch_agent("/usr/bin/atelier", &carried, "com.weselow.atelier");
-        assert!(plist.contains("<string>/Users/me/R&amp;D/&lt;work&gt;</string>"), "{plist}");
+        assert!(
+            plist.contains("<string>/Users/me/R&amp;D/&lt;work&gt;</string>"),
+            "{plist}"
+        );
         assert!(!plist.contains("R&D"), "{plist}");
     }
 
     #[test]
     fn nothing_that_was_never_set_is_written_down_as_if_it_had_been() {
         let carried = settings_from(|_| None);
-        assert_eq!(carried, vec![("ATELIER_PORT".to_string(), crate::command_line::PORT.to_string())]);
+        assert_eq!(
+            carried,
+            vec![(
+                "ATELIER_PORT".to_string(),
+                crate::command_line::PORT.to_string()
+            )]
+        );
     }
 
     #[test]
     fn a_setting_left_empty_is_not_carried_as_an_empty_one() {
         // An empty data folder written into a unit would resolve against
         // whatever directory the service manager happened to start in.
-        let carried = settings_from(|name| if name == "ATELIER_DATA_DIR" { Some("  ".into()) } else { None });
-        assert!(!carried.iter().any(|(n, _)| n == "ATELIER_DATA_DIR"), "{carried:?}");
+        let carried = settings_from(|name| {
+            if name == "ATELIER_DATA_DIR" {
+                Some("  ".into())
+            } else {
+                None
+            }
+        });
+        assert!(
+            !carried.iter().any(|(n, _)| n == "ATELIER_DATA_DIR"),
+            "{carried:?}"
+        );
     }
 
     #[test]
@@ -672,7 +774,10 @@ mod tests {
         // the machine was doing, and it must be the same command a person
         // types — not a second way in that can drift from it.
         let unit = systemd_unit("/usr/bin/atelier", &at(3008));
-        assert!(unit.contains("ExecStart=\"/usr/bin/atelier\" run --no-browser"), "{unit}");
+        assert!(
+            unit.contains("ExecStart=\"/usr/bin/atelier\" run --no-browser"),
+            "{unit}"
+        );
 
         let plist = launch_agent("/usr/bin/atelier", &at(3008), "com.weselow.atelier");
         assert!(plist.contains("<string>run</string>"), "{plist}");
@@ -689,7 +794,8 @@ mod tests {
         // A service has no shell and inherits nothing, so a port left to be
         // read from the environment would quietly become the default at the
         // next reboot.
-        assert!(systemd_unit("/usr/bin/atelier", &at(3456)).contains("Environment=\"ATELIER_PORT=3456\""));
+        assert!(systemd_unit("/usr/bin/atelier", &at(3456))
+            .contains("Environment=\"ATELIER_PORT=3456\""));
         let plist = launch_agent("/usr/bin/atelier", &at(3456), "com.weselow.atelier");
         assert!(plist.contains("<string>3456</string>"), "{plist}");
     }
@@ -700,7 +806,10 @@ mod tests {
         // whole definition when the letter after a `%` names nothing it knows.
         // Either way the reader gets no board back, over a folder they were
         // free to call whatever they liked.
-        let carried = vec![("ATELIER_DATA_DIR".to_string(), "/home/sam/100% mine/data".to_string())];
+        let carried = vec![(
+            "ATELIER_DATA_DIR".to_string(),
+            "/home/sam/100% mine/data".to_string(),
+        )];
         let unit = systemd_unit("/usr/bin/atelier", &carried);
         assert!(
             unit.contains("Environment=\"ATELIER_DATA_DIR=/home/sam/100%% mine/data\""),
@@ -745,10 +854,16 @@ mod tests {
         // The whole point of writing it down is being able to ask later which
         // copy this computer actually starts.
         let unit = systemd_unit("/home/me/.local/bin/atelier", &at(3008));
-        assert_eq!(program_in_unit(&unit).as_deref(), Some("/home/me/.local/bin/atelier"));
+        assert_eq!(
+            program_in_unit(&unit).as_deref(),
+            Some("/home/me/.local/bin/atelier")
+        );
 
         let plist = launch_agent("/opt/atelier/atelier", &at(3008), "com.weselow.atelier");
-        assert_eq!(program_in_plist(&plist).as_deref(), Some("/opt/atelier/atelier"));
+        assert_eq!(
+            program_in_plist(&plist).as_deref(),
+            Some("/opt/atelier/atelier")
+        );
     }
 
     #[test]
@@ -757,10 +872,16 @@ mod tests {
         // it back has to undo exactly that, or a reader whose program sits in
         // `100%` is told it is registered somewhere it is not.
         let unit = systemd_unit("/home/sam/my apps/100%/atelier", &at(3008));
-        assert_eq!(program_in_unit(&unit).as_deref(), Some("/home/sam/my apps/100%/atelier"));
+        assert_eq!(
+            program_in_unit(&unit).as_deref(),
+            Some("/home/sam/my apps/100%/atelier")
+        );
 
         let plist = launch_agent("/Users/me/R&D/atelier", &at(3008), "com.weselow.atelier");
-        assert_eq!(program_in_plist(&plist).as_deref(), Some("/Users/me/R&D/atelier"));
+        assert_eq!(
+            program_in_plist(&plist).as_deref(),
+            Some("/Users/me/R&D/atelier")
+        );
     }
 
     #[test]
@@ -770,7 +891,10 @@ mod tests {
         // the installed program; the folder behind it is deleted by the very
         // next upgrade, and the computer is left starting nothing at all.
         let on_path = vec![
-            ("/usr/local/bin/atelier".to_string(), "/usr/local/bin/atelier".to_string()),
+            (
+                "/usr/local/bin/atelier".to_string(),
+                "/usr/local/bin/atelier".to_string(),
+            ),
             (
                 "/opt/brew/bin/atelier".to_string(),
                 "/opt/brew/Cellar/atelier/0.13.1/bin/atelier".to_string(),
@@ -787,21 +911,38 @@ mod tests {
         // Run out of a folder that is on nobody's list, its own path is the
         // only name it has — and a copy of some other build sitting on the
         // list is not it.
-        let on_path = vec![("/usr/bin/atelier".to_string(), "/usr/bin/atelier".to_string())];
-        assert_eq!(worth_registering("/home/me/build/atelier", &on_path), "/home/me/build/atelier");
-        assert_eq!(worth_registering("/usr/bin/atelier", &on_path), "/usr/bin/atelier");
-        assert_eq!(worth_registering("/usr/bin/atelier", &[]), "/usr/bin/atelier");
+        let on_path = vec![(
+            "/usr/bin/atelier".to_string(),
+            "/usr/bin/atelier".to_string(),
+        )];
+        assert_eq!(
+            worth_registering("/home/me/build/atelier", &on_path),
+            "/home/me/build/atelier"
+        );
+        assert_eq!(
+            worth_registering("/usr/bin/atelier", &on_path),
+            "/usr/bin/atelier"
+        );
+        assert_eq!(
+            worth_registering("/usr/bin/atelier", &[]),
+            "/usr/bin/atelier"
+        );
     }
 
     #[test]
     fn handover_is_only_offered_by_a_registration_that_comes_back_however_it_stops() {
         // What this build writes says yes; what an older build wrote says no,
         // and a copy that stood down under it would never come back.
-        assert!(unit_comes_back_however_it_stops(&systemd_unit("/usr/bin/atelier", &at(3008))));
+        assert!(unit_comes_back_however_it_stops(&systemd_unit(
+            "/usr/bin/atelier",
+            &at(3008)
+        )));
         assert!(!unit_comes_back_however_it_stops(
             "[Service]\nExecStart=\"/usr/bin/atelier\" run\nRestart=on-failure\n"
         ));
-        assert!(!unit_comes_back_however_it_stops("[Service]\nExecStart=\"/usr/bin/atelier\" run\n"));
+        assert!(!unit_comes_back_however_it_stops(
+            "[Service]\nExecStart=\"/usr/bin/atelier\" run\n"
+        ));
 
         assert!(agent_comes_back_however_it_stops(&launch_agent(
             "/usr/bin/atelier",
@@ -852,12 +993,19 @@ mod tests {
     #[test]
     fn installing_and_taking_it_off_name_the_same_registration() {
         // A mismatch here leaves a running copy nobody can name any more.
-        let named = |steps: Vec<Vec<String>>| {
-            steps.iter().flatten().any(|w| w.contains(&label()))
-        };
-        assert!(named(install_steps("/usr/bin/atelier")), "the install names no registration");
-        assert!(named(uninstall_steps()), "taking it off names no registration");
-        assert!(named(status_steps()), "asking after it names no registration");
+        let named = |steps: Vec<Vec<String>>| steps.iter().flatten().any(|w| w.contains(&label()));
+        assert!(
+            named(install_steps("/usr/bin/atelier")),
+            "the install names no registration"
+        );
+        assert!(
+            named(uninstall_steps()),
+            "taking it off names no registration"
+        );
+        assert!(
+            named(status_steps()),
+            "asking after it names no registration"
+        );
     }
 
     #[test]

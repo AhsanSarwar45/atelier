@@ -51,7 +51,10 @@ async fn subscribe(
     State(db): State<AppState>,
     Json(device): Json<Registration>,
 ) -> Result<StatusCode, Refusal> {
-    if device.endpoint.trim().is_empty() || device.p256dh.trim().is_empty() || device.auth.trim().is_empty() {
+    if device.endpoint.trim().is_empty()
+        || device.p256dh.trim().is_empty()
+        || device.auth.trim().is_empty()
+    {
         return Err((
             StatusCode::UNPROCESSABLE_ENTITY,
             "A device has to give an endpoint and both of its keys to be pushed to.".into(),
@@ -104,7 +107,12 @@ mod tests {
         Router::new().nest("/api", push_routes().with_state(Arc::clone(db)))
     }
 
-    async fn call(db: &AppState, method: Method, path: &str, body: Option<Value>) -> (StatusCode, Vec<u8>) {
+    async fn call(
+        db: &AppState,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Vec<u8>) {
         let request = Request::builder()
             .method(method)
             .uri(path)
@@ -116,7 +124,9 @@ mod tests {
         };
         let answer = app(db).oneshot(request).await.unwrap();
         let status = answer.status();
-        let bytes = axum::body::to_bytes(answer.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(answer.into_body(), usize::MAX)
+            .await
+            .unwrap();
         (status, bytes.to_vec())
     }
 
@@ -152,7 +162,13 @@ mod tests {
             "needsAction": true,
             "updates": true,
         });
-        let (status, _) = call(&db, Method::POST, "/api/push/subscribe", Some(device.clone())).await;
+        let (status, _) = call(
+            &db,
+            Method::POST,
+            "/api/push/subscribe",
+            Some(device.clone()),
+        )
+        .await;
         assert_eq!(status, StatusCode::NO_CONTENT);
 
         let mut changed = device.clone();
@@ -162,7 +178,10 @@ mod tests {
 
         let devices = push::registrations(&db).unwrap();
         assert_eq!(devices.len(), 1, "the same endpoint was stored twice");
-        assert!(!devices[0].updates, "the second registration did not replace the first");
+        assert!(
+            !devices[0].updates,
+            "the second registration did not replace the first"
+        );
     }
 
     #[tokio::test]

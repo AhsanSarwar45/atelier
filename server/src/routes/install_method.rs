@@ -219,7 +219,9 @@ mod tests {
             Some(PathBuf::from("/home/linuxbrew/.linuxbrew/bin/atelier"))
         );
         assert_eq!(
-            linked(Path::new("/opt/homebrew/Cellar/atelier/0.22.12/bin/atelier")),
+            linked(Path::new(
+                "/opt/homebrew/Cellar/atelier/0.22.12/bin/atelier"
+            )),
             Some(PathBuf::from("/opt/homebrew/bin/atelier"))
         );
     }

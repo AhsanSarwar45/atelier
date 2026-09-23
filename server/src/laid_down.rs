@@ -67,7 +67,9 @@ pub fn install(dir: &Path, files: &Carried) -> Result<(), String> {
 /// the carried files by the build that wrote them, and the kit the helper
 /// fetches by the lock it was fetched against.
 pub fn marker_says(dir: &Path, name: &str, want: &str) -> bool {
-    std::fs::read_to_string(dir.join(name)).map(|v| v.trim() == want).unwrap_or(false)
+    std::fs::read_to_string(dir.join(name))
+        .map(|v| v.trim() == want)
+        .unwrap_or(false)
 }
 
 /// Write a marker down, so the next run knows this one got here.
@@ -125,17 +127,26 @@ mod tests {
     use super::*;
 
     fn carried(files: &[(&str, &[u8])]) -> Carried {
-        files.iter().map(|(n, b)| (n.to_string(), b.to_vec())).collect()
+        files
+            .iter()
+            .map(|(n, b)| (n.to_string(), b.to_vec()))
+            .collect()
     }
 
     #[test]
     fn files_written_by_this_build_are_not_written_again() {
         let dir = tempfile::tempdir().expect("a temporary directory");
-        assert!(!is_current(dir.path(), "abc123"), "an empty folder cannot be current");
+        assert!(
+            !is_current(dir.path(), "abc123"),
+            "an empty folder cannot be current"
+        );
         std::fs::write(dir.path().join(MARKER), "abc123").unwrap();
         assert!(is_current(dir.path(), "abc123"));
         std::fs::write(dir.path().join(MARKER), "def456").unwrap();
-        assert!(!is_current(dir.path(), "abc123"), "a different fingerprint's files are replaced");
+        assert!(
+            !is_current(dir.path(), "abc123"),
+            "a different fingerprint's files are replaced"
+        );
     }
 
     #[test]
@@ -145,7 +156,10 @@ mod tests {
         // simply be treated as stale and rewritten.
         let dir = tempfile::tempdir().expect("a temporary directory");
         std::fs::write(dir.path().join(MARKER), "0.12.2").unwrap();
-        assert!(!is_current(dir.path(), &fingerprint(&carried(&[("build.py", b"anything")]))));
+        assert!(!is_current(
+            dir.path(),
+            &fingerprint(&carried(&[("build.py", b"anything")]))
+        ));
     }
 
     #[test]
@@ -180,8 +194,14 @@ mod tests {
         let dir = tempfile::tempdir().expect("a temporary directory");
         let files = carried(&[("src/server.ts", b"the helper"), ("package.json", b"{}")]);
         install(dir.path(), &files).expect("a set lands");
-        assert_eq!(std::fs::read(dir.path().join("src/server.ts")).unwrap(), b"the helper");
-        assert_eq!(std::fs::read(dir.path().join("package.json")).unwrap(), b"{}");
+        assert_eq!(
+            std::fs::read(dir.path().join("src/server.ts")).unwrap(),
+            b"the helper"
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("package.json")).unwrap(),
+            b"{}"
+        );
     }
 
     #[test]
@@ -194,14 +214,28 @@ mod tests {
         // so starting again must not cost the write.
         std::fs::write(dir.path().join("src/server.ts"), b"edited by hand").unwrap();
         install(dir.path(), &files).expect("a second run");
-        assert_eq!(std::fs::read(dir.path().join("src/server.ts")).unwrap(), b"edited by hand");
+        assert_eq!(
+            std::fs::read(dir.path().join("src/server.ts")).unwrap(),
+            b"edited by hand"
+        );
     }
 
     #[test]
     fn a_set_that_changed_since_the_last_run_is_written_out_again() {
         let dir = tempfile::tempdir().expect("a temporary directory");
-        install(dir.path(), &carried(&[("src/server.ts", b"the old helper")])).unwrap();
-        install(dir.path(), &carried(&[("src/server.ts", b"the new helper")])).unwrap();
-        assert_eq!(std::fs::read(dir.path().join("src/server.ts")).unwrap(), b"the new helper");
+        install(
+            dir.path(),
+            &carried(&[("src/server.ts", b"the old helper")]),
+        )
+        .unwrap();
+        install(
+            dir.path(),
+            &carried(&[("src/server.ts", b"the new helper")]),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("src/server.ts")).unwrap(),
+            b"the new helper"
+        );
     }
 }

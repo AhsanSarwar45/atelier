@@ -33,13 +33,7 @@
 //! this answers a plain sentence naming the path, the way the terminal's own
 //! refusals do, and the form shows it as it was written.
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    middleware,
-    routing::get,
-    Json, Router,
-};
+use axum::{extract::State, http::StatusCode, middleware, routing::get, Json, Router};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -142,12 +136,8 @@ fn why_not(named: &str) -> Option<String> {
     }
     match std::fs::metadata(path) {
         Err(_) => Some(format!("Shell not found: {named}")),
-        Ok(what) if !what.is_file() => {
-            Some(format!("Shell path is not a file: {named}"))
-        }
-        Ok(_) if !shell::runnable(path) => Some(format!(
-            "Shell is not executable: {named}"
-        )),
+        Ok(what) if !what.is_file() => Some(format!("Shell path is not a file: {named}")),
+        Ok(_) if !shell::runnable(path) => Some(format!("Shell is not executable: {named}")),
         Ok(_) => None,
     }
 }
@@ -162,10 +152,7 @@ fn said(path: PathBuf) -> String {
 /// The database refusing to answer, which is not the person's doing and is not
 /// written as though it were.
 fn unreadable(what: &str, why: impl std::fmt::Display) -> Refusal {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        format!("{what}: {why}"),
-    )
+    (StatusCode::INTERNAL_SERVER_ERROR, format!("{what}: {why}"))
 }
 
 /// The settings routes, behind the guard that decides who may reach them.
@@ -267,7 +254,10 @@ mod tests {
         // value and not the absence of one.
         let (status, said) = ask(&app, Method::PUT, Some(json!({ "shell": "/bin/sh" }))).await;
         assert_eq!(status, StatusCode::OK, "{said}");
-        assert_eq!(db.terminal_shell().unwrap().as_deref(), Some(Path::new("/bin/sh")));
+        assert_eq!(
+            db.terminal_shell().unwrap().as_deref(),
+            Some(Path::new("/bin/sh"))
+        );
 
         // A file that is there and is not a program: the exact mistake a person
         // makes by pointing the setting at a config file or a README.

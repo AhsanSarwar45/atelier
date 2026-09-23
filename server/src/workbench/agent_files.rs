@@ -754,7 +754,10 @@ mod tests {
         assert!(files
             .iter()
             .any(|f| f.name == "shared" && f.provider == Provider::Codex && f.shared));
-        assert!(files.iter().filter(|f| f.name != "shared").all(|f| !f.shared));
+        assert!(files
+            .iter()
+            .filter(|f| f.name != "shared")
+            .all(|f| !f.shared));
         let agent = project.path().join(".codex/agents/reviewer.toml");
         assert_eq!(
             read(&agent, Some(project.path()), home.path(), None, None).unwrap(),

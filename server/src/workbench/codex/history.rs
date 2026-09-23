@@ -2,8 +2,8 @@
 
 use super::transport::{CodexTransport, CodexTransportError};
 use serde_json::{json, Value};
-use std::fs::{self, File};
 use std::collections::HashMap;
+use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -110,9 +110,11 @@ fn remembered(path: &Path, asked: Asked, accept: impl Fn(&Value) -> bool) -> Opt
         .get(&key)
         .cloned();
     let answer = match known {
-        Some(known) if known.len == len && known.modified == modified => return known
-            .answer
-            .and_then(|answer| answer.as_str().map(str::to_string)),
+        Some(known) if known.len == len && known.modified == modified => {
+            return known
+                .answer
+                .and_then(|answer| answer.as_str().map(str::to_string))
+        }
         Some(known) if known.len < len => last_row_timestamp(path, known.len, &accept)
             .map(Value::String)
             .or(known.answer),
@@ -234,7 +236,11 @@ fn session_source(path: &Path) -> Option<Value> {
     // answers what it answered before.
     let len = fs::metadata(path).ok()?.len();
     let key = (path.to_path_buf(), Asked::Source);
-    if let Some(known) = answers().lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+    if let Some(known) = answers()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+    {
         if known.len <= len && known.answer.is_some() {
             return known.answer.clone();
         }
@@ -658,12 +664,22 @@ mod tests {
         let worked = |at: &str| {
             format!("{{\"timestamp\":\"{at}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"agent_message\"}}}}\n")
         };
-        std::fs::write(&path, spoke("2026-01-01T00:00:00Z") + &worked("2026-01-01T00:00:05Z")).unwrap();
-        assert_eq!(last_spoke_at(&path).as_deref(), Some("2026-01-01T00:00:00Z"));
+        std::fs::write(
+            &path,
+            spoke("2026-01-01T00:00:00Z") + &worked("2026-01-01T00:00:05Z"),
+        )
+        .unwrap();
+        assert_eq!(
+            last_spoke_at(&path).as_deref(),
+            Some("2026-01-01T00:00:00Z")
+        );
 
         // Unreadable, yet unchanged: the answer stands without a read.
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
-        assert_eq!(last_spoke_at(&path).as_deref(), Some("2026-01-01T00:00:00Z"));
+        assert_eq!(
+            last_spoke_at(&path).as_deref(),
+            Some("2026-01-01T00:00:00Z")
+        );
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
 
         // What was already read is not read again: the old row is changed in
@@ -671,21 +687,42 @@ mod tests {
         // answer is still the one the old row gave.
         let old = std::fs::read_to_string(&path).unwrap();
         let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
-        file.write_all(old.replacen("2026-01-01T00:00:00Z", "2026-02-02T00:00:00Z", 1).as_bytes()).unwrap();
-        file.write_all(worked("2026-01-01T00:00:09Z").as_bytes()).unwrap();
+        file.write_all(
+            old.replacen("2026-01-01T00:00:00Z", "2026-02-02T00:00:00Z", 1)
+                .as_bytes(),
+        )
+        .unwrap();
+        file.write_all(worked("2026-01-01T00:00:09Z").as_bytes())
+            .unwrap();
         drop(file);
-        assert_eq!(last_spoke_at(&path).as_deref(), Some("2026-01-01T00:00:00Z"));
-        assert_eq!(last_happened_at(&path).as_deref(), Some("2026-01-01T00:00:09Z"));
+        assert_eq!(
+            last_spoke_at(&path).as_deref(),
+            Some("2026-01-01T00:00:00Z")
+        );
+        assert_eq!(
+            last_happened_at(&path).as_deref(),
+            Some("2026-01-01T00:00:09Z")
+        );
 
         // A later person's row in the growth is the new answer.
-        let mut file = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
-        file.write_all(spoke("2026-01-01T00:00:12Z").as_bytes()).unwrap();
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        file.write_all(spoke("2026-01-01T00:00:12Z").as_bytes())
+            .unwrap();
         drop(file);
-        assert_eq!(last_spoke_at(&path).as_deref(), Some("2026-01-01T00:00:12Z"));
+        assert_eq!(
+            last_spoke_at(&path).as_deref(),
+            Some("2026-01-01T00:00:12Z")
+        );
 
         // A rewrite that shrinks the file is read whole again.
         std::fs::write(&path, spoke("2026-03-03T00:00:00Z")).unwrap();
-        assert_eq!(last_spoke_at(&path).as_deref(), Some("2026-03-03T00:00:00Z"));
+        assert_eq!(
+            last_spoke_at(&path).as_deref(),
+            Some("2026-03-03T00:00:00Z")
+        );
     }
 
     /**
@@ -715,9 +752,15 @@ mod tests {
         .unwrap();
         assert_eq!(begun_by(&json!({"path": guardian})), "agent");
         assert_eq!(begun_by(&json!({"path": terminal})), "person");
-        assert_eq!(begun_by(&json!({"path": terminal, "source": "subAgentReview"})), "agent");
+        assert_eq!(
+            begun_by(&json!({"path": terminal, "source": "subAgentReview"})),
+            "agent"
+        );
         assert_eq!(begun_by(&json!({"source": "vscode"})), "person");
-        assert_eq!(begun_by(&json!({"path": directory.path().join("missing.jsonl")})), "unknown");
+        assert_eq!(
+            begun_by(&json!({"path": directory.path().join("missing.jsonl")})),
+            "unknown"
+        );
     }
 
     /*
@@ -752,8 +795,14 @@ mod tests {
         // The index lists every non-interactive run as "exec" whoever began
         // it, so that answer is not the end of the question: the record is
         // still read, and it is the record that separates the two.
-        assert_eq!(begun_by(&json!({"path": worker, "source": "exec"})), "agent");
-        assert_eq!(begun_by(&json!({"path": by_hand, "source": "exec"})), "person");
+        assert_eq!(
+            begun_by(&json!({"path": worker, "source": "exec"})),
+            "agent"
+        );
+        assert_eq!(
+            begun_by(&json!({"path": by_hand, "source": "exec"})),
+            "person"
+        );
         // An "exec" thread with no record left says only what the index said.
         assert_eq!(begun_by(&json!({"source": "exec"})), "person");
     }

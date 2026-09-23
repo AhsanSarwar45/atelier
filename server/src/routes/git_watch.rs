@@ -272,10 +272,17 @@ mod tests {
         a_repository(&main);
 
         let side = held.path().join("side");
-        git(&main, &["worktree", "add", side.to_str().unwrap(), "-b", "side"]);
+        git(
+            &main,
+            &["worktree", "add", side.to_str().unwrap(), "-b", "side"],
+        );
 
         let dirs = git_dirs(&side).await;
-        assert_eq!(dirs.len(), 2, "a worktree has two git directories: {dirs:?}");
+        assert_eq!(
+            dirs.len(),
+            2,
+            "a worktree has two git directories: {dirs:?}"
+        );
         assert!(dirs.iter().any(|d| d.ends_with("worktrees/side")));
         assert!(dirs.iter().any(|d| d.ends_with(".git")));
 

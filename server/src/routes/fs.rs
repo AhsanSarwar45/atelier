@@ -22,15 +22,19 @@ pub mod search;
 const PRESENTATION_ASSET: &str = "presentation asset";
 
 pub(crate) fn valid_presentation_asset(asset: &str) -> bool {
-    asset.split_once('.').is_some_and(|(digest, extension)| digest.len() == 64
-        && digest.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-        && (matches!(extension, "png" | "jpg" | "gif" | "webp" | "artifact.json")
+    asset.split_once('.').is_some_and(|(digest, extension)| {
+        digest.len() == 64
+            && digest
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+            && (matches!(extension, "png" | "jpg" | "gif" | "webp" | "artifact.json")
             // An attachment is kept under whatever extension its name gave it,
             // which is any short word (`media::attachment_extension`). The name
             // is still not a path: it is one run of letters and digits, so
             // there is no separator in it to walk out of the store with.
             || ((1..=12).contains(&extension.len())
-                && extension.bytes().all(|byte| byte.is_ascii_alphanumeric()))))
+                && extension.bytes().all(|byte| byte.is_ascii_alphanumeric())))
+    })
 }
 
 /// How an asset is handed to the browser, by the extension it is kept under.
@@ -74,16 +78,24 @@ fn served_as(extension: &str) -> Option<&'static str> {
 }
 
 fn presentation_asset_path(directory: &std::path::Path, asset: &str) -> Option<PathBuf> {
-    if !valid_presentation_asset(asset) { return None; }
+    if !valid_presentation_asset(asset) {
+        return None;
+    }
     let root = std::fs::canonicalize(directory).ok()?;
     let path = std::fs::canonicalize(directory.join(asset)).ok()?;
     (path.starts_with(root) && path.is_file()).then_some(path)
 }
 
-fn presentation_asset_in_stores(primary: &std::path::Path, durable: Option<&std::path::Path>, asset: &str) -> Option<PathBuf> {
-    presentation_asset_path(primary, asset).or_else(|| durable
-        .filter(|directory| *directory != primary)
-        .and_then(|directory| presentation_asset_path(directory, asset)))
+fn presentation_asset_in_stores(
+    primary: &std::path::Path,
+    durable: Option<&std::path::Path>,
+    asset: &str,
+) -> Option<PathBuf> {
+    presentation_asset_path(primary, asset).or_else(|| {
+        durable
+            .filter(|directory| *directory != primary)
+            .and_then(|directory| presentation_asset_path(directory, asset))
+    })
 }
 
 use super::validate_path_security;
@@ -112,10 +124,15 @@ pub struct FsExistsManyBody {
 const EXISTS_AT_ONCE: usize = 500;
 
 fn media_origin_allowed(headers: &HeaderMap) -> bool {
-    let Some(origin) = headers.get(header::ORIGIN).and_then(|value| value.to_str().ok()) else {
+    let Some(origin) = headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+    else {
         return true;
     };
-    let Ok(url) = reqwest::Url::parse(origin) else { return false };
+    let Ok(url) = reqwest::Url::parse(origin) else {
+        return false;
+    };
     matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"))
 }
 
@@ -133,7 +150,11 @@ pub async fn media(
     // Unlike the metadata-only filesystem routes, this returns file bytes.
     // Refuse a web page in another origin before resolving its requested path.
     if !media_origin_allowed(&headers) {
-        return (StatusCode::FORBIDDEN, "Cross-origin media reads are not allowed").into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            "Cross-origin media reads are not allowed",
+        )
+            .into_response();
     }
     let path = PathBuf::from(&params.path);
     if let Err(e) = validate_path_security(&path) {
@@ -144,13 +165,27 @@ pub async fn media(
     }
     let file = match tokio::fs::File::open(&path).await {
         Ok(file) => file,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to read file: {e}")).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to read file: {e}"),
+            )
+                .into_response()
+        }
     };
     let body = match KnownSize::file(file).await {
         Ok(body) => body,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to read file: {e}")).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to read file: {e}"),
+            )
+                .into_response()
+        }
     };
-    let content_type = mime_guess::from_path(&path).first_or_octet_stream().to_string();
+    let content_type = mime_guess::from_path(&path)
+        .first_or_octet_stream()
+        .to_string();
     // `Ranged` writes the status, `Content-Range`, `Content-Length` and
     // `Accept-Ranges`; the two headers below are this route's own and are put
     // on afterwards so they survive either answer.
@@ -159,7 +194,10 @@ pub async fn media(
     if let Some(value) = ok(&content_type) {
         response.headers_mut().insert(header::CONTENT_TYPE, value);
     }
-    response.headers_mut().insert(header::CONTENT_DISPOSITION, header::HeaderValue::from_static("inline"));
+    response.headers_mut().insert(
+        header::CONTENT_DISPOSITION,
+        header::HeaderValue::from_static("inline"),
+    );
     response
 }
 
@@ -246,7 +284,10 @@ pub async fn tree(Query(params): Query<FsTreeParams>) -> impl IntoResponse {
     let dir = PathBuf::from(&params.dir);
 
     if let Err(e) = validate_path_security(&dir) {
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": e })));
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": e })),
+        );
     }
     if !dir.exists() {
         return (
@@ -270,7 +311,10 @@ pub async fn tree(Query(params): Query<FsTreeParams>) -> impl IntoResponse {
     })
     .await;
     let (listed, kept) = match walked {
-        Ok((listed, kept)) => (listed, kept.into_iter().collect::<std::collections::HashSet<_>>()),
+        Ok((listed, kept)) => (
+            listed,
+            kept.into_iter().collect::<std::collections::HashSet<_>>(),
+        ),
         Err(e) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -281,7 +325,10 @@ pub async fn tree(Query(params): Query<FsTreeParams>) -> impl IntoResponse {
 
     let mut entries: Vec<TreeEntry> = Vec::new();
     for path in listed {
-        let Some(name) = path.file_name().map(|name| name.to_string_lossy().to_string()) else {
+        let Some(name) = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+        else {
             continue;
         };
         // The repository's own machinery is not a folder anybody browses, and
@@ -289,7 +336,9 @@ pub async fn tree(Query(params): Query<FsTreeParams>) -> impl IntoResponse {
         if name == ".git" {
             continue;
         }
-        let Ok(metadata) = std::fs::symlink_metadata(&path) else { continue };
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
         let kind = if metadata.file_type().is_symlink() {
             "link"
         } else if metadata.is_dir() {
@@ -308,12 +357,10 @@ pub async fn tree(Query(params): Query<FsTreeParams>) -> impl IntoResponse {
         });
     }
 
-    entries.sort_by(|a, b| {
-        match (a.kind == "dir", b.kind == "dir") {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-        }
+    entries.sort_by(|a, b| match (a.kind == "dir", b.kind == "dir") {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
     });
 
     (
@@ -357,7 +404,10 @@ pub async fn read_file(Query(params): Query<FsExistsParams>) -> impl IntoRespons
     let path = PathBuf::from(&params.path);
 
     if let Err(e) = validate_path_security(&path) {
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": e })));
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": e })),
+        );
     }
     let metadata = match std::fs::metadata(&path) {
         Ok(metadata) => metadata,
@@ -473,16 +523,26 @@ fn digest_of(path: &std::path::Path) -> std::io::Result<String> {
 ///
 /// The temp file is removed on every path out that is not the rename, so a
 /// failed save leaves the directory exactly as it found it.
-fn written_atomically(path: &std::path::Path, bytes: &[u8], mode: Option<u32>) -> std::io::Result<()> {
+fn written_atomically(
+    path: &std::path::Path,
+    bytes: &[u8],
+    mode: Option<u32>,
+) -> std::io::Result<()> {
     use std::io::Write;
 
     let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-    let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|since| since.as_nanos())
         .unwrap_or(0);
-    let temp = dir.join(format!(".{name}.atelier-{}-{nonce}.tmp", std::process::id()));
+    let temp = dir.join(format!(
+        ".{name}.atelier-{}-{nonce}.tmp",
+        std::process::id()
+    ));
 
     let put = || -> std::io::Result<()> {
         let mut file = std::fs::File::create(&temp)?;
@@ -520,14 +580,21 @@ pub async fn write_file(Json(body): Json<FsWriteBody>) -> Response {
     let path = PathBuf::from(&body.path);
 
     if let Err(e) = validate_path_security(&path) {
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": e }))).into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": e })),
+        )
+            .into_response();
     }
     // `symlink_metadata` rather than `metadata`: this asks what is AT the path,
     // so a link is seen as a link instead of as whatever it points at.
     let metadata = match std::fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
         Err(_) => {
-            return (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "Path does not exist" })))
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "Path does not exist" })),
+            )
                 .into_response()
         }
     };
@@ -591,7 +658,10 @@ pub async fn write_file(Json(body): Json<FsWriteBody>) -> Response {
     let written = FileWritten {
         sha256: format!("{:x}", Sha256::digest(&bytes)),
         size: bytes.len() as u64,
-        mtime: std::fs::metadata(&path).as_ref().map(modified_millis).unwrap_or(0),
+        mtime: std::fs::metadata(&path)
+            .as_ref()
+            .map(modified_millis)
+            .unwrap_or(0),
     };
     (StatusCode::OK, Json(written)).into_response()
 }
@@ -641,16 +711,26 @@ fn refusal((status, why): Refused) -> Response {
 fn checkout(given: &str) -> Result<PathBuf, Refused> {
     let asked = PathBuf::from(given);
     validate_path_security(&asked).map_err(|e| (StatusCode::FORBIDDEN, e))?;
-    let root = std::fs::canonicalize(&asked)
-        .map_err(|_| (StatusCode::NOT_FOUND, "That checkout does not exist".to_string()))?;
+    let root = std::fs::canonicalize(&asked).map_err(|_| {
+        (
+            StatusCode::NOT_FOUND,
+            "That checkout does not exist".to_string(),
+        )
+    })?;
     if !root.is_dir() {
-        return Err((StatusCode::BAD_REQUEST, "That checkout is not a folder".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "That checkout is not a folder".to_string(),
+        ));
     }
     // `exists` and not `is_dir`: a worktree's `.git` is a FILE pointing back at
     // the repository, and the worktrees are exactly the roots the Files tab
     // offers alongside the project itself.
     if !root.join(".git").exists() {
-        return Err((StatusCode::FORBIDDEN, "That folder is not a checkout".to_string()));
+        return Err((
+            StatusCode::FORBIDDEN,
+            "That folder is not a checkout".to_string(),
+        ));
     }
     Ok(root)
 }
@@ -664,24 +744,36 @@ fn checkout(given: &str) -> Result<PathBuf, Refused> {
 /// outside one.
 fn confined(root: PathBuf, path: &std::path::Path) -> Result<Confined, Refused> {
     validate_path_security(path).map_err(|e| (StatusCode::FORBIDDEN, e))?;
-    let parent = path
-        .parent()
-        .ok_or((StatusCode::BAD_REQUEST, "That is not a path inside a folder".to_string()))?;
-    let name = path
-        .file_name()
-        .ok_or((StatusCode::BAD_REQUEST, "That path names nothing".to_string()))?;
-    let parent = std::fs::canonicalize(parent)
-        .map_err(|_| (StatusCode::NOT_FOUND, "That folder does not exist".to_string()))?;
+    let parent = path.parent().ok_or((
+        StatusCode::BAD_REQUEST,
+        "That is not a path inside a folder".to_string(),
+    ))?;
+    let name = path.file_name().ok_or((
+        StatusCode::BAD_REQUEST,
+        "That path names nothing".to_string(),
+    ))?;
+    let parent = std::fs::canonicalize(parent).map_err(|_| {
+        (
+            StatusCode::NOT_FOUND,
+            "That folder does not exist".to_string(),
+        )
+    })?;
     let whole = parent.join(name);
     // `starts_with` on a Path compares whole components, so `/repo-elsewhere`
     // is not inside `/repo`. The checkout itself is excluded too: the root is
     // not a thing the tree drawn from it may rename or remove.
     if whole == root || !whole.starts_with(&root) {
-        return Err((StatusCode::FORBIDDEN, "That path is outside the checkout".to_string()));
+        return Err((
+            StatusCode::FORBIDDEN,
+            "That path is outside the checkout".to_string(),
+        ));
     }
     let inside = whole.strip_prefix(&root).unwrap_or(&whole);
     if inside.components().any(|part| part.as_os_str() == ".git") {
-        return Err((StatusCode::FORBIDDEN, "The repository's own .git is not editable here".to_string()));
+        return Err((
+            StatusCode::FORBIDDEN,
+            "The repository's own .git is not editable here".to_string(),
+        ));
     }
     Ok(Confined { root, path: whole })
 }
@@ -748,7 +840,10 @@ pub async fn rename_path(Json(body): Json<FsRenameBody>) -> Response {
         Err(no) => return refusal(no),
     };
     if std::fs::symlink_metadata(&from.path).is_err() {
-        return refusal((StatusCode::NOT_FOUND, "That file no longer exists".to_string()));
+        return refusal((
+            StatusCode::NOT_FOUND,
+            "That file no longer exists".to_string(),
+        ));
     }
     let wanted = from.path.with_file_name(name);
     let to = match confined(from.root, &wanted) {
@@ -762,9 +857,18 @@ pub async fn rename_path(Json(body): Json<FsRenameBody>) -> Response {
         return refusal((StatusCode::CONFLICT, format!("{name} is already there")));
     }
     if let Err(e) = std::fs::rename(&from.path, &to.path) {
-        return refusal((StatusCode::INTERNAL_SERVER_ERROR, format!("Could not rename it: {e}")));
+        return refusal((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Could not rename it: {e}"),
+        ));
     }
-    (StatusCode::OK, Json(PathMoved { path: to.path.to_string_lossy().into_owned() })).into_response()
+    (
+        StatusCode::OK,
+        Json(PathMoved {
+            path: to.path.to_string_lossy().into_owned(),
+        }),
+    )
+        .into_response()
 }
 
 /// What a delete is asked to do.
@@ -805,7 +909,10 @@ pub async fn delete_path(Json(body): Json<FsPathBody>) -> Response {
         Err(no) => return refusal(no),
     };
     if std::fs::symlink_metadata(&target.path).is_err() {
-        return refusal((StatusCode::NOT_FOUND, "That file no longer exists".to_string()));
+        return refusal((
+            StatusCode::NOT_FOUND,
+            "That file no longer exists".to_string(),
+        ));
     }
     let gone = target.path.clone();
     let done = tokio::task::spawn_blocking(move || trash::delete(&gone)).await;
@@ -817,7 +924,9 @@ pub async fn delete_path(Json(body): Json<FsPathBody>) -> Response {
     match failed {
         None => (
             StatusCode::OK,
-            Json(PathMoved { path: target.path.to_string_lossy().into_owned() }),
+            Json(PathMoved {
+                path: target.path.to_string_lossy().into_owned(),
+            }),
         )
             .into_response(),
         Some(why) => refusal((
@@ -866,20 +975,41 @@ pub async fn create_path(Json(body): Json<FsCreateBody>) -> Response {
         Err(no) => return refusal(no),
     };
     if !made.path.parent().is_some_and(|parent| parent.is_dir()) {
-        return refusal((StatusCode::NOT_FOUND, "That folder does not exist".to_string()));
+        return refusal((
+            StatusCode::NOT_FOUND,
+            "That folder does not exist".to_string(),
+        ));
     }
     let done = match body.kind.as_str() {
         "dir" => std::fs::create_dir(&made.path),
-        "file" => std::fs::OpenOptions::new().write(true).create_new(true).open(&made.path).map(|_| ()),
-        _ => return refusal((StatusCode::BAD_REQUEST, "A new thing is a file or a folder".to_string())),
+        "file" => std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&made.path)
+            .map(|_| ()),
+        _ => {
+            return refusal((
+                StatusCode::BAD_REQUEST,
+                "A new thing is a file or a folder".to_string(),
+            ))
+        }
     };
     if let Err(e) = done {
         if e.kind() == std::io::ErrorKind::AlreadyExists {
             return refusal((StatusCode::CONFLICT, format!("{name} is already there")));
         }
-        return refusal((StatusCode::INTERNAL_SERVER_ERROR, format!("Could not create it: {e}")));
+        return refusal((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Could not create it: {e}"),
+        ));
     }
-    (StatusCode::OK, Json(PathMoved { path: made.path.to_string_lossy().into_owned() })).into_response()
+    (
+        StatusCode::OK,
+        Json(PathMoved {
+            path: made.path.to_string_lossy().into_owned(),
+        }),
+    )
+        .into_response()
 }
 
 /// The name a copy of `name` takes: `notes copy.txt`, then `notes copy 2.txt`.
@@ -920,7 +1050,9 @@ fn copied_wholly(from: &std::path::Path, to: &std::path::Path) -> std::io::Resul
         #[cfg(unix)]
         return std::os::unix::fs::symlink(std::fs::read_link(from)?, to);
         #[cfg(not(unix))]
-        return Err(std::io::Error::other("a link cannot be duplicated on this system"));
+        return Err(std::io::Error::other(
+            "a link cannot be duplicated on this system",
+        ));
     }
     if !kind.is_dir() {
         std::fs::copy(from, to)?;
@@ -953,11 +1085,24 @@ pub async fn duplicate_path(Json(body): Json<FsPathBody>) -> Response {
         Err(no) => return refusal(no),
     };
     if std::fs::symlink_metadata(&from.path).is_err() {
-        return refusal((StatusCode::NOT_FOUND, "That file no longer exists".to_string()));
+        return refusal((
+            StatusCode::NOT_FOUND,
+            "That file no longer exists".to_string(),
+        ));
     }
-    let name = from.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-    let beside = from.path.parent().map(|dir| dir.to_path_buf()).unwrap_or_default();
-    let copy = copy_named(&name, |tried| std::fs::symlink_metadata(beside.join(tried)).is_ok());
+    let name = from
+        .path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let beside = from
+        .path
+        .parent()
+        .map(|dir| dir.to_path_buf())
+        .unwrap_or_default();
+    let copy = copy_named(&name, |tried| {
+        std::fs::symlink_metadata(beside.join(tried)).is_ok()
+    });
     let to = match confined(from.root, &beside.join(copy)) {
         Ok(found) => found,
         Err(no) => return refusal(no),
@@ -970,21 +1115,42 @@ pub async fn duplicate_path(Json(body): Json<FsPathBody>) -> Response {
         Err(e) => Some(e.to_string()),
     };
     match failed {
-        None => (StatusCode::OK, Json(PathMoved { path: to.path.to_string_lossy().into_owned() })).into_response(),
-        Some(why) => refusal((StatusCode::INTERNAL_SERVER_ERROR, format!("Could not duplicate it: {why}"))),
+        None => (
+            StatusCode::OK,
+            Json(PathMoved {
+                path: to.path.to_string_lossy().into_owned(),
+            }),
+        )
+            .into_response(),
+        Some(why) => refusal((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Could not duplicate it: {why}"),
+        )),
     }
 }
 
 /// GET /api/presentation-assets/:asset
 pub async fn presentation_asset(headers: HeaderMap, Path(asset): Path<String>) -> Response {
     if !media_origin_allowed(&headers) {
-        return (StatusCode::FORBIDDEN, "Cross-origin media reads are not allowed").into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            "Cross-origin media reads are not allowed",
+        )
+            .into_response();
     }
     if !valid_presentation_asset(&asset) {
-        return (StatusCode::BAD_REQUEST, format!("Invalid {PRESENTATION_ASSET}")).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid {PRESENTATION_ASSET}"),
+        )
+            .into_response();
     }
     let Some(directory) = crate::identity::presentation_media_dir() else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Presentation storage is unavailable").into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Presentation storage is unavailable",
+        )
+            .into_response();
     };
     let durable = crate::identity::durable_presentation_media_dir();
     let Some(path) = presentation_asset_in_stores(&directory, durable.as_deref(), &asset) else {
@@ -992,21 +1158,42 @@ pub async fn presentation_asset(headers: HeaderMap, Path(asset): Path<String>) -
     };
     let bytes = match tokio::fs::read(&path).await {
         Ok(bytes) => bytes,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to read presentation asset: {e}")).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to read presentation asset: {e}"),
+            )
+                .into_response()
+        }
     };
     // A type the browser is trusted with is shown; anything else is a download,
     // which is what keeps a file the owner attached from being a page on this
     // app's own origin.
-    let served = served_as(asset.rsplit_once('.').map(|(_, extension)| extension).unwrap_or_default());
+    let served = served_as(
+        asset
+            .rsplit_once('.')
+            .map(|(_, extension)| extension)
+            .unwrap_or_default(),
+    );
     let content_type = served.unwrap_or("application/octet-stream");
-    let disposition = if served.is_some() { "inline" } else { "attachment" };
+    let disposition = if served.is_some() {
+        "inline"
+    } else {
+        "attachment"
+    };
     Response::builder()
         .header(header::CONTENT_TYPE, content_type)
         .header(header::CONTENT_DISPOSITION, disposition)
         .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
         .body(Body::from(bytes))
-        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serve presentation asset").into_response())
+        .unwrap_or_else(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to serve presentation asset",
+            )
+                .into_response()
+        })
 }
 
 /// Request body for opening a path in an external application.
@@ -1115,15 +1302,16 @@ pub async fn list_directory(Query(params): Query<FsListParams>) -> impl IntoResp
     }
 
     // Sort entries: directories first, then alphabetically
-    entries.sort_by(|a, b| {
-        match (a.is_directory, b.is_directory) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-        }
+    entries.sort_by(|a, b| match (a.is_directory, b.is_directory) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
     });
 
-    (StatusCode::OK, Json(serde_json::json!({ "entries": entries })))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "entries": entries })),
+    )
 }
 
 /// GET /api/fs/exists?path=/some/path
@@ -1142,7 +1330,10 @@ pub async fn path_exists(Query(params): Query<FsExistsParams>) -> impl IntoRespo
 
     let exists = path.exists();
 
-    (StatusCode::OK, Json(serde_json::json!({ "exists": exists })))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "exists": exists })),
+    )
 }
 
 /// POST /api/fs/exists with `{"paths": [...]}`
@@ -1172,7 +1363,10 @@ pub async fn paths_exist(Json(body): Json<FsExistsManyBody>) -> impl IntoRespons
     .await
     .unwrap_or_default();
 
-    (StatusCode::OK, Json(serde_json::json!({ "exists": answers })))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "exists": answers })),
+    )
 }
 
 /// Runs launcher commands in order and stops at the first one that exits cleanly.
@@ -1205,7 +1399,10 @@ fn first_working_launcher(commands: Vec<std::process::Command>) -> Result<(), St
 
     Err(match failures.len() {
         0 => "no launcher was available to try".to_string(),
-        n => format!("all {n} launchers were tried and failed: {}", failures.join("; ")),
+        n => format!(
+            "all {n} launchers were tried and failed: {}",
+            failures.join("; ")
+        ),
     })
 }
 
@@ -1397,10 +1594,7 @@ pub async fn open_external(Json(request): Json<OpenExternalRequest>) -> impl Int
             // here rather than through `open::that` is what lets a launcher that
             // exits non-zero fall through to the next one.
             return match first_working_launcher(reveal_commands(&path)) {
-                Ok(()) => (
-                    StatusCode::OK,
-                    Json(serde_json::json!({ "success": true })),
-                ),
+                Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "success": true }))),
                 Err(e) => (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(serde_json::json!({
@@ -1420,10 +1614,7 @@ pub async fn open_external(Json(request): Json<OpenExternalRequest>) -> impl Int
     };
 
     match result {
-        Ok(_) => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "success": true })),
-        ),
+        Ok(_) => (StatusCode::OK, Json(serde_json::json!({ "success": true }))),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({
@@ -1526,8 +1717,9 @@ struct Listing {
 }
 
 /// Every root anybody has searched, and when each was last walked.
-static LISTINGS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<PathBuf, std::sync::Arc<Listing>>>> =
-    std::sync::LazyLock::new(Default::default);
+static LISTINGS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<PathBuf, std::sync::Arc<Listing>>>,
+> = std::sync::LazyLock::new(Default::default);
 
 /// The roots a refresh is already running for, so a burst of keystrokes past a
 /// stale listing starts one walk rather than one walk each.
@@ -1551,11 +1743,15 @@ fn walk_all(root: &std::path::Path) -> Vec<Candidate> {
         .filter_entry(|entry| entry.file_name() != std::ffi::OsStr::new(".git"))
         .build();
     for entry in walk.filter_map(|entry| entry.ok()) {
-        let Ok(relative) = entry.path().strip_prefix(root) else { continue };
+        let Ok(relative) = entry.path().strip_prefix(root) else {
+            continue;
+        };
         if relative.as_os_str().is_empty() {
             continue;
         }
-        let path = relative.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/");
+        let path = relative
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
         let name_at = path.rfind('/').map(|at| at + 1).unwrap_or(0);
         paths.push(Candidate {
             lower: path.to_ascii_lowercase(),
@@ -1591,7 +1787,10 @@ async fn listing(root: &std::path::Path) -> std::io::Result<std::sync::Arc<Listi
 /// Walk a root and put it in the cache, off the async runtime's threads.
 async fn walk_for(root: PathBuf) -> std::io::Result<std::sync::Arc<Listing>> {
     let walked = tokio::task::spawn_blocking(move || {
-        let listing = std::sync::Arc::new(Listing { paths: walk_all(&root), walked: std::time::Instant::now() });
+        let listing = std::sync::Arc::new(Listing {
+            paths: walk_all(&root),
+            walked: std::time::Instant::now(),
+        });
         LISTINGS.lock().unwrap().insert(root, listing.clone());
         listing
     })
@@ -1641,12 +1840,17 @@ const TIGHTNESS: i32 = 99;
 fn inside(hay: &str, needle: &str) -> Option<usize> {
     let hay = hay.as_bytes();
     let needle = needle.as_bytes();
-    let Some((&first, rest)) = needle.split_first() else { return Some(0) };
+    let Some((&first, rest)) = needle.split_first() else {
+        return Some(0);
+    };
     if hay.len() < needle.len() {
         return None;
     }
     let mut at = 0;
-    while let Some(found) = hay[at..=hay.len() - needle.len()].iter().position(|byte| *byte == first) {
+    while let Some(found) = hay[at..=hay.len() - needle.len()]
+        .iter()
+        .position(|byte| *byte == first)
+    {
         let start = at + found;
         if hay[start + 1..].starts_with(rest) {
             return Some(start);
@@ -1714,7 +1918,14 @@ fn firmly(candidate: &Candidate, wanted: &str, a_place: bool) -> Option<i32> {
         return Some(HIT_PREFIX);
     }
     let at = inside(name, wanted)?;
-    Some(HIT_INSIDE + if on_a_boundary(name, at) { TIGHTNESS } else { tightness(wanted.len(), at, wanted.len()) })
+    Some(
+        HIT_INSIDE
+            + if on_a_boundary(name, at) {
+                TIGHTNESS
+            } else {
+                tightness(wanted.len(), at, wanted.len())
+            },
+    )
 }
 
 /// The rest of what still answers: the letters in order with gaps between them,
@@ -1735,7 +1946,8 @@ fn loosely_scored(candidate: &Candidate, wanted: &str, a_place: bool) -> Option<
     if inside(&candidate.lower, wanted).is_some() {
         return Some(PATH_INSIDE);
     }
-    loosely(&candidate.lower, wanted).map(|(first, span)| PATH_LOOSE + tightness(wanted.len(), first, span))
+    loosely(&candidate.lower, wanted)
+        .map(|(first, span)| PATH_LOOSE + tightness(wanted.len(), first, span))
 }
 
 /// The best `limit` of `paths` for what was typed, best first.
@@ -1757,7 +1969,11 @@ fn best(paths: &[Candidate], wanted: &str, limit: usize) -> Vec<FoundPath> {
     /// Every candidate `how` says something about, as sortable numbers.
     /// Generic rather than a boxed closure on purpose: this runs once per path
     /// per keystroke, and a virtual call there is the whole budget.
-    fn rank(paths: &[Candidate], ranked: &mut Vec<(i32, u32, u32)>, how: impl Fn(&Candidate) -> Option<i32>) {
+    fn rank(
+        paths: &[Candidate],
+        ranked: &mut Vec<(i32, u32, u32)>,
+        how: impl Fn(&Candidate) -> Option<i32>,
+    ) {
         for (at, candidate) in paths.iter().enumerate() {
             if let Some(hit) = how(candidate) {
                 ranked.push((-hit, candidate.path.len() as u32, at as u32));
@@ -1771,7 +1987,9 @@ fn best(paths: &[Candidate], wanted: &str, limit: usize) -> Vec<FoundPath> {
         rank(paths, &mut ranked, |_| Some(0));
     } else {
         let a_place = wanted.contains('/');
-        rank(paths, &mut ranked, |candidate| firmly(candidate, &wanted, a_place));
+        rank(paths, &mut ranked, |candidate| {
+            firmly(candidate, &wanted, a_place)
+        });
         if ranked.len() < limit {
             rank(paths, &mut ranked, |candidate| {
                 firmly(candidate, &wanted, a_place)
@@ -1790,12 +2008,19 @@ fn best(paths: &[Candidate], wanted: &str, limit: usize) -> Vec<FoundPath> {
     let keep = limit.min(ranked.len());
     ranked.select_nth_unstable(keep - 1);
     ranked.truncate(keep);
-    ranked.sort_by(|a, b| (a.0, a.1, &paths[a.2 as usize].path).cmp(&(b.0, b.1, &paths[b.2 as usize].path)));
+    ranked.sort_by(|a, b| {
+        (a.0, a.1, &paths[a.2 as usize].path).cmp(&(b.0, b.1, &paths[b.2 as usize].path))
+    });
     ranked
         .into_iter()
         .map(|(_, _, at)| FoundPath {
             path: paths[at as usize].path.clone(),
-            kind: if paths[at as usize].dir { "dir" } else { "file" }.to_string(),
+            kind: if paths[at as usize].dir {
+                "dir"
+            } else {
+                "file"
+            }
+            .to_string(),
         })
         .collect()
 }
@@ -1809,7 +2034,10 @@ pub async fn find(Query(params): Query<FsFindParams>) -> impl IntoResponse {
     let root = PathBuf::from(&params.root);
 
     if let Err(e) = validate_path_security(&root) {
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": e })));
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": e })),
+        );
     }
     if !root.is_dir() {
         return (
@@ -1847,8 +2075,14 @@ mod tests {
     /// A scratch tree inside the home directory, because every filesystem
     /// route is jailed to the home directory and `/tmp` is outside it.
     fn scratch() -> tempfile::TempDir {
-        let home = directories::UserDirs::new().unwrap().home_dir().to_path_buf();
-        tempfile::Builder::new().prefix(".atelier-fs-test-").tempdir_in(home).unwrap()
+        let home = directories::UserDirs::new()
+            .unwrap()
+            .home_dir()
+            .to_path_buf();
+        tempfile::Builder::new()
+            .prefix(".atelier-fs-test-")
+            .tempdir_in(home)
+            .unwrap()
     }
 
     fn fs_router() -> axum::Router {
@@ -1866,7 +2100,10 @@ mod tests {
     }
 
     async fn get(uri: String) -> (StatusCode, HeaderMap, Vec<u8>) {
-        let asked = axum::http::Request::builder().uri(uri).body(Body::empty()).unwrap();
+        let asked = axum::http::Request::builder()
+            .uri(uri)
+            .body(Body::empty())
+            .unwrap();
         answered(asked).await
     }
 
@@ -1874,7 +2111,9 @@ mod tests {
         let answer = fs_router().oneshot(asked).await.unwrap();
         let status = answer.status();
         let headers = answer.headers().clone();
-        let bytes = axum::body::to_bytes(answer.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(answer.into_body(), usize::MAX)
+            .await
+            .unwrap();
         (status, headers, bytes.to_vec())
     }
 
@@ -1907,7 +2146,9 @@ mod tests {
         let (status, _, _) = answered(
             axum::http::Request::post("/api/fs/exists")
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(serde_json::json!({ "paths": paths }).to_string()))
+                .body(Body::from(
+                    serde_json::json!({ "paths": paths }).to_string(),
+                ))
                 .unwrap(),
         )
         .await;
@@ -1990,7 +2231,10 @@ mod tests {
         // Directories first, then names without regard to case.
         let names = named(entries);
         assert_eq!(&names[..2], &["build".to_string(), "src".to_string()]);
-        assert!(!names.contains(&".git".to_string()), "the tree offered .git: {names:?}");
+        assert!(
+            !names.contains(&".git".to_string()),
+            "the tree offered .git: {names:?}"
+        );
 
         assert_eq!(entry(entries, "build")["kind"], "dir");
         assert_eq!(entry(entries, "build")["ignored"], true);
@@ -2016,7 +2260,8 @@ mod tests {
     #[tokio::test]
     async fn the_tree_obeys_an_ignore_file_further_down_the_tree() {
         let root = a_project();
-        let (status, answer) = json_of(asked_for("/api/fs/tree", "dir", &root.path().join("src"))).await;
+        let (status, answer) =
+            json_of(asked_for("/api/fs/tree", "dir", &root.path().join("src"))).await;
         assert_eq!(status, StatusCode::OK);
         let entries = &answer["entries"];
 
@@ -2046,7 +2291,10 @@ mod tests {
         assert_eq!(answer["text"], "fn main() {}\n");
         assert_eq!(answer["truncated"], false);
         assert_eq!(answer["size"], 13);
-        assert_eq!(answer["sha256"], format!("{:x}", Sha256::digest(b"fn main() {}\n")));
+        assert_eq!(
+            answer["sha256"],
+            format!("{:x}", Sha256::digest(b"fn main() {}\n"))
+        );
         assert!(answer["mtime"].as_i64().unwrap() > 0);
     }
 
@@ -2100,7 +2348,10 @@ mod tests {
         assert_eq!(answer["kind"], "text");
         assert_eq!(answer["truncated"], true);
         assert_eq!(answer["size"], 3 * 1024 * 1024);
-        assert_eq!(answer["text"].as_str().unwrap().len(), TEXT_READ_LIMIT as usize);
+        assert_eq!(
+            answer["text"].as_str().unwrap().len(),
+            TEXT_READ_LIMIT as usize
+        );
         assert_eq!(
             answer["sha256"],
             format!("{:x}", Sha256::digest(&whole[..TEXT_READ_LIMIT as usize])),
@@ -2143,7 +2394,10 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "after\n");
         assert_eq!(answer["size"], 6);
-        assert_eq!(answer["sha256"], format!("{:x}", Sha256::digest(b"after\n")));
+        assert_eq!(
+            answer["sha256"],
+            format!("{:x}", Sha256::digest(b"after\n"))
+        );
         assert!(answer["mtime"].as_i64().unwrap() > 0);
 
         // The second save uses only what the first one answered with.
@@ -2176,9 +2430,19 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::CONFLICT);
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "theirs\n", "the refusal wrote anyway");
-        assert!(answer["error"].as_str().unwrap().contains("changed on disk"));
-        assert_eq!(answer["sha256"], format!("{:x}", Sha256::digest(b"theirs\n")));
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "theirs\n",
+            "the refusal wrote anyway"
+        );
+        assert!(answer["error"]
+            .as_str()
+            .unwrap()
+            .contains("changed on disk"));
+        assert_eq!(
+            answer["sha256"],
+            format!("{:x}", Sha256::digest(b"theirs\n"))
+        );
 
         // Told what is there now, the same save goes through.
         let (status, _) = saved(serde_json::json!({
@@ -2228,14 +2492,21 @@ mod tests {
             .unwrap()
             .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(left, vec!["script.sh".to_string()], "the save left something behind");
+        assert_eq!(
+            left,
+            vec!["script.sh".to_string()],
+            "the save left something behind"
+        );
 
         // The mode of what was there is carried over, or a saved script comes
         // back without its executable bit.
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o755);
+            assert_eq!(
+                std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+                0o755
+            );
         }
     }
 
@@ -2264,7 +2535,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_save_outside_the_home_directory_is_refused() {
-        let (status, answer) = saved(serde_json::json!({ "path": "/etc/hosts", "text": "no\n" })).await;
+        let (status, answer) =
+            saved(serde_json::json!({ "path": "/etc/hosts", "text": "no\n" })).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert!(answer["error"].as_str().unwrap().contains("home directory"));
     }
@@ -2328,7 +2600,10 @@ mod tests {
         let path = PathBuf::from("/home/someone/project/src/main.rs");
         assert_eq!(
             editor_args(&path, Some(42)),
-            vec!["-g".to_string(), "/home/someone/project/src/main.rs:42".to_string()]
+            vec![
+                "-g".to_string(),
+                "/home/someone/project/src/main.rs:42".to_string()
+            ]
         );
     }
 
@@ -2351,7 +2626,8 @@ mod tests {
             serde_json::from_str(r#"{"path":"/home/someone/x","target":"finder"}"#).unwrap();
         assert_eq!(asked.line, None);
         let with_line: OpenExternalRequest =
-            serde_json::from_str(r#"{"path":"/home/someone/x","target":"vscode","line":7}"#).unwrap();
+            serde_json::from_str(r#"{"path":"/home/someone/x","target":"vscode","line":7}"#)
+                .unwrap();
         assert_eq!(with_line.line, Some(7));
     }
 
@@ -2381,10 +2657,18 @@ mod tests {
         assert!(!valid_presentation_asset("../secret.png"));
         assert!(!valid_presentation_asset(&format!("{digest}./../passwd")));
         assert!(!valid_presentation_asset(&format!("{digest}.p-g")));
-        assert!(!valid_presentation_asset(&format!("{digest}.abcdefghijklmnop")));
+        assert!(!valid_presentation_asset(&format!(
+            "{digest}.abcdefghijklmnop"
+        )));
         assert!(!valid_presentation_asset(&digest));
-        assert!(!valid_presentation_asset(&format!("{}.png", "a".repeat(63))));
-        assert!(!valid_presentation_asset(&format!("{}.png", "A".repeat(64))));
+        assert!(!valid_presentation_asset(&format!(
+            "{}.png",
+            "a".repeat(63)
+        )));
+        assert!(!valid_presentation_asset(&format!(
+            "{}.png",
+            "A".repeat(64)
+        )));
     }
 
     /// Where saying no to an SVG moved to.
@@ -2398,7 +2682,11 @@ mod tests {
     fn a_file_that_could_carry_script_is_a_download_and_not_a_page() {
         assert!(valid_presentation_asset(&format!("{}.svg", "a".repeat(64))));
         for extension in ["svg", "html", "htm", "xhtml", "mjs", "wasm", "zip", "bin"] {
-            assert_eq!(served_as(extension), None, "{extension} must not be shown inline");
+            assert_eq!(
+                served_as(extension),
+                None,
+                "{extension} must not be shown inline"
+            );
         }
         for (extension, kind) in [
             ("png", "image/png"),
@@ -2406,7 +2694,11 @@ mod tests {
             ("mp3", "audio/mpeg"),
             ("pdf", "application/pdf"),
         ] {
-            assert_eq!(served_as(extension), Some(kind), "{extension} should be shown");
+            assert_eq!(
+                served_as(extension),
+                Some(kind),
+                "{extension} should be shown"
+            );
         }
         // Words, never markup: source and data are read, not run.
         assert_eq!(served_as("ts"), Some("text/plain; charset=utf-8"));
@@ -2420,11 +2712,18 @@ mod tests {
         std::fs::create_dir(&media).unwrap();
         let name = format!("{}.png", "b".repeat(64));
         std::fs::write(media.join(&name), b"picture").unwrap();
-        assert_eq!(presentation_asset_path(&media, &name), Some(media.join(&name)));
+        assert_eq!(
+            presentation_asset_path(&media, &name),
+            Some(media.join(&name))
+        );
 
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink(root.path().join("outside.png"), media.join(format!("{}.png", "c".repeat(64)))).unwrap();
+            std::os::unix::fs::symlink(
+                root.path().join("outside.png"),
+                media.join(format!("{}.png", "c".repeat(64))),
+            )
+            .unwrap();
             std::fs::write(root.path().join("outside.png"), b"outside").unwrap();
             assert!(presentation_asset_path(&media, &format!("{}.png", "c".repeat(64))).is_none());
         }
@@ -2456,9 +2755,14 @@ mod tests {
         let mut exits_three = std::process::Command::new("sh");
         exits_three.args(["-c", "exit 3"]);
         let mut leaves_a_mark = std::process::Command::new("sh");
-        leaves_a_mark.args(["-c", "touch \"$1\"", "sh"]).arg(&reached);
+        leaves_a_mark
+            .args(["-c", "touch \"$1\"", "sh"])
+            .arg(&reached);
 
-        assert_eq!(first_working_launcher(vec![exits_three, leaves_a_mark]), Ok(()));
+        assert_eq!(
+            first_working_launcher(vec![exits_three, leaves_a_mark]),
+            Ok(())
+        );
         assert!(
             reached.exists(),
             "the launcher behind the failing one was never actually run"
@@ -2491,14 +2795,20 @@ mod tests {
         let complaint = first_working_launcher(vec![exits_three, absent]).unwrap_err();
         assert!(complaint.contains("all 2 launchers"), "{complaint}");
         assert!(complaint.contains("exited with"), "{complaint}");
-        assert!(complaint.contains("atelier-no-such-launcher-bw-1hmu"), "{complaint}");
+        assert!(
+            complaint.contains("atelier-no-such-launcher-bw-1hmu"),
+            "{complaint}"
+        );
     }
 
     /// Each command as it would be printed, so a list can be stated without
     /// running anything.
     #[cfg(unix)]
     fn described(commands: Vec<std::process::Command>) -> Vec<String> {
-        commands.iter().map(|command| format!("{command:?}")).collect()
+        commands
+            .iter()
+            .map(|command| format!("{command:?}"))
+            .collect()
     }
 
     /// Revealing a file asks for the file manager by name. Before bw-31sl.1
@@ -2517,7 +2827,10 @@ mod tests {
 
         let first = &lines[0];
         assert!(first.contains("gdbus"), "{first}");
-        assert!(first.contains("org.freedesktop.FileManager1.ShowItems"), "{first}");
+        assert!(
+            first.contains("org.freedesktop.FileManager1.ShowItems"),
+            "{first}"
+        );
         assert!(first.contains(&uri), "{first}");
 
         assert!(
@@ -2526,15 +2839,21 @@ mod tests {
             "{lines:?}"
         );
         assert!(
-            lines.iter().any(|line| line.contains("dolphin") && line.contains("--select")),
+            lines
+                .iter()
+                .any(|line| line.contains("dolphin") && line.contains("--select")),
             "{lines:?}"
         );
         assert!(
-            lines.iter().any(|line| line.contains("nautilus") && line.contains("--select")),
+            lines
+                .iter()
+                .any(|line| line.contains("nautilus") && line.contains("--select")),
             "{lines:?}"
         );
         assert!(
-            !lines.iter().any(|line| line.contains("xdg-open") && line.contains("notes.md")),
+            !lines
+                .iter()
+                .any(|line| line.contains("xdg-open") && line.contains("notes.md")),
             "the file itself was still handed to the default handler: {lines:?}"
         );
     }
@@ -2589,9 +2908,12 @@ mod tests {
     async fn open_external_finder_opens_a_real_path() {
         use tower::ServiceExt;
 
-        let home = directories::UserDirs::new().unwrap().home_dir().to_path_buf();
-        let app = axum::Router::new()
-            .route("/api/fs/open-external", axum::routing::post(open_external));
+        let home = directories::UserDirs::new()
+            .unwrap()
+            .home_dir()
+            .to_path_buf();
+        let app =
+            axum::Router::new().route("/api/fs/open-external", axum::routing::post(open_external));
 
         let asked = axum::http::Request::builder()
             .method("POST")
@@ -2656,7 +2978,11 @@ mod tests {
             ("banana", "nan"),
             ("banana", "ana"),
         ] {
-            assert_eq!(inside(hay, needle), hay.find(needle), "inside({hay:?}, {needle:?})");
+            assert_eq!(
+                inside(hay, needle),
+                hay.find(needle),
+                "inside({hay:?}, {needle:?})"
+            );
         }
     }
 
@@ -2687,8 +3013,15 @@ mod tests {
         ]);
         let best = best(&paths, "paths", 4);
         assert_eq!(
-            best.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(),
-            vec!["src/paths.ts", "src/deep/nested/again/paths.ts", "paths/README.md", "docs/paths/notes.md"],
+            best.iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "src/paths.ts",
+                "src/deep/nested/again/paths.ts",
+                "paths/README.md",
+                "docs/paths/notes.md"
+            ],
         );
     }
 
@@ -2697,7 +3030,10 @@ mod tests {
     #[test]
     fn the_letters_may_have_gaps_between_them() {
         let paths = candidates(&["src/workbench/chat-tab.tsx", "src/lib/utils.ts"]);
-        assert_eq!(best(&paths, "chtb", 5)[0].path, "src/workbench/chat-tab.tsx");
+        assert_eq!(
+            best(&paths, "chtb", 5)[0].path,
+            "src/workbench/chat-tab.tsx"
+        );
         assert!(best(&paths, "zzq", 5).is_empty());
     }
 
@@ -2716,7 +3052,13 @@ mod tests {
     #[test]
     fn an_empty_query_offers_the_shallowest_names() {
         let paths = candidates(&["a.ts", "src/deep/down/here/b.ts", "src/c.ts"]);
-        assert_eq!(best(&paths, "", 2).iter().map(|e| e.path.as_str()).collect::<Vec<_>>(), vec!["a.ts", "src/c.ts"]);
+        assert_eq!(
+            best(&paths, "", 2)
+                .iter()
+                .map(|e| e.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a.ts", "src/c.ts"]
+        );
     }
 
     /// The walk obeys the ignore rules rather than flagging them, drops `.git`
@@ -2724,26 +3066,39 @@ mod tests {
     #[tokio::test]
     async fn a_search_obeys_the_ignore_files() {
         let root = a_project();
-        let (status, answer) = json_of(format!("{}&q=", asked_for("/api/fs/find", "root", root.path()))).await;
+        let (status, answer) = json_of(format!(
+            "{}&q=",
+            asked_for("/api/fs/find", "root", root.path())
+        ))
+        .await;
         assert_eq!(status, StatusCode::OK);
         let paths = found(&answer);
 
         assert!(paths.contains(&"src/main.rs".to_string()), "{paths:?}");
         assert!(paths.contains(&".env".to_string()), "{paths:?}");
         // `build/` and `*.tmp` at the root, `*.log` a level down.
-        assert!(!paths.iter().any(|path| path.starts_with("build")), "{paths:?}");
+        assert!(
+            !paths.iter().any(|path| path.starts_with("build")),
+            "{paths:?}"
+        );
         assert!(!paths.contains(&"scratch.tmp".to_string()), "{paths:?}");
         assert!(!paths.contains(&"src/a.log".to_string()), "{paths:?}");
         // The repository's own machinery is never anybody's reference.
-        assert!(!paths.iter().any(|path| path.starts_with(".git/")), "{paths:?}");
+        assert!(
+            !paths.iter().any(|path| path.starts_with(".git/")),
+            "{paths:?}"
+        );
     }
 
     /// The route answers with what it was asked for, and no more of it.
     #[tokio::test]
     async fn a_search_answers_paths_and_kinds_within_the_limit() {
         let root = a_project();
-        let (status, answer) =
-            json_of(format!("{}&q=main&limit=1", asked_for("/api/fs/find", "root", root.path()))).await;
+        let (status, answer) = json_of(format!(
+            "{}&q=main&limit=1",
+            asked_for("/api/fs/find", "root", root.path())
+        ))
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(answer["entries"].as_array().unwrap().len(), 1);
         assert_eq!(answer["entries"][0]["path"], "src/main.rs");
@@ -2810,7 +3165,10 @@ mod tests {
                 let (status, answer) = json_of(format!("{asked}&q={query}&limit=20")).await;
                 let took = began.elapsed();
                 assert_eq!(status, StatusCode::OK);
-                assert!(!answer["entries"].as_array().unwrap().is_empty(), "{query} found nothing");
+                assert!(
+                    !answer["entries"].as_array().unwrap().is_empty(),
+                    "{query} found nothing"
+                );
                 slowest = slowest.max(took);
             }
         }
@@ -2880,7 +3238,10 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         assert!(!root.path().join("src").exists());
-        assert_eq!(std::fs::read_to_string(root.path().join("lib/main.rs")).unwrap(), "fn main() {}\n");
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("lib/main.rs")).unwrap(),
+            "fn main() {}\n"
+        );
     }
 
     /// Taking a name that is in use would silently replace what is there, which
@@ -2898,7 +3259,10 @@ mod tests {
 
         assert_eq!(status, StatusCode::CONFLICT);
         assert!(answer["error"].as_str().unwrap().contains("already there"));
-        assert_eq!(std::fs::read_to_string(root.path().join("taken.txt")).unwrap(), "mine\n");
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("taken.txt")).unwrap(),
+            "mine\n"
+        );
         assert!(root.path().join("notes.txt").exists());
     }
 
@@ -2914,7 +3278,11 @@ mod tests {
                 serde_json::json!({ "root": root.path(), "path": root.path().join("notes.txt"), "name": tried }),
             )
             .await;
-            assert_eq!(status, StatusCode::BAD_REQUEST, "{tried:?} was accepted as a name");
+            assert_eq!(
+                status,
+                StatusCode::BAD_REQUEST,
+                "{tried:?} was accepted as a name"
+            );
         }
         assert!(root.path().join("notes.txt").exists());
     }
@@ -2935,7 +3303,10 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::FORBIDDEN);
-        assert!(answer["error"].as_str().unwrap().contains("outside the checkout"));
+        assert!(answer["error"]
+            .as_str()
+            .unwrap()
+            .contains("outside the checkout"));
         assert!(theirs.exists());
     }
 
@@ -2948,7 +3319,11 @@ mod tests {
         let elsewhere = scratch();
         let theirs = elsewhere.path().join("theirs.txt");
         std::fs::write(&theirs, "not yours\n").unwrap();
-        let climbing = root.path().join("src/../..").join(elsewhere.path().file_name().unwrap()).join("theirs.txt");
+        let climbing = root
+            .path()
+            .join("src/../..")
+            .join(elsewhere.path().file_name().unwrap())
+            .join("theirs.txt");
 
         let (status, _) = posted(
             "/api/fs/rename",
@@ -3031,16 +3406,23 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         assert!(theirs.exists(), "the file the link pointed at was moved");
-        assert_eq!(std::fs::read_link(root.path().join("renamed-shortcut")).unwrap(), theirs);
+        assert_eq!(
+            std::fs::read_link(root.path().join("renamed-shortcut")).unwrap(),
+            theirs
+        );
     }
-
 
     /// Where the freedesktop trash keeps what it took on this machine.
     #[cfg(target_os = "linux")]
     fn trash_dir() -> PathBuf {
         std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
-            .unwrap_or_else(|| directories::UserDirs::new().unwrap().home_dir().join(".local/share"))
+            .unwrap_or_else(|| {
+                directories::UserDirs::new()
+                    .unwrap()
+                    .home_dir()
+                    .join(".local/share")
+            })
             .join("Trash")
     }
 
@@ -3059,16 +3441,28 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn taken_by_the_trash(path: &std::path::Path) -> bool {
         let trash = trash_dir();
-        let Ok(entries) = std::fs::read_dir(trash.join("info")) else { return false };
+        let Ok(entries) = std::fs::read_dir(trash.join("info")) else {
+            return false;
+        };
         let came_from = format!("Path={}", path.display());
         for entry in entries.flatten() {
-            let Ok(said) = std::fs::read_to_string(entry.path()) else { continue };
+            let Ok(said) = std::fs::read_to_string(entry.path()) else {
+                continue;
+            };
             if !said.lines().any(|line| line == came_from) {
                 continue;
             }
-            let name = entry.file_name().to_string_lossy().trim_end_matches(".trashinfo").to_string();
+            let name = entry
+                .file_name()
+                .to_string_lossy()
+                .trim_end_matches(".trashinfo")
+                .to_string();
             let held = trash.join("files").join(name);
-            let _ = if held.is_dir() { std::fs::remove_dir_all(&held) } else { std::fs::remove_file(&held) };
+            let _ = if held.is_dir() {
+                std::fs::remove_dir_all(&held)
+            } else {
+                std::fs::remove_file(&held)
+            };
             let _ = std::fs::remove_file(entry.path());
             return true;
         }
@@ -3096,7 +3490,10 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{answer}");
         assert_eq!(answer["path"].as_str().unwrap(), file.to_string_lossy());
         assert!(!file.exists(), "the file is still in the checkout");
-        assert!(taken_by_the_trash(&file), "the file was unlinked rather than put in the trash");
+        assert!(
+            taken_by_the_trash(&file),
+            "the file was unlinked rather than put in the trash"
+        );
     }
 
     #[tokio::test]
@@ -3111,7 +3508,10 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         assert!(!root.path().join("src").exists());
-        assert!(taken_by_the_trash(&root.path().join("src")), "the folder was erased rather than trashed");
+        assert!(
+            taken_by_the_trash(&root.path().join("src")),
+            "the folder was erased rather than trashed"
+        );
     }
 
     /// The card's own line: a delete aimed outside the checkout is impossible
@@ -3186,8 +3586,14 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::OK);
-        assert!(std::fs::symlink_metadata(&link).is_err(), "the link is still there");
-        assert!(theirs.exists(), "the file the link pointed at was destroyed");
+        assert!(
+            std::fs::symlink_metadata(&link).is_err(),
+            "the link is still there"
+        );
+        assert!(
+            theirs.exists(),
+            "the file the link pointed at was destroyed"
+        );
         assert!(taken_by_the_trash(&link));
     }
 
@@ -3228,7 +3634,10 @@ mod tests {
 
         assert_eq!(status, StatusCode::CONFLICT);
         assert!(answer["error"].as_str().unwrap().contains("already there"));
-        assert_eq!(std::fs::read_to_string(root.path().join("notes.txt")).unwrap(), "hello\n");
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("notes.txt")).unwrap(),
+            "hello\n"
+        );
     }
 
     /// The name is checked before it is joined, so a create cannot be a way to
@@ -3277,14 +3686,18 @@ mod tests {
         let copy = root.path().join("notes copy.txt");
         assert_eq!(answer["path"].as_str().unwrap(), copy.to_string_lossy());
         assert_eq!(std::fs::read_to_string(&copy).unwrap(), "hello\n");
-        assert_eq!(std::fs::read_to_string(root.path().join("notes.txt")).unwrap(), "hello\n");
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("notes.txt")).unwrap(),
+            "hello\n"
+        );
     }
 
     /// Duplicating twice does not fail and does not overwrite the first copy.
     #[tokio::test]
     async fn a_second_duplicate_is_numbered_rather_than_refused() {
         let root = a_checkout();
-        let asked = serde_json::json!({ "root": root.path(), "path": root.path().join("notes.txt") });
+        let asked =
+            serde_json::json!({ "root": root.path(), "path": root.path().join("notes.txt") });
 
         for _ in 0..3 {
             let (status, _) = posted("/api/fs/duplicate", asked.clone()).await;
@@ -3309,8 +3722,14 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(std::fs::read_to_string(root.path().join("src copy/main.rs")).unwrap(), "fn main() {}\n");
-        assert_eq!(std::fs::read_to_string(root.path().join("src copy/deep/inner.rs")).unwrap(), "inner\n");
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("src copy/main.rs")).unwrap(),
+            "fn main() {}\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("src copy/deep/inner.rs")).unwrap(),
+            "inner\n"
+        );
     }
 
     /// The suffix goes before the extension, and a dotfile is all name.
@@ -3321,7 +3740,10 @@ mod tests {
         assert_eq!(copy_named("archive.tar.gz", free), "archive.tar copy.gz");
         assert_eq!(copy_named("Makefile", free), "Makefile copy");
         assert_eq!(copy_named(".gitignore", free), ".gitignore copy");
-        assert_eq!(copy_named("notes.txt", |tried| tried == "notes copy.txt"), "notes copy 2.txt");
+        assert_eq!(
+            copy_named("notes.txt", |tried| tried == "notes copy.txt"),
+            "notes copy 2.txt"
+        );
     }
 
     /// A link is duplicated as a link. Following it would copy whatever it
@@ -3344,7 +3766,10 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         let copy = root.path().join("shortcut copy");
-        assert!(std::fs::symlink_metadata(&copy).unwrap().is_symlink(), "the link's target was copied in");
+        assert!(
+            std::fs::symlink_metadata(&copy).unwrap().is_symlink(),
+            "the link's target was copied in"
+        );
         assert_eq!(std::fs::read_link(&copy).unwrap(), theirs);
     }
 

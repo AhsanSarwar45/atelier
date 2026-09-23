@@ -70,7 +70,12 @@ async fn serve_static(req: Request<Body>) -> impl IntoResponse {
     } else {
         format!("{}/index.html", path)
     };
-    for name in [path.clone(), format!("{path}.html"), index_path, "index.html".into()] {
+    for name in [
+        path.clone(),
+        format!("{path}.html"),
+        index_path,
+        "index.html".into(),
+    ] {
         if let Some(found) = carried(&name) {
             return served(&name, found, held, gzip);
         }
@@ -106,7 +111,12 @@ async fn said_not_to_keep(req: Request<Body>, next: Next) -> Response<Body> {
 
 /// One embedded file, answered the same way whichever of the four routes above
 /// found it — which is what stops a rule being added to three of them.
-fn served(path: &str, (file, packed): (EmbeddedFile, bool), held: Option<&str>, gzip: bool) -> Response<Body> {
+fn served(
+    path: &str,
+    (file, packed): (EmbeddedFile, bool),
+    held: Option<&str>,
+    gzip: bool,
+) -> Response<Body> {
     let mime = mime_guess::from_path(path).first_or_octet_stream();
     let mut tag = serving::tag_for(&file.metadata.sha256_hash());
     // The unpacked answer is different bytes, so it answers to its own tag.
@@ -125,7 +135,10 @@ fn served(path: &str, (file, packed): (EmbeddedFile, bool), held: Option<&str>, 
     // The browser already has this exact file. Saying so costs a few bytes
     // instead of the whole file, which is what makes asking every time cheap.
     if serving::already_held(held, &tag) {
-        return answer.status(StatusCode::NOT_MODIFIED).body(Body::empty()).unwrap();
+        return answer
+            .status(StatusCode::NOT_MODIFIED)
+            .body(Body::empty())
+            .unwrap();
     }
 
     // Carried in the binary for its whole life, so it is handed over as it
@@ -136,9 +149,14 @@ fn served(path: &str, (file, packed): (EmbeddedFile, bool), held: Option<&str>, 
     };
     let body = if unpack {
         let mut plain = Vec::new();
-        if let Err(e) = std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&bytes[..]), &mut plain) {
+        if let Err(e) =
+            std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&bytes[..]), &mut plain)
+        {
             tracing::error!("carried screen {path} could not be unpacked: {e}");
-            return Response::builder().status(StatusCode::INTERNAL_SERVER_ERROR).body(Body::empty()).unwrap();
+            return Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::empty())
+                .unwrap();
         }
         Body::from(plain)
     } else {
@@ -161,7 +179,11 @@ fn compressible(
     headers: &axum::http::HeaderMap,
     _: &axum::http::Extensions,
 ) -> bool {
-    let text = |name| headers.get(name).and_then(|value: &HeaderValue| value.to_str().ok());
+    let text = |name| {
+        headers
+            .get(name)
+            .and_then(|value: &HeaderValue| value.to_str().ok())
+    };
     serving::worth_compressing(
         status.as_u16(),
         text(header::CONTENT_TYPE),
@@ -314,7 +336,13 @@ fn whereabouts() -> String {
     let name = reachable::name_on_this_network(network);
     let public = reachable::published_url();
     let mut said = format!("{} addresses\n", identity::DISPLAY);
-    for line in reachable::openable_at(&bind_host(), port, network, name.as_deref(), public.as_deref()) {
+    for line in reachable::openable_at(
+        &bind_host(),
+        port,
+        network,
+        name.as_deref(),
+        public.as_deref(),
+    ) {
         said.push_str(&format!("  {line}\n"));
     }
     said.push_str(if answering(port) {
@@ -503,6 +531,9 @@ async fn serve(open_browser: bool) {
         }
         directories
     });
+    // What each Claude record said, kept beside the app's data so a restart
+    // does not read every record again (bw-69sa.3).
+    workbench::claude::history::keep_summaries_in(data_dir.join("claude-summaries.json"));
     let mut workbench_state =
         routes::workbench::WorkbenchState::new(registry).with_projects(database.clone());
     match workbench::search_index::SearchIndex::open(
@@ -655,7 +686,10 @@ async fn serve(open_browser: bool) {
         )
         .route("/api/beads", get(routes::beads::read_beads))
         .route("/api/beads/card", get(routes::beads::read_card))
-        .route("/api/beads/search", get(routes::beads::search::search_cards))
+        .route(
+            "/api/beads/search",
+            get(routes::beads::search::search_cards),
+        )
         .route("/api/beads/search/ask", post(routes::beads::search::ask))
         .route(
             "/api/beads/create",
@@ -670,7 +704,10 @@ async fn serve(open_browser: bool) {
         .route("/api/dolt/databases", get(routes::dolt::dolt_databases))
         .route("/api/dolt/servers", get(routes::dolt::dolt_servers))
         .route("/api/fs/list", get(routes::fs::list_directory))
-        .route("/api/fs/exists", get(routes::fs::path_exists).post(routes::fs::paths_exist))
+        .route(
+            "/api/fs/exists",
+            get(routes::fs::path_exists).post(routes::fs::paths_exist),
+        )
         .route("/api/fs/media", get(routes::fs::media))
         .route("/api/fs/tree", get(routes::fs::tree))
         .route("/api/fs/find", get(routes::fs::find))

@@ -117,7 +117,12 @@ pub fn build(cwd: &Path) -> Result<String, String> {
     // running a command that cannot work (bw-3tkl.3).
     let reachable = crate::routes::find_bd().is_some();
     let beads = if wants_beads && reachable {
-        include_str!("../../../machinery/skills/beads/SKILL.md").splitn(3, "---").nth(2).unwrap_or("").trim().to_string()
+        include_str!("../../../machinery/skills/beads/SKILL.md")
+            .splitn(3, "---")
+            .nth(2)
+            .unwrap_or("")
+            .trim()
+            .to_string()
     } else {
         String::new()
     };
@@ -145,8 +150,14 @@ mod tests {
     fn the_always_injected_skill_says_nothing_about_beads() {
         let text = body(&bundled_skills().join("atelier/SKILL.md")).unwrap();
         let lowered = text.to_lowercase();
-        assert!(!lowered.contains("beads"), "atelier/SKILL.md still names Beads:\n{text}");
-        assert!(!lowered.contains(" epic"), "atelier/SKILL.md still names epics:\n{text}");
+        assert!(
+            !lowered.contains("beads"),
+            "atelier/SKILL.md still names Beads:\n{text}"
+        );
+        assert!(
+            !lowered.contains(" epic"),
+            "atelier/SKILL.md still names epics:\n{text}"
+        );
     }
 
     /// The checklist rules did not vanish; they moved to the skill that only
@@ -176,7 +187,10 @@ mod tests {
     /// (bw-a9ln.1).
     #[test]
     fn the_projects_own_instructions_reach_the_session_after_the_enforced_settings() {
-        let (text, _) = project_lines(Path::new("/dev/keystone"), located("Never touch port 3008."));
+        let (text, _) = project_lines(
+            Path::new("/dev/keystone"),
+            located("Never touch port 3008."),
+        );
         let enforced = text.find("External review policy").unwrap();
         let own = text.find("Never touch port 3008.").unwrap();
         assert!(enforced < own, "{text}");
@@ -189,7 +203,10 @@ mod tests {
     #[test]
     fn a_project_with_no_instructions_says_only_what_atelier_knows() {
         let (text, _) = project_lines(Path::new("/dev/keystone"), located(""));
-        assert!(text.ends_with("do not ask for separate permission."), "{text:?}");
+        assert!(
+            text.ends_with("do not ask for separate permission."),
+            "{text:?}"
+        );
     }
 
     /// The six settings that existed only to become these lines are gone, so
@@ -197,8 +214,18 @@ mod tests {
     #[test]
     fn no_setting_still_generates_the_retired_prompt_lines() {
         let (text, _) = project_lines(Path::new("/dev/keystone"), located(""));
-        for retired in ["Setup command", "Start command", "Build command", "Deployment command", "Required evidence", "visual proof"] {
-            assert!(!text.contains(retired), "{retired} is still generated:\n{text}");
+        for retired in [
+            "Setup command",
+            "Start command",
+            "Build command",
+            "Deployment command",
+            "Required evidence",
+            "visual proof",
+        ] {
+            assert!(
+                !text.contains(retired),
+                "{retired} is still generated:\n{text}"
+            );
         }
     }
 

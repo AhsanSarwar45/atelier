@@ -159,7 +159,10 @@ pub fn said_cwd(data: &Value) -> Option<PathBuf> {
 }
 
 fn cwd(data: &Value) -> PathBuf {
-    tool_input(data).get("workdir").or_else(|| tool_input(data).get("cwd")).and_then(Value::as_str)
+    tool_input(data)
+        .get("workdir")
+        .or_else(|| tool_input(data).get("cwd"))
+        .and_then(Value::as_str)
         .map(PathBuf::from)
         .or_else(|| said_cwd(data))
         .or_else(|| std::env::var_os("CLAUDE_PROJECT_DIR").map(PathBuf::from))
@@ -206,16 +209,29 @@ fn tool_name(data: &Value) -> &str {
 }
 
 fn shell(data: &Value) -> &str {
-    tool_input(data).get("command").or_else(|| tool_input(data).get("cmd")).and_then(Value::as_str).unwrap_or("")
+    tool_input(data)
+        .get("command")
+        .or_else(|| tool_input(data).get("cmd"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
 }
 fn session(data: &Value) -> String {
     use sha2::{Digest, Sha256};
-    let identity = data.get("session_id").or_else(|| data.get("sessionId")).and_then(Value::as_str);
-    let identity = identity.map(str::to_owned).unwrap_or_else(||
-        format!("missing:{}:{}", cwd(data).display(), std::process::id()));
-    if identity.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')) {
+    let identity = data
+        .get("session_id")
+        .or_else(|| data.get("sessionId"))
+        .and_then(Value::as_str);
+    let identity = identity
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("missing:{}:{}", cwd(data).display(), std::process::id()));
+    if identity
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+    {
         format!("s-{identity}")
-    } else { format!("s-{:x}", Sha256::digest(identity.as_bytes())) }
+    } else {
+        format!("s-{:x}", Sha256::digest(identity.as_bytes()))
+    }
 }
 
 fn command(root: &Path, program: &str, args: &[&str]) -> Option<(String, bool)> {
@@ -327,7 +343,9 @@ impl<'a> Lexer<'a> {
     }
 
     fn finish_word(&mut self, at: usize) {
-        let Some(start) = self.start.take() else { return; };
+        let Some(start) = self.start.take() else {
+            return;
+        };
         let text = std::mem::take(&mut self.text);
         if self.expect_delimiter {
             self.expect_delimiter = false;
@@ -692,7 +710,11 @@ fn git_mutates(call: &GitCall<'_>) -> bool {
         "symbolic-ref" => {
             args.iter()
                 .any(|word| matches!(word.text.as_str(), "-d" | "--delete"))
-                || args.iter().filter(|word| !word.text.starts_with('-')).count() > 1
+                || args
+                    .iter()
+                    .filter(|word| !word.text.starts_with('-'))
+                    .count()
+                    > 1
         }
         "replace" => {
             args.iter()
@@ -711,7 +733,13 @@ fn git_mutates(call: &GitCall<'_>) -> bool {
         "submodule" => args.first().is_some_and(|word| {
             matches!(
                 word.text.as_str(),
-                "add" | "update" | "init" | "deinit" | "sync" | "set-url" | "set-branch"
+                "add"
+                    | "update"
+                    | "init"
+                    | "deinit"
+                    | "sync"
+                    | "set-url"
+                    | "set-branch"
                     | "absorbgitdirs"
             )
         }),
@@ -963,7 +991,11 @@ fn actor(data: &Value) -> Option<Value> {
     let parsed = calls(original, &cwd(data));
     let mut insertions: Vec<(usize, String)> = Vec::new();
     for (segment, here) in &parsed {
-        if let Some(at) = segment.words.iter().position(|w| executable(&w.text) == "atelier") {
+        if let Some(at) = segment
+            .words
+            .iter()
+            .position(|w| executable(&w.text) == "atelier")
+        {
             if segment.words.get(at + 1).is_some_and(|w| w.text == "tool") {
                 insertions.push((segment.words[at].start, format!("BEADS_ACTOR={who} ")));
             }
@@ -980,7 +1012,9 @@ fn actor(data: &Value) -> Option<Value> {
             .iter()
             .any(|word| word.text == "--actor" || word.text.starts_with("--actor="));
         if flag_value(args, "--actor").is_some_and(|given| given != who) {
-            return deny(format!("This session acts as {who}; it cannot use another board actor"));
+            return deny(format!(
+                "This session acts as {who}; it cannot use another board actor"
+            ));
         }
         if !has_actor {
             insertions.push((
@@ -1012,7 +1046,11 @@ fn actor(data: &Value) -> Option<Value> {
         return None;
     }
     let mut updated = tool_input(data).clone();
-    let key = if updated.get("cmd").is_some() { "cmd" } else { "command" };
+    let key = if updated.get("cmd").is_some() {
+        "cmd"
+    } else {
+        "command"
+    };
     updated[key] = json!(stamped);
     Some(pretool("allow", "board identity", Some(updated)))
 }
@@ -1050,13 +1088,28 @@ fn mutation_targets(data: &Value) -> Vec<Target> {
         "Edit" | "Write" | "MultiEdit" | "NotebookEdit" | "apply_patch" => {
             if tool_name(data) == "apply_patch" {
                 let input = tool_input(data);
-                let patch = input.as_str().or_else(|| input.get("patch").and_then(Value::as_str))
-                    .or_else(|| input.get("input").and_then(Value::as_str)).unwrap_or("");
-                let targets: Vec<_> = patch.lines().filter_map(|line| {
-                    ["*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: "]
-                        .iter().find_map(|prefix| line.strip_prefix(prefix))
-                }).map(|path| Target::named(&cwd(data), path)).collect();
-                if !targets.is_empty() { return targets; }
+                let patch = input
+                    .as_str()
+                    .or_else(|| input.get("patch").and_then(Value::as_str))
+                    .or_else(|| input.get("input").and_then(Value::as_str))
+                    .unwrap_or("");
+                let targets: Vec<_> = patch
+                    .lines()
+                    .filter_map(|line| {
+                        [
+                            "*** Add File: ",
+                            "*** Update File: ",
+                            "*** Delete File: ",
+                            "*** Move to: ",
+                        ]
+                        .iter()
+                        .find_map(|prefix| line.strip_prefix(prefix))
+                    })
+                    .map(|path| Target::named(&cwd(data), path))
+                    .collect();
+                if !targets.is_empty() {
+                    return targets;
+                }
             }
             let named = [
                 "file_path",
@@ -1109,8 +1162,12 @@ fn lands(call: &GitCall<'_>) -> bool {
 /// A branch nobody can lose anything from is one whose work is already on
 /// `ours`. A name that no longer resolves has no commits to lose either.
 fn already_landed(project: &Path, branch: &str) -> bool {
-    if command(project, "git", &["rev-parse", "--verify", "--quiet", branch])
-        .is_none_or(|(_, ok)| !ok)
+    if command(
+        project,
+        "git",
+        &["rev-parse", "--verify", "--quiet", branch],
+    )
+    .is_none_or(|(_, ok)| !ok)
     {
         return true;
     }
@@ -1155,8 +1212,12 @@ fn tidies(call: &GitCall<'_>) -> bool {
                 return false;
             }
             worktree_issue(&destination).is_some_and(|issue| already_landed(&project, &issue))
-                && command(&destination, "git", &["status", "--porcelain", "--untracked-files=no"])
-                    .is_some_and(|(out, ok)| ok && out.is_empty())
+                && command(
+                    &destination,
+                    "git",
+                    &["status", "--porcelain", "--untracked-files=no"],
+                )
+                .is_some_and(|(out, ok)| ok && out.is_empty())
         }
         "branch"
             if arguments
@@ -1164,10 +1225,7 @@ fn tidies(call: &GitCall<'_>) -> bool {
                 .any(|word| matches!(word.text.as_str(), "-d" | "-D" | "--delete")) =>
         {
             let named = operands(arguments);
-            !named.is_empty()
-                && named
-                    .iter()
-                    .all(|branch| already_landed(&project, branch))
+            !named.is_empty() && named.iter().all(|branch| already_landed(&project, branch))
         }
         _ => false,
     }
@@ -1262,9 +1320,7 @@ fn ignored_residue(project: &Path, path: &Path) -> bool {
     let Some(target) = path.to_str() else {
         return false;
     };
-    if command(project, "git", &["check-ignore", "-q", "--", target])
-        .is_none_or(|(_, ok)| !ok)
-    {
+    if command(project, "git", &["check-ignore", "-q", "--", target]).is_none_or(|(_, ok)| !ok) {
         return false;
     }
     // A path git ignores can still hold something git tracks, if it was ever
@@ -1364,7 +1420,10 @@ fn isolation_made(data: &Value, issue: &str) -> Option<PathBuf> {
             let destination = operands(arguments).get(1).copied()?;
             isolates(&call).then(|| path_from(&call.cwd, destination))
         })
-        .find(|made| worktree_issue(made).is_some_and(|job| crate::board_landing::belongs_to(&root(data), issue, &job)))
+        .find(|made| {
+            worktree_issue(made)
+                .is_some_and(|job| crate::board_landing::belongs_to(&root(data), issue, &job))
+        })
 }
 
 fn creates_first_work(data: &Value) -> bool {
@@ -1415,7 +1474,9 @@ fn owns_work_under(project: &Path, job: &str, who: &str) -> bool {
     };
     rows(value).into_iter().any(|card| {
         card["assignee"].as_str() == Some(who)
-            && card["id"].as_str().is_some_and(|id| crate::board_landing::belongs_to(project, id, job))
+            && card["id"]
+                .as_str()
+                .is_some_and(|id| crate::board_landing::belongs_to(project, id, job))
     })
 }
 
@@ -1446,7 +1507,8 @@ fn workflow(data: &Value) -> Option<Value> {
         // The copy is cut per job and reused by every card under it, so the
         // card being claimed need only be work inside the job the copy is
         // named for (`docs/hook-friction-2.md` §18).
-        let isolated = issue_at(&here).is_some_and(|job| crate::board_landing::belongs_to(&here, &issue, &job))
+        let isolated = issue_at(&here)
+            .is_some_and(|job| crate::board_landing::belongs_to(&here, &issue, &job))
             || isolation_made(data, &issue).as_deref() == Some(here.as_path());
         if !isolated {
             return deny(format!(
@@ -1706,51 +1768,110 @@ fn subject_ids(arguments: &[Word]) -> Vec<String> {
     let mut at = 0;
     while let Some(word) = arguments.get(at) {
         let text = word.text.as_str();
-        if REDIRECTS.contains(&text) { at += 2; continue; }
-        if text.starts_with('-') {
-            at += if BD_FLAGS_WITH_VALUES.contains(&text) { 2 } else { 1 };
+        if REDIRECTS.contains(&text) {
+            at += 2;
             continue;
         }
-        ids.push(text.to_owned()); at += 1;
+        if text.starts_with('-') {
+            at += if BD_FLAGS_WITH_VALUES.contains(&text) {
+                2
+            } else {
+                1
+            };
+            continue;
+        }
+        ids.push(text.to_owned());
+        at += 1;
     }
     ids
 }
 fn status_gate(data: &Value) -> Option<Value> {
     for (segment, here) in calls(shell(data), &cwd(data)) {
-        let Some(call) = bd_call(&segment) else { continue; };
+        let Some(call) = bd_call(&segment) else {
+            continue;
+        };
         let project = bd_cwd(&call, &here);
         let verb = call.segment.words[call.verb].text.as_str();
         let args = &call.segment.words[call.verb + 1..];
-        if !matches!(verb, "update" | "close" | "reopen" | "create" | "label") { continue; }
+        if !matches!(verb, "update" | "close" | "reopen" | "create" | "label") {
+            continue;
+        }
         let values = |flag: &str| -> Vec<&str> {
-            args.iter().enumerate().filter_map(|(at, word)| {
-                if word.text == flag { args.get(at + 1).map(|w| w.text.as_str()) }
-                else { word.text.strip_prefix(&format!("{flag}=")) }
-            }).collect()
+            args.iter()
+                .enumerate()
+                .filter_map(|(at, word)| {
+                    if word.text == flag {
+                        args.get(at + 1).map(|w| w.text.as_str())
+                    } else {
+                        word.text.strip_prefix(&format!("{flag}="))
+                    }
+                })
+                .collect()
         };
-        let cancellation = ["--add-label", "--remove-label", "--labels", "-l", "--status", "-s"].iter()
-            .flat_map(|flag| values(flag)).any(|value| value.split(',').any(|tag| tag == "cancelled"))
-            || (verb == "label" && args.first().is_some_and(|w| matches!(w.text.as_str(), "add" | "remove" | "set"))
-                && args.iter().skip(1).any(|w| w.text.split(',').any(|tag| tag == "cancelled")));
+        let cancellation = [
+            "--add-label",
+            "--remove-label",
+            "--labels",
+            "-l",
+            "--status",
+            "-s",
+        ]
+        .iter()
+        .flat_map(|flag| values(flag))
+        .any(|value| value.split(',').any(|tag| tag == "cancelled"))
+            || (verb == "label"
+                && args
+                    .first()
+                    .is_some_and(|w| matches!(w.text.as_str(), "add" | "remove" | "set"))
+                && args
+                    .iter()
+                    .skip(1)
+                    .any(|w| w.text.split(',').any(|tag| tag == "cancelled")));
         if cancellation {
             return deny("Cancel scope with atelier tool board/job cancel ID --reason TEXT; cancellation needs ownership and a recorded reason");
         }
         // Manager signoff is a human action, never agent-authored metadata.
-        if values("--set-metadata").iter().any(|value| ["manager_approved_tree", "checks_passed", "review_passed", "landed_commit"].iter().any(|key| value.starts_with(&format!("{key}=")))) {
+        if values("--set-metadata").iter().any(|value| {
+            [
+                "manager_approved_tree",
+                "checks_passed",
+                "review_passed",
+                "landed_commit",
+            ]
+            .iter()
+            .any(|key| value.starts_with(&format!("{key}=")))
+        }) {
             return deny("Completion and approval evidence must be recorded by the matching native workflow tool or the manager's board action");
         }
-        let status = flag_value(args, "--status").or_else(|| flag_value(args, "-s"))
-            .or_else(|| match verb { "close" => Some("closed".into()), "reopen" => Some("open".into()), _ => None });
-        let Some(status) = status else { continue; };
-        if status == "blocked" && !["--append-notes", "--notes", "--reason"].iter()
-            .flat_map(|flag| values(flag)).any(|value| !value.trim().is_empty()) {
+        let status = flag_value(args, "--status")
+            .or_else(|| flag_value(args, "-s"))
+            .or_else(|| match verb {
+                "close" => Some("closed".into()),
+                "reopen" => Some("open".into()),
+                _ => None,
+            });
+        let Some(status) = status else {
+            continue;
+        };
+        if status == "blocked"
+            && !["--append-notes", "--notes", "--reason"]
+                .iter()
+                .flat_map(|flag| values(flag))
+                .any(|value| !value.trim().is_empty())
+        {
             return deny("Record the concrete blocker and required input with --append-notes when marking work blocked");
         }
         let ids = subject_ids(args);
-        if ids.is_empty() { return deny("A status change must name its cards explicitly"); }
+        if ids.is_empty() {
+            return deny("A status change must name its cards explicitly");
+        }
         for id in ids {
             match crate::board_tools::card(&project, &id) {
-                Ok(row) if row["assignee"].as_str().is_some_and(|owner| !owner.is_empty() && owner != session(data)) => {
+                Ok(row)
+                    if row["assignee"]
+                        .as_str()
+                        .is_some_and(|owner| !owner.is_empty() && owner != session(data)) =>
+                {
                     return deny(format!("{id} belongs to another actor; its state cannot be changed by this session"));
                 }
                 Err(error) => return deny(error),
@@ -1840,8 +1961,12 @@ fn touch(data: &Value) {
                 // child so a session holding several cards does not lose all leases.
                 for id in &ids {
                     let _ = Command::new(&path)
-                        .arg("--actor").arg(&who).arg("heartbeat").arg(id)
-                        .current_dir(&project).status();
+                        .arg("--actor")
+                        .arg(&who)
+                        .arg("heartbeat")
+                        .arg(id)
+                        .current_dir(&project)
+                        .status();
                 }
             }
         }
@@ -1879,7 +2004,13 @@ fn prime(data: &Value) -> Option<Value> {
 fn stop_gate(data: &Value) -> Option<Value> {
     let project = root(data);
     let who = session(data);
-    if !project.join(".beads").exists() && !crate::board_landing::common_root(&project).join(".beads").exists() { return None; }
+    if !project.join(".beads").exists()
+        && !crate::board_landing::common_root(&project)
+            .join(".beads")
+            .exists()
+    {
+        return None;
+    }
     let cards = bd(
         &project,
         &[
@@ -1899,7 +2030,9 @@ fn stop_gate(data: &Value) -> Option<Value> {
             eprintln!("Board remains unavailable after a blocked stop. Report the board outage as a blocker; completion has not been verified.");
             return None;
         }
-        return Some(json!({"decision":"block","reason":"Cannot read owned work from Beads; retry board access. If it remains unavailable, report that outage as the concrete blocker, not completion."}));
+        return Some(
+            json!({"decision":"block","reason":"Cannot read owned work from Beads; retry board access. If it remains unavailable, report that outage as the concrete blocker, not completion."}),
+        );
     };
     if cards.is_empty() {
         return None;
@@ -1937,8 +2070,18 @@ mod tests {
 
     #[test]
     fn native_machinery_nested_repository_uses_its_own_worktree_job() {
-        assert_eq!(worktree_issue(Path::new("/repo/worktrees/bw-outer/tests/repo/worktrees/ld-job/src")), Some("ld-job".into()));
-        assert_eq!(worktree_issue(Path::new("/repo/worktrees/bw-outer/tests/repo/.worktrees/bd-ld-job/src")), Some("ld-job".into()));
+        assert_eq!(
+            worktree_issue(Path::new(
+                "/repo/worktrees/bw-outer/tests/repo/worktrees/ld-job/src"
+            )),
+            Some("ld-job".into())
+        );
+        assert_eq!(
+            worktree_issue(Path::new(
+                "/repo/worktrees/bw-outer/tests/repo/.worktrees/bd-ld-job/src"
+            )),
+            Some("ld-job".into())
+        );
     }
 
     #[test]
@@ -1955,12 +2098,33 @@ mod tests {
 
     #[test]
     fn native_machinery_status_filters_are_reads_and_cancellation_is_explicit() {
-        for command in ["bd list --status open --limit 0 --json", "bd ready --json", "bd search cancelled", "bd create --title cancelled", "bd update x-1 --append-notes cancelled", "bd create --title checks_passed=true"] {
-            assert!(status_gate(&json!({"tool_input":{"command":command}})).is_none(), "{command}");
+        for command in [
+            "bd list --status open --limit 0 --json",
+            "bd ready --json",
+            "bd search cancelled",
+            "bd create --title cancelled",
+            "bd update x-1 --append-notes cancelled",
+            "bd create --title checks_passed=true",
+        ] {
+            assert!(
+                status_gate(&json!({"tool_input":{"command":command}})).is_none(),
+                "{command}"
+            );
         }
-        assert!(status_gate(&json!({"tool_input":{"command":"bd update x-1 --status blocked"}})).is_some());
-        for command in ["bd update x-1 --add-label cancelled", "bd update x-1 --remove-label=cancelled", "bd label add x-1 cancelled", "bd update x-1 --labels other,cancelled"] {
-            assert!(status_gate(&json!({"tool_input":{"command":command}})).is_some(), "{command}");
+        assert!(
+            status_gate(&json!({"tool_input":{"command":"bd update x-1 --status blocked"}}))
+                .is_some()
+        );
+        for command in [
+            "bd update x-1 --add-label cancelled",
+            "bd update x-1 --remove-label=cancelled",
+            "bd label add x-1 cancelled",
+            "bd update x-1 --labels other,cancelled",
+        ] {
+            assert!(
+                status_gate(&json!({"tool_input":{"command":command}})).is_some(),
+                "{command}"
+            );
         }
     }
 
@@ -2100,13 +2264,22 @@ mod tests {
             let call = bd_call(&segments[0]).unwrap();
             subject_id(&segments[0].words[call.verb + 1..])
         };
-        assert_eq!(subject("bd update --status closed bw-1").as_deref(), Some("bw-1"));
-        assert_eq!(subject("bd update bw-1 --status closed").as_deref(), Some("bw-1"));
+        assert_eq!(
+            subject("bd update --status closed bw-1").as_deref(),
+            Some("bw-1")
+        );
+        assert_eq!(
+            subject("bd update bw-1 --status closed").as_deref(),
+            Some("bw-1")
+        );
         assert_eq!(
             subject("bd close --reason 'done here' bw-1").as_deref(),
             Some("bw-1")
         );
-        assert_eq!(subject("bd update --status=closed bw-1").as_deref(), Some("bw-1"));
+        assert_eq!(
+            subject("bd update --status=closed bw-1").as_deref(),
+            Some("bw-1")
+        );
     }
 
     /// The escape hatch has to be readable off the command a gate is judging,
@@ -2122,8 +2295,11 @@ mod tests {
             Some("no way to land")
         );
         assert_eq!(
-            leading_assignment("true && ATELIER_BYPASS=stuck rm notes.txt", "ATELIER_BYPASS")
-                .as_deref(),
+            leading_assignment(
+                "true && ATELIER_BYPASS=stuck rm notes.txt",
+                "ATELIER_BYPASS"
+            )
+            .as_deref(),
             Some("stuck")
         );
         for command in [
@@ -2209,7 +2385,9 @@ mod tests {
         assert!(!isolating("git worktree add worktrees/bw-1 -b other"));
         assert!(!isolating("git worktree add worktrees/sneaky -b bw-1"));
         assert!(!isolating("git worktree remove worktrees/bw-1"));
-        assert!(!isolating("git worktree add /elsewhere/worktrees/bw-1 -b bw-1"));
+        assert!(!isolating(
+            "git worktree add /elsewhere/worktrees/bw-1 -b bw-1"
+        ));
     }
 
     /// The documented opening is three commands on one line, and the gate runs
@@ -2366,7 +2544,10 @@ mod tests {
     #[test]
     fn native_machinery_cannot_impersonate_another_actor() {
         let data = json!({"tool_name":"Bash", "session_id":"test", "tool_input":{"command":"bd --actor somebody update bw-1 --claim"}});
-        assert_eq!(actor(&data).unwrap()["hookSpecificOutput"]["permissionDecision"], "deny");
+        assert_eq!(
+            actor(&data).unwrap()["hookSpecificOutput"]["permissionDecision"],
+            "deny"
+        );
     }
 
     #[test]
@@ -2409,7 +2590,10 @@ mod tests {
         assert!(!descends("bw-xy", "bw-x"));
         assert!(!descends("bw-x1", "bw-x"));
         assert!(!descends("bw-y.1", "bw-x"));
-        assert!(!descends("bw-x", "bw-x.1"), "a parent is not its child's work");
+        assert!(
+            !descends("bw-x", "bw-x.1"),
+            "a parent is not its child's work"
+        );
 
         // The claim of a child, made in the copy cut for its job, is a claim
         // made in its own isolated worktree.
@@ -2433,9 +2617,7 @@ mod tests {
     /// not the gate's business (`docs/hook-friction-2.md` §11, §15, bw-oamr).
     #[test]
     fn native_machinery_a_board_only_write_needs_no_worktree() {
-        let from_main = |command: &str| {
-            json!({"tool_name":"Bash", "cwd":"/repo", "tool_input":{"command": command}})
-        };
+        let from_main = |command: &str| json!({"tool_name":"Bash", "cwd":"/repo", "tool_input":{"command": command}});
         for board_only in [
             "bd update bw-x --status manager_review",
             "bd update bw-x --append-notes=the refusal cost a round trip",
@@ -2516,7 +2698,9 @@ mod tests {
         assert!(!tidying("git branch -D bw-open"));
         assert!(!tidying("git branch -D bw-landed bw-open"));
         assert!(!tidying("git worktree remove worktrees/bw-open"));
-        assert!(!tidying("git worktree add worktrees/bw-landed -b bw-landed"));
+        assert!(!tidying(
+            "git worktree add worktrees/bw-landed -b bw-landed"
+        ));
         assert!(!tidying("git worktree prune"));
         assert!(!tidying("git branch --list"));
         assert!(!tidying("git branch bw-new"));
@@ -2571,13 +2755,17 @@ mod tests {
              card"
         );
         assert!(opening("git worktree add worktrees/bw-p61.17 -b bw-p61.17"));
-        assert!(opening("git -C . worktree add worktrees/bw-p61.17 bw-p61.17"));
+        assert!(opening(
+            "git -C . worktree add worktrees/bw-p61.17 bw-p61.17"
+        ));
 
         // A different branch at the card's path is still a repository change,
         // and so is the card's path built for somebody else's card.
         assert!(!opening("git worktree add worktrees/bw-p61.17 ours"));
         assert!(!opening("git worktree add worktrees/bw-p61.17 -b bw-other"));
-        assert!(!opening("git worktree add worktrees/bw-p61.17 --detach HEAD"));
+        assert!(!opening(
+            "git worktree add worktrees/bw-p61.17 --detach HEAD"
+        ));
         assert!(!opening("git worktree add scratch/bw-p61.17 bw-p61.17"));
     }
 
@@ -2600,8 +2788,14 @@ mod tests {
         // A name that merely begins with the same letters is still a path in
         // the repository, and everything else is unchanged.
         assert_eq!(path_from(repo, "~notme/x"), PathBuf::from("/repo/~notme/x"));
-        assert_eq!(path_from(repo, "$HOMEWORK/x"), PathBuf::from("/repo/$HOMEWORK/x"));
-        assert_eq!(path_from(repo, "src/lib.rs"), PathBuf::from("/repo/src/lib.rs"));
+        assert_eq!(
+            path_from(repo, "$HOMEWORK/x"),
+            PathBuf::from("/repo/$HOMEWORK/x")
+        );
+        assert_eq!(
+            path_from(repo, "src/lib.rs"),
+            PathBuf::from("/repo/src/lib.rs")
+        );
         assert_eq!(path_from(repo, "/tmp/x"), PathBuf::from("/tmp/x"));
 
         // And the refusal does not claim a home path was resolved against the
@@ -2635,7 +2829,11 @@ mod tests {
         git(&["init", "-q", "-b", "ours"]);
         git(&["config", "user.email", "t@t"]);
         git(&["config", "user.name", "t"]);
-        std::fs::write(repo.join(".gitignore"), "node_modules\ntests/.e2e-run-*\nkept\n").unwrap();
+        std::fs::write(
+            repo.join(".gitignore"),
+            "node_modules\ntests/.e2e-run-*\nkept\n",
+        )
+        .unwrap();
         std::fs::create_dir(repo.join("tests")).unwrap();
         std::fs::write(repo.join("tests/a.spec.ts"), "case").unwrap();
         // A path git ignores but has been made to carry anyway is still its.
@@ -2647,7 +2845,10 @@ mod tests {
         assert!(ignored_residue(&repo, &repo.join("tests/.e2e-run-bw-1")));
         assert!(ignored_residue(&repo, &repo.join("node_modules")));
         assert!(!ignored_residue(&repo, &repo.join("tests/a.spec.ts")));
-        assert!(!ignored_residue(&repo, &repo.join("kept")), "tracked, however ignored");
+        assert!(
+            !ignored_residue(&repo, &repo.join("kept")),
+            "tracked, however ignored"
+        );
 
         // A borrowed `node_modules` is a link that lives in this worktree; the
         // repository it points into is not the one being written.
@@ -2715,7 +2916,10 @@ mod tests {
             "tool_input":{"path": repo.path().join("src/lib.rs")}});
         let refusal = workflow(&edit).expect("a denial");
         assert_eq!(refusal["hookSpecificOutput"]["permissionDecision"], "deny");
-        assert_eq!(refusal["decision"], "block", "Goose reads only this: {refusal}");
+        assert_eq!(
+            refusal["decision"], "block",
+            "Goose reads only this: {refusal}"
+        );
 
         let shell = json!({"tool_name":"developer__shell", "working_dir": repo.path(),
             "tool_input":{"command":"echo hi > notes.txt"}});
@@ -2757,13 +2961,26 @@ mod tests {
 
         let allowed = pretool("allow", "fine", None);
         assert_eq!(allowed["hookSpecificOutput"]["permissionDecision"], "allow");
-        assert!(allowed.get("decision").is_none(), "an allowed call must not block: {allowed}");
+        assert!(
+            allowed.get("decision").is_none(),
+            "an allowed call must not block: {allowed}"
+        );
 
         // A rewrite is a permission, not a refusal: board-actor rewrites `bd`
         // rather than refusing it, and Goose must not read that as a block.
-        let rewritten = pretool("allow", "renamed", Some(json!({"command":"bd --actor s-1 ready"})));
-        assert_eq!(rewritten["hookSpecificOutput"]["updatedInput"]["command"], "bd --actor s-1 ready");
-        assert!(rewritten.get("decision").is_none(), "a rewrite must not block: {rewritten}");
+        let rewritten = pretool(
+            "allow",
+            "renamed",
+            Some(json!({"command":"bd --actor s-1 ready"})),
+        );
+        assert_eq!(
+            rewritten["hookSpecificOutput"]["updatedInput"]["command"],
+            "bd --actor s-1 ready"
+        );
+        assert!(
+            rewritten.get("decision").is_none(),
+            "a rewrite must not block: {rewritten}"
+        );
     }
 
     /// A repository change with no owned card is refused; a write with no
@@ -2786,7 +3003,10 @@ mod tests {
         let outside = tempfile::tempdir().unwrap();
         let scratch = json!({"tool_name":"Edit", "cwd": outside.path(),
             "tool_input":{"file_path": outside.path().join("notes.txt")}});
-        assert!(workflow(&scratch).is_none(), "a scratch file is not a change");
+        assert!(
+            workflow(&scratch).is_none(),
+            "a scratch file is not a change"
+        );
 
         for command in [
             "grep -n pattern src/lib.rs 2>/dev/null",
@@ -2908,15 +3128,36 @@ mod tests {
         assert!(!mutation_paths(&data).is_empty());
         let patch = json!({"tool_name":"apply_patch", "cwd":"/main", "tool_input":
             "*** Begin Patch\n*** Update File: /repo/worktrees/job/a.rs\n*** Move to: /repo/worktrees/job/b.rs\n*** Delete File: /other/c.rs\n*** End Patch"});
-        assert_eq!(mutation_paths(&patch), vec![PathBuf::from("/repo/worktrees/job/a.rs"),PathBuf::from("/repo/worktrees/job/b.rs"),PathBuf::from("/other/c.rs")]);
-        assert_ne!(session(&data), session(&json!({"session_id":"abcdefgh-two"})));
+        assert_eq!(
+            mutation_paths(&patch),
+            vec![
+                PathBuf::from("/repo/worktrees/job/a.rs"),
+                PathBuf::from("/repo/worktrees/job/b.rs"),
+                PathBuf::from("/other/c.rs")
+            ]
+        );
+        assert_ne!(
+            session(&data),
+            session(&json!({"session_id":"abcdefgh-two"}))
+        );
     }
 
     #[test]
     fn descriptor_duplication_names_no_repository_file() {
-        for line in ["/tmp/run > /tmp/out 2>&1", "/tmp/run 7>&2", "/tmp/run &>> /tmp/out"] {
-            let data = json!({"tool_name":"exec_command","tool_input":{"cmd":line,"workdir":"/repo"}});
-            assert!(mutation_paths(&data).iter().all(|p| !p.starts_with("/repo")), "{line}: {:?}", mutation_paths(&data));
+        for line in [
+            "/tmp/run > /tmp/out 2>&1",
+            "/tmp/run 7>&2",
+            "/tmp/run &>> /tmp/out",
+        ] {
+            let data =
+                json!({"tool_name":"exec_command","tool_input":{"cmd":line,"workdir":"/repo"}});
+            assert!(
+                mutation_paths(&data)
+                    .iter()
+                    .all(|p| !p.starts_with("/repo")),
+                "{line}: {:?}",
+                mutation_paths(&data)
+            );
         }
     }
 
@@ -2924,10 +3165,19 @@ mod tests {
     fn all_status_operands_are_checked_and_native_tools_keep_the_actor() {
         let segments = shell_segments("bd close bw-a bw-b --reason 'work delivered'");
         let call = bd_call(&segments[0]).unwrap();
-        assert_eq!(subject_ids(&call.segment.words[call.verb + 1..]), vec!["bw-a", "bw-b"]);
+        assert_eq!(
+            subject_ids(&call.segment.words[call.verb + 1..]),
+            vec!["bw-a", "bw-b"]
+        );
         let event = json!({"tool_name":"exec_command","session_id":"test","tool_input":{"cmd":"cd /repo/worktrees/job && atelier tool board/land bw-a","workdir":"/repo"}});
         let update = actor(&event).unwrap();
-        assert!(update["hookSpecificOutput"]["updatedInput"]["cmd"].as_str().unwrap().contains("BEADS_ACTOR=s-test atelier"));
-        assert_eq!(update["hookSpecificOutput"]["updatedInput"]["workdir"], "/repo");
+        assert!(update["hookSpecificOutput"]["updatedInput"]["cmd"]
+            .as_str()
+            .unwrap()
+            .contains("BEADS_ACTOR=s-test atelier"));
+        assert_eq!(
+            update["hookSpecificOutput"]["updatedInput"]["workdir"],
+            "/repo"
+        );
     }
 }

@@ -954,7 +954,25 @@ fn index_session(
     };
     let kind_name = kind.map(Kind::name).unwrap_or("none");
     let same_kind = known.is_some_and(|known| known.kind == kind_name);
-    let words_current = same_kind && known.is_some_and(|known| known.mark == mark);
+    // A record's mark may carry, after `@`, where the last pass stopped
+    // reading; the file itself is unchanged when the part before it is.
+    let known_stamp = known.map(|known| known.mark.split('@').next().unwrap_or_default());
+    let mut words_current = same_kind && known_stamp == Some(mark.as_str());
+    let mut mark = mark;
+    // A Claude record is read whole, since a conversation is put in order from
+    // the file entire. One being written to right now would be read whole again
+    // every pass for as long as it runs, so a record already indexed waits
+    // until it has been quiet a minute; its old words stand meanwhile
+    // (bw-69sa.3).
+    if !words_current
+        && same_kind
+        && kind == Some(Kind::Record)
+        && session.brand != "codex"
+        && record.is_some_and(|path| still_being_written(path, RECORD_SETTLES))
+    {
+        words_current = true;
+        mark = known.map(|known| known.mark.clone()).unwrap_or_default();
+    }
     let title_current = known.is_some_and(|known| known.title == session.title);
     if words_current && title_current {
         return Ok(None);
@@ -1016,13 +1034,27 @@ fn index_session(
                 }
             }
             Some(Kind::Record) => {
-                // A record is read whole: a changed file may have been
-                // rewritten as easily as appended to.
-                words.reset();
                 let path = record.expect("a record kind has its path");
                 let events = if session.brand == "codex" {
-                    rollout_events(path)
+                    // A rollout is only ever appended to, so one that grew is
+                    // read from where the last pass stopped. One that shrank
+                    // was rewritten and is read whole (bw-69sa.3).
+                    let resume = same_kind
+                        .then(|| known.and_then(|known| read_until(&known.mark)))
+                        .flatten()
+                        .filter(|(offset, _)| {
+                            fs::metadata(path).is_ok_and(|meta| meta.len() >= *offset)
+                        });
+                    if resume.is_none() {
+                        words.reset();
+                    }
+                    let (offset, line) = resume.unwrap_or((0, 0));
+                    let (events, offset, line) = rollout_events(path, offset, line);
+                    mark = format!("{mark}@{offset}:{line}");
+                    events
                 } else {
+                    // A Claude record is put in order from the whole file.
+                    words.reset();
                     super::claude::history::searchable_events(path)
                 };
                 for event in &events {
@@ -1043,6 +1075,25 @@ fn index_session(
         .map_err(text)?;
     transaction.commit().map_err(text)?;
     Ok(read)
+}
+
+/// How long a record already indexed must be left alone before it is read
+/// whole again.
+const RECORD_SETTLES: Duration = Duration::from_secs(60);
+
+fn still_being_written(path: &Path, settles: Duration) -> bool {
+    fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|quiet| quiet < settles)
+}
+
+/// Where the last pass stopped in a rollout: its byte offset and line number.
+fn read_until(mark: &str) -> Option<(u64, usize)> {
+    let (_, until) = mark.split_once('@')?;
+    let (offset, line) = until.split_once(':')?;
+    Some((offset.parse().ok()?, line.parse().ok()?))
 }
 
 /// A file's size and modification time: when neither moved, nothing in it did.
@@ -1353,14 +1404,34 @@ fn walk_rollouts(directory: &Path, found: &mut HashMap<String, PathBuf>) {
 /// Only `response_item` rows: the user's words are written twice, once there
 /// and once as an `event_msg`, and the rows that are neither are reasoning,
 /// token counts and tool output.
-fn rollout_events(path: &Path) -> Vec<Value> {
-    let Ok(file) = fs::File::open(path) else {
-        return Vec::new();
-    };
+/// The words in a rollout from byte `offset`, which begins line `line`.
+///
+/// Only whole lines are read: one still being written is left for the next
+/// pass, which starts at the returned offset and line.
+fn rollout_events(path: &Path, offset: u64, line: usize) -> (Vec<Value>, u64, usize) {
+    use std::io::{Seek, SeekFrom};
     let mut events = Vec::new();
-    for (number, line) in BufReader::new(file).lines().enumerate() {
-        let Ok(line) = line else {
-            break;
+    let Ok(mut file) = fs::File::open(path) else {
+        return (events, offset, line);
+    };
+    if file.seek(SeekFrom::Start(offset)).is_err() {
+        return (events, offset, line);
+    }
+    let mut reader = BufReader::new(file);
+    let (mut offset, mut number) = (offset, line);
+    let mut bytes = Vec::new();
+    loop {
+        bytes.clear();
+        match reader.read_until(b'\n', &mut bytes) {
+            Ok(read) if read > 0 && bytes.ends_with(b"\n") => {
+                offset += read as u64;
+                number += 1;
+            }
+            _ => break,
+        }
+        let number = number - 1;
+        let Ok(line) = std::str::from_utf8(&bytes) else {
+            continue;
         };
         if !line.contains("\"response_item\"") {
             continue;
@@ -1420,7 +1491,7 @@ fn rollout_events(path: &Path) -> Vec<Value> {
             _ => {}
         }
     }
-    events
+    (events, offset, number)
 }
 
 #[cfg(test)]
@@ -1602,6 +1673,66 @@ mod tests {
 
         // Nothing moved, so nothing is read again.
         assert_eq!(index.refresh().unwrap(), Refreshed::default());
+
+        // A rollout that grew is read from where the last pass stopped: the
+        // line already read is changed in place and is not read again, the new
+        // whole line is, and a line still being written waits (bw-69sa.3).
+        let rollout_path = codex.join(format!("rollout-2026-09-01T11-00-00-{CODEX_CHAT}.jsonl"));
+        let old = fs::read_to_string(&rollout_path).unwrap();
+        let added = json!({"timestamp":"2026-09-01T11:00:05.000Z","type":"response_item","payload":{"type":"message","role":"assistant",
+            "content":[{"type":"output_text","text":"the apricot flag is missing"}]}});
+        let partial = json!({"timestamp":"2026-09-01T11:00:06.000Z","type":"response_item","payload":{"type":"message","role":"user",
+            "content":[{"type":"input_text","text":"what about gooseberry"}]}});
+        fs::write(
+            &rollout_path,
+            old.replace("tangerine", "clementin")
+                + &added.to_string()
+                + "\n"
+                + &partial.to_string(),
+        )
+        .unwrap();
+        index.refresh().unwrap();
+        assert_eq!(
+            found(&index, "apricot"),
+            [("codex-row".to_string(), "assistant".to_string())]
+        );
+        assert_eq!(found(&index, "tangerine").len(), 1);
+        assert!(found(&index, "clementin").is_empty());
+        assert!(found(&index, "gooseberry").is_empty());
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(&rollout_path)
+            .unwrap();
+        std::io::Write::write_all(&mut file, b"\n").unwrap();
+        drop(file);
+        index.refresh().unwrap();
+        assert_eq!(
+            found(&index, "gooseberry"),
+            [("codex-row".to_string(), "user".to_string())]
+        );
+
+        // A Claude record being written right now keeps its old words until it
+        // has been quiet a while; then it is read whole again.
+        let record = claude.join(format!("{CLAUDE_CHAT}.jsonl"));
+        let later = json!({"type":"user","uuid":"u2","parentUuid":"a1","sessionId":CLAUDE_CHAT,
+            "timestamp":"2026-09-01T10:01:00.000Z","cwd":"/tmp/project",
+            "message":{"role":"user","content":"and the saffron one"}});
+        let mut file = fs::OpenOptions::new().append(true).open(&record).unwrap();
+        std::io::Write::write_all(&mut file, (later.to_string() + "\n").as_bytes()).unwrap();
+        drop(file);
+        assert_eq!(index.refresh().unwrap(), Refreshed::default());
+        assert!(found(&index, "saffron").is_empty());
+        fs::File::options()
+            .write(true)
+            .open(&record)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - RECORD_SETTLES * 2)
+            .unwrap();
+        assert_eq!(index.refresh().unwrap().from_records, 1);
+        assert_eq!(
+            found(&index, "saffron"),
+            [("claude-row".to_string(), "user".to_string())]
+        );
     }
 
     /// A stored chat's words arrive a few characters at a time and across

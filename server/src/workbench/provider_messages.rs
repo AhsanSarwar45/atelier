@@ -46,7 +46,11 @@ pub fn in_plain_words(code: i32, message: &str, data: Option<&Value>) -> String 
         return "The provider could not find something this chat pointed it at.".into();
     }
     let said = message.trim();
-    match data.and_then(Value::as_str).map(str::trim).filter(|more| !more.is_empty()) {
+    match data
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|more| !more.is_empty())
+    {
         Some(more) if said.is_empty() => more.into(),
         Some(more) if !more.contains(said) => format!("{said}: {more}"),
         Some(more) => more.into(),
@@ -133,8 +137,17 @@ mod tests {
         let source = include_str!("provider_messages.rs");
         let body = source.split("#[cfg(test)]").next().unwrap().to_lowercase();
         for word in [
-            "claude", "codex", "anthropic", "openai", "gemini", "goose", "copilot",
-            "you've hit", "try again at", "rate_limit_info", "resetsat",
+            "claude",
+            "codex",
+            "anthropic",
+            "openai",
+            "gemini",
+            "goose",
+            "copilot",
+            "you've hit",
+            "try again at",
+            "rate_limit_info",
+            "resetsat",
         ] {
             assert!(!body.contains(word), "the neutral core says `{word}`");
         }

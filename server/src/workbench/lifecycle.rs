@@ -100,9 +100,8 @@ pub fn abandoned_interactions(
 ) -> Vec<Value> {
     let mut events = Vec::new();
     events.extend(
-        asks.into_iter().map(
-            |ask_id| json!({"type":"ask.resolved","askId":ask_id,"chosen":NOBODY_ANSWERED}),
-        ),
+        asks.into_iter()
+            .map(|ask_id| json!({"type":"ask.resolved","askId":ask_id,"chosen":NOBODY_ANSWERED})),
     );
     events.extend(questions.into_iter().map(
         |request_id| json!({"type":"question.resolved","requestId":request_id,"answers":null}),
