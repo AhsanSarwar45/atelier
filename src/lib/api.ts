@@ -26,6 +26,26 @@ export interface ProjectManifest {
   verification: { commands: { name: string; command: string; paths?: string[] }[] };
   review: { external_review: 'agent_decides' | 'always' | 'never' };
   cross_project: { delivery_projects: string[] };
+  /** What the project's chats are called (bw-mv45). Absent means the app's own rule. */
+  chat_name?: ChatNameSettings;
+}
+
+export type ChatNameSource = 'worktree' | 'branch' | 'path';
+
+/** One piece of a chat's name, in the order the manager arranged them. */
+export type ChatNamePart =
+  | { kind: 'title' }
+  | { kind: 'text'; text: string }
+  | { kind: 'extract'; source: ChatNameSource; pattern: string };
+
+export interface ChatNameSettings {
+  parts: ChatNamePart[];
+}
+
+/** What a draft template would call a project's recent chats. */
+export interface ChatNamePreview {
+  problems: { index: number; message: string }[];
+  chats: { sessionId: string; now: string; then: string; namedByOwner: boolean }[];
 }
 
 export interface ProjectProbe {
@@ -411,6 +431,11 @@ export const projects = {
   updateSettings: (id: string, manifest: ProjectManifest, instructions = '') =>
     fetchApi<ProjectSettingsAnswer>(`/api/projects/${id}/settings`, {
       method: 'PATCH', body: JSON.stringify({ ...manifest, instructions }),
+    }),
+
+  chatNamePreview: (projectId: string, chatName: ChatNameSettings) =>
+    fetchApi<ChatNamePreview>('/api/workbench/chat-name/preview', {
+      method: 'POST', body: JSON.stringify({ projectId, chatName }),
     }),
 
   moveSettings: (id: string, storage: ManifestStorage) =>

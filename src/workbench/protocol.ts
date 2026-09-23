@@ -1482,6 +1482,12 @@ export interface SessionSummary {
   effort?: string | null;
   collaborationMode?: string | null;
   title: string | null;
+  /**
+   * What to call it, settled by the server's one rule: the owner's own name,
+   * else the project's chat name template, else the title or folder
+   * (server, `chat_name`). Absent from an older server.
+   */
+  name?: string;
   state: SessionState;
   createdAt: string;
   lastActiveAt: string;

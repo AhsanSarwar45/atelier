@@ -268,9 +268,9 @@ export function withLive(
         // name. Keep that over our live session's temporary generated label.
         title: known.title ?? session.title,
         // And keep the server's name for it, unless the stream has just
-        // brought a title for a chat that had none — in which case a title is
-        // what the server would name it by too.
-        name: known.title ?? session.title ?? known.name,
+        // brought a title for a chat that had none — in which case the
+        // stream's own name for it, by the same rule (server, `chat_name`).
+        name: known.title ? known.name : session.title ? (session.name ?? session.title) : known.name,
         // Never backwards: the stream carries what our own driver has seen, and
         // the row may already hold a later time from the tool's index — a chat
         // being worked on in a terminal moves that index and not our driver.
@@ -295,10 +295,11 @@ export function withLive(
       brand: session.brand,
       model: session.model,
       title: session.title,
-      // A stand-in until the restore list arrives with the server's own name
-      // for this chat (server, `notice::naming`). A chat this new usually has
-      // no title at all, and it is the one the reader is looking straight at.
-      name: session.title ?? folderOf(session.cwd) ?? 'Chat',
+      // The server's own name for this chat (server, `chat_name`), or a
+      // stand-in from an older server until the restore list arrives. A chat
+      // this new usually has no title at all, and it is the one the reader is
+      // looking straight at.
+      name: session.name ?? session.title ?? folderOf(session.cwd) ?? 'Chat',
       lastActiveAt: session.lastActiveAt,
       lastSpokeAt: session.lastSpokeAt,
       state: session.state,

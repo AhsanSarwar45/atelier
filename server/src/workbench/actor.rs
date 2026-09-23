@@ -1301,7 +1301,7 @@ mod tests {
             model: None, permission_mode: "on-request".into(), effort: None,
             collaboration_mode: None, profile: None, title: None, state: "dormant".into(),
             origin: "app".into(), created_at: "2026-09-14T00:00:00Z".into(),
-            last_active_at: "2026-09-14T00:00:00Z".into(), last_spoke_at: None, begun_by: None,
+            last_active_at: "2026-09-14T00:00:00Z".into(), last_spoke_at: None, begun_by: None, named_by_owner: false,
         };
         for row in [session("open", "codex"), session("saved", "codex"), session("other", "claude")] {
             store.create_session(&row).unwrap();
@@ -1567,6 +1567,7 @@ mod tests {
                 last_active_at: "now".into(),
                 last_spoke_at: None,
                 begun_by: None,
+                named_by_owner: false,
             })
             .await
             .unwrap();
@@ -1631,6 +1632,7 @@ mod tests {
                 last_active_at: "now".into(),
                 last_spoke_at: None,
                 begun_by: None,
+                named_by_owner: false,
             })
             .await
             .unwrap();
@@ -1664,7 +1666,7 @@ mod tests {
             model: Some("gpt-5".into()), permission_mode: "on-request".into(), effort: Some("high".into()),
             collaboration_mode: Some("default".into()), profile: None, title: Some("Generated title".into()),
             state: "idle".into(), origin: "app".into(), created_at: "now".into(), last_active_at: "now".into(),
-            last_spoke_at: None, begun_by: None,
+            last_spoke_at: None, begun_by: None, named_by_owner: false,
         }).await.unwrap();
         for value in [
             json!({

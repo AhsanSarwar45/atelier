@@ -969,6 +969,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/tool", get(tool))
         .route("/spend", get(spend))
         .route("/usage", get(usage))
+        .route("/chat-name/preview", post(chat_name_preview))
         .route("/memory", get(memory))
         .route("/memory/terminate", post(terminate_memory_process))
         .route("/tokens", get(tokens))
@@ -1084,23 +1085,26 @@ async fn search_chats(
 
 /// Name every chat in an answer that knows a project path and not a directory.
 ///
-/// The one naming rule (`notice::naming`), fed what this particular answer
-/// knows. The search index keeps the project a chat belongs to and not the
-/// directory the chat is working in, so a chat in a worktree is named by its
+/// The one naming rule (`chat_name`), fed what this particular answer knows.
+/// With no title and no template, a chat in a worktree is named by its
 /// project here rather than by the worktree — the same word the rail would use
 /// if the chat sat in the project itself, and in every case a name rather than
 /// the "Untitled chat" this screen used to write for itself (bw-altj.7).
 fn name_the_chats(chats: Option<&mut Vec<Value>>) {
     let Some(chats) = chats else { return };
     for chat in chats {
-        chat["name"] = json!(crate::workbench::notice::naming(
-            chat["title"].as_str(),
-            chat["projectPath"]
-                .as_str()
-                .and_then(crate::workbench::notice::folder_of)
-                .as_deref(),
-            chat["brand"].as_str().unwrap_or_default(),
-        ));
+        let folder = chat["projectPath"]
+            .as_str()
+            .and_then(crate::workbench::notice::folder_of);
+        let name = crate::workbench::chat_name::name_of(&crate::workbench::chat_name::Chat {
+            title: chat["title"].as_str(),
+            named_by_owner: chat["namedByOwner"].as_bool().unwrap_or(false),
+            cwd: chat["cwd"].as_str(),
+            project_path: chat["projectPath"].as_str().unwrap_or_default(),
+            folder: folder.as_deref(),
+            brand: chat["brand"].as_str().unwrap_or_default(),
+        });
+        chat["name"] = json!(name);
     }
 }
 
@@ -1254,16 +1258,13 @@ async fn chats_for_bead(
     Ok(Json(json!(wanted.into_iter().map(|session_id| {
         let row = cached.iter().find(|s|s.id == session_id);
         json!({"sessionId":session_id,"title":row.and_then(|s|s.title.clone()),
-            // Named the one way, from the chat's own directory, which this
-            // answer has in hand (notice::naming, bw-altj.7).
-            "name":row.map(|s|crate::workbench::notice::naming(
-                s.title.as_deref(),
-                crate::workbench::notice::folder_of(&s.cwd).as_deref(),
-                &s.brand,
+            // Named the one way, from the chat's own record, which this
+            // answer has in hand (chat_name, bw-altj.7).
+            "name":row.map(crate::workbench::chat_name::name_session)
             // The board can link a card to a chat this app has no record of.
             // Nothing is known about it, so the rule's own last word names it,
             // rather than a second word invented on the screen that draws it.
-            )).unwrap_or_else(||crate::workbench::notice::naming(None,None,"")),
+            .unwrap_or_else(||crate::workbench::notice::naming(None,None,"")),
             "brand":row.map(|s|s.brand.clone()),"lastActiveAt":row.map(|s|s.last_active_at.clone()),"projectId":row.map(|s|s.project_id.clone())})
     }).collect::<Vec<_>>())))
 }
@@ -1400,10 +1401,14 @@ pub(crate) async fn session_summaries(
                     call: Value::Null,
                     busy_since: None,
                 });
+        let name = crate::workbench::chat_name::name_session(&session);
         let mut value = serde_json::to_value(session).map_err(|error| error.to_string())?;
         let object = value
             .as_object_mut()
             .ok_or_else(|| "session was not an object".to_string())?;
+        // What the rail calls it, by the one rule, so a chat that has just
+        // been titled is not drawn by its bare title for a moment (chat_name).
+        object.insert("name".into(), json!(name));
         object.insert("activity".into(), json!(activity.label));
         // What it is doing, in the words of its own call. Beside the
         // activity rather than inside it: the row draws its own word for
@@ -1417,6 +1422,53 @@ pub(crate) async fn session_summaries(
         values.push(value);
     }
     Ok(values)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChatNamePreviewInput {
+    project_id: String,
+    chat_name: crate::project_manifest::ChatNameSettings,
+}
+
+/// How many of a project's chats the name preview shows.
+const PREVIEWED_CHATS: usize = 6;
+
+/// What a template that has not been saved would call this project's most
+/// recent chats, beside what they are called now, and what is wrong with any
+/// of its parts. The same code names the real rows, so the preview cannot say
+/// one thing and the rail another (bw-mv45).
+async fn chat_name_preview(
+    State(state): State<WorkbenchState>,
+    Json(input): Json<ChatNamePreviewInput>,
+) -> Result<Json<Value>, ApiError> {
+    use crate::workbench::chat_name;
+    let problems = chat_name::problems(&input.chat_name);
+    let sessions = state
+        .database()
+        .list_restore_sessions(Some(input.project_id), false)
+        .await?;
+    let draft = input.chat_name;
+    let chats = tokio::task::spawn_blocking(move || {
+        let template = chat_name::compile(&draft);
+        sessions
+            .iter()
+            .take(PREVIEWED_CHATS)
+            .map(|session| {
+                let folder = folder_of(&session.cwd);
+                let chat = chat_name::Chat::of(session, folder.as_deref());
+                json!({
+                    "sessionId": session.id,
+                    "now": chat_name::name_of(&chat),
+                    "then": chat_name::name_by(template.as_ref(), &chat),
+                    "namedByOwner": session.named_by_owner,
+                })
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(Json(json!({ "problems": problems, "chats": chats })))
 }
 
 #[derive(Deserialize)]
@@ -1438,13 +1490,20 @@ fn folder_of(path: &str) -> Option<String> {
 /// the reader will actually see. One pass rather than one per builder: there
 /// are four places above that make a restore row, and a name missing from any
 /// of them would put "Untitled chat" back on the rail for exactly those chats.
-fn name_the_rows(rows: &mut [Value]) {
+///
+/// A row built from the database carries its project's path; one found only
+/// in a provider's listing is in the project the answer was asked about.
+fn name_the_rows(rows: &mut [Value], project_path: Option<&str>) {
     for row in rows {
-        row["name"] = json!(crate::workbench::notice::naming(
-            row["title"].as_str(),
-            row["folder"].as_str(),
-            row["brand"].as_str().unwrap_or_default(),
-        ));
+        let name = crate::workbench::chat_name::name_of(&crate::workbench::chat_name::Chat {
+            title: row["title"].as_str(),
+            named_by_owner: row["namedByOwner"].as_bool().unwrap_or(false),
+            cwd: row["cwdHint"].as_str(),
+            project_path: row["projectPath"].as_str().or(project_path).unwrap_or_default(),
+            folder: row["folder"].as_str(),
+            brand: row["brand"].as_str().unwrap_or_default(),
+        });
+        row["name"] = json!(name);
     }
 }
 
@@ -1492,7 +1551,8 @@ fn restore_row(
         "title": session.title, "lastActiveAt": session.last_active_at,
         "lastSpokeAt": session.last_spoke_at, "state": session.state, "origin": session.origin,
         "begunBy": session.begun_by,
-        "projectId": session.project_id, "cwdHint": session.cwd, "folder": folder,
+        "projectId": session.project_id, "projectPath": session.project_path,
+        "namedByOwner": session.named_by_owner, "cwdHint": session.cwd, "folder": folder,
         "branch": branch, "beads": beads, "runningElsewhere": held.is_some(), "held": held,
     })
 }
@@ -1888,7 +1948,7 @@ async fn restore(
                 restore_row(session, linked, &lately, &checkouts)
             })
             .collect();
-        name_the_rows(&mut rows);
+        name_the_rows(&mut rows, query.path.as_deref());
         rows.sort_by(|a, b| restore_clock(b).cmp(restore_clock(a)));
         return Ok(Json(rows));
     }
@@ -2082,6 +2142,7 @@ async fn restore(
                     .as_str()
                     .filter(|who| *who == "person" || *who == "agent")
                     .map(str::to_string),
+                named_by_owner: false,
             };
             // The rows above are only the ones this request's own listing
             // drew. A row cached by a request already in flight — the sidebar
@@ -2182,7 +2243,7 @@ async fn restore(
     if !everything {
         rows.retain(|row| row["begunBy"] != "agent");
     }
-    name_the_rows(&mut rows);
+    name_the_rows(&mut rows, query.path.as_deref());
     rows.sort_by(|a, b| restore_clock(b).cmp(restore_clock(a)));
     Ok(Json(rows))
 }
@@ -2548,7 +2609,8 @@ async fn watch(State(state): State<WorkbenchState>) -> Result<Sse<EventStream>, 
                         if update.event.kind==crate::workbench::protocol::EventKind::SessionStarted{
                             if let Ok(Some(session))=state.database().get_session(update.session_id.clone()).await{
                                 let beads=state.database().beads_for_session(update.session_id.clone()).await.unwrap_or_default();
-                                if tx.send(Ok(watch_frame(json!({"kind":"opened","session":{"id":session.id,"brand":session.brand,"externalId":session.external_id,"projectId":session.project_id,"projectPath":session.project_path,"cwd":session.cwd,"model":session.model,"permissionMode":session.permission_mode,"effort":session.effort,"collaborationMode":session.collaboration_mode,"title":session.title,"state":session.state,"origin":session.origin,"createdAt":session.created_at,"lastActiveAt":session.last_active_at,"lastSpokeAt":session.last_spoke_at,"activity":"","activityDetail":"","activityCall":Value::Null,"busySince":Value::Null,"beads":beads}})))).await.is_err(){return}
+                                let name=crate::workbench::chat_name::name_session(&session);
+                                if tx.send(Ok(watch_frame(json!({"kind":"opened","session":{"id":session.id,"brand":session.brand,"externalId":session.external_id,"projectId":session.project_id,"projectPath":session.project_path,"cwd":session.cwd,"model":session.model,"permissionMode":session.permission_mode,"effort":session.effort,"collaborationMode":session.collaboration_mode,"title":session.title,"name":name,"state":session.state,"origin":session.origin,"createdAt":session.created_at,"lastActiveAt":session.last_active_at,"lastSpokeAt":session.last_spoke_at,"activity":"","activityDetail":"","activityCall":Value::Null,"busySince":Value::Null,"beads":beads}})))).await.is_err(){return}
                             }
                         }
                         if tx.send(Ok(watch_frame(json!({"kind":"event","event":update.event})))).await.is_err(){return}
@@ -3129,7 +3191,7 @@ mod tests {
         // The rail's row for the same chat, named the way every restore answer
         // names one.
         let mut listed = vec![restore_row(nameless, Vec::new(), &[], &HashMap::new())];
-        name_the_rows(&mut listed);
+        name_the_rows(&mut listed, None);
 
         assert_eq!(
             row["name"], listed[0]["name"],
@@ -3266,6 +3328,7 @@ mod tests {
             last_active_at: "2026-08-30T00:01:00.000Z".into(),
             last_spoke_at: Some("2026-08-30T00:00:30.000Z".into()),
             begun_by: None,
+            named_by_owner: false,
         }
     }
 

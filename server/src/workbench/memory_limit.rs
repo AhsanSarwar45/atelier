@@ -443,6 +443,7 @@ mod tests {
                 last_active_at: "2026-09-19T00:00:00Z".into(),
                 last_spoke_at: None,
                 begun_by: Some("person".into()),
+                named_by_owner: false,
             }
         }
 

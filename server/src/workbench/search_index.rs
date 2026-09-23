@@ -279,6 +279,10 @@ pub struct ChatMatch {
     pub brand: String,
     pub origin: String,
     pub last_active_at: String,
+    /// Where the chat works, and whether the owner named it by hand: what
+    /// its project's name template needs (workbench::chat_name).
+    pub cwd: String,
+    pub named_by_owner: bool,
     /// How many messages, tool calls and titles in the chat matched.
     pub matches: usize,
     pub snippets: Vec<Snippet>,
@@ -477,7 +481,7 @@ impl SearchIndex {
             }
             let conditions = chat_conditions(&mut args, query, project_ids);
             format!(
-                "SELECT s.id, s.title, s.project_id, s.project_path, s.brand, s.origin, s.last_active_at, 0.0 \
+                "SELECT s.id, s.title, s.project_id, s.project_path, s.brand, s.origin, s.last_active_at, 0.0, s.cwd, s.named_by_owner \
                  FROM chats.session s WHERE 1=1{dates}{conditions} \
                  ORDER BY s.last_active_at DESC LIMIT {} OFFSET {}",
                 bind(&mut args, (limit + 1) as i64),
@@ -508,7 +512,7 @@ impl SearchIndex {
                 Sort::Newest => "s.last_active_at DESC",
             };
             format!(
-                "WITH {} SELECT s.id, s.title, s.project_id, s.project_path, s.brand, s.origin, s.last_active_at, {score} AS score \
+                "WITH {} SELECT s.id, s.title, s.project_id, s.project_path, s.brand, s.origin, s.last_active_at, {score} AS score, s.cwd, s.named_by_owner \
                  FROM g0{joins} JOIN chats.session s ON s.id = g0.session_id \
                  WHERE 1=1{conditions} ORDER BY {order} LIMIT {} OFFSET {}",
                 groups.join(", "),
@@ -530,6 +534,8 @@ impl SearchIndex {
                             brand: row.get(4)?,
                             origin: row.get(5)?,
                             last_active_at: row.get(6)?,
+                            cwd: row.get(8)?,
+                            named_by_owner: row.get::<_, Option<i64>>(9)?.unwrap_or(0) != 0,
                             matches: 0,
                             snippets: Vec::new(),
                         })
@@ -719,6 +725,8 @@ pub struct ChatWords {
     pub project_path: String,
     pub brand: String,
     pub last_active_at: String,
+    pub cwd: String,
+    pub named_by_owner: bool,
     pub said: Vec<Said>,
     /// The offset of the next page, when there is one.
     pub next: Option<usize>,
@@ -754,7 +762,7 @@ impl SearchIndex {
         let chat = connection
             .query_row(
                 "SELECT s.id, COALESCE(s.title, (SELECT d.text FROM doc d WHERE d.session_id = s.id AND d.part = 'title')), \
-                        s.project_id, s.project_path, s.brand, s.last_active_at \
+                        s.project_id, s.project_path, s.brand, s.last_active_at, s.cwd, s.named_by_owner \
                  FROM chats.session s WHERE s.id = ?1",
                 [session_id],
                 |row| {
@@ -765,6 +773,8 @@ impl SearchIndex {
                         project_path: row.get(3)?,
                         brand: row.get(4)?,
                         last_active_at: row.get(5)?,
+                        cwd: row.get(6)?,
+                        named_by_owner: row.get::<_, Option<i64>>(7)?.unwrap_or(0) != 0,
                         said: Vec::new(),
                         next: None,
                     })
@@ -1447,6 +1457,7 @@ mod tests {
             last_active_at: "2026-09-01T00:00:00.000Z".to_string(),
             last_spoke_at: None,
             begun_by: None,
+            named_by_owner: false,
         }
     }
 

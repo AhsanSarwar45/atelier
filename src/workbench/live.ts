@@ -43,6 +43,8 @@ export interface LiveSession {
    */
   cwd: string;
   title: string | null;
+  /** The server's name for it (protocol.ts, SessionSummary.name). */
+  name?: string;
   state: SessionState;
   /** The agent's own words for what it is doing — "Asking about Edit", "Answering". */
   activity: string;
@@ -336,6 +338,7 @@ function fromSummary(
     projectPath: s.projectPath,
     cwd: s.cwd,
     title: s.title,
+    name: s.name,
     state: s.state,
     activity: s.activity,
     activityDetail: s.activityDetail ?? '',

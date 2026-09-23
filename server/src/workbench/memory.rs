@@ -283,12 +283,8 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
             .filter(|session| running_chats.contains(&session.id))
             .map(|session| {
                 // The one naming rule, so a chat is called the same thing here
-                // as on the rail and in the tray (notice::naming, bw-altj.7).
-                let name = crate::workbench::notice::naming(
-                    session.title.as_deref(),
-                    crate::workbench::notice::folder_of(&session.cwd).as_deref(),
-                    &session.brand,
-                );
+                // as on the rail and in the tray (chat_name, bw-altj.7).
+                let name = crate::workbench::chat_name::name_session(&session);
                 (session.id, name)
             })
             .collect()

@@ -227,6 +227,11 @@ pub struct Session {
     /// never a reason to hide a chat — a chat is not put out of sight on a
     /// guess (bw-p61.17).
     pub begun_by: Option<String>,
+    /// Whether the owner named this chat by hand. Such a name is shown as it
+    /// was typed, and the project's name template leaves it alone
+    /// (workbench::chat_name).
+    #[serde(default)]
+    pub named_by_owner: bool,
 }
 
 /// `Some(None)` clears a nullable setting; `None` leaves it untouched.
@@ -240,6 +245,7 @@ pub struct SessionPatch {
     pub effort: Option<Option<String>>,
     pub collaboration_mode: Option<Option<String>>,
     pub profile: Option<Option<String>>,
+    pub named_by_owner: Option<bool>,
 }
 
 /// One match, as the panel draws it: the sentence it fell in, the words that
@@ -499,6 +505,10 @@ impl Store {
         if let Some(mode) = patch.permission_mode {
             sets.push("permission_mode = ?".to_string());
             values.push(SqlValue::Text(mode));
+        }
+        if let Some(named) = patch.named_by_owner {
+            sets.push("named_by_owner = ?".to_string());
+            values.push(SqlValue::Integer(named.into()));
         }
         if let Some(at) = touch_at {
             // Forwards only. A chat's activity clock answers "when did anything
@@ -2667,6 +2677,7 @@ fn session_from_row(row: &Row<'_>) -> rusqlite::Result<Session> {
         last_active_at: row.get("last_active_at")?,
         last_spoke_at: row.get("last_spoke_at")?,
         begun_by: row.get("begun_by")?,
+        named_by_owner: row.get::<_, Option<i64>>("named_by_owner")?.unwrap_or(0) != 0,
     })
 }
 
@@ -2766,6 +2777,37 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
         .any(|name| name == "profile")
     {
         transaction.execute_batch("ALTER TABLE session ADD COLUMN profile TEXT;")?;
+    }
+    // Whether the owner named the chat by hand, so a project's name template
+    // can leave that name alone without reading the chat's events on every
+    // list. Filled once from the same events `explicit_title` reads.
+    if !columns(transaction, "session")?
+        .iter()
+        .any(|name| name == "named_by_owner")
+    {
+        transaction.execute_batch(
+            r#"ALTER TABLE session ADD COLUMN named_by_owner INTEGER NOT NULL DEFAULT 0;
+               UPDATE session SET named_by_owner = 1
+               WHERE EXISTS (
+                 SELECT 1 FROM event
+                 WHERE event.session_id = session.id
+                   AND event.type = 'session.pinned'
+                   AND json_type(event.json, '$.title') = 'text'
+                   AND (
+                     json_extract(event.json, '$.titleSource') = 'user'
+                     OR (
+                       json_type(event.json, '$.titleSource') IS NULL
+                       AND json_type(event.json, '$.acp') IS NULL
+                       AND json_type(event.json, '$.providerEvent') IS NULL
+                       AND json_type(event.json, '$.configOptions') IS NULL
+                       AND json_type(event.json, '$.permissionMode') = 'null'
+                       AND json_type(event.json, '$.model') = 'null'
+                       AND json_type(event.json, '$.effort') = 'null'
+                       AND json_type(event.json, '$.collaborationMode') = 'null'
+                     )
+                   )
+               );"#,
+        )?;
     }
     transaction.execute_batch(
         "CREATE TABLE IF NOT EXISTS held_message (
@@ -3256,6 +3298,7 @@ mod tests {
             last_active_at: at.to_string(),
             last_spoke_at: None,
             begun_by: None,
+            named_by_owner: false,
         }
     }
 
@@ -3289,6 +3332,53 @@ mod tests {
             None,
             "no profile means the directory the server booted with"
         );
+    }
+
+    /// A name the owner typed is known to be theirs without reading the
+    /// chat's events, on a database that had renamed chats before the flag
+    /// existed as well as on a rename made since (bw-mv45).
+    #[test]
+    fn a_chat_named_by_hand_is_known_to_be_the_owners() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        let store = Store::open(&path).unwrap();
+        for id in ["renamed", "titled", "later"] {
+            store
+                .create_session(&session(id, "claude", None, "2026-09-11T00:00:00Z"))
+                .unwrap();
+        }
+        let pinned = |id: &str, source: &str| {
+            format!(
+                r#"{{"type":"session.pinned","sessionId":"{id}","seq":1,"at":"2026-09-11T00:00:00Z","title":"Mine","titleSource":"{source}","permissionMode":null,"model":null,"effort":null,"collaborationMode":null}}"#
+            )
+        };
+        for (id, source) in [("renamed", "user"), ("titled", "agent")] {
+            store
+                .connection
+                .execute(
+                    "INSERT INTO event (session_id, seq, at, type, json) VALUES (?1, 1, '2026-09-11T00:00:00Z', 'session.pinned', ?2)",
+                    params![id, pinned(id, source)],
+                )
+                .unwrap();
+        }
+        store
+            .connection
+            .execute_batch("ALTER TABLE session DROP COLUMN named_by_owner;")
+            .unwrap();
+        drop(store);
+
+        let reopened = Store::open(&path).unwrap();
+        assert!(reopened.get_session("renamed").unwrap().unwrap().named_by_owner);
+        assert!(!reopened.get_session("titled").unwrap().unwrap().named_by_owner);
+
+        reopened
+            .update_session(
+                "later",
+                SessionPatch { named_by_owner: Some(true), ..Default::default() },
+                None,
+            )
+            .unwrap();
+        assert!(reopened.get_session("later").unwrap().unwrap().named_by_owner);
     }
 
     /// What a chat has spent is a running total, and the spend table is a sum.

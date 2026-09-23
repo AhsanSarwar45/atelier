@@ -10,6 +10,7 @@ pub mod agent_files;
 pub mod answering;
 pub mod beads_links;
 pub mod browser;
+pub mod chat_name;
 pub mod claude;
 pub mod cli;
 pub mod codex;

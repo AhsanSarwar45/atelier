@@ -281,8 +281,12 @@ pub async fn update_project_settings(
     if !virtual_project && located.manifest.git.completed_work_branch != manifest.git.completed_work_branch && has_linked_worktrees(root.as_ref().unwrap()) {
         return Err(manifest_error("Completed-work branch cannot change while linked worktrees exist".into()));
     }
+    crate::workbench::chat_name::check(&manifest.chat_name).map_err(manifest_error)?;
     project_manifest::write_atomic(&located.path, &manifest).map_err(manifest_error)?;
     project_manifest::write_instructions(&located.path, &instructions).map_err(manifest_error)?;
+    // Every list names its chats by the template just written, not the one
+    // read a moment ago (workbench::chat_name).
+    crate::workbench::chat_name::forget();
     if !virtual_project && located.manifest.project.use_beads != manifest.project.use_beads {
         if let Err(error) = apply_beads_mode(root.as_ref().unwrap(), &manifest) {
             let _ = project_manifest::write_atomic(&located.path, &located.manifest);

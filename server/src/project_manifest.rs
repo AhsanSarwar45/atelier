@@ -30,6 +30,10 @@ pub struct ProjectManifest {
     pub review: ReviewSettings,
     #[serde(default)]
     pub cross_project: CrossProjectSettings,
+    /// What this project's chats are called (workbench::chat_name). Empty
+    /// means the app's own rule.
+    #[serde(default, skip_serializing_if = "ChatNameSettings::is_empty")]
+    pub chat_name: ChatNameSettings,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -92,6 +96,32 @@ pub struct CrossProjectSettings {
     #[serde(default)]
     pub delivery_projects: Vec<String>,
 }
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ChatNameSettings {
+    #[serde(default)]
+    pub parts: Vec<ChatNamePart>,
+}
+
+impl ChatNameSettings {
+    pub fn is_empty(&self) -> bool { self.parts.is_empty() }
+}
+
+/// One piece of a chat's name, in the order the manager arranged them.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ChatNamePart {
+    /// The chat's own title, from its agent.
+    Title,
+    /// Words put in as they are, usually a separator.
+    Text { text: String },
+    /// What a pattern finds in something the chat knows about itself.
+    Extract { source: ChatNameSource, pattern: String },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatNameSource { Worktree, Branch, Path }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -230,6 +260,7 @@ pub fn migrate_legacy(root: &Path, data_dir: &Path) -> Result<Option<PathBuf>, S
         },
         review: ReviewSettings { external_review: agent_decides() },
         cross_project: CrossProjectSettings { delivery_projects: legacy.lands_elsewhere.unwrap_or_default() },
+        chat_name: ChatNameSettings::default(),
     };
     let destination = personal_path(root, data_dir);
     write_atomic(&destination, &manifest)?;
@@ -336,6 +367,7 @@ pub fn infer(root: &Path) -> ProjectManifest {
         beads: BeadsSettings { issue_id_prefix: prefix(&name), work_areas: vec!["interface".into(), "server".into(), "tests".into(), "tooling".into(), "docs".into()] },
         verification: VerificationSettings { commands },
         review: ReviewSettings::default(), cross_project: CrossProjectSettings::default(),
+        chat_name: ChatNameSettings::default(),
     }
 }
 
@@ -360,7 +392,7 @@ pub fn infer_virtual(name: &str) -> ProjectManifest {
         git: GitSettings { completed_work_branch: "main".into(), agents_may_merge_completed_work: false, protected_branches: vec!["main".into()] },
         beads: BeadsSettings { issue_id_prefix: prefix(name), work_areas: vec!["product".into(), "operations".into()] },
         verification: VerificationSettings::default(), review: ReviewSettings::default(),
-        cross_project: CrossProjectSettings::default(),
+        cross_project: CrossProjectSettings::default(), chat_name: ChatNameSettings::default(),
     }
 }
 
@@ -533,6 +565,29 @@ mod tests {
         move_to(&repo, &data, ManifestStorage::Repository).unwrap();
         assert!(!personal_path(&repo, &data).exists());
         assert_eq!(locate(&repo, &data).unwrap().storage, ManifestStorage::Repository);
+    }
+
+    /// A chat name template is written as a list of tables the manager could
+    /// read and edit by hand, and reads back as it was arranged (bw-mv45).
+    /// A manifest without one writes no `[chat_name]` at all.
+    #[test]
+    fn a_chat_name_template_round_trips_through_the_file() {
+        let held = tempdir().unwrap();
+        let path = held.path().join("project.toml");
+        let mut manifest = infer_virtual("Example");
+        write_atomic(&path, &manifest).unwrap();
+        assert!(!fs::read_to_string(&path).unwrap().contains("chat_name"));
+
+        manifest.chat_name.parts = vec![
+            ChatNamePart::Extract { source: ChatNameSource::Worktree, pattern: "bw-[a-z0-9]+".into() },
+            ChatNamePart::Text { text: ": ".into() },
+            ChatNamePart::Title,
+        ];
+        write_atomic(&path, &manifest).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("[[chat_name.parts]]"), "{text}");
+        assert!(text.contains(r#"kind = "extract""#), "{text}");
+        assert_eq!(read(&path).unwrap(), manifest);
     }
 
     /// A move changes where the settings live, not what they say. The

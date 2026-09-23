@@ -1668,6 +1668,7 @@ impl WorkbenchRegistry {
                         session_id.to_string(),
                         crate::workbench::store::SessionPatch {
                             title: Some(Some(title.to_string())),
+                            named_by_owner: Some(true),
                             ..Default::default()
                         },
                         None,
@@ -2092,6 +2093,7 @@ mod tests {
             last_active_at: "2026-09-19T00:00:00Z".into(),
             last_spoke_at: None,
             begun_by: Some("person".into()),
+            named_by_owner: false,
         }
     }
 
@@ -2425,6 +2427,7 @@ mod tests {
             last_active_at: "2026-09-13T00:00:00Z".into(),
             last_spoke_at: None,
             begun_by: Some("person".into()),
+            named_by_owner: false,
         }).await.unwrap();
         for value in [
             json!({"type":"message.started","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:01Z","messageId":"u1","role":"user"}),
@@ -2657,6 +2660,7 @@ mod tests {
                 last_active_at: "2026-08-30T00:00:01Z".into(),
                 last_spoke_at: None,
                 begun_by: None,
+                named_by_owner: false,
             })
             .await
             .unwrap();
@@ -2731,6 +2735,7 @@ mod tests {
             last_active_at: "2026-08-30T00:00:01Z".into(),
             last_spoke_at: None,
             begun_by: None,
+            named_by_owner: false,
         };
         database.create_session(session.clone()).await.unwrap();
         let registry = WorkbenchRegistry::new(
@@ -2795,6 +2800,7 @@ mod tests {
                 last_active_at: "2026-09-04T00:00:00Z".into(),
                 last_spoke_at: None,
                 begun_by: None,
+                named_by_owner: false,
             })
             .await
             .unwrap();
@@ -2865,6 +2871,7 @@ mod tests {
             last_active_at: "2026-09-05T00:00:00Z".into(),
             last_spoke_at: None,
             begun_by: None,
+            named_by_owner: false,
         };
         database
             .create_session(chat("working", "running_tool"))
@@ -2960,6 +2967,7 @@ mod tests {
                 last_active_at: "2026-08-30T00:00:00Z".into(),
                 last_spoke_at: None,
                 begun_by: None,
+                named_by_owner: false,
             })
             .await
             .unwrap();
@@ -3047,6 +3055,7 @@ mod tests {
                 last_active_at: "2026-09-13T00:00:00Z".into(),
                 last_spoke_at: None,
                 begun_by: None,
+                named_by_owner: false,
             })
             .await
             .unwrap();
@@ -3162,6 +3171,7 @@ mod tests {
                 last_active_at: "2026-08-30T00:00:00Z".into(),
                 last_spoke_at: None,
                 begun_by: None,
+                named_by_owner: false,
             })
             .await
             .unwrap();

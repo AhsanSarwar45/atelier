@@ -166,11 +166,17 @@ impl Source for Chats {
                             "title": chat.title,
                             // The one naming rule, fed what the index knows:
                             // the project's folder rather than the chat's own
-                            // (notice::naming, bw-altj.7).
-                            "name": crate::workbench::notice::naming(
-                                chat.title.as_deref(),
-                                crate::workbench::notice::folder_of(&chat.project_path).as_deref(),
-                                &chat.brand,
+                            // (chat_name, bw-altj.7).
+                            "name": crate::workbench::chat_name::name_of(
+                                &crate::workbench::chat_name::Chat {
+                                    title: chat.title.as_deref(),
+                                    named_by_owner: chat.named_by_owner,
+                                    cwd: Some(&chat.cwd),
+                                    project_path: &chat.project_path,
+                                    folder: crate::workbench::notice::folder_of(&chat.project_path)
+                                        .as_deref(),
+                                    brand: &chat.brand,
+                                },
                             ),
                             "projectId": chat.project_id,
                             "projectPath": chat.project_path,

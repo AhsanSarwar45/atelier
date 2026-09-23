@@ -12,11 +12,12 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 
 import { useRouter } from 'next/navigation';
 
-import { Archive, ArchiveRestore, FolderSearch, GitBranch, Loader2, NotebookPen, ScrollText, Settings2, ShieldCheck, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, FolderSearch, GitBranch, Loader2, NotebookPen, ScrollText, Settings2, ShieldCheck, Tag, Trash2 } from 'lucide-react';
 
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
 import { FolderBrowser } from '@/components/folder-browser';
 import { BranchSelect, BranchesPicker } from '@/components/settings/branch-picker';
+import { ChatNameEditor } from '@/components/settings/chat-name-editor';
 import { ExtensionsPanel } from '@/components/settings/extensions-panel';
 import { McpServersPanel } from '@/components/settings/mcp-servers-panel';
 import { pagesFor, type Brand } from '@/components/settings/provider-schema';
@@ -32,7 +33,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import * as api from '@/lib/api';
-import type { ManifestStorage, ProjectManifest } from '@/lib/api';
+import type { ChatNamePart, ManifestStorage, ProjectManifest } from '@/lib/api';
 import { updateProject } from '@/lib/db';
 import { BrandIcon } from '@/workbench/brand-icon';
 
@@ -41,6 +42,7 @@ export const PROJECT_SETTINGS_SECTIONS: SettingsSectionDef[] = [
   { id: 'workflow', label: 'Workflow', hint: 'Cards, branches', icon: <GitBranch /> },
   { id: 'review', label: 'Review', hint: 'Checks', icon: <ShieldCheck /> },
   { id: 'instructions', label: 'Instructions', hint: 'Agent prompt', icon: <NotebookPen /> },
+  { id: 'chat-names', label: 'Chat names', hint: 'Template', icon: <Tag /> },
   { id: 'claude', label: 'Claude Code', hint: 'Project settings', icon: <BrandIcon brand="claude" /> },
   { id: 'codex', label: 'Codex', hint: 'Project settings', icon: <BrandIcon brand="codex" /> },
   { id: 'files', label: 'Agent files', hint: 'Project settings', icon: <ScrollText /> },
@@ -190,6 +192,15 @@ export function ProjectSettingsScreen({
 
   const patch = <K extends keyof ProjectManifest>(key: K, value: Partial<ProjectManifest[K]>) =>
     setManifest((m) => (m ? { ...m, [key]: { ...(m[key] as object), ...(value as object) } } : m));
+
+  // An empty template is no template: the key leaves the manifest, so
+  // clearing it reads as unchanged from a project that never had one.
+  const setChatName = (parts: ChatNamePart[]) =>
+    setManifest((m) => {
+      if (!m) return m;
+      const { chat_name: _dropped, ...rest } = m;
+      return parts.length ? { ...rest, chat_name: { parts } } : rest;
+    });
 
   const open = section ?? 'project';
   const projectScope: Scope = useMemo(() => ({ kind: 'project', projectPath: folder }), [folder]);
@@ -410,7 +421,20 @@ export function ProjectSettingsScreen({
         </SettingsGroup>
       )}
 
-      {(open === 'workflow' || open === 'review' || open === 'instructions') && !manifest && (
+      {open === 'chat-names' && manifest && (
+        <SettingsGroup title="Chat names" data-testid="project-chat-names">
+          <SettingRow label="Name template" stack>
+            <ChatNameEditor
+              projectId={projectId}
+              parts={manifest.chat_name?.parts ?? []}
+              onChange={setChatName}
+              prefix={manifest.project.use_beads ? manifest.beads.issue_id_prefix : ''}
+            />
+          </SettingRow>
+        </SettingsGroup>
+      )}
+
+      {(open === 'workflow' || open === 'review' || open === 'instructions' || open === 'chat-names') && !manifest && (
         <p className="text-sm text-t-tertiary">No project settings file.</p>
       )}
 

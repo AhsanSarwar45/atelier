@@ -201,11 +201,7 @@ pub async fn worth_saying(
                 href: chat_href(&session.project_id, &session.id),
                 needs_action: waits_on_you(&session.state),
                 says: wording(&session.state).to_string(),
-                name: naming(
-                    session.title.as_deref(),
-                    folder_of(&session.cwd).as_deref(),
-                    &session.brand,
-                ),
+                name: crate::workbench::chat_name::name_session(&session),
                 id: session.id,
                 project_id: session.project_id,
                 project_name,
@@ -269,11 +265,7 @@ pub async fn worth_pushing(
         needs_action: waits_on_you(state),
         says: wording(state).to_string(),
         id: session_id.to_string(),
-        name: naming(
-            session.title.as_deref(),
-            folder_of(&session.cwd).as_deref(),
-            &session.brand,
-        ),
+        name: crate::workbench::chat_name::name_session(&session),
         project_id: session.project_id,
         project_name,
         state: state.to_string(),
@@ -323,6 +315,7 @@ mod tests {
             last_active_at: "2026-01-01T00:00:00Z".into(),
             last_spoke_at: None,
             begun_by: None,
+            named_by_owner: false,
         }
     }
 

@@ -193,7 +193,9 @@ async fn relay_native_watch(state: workbench::WorkbenchState, tx: mpsc::Sender<T
                 if update.event.kind == crate::workbench::protocol::EventKind::SessionStarted {
                     if let Ok(Some(session)) = state.database().get_session(update.session_id.clone()).await {
                         let beads = state.database().beads_for_session(update.session_id.clone()).await.unwrap_or_default();
+                        let name = crate::workbench::chat_name::name_session(&session);
                         let frame = serde_json::json!({"kind":"opened","session":{
+                            "name":name,
                             "id":session.id,"brand":session.brand,"externalId":session.external_id,
                             "projectId":session.project_id,"projectPath":session.project_path,"cwd":session.cwd,
                             "model":session.model,"permissionMode":session.permission_mode,"effort":session.effort,
@@ -967,6 +969,7 @@ mod tests {
                 last_active_at: at.into(),
                 last_spoke_at: None,
                 begun_by: None,
+                named_by_owner: false,
             })
             .await
             .unwrap();
@@ -1080,6 +1083,7 @@ mod tests {
                 last_active_at: at.into(),
                 last_spoke_at: None,
                 begun_by: None,
+                named_by_owner: false,
             })
             .await
             .unwrap();

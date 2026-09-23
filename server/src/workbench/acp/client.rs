@@ -3588,6 +3588,7 @@ mod tests {
             last_active_at: "2026-09-02T00:00:00Z".into(),
             last_spoke_at: None,
             begun_by: None,
+            named_by_owner: false,
         }
     }
 
@@ -4491,6 +4492,7 @@ mod tests {
             last_active_at: "2026-09-02T00:00:00Z".into(),
             last_spoke_at: None,
             begun_by: None,
+            named_by_owner: false,
         };
         database.create_session(session.clone()).await.unwrap();
         for (agent_id, tool_id) in [("stop-me", "tool-1"), ("park-me", "tool-2")] {
@@ -4581,6 +4583,7 @@ mod tests {
             last_active_at: "2026-09-02T00:00:00Z".into(),
             last_spoke_at: None,
             begun_by: None,
+            named_by_owner: false,
         };
         database.create_session(session.clone()).await.unwrap();
         let (controls, _) = mpsc::unbounded_channel();
