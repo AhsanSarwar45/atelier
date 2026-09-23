@@ -146,4 +146,13 @@ describe('a long diff opens and closes', () => {
     fireEvent.click(screen.getByTestId('diff-expand'));
     expect(screen.getByTestId('tool-row')).toHaveAttribute('data-open', 'true');
   });
+
+  it('draws one enormous line only so far, and says how much it left out', () => {
+    const line = 'QUJD'.repeat(50_000);
+    render(<ToolRow item={largeEdit('', `${line}\n`)} nested={false} />);
+
+    const table = screen.getByTestId('diff-view');
+    expect(table).toHaveTextContent('199,500 more characters');
+    expect(table.textContent!.length).toBeLessThan(2_000);
+  });
 });

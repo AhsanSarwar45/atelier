@@ -255,6 +255,22 @@ function cutSize(text: string): number | null {
 /** How many lines of a diff are drawn before the reader asks for the rest. */
 const COLLAPSED = 12;
 
+/** How much of one line is drawn. */
+const LINE_CHARS = 500;
+
+/**
+ * A line cut to what a card can hold, saying how much it left out.
+ *
+ * The wire caps an edit at four hundred lines, but a line has no cap of its
+ * own: a base64 image written in one line crossed as one line of hundreds of
+ * thousands of characters, wrapped into thousands of rows, and the reader
+ * scrolled for miles to get past one card (bw-p7xm).
+ */
+function clipLine(text: string | null): string | null {
+  if (text === null || text.length <= LINE_CHARS) return text;
+  return `${text.slice(0, LINE_CHARS)} … ${(text.length - LINE_CHARS).toLocaleString('en-US')} more characters`;
+}
+
 /**
  * How much changed, as the header says it.
  *
@@ -291,7 +307,9 @@ function DiffView({ diff }: { diff: NonNullable<TranscriptTool['diff']> }) {
   // saying almost nothing useful (bw-2xjd.1). Hunks are the answer to that —
   // they were taken before the cut — so they are preferred wherever they are.
   const cut = beforeSize !== null || afterSize !== null;
-  const rows = hunks ? hunksToRows(hunks) : cut ? [] : diffLines(before, after, line ?? 1);
+  const rows = (hunks ? hunksToRows(hunks) : cut ? [] : diffLines(before, after, line ?? 1)).map((r) =>
+    r.kind === 'gap' ? r : { ...r, left: clipLine(r.left), right: clipLine(r.right) },
+  );
   const counted = added !== undefined && removed !== undefined;
   // A diff longer than this opens on its first lines and is asked for in full,
   // the way a long diff reads anywhere else. Short of it there is nothing to
@@ -325,10 +343,11 @@ function DiffView({ diff }: { diff: NonNullable<TranscriptTool['diff']> }) {
       </div>
       {rows.length > 0 ? (
         <>
-          {/* Open, the diff still scrolls inside itself rather than pushing the
-              conversation off the screen — a change of four hundred lines is
-              a change the reader should be able to skim past. */}
-          <div className={open ? 'max-h-[36rem] overflow-auto' : 'overflow-hidden'}>
+          {/* Open or closed, the diff scrolls inside itself rather than
+              pushing the conversation off the screen — a change of four
+              hundred lines, or a dozen long ones, is a change the reader
+              should be able to skim past. */}
+          <div className="max-h-[36rem] overflow-auto">
             <DiffTable rows={shown} language={language} />
           </div>
           {long && (
