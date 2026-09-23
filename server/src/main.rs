@@ -188,14 +188,21 @@ fn main() {
 }
 
 async fn run() {
+    let asked = command_line::asked(env::args().skip(1));
+    let guidance_discovery = matches!(&asked, command_line::Ask::Tool { name, rest }
+        if name == "skills" && matches!(rest.first().map(String::as_str),
+            None | Some("locations" | "help" | "--help" | "-h")));
     // An install made under the earlier name is carried across before anything
     // reads the settings, so a person who upgrades finds their projects where
     // they left them rather than an empty list (bw-8um.3.8).
-    if let Err(e) = identity::adopt_earlier_install() {
-        eprintln!("Could not migrate the previous installation: {e}");
+    // Source discovery must not copy an old installation or create settings.
+    if !guidance_discovery {
+        if let Err(e) = identity::adopt_earlier_install() {
+            eprintln!("Could not migrate the previous installation: {e}");
+        }
     }
 
-    match command_line::asked(env::args().skip(1)) {
+    match asked {
         command_line::Ask::Run { open_browser } => serve(open_browser).await,
         command_line::Ask::Help => print!("{}", command_line::help()),
         // Having the computer start it is one command, and taking that back

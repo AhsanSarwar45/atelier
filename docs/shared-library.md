@@ -85,10 +85,19 @@ for the next ordinary or shared-skill turn instead of disrupting command parsing
 The read-only CLI uses the same resolver:
 
 ```sh
+atelier tool skills locations
+atelier tool skills locations --project /absolute/project/folder
 atelier tool skills list
 atelier tool skills read REVISION ID
 atelier tool skills read REVISION ID references/testing.md
 ```
+
+`locations` reports absolute global and active project source paths as JSON,
+including repository versus personal storage. It finds the project from the
+current folder (or `--project`), handles linked worktrees, and creates no settings
+or snapshots. An unregistered folder returns `project: null`; register it before
+creating project guidance. Skills, commands and styles are library items, not
+individual provider-native files.
 
 `atelier tool skills mcp REVISION` serves the same snapshot through stdio MCP.
 Read-only review workers receive shared project guidance and can read the pinned

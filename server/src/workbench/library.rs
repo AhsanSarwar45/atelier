@@ -1326,8 +1326,62 @@ fn load_snapshot(data: &Path, revision: &str) -> Result<Snapshot, String> {
 }
 
 /// Read-only stdio MCP server, used unchanged by every ACP provider.
+/// Discover editable sources without creating settings, migrating manifests,
+/// or generating a session snapshot. Personal settings use the same Git identity
+/// as the resolver, so linked worktrees find the same personal library.
+fn locations(data: &Path, folder: &Path) -> Result<Value, String> {
+    let folder = fs::canonicalize(folder).map_err(|e| format!("Project folder: {e}"))?;
+    if !folder.is_dir() {
+        return Err("Project folder must be a directory".into());
+    }
+    let git = std::process::Command::new("git")
+        .arg("-C").arg(&folder).args(["rev-parse", "--show-toplevel"]).output();
+    let git_root = git.ok().filter(|out| out.status.success())
+        .map(|out| PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()));
+    let root = git_root.unwrap_or_else(|| {
+        folder.ancestors().find(|dir| {
+            crate::project_manifest::repository_path(dir).is_file()
+                || crate::project_manifest::personal_path(dir, data).is_file()
+        }).unwrap_or(&folder).to_path_buf()
+    });
+    let repository = crate::project_manifest::repository_path(&root);
+    let personal = crate::project_manifest::personal_path(&root, data);
+    let selected = if repository.is_file() { Some((repository, "repository")) }
+        else if personal.is_file() { Some((personal, "personal")) } else { None };
+    let project = selected.map(|(manifest, storage)| {
+        crate::project_manifest::read(&manifest)?;
+        Ok::<_, String>(json!({
+            "root": root, "storage": storage, "manifest": manifest,
+            "instructions": crate::project_manifest::instructions_path(&manifest),
+            "library": manifest.with_file_name("library.json"),
+        }))
+    }).transpose()?;
+    Ok(json!({
+        "global": {"library": data.join("library.json"), "instructions_field": "general_instructions"},
+        "project": project,
+        "project_registered": project.is_some(),
+        "project_root": root,
+        "format": "Skills, commands and output styles are items in library.json, not separate files. Commands are skills with automatic=false; output_style selects a style ID.",
+        "note": "Paths may not exist until first save. No project settings were created. Edit sources, never library-snapshots; reconnect to apply changes.",
+    }))
+}
+
 pub fn cli(args: &[String]) -> Result<i32, String> {
     let action = args.first().map(String::as_str).unwrap_or("help");
+    if matches!(action, "help" | "--help" | "-h") {
+        println!("Usage: atelier tool skills locations [--project PATH] | list | read REVISION ID [RESOURCE] | mcp REVISION");
+        return Ok(0);
+    }
+    if action == "locations" {
+        let folder = match &args[1..] {
+            [] => std::env::current_dir().map_err(|e| e.to_string())?,
+            [flag, path] if flag == "--project" => PathBuf::from(path),
+            _ => return Err("Usage: atelier tool skills locations [--project PATH]".into()),
+        };
+        let data = std::path::absolute(data_dir()?).map_err(|e| e.to_string())?;
+        println!("{}", serde_json::to_string_pretty(&locations(&data, &folder)?).map_err(|e| e.to_string())?);
+        return Ok(0);
+    }
     if action == "list" {
         let root = std::env::current_dir().map_err(|e| e.to_string())?;
         println!(

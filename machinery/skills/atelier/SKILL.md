@@ -14,11 +14,10 @@ Default instruction, skill, command and output-style changes to Atelier, not
 provider-native files, unless the user specifies otherwise. Keep project-specific
 guidance local; reusable conditional instruction rules belong in global settings.
 
-- Global: `<Atelier data directory>/library.json` (`general_instructions`,
-  `items`, `output_style`); normally `~/.local/share/atelier` on Linux.
-- Project: `instructions.md` and `library.json` beside the active `project.toml`:
-  repository `.atelier/`, or personal `<data directory>/projects/<project hash>/`.
-  Use the existing storage location; do not create a competing copy.
+- Run `atelier tool skills locations [--project PATH]` to find the actual global
+  and project instruction/library files. Use those paths, not provider folders
+  or guessed locations. Skills, commands and styles are items in `library.json`,
+  not separate skill files; global baseline text is `general_instructions`.
 - Edit through Settings → Agent guidance at the intended scope. For programmatic
   library edits, GET then PUT `/api/settings/library` on the running Atelier
   instance, adding `?path=<URL-encoded absolute project folder>` for project scope.
