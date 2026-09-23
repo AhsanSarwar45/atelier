@@ -71,10 +71,14 @@ fn valid_session_id(id: &str) -> bool {
 /// their setup the parsing is split across them and stitched back in order
 /// (bw-t26l.20).
 fn jsonl(path: &Path) -> Vec<Value> {
-    const WORTH_SPLITTING: usize = 1 << 20;
     let Ok(text) = fs::read_to_string(path) else {
         return Vec::new();
     };
+    jsonl_rows(&text)
+}
+
+fn jsonl_rows(text: &str) -> Vec<Value> {
+    const WORTH_SPLITTING: usize = 1 << 20;
     let parse = |line: &str| serde_json::from_str::<Value>(line.trim()).ok();
     let hands = std::thread::available_parallelism()
         .map(|hands| hands.get())
@@ -1512,14 +1516,32 @@ struct HelperFacts {
     size: u64,
 }
 
-fn helper_facts(path: &Path) -> Option<HelperFacts> {
+fn helper_id(path: &Path) -> Option<String> {
     let name = path.file_name()?.to_str()?;
-    let agent_id = name
-        .strip_prefix("agent-")?
-        .strip_suffix(".jsonl")?
-        .to_string();
-    let rows = jsonl(path);
-    let conversation = ordered_conversation(&rows, true);
+    Some(name.strip_prefix("agent-")?.strip_suffix(".jsonl")?.to_string())
+}
+
+/// Every row of one helper record, and the byte just past the last of them —
+/// where a tail picks up. A final line without its newline counts when it is
+/// a whole row; one still being written is left for the tail.
+fn helper_rows(path: &Path) -> Option<(Vec<Value>, u64)> {
+    let text = fs::read_to_string(path).ok()?;
+    let mut through = text.rfind('\n').map_or(0, |newline| newline + 1);
+    let last = text[through..].trim();
+    if !last.is_empty() && serde_json::from_str::<serde::de::IgnoredAny>(last).is_ok() {
+        through = text.len();
+    }
+    Some((jsonl_rows(&text[..through]), through as u64))
+}
+
+fn helper_facts(path: &Path) -> Option<HelperFacts> {
+    let agent_id = helper_id(path)?;
+    let (rows, size) = helper_rows(path)?;
+    Some(helper_facts_from(path, agent_id, &rows, size))
+}
+
+fn helper_facts_from(path: &Path, agent_id: String, rows: &[Value], size: u64) -> HelperFacts {
+    let conversation = ordered_conversation(rows, true);
     let meta_path = path.with_file_name(format!("agent-{agent_id}.meta.json"));
     let meta: Value = fs::read_to_string(meta_path)
         .ok()
@@ -1543,7 +1565,7 @@ fn helper_facts(path: &Path) -> Option<HelperFacts> {
         )
         .map(|(first, last)| (last - first).num_seconds().max(0))
         .unwrap_or_default();
-    let spent = usage(&rows);
+    let spent = usage(rows);
     let calls = conversation
         .iter()
         .flat_map(|row| row["message"]["content"].as_array().into_iter().flatten())
@@ -1572,15 +1594,15 @@ fn helper_facts(path: &Path) -> Option<HelperFacts> {
         "seconds":seconds, "tokens":spent.total, "calls":calls,
         "model":model, "result":result
     });
-    Some(HelperFacts {
+    HelperFacts {
         agent_id,
         tool_call_id: tool,
         first_at: first.unwrap_or_default(),
         events,
         finish,
         spent,
-        size: fs::metadata(path).map(|meta| meta.len()).unwrap_or_default(),
-    })
+        size,
+    }
 }
 
 fn tool_outcomes(rows: &[Value]) -> HashMap<String, bool> {
@@ -1693,9 +1715,16 @@ fn helper_events(facts: Vec<HelperFacts>, outcomes: &HashMap<String, bool>) -> (
 ///
 /// Claude writes a detached helper's turns into its own JSONL. The parent file
 /// contains only the dispatch and its eventual result, so following only that
-/// file loses every child turn. A tick lists and stats the helper directory,
-/// reads only files whose size changed, and content-addresses the normalized
-/// events so growing files do not replay their already-seen prefix.
+/// file loses every child turn. A tick lists and stats the helper directory and
+/// opens only files whose size changed, reading each from where the last tick
+/// stopped; normalized events are content-addressed so a growing file does not
+/// replay its already-seen prefix.
+///
+/// This runs four times a second for every chat another process holds. It
+/// used to read and parse every helper file in full on each tick before
+/// looking at its size — one chat with 127 MB of helpers kept the server
+/// reading 550 MB a second, and the churn got it killed for memory pressure
+/// (bw-ifjt.1).
 pub struct HelperFollower {
     record: PathBuf,
     sizes: HashMap<String, u64>,
@@ -1703,25 +1732,45 @@ pub struct HelperFollower {
     outcomes: HashMap<String, bool>,
     ended: HashSet<String>,
     seen: HashSet<String>,
+    /// The rows so far of each helper still being written, and where its file
+    /// was read up to. A helper that ends gives its rows back.
+    tails: HashMap<String, HelperTail>,
+    /// Each helper's latest summary, so settling one never reopens its file.
+    finishes: HashMap<String, Value>,
+    #[cfg_attr(not(test), allow(dead_code))]
+    bytes_read: u64,
+}
+
+struct HelperTail {
+    tail: crate::workbench::external::LineTail,
+    rows: Vec<Value>,
 }
 
 impl HelperFollower {
-    pub fn after_import(record: &Path) -> Self {
-        let rows = jsonl(record);
-        let outcomes = tool_outcomes(&rows);
-        let mut follower = Self {
+    fn new(record: &Path, outcomes: HashMap<String, bool>) -> Self {
+        Self {
             record: record.to_path_buf(),
             sizes: HashMap::new(),
             calls: HashMap::new(),
             outcomes,
             ended: HashSet::new(),
             seen: HashSet::new(),
-        };
+            tails: HashMap::new(),
+            finishes: HashMap::new(),
+            bytes_read: 0,
+        }
+    }
+
+    pub fn after_import(record: &Path) -> Self {
+        let mut follower = Self::new(record, tool_outcomes(&jsonl(record)));
         // `read_history` has already normalized every current helper file.
         // Seed the incremental cursor and identities from that exact view so
         // the first follower tick cannot replay the imported prefix.
         for mut helper in helper_records(record) {
             follower.sizes.insert(helper.agent_id.clone(), helper.size);
+            follower
+                .finishes
+                .insert(helper.agent_id.clone(), helper.finish.clone());
             if let Some(call) = &helper.tool_call_id {
                 follower.calls.insert(call.clone(), helper.agent_id.clone());
             }
@@ -1755,22 +1804,16 @@ impl HelperFollower {
     /// rows must be emitted into the new generation rather than treated as an
     /// already-imported prefix.
     pub fn after_reset(record: &Path) -> Self {
-        let rows = jsonl(record);
-        Self {
-            record: record.to_path_buf(),
-            sizes: HashMap::new(),
-            calls: HashMap::new(),
-            outcomes: tool_outcomes(&rows),
-            ended: HashSet::new(),
-            seen: HashSet::new(),
-        }
+        Self::new(record, tool_outcomes(&jsonl(record)))
+    }
+
+    fn helper_dir(&self) -> Option<PathBuf> {
+        let stem = self.record.file_stem()?;
+        Some(self.record.with_file_name(stem).join("subagents"))
     }
 
     fn paths(&self) -> Vec<PathBuf> {
-        let Some(stem) = self.record.file_stem() else {
-            return Vec::new();
-        };
-        let Ok(entries) = fs::read_dir(self.record.with_file_name(stem).join("subagents")) else {
+        let Some(Ok(entries)) = self.helper_dir().map(fs::read_dir) else {
             return Vec::new();
         };
         entries
@@ -1782,6 +1825,53 @@ impl HelperFollower {
                     .is_some_and(|name| name.starts_with("agent-") && name.ends_with(".jsonl"))
             })
             .collect()
+    }
+
+    /// One helper's facts after its file grew: its new lines on top of the
+    /// rows already held, or the whole file the first time or after a rewrite.
+    fn grown(&mut self, path: &Path, agent: &str) -> Option<HelperFacts> {
+        let mut held = self.tails.remove(agent);
+        if let Some(helper) = held.as_mut() {
+            match helper.tail.grown() {
+                Ok(growth) if !growth.rewritten => {
+                    self.bytes_read += growth.bytes_read;
+                    helper.rows.extend(
+                        growth
+                            .lines
+                            .iter()
+                            .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok()),
+                    );
+                }
+                _ => held = None,
+            }
+        }
+        let helper = match held {
+            Some(helper) => helper,
+            None => {
+                let (rows, through) = helper_rows(path)?;
+                self.bytes_read += fs::metadata(path).map(|meta| meta.len()).unwrap_or(through);
+                let mut tail = crate::workbench::external::LineTail::new(path);
+                tail.seek(through);
+                HelperTail { tail, rows }
+            }
+        };
+        let size = helper.tail.through_line();
+        let facts = helper_facts_from(path, agent.to_string(), &helper.rows, size);
+        self.tails.insert(agent.to_string(), helper);
+        Some(facts)
+    }
+
+    /// The summary a helper settles with, reading its file only if no tick
+    /// has seen it yet.
+    fn finish_of(&mut self, agent: &str) -> Option<Value> {
+        if let Some(finish) = self.finishes.get(agent) {
+            return Some(finish.clone());
+        }
+        let path = self.helper_dir()?.join(format!("agent-{agent}.jsonl"));
+        let helper = helper_facts(&path)?;
+        self.bytes_read += helper.size;
+        self.finishes.insert(agent.to_string(), helper.finish.clone());
+        Some(helper.finish)
     }
 
     /// New child transcript/progress events, then completions that must follow
@@ -1802,34 +1892,36 @@ impl HelperFollower {
         }
 
         let mut updates = Vec::new();
-        let mut facts = HashMap::new();
         for path in self.paths() {
+            let Some(agent) = helper_id(&path) else {
+                continue;
+            };
             let Ok(size) = fs::metadata(&path).map(|meta| meta.len()) else {
                 continue;
             };
-            let Some(helper) = helper_facts(&path) else {
+            if self.sizes.get(&agent) == Some(&size) {
+                continue;
+            }
+            let Some(helper) = self.grown(&path, &agent) else {
                 continue;
             };
-            let changed = self.sizes.get(&helper.agent_id).copied() != Some(size);
-            self.sizes.insert(helper.agent_id.clone(), size);
+            self.sizes.insert(agent.clone(), size);
+            self.finishes.insert(agent.clone(), helper.finish.clone());
             if let Some(call) = &helper.tool_call_id {
-                self.calls.insert(call.clone(), helper.agent_id.clone());
+                self.calls.insert(call.clone(), agent.clone());
             }
-            if changed {
-                for event in &helper.events {
-                    if self.ended.contains(&helper.agent_id) && event["type"] == "agent.progress" {
-                        continue;
-                    }
-                    let id = crate::workbench::protocol::record_event_id_at(
-                        event,
-                        crate::workbench::store::CLAUDE_IMPORT_RECIPE,
-                    );
-                    if self.seen.insert(id) {
-                        updates.push(event.clone());
-                    }
+            for event in &helper.events {
+                if self.ended.contains(&agent) && event["type"] == "agent.progress" {
+                    continue;
+                }
+                let id = crate::workbench::protocol::record_event_id_at(
+                    event,
+                    crate::workbench::store::CLAUDE_IMPORT_RECIPE,
+                );
+                if self.seen.insert(id) {
+                    updates.push(event.clone());
                 }
             }
-            facts.insert(helper.agent_id.clone(), helper);
         }
 
         let mut finished = Vec::new();
@@ -1840,24 +1932,21 @@ impl HelperFollower {
             if !self.ended.insert(agent.clone()) {
                 continue;
             }
-            let helper = facts.get(&agent).cloned().or_else(|| {
-                self.paths()
-                    .into_iter()
-                    .find_map(|path| helper_facts(&path).filter(|helper| helper.agent_id == agent))
-            });
-            let Some(mut helper) = helper else {
+            let Some(mut finish) = self.finish_of(&agent) else {
                 self.ended.remove(&agent);
                 continue;
             };
-            helper.finish["state"] = json!(if ok { "done" } else { "failed" });
+            finish["state"] = json!(if ok { "done" } else { "failed" });
             let id = crate::workbench::protocol::record_event_id_at(
-                &helper.finish,
+                &finish,
                 crate::workbench::store::CLAUDE_IMPORT_RECIPE,
             );
             if self.seen.insert(id) {
-                finished.push(helper.finish);
+                finished.push(finish);
             }
         }
+        // A settled helper is not written to again; its rows are dead weight.
+        self.tails.retain(|agent, _| !self.ended.contains(agent));
         (updates, finished)
     }
 }
@@ -2983,6 +3072,62 @@ mod tests {
             && event["agentId"] == "h1"
             && event["state"] == "done"));
         assert!(follower.poll(&parent).1.is_empty());
+    }
+
+    /// A tick opens only helper files that grew, and reads only what they
+    /// added. Four ticks a second over every helper of every followed chat
+    /// otherwise re-reads and re-parses all of them without end (bw-ifjt.1).
+    #[test]
+    fn helper_follower_leaves_unchanged_files_closed_and_reads_only_growth() {
+        let home = tempdir().unwrap();
+        let record = home.path().join(format!("{CHAT}.jsonl"));
+        write(&record, "").unwrap();
+        let helper_dir = record.with_file_name(CHAT).join("subagents");
+        create_dir_all(&helper_dir).unwrap();
+        let row = |uuid: &str, text: &str| {
+            json!({
+                "type":"assistant","uuid":uuid,"timestamp":"2026-08-30T00:00:01Z",
+                "message":{"content":[{"type":"text","text":text}]}
+            })
+            .to_string()
+                + "\n"
+        };
+        let still = helper_dir.join("agent-still.jsonl");
+        write(&still, row("still-1", "Resting")).unwrap();
+        let busy = helper_dir.join("agent-busy.jsonl");
+        write(&busy, row("busy-1", "Begun")).unwrap();
+        let mut follower = HelperFollower::after_import(&record);
+
+        for _ in 0..3 {
+            assert_eq!(follower.poll(&[]), (vec![], vec![]));
+        }
+        assert_eq!(follower.bytes_read, 0, "no file changed, so none was read");
+
+        let mut file = OpenOptions::new().append(true).open(&busy).unwrap();
+        file.write_all(row("busy-2", "Second").as_bytes()).unwrap();
+        let (growth, _) = follower.poll(&[]);
+        assert!(growth.iter().any(|event| event["text"] == "Second"));
+        let first_growth = follower.bytes_read;
+        assert_eq!(first_growth, fs::metadata(&busy).unwrap().len());
+
+        let third = row("busy-3", "Third");
+        file.write_all(third.as_bytes()).unwrap();
+        let (growth, _) = follower.poll(&[]);
+        assert!(growth.iter().any(|event| event["text"] == "Third"));
+        assert!(!growth.iter().any(|event| event["text"] == "Second"));
+        assert_eq!(follower.bytes_read - first_growth, third.len() as u64);
+
+        // A line still being written waits for its newline.
+        let fourth = row("busy-4", "Fourth");
+        let (head, rest) = fourth.split_at(10);
+        file.write_all(head.as_bytes()).unwrap();
+        assert!(!follower.poll(&[]).0.iter().any(|event| event["text"] == "Fourth"));
+        file.write_all(rest.as_bytes()).unwrap();
+        assert!(follower.poll(&[]).0.iter().any(|event| event["text"] == "Fourth"));
+
+        // A rewritten file is read again from the start.
+        write(&busy, row("busy-new", "Fresh")).unwrap();
+        assert!(follower.poll(&[]).0.iter().any(|event| event["text"] == "Fresh"));
     }
 
     /// A chat reads the transcript belonging to its own account.
