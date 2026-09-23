@@ -1094,6 +1094,8 @@ export interface ExtensionItem {
   source?: 'user' | 'project';
   /** A marketplace's own address: the `owner/repo`, URL or path it was added from. */
   origin?: string;
+  /** False for what the provider puts there itself: a plugin claude.ai syncs, a marketplace Codex ships with. */
+  removable?: boolean;
 }
 
 export interface ExtensionKindList {

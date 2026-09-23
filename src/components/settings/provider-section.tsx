@@ -29,14 +29,15 @@ export interface ProviderTabDef {
   label: string;
 }
 
-/** The pages every provider has, in reading order. */
-export function providerTabs(brand: Brand): ProviderTabDef[] {
+/**
+ * The pages every provider has, in reading order. Codex plugins belong to an
+ * account, so a project's Codex pages have none.
+ */
+export function providerTabs(brand: Brand, where: 'account' | 'project' = 'account'): ProviderTabDef[] {
   return [
     ...pagesFor(brand).map((p) => ({ id: p.id, label: p.label })),
     { id: 'mcp', label: 'MCP servers' },
-    // Codex has no plugin system; its skills, hooks and rules are files,
-    // and files of every kind are under Agent files, not here.
-    ...(brand === 'claude' ? [{ id: 'plugins', label: 'Plugins' }] : []),
+    ...(brand === 'claude' || where === 'account' ? [{ id: 'plugins', label: 'Plugins' }] : []),
   ];
 }
 

@@ -249,7 +249,7 @@ export function ProjectSettingsScreen({
   );
 
   const provider = (brand: Brand): ReactNode => {
-    const tabs = providerTabs(brand);
+    const tabs = providerTabs(brand, 'project');
     const known = tabs.some((t) => t.id === tab) ? tab! : tabs[0].id;
     const isPage = pagesFor(brand).some((p) => p.id === known);
     const layer: Layer = brand === 'claude' ? claudeLayer : 'project';

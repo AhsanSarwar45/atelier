@@ -1,7 +1,7 @@
 /**
- * One scope's Claude plugins and the marketplaces they come from (bw-2t1c.8,
- * bw-nin9.2). Skills, agents, hooks, output styles and rules are files, and
- * live under Agent files.
+ * One scope's plugins and the marketplaces they come from (bw-2t1c.8,
+ * bw-nin9.2), for Claude and for a Codex account (bw-anxb.3). Skills, agents,
+ * hooks, output styles and rules are files, and live under Agent files.
  */
 'use client';
 
@@ -222,9 +222,15 @@ export function ExtensionsPanel({ brand, scope }: { brand: Brand; scope: Scope }
                       </Tooltip>
                     )}
                   </div>
-                  <Button variant="ghost" size="sm" aria-label={`Remove ${item.name}`} disabled={busy !== null} onClick={() => void remove(kind, item)} data-testid={`extension-remove-${item.id}`}>
-                    <Trash2 />
-                  </Button>
+                  {item.removable === false ? (
+                    <Badge variant="secondary" size="sm" data-testid={`extension-fixed-${item.id}`}>
+                      {item.marketplace === 'synced' ? 'Synced' : 'Built in'}
+                    </Badge>
+                  ) : (
+                    <Button variant="ghost" size="sm" aria-label={`Remove ${item.name}`} disabled={busy !== null} onClick={() => void remove(kind, item)} data-testid={`extension-remove-${item.id}`}>
+                      <Trash2 />
+                    </Button>
+                  )}
                 </div>
               );
             })}

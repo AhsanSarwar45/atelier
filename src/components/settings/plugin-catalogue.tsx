@@ -47,9 +47,11 @@ function matches(entry: OfferedPlugin, want: string): boolean {
   return hay.includes(want);
 }
 
+// Codex's store alone lists thousands; a row off screen is not laid out or
+// painted until it is scrolled to, so the sheet opens as fast with all of them.
 function Row({ entry, busy, onInstall }: { entry: OfferedPlugin; busy: boolean; onInstall: (entry: OfferedPlugin) => Promise<void> }) {
   return (
-    <li className="flex items-start gap-3 px-3 py-2" data-testid={`plugin-entry-${entry.id}`}>
+    <li className="flex items-start gap-3 px-3 py-2 [contain-intrinsic-size:auto_4rem] [content-visibility:auto]" data-testid={`plugin-entry-${entry.id}`}>
       <KindIcon kind="plugin" />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">

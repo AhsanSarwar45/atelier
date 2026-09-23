@@ -48,8 +48,7 @@ export function copyableSections(brand: Brand): SectionDef[] {
   return [
     ...pagesFor(brand).map((p) => ({ id: p.id, label: p.label, effect: 'Replaces' as const, hint: 'Settings unset here are cleared there' })),
     { id: 'mcp', label: 'MCP servers', effect: 'Merges' as const, hint: 'Added; nothing is removed' },
-    // Codex has no plugin system.
-    ...(brand === 'claude' ? [{ id: 'plugins', label: 'Plugins', effect: 'Merges' as const, hint: 'Marketplaces and plugins added; nothing is removed' }] : []),
+    { id: 'plugins', label: 'Plugins', effect: 'Merges' as const, hint: 'Marketplaces and plugins added; nothing is removed' },
   ];
 }
 
@@ -111,7 +110,9 @@ export function CopyToAccounts({ brand, from, profiles, page }: { brand: Brand; 
       scope: 'account',
       profileId: from,
     });
-    const of = (kind: ExtensionKind) => kinds.find((k) => k.kind === kind)?.items ?? [];
+    // What the provider puts there itself — a synced plugin, a built-in
+    // marketplace — is not installed by anybody, so it is not copied.
+    const of = (kind: ExtensionKind) => (kinds.find((k) => k.kind === kind)?.items ?? []).filter((item) => item.removable !== false);
     for (const id of targets) {
       for (const place of of('marketplaces')) {
         // A marketplace whose file does not say where it came from cannot be
