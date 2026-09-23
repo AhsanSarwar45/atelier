@@ -207,7 +207,7 @@ pub(crate) fn folders_of(project: &Path) -> Vec<PathBuf> {
 /// not inside another project on the way down.
 ///
 /// A project nested in this one keeps its own chats: the home folder's list
-/// does not hold `~/dev/beads-web`'s. A folder is another project when it is
+/// does not hold a project inside it's. A folder is another project when it is
 /// one of `others` — the roots of the registered projects — or carries its own
 /// `.atelier`. Only the folders between the chat and the nearest of this
 /// project's own checkouts are asked, so a worktree of this project that
@@ -1175,7 +1175,7 @@ mod tests {
     fn a_nested_project_keeps_its_own_chats() {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("home");
-        let registered = home.join("dev").join("beads-web");
+        let registered = home.join("dev").join("keystone");
         let marked = home.join("dev").join("marked");
         std::fs::create_dir_all(registered.join("server")).unwrap();
         std::fs::create_dir_all(marked.join(".atelier")).unwrap();

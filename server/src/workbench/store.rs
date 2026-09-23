@@ -3889,12 +3889,12 @@ mod tests {
     fn restore_sessions_leave_a_nested_projects_chats_to_it() {
         let directory = tempfile::tempdir().unwrap();
         let store = Store::open(&directory.path().join("workbench.db")).unwrap();
-        for (id, cwd) in [("home", "/project"), ("nested", "/project/dev/beads-web/server")] {
+        for (id, cwd) in [("home", "/project"), ("nested", "/project/dev/keystone/server")] {
             let mut row = session(id, "claude", None, "2026-08-20T00:00:00Z");
             row.cwd = cwd.into();
             store.create_session(&row).unwrap();
         }
-        let others = [std::path::PathBuf::from("/project/dev/beads-web")];
+        let others = [std::path::PathBuf::from("/project/dev/keystone")];
         let listed: Vec<_> = store
             .list_restore_sessions(Some("project-1"), false, &others)
             .unwrap()
