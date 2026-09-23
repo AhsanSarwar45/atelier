@@ -5,6 +5,8 @@ describe('lossless shared guidance editing', () => {
   it('generates valid identifiers without colliding with inherited or local items', () => {
     expect(suggestedItemId('Release check!', ['release-check', 'release-check-2'])).toBe('release-check-3');
     expect(suggestedItemId('日本語', [])).toBe('new-item');
+    expect(suggestedItemId('Atelier review', [])).toBe('my-atelier-review');
+    expect(suggestedItemId('Atelier review', ['my-atelier-review'])).toBe('my-atelier-review-2');
     expect(suggestedItemId('A'.repeat(100), [])).toHaveLength(68);
     expect(suggestedItemId('  Review docs  ', [])).toBe('review-docs');
   });

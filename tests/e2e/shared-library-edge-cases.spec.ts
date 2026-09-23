@@ -208,6 +208,12 @@ test('new guidance needs no advanced setup and explicitly chosen identifiers sta
   await commit(page);
   expect((await held(request)).library.items.find((i: any) => i.id === 'release-check-2').content).toBe('Check release notes');
   await page.getByRole('button', { name: 'Add skill', exact: true }).click();
+  await page.getByLabel('Item name').fill('Atelier review');
+  await page.getByLabel('Item content').fill('Review the app');
+  await expect(page.getByTestId('editor-advanced')).not.toHaveAttribute('open');
+  await commit(page);
+  expect((await held(request)).library.items.find((i: any) => i.id === 'my-atelier-review').content).toBe('Review the app');
+  await page.getByRole('button', { name: 'Add skill', exact: true }).click();
   await page.getByTestId('editor-advanced').locator('summary').click();
   await page.getByLabel('Item ID', { exact: true }).fill('chosen-id');
   await page.getByLabel('Item name').fill('Different name');

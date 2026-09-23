@@ -1,6 +1,7 @@
 /** Keep editor operations lossless and store only explicit project differences. */
 export function suggestedItemId(name: string, used: string[]): string {
-  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 68) || 'new-item';
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'new-item';
+  const base = (slug.startsWith('atelier-') ? `my-${slug}` : slug).slice(0, 68);
   let candidate = base;
   for (let n = 2; used.includes(candidate); n++) candidate = `${base}-${n}`;
   return candidate;
