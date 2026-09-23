@@ -101,7 +101,7 @@ test('a Claude account gives another its defaults and its servers, and leaves th
   await page.screenshot({ path: join(results, 'claude-target-servers.png') });
 });
 
-test('a Codex account is offered the same sheet, without the plugins it does not have', async ({ page, request }) => {
+test('a Codex account is offered the same sheet, plugins included', async ({ page, request }) => {
   const { profile } = (await command(request, { type: 'profile.create', brand: 'codex', name: 'Target' })) as { profile: { id: string } };
   const id = profile.id;
 
@@ -115,8 +115,8 @@ test('a Codex account is offered the same sheet, without the plugins it does not
 
   await page.getByTestId('copy-to-accounts-codex').click();
   await expect(page.getByTestId('copy-section-mcp')).toBeVisible();
-  // Codex has no plugin system, so it is not offered one.
-  await expect(page.getByTestId('copy-section-plugins')).toHaveCount(0);
+  // A Codex account has plugins too (bw-anxb.3), so they are offered as well.
+  await expect(page.getByTestId('copy-section-plugins')).toBeVisible();
   // The sheet was opened from the MCP tab, so that is the section already ticked.
   await expect(page.getByTestId('copy-section-mcp')).toBeChecked();
   await expect(page.getByTestId('copy-section-defaults')).not.toBeChecked();
