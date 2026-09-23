@@ -88,8 +88,9 @@ test('global and project editors persist conditional skills, instructions and ex
   await expect(page.getByRole('combobox', { name: 'Selected output style' })).toContainText('Concise');
 
   await page.goto(`/project?id=${project.id}&settings=library`);
-  await add(page, 'instruction', 'project-conventions', 'Project conventions', 'When asked for library proof, include PROJECT-READY.');
-  await saved(page);
+  await page.getByRole('textbox', { name: 'Project instructions', exact: true }).fill('When asked for library proof, include PROJECT-READY.');
+  await page.getByRole('button', { name: 'Save project instructions' }).click();
+  await expect(page.getByRole('button', { name: 'Save project instructions' })).toBeDisabled();
   await page.getByRole('button', { name: 'Skills', exact: true }).click();
   await page.getByTestId('library-item-frontend-review').getByRole('button', { name: 'Customize', exact: true }).click();
   await page.getByTestId('editor-support').locator('summary').click();
@@ -103,7 +104,7 @@ test('global and project editors persist conditional skills, instructions and ex
   await expect(page.getByTestId('library-item-frontend-review')).toContainText('Available');
   const held = await (await request.get(`${api}?path=${encodeURIComponent(project.path)}`)).json();
   expect(held.library.overrides['frontend-review'].parameters.framework).toBe('PROJECT-NEXT');
-  expect(held.guidance).toContain('GLOBAL-READY'); expect(held.guidance).toContain('PROJECT-READY'); expect(held.guidance).toContain('STYLE-READY');
+  expect(held.guidance).toContain('GLOBAL-READY'); expect((await (await request.get(`/api/projects/${project.id}/settings`)).json()).instructions).toContain('PROJECT-READY'); expect(held.guidance).toContain('STYLE-READY');
   expect(held.guidance).not.toContain('RESOURCE-READY');
   await page.getByRole('button', { name: 'Output styles', exact: true }).click();
   await choose(page, 'Selected output style', 'No shared output style');
@@ -112,7 +113,7 @@ test('global and project editors persist conditional skills, instructions and ex
   await expect(page.getByTestId('library-item-concise')).toContainText('Available');
   await page.screenshot({ path: join(results, 'project-style.png') });
   writeFileSync(join(project.path, 'CLAUDE.md'), 'Keep documentation examples short.');
-  await page.getByRole('button', { name: 'Instructions', exact: true }).click();
+  await page.getByRole('button', { name: 'Skills', exact: true }).click();
   await page.getByRole('button', { name: 'Import native file', exact: true }).click();
   await page.getByRole('button', { name: 'CLAUDE.md · instructions', exact: true }).click();
   await expect(page.getByLabel('Item content')).toHaveValue('Keep documentation examples short.');

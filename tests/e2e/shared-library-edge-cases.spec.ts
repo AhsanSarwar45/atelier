@@ -148,7 +148,10 @@ test('removing global sources exposes orphan customizations and ambiguous IDs di
   await page.goto(`/project?id=${alpha.id}&settings=library`); await expect(page.getByText('Global source removed:', { exact: false })).toBeVisible();
   // Remove the conflicting project source before saving the unrelated orphan cleanup.
   await save(request, { items: [], overrides: { source: { content: 'custom' } } }, alpha);
-  await page.reload(); await page.getByRole('button', { name: 'Forget customization' }).click();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Forget customization' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Skills', exact: true }).click();
+  await page.getByRole('button', { name: 'Forget customization' }).click();
   await expect(page.getByRole('button', { name: 'Forget customization' })).toHaveCount(0);
 });
 

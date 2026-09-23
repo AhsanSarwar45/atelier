@@ -58,7 +58,7 @@ test('one instruction destination preserves old text, global drafts, commands an
   await expect.poll(async () => (await (await request.get(settingsUrl)).json()).instructions).toBe('Updated project guidance');
   await page.reload();
   await expect(page.getByRole('textbox', { name: 'Project instructions', exact: true })).toHaveValue('Updated project guidance');
-  await page.getByText('Also inherited: global instructions', { exact: true }).click();
+  await page.getByTestId('library-item-atelier-general-instructions').getByText('View instructions', { exact: true }).click();
   await expect(page.getByText('Global guidance for every provider', { exact: true })).toBeVisible();
   await page.screenshot({ path: join(results, 'unified-project.png'), animations: 'disabled' });
   await page.getByRole('button', { name: 'Commands', exact: true }).click();
@@ -74,6 +74,46 @@ test('one instruction destination preserves old text, global drafts, commands an
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: join(results, 'unified-commands-mobile.png'), animations: 'disabled' });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('project rules are read-only, explain applicability and preserve older settings', async ({ page, request }) => {
+  const url = `/api/settings/library?path=${encodeURIComponent(project.path)}`;
+  const rule = (id: string, when = { op: 'always' } as object) => ({ id, name: id, kind: 'instruction', content: `Guidance ${id}`, when });
+  const global = await (await request.get('/api/settings/library')).json();
+  expect((await request.put('/api/settings/library', { data: { revision: global.revision, library: { items: [rule('applies'), rule('missing-file', { op: 'file_exists', path: 'not-here.json' }), rule('previous-override')], overrides: {} } } })).ok()).toBeTruthy();
+  const local = await (await request.get(url)).json();
+  expect((await request.put(url, { data: { revision: local.revision, library: { items: [rule('older-project-rule')], overrides: { 'previous-override': { content: 'Preserved customized instructions' } } } } })).ok()).toBeTruthy();
+  const before = (await (await request.get(url)).json()).library;
+  await page.goto(`/project?id=${project.id}&settings=library`);
+  const summary = page.getByTestId('project-instruction-summary');
+  await expect(summary.getByRole('heading', { name: 'Applied global guidance' })).toBeVisible();
+  await expect(summary.getByTestId('library-item-applies')).toContainText('Included');
+  await expect(summary.getByTestId('library-item-previous-override')).toContainText('previously saved project override');
+  for (const name of ['Add instruction', 'Import native file', 'Customize', 'Edit', 'Enable here', 'Disable here', 'Reset to global', 'Remove']) await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Additional rules', exact: true })).toHaveCount(0);
+  await summary.getByText('Not applied · 1', { exact: true }).click();
+  await expect(summary.getByTestId('library-item-missing-file')).toContainText('Does not apply');
+  await expect(summary.getByTestId('library-item-missing-file')).toContainText('not-here.json');
+  await summary.getByText('Previously saved project rules · 1', { exact: true }).click();
+  await expect(summary.getByTestId('library-item-older-project-rule')).toBeVisible();
+  await page.getByRole('textbox', { name: 'Project instructions', exact: true }).fill('Only this project');
+  await page.getByRole('button', { name: 'Save project instructions' }).click();
+  await expect(page.getByRole('button', { name: 'Save project instructions' })).toBeDisabled();
+  expect((await (await request.get(url)).json()).library).toEqual(before);
+  await page.screenshot({ path: join(results, 'global-rules-readonly-desktop.png'), animations: 'disabled' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: join(results, 'global-rules-readonly-mobile.png'), animations: 'disabled' });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await summary.getByRole('link', { name: 'Manage global instructions' }).click();
+  await expect(page.getByRole('button', { name: 'Add instruction', exact: true })).toBeVisible();
+  await page.getByTestId('library-item-applies').getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.getByLabel('Item content').fill('Edited globally');
+  await page.getByRole('button', { name: 'Save item', exact: true }).click();
+  await expect(page.getByTestId('library-editor')).toHaveCount(0);
+  await page.goto(`/project?id=${project.id}&settings=library`);
+  await page.getByTestId('library-item-applies').getByText('View instructions', { exact: true }).click();
+  await expect(page.getByText('Edited globally', { exact: true })).toBeVisible();
+  expect((await (await request.get(url)).json()).library).toEqual(before);
 });
 
 for (const brand of ['claude', 'codex'] as const) test(`${brand} chat guidance has readable groups and collapsed diagnostics`, async ({ page }) => {
