@@ -3122,6 +3122,8 @@ impl AcpDriver {
         match command.kind {
             CommandKind::PromptSend => {
                 let expansion = self.shared_library.expand(command.at("text").as_str().unwrap_or_default())?;
+                let native_command = expansion.is_none()
+                    && slash_name(command.at("text").as_str().unwrap_or_default()).is_some();
                 if expansion.is_none() {
                     validate_offered_command(
                         &self.database,
@@ -3133,7 +3135,10 @@ impl AcpDriver {
                 if let Some(text) = expansion { expanded_command.fields.insert("text".into(), json!(text)); }
                 let mut content =
                     prompt_content(&expanded_command, Carries::unpacked(self.carries.load(Ordering::SeqCst)))?;
-                if let Some(guidance) = &self.pending_guidance {
+                // Native slash commands must remain the leading (and only
+                // textual) command block for adapters to recognize them.
+                // Keep guidance pending until a normal/shared-skill turn.
+                if let Some(guidance) = self.pending_guidance.as_ref().filter(|_| !native_command) {
                     content.insert(0, ContentBlock::Text(TextContent::new(format!(
                         "<atelier_connection_guidance>\nThe user-configured shared guidance for this connection follows. It replaces earlier shared-library instructions, skill catalogs, and output-style selections in this conversation. Do not carry forward removed guidance or infer the current style from earlier responses. Provider safety rules and explicit user requests still apply.\n\n{guidance}\n</atelier_connection_guidance>"
                     ))));
@@ -3156,7 +3161,7 @@ impl AcpDriver {
                     content,
                 )
                 .await?;
-                self.pending_guidance = None;
+                if !native_command { self.pending_guidance = None; }
                 if handoff.is_some() {
                     self.database.clear_account_handoff(self.session.id.clone()).await?;
                 }
@@ -4014,6 +4019,23 @@ mod tests {
                 kind: CommandKind::PromptSend,
                 fields: serde_json::Map::from_iter([("text".into(), json!("User request"))]),
             };
+            database.append(serde_json::from_value(json!({
+                "type":"session.menu", "sessionId":"chat-1", "seq":0,
+                "at":"2026-09-02T00:00:00Z", "commands":[{"name":"compact"}]
+            })).unwrap()).await.unwrap();
+            let native = Command {
+                kind: CommandKind::PromptSend,
+                fields: serde_json::Map::from_iter([("text".into(), json!("/compact"))]),
+            };
+            let (result, ()) = tokio::join!(driver.run(&native), async {
+                let Control::Prompt { content, reply } = requests.recv().await.unwrap() else {
+                    panic!("expected native command");
+                };
+                assert_eq!(serde_json::to_value(content).unwrap(), json!([{"type":"text","text":"/compact"}]));
+                reply.send(Ok(json!({"ok":true}))).unwrap();
+            });
+            result.unwrap();
+            assert!(driver.pending_guidance.is_some());
             for attempt in 0..3 {
                 let (result, ()) = tokio::join!(driver.run(&command), async {
                     let Control::Prompt { content, reply } = requests.recv().await.unwrap() else {
@@ -4035,7 +4057,7 @@ mod tests {
             let events = database.events_since("chat-1".into(), 0).await.unwrap();
             let text: Vec<_> = events.iter().filter(|event| event.kind == crate::workbench::protocol::EventKind::TextDelta).collect();
             assert!(!text.is_empty());
-            assert!(text.iter().all(|event| event.fields["text"] == "User request"));
+            assert!(text.iter().all(|event| event.fields["text"] == "User request" || event.fields["text"] == "/compact"));
         }
     }
 

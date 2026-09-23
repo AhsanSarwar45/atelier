@@ -20,7 +20,7 @@ repeatable regression assertions in addition to that exploration.
 | Manual-only skill | Both providers accepted /skill:manual-audit, used ALPHA parameters and the selected pipe style; automatic catalogue excludes manual-only descriptions |
 | Cross-project isolation | Both providers rejected the conditional skill in Beta and returned PIPE / MANUAL-V1 / BASE / GLOBAL-V2 / BETA for its manual skill |
 | Existing feature regression | Original browser cases cover both editors, native import, output-style selection, immutable MCP reads and explicit skill/resource delivery to both providers |
-| Connection context transport | Rust test exercises Claude, Codex and Local branches, rejected-send retry, once-per-connection delivery and unchanged stored user text |
+| Connection context transport | Rust test exercises Claude, Codex and Local branches, native /compact as the first turn, rejected-send retry, once-per-connection delivery and unchanged stored user text |
 
 Provider screenshots in `tests/results/shared-library/claude-chrome-lifecycle.png`
 and `codex-chrome-lifecycle.png` show the JSON-to-pipe transition and subsequent

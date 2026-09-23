@@ -79,6 +79,8 @@ guidance as a separate context block. This common ACP path refreshes resumed
 conversations whose provider retains earlier system/developer instructions.
 It does not rewrite the user's stored message, is retried if sending fails, and
 is not repeated on subsequent turns of the same connection.
+Native slash commands keep their original wire shape; the context block waits
+for the next ordinary or shared-skill turn instead of disrupting command parsing.
 
 The read-only CLI uses the same resolver:
 
