@@ -93,10 +93,17 @@ pub fn list(brand: &str, scope: &Scope, account_dir: &Path) -> Result<Vec<KindLi
     Ok(match (brand, scope) {
         ("claude", Scope::Account { .. }) => {
             let settings = account_dir.join("settings.json");
+            // A synced plugin switched off is also a bare `enabledPlugins`
+            // entry; the synced one says more, so it stands in for it.
+            let synced = synced_plugins(account_dir, &settings);
+            let mut plugins = installed_plugins(account_dir, &settings);
+            plugins.retain(|plugin| !synced.iter().any(|one| one.id == plugin.id));
+            plugins.extend(synced);
+            plugins.sort_by(|a, b| a.id.cmp(&b.id));
             vec![
                 KindList {
                     kind: Kind::Plugins,
-                    items: installed_plugins(account_dir, &settings),
+                    items: plugins,
                 },
                 KindList {
                     kind: Kind::Marketplaces,
@@ -260,6 +267,54 @@ fn installed_plugins(account_dir: &Path, settings: &Path) -> Vec<Item> {
         ));
     }
     items.sort_by(|a, b| a.id.cmp(&b.id));
+    items
+}
+
+/// Plugins claude.ai syncs to the account, from each bucket's `manifest.json`
+/// under `plugins/synced`. Each loads as `name@synced` and is on unless the
+/// settings switch it off; there is no install record to remove, only the
+/// switch. A folder is not the name to go by — a later generation is kept as
+/// `name~g2` — so the manifest is.
+fn synced_plugins(account_dir: &Path, settings: &Path) -> Vec<Item> {
+    let enabled = enabled_plugins(&read_object(settings));
+    let synced = account_dir.join("plugins/synced");
+    let Ok(buckets) = fs::read_dir(&synced) else {
+        return Vec::new();
+    };
+    let mut items: Vec<Item> = Vec::new();
+    let mut buckets: Vec<PathBuf> = buckets.flatten().map(|entry| entry.path()).collect();
+    buckets.sort();
+    for bucket in buckets.iter().filter(|path| path.is_dir()) {
+        let manifest = read_object(&bucket.join("manifest.json"));
+        let Some(Value::Array(plugins)) = manifest.get("plugins") else {
+            continue;
+        };
+        for plugin in plugins {
+            let Some(name) = plugin.get("name").and_then(string_of) else {
+                continue;
+            };
+            let id = format!("{name}@synced");
+            if items.iter().any(|item| item.id == id) {
+                continue;
+            }
+            let folder = match plugin.get("generation").and_then(Value::as_u64) {
+                Some(generation) if generation > 1 => format!("{name}~g{generation}"),
+                _ => name.clone(),
+            };
+            items.push(Item {
+                name: name.clone(),
+                description: plugin.get("description").and_then(string_of),
+                path: bucket.join(folder),
+                enabled: Some(enabled.get(&id).and_then(Value::as_bool).unwrap_or(true)),
+                version: plugin.get("version").and_then(string_of),
+                marketplace: Some("synced".into()),
+                source: Some(Source::User),
+                removable: Some(false),
+                id,
+                ..Item::default()
+            });
+        }
+    }
     items
 }
 
@@ -707,6 +762,35 @@ mod tests {
         )
         .is_err());
         assert!(list("gemini", &account(), cfg.path()).is_err());
+    }
+
+    #[test]
+    fn synced_plugins_are_listed_on_unless_switched_off_and_cannot_be_removed() {
+        let account_dir = tempfile::tempdir().unwrap();
+        let bucket = account_dir.path().join("plugins/synced/org_account");
+        write(
+            &bucket.join("manifest.json"),
+            &serde_json::to_string(&json!({"plugins": [
+                {"pluginId": "plugin_1", "name": "design", "description": "Design work", "version": "0040"},
+                {"pluginId": "plugin_2", "name": "pdf-viewer", "description": "PDFs", "version": "0038", "generation": 2},
+            ]}))
+            .unwrap(),
+        );
+        write(
+            &account_dir.path().join("settings.json"),
+            r#"{"enabledPlugins":{"pdf-viewer@synced":false}}"#,
+        );
+        let kinds = list("claude", &account(), account_dir.path()).unwrap();
+        let plugins = &kinds[0].items;
+        assert_eq!(plugins.len(), 2, "the switched-off one is not listed twice: {plugins:?}");
+        assert_eq!(plugins[0].id, "design@synced");
+        assert_eq!(plugins[0].enabled, Some(true));
+        assert_eq!(plugins[0].removable, Some(false));
+        assert_eq!(plugins[0].description.as_deref(), Some("Design work"));
+        assert_eq!(plugins[1].id, "pdf-viewer@synced");
+        assert_eq!(plugins[1].enabled, Some(false));
+        assert_eq!(plugins[1].path, bucket.join("pdf-viewer~g2"));
+        assert_eq!(serde_json::to_value(&plugins[1]).unwrap()["removable"], json!(false));
     }
 
     #[test]
