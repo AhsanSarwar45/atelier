@@ -560,7 +560,7 @@ pub fn validate(library: &Library, project: bool) -> Result<(), String> {
             return Err("Content replacement exceeds 128 KiB".into());
         }
     }
-    if serde_json::to_vec(library)
+    if serde_json::to_vec_pretty(library)
         .map_err(|e| e.to_string())?
         .len()
         > MAX_LIBRARY
@@ -602,6 +602,15 @@ mod tests {
     }
     fn save(data: &Path, root: Option<&Path>, lib: &Library) {
         write(data, root, lib, &revision(&read(data, root).unwrap())).unwrap();
+    }
+    #[test]
+    fn size_limit_measures_the_format_that_is_written_and_read() {
+        let mut library = Library { items: vec![item("large", Kind::Skill, "Read me")], ..Default::default() };
+        let spare = MAX_LIBRARY - serde_json::to_vec(&library).unwrap().len();
+        library.items[0].bundle = "x".repeat(spare);
+        assert_eq!(serde_json::to_vec(&library).unwrap().len(), MAX_LIBRARY);
+        assert!(serde_json::to_vec_pretty(&library).unwrap().len() > MAX_LIBRARY);
+        assert!(validate(&library, false).unwrap_err().contains("2 MiB"));
     }
     #[test]
     fn global_project_and_style_resolve_without_merging_content() {

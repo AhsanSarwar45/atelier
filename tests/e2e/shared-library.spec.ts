@@ -24,6 +24,11 @@ async function saved(page: Page) {
   await page.getByRole('button', { name: 'Save item', exact: true }).click();
   await expect(page.getByTestId('library-editor')).toHaveCount(0);
 }
+async function choose(page: Page, label: string, option: string) {
+  await page.getByRole('combobox', { name: label, exact: true }).click();
+  await page.getByRole('option', { name: option, exact: true }).click();
+  await expect(page.getByRole('listbox', { includeHidden: true })).toHaveCount(0);
+}
 test.beforeAll(async ({ request }) => {
   expect(run, 'run through the isolated harness').toBeTruthy();
   mkdirSync(join(run, 'projects'), { recursive: true }); mkdirSync(results, { recursive: true });
@@ -47,7 +52,7 @@ test('global and project editors persist conditional skills, instructions and ex
   await page.getByRole('button', { name: 'Skills', exact: true }).click();
   await add(page, 'skill', 'frontend-review', 'Frontend review', 'Read the supporting resource checklist.md with atelier_skill_read. Return its proof code and {{framework}}.');
   await page.getByLabel('Item description').fill('Use when asked to perform the shared frontend review.');
-  await page.getByLabel('Condition', { exact: true }).selectOption('dependency');
+  await choose(page, 'Condition', 'Package declares dependency');
   await page.getByLabel('Dependency name').fill('next');
   await page.getByText('Parameters and supporting resources', { exact: true }).click();
   await page.getByRole('button', { name: 'Add parameters', exact: true }).click();
@@ -57,7 +62,7 @@ test('global and project editors persist conditional skills, instructions and ex
   await page.getByLabel('Resources name').fill('checklist.md');
   await page.getByLabel('Resources value').fill('The proof code is RESOURCE-READY.');
   await saved(page);
-  await page.getByLabel('Evaluate for project').selectOption(project.path);
+  await choose(page, 'Evaluate for project', 'Shared guidance demo');
   const row = page.getByTestId('library-item-frontend-review');
   await expect(row).toContainText('Available');
   await row.getByText('Why? · Inspect content').click();
@@ -74,11 +79,11 @@ test('global and project editors persist conditional skills, instructions and ex
   await page.getByRole('button', { name: 'Output styles', exact: true }).click();
   await add(page, 'output style', 'concise', 'Concise', 'Use short paragraphs. When asked for library proof, include STYLE-READY.');
   await saved(page);
-  await page.getByLabel('Selected output style').selectOption('concise');
+  await choose(page, 'Selected output style', 'Concise');
   await expect(page.getByTestId('library-item-concise')).toContainText('Available');
   await page.reload();
   await page.getByRole('button', { name: 'Output styles', exact: true }).click();
-  await expect(page.getByLabel('Selected output style')).toHaveValue('concise');
+  await expect(page.getByRole('combobox', { name: 'Selected output style' })).toContainText('Concise');
 
   await page.goto(`/project?id=${project.id}&settings=library`);
   await add(page, 'instruction', 'project-conventions', 'Project conventions', 'When asked for library proof, include PROJECT-READY.');
@@ -99,9 +104,9 @@ test('global and project editors persist conditional skills, instructions and ex
   expect(held.guidance).toContain('GLOBAL-READY'); expect(held.guidance).toContain('PROJECT-READY'); expect(held.guidance).toContain('STYLE-READY');
   expect(held.guidance).not.toContain('RESOURCE-READY');
   await page.getByRole('button', { name: 'Output styles', exact: true }).click();
-  await page.getByLabel('Selected output style').selectOption('');
+  await choose(page, 'Selected output style', 'No shared output style');
   await expect(page.getByTestId('library-item-concise')).toContainText('Not selected');
-  await page.getByLabel('Selected output style').selectOption('__inherit');
+  await choose(page, 'Selected output style', 'Use global selection');
   await expect(page.getByTestId('library-item-concise')).toContainText('Available');
   await page.screenshot({ path: join(results, 'project-style.png') });
   writeFileSync(join(project.path, 'CLAUDE.md'), 'Keep documentation examples short.');
