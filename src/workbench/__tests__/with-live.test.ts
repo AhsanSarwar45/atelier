@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { withLive } from '@/workbench/chat-sidebar';
+import { heldHere, withLive } from '@/workbench/chat-sidebar';
 import type { LiveSession } from '@/workbench/live';
 import type { RestoreRow } from '@/workbench/protocol';
 
@@ -302,4 +302,38 @@ describe('what the stream may move a row for', () => {
     expect(drawn!.held?.since).toBe(1_000);
   });
 
+});
+
+describe('a live chat is only added where it is working', () => {
+  // The home folder is a project, and so is a checkout inside it.
+  const HOME = { folders: ['/home/me'], others: ['/home/me', '/home/me/dev/beads-web'] };
+
+  it('a chat inside a project nested in this one is left to that project', () => {
+    const [nested] = [session({ projectPath: '/home/me', cwd: '/home/me/dev/beads-web/server' })];
+    expect(withLive([], [nested], PROJECT, null, null, false, HOME)).toEqual([]);
+    const [mine] = withLive([], [session({ projectPath: '/home/me', cwd: '/home/me/notes' })], PROJECT, null, null, false, HOME);
+    expect(mine!.sessionId).toBe('s2');
+  });
+
+  it('a chat begun above the project is never the project\'s', () => {
+    const place = { folders: ['/home/me/project'], others: ['/home/me', '/home/me/project'] };
+    expect(withLive([], [session({ cwd: '/home/me' })], PROJECT, null, null, false, place)).toEqual([]);
+    // A worktree git keeps beside the project is still the project's.
+    const beside = { ...place, folders: [...place.folders, '/home/me/worktrees/project/fix'] };
+    expect(withLive([], [session({ cwd: '/home/me/worktrees/project/fix/src' })], PROJECT, null, null, false, beside)).toHaveLength(1);
+  });
+
+  it('a chat the list already holds is kept whatever its folder', () => {
+    const merged = withLive([row()], [session({ id: 's1', cwd: '/elsewhere', state: 'thinking' })], PROJECT, null, null, false, HOME);
+    expect(merged).toHaveLength(1);
+  });
+
+  it('asks the nearest of the project\'s own folders', () => {
+    // A registered project inside the project's own worktree folder does not
+    // take the worktree's chats when the worktree is itself a checkout.
+    const place = { folders: ['/p', '/p/worktrees/a'], others: ['/p', '/p/worktrees'] };
+    expect(heldHere('/p/worktrees/a/src', place)).toBe(true);
+    expect(heldHere('/p/worktrees/b', place)).toBe(false);
+    expect(heldHere('/p-old', place)).toBe(false);
+  });
 });

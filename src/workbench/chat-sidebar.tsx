@@ -40,7 +40,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Tooltip } from '@/components/ui/tooltip';
 import { toast } from '@/hooks/use-toast';
-import { git, request } from '@/lib/api';
+import { git, projects as projectList, request } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { chatState, holderOnly, HOLDER_WORD, type HeldChat } from '@/workbench/chat-state';
 import { ChatStateChip } from '@/workbench/chat-state-chip';
@@ -213,6 +213,37 @@ export function holdStill(fresh: RestoreRow[], settled: readonly SettledRow[], n
   return held;
 }
 
+/** Where this project's chats are held, for a chat the list has not placed. */
+export interface Place {
+  /** The project's folder and every checkout git keeps of it. */
+  folders: readonly string[];
+  /** The registered projects' roots, each of which keeps its own chats. */
+  others: readonly string[];
+}
+
+const within = (dir: string, folder: string) => {
+  const root = folder.replace(/\/+$/, '');
+  return dir === root || dir.startsWith(`${root}/`);
+};
+
+/**
+ * Whether a chat working in `cwd` is this project's: inside one of its
+ * folders, and not inside another registered project on the way down. The
+ * server's own rule (provider.rs, `held_in`), less the `.atelier` it can see
+ * on disk and this page cannot (bw-6twt.1).
+ */
+export function heldHere(cwd: string, place: Place): boolean {
+  const nearest = place.folders
+    .filter((folder) => within(cwd, folder))
+    .sort((a, b) => b.length - a.length)[0];
+  if (nearest === undefined) return false;
+  const root = nearest.replace(/\/+$/, '');
+  return !place.others.some((other) => {
+    const nested = other.replace(/\/+$/, '');
+    return nested.length > root.length && within(nested, root) && within(cwd, nested);
+  });
+}
+
 /**
  * The list as it stands, plus whatever has happened since it was asked for.
  *
@@ -247,6 +278,13 @@ export function withLive(
    * (live.ts, `useHeldFactsAreOld`, bw-96is.22).
    */
   heldFactsAreOld = false,
+  /**
+   * Where the project's chats are held. A chat the list has not placed is
+   * only added when it is working there: one filed under this project but
+   * begun above it, or inside a project nested in it, is that other project's
+   * (bw-6twt.1). `null` adds every one, as before.
+   */
+  place: Place | null = null,
 ): RestoreRow[] {
   const byId = new Map(rows.filter((r) => r.sessionId).map((r) => [r.sessionId!, r]));
   const merged = [...rows];
@@ -259,6 +297,7 @@ export function withLive(
     // (docs/agent-workbench.md §6.3.1).
     const awake = session.state !== 'dormant';
     if (!known && !awake) continue;
+    if (!known && place && session.cwd && !heldHere(session.cwd, place)) continue;
     if (known) {
       merged[merged.indexOf(known)] = {
         ...known,
@@ -390,9 +429,31 @@ export function ChatSidebar({
   // The order as it was last drawn. Read while rendering and written after, so
   // what he is pointing at is what decides where the rows go (holdStill).
   const settled = useRef<SettledRow[]>([]);
+  const [checkouts, setCheckouts] = useState<readonly string[]>([]);
+  // Every registered project's root, whose chats stay its own even when it
+  // sits inside this one: the home folder's list does not hold beads-web's.
+  const [others, setOthers] = useState<readonly string[]>([]);
+  useEffect(() => {
+    let current = true;
+    Promise.resolve()
+      .then(() => projectList.listAll())
+      .then((projects) => {
+        if (!current || !Array.isArray(projects)) return;
+        setOthers(
+          projects.flatMap((project) =>
+            [project.path, project.localPath].filter((path): path is string => typeof path === 'string' && path !== ''),
+          ),
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, []);
+  const place = useMemo<Place>(() => ({ folders: [projectPath, ...checkouts], others }), [projectPath, checkouts, others]);
   const rows = useMemo(
-    () => holdStill(withLive(fetched, live, projectId, running, holds, heldFactsAreOld), settled.current),
-    [fetched, live, projectId, running, holds, heldFactsAreOld],
+    () => holdStill(withLive(fetched, live, projectId, running, holds, heldFactsAreOld, place), settled.current),
+    [fetched, live, projectId, running, holds, heldFactsAreOld, place],
   );
   useEffect(() => {
     settled.current = asSettled(rows);
@@ -465,7 +526,6 @@ export function ChatSidebar({
    * in twelve idle seconds, for work nothing on this screen was showing
    * (bw-uivp.4).
    */
-  const [checkouts, setCheckouts] = useState<readonly string[]>([]);
   useEffect(() => {
     // Where git keeps this project's worktrees, which may be nowhere under its
     // folder: a chat begun in one of those is this list's too (bw-ggbj.1).
