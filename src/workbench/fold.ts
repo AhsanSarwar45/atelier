@@ -425,7 +425,7 @@ export interface SessionView {
 }
 
 export interface SessionMenu {
-  sharedLibrary?: { revision: string; items: { id: string; name: string; kind: string; source: string; state: string }[] };
+  sharedLibrary?: { revision: string; items: { id: string; name: string; kind: string; source: string; state: string; automatic?: boolean }[] };
   commands: CommandInfo[];
   skills: string[];
   models: ModelChoice[];

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({ manifest: {
 }, updateSettings: vi.fn() }));
 mocks.updateSettings.mockResolvedValue({ manifest: mocks.manifest, instructions: 'Start command: npm run dev', storage: 'personal' });
 vi.mock('@/lib/api', () => ({
+  request: vi.fn().mockResolvedValue({ ok: true, json: async () => ({ library: { items: [], overrides: {} }, revision: 'one', source_revision: 'one', resolved: { revision: 'one', items: [] }, guidance: '', inherited: [] }) }),
   projects: {
     settings: vi.fn().mockResolvedValue({ manifest: mocks.manifest, instructions: 'Start command: npm run dev', storage: 'personal', path: '/data/project.toml' }),
     updateSettings: mocks.updateSettings,
@@ -40,7 +41,7 @@ describe('project settings', () => {
     expect(screen.getByDisplayValue('UI | npm test | src/')).toBeVisible();
 
     rerender(<ProjectSettingsScreen {...shared} section="instructions" />);
-    expect(screen.getByDisplayValue('Start command: npm run dev')).toBeVisible();
+    expect(await screen.findByDisplayValue('Start command: npm run dev')).toBeVisible();
 
     rerender(<ProjectSettingsScreen {...shared} section="workflow" />);
     fireEvent.change(screen.getByDisplayValue('A workbench'), { target: { value: 'Updated summary' } });

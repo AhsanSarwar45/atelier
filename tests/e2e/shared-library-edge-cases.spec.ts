@@ -28,10 +28,12 @@ async function edit(page: Page, id: string, inherited = false) {
 async function commit(page: Page) { await page.getByRole('button', { name: 'Save item', exact: true }).click(); await expect(page.getByTestId('library-editor')).toHaveCount(0); }
 async function turn(page: Page, text: string) {
   const messages = page.getByTestId('assistant-message');
-  const before = await messages.count();
+  const before = await messages.count() ? await messages.last().evaluate(el => el.closest('[data-transcript-key]')?.getAttribute('data-transcript-key')) : null;
   await page.getByTestId('composer').fill(text); await page.getByTestId('send-button').click();
   await expect(page.getByTestId('stop-button')).toBeVisible({ timeout: 30_000 });
-  await expect.poll(async () => messages.count(), { timeout: 120_000 }).toBeGreaterThan(before);
+  // The transcript is virtualized: a new answer can replace an old visible row
+  // without increasing the number of mounted messages.
+  await expect.poll(async () => await messages.count() ? messages.last().evaluate(el => el.closest('[data-transcript-key]')?.getAttribute('data-transcript-key')) : null, { timeout: 120_000 }).not.toBe(before);
   await expect(page.getByTestId('stop-button')).toBeHidden({ timeout: 120_000 });
   return (await messages.last().innerText()).trim();
 }
@@ -70,7 +72,7 @@ test('project customization resets to the actual global source and removes proje
   const original = item('inherited', 'skill', 'global {{runner}}', { parameters: { runner: 'npm test' } });
   await save(request, { items: [original], overrides: {} });
   await save(request, { items: [], overrides: { inherited: { parameters: { runner: 'cargo test', extra: 'remove me' }, content: 'project content', automatic: false } } }, alpha);
-  await page.goto(`/project?id=${alpha.id}&settings=library`); await page.getByRole('button', { name: 'Skills', exact: true }).click(); await edit(page, 'inherited', true);
+  await page.goto(`/project?id=${alpha.id}&settings=library`); await page.getByRole('button', { name: 'Commands', exact: true }).click(); await edit(page, 'inherited', true);
   await page.getByRole('button', { name: 'Reset parameters to global' }).click();
   await page.getByRole('button', { name: 'Remove parameters' }).click();
   await page.getByLabel('Item content').fill(original.content); await page.getByRole('checkbox', { name: 'Allow automatic selection by the agent' }).check();
@@ -231,8 +233,8 @@ for (const brand of ['claude', 'codex']) {
     test.skip(process.env.BEADS_E2E_LIVE_PROVIDERS !== '1', 'requires isolated provider credential copies');
     test.setTimeout(600_000);
     const globals = {
+      general_instructions: 'For release readiness and manual audit reports the global field is GLOBAL-V1.',
       items: [
-        item('global-marker', 'instruction', 'For release readiness and manual audit reports the global field is GLOBAL-V1.'),
         item('auto-release', 'skill', 'Read references/deep/release.md with atelier_skill_read. Use project parameter {{workspace}}. Follow the selected output style.', { description: 'Use for requests to inspect release readiness.', when: { op: 'dependency', path: 'package.json', name: 'next' }, parameters: { workspace: 'BASE' }, resources: { 'references/deep/release.md': 'Report proof RELEASE-V1; project {{workspace}}; unicode 日本語 🧪. Get global and local fields from the shared instructions. Follow the selected output style.' } }),
         item('manual-audit', 'skill', 'Report proof MANUAL-V1; project {{workspace}}; unicode 日本語 🧪. Get global and local fields from shared instructions. Follow the selected output style.', { automatic: false, parameters: { workspace: 'BASE' } }),
         item('json-style', 'output_style', 'For release readiness and manual audit, final output must be ONLY one valid JSON object, no Markdown fences or extra prose. Exactly five string fields: proof, project, global, local, unicode.'),
@@ -248,10 +250,11 @@ for (const brand of ['claude', 'codex']) {
     try {
       const s = await start(alpha);
       expect(JSON.parse(await turn(page, prompt))).toEqual({ proof: 'RELEASE-V1', project: 'ALPHA', global: 'GLOBAL-V1', local: 'ALPHA', unicode: '日本語 🧪' });
-      await page.getByTestId('chat-shared-library').locator('summary').click();
+      await page.getByTestId('chat-shared-library').locator(':scope > summary').click();
+      await page.getByTestId('guidance-diagnostics').locator('summary').click();
       const pinned = await page.getByTestId('chat-shared-library').innerText();
-      globals.items[0].content = 'For release readiness and manual audit reports the global field is GLOBAL-V2.';
-      (globals.items[1].resources as Record<string, string>)['references/deep/release.md'] = 'Report proof RELEASE-V2; project {{workspace}}; unicode 日本語 🧪. Get global and local fields from shared instructions. Follow the selected output style.';
+      globals.general_instructions = 'For release readiness and manual audit reports the global field is GLOBAL-V2.';
+      (globals.items[0].resources as Record<string, string>)['references/deep/release.md'] = 'Report proof RELEASE-V2; project {{workspace}}; unicode 日本語 🧪. Get global and local fields from shared instructions. Follow the selected output style.';
       globals.output_style = 'pipe-style'; await save(request, globals);
       expect(JSON.parse(await turn(page, prompt))).toEqual({ proof: 'RELEASE-V1', project: 'ALPHA', global: 'GLOBAL-V1', local: 'ALPHA', unicode: '日本語 🧪' });
       expect(await page.getByTestId('chat-shared-library').innerText()).toBe(pinned);
@@ -264,7 +267,8 @@ for (const brand of ['claude', 'codex']) {
       }, { timeout: 30_000, intervals: [500, 1000] }).toBe(true);
       await page.reload();
       expect(await turn(page, prompt)).toBe('PIPE|RELEASE-V2|ALPHA|GLOBAL-V2|ALPHA|日本語 🧪');
-      await page.getByTestId('chat-shared-library').locator('summary').click();
+      await page.getByTestId('chat-shared-library').locator(':scope > summary').click();
+      await page.getByTestId('guidance-diagnostics').locator('summary').click();
       expect(await page.getByTestId('chat-shared-library').innerText()).not.toBe(pinned);
       expect(await turn(page, '/skill:manual-audit Perform the manual audit.')).toBe('PIPE|MANUAL-V1|ALPHA|GLOBAL-V2|ALPHA|日本語 🧪');
       const b = await start(beta);

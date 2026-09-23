@@ -19,6 +19,9 @@ static WRITES: Mutex<()> = Mutex::new(());
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Library {
+    /// Plain global guidance; project baseline remains in instructions.md.
+    #[serde(default)]
+    pub general_instructions: String,
     #[serde(default)]
     pub items: Vec<Item>,
     #[serde(default)]
@@ -507,6 +510,12 @@ impl Condition {
 }
 
 pub fn validate(library: &Library, project: bool) -> Result<(), String> {
+    if library.general_instructions.len() > MAX_TEXT {
+        return Err("Keep general instructions below 128 KiB".into());
+    }
+    if project && !library.general_instructions.is_empty() {
+        return Err("Project general instructions belong in project settings".into());
+    }
     if library.items.len() > 200 || library.overrides.len() > 200 {
         return Err("A library supports at most 200 items and overrides".into());
     }
@@ -602,6 +611,24 @@ mod tests {
     }
     fn save(data: &Path, root: Option<&Path>, lib: &Library) {
         write(data, root, lib, &revision(&read(data, root).unwrap())).unwrap();
+    }
+    #[test]
+    fn plain_global_instructions_are_optional_inherited_and_pinned() {
+        let (data, root) = fixture();
+        let old: Library = serde_json::from_str(r#"{"items":[],"overrides":{}}"#).unwrap();
+        assert!(old.general_instructions.is_empty());
+        let mut library = Library { general_instructions: "Global guidance 日本語".into(), ..Default::default() };
+        save(data.path(), None, &library);
+        let snap = resolve(data.path(), Some(root.path())).unwrap();
+        assert!(snap.guidance().contains("Global guidance 日本語"));
+        assert_eq!(snap.items.iter().filter(|row| row.item.id == "atelier-general-instructions").count(), 1);
+        assert!(validate(&library, true).is_err());
+        library.general_instructions.clear();
+        save(data.path(), None, &library);
+        assert!(!resolve(data.path(), Some(root.path())).unwrap().guidance().contains("Global guidance 日本語"));
+        assert!(snap.guidance().contains("Global guidance 日本語"));
+        library.general_instructions = "x".repeat(MAX_TEXT + 1);
+        assert!(validate(&library, false).is_err());
     }
     #[test]
     fn size_limit_measures_the_format_that_is_written_and_read() {
@@ -1072,6 +1099,16 @@ pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
         .into_iter()
         .map(|i| (i.id.clone(), (i, "built-in")))
         .collect();
+    if !global.general_instructions.trim().is_empty() {
+        items.insert("atelier-general-instructions".into(), (Item {
+            id: "atelier-general-instructions".into(),
+            name: "Global instructions".into(),
+            kind: Kind::Instruction,
+            content: global.general_instructions.clone(),
+            description: String::new(), when: Condition::Always, requires: vec![],
+            automatic: true, parameters: BTreeMap::new(), resources: BTreeMap::new(), bundle: String::new(),
+        }, "global"));
+    }
     for item in global.items {
         items.insert(item.id.clone(), (item, "global"));
     }

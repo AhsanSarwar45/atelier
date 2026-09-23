@@ -39,7 +39,7 @@ const SECTIONS: SettingsSectionDef[] = [
   { id: 'appearance', label: 'Appearance', hint: 'Theme, type', icon: <Palette /> },
   { id: 'notifications', label: 'Notifications', hint: 'Alerts, devices', icon: <Bell /> },
   { id: 'accounts', label: 'Accounts', hint: 'Sign-ins', icon: <Users /> },
-  { id: 'library', label: 'Shared library', hint: 'Instructions, skills, styles', icon: <FileCode2 /> },
+  { id: 'library', label: 'Agent guidance', hint: 'Instructions, skills, commands', icon: <FileCode2 /> },
   { id: 'claude', label: 'Claude Code', hint: 'Per account', icon: <BrandIcon brand="claude" /> },
   { id: 'codex', label: 'Codex', hint: 'Per account', icon: <BrandIcon brand="codex" /> },
   { id: 'files', label: 'Agent files', hint: 'Per account', icon: <FileCode2 /> },

@@ -220,7 +220,7 @@ impl Default for AcpNormalizer {
 impl AcpNormalizer {
     pub fn shared_library(&mut self, library: &super::super::library::Snapshot) {
         self.shared_commands = library.commands();
-        self.shared_library = json!({"revision":library.revision,"items":library.items.iter().map(|r| json!({"id":r.item.id,"name":r.item.name,"kind":r.item.kind,"source":r.source,"state":r.state})).collect::<Vec<_>>()});
+        self.shared_library = json!({"revision":library.revision,"items":library.items.iter().map(|r| json!({"id":r.item.id,"name":r.item.name,"kind":r.item.kind,"source":r.source,"state":r.state,"automatic":r.item.automatic})).collect::<Vec<_>>()});
     }
 
     fn merge_shared_commands(&mut self) {

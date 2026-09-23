@@ -42,8 +42,7 @@ export const PROJECT_SETTINGS_SECTIONS: SettingsSectionDef[] = [
   { id: 'project', label: 'Project', hint: 'Name, folder', icon: <Settings2 /> },
   { id: 'workflow', label: 'Workflow', hint: 'Cards, branches', icon: <GitBranch /> },
   { id: 'review', label: 'Review', hint: 'Checks', icon: <ShieldCheck /> },
-  { id: 'instructions', label: 'Instructions', hint: 'Agent prompt', icon: <NotebookPen /> },
-  { id: 'library', label: 'Shared library', hint: 'Instructions, skills, styles', icon: <NotebookPen /> },
+  { id: 'library', label: 'Agent guidance', hint: 'Instructions, skills, commands', icon: <NotebookPen /> },
   { id: 'chat-names', label: 'Chat names', hint: 'Template', icon: <Tag /> },
   { id: 'claude', label: 'Claude Code', hint: 'Project settings', icon: <BrandIcon brand="claude" /> },
   { id: 'codex', label: 'Codex', hint: 'Project settings', icon: <BrandIcon brand="codex" /> },
@@ -204,7 +203,7 @@ export function ProjectSettingsScreen({
       return parts.length ? { ...rest, chat_name: { parts } } : rest;
     });
 
-  const open = section ?? 'project';
+  const open = section === 'instructions' ? 'library' : section ?? 'project';
   const projectScope: Scope = useMemo(() => ({ kind: 'project', projectPath: folder }), [folder]);
 
   const pathField = (label: string, id: string, value: string, onChange: (v: string) => void, key: 'path' | 'localPath') => (
@@ -289,7 +288,7 @@ export function ProjectSettingsScreen({
       backHref={backHref}
       backSteps={backSteps}
       sections={PROJECT_SETTINGS_SECTIONS}
-      section={section}
+      section={section === 'instructions' ? 'library' : section}
       onOpen={onOpen}
       wide={open === 'files'}
       bar={dirty || saving ? saveButton : null}
@@ -410,18 +409,6 @@ export function ProjectSettingsScreen({
         </SettingsGroup>
       )}
 
-      {open === 'instructions' && manifest && (
-        <SettingsGroup title="Instructions">
-          <SettingRow label="Added to every prompt" htmlFor="settings-instructions" stack>
-            <Textarea
-              id="settings-instructions"
-              className="min-h-64 font-mono text-xs"
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
-            />
-          </SettingRow>
-        </SettingsGroup>
-      )}
 
       {open === 'chat-names' && manifest && (
         <SettingsGroup title="Chat names" data-testid="project-chat-names">
@@ -441,7 +428,7 @@ export function ProjectSettingsScreen({
       )}
 
       {open === 'claude' && provider('claude')}
-      {open === 'library' && (folder.startsWith('dolt://') ? <p className="text-sm">Choose a local project folder to configure its shared library.</p> : manifest ? <SharedLibrary projectPath={folder} /> : <p className="text-sm">Loading project settings…</p>)}
+      {open === 'library' && (folder.startsWith('dolt://') ? <p className="text-sm">Choose a local project folder to configure agent guidance.</p> : manifest ? <SharedLibrary projectPath={folder} projectInstructions={<section aria-label="Project instructions" className="space-y-3"><h3 className="font-semibold">Project instructions</h3><p className="text-sm text-t-secondary">Your shared CLAUDE.md / AGENTS.md guidance. Included in every conversation for this project, across providers. Existing project instructions are preserved here.</p><label className="block"><span className="sr-only">Project instructions</span><Textarea id="settings-instructions" className="min-h-64 font-mono text-sm" value={instructions} onChange={e => setInstructions(e.target.value)} /></label><Button disabled={!dirty || saving} onClick={() => void save()}>Save project instructions</Button></section>} /> : <p className="text-sm">Loading project settings…</p>)}
       {open === 'codex' && provider('codex')}
       {open === 'files' && (
         <div className="-m-4 flex h-[calc(100dvh-3rem)] flex-col sm:-m-6">
