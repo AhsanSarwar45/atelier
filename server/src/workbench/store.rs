@@ -173,6 +173,9 @@ const LEGACY_MIGRATIONS: &[&str] = &[
 /// The native owner of the existing workbench database.
 pub struct Store {
     connection: Connection,
+    /// Each chat's helpers as last folded, with the newest lifecycle row and
+    /// the count of them they were folded from (`projected_agents`).
+    agents_folded: std::cell::RefCell<HashMap<String, ((i64, i64), Vec<Value>)>>,
 }
 
 /// What has already been said about one chat, and to whom (`session_notice`).
@@ -332,7 +335,10 @@ impl Store {
         connection.busy_timeout(Duration::from_secs(10))?;
         connection.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
         migrate(&mut connection)?;
-        Ok(Self { connection })
+        Ok(Self {
+            connection,
+            agents_folded: Default::default(),
+        })
     }
 
     /// The last positional migration understood by this build.
@@ -403,6 +409,7 @@ impl Store {
     }
 
     pub fn delete_session(&mut self, id: &str) -> rusqlite::Result<()> {
+        self.agents_folded.borrow_mut().remove(id);
         let transaction = self.connection.transaction()?;
         transaction.execute("DELETE FROM event WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM bead_link WHERE session_id = ?1", [id])?;
@@ -1022,6 +1029,7 @@ fn held_in_its_project(
 
     pub fn rollback_event_batch(&self) {
         let _ = self.connection.execute_batch("ROLLBACK");
+        self.agents_folded.borrow_mut().clear();
     }
 
     pub fn events_since(&self, session_id: &str, since: i64) -> rusqlite::Result<Vec<Event>> {
@@ -2163,9 +2171,33 @@ fn held_in_its_project(
         // lifecycle edges plus only the newest progress report per agent, the
         // same bounded contract the final Node reader used. In particular, do
         // not let a stale transcript projection force a full chat catch-up.
-        Ok(fold_all(&self.agent_lifecycle_events(session_id)?)
+        //
+        // The status sweep asks this for every live chat every five seconds,
+        // and the rows it folds carry each helper's whole report: tens of
+        // megabytes a sweep on a chat that ran many helpers, read again with
+        // nothing changed, and from disk once the page cache lets go of them
+        // (bw-26n5). The index alone says whether anything changed: a new
+        // lifecycle row raises the newest seq, a reset is itself one, and
+        // pruning keeps each agent's newest progress, so the fold stands.
+        let seen: (i64, i64) = self.connection.query_row(
+            "SELECT COALESCE(MAX(seq),0), COUNT(*) FROM event WHERE session_id=?1 AND type IN \
+               ('agent.started','agent.finished','agent.identified','agent.relayed',\
+                'agent.progress','transcript.reset')",
+            [session_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        if let Some((at, agents)) = self.agents_folded.borrow().get(session_id) {
+            if *at == seen {
+                return Ok(agents.clone());
+            }
+        }
+        let agents = fold_all(&self.agent_lifecycle_events(session_id)?)
             .agents()
-            .to_vec())
+            .to_vec();
+        self.agents_folded
+            .borrow_mut()
+            .insert(session_id.to_string(), (seen, agents.clone()));
+        Ok(agents)
     }
 
     /// Read a cold conversation newest-first without constructing its complete
@@ -4770,6 +4802,40 @@ mod tests {
             .unwrap();
         assert_eq!(thought["text"], "early late");
         assert_eq!(thought["done"], true);
+    }
+
+    #[test]
+    fn helpers_are_folded_again_only_when_their_rows_change() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let append = |store: &Store, value: Value| {
+            assert!(store
+                .append_event(&serde_json::from_value(value).unwrap())
+                .unwrap());
+        };
+        append(&store, json!({"type":"agent.started","sessionId":"chat","seq":1,"at":"2026-09-23T00:00:00Z","agentId":"a","toolCallId":"t","kind":"helper","what":"Inspect","agentType":null,"model":null}));
+        assert_eq!(store.projected_agents("chat").unwrap()[0]["state"], "running");
+
+        // Rows that are not the helpers' own leave the fold standing: the
+        // sweep's question is answered without reading a helper row again.
+        store
+            .connection()
+            .execute("UPDATE event SET json=json_set(json,'$.what','Changed underneath') WHERE seq=1", [])
+            .unwrap();
+        append(&store, json!({"type":"notice","sessionId":"chat","seq":2,"at":"now","text":"unrelated"}));
+        assert_eq!(store.projected_agents("chat").unwrap()[0]["what"], "Inspect");
+
+        append(&store, json!({"type":"agent.progress","sessionId":"chat","seq":3,"at":"now","agentId":"a","seconds":7,"tokens":2,"calls":3}));
+        assert_eq!(store.projected_agents("chat").unwrap()[0]["seconds"], 7);
+        append(&store, json!({"type":"agent.progress","sessionId":"chat","seq":4,"at":"now","agentId":"a","seconds":9,"tokens":2,"calls":3}));
+        assert_eq!(store.projected_agents("chat").unwrap()[0]["seconds"], 9);
+        append(&store, json!({"type":"agent.finished","sessionId":"chat","seq":5,"at":"now","agentId":"a","state":"done","result":"Found it","seconds":9,"tokens":2,"calls":3}));
+        let agents = store.projected_agents("chat").unwrap();
+        assert_eq!(agents[0]["state"], "done");
+        assert_eq!(agents[0]["result"], "Found it");
+
+        store.delete_session("chat").unwrap();
+        assert!(store.projected_agents("chat").unwrap().is_empty());
     }
 
     #[test]
