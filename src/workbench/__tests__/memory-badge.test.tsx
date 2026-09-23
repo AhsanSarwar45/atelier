@@ -49,6 +49,31 @@ describe('memory badge', () => {
     expect(screen.queryByTestId('memory-swap-line')).toBeNull();
   });
 
+  // A monitor reading the service's control group sees file cache the chip's
+  // per-process total leaves out; the popover names both and the pressure the
+  // kernel's killer acts on (bw-ifjt.3).
+  it('shows the service total, its freeable cache and the memory pressure', async () => {
+    request.mockResolvedValue({ ok: true, json: async () => ({
+      totalBytes: 2 * 1024 ** 3, swapBytes: 0, metric: 'pssWithSwap', processCount: 1,
+      chats: [], processDetails: [],
+      service: { totalBytes: 9 * 1024 ** 3, cacheBytes: 6 * 1024 ** 3, pressure: 77.2 },
+    }) });
+    render(<MemoryBadge />);
+    fireEvent.click(await screen.findByTestId('memory-badge'));
+    const service = await screen.findByTestId('memory-service');
+    expect(service).toHaveTextContent('Service total9.0 GB');
+    expect(service).toHaveTextContent('Freeable cache6.0 GB');
+    expect(screen.getByTestId('memory-pressure')).toHaveTextContent('Memory pressure77%');
+    expect(screen.getByTestId('memory-pressure')).toHaveClass('text-destructive');
+  });
+
+  it('leaves the service lines out when the app has no group of its own', async () => {
+    render(<MemoryBadge />);
+    fireEvent.click(await screen.findByTestId('memory-badge'));
+    await screen.findByTestId('memory-popup');
+    expect(screen.queryByTestId('memory-service')).toBeNull();
+  });
+
   it('offers a confirmed stop only for a chat subprocess', async () => {
     render(<MemoryBadge />);
     fireEvent.click(await screen.findByTestId('memory-badge'));

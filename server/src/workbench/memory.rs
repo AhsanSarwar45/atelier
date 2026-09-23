@@ -42,6 +42,26 @@ pub struct MemoryReport {
     pub process_count: usize,
     pub chats: Vec<ChatMemory>,
     pub process_details: Vec<ProcessMemory>,
+    /// What the kernel charges the app's own control group, when it has one.
+    pub service: Option<ServiceMemory>,
+}
+
+/// The kernel's own account of the app's control group. The proportional
+/// total above leaves out the file cache the group has read in and the
+/// kernel memory it holds, so a monitor reading the group saw three times the
+/// badge's number and nothing on the badge said why. The kernel's
+/// out-of-memory killer acts on the group's pressure, not on either total,
+/// so that is shown as well (bw-ifjt.3).
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceMemory {
+    /// Everything charged to the group, in RAM and in swap.
+    pub total_bytes: u64,
+    /// The part of `total_bytes` that is file cache the kernel can drop.
+    pub cache_bytes: u64,
+    /// Share of the last ten seconds every process in the group spent
+    /// stalled waiting for memory, in percent. `systemd-oomd` kills on this.
+    pub pressure: f64,
 }
 
 fn belongs_to(pid: Pid, root: Pid, parents: &HashMap<Pid, Option<Pid>>) -> bool {
@@ -144,6 +164,69 @@ fn process_cost(pid: Pid) -> Result<Option<ProcessCost>, String> {
 #[cfg(not(target_os = "linux"))]
 fn process_cost(_pid: Pid) -> Result<Option<ProcessCost>, String> {
     Err("proportional process memory is not available on this operating system".into())
+}
+
+/// The group this process runs in, from `/proc/self/cgroup` on a unified
+/// hierarchy. The root group has no memory account of its own.
+fn cgroup_path(contents: &str) -> Option<&str> {
+    contents
+        .lines()
+        .find_map(|line| line.strip_prefix("0::"))
+        .map(str::trim)
+        .filter(|path| !path.is_empty() && *path != "/")
+}
+
+/// One `memory.stat` counter, in bytes.
+fn stat_field(stat: &str, name: &str) -> Option<u64> {
+    stat.lines().find_map(|line| {
+        let (key, value) = line.split_once(' ')?;
+        (key == name).then(|| value.trim().parse().ok()).flatten()
+    })
+}
+
+/// The `full avg10` figure of a pressure file: the share of time every
+/// process in the group was stalled at once. `systemd-oomd` compares this
+/// one against its limit, not the `some` line.
+fn full_pressure(pressure: &str) -> Option<f64> {
+    pressure
+        .lines()
+        .find_map(|line| line.strip_prefix("full "))?
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("avg10="))?
+        .parse()
+        .ok()
+}
+
+/// The group's own account, but only when the group is this app's alone: in a
+/// terminal or a desktop session scope it would count unrelated programs.
+#[cfg(target_os = "linux")]
+fn service_memory(ours: &[Found]) -> Option<ServiceMemory> {
+    let own = std::fs::read_to_string("/proc/self/cgroup").ok()?;
+    let group = std::path::Path::new("/sys/fs/cgroup").join(cgroup_path(&own)?.trim_start_matches('/'));
+    let read = |name: &str| std::fs::read_to_string(group.join(name)).ok();
+    let pids: HashSet<u32> = ours.iter().map(|found| found.pid.as_u32()).collect();
+    let members = read("cgroup.procs")?;
+    let mut members = members.lines().filter_map(|line| line.trim().parse::<u32>().ok()).peekable();
+    members.peek()?;
+    if !members.all(|pid| pids.contains(&pid)) {
+        return None;
+    }
+    let current: u64 = read("memory.current")?.trim().parse().ok()?;
+    let swapped: u64 = read("memory.swap.current")
+        .and_then(|text| text.trim().parse().ok())
+        .unwrap_or(0);
+    let stat = read("memory.stat")?;
+    let cache = stat_field(&stat, "file")?.saturating_sub(stat_field(&stat, "shmem").unwrap_or(0));
+    Some(ServiceMemory {
+        total_bytes: current.saturating_add(swapped),
+        cache_bytes: cache,
+        pressure: read("memory.pressure").as_deref().and_then(full_pressure).unwrap_or(0.0),
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn service_memory(_ours: &[Found]) -> Option<ServiceMemory> {
+    None
 }
 
 /// Proportional set size, resident and swapped together. The name says both
@@ -254,8 +337,12 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
     // The table is kept between reports, so a process already known is not
     // built again, and it is file reading, so it runs off the request threads
     // (bw-fbzd.5).
-    let ours = tokio::task::spawn_blocking(scan)
-        .await
+    let (ours, service) = tokio::task::spawn_blocking(|| {
+        let ours = scan();
+        let service = service_memory(&ours);
+        (ours, service)
+    })
+    .await
         .map_err(|e| format!("process scan failed: {e}"))?;
     let root = Pid::from_u32(std::process::id());
     let inherited_chat_id = ours
@@ -337,6 +424,7 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
         process_count: details.len(),
         chats,
         process_details: details,
+        service,
     })
 }
 
@@ -422,6 +510,36 @@ mod tests {
         ]);
         assert!(belongs_to(Pid::from_u32(12), root, &parents));
         assert!(!belongs_to(Pid::from_u32(20), root, &parents));
+    }
+
+    #[test]
+    fn finds_its_own_group_and_refuses_the_root() {
+        let own = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/atelier.service\n";
+        assert_eq!(
+            cgroup_path(own),
+            Some("/user.slice/user-1000.slice/user@1000.service/app.slice/atelier.service")
+        );
+        assert_eq!(cgroup_path("0::/\n"), None);
+        assert_eq!(cgroup_path("12:memory:/legacy\n"), None);
+    }
+
+    /// `file` is the cache; `file_mapped` and `file_dirty` are parts of it and
+    /// must not answer for it.
+    #[test]
+    fn reads_the_cache_counter_by_its_whole_name() {
+        let stat = "anon 2344000000\nfile 5932000000\nfile_mapped 241000000\nshmem 1000\n";
+        assert_eq!(stat_field(stat, "file"), Some(5_932_000_000));
+        assert_eq!(stat_field(stat, "shmem"), Some(1000));
+        assert_eq!(stat_field(stat, "kernel"), None);
+    }
+
+    /// The killer reads the `full` line; the `some` line runs higher and
+    /// would cry wolf.
+    #[test]
+    fn pressure_is_the_full_ten_second_average() {
+        let pressure = "some avg10=91.50 avg60=40.00 avg300=9.00 total=1\nfull avg10=77.23 avg60=54.69 avg300=17.55 total=2\n";
+        assert_eq!(full_pressure(pressure), Some(77.23));
+        assert_eq!(full_pressure("some avg10=1.00 avg60=0 avg300=0 total=0\n"), None);
     }
 
     #[cfg(target_os = "linux")]

@@ -22,6 +22,8 @@ interface MemoryReport {
     role: 'app' | 'accountReader' | 'appService' | 'chatAdapter' | 'provider' | 'subprocess';
     killable: boolean; startTime: number;
   }>;
+  /** The kernel's account of the app's own control group, absent outside one. */
+  service?: { totalBytes: number; cacheBytes: number; pressure: number } | null;
 }
 function isMemoryReport(value: unknown): value is MemoryReport {
   if (!value || typeof value !== 'object') return false;
@@ -113,6 +115,16 @@ export function MemoryBadge() {
         {report.swapBytes > 0 && <div className="flex items-center justify-between pt-0.5 text-xs font-normal text-muted-foreground" data-testid="memory-swap-line">
           <span>In RAM {memoryWords(report.totalBytes - report.swapBytes)}</span>
           <span className="tabular-nums">Swapped {memoryWords(report.swapBytes)}</span>
+        </div>}
+        {/* The group total is what a system monitor reading the service sees;
+            most of the gap is file cache the kernel drops on demand. What gets
+            the app killed is pressure, so that is shown beside it. */}
+        {report.service && <div className="mt-1.5 space-y-0.5 border-t pt-1.5 text-xs text-muted-foreground" data-testid="memory-service">
+          <div className="flex items-center justify-between"><span>Service total</span><span className="tabular-nums">{memoryWords(report.service.totalBytes)}</span></div>
+          <div className="flex items-center justify-between"><span>Freeable cache</span><span className="tabular-nums">{memoryWords(report.service.cacheBytes)}</span></div>
+          <div className={`flex items-center justify-between ${report.service.pressure >= 40 ? 'font-medium text-destructive' : ''}`} data-testid="memory-pressure">
+            <span>Memory pressure</span><span className="tabular-nums">{Math.round(report.service.pressure)}%</span>
+          </div>
         </div>}
       </div>
     </PopoverContent>
