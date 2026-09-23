@@ -3,6 +3,7 @@
 use super::actor::ChatDb;
 use super::agent_files;
 use super::browser::{self, BrowserCapture, BrowserRecipe};
+use super::codex_plugins;
 use super::extensions;
 use super::external::{self, ProviderHold};
 use super::mcp_catalogue;
@@ -918,6 +919,62 @@ impl WorkbenchRegistry {
         Ok(json!({"kinds": extensions::list(brand, scope, dir)?}))
     }
 
+    /// The plugins and marketplaces of the account behind a command, for
+    /// either brand: Claude's read off its files, Codex's asked of its CLI.
+    async fn extension_kinds(&self, command: &Command) -> Result<Value, String> {
+        let (brand, scope, dir, spawn_dir) = self.extension_account(command)?;
+        match (brand.as_str(), &scope) {
+            ("codex", provider_settings::Scope::Account { .. }) => {
+                let program = Self::codex_program()?;
+                Ok(json!({"kinds": codex_plugins::list(&program, spawn_dir.as_deref(), &dir).await?}))
+            }
+            _ => self.extensions_list(&brand, &scope, &dir),
+        }
+    }
+
+    fn codex_program() -> Result<PathBuf, String> {
+        crate::routes::find_tool("codex", &[]).ok_or_else(|| "codex is not installed on this machine".into())
+    }
+
+    /// The account behind a Codex plugin command. Codex plugins belong to an
+    /// account; a project has none of its own to move.
+    fn codex_plugin_account(&self, command: &Command) -> Result<Option<(PathBuf, Option<PathBuf>)>, String> {
+        let (brand, scope, dir, spawn_dir) = self.extension_account(command)?;
+        if brand != "codex" {
+            return Ok(None);
+        }
+        if matches!(scope, provider_settings::Scope::Project { .. }) {
+            return Err("Codex plugins belong to an account, not a project".into());
+        }
+        Ok(Some((dir, spawn_dir)))
+    }
+
+    /// Run Codex's own CLI for a plugin or marketplace command and answer its
+    /// outcome with the list as it now reads.
+    async fn codex_plugin_cli(
+        &self,
+        command: &Command,
+        words: &[&str],
+        within: Duration,
+    ) -> Result<Value, String> {
+        let program = Self::codex_program()?;
+        let (dir, spawn_dir) = self
+            .codex_plugin_account(command)?
+            .ok_or("not a Codex account")?;
+        let outcome = extensions::run_cli(
+            &program,
+            codex_plugins::HOME_VARIABLE,
+            spawn_dir.as_deref(),
+            None,
+            words,
+            within,
+        )
+        .await?;
+        let mut answer = serde_json::to_value(&outcome).map_err(|e| e.to_string())?;
+        answer["kinds"] = json!(codex_plugins::list(&program, spawn_dir.as_deref(), &dir).await?);
+        Ok(answer)
+    }
+
     /// Run Claude's own CLI for a plugin or marketplace command and answer
     /// its outcome with the list as it now reads.
     async fn claude_plugin_cli(
@@ -1367,16 +1424,27 @@ impl WorkbenchRegistry {
                 serde_json::to_value(provider_settings::write(brand, &scope, &dir, layer, patch)?)
                     .map_err(|e| e.to_string())
             }
-            CommandKind::ExtensionsList => {
-                let (brand, scope, dir, _) = self.extension_account(command)?;
-                self.extensions_list(&brand, &scope, &dir)
-            }
+            CommandKind::ExtensionsList => self.extension_kinds(command).await,
             CommandKind::PluginSetEnabled => {
                 let id = Self::field(command, "id")?.to_string();
                 let enabled = command
                     .at("enabled")
                     .as_bool()
                     .ok_or("enabled must be true or false")?;
+                // Codex has no verb for this; the switch is its own table in
+                // config.toml, written the way Codex writes it.
+                if let Some((dir, _)) = self.codex_plugin_account(command)? {
+                    let config = dir.join("config.toml");
+                    codex_plugins::set_enabled(&config, &id, enabled)?;
+                    let mut answer = self.extension_kinds(command).await?;
+                    answer["ok"] = json!(true);
+                    answer["output"] = json!(format!(
+                        "{} was set in {}",
+                        if enabled { "enabled" } else { "disabled" },
+                        config.display()
+                    ));
+                    return Ok(answer);
+                }
                 let verb = if enabled { "enable" } else { "disable" };
                 let words = vec!["plugin".to_string(), verb.to_string(), id.clone()];
                 match self.claude_plugin_cli(command, words, extensions::QUICK_CLI).await {
@@ -1408,19 +1476,27 @@ impl WorkbenchRegistry {
             }
             CommandKind::PluginInstall | CommandKind::PluginUninstall => {
                 let id = Self::field(command, "id")?.to_string();
-                let verb = if command.kind == CommandKind::PluginInstall {
-                    "install"
-                } else {
-                    "uninstall"
-                };
+                let install = command.kind == CommandKind::PluginInstall;
+                if self.codex_plugin_account(command)?.is_some() {
+                    let verb = if install { "add" } else { "remove" };
+                    return self
+                        .codex_plugin_cli(command, &["plugin", verb, &id], extensions::SLOW_CLI)
+                        .await;
+                }
+                let verb = if install { "install" } else { "uninstall" };
                 let words = vec!["plugin".to_string(), verb.to_string(), id];
                 self.claude_plugin_cli(command, words, extensions::SLOW_CLI)
                     .await
             }
             CommandKind::PluginCatalogue => {
+                if let Some((dir, spawn_dir)) = self.codex_plugin_account(command)? {
+                    let program = Self::codex_program()?;
+                    let listing = codex_plugins::browse(&program, spawn_dir.as_deref(), &dir).await?;
+                    return serde_json::to_value(listing).map_err(|e| e.to_string());
+                }
                 let (brand, _, dir, _) = self.extension_account(command)?;
                 if brand != "claude" {
-                    return Err("plugins are a Claude Code feature".into());
+                    return Err("brand must be claude or codex".into());
                 }
                 serde_json::to_value(plugin_catalogue::browse(&dir).await).map_err(|e| e.to_string())
             }
@@ -1430,6 +1506,12 @@ impl WorkbenchRegistry {
             // it has never heard of.
             CommandKind::PluginInstallFromCatalogue => {
                 let id = Self::field(command, "id")?.to_string();
+                // Codex lists only from marketplaces it already has.
+                if self.codex_plugin_account(command)?.is_some() {
+                    return self
+                        .codex_plugin_cli(command, &["plugin", "add", &id], extensions::SLOW_CLI)
+                        .await;
+                }
                 let origin = Self::maybe(command, "origin").unwrap_or_default().to_string();
                 let known = command.at("known").as_bool().unwrap_or(false);
                 if !known && !origin.is_empty() {
@@ -1452,6 +1534,15 @@ impl WorkbenchRegistry {
             }
             CommandKind::MarketplaceAdd => {
                 let source = Self::field(command, "source")?.to_string();
+                if self.codex_plugin_account(command)?.is_some() {
+                    return self
+                        .codex_plugin_cli(
+                            command,
+                            &["plugin", "marketplace", "add", &source],
+                            extensions::SLOW_CLI,
+                        )
+                        .await;
+                }
                 let words = vec![
                     "plugin".to_string(),
                     "marketplace".to_string(),
@@ -1463,6 +1554,15 @@ impl WorkbenchRegistry {
             }
             CommandKind::MarketplaceRemove => {
                 let name = Self::field(command, "name")?.to_string();
+                if self.codex_plugin_account(command)?.is_some() {
+                    return self
+                        .codex_plugin_cli(
+                            command,
+                            &["plugin", "marketplace", "remove", &name],
+                            extensions::QUICK_CLI,
+                        )
+                        .await;
+                }
                 let words = vec![
                     "plugin".to_string(),
                     "marketplace".to_string(),
@@ -2349,12 +2449,18 @@ mod tests {
         assert_eq!(listed["kinds"][1]["kind"], json!("marketplaces"));
         assert_eq!(listed["kinds"][1]["items"][0]["id"], json!("official"));
         assert_eq!(listed["kinds"][1]["items"][0]["description"], json!("github anthropics/official"));
-        // Codex has no plugin system, so it lists nothing.
+        // Codex plugins belong to an account: a project has none to list, and
+        // none to move. (An account's are its CLI's answers, codex_plugins.)
+        let project = root.path().join("project");
         let listed = registry
-            .execute(&command(CommandKind::ExtensionsList, json!({"brand":"codex","scope":"account","profileId":"system"})))
+            .execute(&command(CommandKind::ExtensionsList, json!({"brand":"codex","scope":"project","projectPath":project})))
             .await
             .unwrap();
         assert_eq!(listed["kinds"], json!([]));
+        let refused = registry
+            .execute(&command(CommandKind::PluginInstall, json!({"brand":"codex","scope":"project","projectPath":project,"id":"gmail@openai-curated-remote"})))
+            .await;
+        assert!(refused.unwrap_err().contains("account"));
 
         // A created account reads its own directory, which starts empty.
         let made = registry

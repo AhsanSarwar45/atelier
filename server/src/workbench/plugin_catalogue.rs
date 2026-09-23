@@ -206,7 +206,7 @@ fn installed_ids(account_dir: &Path) -> HashSet<String> {
     }
 }
 
-fn shelves<F: Fn(&Offered) -> &str>(entries: &[Offered], of: F) -> Vec<Shelf> {
+pub(crate) fn shelves<F: Fn(&Offered) -> &str>(entries: &[Offered], of: F) -> Vec<Shelf> {
     let mut counts: HashMap<&str, usize> = HashMap::new();
     for entry in entries {
         let id = of(entry);

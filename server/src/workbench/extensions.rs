@@ -1,14 +1,15 @@
-//! What one account or one project loads beyond its settings: Claude's
-//! plugins and the marketplaces they come from.
+//! What one account or one project loads beyond its settings: the plugins
+//! and the marketplaces they come from.
 //!
 //! Skills, subagents, hooks, output styles and rules are files, and the Agent
-//! files screen lists and edits them; Codex has no plugin system, so it has
-//! nothing here. Plugins and marketplaces are listed from Claude's own
-//! records (`plugins/installed_plugins.json`, `plugins/known_marketplaces.json`)
-//! and from the settings files that switch them on, so the screen shows what
-//! a chat would actually load. They are moved by Claude's own CLI so its
-//! records stay consistent with each other; `set_enabled_in_settings` is the
-//! fallback edit for when the CLI is not there.
+//! files screen lists and edits them. Claude's plugins and marketplaces are
+//! listed from its own records (`plugins/installed_plugins.json`,
+//! `plugins/known_marketplaces.json`, the `plugins/synced` manifests) and from
+//! the settings files that switch them on, so the screen shows what a chat
+//! would actually load. They are moved by Claude's own CLI so its records stay
+//! consistent with each other; `set_enabled_in_settings` is the fallback edit
+//! for when the CLI is not there. Codex's are asked of its own CLI, which alone
+//! knows what an account installed from the remote catalogue (`codex_plugins`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -64,6 +65,11 @@ pub struct Item {
     /// same marketplace on another account (bw-6ecp.5).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin: Option<String>,
+    /// `Some(false)` for what the provider puts there itself and will not
+    /// take away: a plugin claude.ai syncs, a marketplace Codex ships with.
+    /// It can be switched off where that exists, never removed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub removable: Option<bool>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -75,8 +81,9 @@ pub struct KindList {
 
 /// Every kind the brand has in this scope, each with what is there now.
 ///
-/// `account_dir` is the account's own config directory. Codex has no plugins,
-/// so it lists nothing.
+/// `account_dir` is the account's own config directory. Codex's list comes
+/// from its CLI (`codex_plugins::list`); here it has none, and a project has
+/// no plugins of its own in Codex.
 pub fn list(brand: &str, scope: &Scope, account_dir: &Path) -> Result<Vec<KindList>, String> {
     if let Scope::Project { path } = scope {
         if !path.is_absolute() {
@@ -213,6 +220,7 @@ fn plugin_item(
         // A plugin is named by `plugin@marketplace`; only a marketplace has an
         // address of its own.
         origin: None,
+        removable: None,
     }
 }
 
@@ -434,6 +442,63 @@ pub async fn run_cli(
     args: &[&str],
     within: Duration,
 ) -> Result<Outcome, String> {
+    let finished = cli_output(program, variable, config_dir, cwd, args, within).await?;
+    let mut output = String::from_utf8_lossy(&finished.stdout).trim().to_string();
+    let errors = String::from_utf8_lossy(&finished.stderr).trim().to_string();
+    if !errors.is_empty() {
+        if !output.is_empty() {
+            output.push('\n');
+        }
+        output.push_str(&errors);
+    }
+    if output.len() > MAX_OUTPUT {
+        let cut = output
+            .char_indices()
+            .map(|(i, _)| i)
+            .take_while(|i| *i <= MAX_OUTPUT)
+            .last()
+            .unwrap_or(0);
+        output.truncate(cut);
+        output.push_str("\n…");
+    }
+    Ok(Outcome {
+        ok: finished.status.success(),
+        output,
+    })
+}
+
+/// `run_cli` for a command that answers in JSON on stdout: the whole answer,
+/// parsed, or what the CLI said instead. Nothing is cut, since a listing can
+/// run to megabytes.
+pub async fn run_cli_json(
+    program: &Path,
+    variable: &str,
+    config_dir: Option<&Path>,
+    args: &[&str],
+    within: Duration,
+) -> Result<Value, String> {
+    let finished = cli_output(program, variable, config_dir, None, args, within).await?;
+    if !finished.status.success() {
+        let said = String::from_utf8_lossy(&finished.stderr).trim().to_string();
+        return Err(if said.is_empty() {
+            format!("{} {} failed", program.display(), args.join(" "))
+        } else {
+            said
+        });
+    }
+    serde_json::from_slice(&finished.stdout).map_err(|error| {
+        format!("{} {} did not answer in JSON: {error}", program.display(), args.join(" "))
+    })
+}
+
+async fn cli_output(
+    program: &Path,
+    variable: &str,
+    config_dir: Option<&Path>,
+    cwd: Option<&Path>,
+    args: &[&str],
+    within: Duration,
+) -> Result<std::process::Output, String> {
     let mut command = tokio::process::Command::new(program);
     command
         .args(args)
@@ -463,28 +528,7 @@ pub async fn run_cli(
             )
         })?
         .map_err(|error| format!("{} could not be waited for: {error}", program.display()))?;
-    let mut output = String::from_utf8_lossy(&finished.stdout).trim().to_string();
-    let errors = String::from_utf8_lossy(&finished.stderr).trim().to_string();
-    if !errors.is_empty() {
-        if !output.is_empty() {
-            output.push('\n');
-        }
-        output.push_str(&errors);
-    }
-    if output.len() > MAX_OUTPUT {
-        let cut = output
-            .char_indices()
-            .map(|(i, _)| i)
-            .take_while(|i| *i <= MAX_OUTPUT)
-            .last()
-            .unwrap_or(0);
-        output.truncate(cut);
-        output.push_str("\n…");
-    }
-    Ok(Outcome {
-        ok: finished.status.success(),
-        output,
-    })
+    Ok(finished)
 }
 
 #[cfg(test)]

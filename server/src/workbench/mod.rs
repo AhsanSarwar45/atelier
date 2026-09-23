@@ -29,6 +29,7 @@ pub mod memory;
 pub mod memory_limit;
 pub mod metadata;
 pub mod notice;
+pub mod codex_plugins;
 pub mod plugin_catalogue;
 pub mod profiles;
 pub mod projection;
