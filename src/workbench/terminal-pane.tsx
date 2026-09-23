@@ -62,12 +62,16 @@
 
 import { useEffect, useRef } from 'react';
 
+import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { FitAddon } from '@xterm/addon-fit';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
 
 import { apiUrl } from '@/lib/api-base';
 import { cn } from '@/lib/utils';
 
+import { clipboardKeys, meansToOpen, openLink, resyncScrollbar, shellClipboard, touchScroll } from './terminal-habits';
 import { useTerminalShells } from './terminal-shells';
 
 import '@xterm/xterm/css/xterm.css';
@@ -171,11 +175,38 @@ export function TerminalPane({
     // app's. The sixteen ANSI colours are what the programs inside it draw
     // with, and a grid repainted in a light theme makes half of them
     // unreadable. The app's scale dresses the box around it instead.
-    const term = new Terminal({ cursorBlink: true, fontFamily: GRID_FONT });
+    //
+    // The rest is what a desktop terminal does without being asked:
+    // `terminal-habits.ts` says why each of those is here.
+    let lastPointer = 'mouse';
+    const opens = (event: MouseEvent, uri: string): void => {
+      if (meansToOpen(event, lastPointer)) openLink(uri);
+    };
+    const term = new Terminal({
+      cursorBlink: true,
+      fontFamily: GRID_FONT,
+      scrollback: 10_000,
+      // The Unicode 11 widths below are a proposed API in xterm's terms.
+      allowProposedApi: true,
+      // A link a program wrote as a link (OSC 8), not one recognised in text.
+      linkHandler: { activate: opens },
+    });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    term.loadAddon(new WebLinksAddon(opens));
+    // Lets a program in the shell — tmux, vim over ssh — set the clipboard.
+    term.loadAddon(new ClipboardAddon(undefined, shellClipboard));
+    term.loadAddon(new Unicode11Addon());
+    term.unicode.activeVersion = '11';
+    term.attachCustomKeyEventHandler(clipboardKeys(() => term.hasSelection()));
     term.open(box);
     grid.current = term;
+    const pointed = (event: PointerEvent): void => {
+      lastPointer = event.pointerType;
+    };
+    box.addEventListener('pointerdown', pointed, true);
+    const screenEl = box.querySelector<HTMLElement>('.xterm-screen');
+    const stopTouchScroll = screenEl ? touchScroll(term, screenEl) : () => {};
 
     /**
      * The icon face, fetched, and then the grid drawn again.
@@ -238,12 +269,30 @@ export function TerminalPane({
      * small terminal, it is a terminal that has not been shown yet, and the two
      * have to be told apart here because nothing downstream can.
      */
+    /**
+     * The scrollbar set from the view, once the frame after a change has been
+     * drawn — `resyncScrollbar` says why xterm needs telling. After the frame
+     * because the bar is sized from the canvas, and a pane just shown again
+     * has not drawn its canvas yet.
+     */
+    let resync: number | null = null;
+    const resyncSoon = (): void => {
+      if (resync !== null || typeof requestAnimationFrame === 'undefined') return;
+      resync = requestAnimationFrame(() => {
+        resync = null;
+        if (live) resyncScrollbar(term);
+      });
+    };
+
     const measure = (): void => {
       const { width, height } = box.getBoundingClientRect();
       if (width <= 0 || height <= 0) return;
       fit.fit();
       measured = { cols: term.cols, rows: term.rows };
       tellShape();
+      // Also when the shape did not change: a hidden tab shown again is the
+      // same shape with a bar sized while nothing was drawn.
+      resyncSoon();
     };
 
     const type = (typed: string): void => {
@@ -262,6 +311,7 @@ export function TerminalPane({
     term.onResize(({ cols, rows }) => {
       measured = { cols, rows };
       tellShape();
+      resyncSoon();
     });
 
     socket.onopen = () => tellShape();
@@ -281,7 +331,10 @@ export function TerminalPane({
 
     return () => {
       live = false;
+      if (resync !== null) cancelAnimationFrame(resync);
       offer(shellId, null);
+      box.removeEventListener('pointerdown', pointed, true);
+      stopTouchScroll();
       watcher?.disconnect();
       // Unhooked before the close, so a frame already on its way in cannot be
       // written to a terminal that is about to be disposed.
@@ -321,7 +374,9 @@ export function TerminalPane({
     <div
       ref={host}
       data-testid="terminal-pane"
-      className={cn('h-full w-full overflow-hidden bg-surface-base', className)}
+      // A drag on the grid is the terminal's to scroll (`touchScroll`), never
+      // the page's, and never a pull to refresh.
+      className={cn('h-full w-full touch-none overflow-hidden overscroll-contain bg-surface-base', className)}
     />
   );
 }

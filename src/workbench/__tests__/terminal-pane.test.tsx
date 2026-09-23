@@ -406,4 +406,85 @@ describe('the pane that draws a live shell', () => {
     expect(Watcher.live).toEqual([]);
     expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
   });
+
+  it('pastes on Ctrl+Shift+V and Shift+Insert by leaving the press to the browser', () => {
+    paneBox = { width: 800, height: 340 };
+    const { socket } = draw();
+    socket.opens();
+
+    const area = keyboard();
+    // `fireEvent` answers false when something cancelled the press, which is
+    // the browser's paste not happening.
+    const pasted = [
+      fireEvent.keyDown(area, { key: 'V', keyCode: 86, code: 'KeyV', ctrlKey: true, shiftKey: true }),
+      fireEvent.keyDown(area, { key: 'Insert', keyCode: 45, code: 'Insert', shiftKey: true }),
+    ];
+
+    expect(pasted).toEqual([true, true]);
+    // Not a ^V, and not an escape sequence for Insert: the paste event is what
+    // reaches the shell, and xterm sends that on its own.
+    expect(typedUp(socket)).toEqual([]);
+  });
+
+  it('copies the selection on Ctrl+Shift+C and Ctrl+Insert, and never opens the inspector', async () => {
+    paneBox = { width: 800, height: 340 };
+    const { socket, term } = draw();
+    socket.opens();
+    const copy = vi.fn(() => true);
+    Object.defineProperty(document, 'execCommand', { value: copy, configurable: true });
+
+    socket.prints(0x68, 0x69);
+    await drawn(term);
+    term.selectAll();
+
+    const area = keyboard();
+    const allowed = [
+      fireEvent.keyDown(area, { key: 'C', keyCode: 67, code: 'KeyC', ctrlKey: true, shiftKey: true }),
+      fireEvent.keyDown(area, { key: 'Insert', keyCode: 45, code: 'Insert', ctrlKey: true }),
+    ];
+
+    expect(allowed, "the browser's own Ctrl+Shift+C is its element inspector").toEqual([false, false]);
+    expect(copy).toHaveBeenCalledTimes(2);
+    expect(copy).toHaveBeenCalledWith('copy');
+    expect(typedUp(socket), 'a copy chord is not an interrupt').toEqual([]);
+  });
+
+  it('does nothing on Ctrl+Shift+C with nothing selected', () => {
+    paneBox = { width: 800, height: 340 };
+    const { socket } = draw();
+    socket.opens();
+    const copy = vi.fn(() => true);
+    Object.defineProperty(document, 'execCommand', { value: copy, configurable: true });
+
+    fireEvent.keyDown(keyboard(), { key: 'C', keyCode: 67, code: 'KeyC', ctrlKey: true, shiftKey: true });
+
+    expect(copy).not.toHaveBeenCalled();
+    expect(typedUp(socket)).toEqual([]);
+  });
+
+  it('opens a link only with Ctrl or Cmd held, or on a tap', () => {
+    const { term } = draw();
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const activate = term.options.linkHandler?.activate;
+    expect(activate, 'links a program writes (OSC 8) need a handler').toBeDefined();
+    const pane = screen.getByTestId('terminal-pane');
+    const at = { start: { x: 1, y: 1 }, end: { x: 1, y: 1 } };
+
+    activate!(new MouseEvent('click'), 'https://example.test/plain', at);
+    expect(open).not.toHaveBeenCalled();
+
+    activate!(new MouseEvent('click', { ctrlKey: true }), 'https://example.test/ctrl', at);
+    activate!(new MouseEvent('click', { metaKey: true }), 'https://example.test/cmd', at);
+    const tap = new MouseEvent('pointerdown', { bubbles: true }) as PointerEvent;
+    Object.defineProperty(tap, 'pointerType', { value: 'touch' });
+    pane.dispatchEvent(tap);
+    activate!(new MouseEvent('click'), 'https://example.test/tap', at);
+
+    expect(open.mock.calls.map((call) => call[0])).toEqual([
+      'https://example.test/ctrl',
+      'https://example.test/cmd',
+      'https://example.test/tap',
+    ]);
+    expect(open.mock.calls[0][2]).toContain('noopener');
+  });
 });

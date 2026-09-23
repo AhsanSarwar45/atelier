@@ -144,7 +144,14 @@ async function drawsEventually(pane: Locator, wanted: RegExp, why: string, wait 
  * starting is how a case that reads its own echo comes to pass.
  */
 async function openTerminal(page: Page): Promise<Locator> {
-  await page.getByTestId('open-terminal').click();
+  // A phone folds the button into the bar's menu (src/components/shell.tsx).
+  const menu = page.getByTestId('shell-menu');
+  if (await menu.isVisible()) {
+    await menu.click();
+    await page.getByTestId('shell-menu-terminal').click();
+  } else {
+    await page.getByTestId('open-terminal').click();
+  }
   await expect(page.getByTestId('terminal-window'), 'the button did not open the window').toBeVisible({
     timeout: SHELL_MS,
   });
