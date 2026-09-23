@@ -42,8 +42,7 @@ fn main() {
 /// the file on the way out.
 fn screens() {
     let source = Path::new("../out");
-    let target =
-        PathBuf::from(std::env::var_os("OUT_DIR").expect("cargo sets OUT_DIR")).join("screens");
+    let target = PathBuf::from(std::env::var_os("OUT_DIR").expect("cargo sets OUT_DIR")).join("screens");
     let _ = fs::remove_dir_all(&target);
     fs::create_dir_all(&target).expect("the screens folder can be made");
     if source.is_dir() {
@@ -52,10 +51,7 @@ fn screens() {
 }
 
 fn carry(root: &Path, dir: &Path, target: &Path) {
-    let mut entries: Vec<_> = fs::read_dir(dir)
-        .expect("the screens can be listed")
-        .flatten()
-        .collect();
+    let mut entries: Vec<_> = fs::read_dir(dir).expect("the screens can be listed").flatten().collect();
     entries.sort_by_key(|entry| entry.path());
     for entry in entries {
         let path = entry.path();
@@ -65,12 +61,10 @@ fn carry(root: &Path, dir: &Path, target: &Path) {
         }
         let relative = path.strip_prefix(root).expect("inside the screens");
         let out = target.join(relative);
-        fs::create_dir_all(out.parent().expect("a file has a folder"))
-            .expect("the folder can be made");
+        fs::create_dir_all(out.parent().expect("a file has a folder")).expect("the folder can be made");
         let bytes = fs::read(&path).expect("a screen file can be read");
         if shrinks(&path) {
-            let mut encoder =
-                GzEncoder::new(Vec::with_capacity(bytes.len() / 3), Compression::best());
+            let mut encoder = GzEncoder::new(Vec::with_capacity(bytes.len() / 3), Compression::best());
             encoder.write_all(&bytes).expect("gzip in memory");
             let packed = encoder.finish().expect("gzip in memory");
             if packed.len() < bytes.len() {
@@ -88,20 +82,6 @@ fn carry(root: &Path, dir: &Path, target: &Path) {
 fn shrinks(path: &Path) -> bool {
     !matches!(
         path.extension().and_then(|ext| ext.to_str()),
-        Some(
-            "woff2"
-                | "woff"
-                | "png"
-                | "jpg"
-                | "jpeg"
-                | "gif"
-                | "webp"
-                | "avif"
-                | "mp4"
-                | "webm"
-                | "gz"
-                | "br"
-                | "zip"
-        )
+        Some("woff2" | "woff" | "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "mp4" | "webm" | "gz" | "br" | "zip")
     )
 }

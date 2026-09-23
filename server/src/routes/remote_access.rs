@@ -26,13 +26,7 @@
 //! that allowlist admits the names this machine answers to on its own
 //! network, so the phone in the next room still reaches it.
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    middleware,
-    routing::{get, post},
-    Json, Router,
-};
+use axum::{extract::State, http::StatusCode, middleware, routing::{get, post}, Json, Router};
 use serde::{Deserialize, Serialize};
 
 use crate::reachable::{BIND_HOST_SETTING, PORT_SETTING};
@@ -63,13 +57,7 @@ pub struct Trouble {
 
 /// A refusal with nothing to click.
 fn refused(code: StatusCode, why: impl Into<String>) -> Refusal {
-    (
-        code,
-        Json(Trouble {
-            error: why.into(),
-            link: None,
-        }),
-    )
+    (code, Json(Trouble { error: why.into(), link: None }))
 }
 
 /// A refusal from Tailscale, keeping whatever it left to act on.
@@ -92,7 +80,9 @@ fn turned_away(why: remote::Refused) -> Refusal {
 /// waited for. Waiting for one on a runtime thread is a thread answering
 /// nobody — and while `tailscale serve` could wait forever, that was the whole
 /// app going quiet rather than this one call (bw-ar1o).
-async fn away<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Result<T, Refusal> {
+async fn away<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, Refusal> {
     tokio::task::spawn_blocking(work).await.map_err(|e| {
         refused(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -354,26 +344,18 @@ mod tests {
     fn each_step_the_screen_draws_has_its_own_word() {
         let all = [
             Standing::NotInstalled,
-            Standing::NotAnswering {
-                said: String::new(),
-            },
+            Standing::NotAnswering { said: String::new() },
             Standing::NeedsSignIn,
             Standing::Stopped,
             Standing::Starting,
             Standing::Unnamed,
-            Standing::Ready {
-                address: String::new(),
-            },
+            Standing::Ready { address: String::new() },
         ];
         let mut words: Vec<&str> = all.iter().map(named).collect();
         let counted = words.len();
         words.sort_unstable();
         words.dedup();
-        assert_eq!(
-            words.len(),
-            counted,
-            "two standings answer to the same word"
-        );
+        assert_eq!(words.len(), counted, "two standings answer to the same word");
     }
 
     /// A refusal the reader can act on keeps the thing to act on.
@@ -419,23 +401,14 @@ mod tests {
         assert_eq!(why_not_a_host(None), None, "clearing it is not a bad host");
 
         let said = why_not_a_host(Some("my-desk")).expect("a name is not an address to bind");
-        assert!(
-            said.contains("my-desk"),
-            "the refusal does not name it: {said}"
-        );
-        assert!(
-            said.contains("127.0.0.1"),
-            "the refusal offers no way out: {said}"
-        );
+        assert!(said.contains("my-desk"), "the refusal does not name it: {said}");
+        assert!(said.contains("127.0.0.1"), "the refusal offers no way out: {said}");
     }
 
     /// Spaces a paste brings along are not a setting, and neither is nothing.
     #[test]
     fn an_emptied_field_clears_the_setting_rather_than_storing_a_blank() {
-        assert_eq!(
-            tidied("  https://desk.ts.net "),
-            Some("https://desk.ts.net")
-        );
+        assert_eq!(tidied("  https://desk.ts.net "), Some("https://desk.ts.net"));
         assert_eq!(tidied("   "), None);
         assert_eq!(tidied(""), None);
     }

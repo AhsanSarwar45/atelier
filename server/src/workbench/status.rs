@@ -211,9 +211,7 @@ pub async fn settle_background(
     let mut alive = false;
     let mut endings = Vec::new();
     for agent in open {
-        let Some(id) = agent["id"].as_str() else {
-            continue;
-        };
+        let Some(id) = agent["id"].as_str() else { continue };
         let ending = if let Some(notice) = notices.get(id) {
             Some(notice.clone())
         } else if agent["kind"] == "helper" {
@@ -227,10 +225,7 @@ pub async fn settle_background(
                 .map(|(_, words)| finished(id, "done", words))
                 .or_else(|| process_gone.then(|| finished(id, "stopped", None)))
         } else {
-            match agent["toolCallId"]
-                .as_str()
-                .and_then(|call| outputs.get(call))
-            {
+            match agent["toolCallId"].as_str().and_then(|call| outputs.get(call)) {
                 Some(file) if held.contains(file) => None,
                 Some(_) => Some(finished(id, "done", None)),
                 None => process_gone.then(|| finished(id, "stopped", None)),
@@ -381,69 +376,35 @@ mod tests {
             "errored",
             "idle",
         ] {
-            assert_eq!(
-                resolve(
-                    &saved(state),
-                    Some(&idle()),
-                    &Evidence::default(),
-                    Utc::now()
-                )["state"],
-                "idle"
-            );
+            assert_eq!(resolve(&saved(state), Some(&idle()), &Evidence::default(), Utc::now())["state"], "idle");
         }
         let mut working = idle();
         working.turn_open = true;
         assert_eq!(
-            resolve(
-                &saved("idle"),
-                Some(&working),
-                &Evidence::default(),
-                Utc::now()
-            )["state"],
+            resolve(&saved("idle"), Some(&working), &Evidence::default(), Utc::now())["state"],
             "streaming"
         );
         working.pending_answer = true;
         assert_eq!(
-            resolve(
-                &saved("idle"),
-                Some(&working),
-                &Evidence::default(),
-                Utc::now()
-            )["state"],
+            resolve(&saved("idle"), Some(&working), &Evidence::default(), Utc::now())["state"],
             "waiting_permission"
         );
         working.connected = false;
         assert_eq!(
-            resolve(
-                &saved("streaming"),
-                Some(&working),
-                &Evidence::default(),
-                Utc::now()
-            )["state"],
+            resolve(&saved("streaming"), Some(&working), &Evidence::default(), Utc::now())["state"],
             "dormant"
         );
     }
     #[test]
     fn detached_chats_preserve_outcomes_but_never_cached_activity() {
         for state in ["stopped", "errored", "idle", "dormant"] {
-            assert_eq!(
-                resolve(&saved(state), None, &Evidence::default(), Utc::now())["state"],
-                state
-            );
+            assert_eq!(resolve(&saved(state), None, &Evidence::default(), Utc::now())["state"], state);
         }
-        assert_eq!(
-            resolve(&saved("streaming"), None, &Evidence::default(), Utc::now())["state"],
-            "dormant"
-        );
+        assert_eq!(resolve(&saved("streaming"), None, &Evidence::default(), Utc::now())["state"], "dormant");
         let mut finished = idle();
         finished.outcome = json!({"state":"running_tool","label":"Retrying"});
         assert_eq!(
-            resolve(
-                &saved("running_tool"),
-                Some(&finished),
-                &Evidence::default(),
-                Utc::now()
-            )["state"],
+            resolve(&saved("running_tool"), Some(&finished), &Evidence::default(), Utc::now())["state"],
             "idle"
         );
     }
@@ -537,10 +498,7 @@ mod tests {
         let mut held = idle();
         held.turn_open = true;
         held.prompted_at = Some(ago(600));
-        let ended = |at| Evidence {
-            reply_ended_at: Some(at),
-            background: false,
-        };
+        let ended = |at| Evidence { reply_ended_at: Some(at), background: false };
         let state = |facts: &RuntimeFacts, evidence: Evidence| {
             resolve(&saved("streaming"), Some(facts), &evidence, now)["state"].clone()
         };
@@ -553,33 +511,13 @@ mod tests {
         assert_eq!(state(&held, ended(ago(60))), "streaming");
         // Over, with a task it started still alive.
         held.prompted_at = Some(ago(600));
-        let both = Evidence {
-            reply_ended_at: Some(ago(60)),
-            background: true,
-        };
+        let both = Evidence { reply_ended_at: Some(ago(60)), background: true };
         assert_eq!(state(&held, both), "waiting_for_agents");
-        let over = resolve(
-            &saved("idle"),
-            Some(&idle()),
-            &Evidence {
-                reply_ended_at: None,
-                background: true,
-            },
-            now,
-        );
+        let over = resolve(&saved("idle"), Some(&idle()), &Evidence { reply_ended_at: None, background: true }, now);
         assert_eq!(over["state"], "waiting_for_agents");
         assert_eq!(over["label"], Value::Null);
         // While the reply is going, what it is doing is what it shows.
-        assert_eq!(
-            state(
-                &held,
-                Evidence {
-                    reply_ended_at: None,
-                    background: true
-                }
-            ),
-            "streaming"
-        );
+        assert_eq!(state(&held, Evidence { reply_ended_at: None, background: true }), "streaming");
         // A question waiting on the person outranks all of it.
         held.pending_answer = true;
         assert_eq!(state(&held, both), "waiting_permission");
@@ -605,13 +543,7 @@ mod tests {
         let record = directory.path().join("record.jsonl");
         std::fs::write(&record, format!("{}\n", json!({"type":"queue-operation","operation":"enqueue","timestamp":"2026-09-15T15:03:54Z",
             "content":"<task-notification><task-id>noticed</task-id><status>killed</status><summary>Background command \"x\" was stopped</summary></task-notification>"}))).unwrap();
-        for (task, call, kind) in [
-            ("running", "t1", "command"),
-            ("over", "t2", "command"),
-            ("noticed", "t3", "command"),
-            ("unknown", "t4", "watch"),
-            ("helper", "h1", "helper"),
-        ] {
+        for (task, call, kind) in [("running","t1","command"),("over","t2","command"),("noticed","t3","command"),("unknown","t4","watch"),("helper","h1","helper")] {
             db.append(event(json!({"type":"agent.started","agentId":task,"toolCallId":call,"kind":kind,"what":task,"agentType":null,"model":null}))).await.unwrap();
         }
         for (call, file) in [("t1", &running), ("t2", &over)] {
@@ -620,34 +552,13 @@ mod tests {
         }
         // Wait for the child to have the file open before asking.
         for _ in 0..50 {
-            if std::fs::read_dir("/proc/self").is_ok()
-                && std::fs::read_dir(format!("/proc/{}/fd", child.id()))
-                    .map(|fds| {
-                        fds.flatten()
-                            .any(|fd| std::fs::read_link(fd.path()).is_ok_and(|to| to == running))
-                    })
-                    .unwrap_or(false)
-            {
-                break;
-            }
+            if std::fs::read_dir("/proc/self").is_ok() && std::fs::read_dir(format!("/proc/{}/fd", child.id())).map(|fds| fds.flatten().any(|fd| std::fs::read_link(fd.path()).is_ok_and(|to| to == running))).unwrap_or(false) { break; }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         let session = db.get_session("chat".into()).await.unwrap().unwrap();
-        let states = |agents: Vec<Value>| {
-            agents
-                .into_iter()
-                .map(|a| {
-                    (
-                        a["id"].as_str().unwrap().to_string(),
-                        a["state"].as_str().unwrap().to_string(),
-                    )
-                })
-                .collect::<HashMap<_, _>>()
-        };
+        let states = |agents: Vec<Value>| agents.into_iter().map(|a| (a["id"].as_str().unwrap().to_string(), a["state"].as_str().unwrap().to_string())).collect::<HashMap<_,_>>();
 
-        let alive = settle_background(&db, &session, true, Some(&record), Utc::now())
-            .await
-            .unwrap();
+        let alive = settle_background(&db, &session, true, Some(&record), Utc::now()).await.unwrap();
         assert!(alive);
         let now = states(db.projected_agents("chat".into()).await.unwrap());
         assert_eq!(now["running"], "running");
@@ -659,23 +570,12 @@ mod tests {
         // Started from a terminal: not being attached here ends nothing.
         let mut outside = session.clone();
         outside.origin = "terminal".into();
-        assert!(
-            settle_background(&db, &outside, false, Some(&record), Utc::now())
-                .await
-                .unwrap()
-        );
-        assert_eq!(
-            states(db.projected_agents("chat".into()).await.unwrap())["helper"],
-            "running"
-        );
+        assert!(settle_background(&db, &outside, false, Some(&record), Utc::now()).await.unwrap());
+        assert_eq!(states(db.projected_agents("chat".into()).await.unwrap())["helper"], "running");
 
         // The chat's process is gone: what cannot be shown alive has stopped,
         // and a command still writing its file is still running.
-        assert!(
-            settle_background(&db, &session, false, Some(&record), Utc::now())
-                .await
-                .unwrap()
-        );
+        assert!(settle_background(&db, &session, false, Some(&record), Utc::now()).await.unwrap());
         let now = states(db.projected_agents("chat".into()).await.unwrap());
         assert_eq!(now["helper"], "stopped");
         assert_eq!(now["unknown"], "stopped");
@@ -691,23 +591,16 @@ mod tests {
         db.create_session(saved("idle")).await.unwrap();
         db.append(event(json!({"type":"agent.started","agentId":"h","toolCallId":"h","kind":"helper","what":"h","agentType":null,"model":null}))).await.unwrap();
         let session = db.get_session("chat".into()).await.unwrap().unwrap();
-        let status = reconcile_with(&db, &session, Some(&idle()), None, Utc::now())
-            .await
-            .unwrap();
+        let status = reconcile_with(&db, &session, Some(&idle()), None, Utc::now()).await.unwrap();
         assert_eq!(status["state"], "waiting_for_agents");
         db.append(event(json!({"type":"agent.finished","agentId":"h","state":"done","result":"ok","seconds":0,"tokens":0,"calls":0}))).await.unwrap();
-        let status = reconcile_with(&db, &session, Some(&idle()), None, Utc::now())
-            .await
-            .unwrap();
+        let status = reconcile_with(&db, &session, Some(&idle()), None, Utc::now()).await.unwrap();
         assert_eq!(status["state"], "idle");
         // Reopened after a restart with nothing attached: the task is closed too.
         db.append(event(json!({"type":"agent.started","agentId":"h2","toolCallId":"h2","kind":"helper","what":"h2","agentType":null,"model":null}))).await.unwrap();
         reconcile(&db, "chat", None).await.unwrap();
         let agents = db.projected_agents("chat".into()).await.unwrap();
-        assert!(
-            agents.iter().all(|agent| agent["state"] != "running"),
-            "{agents:?}"
-        );
+        assert!(agents.iter().all(|agent| agent["state"] != "running"), "{agents:?}");
     }
 
     #[tokio::test]
@@ -717,24 +610,9 @@ mod tests {
         db.create_session(saved("idle")).await.unwrap();
         assert!(db.active_session_ids().await.unwrap().is_empty());
         db.append(event(json!({"type":"session.state","state":"running_tool","label":"Terminal","detail":null,"call":null}))).await.unwrap();
-        db.update_session(
-            "chat".into(),
-            super::super::store::SessionPatch {
-                state: Some("dormant".into()),
-                ..Default::default()
-            },
-            None,
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            db.get_session("chat".into()).await.unwrap().unwrap().state,
-            "dormant"
-        );
-        assert_eq!(
-            db.active_session_ids().await.unwrap(),
-            vec!["chat".to_string()]
-        );
+        db.update_session("chat".into(), super::super::store::SessionPatch { state: Some("dormant".into()), ..Default::default() }, None).await.unwrap();
+        assert_eq!(db.get_session("chat".into()).await.unwrap().unwrap().state, "dormant");
+        assert_eq!(db.active_session_ids().await.unwrap(), vec!["chat".to_string()]);
     }
 
     /// Settles a real chat in a copy of a real database:
@@ -742,21 +620,18 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn real_chat_settles_from_what_can_be_checked() {
-        let (Ok(path), Ok(chat)) = (std::env::var("STATUS_DB"), std::env::var("STATUS_CHAT"))
-        else {
+        let (Ok(path), Ok(chat)) = (std::env::var("STATUS_DB"), std::env::var("STATUS_CHAT")) else {
             return;
         };
         let db = ChatDb::open(std::path::Path::new(&path)).unwrap();
         let session = db.get_session(chat.clone()).await.unwrap().unwrap();
         println!("record {:?}", record_of(&session));
         let record = record_of(&session);
-        println!(
-            "reply ended {:?}",
-            record.as_deref().and_then(liveness::record_reply_ended_at)
-        );
+        println!("reply ended {:?}", record.as_deref().and_then(liveness::record_reply_ended_at));
         println!("status {}", reconcile(&db, &chat, None).await.unwrap());
         for agent in db.projected_agents(chat).await.unwrap() {
             println!("{} {} {}", agent["id"], agent["kind"], agent["state"]);
         }
     }
 }
+

@@ -83,15 +83,11 @@ pub struct ReviewSettings {
     pub external_review: String,
 }
 
-fn agent_decides() -> String {
-    "agent_decides".into()
-}
+fn agent_decides() -> String { "agent_decides".into() }
 
 impl Default for ReviewSettings {
     fn default() -> Self {
-        Self {
-            external_review: agent_decides(),
-        }
+        Self { external_review: agent_decides() }
     }
 }
 
@@ -108,9 +104,7 @@ pub struct ChatNameSettings {
 }
 
 impl ChatNameSettings {
-    pub fn is_empty(&self) -> bool {
-        self.parts.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.parts.is_empty() }
 }
 
 /// One piece of a chat's name, in the order the manager arranged them.
@@ -122,26 +116,16 @@ pub enum ChatNamePart {
     /// Words put in as they are, usually a separator.
     Text { text: String },
     /// What a pattern finds in something the chat knows about itself.
-    Extract {
-        source: ChatNameSource,
-        pattern: String,
-    },
+    Extract { source: ChatNameSource, pattern: String },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ChatNameSource {
-    Worktree,
-    Branch,
-    Path,
-}
+pub enum ChatNameSource { Worktree, Branch, Path }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ManifestStorage {
-    Personal,
-    Repository,
-}
+pub enum ManifestStorage { Personal, Repository }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct LocatedManifest {
@@ -168,33 +152,18 @@ struct LegacyManifest {
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct LegacyReview {
-    persona: Option<String>,
-    proves: Option<String>,
-}
+struct LegacyReview { persona: Option<String>, proves: Option<String> }
 
 fn git(root: &Path, args: &[&str]) -> String {
-    Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()
-        .ok()
+    Command::new("git").arg("-C").arg(root).args(args).output().ok()
         .filter(|out| out.status.success())
         .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
         .unwrap_or_default()
 }
 
 pub fn git_identity(root: &Path) -> PathBuf {
-    let common = git(
-        root,
-        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-    );
-    if common.is_empty() {
-        root.to_path_buf()
-    } else {
-        PathBuf::from(common)
-    }
+    let common = git(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+    if common.is_empty() { root.to_path_buf() } else { PathBuf::from(common) }
 }
 
 pub fn project_id(root: &Path) -> String {
@@ -204,10 +173,7 @@ pub fn project_id(root: &Path) -> String {
 }
 
 pub fn personal_path(root: &Path, data_dir: &Path) -> PathBuf {
-    data_dir
-        .join("projects")
-        .join(project_id(root))
-        .join("project.toml")
+    data_dir.join("projects").join(project_id(root)).join("project.toml")
 }
 
 pub fn personal_path_for_key(key: &str, data_dir: &Path) -> PathBuf {
@@ -220,29 +186,19 @@ pub fn locate_key(key: &str, data_dir: &Path) -> Option<LocatedManifest> {
     let path = personal_path_for_key(key, data_dir);
     let _ = carry_retired_fields_forward(&path);
     read(&path).ok().map(|manifest| LocatedManifest {
-        instructions: read_instructions(&path),
-        manifest,
-        path,
+        instructions: read_instructions(&path), manifest, path,
         storage: ManifestStorage::Personal,
     })
 }
 
-pub fn create_key(
-    key: &str,
-    data_dir: &Path,
-    manifest: &ProjectManifest,
-) -> Result<PathBuf, String> {
+pub fn create_key(key: &str, data_dir: &Path, manifest: &ProjectManifest) -> Result<PathBuf, String> {
     let path = personal_path_for_key(key, data_dir);
-    if path.exists() {
-        return Err(format!("{} already exists", path.display()));
-    }
+    if path.exists() { return Err(format!("{} already exists", path.display())); }
     write_atomic(&path, manifest)?;
     Ok(path)
 }
 
-pub fn repository_path(root: &Path) -> PathBuf {
-    root.join(REPOSITORY_MANIFEST)
-}
+pub fn repository_path(root: &Path) -> PathBuf { root.join(REPOSITORY_MANIFEST) }
 
 pub fn locate(root: &Path, data_dir: &Path) -> Option<LocatedManifest> {
     let repository = repository_path(root);
@@ -257,17 +213,12 @@ pub fn locate(root: &Path, data_dir: &Path) -> Option<LocatedManifest> {
     };
     let _ = carry_retired_fields_forward(&path);
     read(&path).ok().map(|manifest| LocatedManifest {
-        instructions: read_instructions(&path),
-        manifest,
-        path,
-        storage,
+        instructions: read_instructions(&path), manifest, path, storage,
     })
 }
 
 fn old_personal_path(root: &Path, data_dir: &Path) -> PathBuf {
-    data_dir
-        .join("projects")
-        .join(format!("{}.toml", project_id(root)))
+    data_dir.join("projects").join(format!("{}.toml", project_id(root)))
 }
 
 /// Convert the previous declaration exactly once. No runtime reader consumes
@@ -275,20 +226,11 @@ fn old_personal_path(root: &Path, data_dir: &Path) -> PathBuf {
 pub fn migrate_legacy(root: &Path, data_dir: &Path) -> Result<Option<PathBuf>, String> {
     let external = old_personal_path(root, data_dir);
     let in_repo = root.join("machinery.toml");
-    let source = if external.is_file() {
-        external
-    } else if in_repo.is_file() {
-        in_repo
-    } else {
-        return Ok(None);
-    };
+    let source = if external.is_file() { external } else if in_repo.is_file() { in_repo } else { return Ok(None) };
     let text = fs::read_to_string(&source).map_err(|error| error.to_string())?;
-    let legacy: LegacyManifest = toml::from_str(&text)
-        .map_err(|error| format!("{} could not be migrated: {error}", source.display()))?;
+    let legacy: LegacyManifest = toml::from_str(&text).map_err(|error| format!("{} could not be migrated: {error}", source.display()))?;
     let fallback = infer(root);
-    let branch = legacy
-        .lands_on
-        .unwrap_or(fallback.git.completed_work_branch);
+    let branch = legacy.lands_on.unwrap_or(fallback.git.completed_work_branch);
     let checks = legacy.checks.unwrap_or_default();
     let review = legacy.review.unwrap_or_default();
     let manifest = ProjectManifest {
@@ -303,9 +245,7 @@ pub fn migrate_legacy(root: &Path, data_dir: &Path) -> Result<Option<PathBuf>, S
             agents_may_merge_completed_work: legacy.agent_merges.unwrap_or(false),
             protected_branches: legacy.protected.unwrap_or_else(|| {
                 let mut protected = fallback.git.protected_branches;
-                if !protected.contains(&branch) {
-                    protected.push(branch);
-                }
+                if !protected.contains(&branch) { protected.push(branch); }
                 protected
             }),
         },
@@ -314,80 +254,44 @@ pub fn migrate_legacy(root: &Path, data_dir: &Path) -> Result<Option<PathBuf>, S
             work_areas: legacy.areas.unwrap_or(fallback.beads.work_areas),
         },
         verification: VerificationSettings {
-            commands: if checks.trim().is_empty() {
-                fallback.verification.commands
-            } else {
-                vec![VerificationCommand {
-                    name: "Project checks".into(),
-                    command: checks,
-                    paths: vec![],
-                }]
+            commands: if checks.trim().is_empty() { fallback.verification.commands } else {
+                vec![VerificationCommand { name: "Project checks".into(), command: checks, paths: vec![] }]
             },
         },
-        review: ReviewSettings {
-            external_review: agent_decides(),
-        },
-        cross_project: CrossProjectSettings {
-            delivery_projects: legacy.lands_elsewhere.unwrap_or_default(),
-        },
+        review: ReviewSettings { external_review: agent_decides() },
+        cross_project: CrossProjectSettings { delivery_projects: legacy.lands_elsewhere.unwrap_or_default() },
         chat_name: ChatNameSettings::default(),
     };
     let destination = personal_path(root, data_dir);
     write_atomic(&destination, &manifest)?;
-    let mut carried: Vec<String> = infer_instructions(root)
-        .lines()
-        .map(str::to_string)
-        .collect();
+    let mut carried: Vec<String> = infer_instructions(root).lines().map(str::to_string).collect();
     if let Some(proves) = review.proves.filter(|text| !text.trim().is_empty()) {
         carried.push(format!("Required evidence: {proves}"));
     }
-    if !carried.is_empty() {
-        write_instructions(&destination, &carried.join("\n"))?;
-    }
-    fs::remove_file(&source).map_err(|error| {
-        format!(
-            "{} was migrated but could not be removed: {error}",
-            source.display()
-        )
-    })?;
+    if !carried.is_empty() { write_instructions(&destination, &carried.join("\n"))?; }
+    fs::remove_file(&source).map_err(|error| format!("{} was migrated but could not be removed: {error}", source.display()))?;
     Ok(Some(destination))
 }
 
 pub fn read(path: &Path) -> Result<ProjectManifest, String> {
     let text = fs::read_to_string(path)
         .map_err(|error| format!("{} could not be read: {error}", path.display()))?;
-    let manifest: ProjectManifest = toml::from_str(&text).map_err(|error| {
-        format!(
-            "{} is not a valid project manifest: {error}",
-            path.display()
-        )
-    })?;
+    let manifest: ProjectManifest = toml::from_str(&text)
+        .map_err(|error| format!("{} is not a valid project manifest: {error}", path.display()))?;
     validate(&manifest)?;
     Ok(manifest)
 }
 
 pub fn validate(manifest: &ProjectManifest) -> Result<(), String> {
     if manifest.schema_version != SCHEMA_VERSION {
-        return Err(format!(
-            "project manifest schema {} is not supported",
-            manifest.schema_version
-        ));
+        return Err(format!("project manifest schema {} is not supported", manifest.schema_version));
     }
-    if manifest.project.display_name.trim().is_empty() {
-        return Err("display_name cannot be empty".into());
-    }
+    if manifest.project.display_name.trim().is_empty() { return Err("display_name cannot be empty".into()); }
     if manifest.project.use_beads {
-        if manifest.beads.issue_id_prefix.trim().is_empty() {
-            return Err("issue_id_prefix cannot be empty when Beads is enabled".into());
-        }
-        if manifest.git.completed_work_branch.trim().is_empty() {
-            return Err("completed_work_branch cannot be empty when Beads is enabled".into());
-        }
+        if manifest.beads.issue_id_prefix.trim().is_empty() { return Err("issue_id_prefix cannot be empty when Beads is enabled".into()); }
+        if manifest.git.completed_work_branch.trim().is_empty() { return Err("completed_work_branch cannot be empty when Beads is enabled".into()); }
     }
-    if !matches!(
-        manifest.review.external_review.as_str(),
-        "agent_decides" | "always" | "never"
-    ) {
+    if !matches!(manifest.review.external_review.as_str(), "agent_decides" | "always" | "never") {
         return Err("external_review must be agent_decides, always, or never".into());
     }
     for check in &manifest.verification.commands {
@@ -400,144 +304,69 @@ pub fn validate(manifest: &ProjectManifest) -> Result<(), String> {
 
 pub fn write_atomic(path: &Path, manifest: &ProjectManifest) -> Result<(), String> {
     validate(manifest)?;
-    let parent = path
-        .parent()
-        .ok_or_else(|| "manifest has no parent directory".to_string())?;
-    fs::create_dir_all(parent)
-        .map_err(|error| format!("{} could not be created: {error}", parent.display()))?;
+    let parent = path.parent().ok_or_else(|| "manifest has no parent directory".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| format!("{} could not be created: {error}", parent.display()))?;
     let text = toml::to_string_pretty(manifest).map_err(|error| error.to_string())?;
     write_text_atomic(path, &text)
 }
 
 fn write_text_atomic(path: &Path, text: &str) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| "file has no parent directory".to_string())?;
-    fs::create_dir_all(parent)
-        .map_err(|error| format!("{} could not be created: {error}", parent.display()))?;
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("settings");
+    let parent = path.parent().ok_or_else(|| "file has no parent directory".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| format!("{} could not be created: {error}", parent.display()))?;
+    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("settings");
     let temporary = parent.join(format!(".{name}.{}.tmp", std::process::id()));
     let mut file = fs::File::create(&temporary).map_err(|error| error.to_string())?;
-    file.write_all(text.as_bytes())
-        .and_then(|_| file.sync_all())
-        .map_err(|error| error.to_string())?;
+    file.write_all(text.as_bytes()).and_then(|_| file.sync_all()).map_err(|error| error.to_string())?;
     fs::rename(&temporary, path).map_err(|error| error.to_string())
 }
 
 fn prefix(name: &str) -> String {
-    let mut out: String = name
-        .to_ascii_lowercase()
-        .chars()
-        .filter(|c| c.is_ascii_alphabetic())
-        .take(3)
-        .collect();
-    while out.len() < 2 {
-        out.push('p');
-    }
+    let mut out: String = name.to_ascii_lowercase().chars().filter(|c| c.is_ascii_alphabetic()).take(3).collect();
+    while out.len() < 2 { out.push('p'); }
     out
 }
 
 fn existing_branches(root: &Path) -> Vec<String> {
-    git(
-        root,
-        &["for-each-ref", "--format=%(refname:short)", "refs/heads"],
-    )
-    .lines()
-    .map(str::to_string)
-    .collect()
+    git(root, &["for-each-ref", "--format=%(refname:short)", "refs/heads"])
+        .lines().map(str::to_string).collect()
 }
 
 pub fn branch_exists(root: &Path, branch: &str) -> bool {
-    existing_branches(root)
-        .iter()
-        .any(|existing| existing == branch)
+    existing_branches(root).iter().any(|existing| existing == branch)
 }
 
 /// Make the branch the reader named in the picker, at the current head.
 pub fn create_branch(root: &Path, branch: &str) -> Result<(), String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["branch", "--", branch])
-        .output()
+    let out = Command::new("git").arg("-C").arg(root).args(["branch", "--", branch]).output()
         .map_err(|error| format!("git could not be run: {error}"))?;
-    if out.status.success() {
-        return Ok(());
-    }
+    if out.status.success() { return Ok(()); }
     let why = String::from_utf8_lossy(&out.stderr).trim().to_string();
-    Err(if why.is_empty() {
-        format!("branch {branch} could not be created")
-    } else {
-        why
-    })
+    Err(if why.is_empty() { format!("branch {branch} could not be created") } else { why })
 }
 
 pub fn infer(root: &Path) -> ProjectManifest {
-    let name = root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("Project")
-        .to_string();
+    let name = root.file_name().and_then(|name| name.to_str()).unwrap_or("Project").to_string();
     let current = git(root, &["branch", "--show-current"]);
-    let branch = if current.is_empty() {
-        "main".into()
-    } else {
-        current
-    };
+    let branch = if current.is_empty() { "main".into() } else { current };
     let branches = existing_branches(root);
     let protected_branches = ["main", "master", "staging", "production", "release"]
-        .into_iter()
-        .filter(|candidate| branches.iter().any(|branch| branch == candidate))
-        .map(str::to_string)
-        .collect();
+        .into_iter().filter(|candidate| branches.iter().any(|branch| branch == candidate))
+        .map(str::to_string).collect();
     let mut commands = Vec::new();
     if root.join("package.json").is_file() {
-        commands.push(VerificationCommand {
-            name: "JavaScript tests".into(),
-            command: "npm test".into(),
-            paths: vec![],
-        });
+        commands.push(VerificationCommand { name: "JavaScript tests".into(), command: "npm test".into(), paths: vec![] });
     }
     if root.join("Cargo.toml").is_file() || root.join("server/Cargo.toml").is_file() {
-        let command = if root.join("server/Cargo.toml").is_file() {
-            "cd server && cargo test"
-        } else {
-            "cargo test"
-        };
-        commands.push(VerificationCommand {
-            name: "Rust tests".into(),
-            command: command.into(),
-            paths: vec!["**/*.rs".into(), "**/Cargo.toml".into()],
-        });
+        let command = if root.join("server/Cargo.toml").is_file() { "cd server && cargo test" } else { "cargo test" };
+        commands.push(VerificationCommand { name: "Rust tests".into(), command: command.into(), paths: vec!["**/*.rs".into(), "**/Cargo.toml".into()] });
     }
     ProjectManifest {
         schema_version: SCHEMA_VERSION,
-        project: ProjectSettings {
-            display_name: name.clone(),
-            use_beads: root.join(".beads").is_dir(),
-            summary: String::new(),
-        },
-        git: GitSettings {
-            completed_work_branch: branch,
-            agents_may_merge_completed_work: false,
-            protected_branches,
-        },
-        beads: BeadsSettings {
-            issue_id_prefix: prefix(&name),
-            work_areas: vec![
-                "interface".into(),
-                "server".into(),
-                "tests".into(),
-                "tooling".into(),
-                "docs".into(),
-            ],
-        },
+        project: ProjectSettings { display_name: name.clone(), use_beads: root.join(".beads").is_dir(), summary: String::new() },
+        git: GitSettings { completed_work_branch: branch, agents_may_merge_completed_work: false, protected_branches },
+        beads: BeadsSettings { issue_id_prefix: prefix(&name), work_areas: vec!["interface".into(), "server".into(), "tests".into(), "tooling".into(), "docs".into()] },
         verification: VerificationSettings { commands },
-        review: ReviewSettings::default(),
-        cross_project: CrossProjectSettings::default(),
+        review: ReviewSettings::default(), cross_project: CrossProjectSettings::default(),
         chat_name: ChatNameSettings::default(),
     }
 }
@@ -556,47 +385,20 @@ pub fn infer_instructions(root: &Path) -> String {
 }
 
 pub fn infer_virtual(name: &str) -> ProjectManifest {
-    let name = if name.trim().is_empty() {
-        "Project"
-    } else {
-        name.trim()
-    };
+    let name = if name.trim().is_empty() { "Project" } else { name.trim() };
     ProjectManifest {
         schema_version: SCHEMA_VERSION,
-        project: ProjectSettings {
-            display_name: name.into(),
-            use_beads: true,
-            summary: String::new(),
-        },
-        git: GitSettings {
-            completed_work_branch: "main".into(),
-            agents_may_merge_completed_work: false,
-            protected_branches: vec!["main".into()],
-        },
-        beads: BeadsSettings {
-            issue_id_prefix: prefix(name),
-            work_areas: vec!["product".into(), "operations".into()],
-        },
-        verification: VerificationSettings::default(),
-        review: ReviewSettings::default(),
-        cross_project: CrossProjectSettings::default(),
-        chat_name: ChatNameSettings::default(),
+        project: ProjectSettings { display_name: name.into(), use_beads: true, summary: String::new() },
+        git: GitSettings { completed_work_branch: "main".into(), agents_may_merge_completed_work: false, protected_branches: vec!["main".into()] },
+        beads: BeadsSettings { issue_id_prefix: prefix(name), work_areas: vec!["product".into(), "operations".into()] },
+        verification: VerificationSettings::default(), review: ReviewSettings::default(),
+        cross_project: CrossProjectSettings::default(), chat_name: ChatNameSettings::default(),
     }
 }
 
-pub fn create(
-    root: &Path,
-    data_dir: &Path,
-    storage: ManifestStorage,
-    manifest: &ProjectManifest,
-) -> Result<PathBuf, String> {
-    let path = match storage {
-        ManifestStorage::Personal => personal_path(root, data_dir),
-        ManifestStorage::Repository => repository_path(root),
-    };
-    if path.exists() {
-        return Err(format!("{} already exists", path.display()));
-    }
+pub fn create(root: &Path, data_dir: &Path, storage: ManifestStorage, manifest: &ProjectManifest) -> Result<PathBuf, String> {
+    let path = match storage { ManifestStorage::Personal => personal_path(root, data_dir), ManifestStorage::Repository => repository_path(root) };
+    if path.exists() { return Err(format!("{} already exists", path.display())); }
     write_atomic(&path, manifest)?;
     Ok(path)
 }
@@ -633,44 +435,33 @@ pub fn write_instructions(manifest_path: &Path, text: &str) -> Result<(), String
 /// before a project could say these things in its own words.
 #[derive(Debug, Default, Deserialize)]
 struct RetiredPromptFields {
-    #[serde(default)]
-    development: DevelopmentSettings,
-    #[serde(default)]
-    deployment: DeploymentSettings,
-    #[serde(default)]
-    review: RetiredReviewFields,
-    #[serde(default)]
-    verification: RetiredVerificationFields,
+    #[serde(default)] development: DevelopmentSettings,
+    #[serde(default)] deployment: DeploymentSettings,
+    #[serde(default)] review: RetiredReviewFields,
+    #[serde(default)] verification: RetiredVerificationFields,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
 struct DevelopmentSettings {
-    #[serde(default)]
-    setup_command: String,
-    #[serde(default)]
-    start_command: String,
-    #[serde(default)]
-    build_command: String,
+    #[serde(default)] setup_command: String,
+    #[serde(default)] start_command: String,
+    #[serde(default)] build_command: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
 struct DeploymentSettings {
-    #[serde(default)]
-    command: String,
-    #[serde(default)]
-    requires_confirmation: bool,
+    #[serde(default)] command: String,
+    #[serde(default)] requires_confirmation: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
 struct RetiredReviewFields {
-    #[serde(default)]
-    evidence_requirements: String,
+    #[serde(default)] evidence_requirements: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
 struct RetiredVerificationFields {
-    #[serde(default)]
-    visual_proof_for_ui_changes: bool,
+    #[serde(default)] visual_proof_for_ui_changes: bool,
 }
 
 fn development_lines(development: &DevelopmentSettings) -> Vec<String> {
@@ -690,10 +481,7 @@ fn development_lines(development: &DevelopmentSettings) -> Vec<String> {
 fn retired_lines(retired: &RetiredPromptFields) -> Vec<String> {
     let mut lines = development_lines(&retired.development);
     if !retired.review.evidence_requirements.trim().is_empty() {
-        lines.push(format!(
-            "Required evidence: {}",
-            retired.review.evidence_requirements
-        ));
+        lines.push(format!("Required evidence: {}", retired.review.evidence_requirements));
     }
     // Only the requirement is carried. "Does not require visual proof" was a
     // sentence the settings screen produced whether or not anyone meant it,
@@ -702,15 +490,9 @@ fn retired_lines(retired: &RetiredPromptFields) -> Vec<String> {
         lines.push("This project requires visual proof for interface changes.".into());
     }
     if !retired.deployment.command.trim().is_empty() {
-        lines.push(format!(
-            "Deployment command: {}",
-            retired.deployment.command
-        ));
+        lines.push(format!("Deployment command: {}", retired.deployment.command));
         if retired.deployment.requires_confirmation {
-            lines.push(
-                "Ask for explicit permission immediately before running the deployment command."
-                    .into(),
-            );
+            lines.push("Ask for explicit permission immediately before running the deployment command.".into());
         }
     }
     lines
@@ -724,42 +506,23 @@ fn retired_lines(retired: &RetiredPromptFields) -> Vec<String> {
 /// from the manifest as the text is written, which is what makes this run at
 /// most once per project.
 pub fn carry_retired_fields_forward(path: &Path) -> Result<bool, String> {
-    let Ok(text) = fs::read_to_string(path) else {
-        return Ok(false);
-    };
-    let Ok(retired) = toml::from_str::<RetiredPromptFields>(&text) else {
-        return Ok(false);
-    };
+    let Ok(text) = fs::read_to_string(path) else { return Ok(false) };
+    let Ok(retired) = toml::from_str::<RetiredPromptFields>(&text) else { return Ok(false) };
     // Edited rather than re-serialised: a repository manifest is a tracked
     // file, and a migration that reordered every section would bury the one
     // change it made in a diff of the whole file.
-    let Ok(mut document) = text.parse::<toml_edit::DocumentMut>() else {
-        return Ok(false);
-    };
-    let mut stripped =
-        document.remove("development").is_some() | document.remove("deployment").is_some();
-    for (section, key) in [
-        ("review", "evidence_requirements"),
-        ("verification", "visual_proof_for_ui_changes"),
-    ] {
-        if let Some(inner) = document
-            .get_mut(section)
-            .and_then(|item| item.as_table_mut())
-        {
+    let Ok(mut document) = text.parse::<toml_edit::DocumentMut>() else { return Ok(false) };
+    let mut stripped = document.remove("development").is_some() | document.remove("deployment").is_some();
+    for (section, key) in [("review", "evidence_requirements"), ("verification", "visual_proof_for_ui_changes")] {
+        if let Some(inner) = document.get_mut(section).and_then(|item| item.as_table_mut()) {
             stripped |= inner.remove(key).is_some();
         }
     }
-    if !stripped {
-        return Ok(false);
-    }
+    if !stripped { return Ok(false) }
     let carried = retired_lines(&retired);
     if !carried.is_empty() {
         let existing = read_instructions(path);
-        let joined = if existing.is_empty() {
-            carried.join("\n")
-        } else {
-            format!("{existing}\n\n{}", carried.join("\n"))
-        };
+        let joined = if existing.is_empty() { carried.join("\n") } else { format!("{existing}\n\n{}", carried.join("\n")) };
         write_instructions(path, &joined)?;
     }
     write_text_atomic(path, &document.to_string())
@@ -769,27 +532,15 @@ pub fn carry_retired_fields_forward(path: &Path) -> Result<bool, String> {
 
 pub fn move_to(root: &Path, data_dir: &Path, storage: ManifestStorage) -> Result<PathBuf, String> {
     let located = locate(root, data_dir).ok_or_else(|| "project has no manifest".to_string())?;
-    if located.storage == storage {
-        return Ok(located.path);
-    }
-    let destination = match storage {
-        ManifestStorage::Personal => personal_path(root, data_dir),
-        ManifestStorage::Repository => repository_path(root),
-    };
-    if destination.exists() {
-        return Err(format!("{} already exists", destination.display()));
-    }
+    if located.storage == storage { return Ok(located.path); }
+    let destination = match storage { ManifestStorage::Personal => personal_path(root, data_dir), ManifestStorage::Repository => repository_path(root) };
+    if destination.exists() { return Err(format!("{} already exists", destination.display())); }
     write_atomic(&destination, &located.manifest)?;
     // The instructions are half of what a project says about itself; a move
     // that left them behind would look like a move that erased them.
     write_instructions(&destination, &located.instructions)?;
     write_instructions(&located.path, "")?;
-    fs::remove_file(&located.path).map_err(|error| {
-        format!(
-            "new manifest was written but {} could not be removed: {error}",
-            located.path.display()
-        )
-    })?;
+    fs::remove_file(&located.path).map_err(|error| format!("new manifest was written but {} could not be removed: {error}", located.path.display()))?;
     Ok(destination)
 }
 
@@ -813,10 +564,7 @@ mod tests {
         assert_eq!(found.storage, ManifestStorage::Personal);
         move_to(&repo, &data, ManifestStorage::Repository).unwrap();
         assert!(!personal_path(&repo, &data).exists());
-        assert_eq!(
-            locate(&repo, &data).unwrap().storage,
-            ManifestStorage::Repository
-        );
+        assert_eq!(locate(&repo, &data).unwrap().storage, ManifestStorage::Repository);
     }
 
     /// A chat name template is written as a list of tables the manager could
@@ -831,10 +579,7 @@ mod tests {
         assert!(!fs::read_to_string(&path).unwrap().contains("chat_name"));
 
         manifest.chat_name.parts = vec![
-            ChatNamePart::Extract {
-                source: ChatNameSource::Worktree,
-                pattern: "bw-[a-z0-9]+".into(),
-            },
+            ChatNamePart::Extract { source: ChatNameSource::Worktree, pattern: "bw-[a-z0-9]+".into() },
             ChatNamePart::Text { text: ": ".into() },
             ChatNamePart::Title,
         ];
@@ -861,10 +606,7 @@ mod tests {
         let moved = move_to(&repo, &data, ManifestStorage::Repository).unwrap();
         assert_eq!(read_instructions(&moved), "Never touch port 3008.");
         assert!(!instructions_path(&path).exists());
-        assert_eq!(
-            locate(&repo, &data).unwrap().instructions,
-            "Never touch port 3008."
-        );
+        assert_eq!(locate(&repo, &data).unwrap().instructions, "Never touch port 3008.");
     }
 
     /// Blank instructions and no instructions are one state, not two, so a
@@ -900,25 +642,19 @@ mod tests {
 
         assert!(carry_retired_fields_forward(&path).unwrap());
         let carried = read_instructions(&path);
-        assert_eq!(
-            carried,
-            concat!(
-                "Setup command: npm install\n",
-                "Start command: npm run dev\n",
-                "Required evidence: Show the screen\n",
-                "This project requires visual proof for interface changes.\n",
-                "Deployment command: deploy it\n",
-                "Ask for explicit permission immediately before running the deployment command.",
-            )
-        );
+        assert_eq!(carried, concat!(
+            "Setup command: npm install\n",
+            "Start command: npm run dev\n",
+            "Required evidence: Show the screen\n",
+            "This project requires visual proof for interface changes.\n",
+            "Deployment command: deploy it\n",
+            "Ask for explicit permission immediately before running the deployment command.",
+        ));
         // The policy a gate reads is untouched: only the prompt-only settings move.
         assert_eq!(read(&path).unwrap().review.external_review, "always");
         // And the file is edited, not rewritten: what stayed, stayed as it was.
         let after = fs::read_to_string(&path).unwrap();
-        assert!(
-            after.starts_with("schema_version = 1\n[project]\ndisplay_name = \"Keystone\""),
-            "{after}"
-        );
+        assert!(after.starts_with("schema_version = 1\n[project]\ndisplay_name = \"Keystone\""), "{after}");
         assert!(!after.contains("development"), "{after}");
 
         // Running again finds nothing to carry, so the text is not doubled.

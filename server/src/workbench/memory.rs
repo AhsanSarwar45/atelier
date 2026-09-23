@@ -202,15 +202,11 @@ fn full_pressure(pressure: &str) -> Option<f64> {
 #[cfg(target_os = "linux")]
 fn service_memory(ours: &[Found]) -> Option<ServiceMemory> {
     let own = std::fs::read_to_string("/proc/self/cgroup").ok()?;
-    let group =
-        std::path::Path::new("/sys/fs/cgroup").join(cgroup_path(&own)?.trim_start_matches('/'));
+    let group = std::path::Path::new("/sys/fs/cgroup").join(cgroup_path(&own)?.trim_start_matches('/'));
     let read = |name: &str| std::fs::read_to_string(group.join(name)).ok();
     let pids: HashSet<u32> = ours.iter().map(|found| found.pid.as_u32()).collect();
     let members = read("cgroup.procs")?;
-    let mut members = members
-        .lines()
-        .filter_map(|line| line.trim().parse::<u32>().ok())
-        .peekable();
+    let mut members = members.lines().filter_map(|line| line.trim().parse::<u32>().ok()).peekable();
     members.peek()?;
     if !members.all(|pid| pids.contains(&pid)) {
         return None;
@@ -224,10 +220,7 @@ fn service_memory(ours: &[Found]) -> Option<ServiceMemory> {
     Some(ServiceMemory {
         total_bytes: current.saturating_add(swapped),
         cache_bytes: cache,
-        pressure: read("memory.pressure")
-            .as_deref()
-            .and_then(full_pressure)
-            .unwrap_or(0.0),
+        pressure: read("memory.pressure").as_deref().and_then(full_pressure).unwrap_or(0.0),
     })
 }
 
@@ -350,7 +343,7 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
         (ours, service)
     })
     .await
-    .map_err(|e| format!("process scan failed: {e}"))?;
+        .map_err(|e| format!("process scan failed: {e}"))?;
     let root = Pid::from_u32(std::process::id());
     let inherited_chat_id = ours
         .iter()
@@ -546,10 +539,7 @@ mod tests {
     fn pressure_is_the_full_ten_second_average() {
         let pressure = "some avg10=91.50 avg60=40.00 avg300=9.00 total=1\nfull avg10=77.23 avg60=54.69 avg300=17.55 total=2\n";
         assert_eq!(full_pressure(pressure), Some(77.23));
-        assert_eq!(
-            full_pressure("some avg10=1.00 avg60=0 avg300=0 total=0\n"),
-            None
-        );
+        assert_eq!(full_pressure("some avg10=1.00 avg60=0 avg300=0 total=0\n"), None);
     }
 
     #[cfg(target_os = "linux")]

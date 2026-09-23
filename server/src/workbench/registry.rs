@@ -6,9 +6,9 @@ use super::browser::{self, BrowserCapture, BrowserRecipe};
 use super::extensions;
 use super::external::{self, ProviderHold};
 use super::mcp_catalogue;
+use super::plugin_catalogue;
 use super::mcp_servers;
 use super::media;
-use super::plugin_catalogue;
 use super::profiles::Profiles;
 use super::protocol::{Command, CommandKind};
 use super::provider_defaults::ProviderDefaultFiles;
@@ -1199,20 +1199,12 @@ impl WorkbenchRegistry {
         }
         if matches!(
             session.state.as_str(),
-            "starting"
-                | "thinking"
-                | "streaming"
-                | "running_tool"
-                | "waiting_for_agents"
-                | "waiting_permission"
+            "starting" | "thinking" | "streaming" | "running_tool" | "waiting_for_agents" | "waiting_permission"
         ) {
             return Err("Wait for the current response to finish before changing accounts.".into());
         }
 
-        let context = self
-            .database
-            .account_handoff(session_id.to_string())
-            .await?;
+        let context = self.database.account_handoff(session_id.to_string()).await?;
 
         // Remove first so a prompt arriving after the reply always takes the
         // lazy attach path. Retiring closes only the process; unlike Chat Close
@@ -1228,9 +1220,7 @@ impl WorkbenchRegistry {
         }
 
         if context.is_empty() {
-            self.database
-                .clear_account_handoff(session_id.to_string())
-                .await?;
+            self.database.clear_account_handoff(session_id.to_string()).await?;
         } else {
             self.database
                 .save_account_handoff(session_id.to_string(), context)
@@ -1256,20 +1246,14 @@ impl WorkbenchRegistry {
         super::provider::append_notice(
             &self.database,
             session_id,
-            &format!(
-                "Account changed to {}. The next message continues this conversation there.",
-                profile.name
-            ),
+            &format!("Account changed to {}. The next message continues this conversation there.", profile.name),
         )
         .await?;
         self.database
-            .append(
-                serde_json::from_value(json!({
-                    "type":"session.state", "sessionId":session_id, "seq":0,
-                    "at":chrono::Utc::now().to_rfc3339(), "state":"dormant", "label":"Asleep"
-                }))
-                .map_err(|error| error.to_string())?,
-            )
+            .append(serde_json::from_value(json!({
+                "type":"session.state", "sessionId":session_id, "seq":0,
+                "at":chrono::Utc::now().to_rfc3339(), "state":"dormant", "label":"Asleep"
+            })).map_err(|error| error.to_string())?)
             .await?;
         Ok(json!({"ok":true,"profile":chosen}))
     }
@@ -1395,10 +1379,7 @@ impl WorkbenchRegistry {
                     .ok_or("enabled must be true or false")?;
                 let verb = if enabled { "enable" } else { "disable" };
                 let words = vec!["plugin".to_string(), verb.to_string(), id.clone()];
-                match self
-                    .claude_plugin_cli(command, words, extensions::QUICK_CLI)
-                    .await
-                {
+                match self.claude_plugin_cli(command, words, extensions::QUICK_CLI).await {
                     Ok(answer) if answer["ok"] == json!(true) => Ok(answer),
                     // The CLI is not there or refused: the switch is one key
                     // in settings.json, so it is set there directly.
@@ -1441,8 +1422,7 @@ impl WorkbenchRegistry {
                 if brand != "claude" {
                     return Err("plugins are a Claude Code feature".into());
                 }
-                serde_json::to_value(plugin_catalogue::browse(&dir).await)
-                    .map_err(|e| e.to_string())
+                serde_json::to_value(plugin_catalogue::browse(&dir).await).map_err(|e| e.to_string())
             }
             // Installing from the catalogue is the two commands a reader would
             // have had to run: the marketplace is added first when the account
@@ -1450,9 +1430,7 @@ impl WorkbenchRegistry {
             // it has never heard of.
             CommandKind::PluginInstallFromCatalogue => {
                 let id = Self::field(command, "id")?.to_string();
-                let origin = Self::maybe(command, "origin")
-                    .unwrap_or_default()
-                    .to_string();
+                let origin = Self::maybe(command, "origin").unwrap_or_default().to_string();
                 let known = command.at("known").as_bool().unwrap_or(false);
                 if !known && !origin.is_empty() {
                     let words = vec![
@@ -1507,7 +1485,11 @@ impl WorkbenchRegistry {
                     serde_json::from_value(command.at("entry").clone())
                         .map_err(|e| format!("entry is not a catalogue entry: {e}"))?;
                 let id = Self::maybe(command, "id").unwrap_or(&entry.id).to_string();
-                let supplied = command.at("env").as_object().cloned().unwrap_or_default();
+                let supplied = command
+                    .at("env")
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default();
                 let config = mcp_catalogue::config(brand, &entry, &supplied);
                 let chosen = Self::maybe(command, "profileId");
                 let account = self.mcp_account(brand, chosen);
@@ -1565,7 +1547,7 @@ impl WorkbenchRegistry {
                 let listing =
                     mcp_servers::set_enabled(brand, &scope, &account, source, id, enabled)?;
                 serde_json::to_value(self.with_elsewhere(brand, &scope, chosen, listing))
-                    .map_err(|e| e.to_string())
+                .map_err(|e| e.to_string())
             }
             CommandKind::McpLogin | CommandKind::McpLogout => {
                 let brand = Self::field(command, "brand")?;
@@ -1799,12 +1781,7 @@ impl WorkbenchRegistry {
                 if text.trim().is_empty() && images.as_array().is_some_and(Vec::is_empty) {
                     return Err("there is nothing in the message to hold".into());
                 }
-                if self
-                    .database
-                    .get_session(session_id.to_string())
-                    .await?
-                    .is_none()
-                {
+                if self.database.get_session(session_id.to_string()).await?.is_none() {
                     return Err(format!("no session {session_id}"));
                 }
                 let parts = match command.at("parts") {
@@ -1819,7 +1796,8 @@ impl WorkbenchRegistry {
                         text,
                         images,
                         parts,
-                        chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                        chrono::Utc::now()
+                            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
                     )
                     .await?;
                 self.database
@@ -2191,36 +2169,24 @@ mod tests {
         let registry = WorkbenchRegistry::new(
             database.clone(),
             paths(root.path()),
-            Arc::new(FakeFactory {
-                calls: Arc::new(AtomicUsize::new(0)),
-            }),
+            Arc::new(FakeFactory { calls: Arc::new(AtomicUsize::new(0)) }),
         );
         database.create_session(a_chat("thinking")).await.unwrap();
         registry
-            .execute(&command(
-                CommandKind::SessionStart,
-                json!({"sessionId":"session-1","brand":"claude"}),
-            ))
+            .execute(&command(CommandKind::SessionStart, json!({"sessionId":"session-1","brand":"claude"})))
             .await
             .unwrap();
         say_state(&database, "thinking").await;
 
         for text in ["first thing", "second thing"] {
             registry
-                .execute(&command(
-                    CommandKind::PromptHold,
-                    json!({"sessionId":"session-1","text":text}),
-                ))
+                .execute(&command(CommandKind::PromptHold, json!({"sessionId":"session-1","text":text})))
                 .await
                 .unwrap();
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
         let waiting = database.held_messages("session-1".into()).await.unwrap();
-        assert_eq!(
-            waiting.len(),
-            2,
-            "a working chat is not interrupted: {waiting:?}"
-        );
+        assert_eq!(waiting.len(), 2, "a working chat is not interrupted: {waiting:?}");
         assert_eq!(waiting[0]["text"], json!("first thing"));
 
         // The reader's own words, kept where a restart cannot lose them.
@@ -2228,11 +2194,7 @@ mod tests {
         drop(database);
         let database = ChatDb::open(&file).unwrap();
         assert_eq!(
-            database
-                .held_messages("session-1".into())
-                .await
-                .unwrap()
-                .len(),
+            database.held_messages("session-1".into()).await.unwrap().len(),
             2,
             "a restarted server still holds what was written"
         );
@@ -2242,24 +2204,16 @@ mod tests {
             database.clone(),
             paths(root.path()),
             Arc::new(OneDriverFactory {
-                driver: std::sync::Mutex::new(Some(Box::new(RecordingDriver {
-                    sent: sent.clone(),
-                }))),
+                driver: std::sync::Mutex::new(Some(Box::new(RecordingDriver { sent: sent.clone() }))),
             }),
         );
         registry
-            .execute(&command(
-                CommandKind::SessionStart,
-                json!({"sessionId":"session-1","brand":"claude"}),
-            ))
+            .execute(&command(CommandKind::SessionStart, json!({"sessionId":"session-1","brand":"claude"})))
             .await
             .unwrap();
         say_state(&database, "thinking").await;
         tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(
-            sent.lock().unwrap().is_empty(),
-            "still working, still waiting"
-        );
+        assert!(sent.lock().unwrap().is_empty(), "still working, still waiting");
 
         say_state(&database, "idle").await;
         until_nothing_waits(&database).await;
@@ -2272,10 +2226,8 @@ mod tests {
         assert_eq!(
             events
                 .iter()
-                .filter(
-                    |event| event.kind == super::super::protocol::EventKind::PromptReleased
-                        && event.fields.get("reason") == Some(&json!("sent"))
-                )
+                .filter(|event| event.kind == super::super::protocol::EventKind::PromptReleased
+                    && event.fields.get("reason") == Some(&json!("sent")))
                 .count(),
             2,
             "the queue says both messages left it"
@@ -2298,25 +2250,17 @@ mod tests {
             database.clone(),
             paths(root.path()),
             Arc::new(OneDriverFactory {
-                driver: std::sync::Mutex::new(Some(Box::new(RecordingDriver {
-                    sent: sent.clone(),
-                }))),
+                driver: std::sync::Mutex::new(Some(Box::new(RecordingDriver { sent: sent.clone() }))),
             }),
         );
         database.create_session(a_chat("thinking")).await.unwrap();
         registry
-            .execute(&command(
-                CommandKind::SessionStart,
-                json!({"sessionId":"session-1","brand":"claude"}),
-            ))
+            .execute(&command(CommandKind::SessionStart, json!({"sessionId":"session-1","brand":"claude"})))
             .await
             .unwrap();
         say_state(&database, "thinking").await;
         registry
-            .execute(&command(
-                CommandKind::PromptHold,
-                json!({"sessionId":"session-1","text":"one more thing"}),
-            ))
+            .execute(&command(CommandKind::PromptHold, json!({"sessionId":"session-1","text":"one more thing"})))
             .await
             .unwrap();
 
@@ -2352,48 +2296,29 @@ mod tests {
         );
         database.create_session(a_chat("thinking")).await.unwrap();
         registry
-            .execute(&command(
-                CommandKind::SessionStart,
-                json!({"sessionId":"session-1","brand":"claude"}),
-            ))
+            .execute(&command(CommandKind::SessionStart, json!({"sessionId":"session-1","brand":"claude"})))
             .await
             .unwrap();
         let held = registry
-            .execute(&command(
-                CommandKind::PromptHold,
-                json!({"sessionId":"session-1","text":"say this now"}),
-            ))
+            .execute(&command(CommandKind::PromptHold, json!({"sessionId":"session-1","text":"say this now"})))
             .await
             .unwrap();
         let held_id = held["held"]["id"].as_str().unwrap().to_string();
 
         let refused = registry
-            .execute(&command(
-                CommandKind::PromptPush,
-                json!({"sessionId":"session-1","heldId":held_id}),
-            ))
+            .execute(&command(CommandKind::PromptPush, json!({"sessionId":"session-1","heldId":held_id})))
             .await;
-        assert!(
-            refused.is_err(),
-            "the refusal is the reader's to see: {refused:?}"
-        );
+        assert!(refused.is_err(), "the refusal is the reader's to see: {refused:?}");
         let waiting = database.held_messages("session-1".into()).await.unwrap();
         assert_eq!(waiting.len(), 1, "it is still waiting, and still sendable");
         assert_eq!(waiting[0]["text"], json!("say this now"));
 
         // And it can still be dropped, which a claimed message could not be.
         registry
-            .execute(&command(
-                CommandKind::PromptDrop,
-                json!({"sessionId":"session-1","heldId":held_id}),
-            ))
+            .execute(&command(CommandKind::PromptDrop, json!({"sessionId":"session-1","heldId":held_id})))
             .await
             .unwrap();
-        assert!(database
-            .held_messages("session-1".into())
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(database.held_messages("session-1".into()).await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -2409,57 +2334,36 @@ mod tests {
                 profiles: root.path().join("profiles"),
                 media: root.path().join("media"),
             },
-            Arc::new(FakeFactory {
-                calls: Arc::new(AtomicUsize::new(0)),
-            }),
+            Arc::new(FakeFactory { calls: Arc::new(AtomicUsize::new(0)) }),
         );
         let market = root.path().join("claude/plugins/known_marketplaces.json");
         std::fs::create_dir_all(market.parent().unwrap()).unwrap();
-        std::fs::write(
-            &market,
-            r#"{"official":{"source":{"source":"github","repo":"anthropics/official"}}}"#,
-        )
-        .unwrap();
+        std::fs::write(&market, r#"{"official":{"source":{"source":"github","repo":"anthropics/official"}}}"#).unwrap();
 
         // The system account reads the directory the server booted with.
         let listed = registry
-            .execute(&command(
-                CommandKind::ExtensionsList,
-                json!({"brand":"claude","scope":"account"}),
-            ))
+            .execute(&command(CommandKind::ExtensionsList, json!({"brand":"claude","scope":"account"})))
             .await
             .unwrap();
         assert_eq!(listed["kinds"][0]["kind"], json!("plugins"));
         assert_eq!(listed["kinds"][1]["kind"], json!("marketplaces"));
         assert_eq!(listed["kinds"][1]["items"][0]["id"], json!("official"));
-        assert_eq!(
-            listed["kinds"][1]["items"][0]["description"],
-            json!("github anthropics/official")
-        );
+        assert_eq!(listed["kinds"][1]["items"][0]["description"], json!("github anthropics/official"));
         // Codex has no plugin system, so it lists nothing.
         let listed = registry
-            .execute(&command(
-                CommandKind::ExtensionsList,
-                json!({"brand":"codex","scope":"account","profileId":"system"}),
-            ))
+            .execute(&command(CommandKind::ExtensionsList, json!({"brand":"codex","scope":"account","profileId":"system"})))
             .await
             .unwrap();
         assert_eq!(listed["kinds"], json!([]));
 
         // A created account reads its own directory, which starts empty.
         let made = registry
-            .execute(&command(
-                CommandKind::ProfileCreate,
-                json!({"brand":"claude","name":"Work"}),
-            ))
+            .execute(&command(CommandKind::ProfileCreate, json!({"brand":"claude","name":"Work"})))
             .await
             .unwrap();
         let profile = made["profile"]["id"].as_str().unwrap().to_string();
         let listed = registry
-            .execute(&command(
-                CommandKind::ExtensionsList,
-                json!({"brand":"claude","scope":"account","profileId":profile}),
-            ))
+            .execute(&command(CommandKind::ExtensionsList, json!({"brand":"claude","scope":"account","profileId":profile})))
             .await
             .unwrap();
         assert_eq!(listed["kinds"][1]["items"], json!([]));
@@ -2475,30 +2379,16 @@ mod tests {
             .unwrap();
         assert_eq!(answer["ok"], json!(true), "{answer}");
         let settings: Value = serde_json::from_str(
-            &std::fs::read_to_string(
-                registry
-                    .profile_directory("claude", &profile)
-                    .join("settings.json"),
-            )
-            .unwrap(),
+            &std::fs::read_to_string(registry.profile_directory("claude", &profile).join("settings.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(settings["enabledPlugins"]["notion@official"], json!(true));
-        assert_eq!(
-            answer["kinds"][0]["items"][0]["id"],
-            json!("notion@official")
-        );
+        assert_eq!(answer["kinds"][0]["items"][0]["id"], json!("notion@official"));
         assert_eq!(answer["kinds"][0]["items"][0]["enabled"], json!(true));
-        assert!(
-            !root.path().join("claude/settings.json").exists(),
-            "the system account was left alone"
-        );
+        assert!(!root.path().join("claude/settings.json").exists(), "the system account was left alone");
 
         assert!(registry
-            .execute(&command(
-                CommandKind::ExtensionsList,
-                json!({"brand":"claude","scope":"project","projectPath":"relative"})
-            ))
+            .execute(&command(CommandKind::ExtensionsList, json!({"brand":"claude","scope":"project","projectPath":"relative"})))
             .await
             .is_err());
     }
@@ -2516,81 +2406,53 @@ mod tests {
                 profiles: root.path().join("profiles"),
                 media: root.path().join("media"),
             },
-            Arc::new(FakeFactory {
-                calls: Arc::new(AtomicUsize::new(0)),
-            }),
+            Arc::new(FakeFactory { calls: Arc::new(AtomicUsize::new(0)) }),
         );
-        database
-            .create_session(crate::workbench::store::Session {
-                id: "session-1".into(),
-                brand: "claude".into(),
-                external_id: Some("old-thread".into()),
-                project_id: "project".into(),
-                project_path: "/project".into(),
-                cwd: "/project".into(),
-                model: None,
-                permission_mode: "default".into(),
-                effort: None,
-                collaboration_mode: None,
-                profile: None,
-                title: Some("Existing chat".into()),
-                state: "idle".into(),
-                origin: "app".into(),
-                created_at: "2026-09-13T00:00:00Z".into(),
-                last_active_at: "2026-09-13T00:00:00Z".into(),
-                last_spoke_at: None,
-                begun_by: Some("person".into()),
-                named_by_owner: false,
-            })
-            .await
-            .unwrap();
+        database.create_session(crate::workbench::store::Session {
+            id: "session-1".into(),
+            brand: "claude".into(),
+            external_id: Some("old-thread".into()),
+            project_id: "project".into(),
+            project_path: "/project".into(),
+            cwd: "/project".into(),
+            model: None,
+            permission_mode: "default".into(),
+            effort: None,
+            collaboration_mode: None,
+            profile: None,
+            title: Some("Existing chat".into()),
+            state: "idle".into(),
+            origin: "app".into(),
+            created_at: "2026-09-13T00:00:00Z".into(),
+            last_active_at: "2026-09-13T00:00:00Z".into(),
+            last_spoke_at: None,
+            begun_by: Some("person".into()),
+            named_by_owner: false,
+        }).await.unwrap();
         for value in [
             json!({"type":"message.started","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:01Z","messageId":"u1","role":"user"}),
             json!({"type":"text.delta","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:01Z","messageId":"u1","text":"remember the blue door"}),
             json!({"type":"message.completed","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:01Z","messageId":"u1"}),
         ] {
-            database
-                .append(serde_json::from_value(value).unwrap())
-                .await
-                .unwrap();
+            database.append(serde_json::from_value(value).unwrap()).await.unwrap();
         }
-        let made = registry
-            .execute(&command(
-                CommandKind::ProfileCreate,
-                json!({"brand":"claude","name":"Work"}),
-            ))
-            .await
-            .unwrap();
+        let made = registry.execute(&command(
+            CommandKind::ProfileCreate,
+            json!({"brand":"claude","name":"Work"}),
+        )).await.unwrap();
         let profile = made["profile"]["id"].as_str().unwrap();
 
-        registry
-            .execute(&command(
-                CommandKind::SessionProfile,
-                json!({"sessionId":"session-1","profileId":profile}),
-            ))
-            .await
-            .unwrap();
+        registry.execute(&command(
+            CommandKind::SessionProfile,
+            json!({"sessionId":"session-1","profileId":profile}),
+        )).await.unwrap();
 
-        let stored = database
-            .get_session("session-1".into())
-            .await
-            .unwrap()
-            .unwrap();
+        let stored = database.get_session("session-1".into()).await.unwrap().unwrap();
         assert_eq!(stored.profile.as_deref(), Some(profile));
-        assert_eq!(
-            stored.external_id, None,
-            "the old account's remote id is not reused"
-        );
+        assert_eq!(stored.external_id, None, "the old account's remote id is not reused");
         assert_eq!(stored.state, "dormant");
-        let handoff = database
-            .saved_account_handoff("session-1".into())
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(
-            handoff.contains("User: remember the blue door"),
-            "{handoff}"
-        );
+        let handoff = database.saved_account_handoff("session-1".into()).await.unwrap().unwrap();
+        assert!(handoff.contains("User: remember the blue door"), "{handoff}");
         assert!(database.timeline_count("session-1".into()).await.unwrap() >= 1);
     }
 
@@ -3260,10 +3122,7 @@ mod tests {
         assert!(ownership.ours[0].pids.contains(&provider_pid));
         // /proc also contains unrelated live terminal agents. This fixture
         // proves that its owned provider is never classified as external.
-        assert!(ownership
-            .external
-            .iter()
-            .all(|hold| !hold.pids.contains(&provider_pid)));
+        assert!(ownership.external.iter().all(|hold| !hold.pids.contains(&provider_pid)));
         let sent = registry
             .execute(&command(
                 CommandKind::PromptSend,

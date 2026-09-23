@@ -232,22 +232,10 @@ pub struct Manager {
 
 /// The managers looked for, in the order they are tried.
 pub const MANAGERS: &[Manager] = &[
-    Manager {
-        program: "dnf",
-        install: &["install", "-y"],
-    },
-    Manager {
-        program: "apt-get",
-        install: &["install", "-y"],
-    },
-    Manager {
-        program: "pacman",
-        install: &["-S", "--noconfirm"],
-    },
-    Manager {
-        program: "zypper",
-        install: &["install", "-y"],
-    },
+    Manager { program: "dnf", install: &["install", "-y"] },
+    Manager { program: "apt-get", install: &["install", "-y"] },
+    Manager { program: "pacman", install: &["-S", "--noconfirm"] },
+    Manager { program: "zypper", install: &["install", "-y"] },
 ];
 
 /// Where a reader gets it when this cannot install it for them.
@@ -601,7 +589,9 @@ fn said_within(
 }
 
 /// Read a pipe to its end on a thread of its own.
-fn drained<R: std::io::Read + Send + 'static>(pipe: Option<R>) -> std::thread::JoinHandle<String> {
+fn drained<R: std::io::Read + Send + 'static>(
+    pipe: Option<R>,
+) -> std::thread::JoinHandle<String> {
     std::thread::spawn(move || {
         let mut said = String::new();
         if let Some(mut pipe) = pipe {
@@ -916,10 +906,7 @@ mod tests {
             patience,
         )
         .expect("a shell is on this computer");
-        assert!(
-            began.elapsed() < std::time::Duration::from_secs(5),
-            "it waited for the sleep"
-        );
+        assert!(began.elapsed() < std::time::Duration::from_secs(5), "it waited for the sleep");
         assert!(said.finished.is_none(), "it was not stopped");
         assert_eq!(
             consent_link(&said.both()).as_deref(),
@@ -984,14 +971,8 @@ mod tests {
         let here = PathBuf::from("/usr/bin/tailscale");
         let dropped = Cell::new(false);
 
-        assert_eq!(
-            asked_twice(|| Some(here.clone()), || dropped.set(true)),
-            Some(here)
-        );
-        assert!(
-            !dropped.get(),
-            "a working answer was thrown away for no reason"
-        );
+        assert_eq!(asked_twice(|| Some(here.clone()), || dropped.set(true)), Some(here));
+        assert!(!dropped.get(), "a working answer was thrown away for no reason");
     }
 
     /// What is being served is read by the address it forwards to.
@@ -1000,8 +981,7 @@ mod tests {
     /// otherwise draw itself on because a neighbour is served (bw-hdor.3).
     #[test]
     fn a_reading_for_another_port_is_not_read_as_this_one_being_served() {
-        let said =
-            r#"{"Web":{"desk.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3008"}}}}}"#;
+        let said = r#"{"Web":{"desk.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3008"}}}}}"#;
         assert!(serving_from(said, 3008));
         assert!(!serving_from(said, 3009));
         assert!(!serving_from("{}", 3008));
@@ -1013,15 +993,8 @@ mod tests {
         // in over Tailscale is answered rather than refused (bw-ndlu.4).
         let said = r#"{"BackendState":"Running","Self":{"DNSName":"Nobara.tail1a2b.ts.net.","TailscaleIPs":["100.70.11.94","fd7a:115c:a1e0::1701:b5e"]}}"#;
         let it = on_the_tailnet_from(said);
-        assert_eq!(
-            it.name.as_deref(),
-            Some("nobara.tail1a2b.ts.net"),
-            "the root dot and the case belong to DNS, not to the allowlist"
-        );
-        assert_eq!(
-            it.addresses,
-            vec!["100.70.11.94", "fd7a:115c:a1e0::1701:b5e"]
-        );
+        assert_eq!(it.name.as_deref(), Some("nobara.tail1a2b.ts.net"), "the root dot and the case belong to DNS, not to the allowlist");
+        assert_eq!(it.addresses, vec!["100.70.11.94", "fd7a:115c:a1e0::1701:b5e"]);
     }
 
     #[test]
@@ -1030,10 +1003,7 @@ mod tests {
         // answer to it now, so admitting it would outlive the tailnet.
         let stopped = r#"{"BackendState":"Stopped","Self":{"DNSName":"nobara.tail1a2b.ts.net.","TailscaleIPs":["100.70.11.94"]}}"#;
         assert_eq!(on_the_tailnet_from(stopped), OnTheTailnet::default());
-        assert_eq!(
-            on_the_tailnet_from("tailscale: command not found"),
-            OnTheTailnet::default()
-        );
+        assert_eq!(on_the_tailnet_from("tailscale: command not found"), OnTheTailnet::default());
         assert_eq!(on_the_tailnet_from(""), OnTheTailnet::default());
     }
 
@@ -1042,9 +1012,7 @@ mod tests {
         let said = r#"{"BackendState":"Running","Self":{"DNSName":"nobara.tail1a2b.ts.net."}}"#;
         assert_eq!(
             standing_from(said),
-            Standing::Ready {
-                address: "https://nobara.tail1a2b.ts.net".to_string()
-            }
+            Standing::Ready { address: "https://nobara.tail1a2b.ts.net".to_string() }
         );
         assert!(standing_from(said).is_ready());
         assert_eq!(standing_from(said).wrong(), None);
@@ -1057,14 +1025,8 @@ mod tests {
         let Standing::Ready { address } = standing_from(said) else {
             panic!("a named, running computer was not read as ready");
         };
-        assert!(
-            !address.ends_with('.'),
-            "{address} ends with the absolute dot"
-        );
-        assert!(
-            address.starts_with("https://"),
-            "{address} is not a secure origin"
-        );
+        assert!(!address.ends_with('.'), "{address} ends with the absolute dot");
+        assert!(address.starts_with("https://"), "{address} is not a secure origin");
     }
 
     #[test]
@@ -1073,10 +1035,7 @@ mod tests {
         // actually have, not "remote access is not working".
         let cases = [
             (r#"{"BackendState":"NeedsLogin"}"#, Standing::NeedsSignIn),
-            (
-                r#"{"BackendState":"NeedsMachineAuth"}"#,
-                Standing::NeedsSignIn,
-            ),
+            (r#"{"BackendState":"NeedsMachineAuth"}"#, Standing::NeedsSignIn),
             (r#"{"BackendState":"NoState"}"#, Standing::NeedsSignIn),
             (r#"{"BackendState":"Stopped"}"#, Standing::Stopped),
             (r#"{"BackendState":"Starting"}"#, Standing::Starting),
@@ -1123,11 +1082,7 @@ mod tests {
         let Standing::NotAnswering { said } = standing_from(&said) else {
             panic!("a wall of text was not read as unreadable");
         };
-        assert!(
-            said.chars().count() <= 200,
-            "{} characters",
-            said.chars().count()
-        );
+        assert!(said.chars().count() <= 200, "{} characters", said.chars().count());
     }
 
     #[test]
@@ -1135,10 +1090,7 @@ mod tests {
         let plan = install_plan(Some(MANAGERS[0]), "ahsan").expect("dnf is a manager it knows");
         assert_eq!(plan.len(), 3);
         assert_eq!(plan[0], vec!["sudo", "dnf", "install", "-y", "tailscale"]);
-        assert_eq!(
-            plan[1],
-            vec!["sudo", "systemctl", "enable", "--now", "tailscaled"]
-        );
+        assert_eq!(plan[1], vec!["sudo", "systemctl", "enable", "--now", "tailscaled"]);
         // The step the switch on the settings screen depends on. `set
         // --operator` is what Tailscale's own error suggests and it does not
         // work, so this must stay `up --operator`.
@@ -1155,11 +1107,7 @@ mod tests {
                 manager.program,
                 plan[0]
             );
-            assert_eq!(
-                plan[0][0], "sudo",
-                "{} is not asked for with a password",
-                manager.program
-            );
+            assert_eq!(plan[0][0], "sudo", "{} is not asked for with a password", manager.program);
         }
     }
 
@@ -1175,10 +1123,7 @@ mod tests {
         // door in settings.
         let on = serve_on(3008);
         assert!(on.contains(&"http://127.0.0.1:3008".to_string()), "{on:?}");
-        assert!(
-            on.contains(&"--bg".to_string()),
-            "it would die with the command: {on:?}"
-        );
+        assert!(on.contains(&"--bg".to_string()), "it would die with the command: {on:?}");
         assert!(serve_off().contains(&"off".to_string()));
         // On and off must name the same door, or turning it off leaves it on.
         assert!(on.contains(&"--https=443".to_string()));

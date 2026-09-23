@@ -281,8 +281,7 @@ pub async fn perform_update(
     // asset of its own — brew fetches the same archive itself. Only a
     // standalone install has to have an asset named for this platform.
     let how = install_method::current();
-    if how == InstallMethod::Standalone
-        && (check.asset_url.is_none() || current_platform_asset().is_none())
+    if how == InstallMethod::Standalone && (check.asset_url.is_none() || current_platform_asset().is_none())
     {
         return (
             StatusCode::NOT_FOUND,
@@ -505,8 +504,9 @@ async fn run_standalone(
 /// back. Brew does not say how many bytes it is fetching, so this path reports
 /// its own output lines instead and leaves the bar indeterminate.
 async fn run_homebrew(watch: &UpdateWatch) -> Result<PathBuf, String> {
-    let brew = install_method::brew()
-        .ok_or("This copy was installed with Homebrew, but brew cannot be found to upgrade it.")?;
+    let brew = install_method::brew().ok_or(
+        "This copy was installed with Homebrew, but brew cannot be found to upgrade it.",
+    )?;
 
     // `brew upgrade` can only see a release the tap has been told about.
     watch

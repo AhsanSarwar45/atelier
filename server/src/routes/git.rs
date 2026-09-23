@@ -143,6 +143,7 @@ async fn check_dirty(repo: &Path) -> bool {
     }
 }
 
+
 // ============================================================================
 // The Git panel's routes
 //
@@ -171,11 +172,7 @@ pub struct Refused {
 impl Refused {
     /// The ordinary refusal: a code and git's own words.
     fn new(code: StatusCode, said: impl Into<String>) -> Self {
-        Refused {
-            code,
-            said: said.into(),
-            a_key_could_fix_it: false,
-        }
+        Refused { code, said: said.into(), a_key_could_fix_it: false }
     }
 
     /// The refusal a locked SSH key could clear, told apart so the panel can
@@ -282,14 +279,8 @@ static REPO_LOCKS: OnceLock<Mutex<HashMap<PathBuf, RepoLock>>> = OnceLock::new()
 pub fn repo_lock(repo: &Path) -> RepoLock {
     let key = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
     let locks = REPO_LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut locks = locks
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    Arc::clone(
-        locks
-            .entry(key)
-            .or_insert_with(|| Arc::new(AsyncMutex::new(()))),
-    )
+    let mut locks = locks.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    Arc::clone(locks.entry(key).or_insert_with(|| Arc::new(AsyncMutex::new(()))))
 }
 
 // ----------------------------------------------------------------------------
@@ -367,10 +358,7 @@ fn with_batch_mode(from_env: Option<String>, from_config: Option<String>) -> Str
         .into_iter()
         .flatten()
         .find(|carried| !carried.trim().is_empty());
-    format!(
-        "{} -o BatchMode=yes",
-        carried.as_deref().unwrap_or("ssh").trim()
-    )
+    format!("{} -o BatchMode=yes", carried.as_deref().unwrap_or("ssh").trim())
 }
 
 /// The name the passphrase travels under, from this server to the helper ssh
@@ -408,9 +396,7 @@ struct AskpassForOneCall {
 fn askpass_for_one_call() -> std::io::Result<AskpassForOneCall> {
     use std::os::unix::fs::PermissionsExt;
 
-    let dir = tempfile::Builder::new()
-        .prefix("atelier-askpass-")
-        .tempdir()?;
+    let dir = tempfile::Builder::new().prefix("atelier-askpass-").tempdir()?;
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700))?;
 
     let program = dir.path().join("askpass");
@@ -504,10 +490,7 @@ fn askpass_when_one_is_supplied() -> Result<AskpassForOneCall, Refused> {
     askpass_for_one_call().map_err(|e| {
         Refused::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!(
-                "Could not make somewhere for ssh to ask for the passphrase: {}",
-                e
-            ),
+            format!("Could not make somewhere for ssh to ask for the passphrase: {}", e),
         )
     })
 }
@@ -789,16 +772,12 @@ pub fn read_porcelain_v2(raw: &[u8]) -> StatusResponse {
             // `u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>`
             b'u' => {
                 if let Some((_, path)) = entry_fields(record, 10) {
-                    status.conflicted.push(NamedPath {
-                        path: path.to_string(),
-                    });
+                    status.conflicted.push(NamedPath { path: path.to_string() });
                 }
             }
             b'?' => {
                 if let Some(path) = record.strip_prefix("? ") {
-                    status.untracked.push(NamedPath {
-                        path: path.to_string(),
-                    });
+                    status.untracked.push(NamedPath { path: path.to_string() });
                 }
             }
             // `!` is an ignored file; this route never asks for those.
@@ -989,14 +968,7 @@ pub async fn discard(GitJson(body): GitJson<FilesRequest>) -> Answer {
             spoke_or_refused(
                 run_git(
                     &repo,
-                    &[
-                        "restore",
-                        "--worktree",
-                        "--staged",
-                        "--source=HEAD",
-                        "--",
-                        ".",
-                    ],
+                    &["restore", "--worktree", "--staged", "--source=HEAD", "--", "."],
                 )
                 .await?,
             )?;
@@ -1128,12 +1100,9 @@ pub struct PathRequest {
 /// `None` when there is no such ref at all: a branch following nothing, or a
 /// detached HEAD, in which case git exits nonzero and says so on stderr.
 async fn named_ref(repo: &Path, which: &str) -> Option<String> {
-    let named = run_git(
-        repo,
-        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", which],
-    )
-    .await
-    .ok()?;
+    let named = run_git(repo, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", which])
+        .await
+        .ok()?;
     if !named.status.success() {
         return None;
     }
@@ -1171,10 +1140,7 @@ async fn ahead_of_where_a_push_goes(repo: &Path) -> Option<(String, i32)> {
     if !counted.status.success() {
         return None;
     }
-    let ahead = String::from_utf8_lossy(&counted.stdout)
-        .trim()
-        .parse()
-        .ok()?;
+    let ahead = String::from_utf8_lossy(&counted.stdout).trim().parse().ok()?;
     Some((sent_to, ahead))
 }
 
@@ -1273,7 +1239,8 @@ pub async fn push(GitJson(body): GitJson<PushRequest>) -> Answer {
         vec!["push"]
     };
 
-    let output = spoke_or_refused(run_git_remote(&repo, &args, body.passphrase.as_deref()).await?)?;
+    let output =
+        spoke_or_refused(run_git_remote(&repo, &args, body.passphrase.as_deref()).await?)?;
     Ok(Json(serde_json::json!({
         "ok": true,
         "output": everything_git_printed(&output),
@@ -1633,10 +1600,7 @@ pub async fn log(GitQuery(params): GitQuery<LogParams>) -> Answer {
         // A project nobody has saved anything in yet has an empty history,
         // which is not a failure worth showing anyone.
         if !has_commits(&repo).await {
-            return Ok(Json(LogResponse {
-                commits: Vec::new(),
-            })
-            .into_response());
+            return Ok(Json(LogResponse { commits: Vec::new() }).into_response());
         }
         return Err(git_said_no(&read));
     }
@@ -2311,18 +2275,11 @@ fn read_worktree_list(said: &str) -> Vec<ListedTree> {
     let mut trees: Vec<ListedTree> = Vec::new();
     for line in said.lines() {
         if let Some(path) = line.strip_prefix("worktree ") {
-            trees.push(ListedTree {
-                path: path.to_string(),
-                branch: None,
-            });
+            trees.push(ListedTree { path: path.to_string(), branch: None });
         } else if let Some(reference) = line.strip_prefix("branch ") {
             if let Some(current) = trees.last_mut() {
-                current.branch = Some(
-                    reference
-                        .strip_prefix("refs/heads/")
-                        .unwrap_or(reference)
-                        .to_string(),
-                );
+                current.branch =
+                    Some(reference.strip_prefix("refs/heads/").unwrap_or(reference).to_string());
             }
         }
     }
@@ -2354,12 +2311,9 @@ pub struct Checkout {
 /// asked for. A detached head says `HEAD`, which is not a branch and is
 /// carried as none.
 pub async fn checkout_at(at: &Path) -> Option<Checkout> {
-    let out = super::git_output(
-        at,
-        &["rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD"],
-    )
-    .await
-    .ok()?;
+    let out = super::git_output(at, &["rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD"])
+        .await
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -2400,16 +2354,9 @@ async fn tree_is_dirty(at: &Path) -> bool {
 /// What this checkout's drift is measured against: its upstream when it
 /// follows one, and otherwise the branch the main checkout is on.
 async fn measure_for(at: &Path, landing: Option<&str>) -> Option<String> {
-    if let Ok(out) = super::git_output(
-        at,
-        &[
-            "rev-parse",
-            "--abbrev-ref",
-            "--symbolic-full-name",
-            "@{upstream}",
-        ],
-    )
-    .await
+    if let Ok(out) =
+        super::git_output(at, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
+            .await
     {
         if out.status.success() {
             let upstream = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -2470,9 +2417,7 @@ async fn measure_tree(listed: ListedTree, is_main: bool, landing: Option<String>
 fn place_for_trees(repo: &Path, trees: &[ListedTree]) -> PathBuf {
     let mut seen: Vec<(PathBuf, usize)> = Vec::new();
     for beside in trees.iter().skip(1) {
-        let Some(parent) = Path::new(&beside.path).parent() else {
-            continue;
-        };
+        let Some(parent) = Path::new(&beside.path).parent() else { continue };
         match seen.iter_mut().find(|(known, _)| known == parent) {
             Some((_, count)) => *count += 1,
             None => seen.push((parent.to_path_buf(), 1)),
@@ -2583,12 +2528,9 @@ fn plain_name(name: &str) -> Result<&str, Refused> {
 /// it, and only ever by adding a line — a worktree's build output showing up
 /// as hundreds of thousands of untracked files is what this prevents.
 async fn ignore_the_place(repo: &Path, place: &Path) {
-    let Ok(inside) = place.strip_prefix(repo) else {
-        return;
-    };
+    let Ok(inside) = place.strip_prefix(repo) else { return };
     let entry = format!("/{}/", inside.display());
-    if let Ok(out) =
-        super::git_output(repo, &["check-ignore", "-q", &place.display().to_string()]).await
+    if let Ok(out) = super::git_output(repo, &["check-ignore", "-q", &place.display().to_string()]).await
     {
         if out.status.success() {
             return;
@@ -2634,10 +2576,7 @@ pub async fn new_tree(GitJson(body): GitJson<NewTreeRequest>) -> Answer {
     if let Some(taken) = listed.iter().find(|one| name_of(&one.path) == name) {
         return Err(Refused::new(
             StatusCode::CONFLICT,
-            format!(
-                "There is already a worktree called {name:?}, at {}",
-                taken.path
-            ),
+            format!("There is already a worktree called {name:?}, at {}", taken.path),
         ));
     }
 
@@ -2660,12 +2599,7 @@ pub async fn new_tree(GitJson(body): GitJson<NewTreeRequest>) -> Answer {
     let made = where_it_goes.display().to_string();
     let args: Vec<&str> = if body.create {
         let mut args = vec!["worktree", "add", "-b", branch, made.as_str()];
-        if let Some(base) = body
-            .base
-            .as_deref()
-            .map(str::trim)
-            .filter(|b| !b.is_empty())
-        {
+        if let Some(base) = body.base.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
             args.push(base);
         }
         args
@@ -2679,10 +2613,7 @@ pub async fn new_tree(GitJson(body): GitJson<NewTreeRequest>) -> Answer {
 
     let landing = listed.first().and_then(|main| main.branch.clone());
     let entry = measure_tree(
-        ListedTree {
-            path: made,
-            branch: Some(branch.to_string()),
-        },
+        ListedTree { path: made, branch: Some(branch.to_string()) },
         false,
         landing,
     )
@@ -2753,10 +2684,7 @@ mod tests {
     /// The status route turns away anything outside the home directory, so a
     /// test that goes through a route cannot use `/tmp`.
     fn a_scratch_repository_under_home() -> tempfile::TempDir {
-        let home = directories::UserDirs::new()
-            .unwrap()
-            .home_dir()
-            .to_path_buf();
+        let home = directories::UserDirs::new().unwrap().home_dir().to_path_buf();
         tempfile::Builder::new()
             .prefix(".atelier-git-push-test-")
             .tempdir_in(home)
@@ -2811,24 +2739,11 @@ mod tests {
         let shared = dir.join("shared.git");
         let repo = dir.join("work");
         std::fs::create_dir_all(&repo).unwrap();
-        git(
-            dir,
-            &[
-                "init",
-                "-q",
-                "--bare",
-                "-b",
-                "main",
-                shared.to_str().unwrap(),
-            ],
-        );
+        git(dir, &["init", "-q", "--bare", "-b", "main", shared.to_str().unwrap()]);
         git(&repo, &["init", "-q", "-b", "ours"]);
         git(&repo, &["config", "user.name", "Atelier test"]);
         git(&repo, &["config", "user.email", "atelier@example.invalid"]);
-        git(
-            &repo,
-            &["remote", "add", "origin", shared.to_str().unwrap()],
-        );
+        git(&repo, &["remote", "add", "origin", shared.to_str().unwrap()]);
         std::fs::write(repo.join("kept"), "one\n").unwrap();
         git(&repo, &["add", "kept"]);
         git(&repo, &["commit", "-qm", "first"]);
@@ -2841,14 +2756,7 @@ mod tests {
             git(&repo, &["commit", "-qam", &format!("work {n}")]);
         }
         // Sent, in full, to a name the upstream never hears about.
-        git(
-            &repo,
-            &[
-                "config",
-                "remote.origin.push",
-                "refs/heads/ours:refs/heads/main",
-            ],
-        );
+        git(&repo, &["config", "remote.origin.push", "refs/heads/ours:refs/heads/main"]);
         git(&repo, &["push", "-q"]);
         repo
     }
@@ -2862,10 +2770,7 @@ mod tests {
         let repo = a_repository_pushed_somewhere_else(dir.path());
 
         // git itself, asked the ordinary way, still says three.
-        assert_eq!(
-            git(&repo, &["rev-list", "--count", "origin/ours..HEAD"]),
-            "3"
-        );
+        assert_eq!(git(&repo, &["rev-list", "--count", "origin/ours..HEAD"]), "3");
 
         let (sent_to, ahead) = ahead_of_where_a_push_goes(&repo)
             .await
@@ -2881,11 +2786,9 @@ mod tests {
         let dir = a_scratch_repository_under_home();
         let repo = a_repository_pushed_somewhere_else(dir.path());
 
-        let answer = status(GitQuery(PathParams {
-            path: repo.to_string_lossy().into_owned(),
-        }))
-        .await
-        .expect("a status of a repository that exists");
+        let answer = status(GitQuery(PathParams { path: repo.to_string_lossy().into_owned() }))
+            .await
+            .expect("a status of a repository that exists");
         let said = read_json(answer).await;
 
         assert_eq!(said["branch"], "ours");
@@ -2906,11 +2809,9 @@ mod tests {
 
         assert!(ahead_of_where_a_push_goes(&repo).await.is_none());
 
-        let answer = status(GitQuery(PathParams {
-            path: repo.to_string_lossy().into_owned(),
-        }))
-        .await
-        .expect("a status of a repository that exists");
+        let answer = status(GitQuery(PathParams { path: repo.to_string_lossy().into_owned() }))
+            .await
+            .expect("a status of a repository that exists");
         let said = read_json(answer).await;
 
         assert_eq!(said["pushTo"], serde_json::Value::Null);
@@ -2976,16 +2877,10 @@ mod tests {
     #[test]
     fn an_empty_ssh_command_is_not_mistaken_for_one() {
         assert_eq!(
-            with_batch_mode(
-                Some("   ".to_string()),
-                Some("ssh -i /keys/real".to_string())
-            ),
+            with_batch_mode(Some("   ".to_string()), Some("ssh -i /keys/real".to_string())),
             "ssh -i /keys/real -o BatchMode=yes"
         );
-        assert_eq!(
-            with_batch_mode(Some(String::new()), None),
-            "ssh -o BatchMode=yes"
-        );
+        assert_eq!(with_batch_mode(Some(String::new()), None), "ssh -o BatchMode=yes");
     }
 
     /// What a refusal put on the wire, so a test can read the answer the panel
@@ -3026,9 +2921,7 @@ mod tests {
         assert!(!a_key_could_fix_it(
             " ! [rejected]        main -> main (non-fast-forward)"
         ));
-        assert!(!a_key_could_fix_it(
-            "CONFLICT (content): Merge conflict in kept"
-        ));
+        assert!(!a_key_could_fix_it("CONFLICT (content): Merge conflict in kept"));
         assert!(!a_key_could_fix_it("nothing to commit, working tree clean"));
     }
 
@@ -3170,19 +3063,8 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&fake_ssh, std::fs::Permissions::from_mode(0o755)).unwrap();
-        git(
-            repo,
-            &["config", "core.sshCommand", fake_ssh.to_str().unwrap()],
-        );
-        git(
-            repo,
-            &[
-                "remote",
-                "add",
-                "origin",
-                "git@example.invalid:some/repo.git",
-            ],
-        );
+        git(repo, &["config", "core.sshCommand", fake_ssh.to_str().unwrap()]);
+        git(repo, &["remote", "add", "origin", "git@example.invalid:some/repo.git"]);
 
         let answered = tokio::time::timeout(
             std::time::Duration::from_secs(30),
@@ -3264,19 +3146,8 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&fake_ssh, std::fs::Permissions::from_mode(0o755)).unwrap();
-        git(
-            repo,
-            &["config", "core.sshCommand", fake_ssh.to_str().unwrap()],
-        );
-        git(
-            repo,
-            &[
-                "remote",
-                "add",
-                "origin",
-                "git@example.invalid:some/repo.git",
-            ],
-        );
+        git(repo, &["config", "core.sshCommand", fake_ssh.to_str().unwrap()]);
+        git(repo, &["remote", "add", "origin", "git@example.invalid:some/repo.git"]);
 
         let answered = tokio::time::timeout(
             std::time::Duration::from_secs(30),
@@ -3387,15 +3258,11 @@ mod porcelain_tests {
         let status = read_porcelain_v2(SAMPLE.as_bytes());
         assert_eq!(
             status.conflicted,
-            vec![NamedPath {
-                path: "fought over.txt".to_string()
-            }]
+            vec![NamedPath { path: "fought over.txt".to_string() }]
         );
         assert_eq!(
             status.untracked,
-            vec![NamedPath {
-                path: "loose file.txt".to_string()
-            }]
+            vec![NamedPath { path: "loose file.txt".to_string() }]
         );
         // An unmerged file is not also a change on either side.
         assert!(!status.staged.iter().any(|f| f.path == "fought over.txt"));
@@ -3442,6 +3309,7 @@ mod porcelain_tests {
 mod patch_tests {
     use super::*;
 
+
     /// The plain case: one file, one run of changed lines.
     #[test]
     fn one_hunk_carries_its_counts_and_its_lines() {
@@ -3469,37 +3337,17 @@ index 1234567..89abcde 100644
         assert_eq!(file.hunks.len(), 1);
         let hunk = &file.hunks[0];
         assert_eq!(
-            (
-                hunk.old_start,
-                hunk.old_lines,
-                hunk.new_start,
-                hunk.new_lines
-            ),
+            (hunk.old_start, hunk.old_lines, hunk.new_start, hunk.new_lines),
             (1, 4, 1, 4)
         );
         assert_eq!(
             hunk.lines,
             vec![
-                DiffLine {
-                    kind: "context".into(),
-                    text: "first".into()
-                },
-                DiffLine {
-                    kind: "removed".into(),
-                    text: "second".into()
-                },
-                DiffLine {
-                    kind: "added".into(),
-                    text: "SECOND".into()
-                },
-                DiffLine {
-                    kind: "context".into(),
-                    text: "third".into()
-                },
-                DiffLine {
-                    kind: "context".into(),
-                    text: "fourth".into()
-                },
+                DiffLine { kind: "context".into(), text: "first".into() },
+                DiffLine { kind: "removed".into(), text: "second".into() },
+                DiffLine { kind: "added".into(), text: "SECOND".into() },
+                DiffLine { kind: "context".into(), text: "third".into() },
+                DiffLine { kind: "context".into(), text: "fourth".into() },
             ]
         );
     }
@@ -3528,12 +3376,7 @@ diff --git a/a.txt b/a.txt
         assert_eq!(hunks.len(), 2);
         assert_eq!((hunks[0].old_start, hunks[0].new_start), (1, 1));
         assert_eq!(
-            (
-                hunks[1].old_start,
-                hunks[1].old_lines,
-                hunks[1].new_start,
-                hunks[1].new_lines
-            ),
+            (hunks[1].old_start, hunks[1].old_lines, hunks[1].new_start, hunks[1].new_lines),
             (20, 3, 20, 4)
         );
         assert_eq!(files[0].additions, 2);
@@ -3661,9 +3504,7 @@ diff --git a/tail.txt b/tail.txt
         let files = read_unified_patch(patch);
         let lines = &files[0].hunks[0].lines;
         assert_eq!(lines.len(), 3);
-        assert!(lines
-            .iter()
-            .all(|line| !line.text.starts_with("No newline")));
+        assert!(lines.iter().all(|line| !line.text.starts_with("No newline")));
         assert_eq!((files[0].additions, files[0].deletions), (1, 1));
     }
 

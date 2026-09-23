@@ -420,10 +420,7 @@ async fn a_detached_head_says_so_and_names_the_commit() {
     let (code, listed) = branches_of(&repo).await;
     assert_eq!(code, StatusCode::OK);
     let current = listed["current"].as_str().expect("something is current");
-    assert!(
-        first.starts_with(current),
-        "{current} is not part of {first}"
-    );
+    assert!(first.starts_with(current), "{current} is not part of {first}");
 }
 
 #[tokio::test]
@@ -468,11 +465,7 @@ async fn many_mutating_calls_at_one_project_wait_for_each_other_instead_of_colli
 
     for answer in answers {
         let (code, body) = answered(answer).await;
-        assert_eq!(
-            code,
-            StatusCode::OK,
-            "a concurrent pick was refused: {body}"
-        );
+        assert_eq!(code, StatusCode::OK, "a concurrent pick was refused: {body}");
     }
 
     let (_, body) = status_of(&repo).await;
@@ -599,10 +592,7 @@ async fn picking_nothing_at_all_is_refused_rather_than_quietly_doing_nothing() {
 
     let (code, body) = stage(&repo, &[]).await;
     assert_eq!(code, StatusCode::BAD_REQUEST);
-    assert!(body["error"]
-        .as_str()
-        .expect("a reason")
-        .contains("No files"));
+    assert!(body["error"].as_str().expect("a reason").contains("No files"));
 }
 
 #[tokio::test]
@@ -649,10 +639,7 @@ async fn everything_is_picked_up_at_once_and_put_back_at_once() {
     assert_eq!(code, StatusCode::OK, "{body}");
 
     let (_, seen) = status_of(&repo).await;
-    assert!(
-        named(&seen, "staged").is_empty(),
-        "nothing is picked now: {seen}"
-    );
+    assert!(named(&seen, "staged").is_empty(), "nothing is picked now: {seen}");
     // Putting the index back never touches what the files say on disk.
     assert_eq!(named(&seen, "unstaged"), vec!["kept.txt"]);
     assert_eq!(named(&seen, "untracked"), vec!["src/new.ts"]);
@@ -669,10 +656,7 @@ async fn a_project_with_nothing_saved_yet_can_still_put_everything_back() {
 
     let (code, body) = stage_all(&repo).await;
     assert_eq!(code, StatusCode::OK, "{body}");
-    assert_eq!(
-        named(&status_of(&repo).await.1, "staged"),
-        vec!["first.txt"]
-    );
+    assert_eq!(named(&status_of(&repo).await.1, "staged"), vec!["first.txt"]);
 
     let (code, body) = unstage_all(&repo).await;
     assert_eq!(code, StatusCode::OK, "{body}");
@@ -700,10 +684,7 @@ async fn discarding_one_file_puts_it_back_to_what_was_saved_and_leaves_the_other
     // And nothing else was touched, which is the other half of doing what was
     // asked and no more.
     assert_eq!(reads(at, "other.txt"), "left alone, and changed\n");
-    assert_eq!(
-        named(&status_of(&repo).await.1, "unstaged"),
-        vec!["other.txt"]
-    );
+    assert_eq!(named(&status_of(&repo).await.1, "unstaged"), vec!["other.txt"]);
 }
 
 #[tokio::test]
@@ -723,11 +704,7 @@ async fn discarding_a_files_unstaged_half_leaves_what_was_already_picked() {
     let (code, body) = discard(&repo, &["twice.txt"]).await;
     assert_eq!(code, StatusCode::OK, "{body}");
 
-    assert_eq!(
-        reads(at, "twice.txt"),
-        "one\ntwo\n",
-        "back to what was picked"
-    );
+    assert_eq!(reads(at, "twice.txt"), "one\ntwo\n", "back to what was picked");
     let (_, seen) = status_of(&repo).await;
     assert_eq!(named(&seen, "staged"), vec!["twice.txt"], "{seen}");
     assert!(named(&seen, "unstaged").is_empty(), "{seen}");
@@ -743,10 +720,7 @@ async fn a_file_git_has_never_heard_of_is_deleted_and_a_tracked_one_is_not() {
 
     let (code, body) = remove(&repo, &["scratch/notes.txt"]).await;
     assert_eq!(code, StatusCode::OK, "{body}");
-    assert!(
-        !at.join("scratch/notes.txt").exists(),
-        "the file is still there"
-    );
+    assert!(!at.join("scratch/notes.txt").exists(), "the file is still there");
 
     // `git clean` only ever touches untracked files, so a tracked path sent
     // here by mistake is left where it is rather than deleted.
@@ -757,10 +731,7 @@ async fn a_file_git_has_never_heard_of_is_deleted_and_a_tracked_one_is_not() {
     // And naming nothing is refused rather than sweeping the project.
     let (code, body) = remove(&repo, &[]).await;
     assert_eq!(code, StatusCode::BAD_REQUEST);
-    assert!(body["error"]
-        .as_str()
-        .expect("a reason")
-        .contains("No files"));
+    assert!(body["error"].as_str().expect("a reason").contains("No files"));
 }
 
 #[tokio::test]
@@ -786,10 +757,7 @@ async fn discarding_everything_clears_all_three_groups_and_keeps_what_is_ignored
 
     // Everything tracked is back at HEAD, and everything new is gone.
     assert_eq!(reads(at, "kept.txt"), "the words that were saved\n");
-    assert!(
-        !at.join("picked.txt").exists(),
-        "a picked-up new file survived"
-    );
+    assert!(!at.join("picked.txt").exists(), "a picked-up new file survived");
     assert!(!at.join("loose.txt").exists(), "an untracked file survived");
     assert!(!at.join("scratch").exists(), "an untracked folder survived");
 
@@ -800,10 +768,7 @@ async fn discarding_everything_clears_all_three_groups_and_keeps_what_is_ignored
     assert_eq!(reads(at, "build/output.bin"), "an ignored build\n");
 
     // git's own opinion, which is the only one that counts.
-    assert_eq!(
-        run(at, &["status", "--porcelain", "--untracked-files=all"]),
-        ""
-    );
+    assert_eq!(run(at, &["status", "--porcelain", "--untracked-files=all"]), "");
     let (_, seen) = status_of(&repo).await;
     assert!(named(&seen, "staged").is_empty(), "{seen}");
     assert!(named(&seen, "unstaged").is_empty(), "{seen}");
@@ -818,10 +783,7 @@ async fn discarding_nothing_at_all_is_refused_rather_than_quietly_doing_nothing(
 
     let (code, body) = discard(&repo, &[]).await;
     assert_eq!(code, StatusCode::BAD_REQUEST);
-    assert!(body["error"]
-        .as_str()
-        .expect("a reason")
-        .contains("No files"));
+    assert!(body["error"].as_str().expect("a reason").contains("No files"));
 }
 
 // ============================================================================
@@ -842,10 +804,7 @@ async fn a_saved_change_reaches_a_bare_shared_copy_and_a_refusal_arrives_in_gits
     assert_eq!(code, StatusCode::OK, "{sent}");
     assert_eq!(sent["ok"], true);
     assert!(
-        !sent["output"]
-            .as_str()
-            .expect("what git printed")
-            .is_empty(),
+        !sent["output"].as_str().expect("what git printed").is_empty(),
         "git says something when it sends"
     );
     assert_eq!(
@@ -854,10 +813,7 @@ async fn a_saved_change_reaches_a_bare_shared_copy_and_a_refusal_arrives_in_gits
         "the shared copy received the commit"
     );
     assert_eq!(
-        run(
-            mine.path(),
-            &["rev-parse", "--abbrev-ref", "HEAD@{upstream}"]
-        ),
+        run(mine.path(), &["rev-parse", "--abbrev-ref", "HEAD@{upstream}"]),
         "origin/main",
         "setUpstream leaves the branch following the shared copy"
     );
@@ -878,10 +834,7 @@ async fn a_saved_change_reaches_a_bare_shared_copy_and_a_refusal_arrives_in_gits
     save_all(theirs.path(), "theirs");
     let (code, refused) = push(&theirs, false).await;
 
-    assert!(
-        !code.is_success(),
-        "a rejected push must not report success"
-    );
+    assert!(!code.is_success(), "a rejected push must not report success");
     let said = refused["error"].as_str().expect("git's own words");
     assert!(said.contains("[rejected]"), "not git's own words: {said}");
     assert!(
@@ -991,12 +944,7 @@ async fn the_lines_of_work_are_listed_switched_and_their_saved_changes_read() {
 
     run(
         at,
-        &[
-            "remote",
-            "add",
-            "origin",
-            &shared.path().display().to_string(),
-        ],
+        &["remote", "add", "origin", &shared.path().display().to_string()],
     );
     let (code, _) = push(&repo, true).await;
     assert_eq!(code, StatusCode::OK);
@@ -1049,10 +997,7 @@ async fn the_lines_of_work_are_listed_switched_and_their_saved_changes_read() {
     )
     .await;
     assert_eq!(code, StatusCode::OK);
-    assert_eq!(
-        run(at, &["rev-parse", "--abbrev-ref", "HEAD"]),
-        "feature-one"
-    );
+    assert_eq!(run(at, &["rev-parse", "--abbrev-ref", "HEAD"]), "feature-one");
     let (_, listed) = branches_of(&repo).await;
     assert_eq!(listed["current"], "feature-one");
 
@@ -1665,23 +1610,8 @@ const OLDER: [(&str, &str); 1] = [("get", "/api/git/branch-status")];
 #[test]
 fn the_server_registers_every_route_the_contract_names() {
     let handlers = [
-        "status",
-        "stage",
-        "unstage",
-        "discard",
-        "remove",
-        "commit",
-        "fetch",
-        "pull",
-        "push",
-        "branches",
-        "checkout",
-        "log",
-        "diff",
-        "show",
-        "trees",
-        "new_tree",
-        "drop_tree",
+        "status", "stage", "unstage", "discard", "remove", "commit", "fetch", "pull", "push",
+        "branches", "checkout", "log", "diff", "show", "trees", "new_tree", "drop_tree",
     ];
     let main = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -2221,14 +2151,8 @@ async fn every_checkout_of_a_project_is_listed_by_its_own_name_and_branch() {
     run(at, &["branch", "writing"]);
     let first = at.join("worktrees").join("one");
     let second = at.join("worktrees").join("two");
-    run(
-        at,
-        &["worktree", "add", &first.display().to_string(), "reading"],
-    );
-    run(
-        at,
-        &["worktree", "add", &second.display().to_string(), "writing"],
-    );
+    run(at, &["worktree", "add", &first.display().to_string(), "reading"]);
+    run(at, &["worktree", "add", &second.display().to_string(), "writing"]);
 
     // One of them is worked in, the other is not, and one of them has a commit
     // the project does not: the three things a row carries beyond its name.
@@ -2241,23 +2165,14 @@ async fn every_checkout_of_a_project_is_listed_by_its_own_name_and_branch() {
     assert_eq!(body["trees"].as_array().expect("a list").len(), 3);
 
     let main = &body["trees"][0];
-    assert_eq!(
-        main["isMain"], true,
-        "git lists the project's own checkout first"
-    );
+    assert_eq!(main["isMain"], true, "git lists the project's own checkout first");
     assert_eq!(main["branch"], "main");
 
     let one = tree_named(&body, "one");
     assert_eq!(one["isMain"], false);
     assert_eq!(one["branch"], "reading");
-    assert_eq!(
-        one["path"],
-        first.canonicalize().unwrap().display().to_string()
-    );
-    assert_eq!(
-        one["dirty"], true,
-        "a file was written and never saved there"
-    );
+    assert_eq!(one["path"], first.canonicalize().unwrap().display().to_string());
+    assert_eq!(one["dirty"], true, "a file was written and never saved there");
     assert_eq!(one["ahead"], 0);
 
     let two = tree_named(&body, "two");
@@ -2282,10 +2197,7 @@ async fn a_worktree_is_made_on_a_branch_that_already_exists() {
     assert_eq!(made["isMain"], false);
 
     let where_it_went = repo.path().join("worktrees").join("reading-room");
-    assert!(
-        where_it_went.join("kept.txt").exists(),
-        "the branch is checked out there"
-    );
+    assert!(where_it_went.join("kept.txt").exists(), "the branch is checked out there");
     assert_eq!(
         run(&where_it_went, &["rev-parse", "--abbrev-ref", "HEAD"]),
         "already-here"
@@ -2335,17 +2247,11 @@ async fn a_name_a_worktree_already_has_is_refused_rather_than_taken_over() {
     let (again, said) = make_tree(&repo, "taken", "second", false, None).await;
     assert_eq!(again, StatusCode::CONFLICT);
     assert!(
-        said["error"]
-            .as_str()
-            .expect("git's own words")
-            .contains("taken"),
+        said["error"].as_str().expect("git's own words").contains("taken"),
         "the refusal names the worktree already using it: {said}"
     );
     assert_eq!(
-        run(
-            &repo.path().join("worktrees").join("taken"),
-            &["rev-parse", "--abbrev-ref", "HEAD"]
-        ),
+        run(&repo.path().join("worktrees").join("taken"), &["rev-parse", "--abbrev-ref", "HEAD"]),
         "first",
         "the one that was there is untouched"
     );
@@ -2358,19 +2264,11 @@ async fn a_name_that_names_nothing_at_all_is_refused() {
 
     for name in ["..", "", "   ", "/", "./.."] {
         let (code, said) = make_tree(&repo, name, "work", false, None).await;
-        assert_eq!(
-            code,
-            StatusCode::BAD_REQUEST,
-            "{name:?} was allowed: {said}"
-        );
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{name:?} was allowed: {said}");
     }
 
     let (code, said) = drop_tree(&repo, "../escaped", false).await;
-    assert_eq!(
-        code,
-        StatusCode::BAD_REQUEST,
-        "removing is held to a folder name: {said}"
-    );
+    assert_eq!(code, StatusCode::BAD_REQUEST, "removing is held to a folder name: {said}");
 }
 
 #[tokio::test]
@@ -2411,15 +2309,7 @@ async fn a_project_that_already_keeps_its_worktrees_somewhere_keeps_them_there()
     // This project's habit is a hidden directory, and one it keeps beside the
     // checkout would be followed the same way.
     let habit = at.join(".worktrees");
-    run(
-        at,
-        &[
-            "worktree",
-            "add",
-            &habit.join("one").display().to_string(),
-            "one",
-        ],
-    );
+    run(at, &["worktree", "add", &habit.join("one").display().to_string(), "one"]);
 
     let (code, body) = trees_of(&repo).await;
     assert_eq!(code, StatusCode::OK);
@@ -2446,10 +2336,7 @@ async fn the_place_worktrees_go_is_kept_out_of_the_project_history() {
     assert_eq!(code, StatusCode::OK);
 
     let ignored = fs::read_to_string(repo.path().join(".gitignore")).expect("a .gitignore");
-    assert!(
-        ignored.lines().any(|line| line.trim() == "/worktrees/"),
-        "{ignored}"
-    );
+    assert!(ignored.lines().any(|line| line.trim() == "/worktrees/"), "{ignored}");
     let (_, after) = status_of(&repo).await;
     assert_eq!(
         after["untracked"].as_array().expect("a list").len(),
@@ -2497,10 +2384,7 @@ async fn the_projects_own_checkout_is_not_a_worktree_anyone_can_remove() {
 
     let (code, said) = drop_tree(&repo, &its_own_name, true).await;
     assert_eq!(code, StatusCode::BAD_REQUEST, "{said}");
-    assert!(
-        repo.path().join("kept.txt").exists(),
-        "the project is still there"
-    );
+    assert!(repo.path().join("kept.txt").exists(), "the project is still there");
 }
 
 #[tokio::test]
@@ -2532,29 +2416,16 @@ async fn a_working_directory_names_the_checkout_it_is_in_and_the_branch_it_has_o
     let repo = a_project_with_history();
     let at = repo.path();
     let tree = at.join("worktrees").join("reading-room");
-    run(
-        at,
-        &[
-            "worktree",
-            "add",
-            &tree.display().to_string(),
-            "-b",
-            "reading-room",
-        ],
-    );
+    run(at, &["worktree", "add", &tree.display().to_string(), "-b", "reading-room"]);
     fs::create_dir_all(tree.join("server").join("src")).expect("a folder deep in the worktree");
 
     // The project itself: its own folder, and the branch it was seeded on.
-    let here = git::checkout_at(at)
-        .await
-        .expect("the project is a checkout");
+    let here = git::checkout_at(at).await.expect("the project is a checkout");
     assert_eq!(here.folder, at.file_name().unwrap().to_string_lossy());
     assert_eq!(here.branch.as_deref(), Some("main"));
 
     // A worktree names itself, not the project it hangs off.
-    let there = git::checkout_at(&tree)
-        .await
-        .expect("a worktree is a checkout");
+    let there = git::checkout_at(&tree).await.expect("a worktree is a checkout");
     assert_eq!(there.folder, "reading-room");
     assert_eq!(there.branch.as_deref(), Some("reading-room"));
 
@@ -2575,9 +2446,7 @@ async fn a_detached_checkout_carries_no_branch_and_a_plain_folder_carries_nothin
     let head = run(at, &["rev-parse", "HEAD"]).trim().to_string();
     run(at, &["checkout", "--detach", &head]);
 
-    let loose = git::checkout_at(at)
-        .await
-        .expect("a detached checkout is still a checkout");
+    let loose = git::checkout_at(at).await.expect("a detached checkout is still a checkout");
     assert_eq!(loose.branch, None, "`HEAD` is not a branch name");
     assert_eq!(loose.folder, at.file_name().unwrap().to_string_lossy());
 
@@ -2632,11 +2501,7 @@ async fn every_kind_of_working_tree_change_is_answered_for_with_its_own_hunks() 
     put(repo.path(), "staged-new.txt", "brand new\n");
     run(repo.path(), &["add", "staged-new.txt"]);
     // Untracked: git has never been told about it.
-    put(
-        repo.path(),
-        "never-told.txt",
-        "nobody added me\nsecond line\n",
-    );
+    put(repo.path(), "never-told.txt", "nobody added me\nsecond line\n");
     // Deleted.
     run(repo.path(), &["rm", "-q", "gone.txt"]);
     // Renamed, with the content left alone so git scores it a pure rename.
@@ -2803,10 +2668,7 @@ async fn a_clean_project_answers_with_nothing_changed() {
 
     let (code, body) = diff_of(&repo).await;
     assert_eq!(code, StatusCode::OK, "{body}");
-    assert_eq!(
-        body["files"].as_array().expect("a list"),
-        &Vec::<Value>::new()
-    );
+    assert_eq!(body["files"].as_array().expect("a list"), &Vec::<Value>::new());
 }
 
 /// A file a merge left unresolved is named for what it is, so the panel does
@@ -2884,10 +2746,7 @@ async fn a_move_that_would_lose_unsaved_work_is_refused_in_gits_own_words() {
     assert!(!code.is_success(), "the move must not be made: {refused}");
     let said = refused["error"].as_str().expect("git's own sentence");
     assert!(said.contains("would be overwritten"), "{said}");
-    assert!(
-        said.contains("kept.txt"),
-        "the file at risk is named: {said}"
-    );
+    assert!(said.contains("kept.txt"), "the file at risk is named: {said}");
 
     // And nothing moved: the work is still here, on the branch it was written on.
     assert_eq!(run(at, &["rev-parse", "--abbrev-ref", "HEAD"]), "main");

@@ -12,9 +12,7 @@ use super::beads::forget_all_boards;
 use super::validate_path_security;
 
 /// Whitelisted bd subcommands that are allowed to be executed.
-const ALLOWED_COMMANDS: &[&str] = &[
-    "list", "show", "comment", "comments", "update", "close", "create", "ready", "epic",
-];
+const ALLOWED_COMMANDS: &[&str] = &["list", "show", "comment", "comments", "update", "close", "create", "ready", "epic"];
 
 /// Request body for the bd command endpoint.
 #[derive(Deserialize)]
@@ -74,16 +72,8 @@ pub async fn bd_command(Json(req): Json<BdCommandRequest>) -> impl IntoResponse 
             .into_response();
     }
 
-    if subcommand == "close"
-        || (subcommand == "update"
-            && req.args.iter().any(|arg| {
-                arg == "--status"
-                    || arg == "-s"
-                    || arg.starts_with("--status=")
-                    || arg == "--set-metadata"
-                    || arg.starts_with("--set-metadata=")
-            }))
-    {
+    if subcommand == "close" || (subcommand == "update" && req.args.iter().any(|arg|
+        arg == "--status" || arg == "-s" || arg.starts_with("--status=") || arg == "--set-metadata" || arg.starts_with("--set-metadata="))) {
         return (StatusCode::CONFLICT, Json(serde_json::json!({"error":"Use the board status endpoint so completion and hierarchy can be verified"}))).into_response();
     }
 
@@ -91,11 +81,7 @@ pub async fn bd_command(Json(req): Json<BdCommandRequest>) -> impl IntoResponse 
     let cwd = if let Some(ref dir) = req.cwd {
         let path = Path::new(dir);
         if let Err(e) = validate_path_security(path) {
-            return (
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({ "error": e })),
-            )
-                .into_response();
+            return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": e }))).into_response();
         }
         if !path.exists() {
             return (
@@ -128,8 +114,7 @@ pub async fn bd_command(Json(req): Json<BdCommandRequest>) -> impl IntoResponse 
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(serde_json::json!({ "error": super::BD_MISSING })),
-            )
-                .into_response();
+            ).into_response();
         }
     };
     let gate = super::beads::gate_for(&cwd.to_string_lossy());
@@ -142,10 +127,7 @@ pub async fn bd_command(Json(req): Json<BdCommandRequest>) -> impl IntoResponse 
     // `update`, `close`, `create` and `comment` all write cards, and this route
     // is handed the arguments rather than a board, so which board moved is not
     // knowable here: everything read of every board is dropped.
-    if matches!(
-        subcommand.as_str(),
-        "update" | "close" | "create" | "comment"
-    ) {
+    if matches!(subcommand.as_str(), "update" | "close" | "create" | "comment") {
         forget_all_boards();
     }
 

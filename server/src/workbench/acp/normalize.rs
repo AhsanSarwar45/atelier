@@ -391,11 +391,7 @@ impl AcpNormalizer {
                 Some(json!({"path":path, "line":place["line"]}))
             })
             .collect::<Vec<_>>();
-        if places.is_empty() {
-            Value::Null
-        } else {
-            json!(places)
-        }
+        if places.is_empty() { Value::Null } else { json!(places) }
     }
 
     /// A content block as words, for the four ACP kinds that are words.
@@ -969,10 +965,7 @@ impl AcpNormalizer {
             // A typed terminal state is an ending, even if the prompt RPC
             // never returns. Unknown metadata remains non-authoritative.
             let ended = self.turn_is_open()
-                && matches!(
-                    status["type"].as_str(),
-                    Some("idle" | "systemError" | "notLoaded")
-                );
+                && matches!(status["type"].as_str(), Some("idle" | "systemError" | "notLoaded"));
             if ended {
                 let mut end = raw.clone();
                 end["stopReason"] = json!("end_turn");
@@ -992,8 +985,7 @@ impl AcpNormalizer {
             // working: it stopped the clock, dropped the row out of the working
             // list, and left nothing after it to put either right. So the floor
             // is only taken when there is no turn to contradict it (bw-xfb4).
-            if !ended
-                && (!self.turn_finished || !matches!(state, "thinking" | "waiting_permission"))
+            if !ended && (!self.turn_finished || !matches!(state, "thinking" | "waiting_permission"))
                 && (state != "idle" || !self.turn_is_open())
             {
                 events.push(self.envelope(
@@ -1125,11 +1117,7 @@ impl AcpNormalizer {
     /// a sentence that says less than it did. Where nothing can be read
     /// honestly the call keeps its title, and `acpKind` still gives the row
     /// its mark.
-    fn call_named_by_acp(
-        kind: Option<&str>,
-        input: &Value,
-        locations: &Value,
-    ) -> Option<&'static str> {
+    fn call_named_by_acp(kind: Option<&str>, input: &Value, locations: &Value) -> Option<&'static str> {
         let said = |key: &str| input[key].as_str().is_some_and(|value| !value.is_empty());
         let a_place = said("file_path")
             || said("path")
@@ -1159,11 +1147,9 @@ impl AcpNormalizer {
         if provider_named {
             return;
         }
-        let Some(name) = Self::call_named_by_acp(
-            started["acpKind"].as_str(),
-            &started["input"],
-            &started["locations"],
-        ) else {
+        let Some(name) =
+            Self::call_named_by_acp(started["acpKind"].as_str(), &started["input"], &started["locations"])
+        else {
             return;
         };
         started["name"] = json!(name);
@@ -1426,39 +1412,24 @@ impl AcpNormalizer {
     }
 
     pub fn request_is_active(&self, requests: &super::super::status::Requests) -> bool {
-        requests
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-            .any(|generation| self.owns_prompt(*generation))
+        requests.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|generation| self.owns_prompt(*generation))
     }
 
-    pub fn runtime_facts(
-        &self,
-        connected: bool,
-        pending_answer: bool,
-        requests: &super::super::status::Requests,
-    ) -> super::super::status::RuntimeFacts {
+    pub fn runtime_facts(&self, connected: bool, pending_answer: bool, requests: &super::super::status::Requests) -> super::super::status::RuntimeFacts {
         let turn_open = self.request_is_active(requests);
         super::super::status::RuntimeFacts {
             connected,
             turn_open,
             pending_answer,
             prompted_at: self.prompted_at,
-            activity: self.signal_standing.clone().or_else(|| {
-                self.standing_now().map(|(state, detail, call)| {
-                    json!({
-                        "state":state, "label":Value::Null, "detail":detail, "call":call
-                    })
-                })
-            }),
+            activity: self.signal_standing.clone().or_else(|| self.standing_now().map(|(state, detail, call)| json!({
+                "state":state, "label":Value::Null, "detail":detail, "call":call
+            }))),
             // A future that vanished without publishing completion still
             // cannot leave its old activity behind. The request lifetime wins.
             outcome: if !turn_open && self.turn_is_open() {
                 json!({"state":"idle","label":"Ready"})
-            } else {
-                self.outcome.clone()
-            },
+            } else { self.outcome.clone() },
         }
     }
 
@@ -1584,11 +1555,9 @@ impl AcpNormalizer {
         let exit = &meta["terminal_exit"];
         let told = named(&meta["terminal_info"]) || named(printed) || named(exit);
         let Some(mut run) = content.cloned().or_else(|| {
-            told.then(|| {
-                json!({"type":"terminal","terminalId":id,"command":"","cwd":"",
+            told.then(|| json!({"type":"terminal","terminalId":id,"command":"","cwd":"",
                     "output":"","truncated":false,"exitCode":Value::Null,"signal":Value::Null,
-                    "seconds":0.0,"running":true})
-            })
+                    "seconds":0.0,"running":true}))
         }) else {
             // Nothing about a terminal in this message. What is already known
             // still stands: an update that says only "still going" is not an
@@ -1681,10 +1650,7 @@ impl AcpNormalizer {
         let row = crate::workbench::claude::history::handed_off(answer, id, title)?;
         // The same answer is repeated on every ping about the call, and on the
         // close as well. One handover, one row.
-        if !self
-            .left_running
-            .insert(row["agentId"].as_str()?.to_string())
-        {
+        if !self.left_running.insert(row["agentId"].as_str()?.to_string()) {
             return None;
         }
         Some(row)
@@ -1715,10 +1681,7 @@ impl AcpNormalizer {
         raw: &Value,
         update: &Value,
     ) -> Vec<Event> {
-        let id = update["compactionId"]
-            .as_str()
-            .unwrap_or("_unnamed")
-            .to_string();
+        let id = update["compactionId"].as_str().unwrap_or("_unnamed").to_string();
         if matches!(
             update["status"].as_str(),
             Some("completed" | "failed" | "cancelled")
@@ -1852,7 +1815,13 @@ impl AcpNormalizer {
         if let Some((_, was)) = active {
             if was != id {
                 self.active_messages.remove(&lane);
-                events.extend(self.complete_message(session_id, provider, raw, was, Value::Null));
+                events.extend(self.complete_message(
+                    session_id,
+                    provider,
+                    raw,
+                    was,
+                    Value::Null,
+                ));
             }
         }
         self.active_messages
@@ -1986,14 +1955,9 @@ impl AcpNormalizer {
             events.push(event);
             if let Some((state, label)) = status {
                 self.signal_standing = Some(json!({"state":state, "label":label}));
-                events.push(self.envelope(
-                    session_id,
-                    provider,
-                    raw,
-                    json!({
-                        "type":"session.state", "state":state, "label":label
-                    }),
-                ));
+                events.push(self.envelope(session_id, provider, raw, json!({
+                    "type":"session.state", "state":state, "label":label
+                })));
             }
         }
         events
@@ -2688,15 +2652,10 @@ impl AcpNormalizer {
             self.tool_starts.remove(&id);
             self.tool_pictures.remove(&id);
             self.terminals.remove(&id);
-            events.push(self.envelope(
-                session_id,
-                provider,
-                raw,
-                json!({
-                    "type":"tool.completed", "toolCallId":id, "ok":false,
-                    "output":"The turn ended before this tool returned."
-                }),
-            ));
+            events.push(self.envelope(session_id, provider, raw, json!({
+                "type":"tool.completed", "toolCallId":id, "ok":false,
+                "output":"The turn ended before this tool returned."
+            })));
         }
 
         for (agent, chunks) in std::mem::take(&mut self.deferred_agents) {
@@ -2738,8 +2697,9 @@ impl AcpNormalizer {
             .iter()
             .filter_map(|(agent, (state, reported))| {
                 let said = self.agent_words.get(agent)?;
-                (!said.is_empty() && said != reported)
-                    .then(|| (agent.clone(), state.clone(), said.clone()))
+                (!said.is_empty() && said != reported).then(|| {
+                    (agent.clone(), state.clone(), said.clone())
+                })
             })
             .collect::<Vec<_>>();
         for (agent, state, said) in corrections {
@@ -2802,23 +2762,16 @@ impl AcpNormalizer {
                 json!({"type":"provider.message","signal":signal}),
             ));
         }
-        let (state, label) = events
-            .iter()
+        let (state, label) = events.iter()
             .filter(|event| event.kind == EventKind::ProviderMessage)
             .filter_map(|event| event.fields.get("signal"))
             .filter(|signal| signal["phase"] == "active")
             .max_by_key(|signal| crate::workbench::provider_messages::loudness(signal))
             .map(crate::workbench::provider_messages::standing)
-            .unwrap_or(if failed {
-                ("errored", "Provider failed")
-            } else {
-                ("idle", "Ready")
-            });
+            .unwrap_or(if failed { ("errored", "Provider failed") } else { ("idle", "Ready") });
         self.outcome = json!({"state":state,"label":label});
         events.push(self.envelope(
-            session_id,
-            provider,
-            raw,
+            session_id, provider, raw,
             json!({"type":"session.state","state":state,"label":label}),
         ));
         events
@@ -2851,8 +2804,8 @@ impl AcpNormalizer {
         // "rate_limit" }`. `data` is structure and belongs to whatever reads
         // structure; prose is what this reads.
         let message = error["message"].as_str().unwrap_or_default();
-        if let Some(signal) =
-            Self::acp_error_signal(error).or_else(|| Self::error_prose_signal(provider, message))
+        if let Some(signal) = Self::acp_error_signal(error)
+            .or_else(|| Self::error_prose_signal(provider, message))
         {
             self.record_signal(&signal);
             events.push(self.envelope(
@@ -2913,16 +2866,10 @@ impl AcpNormalizer {
     // A response to an already ended turn may still supply its final usage.
     // Keep that accounting without letting it mutate the current turn's state.
     pub fn prompt_usage(&mut self, session_id: &str, provider: &str, raw: &Value) -> Vec<Event> {
-        let Some((turn, source)) = Self::turn_usage(raw) else {
-            return Vec::new();
-        };
+        let Some((turn, source)) = Self::turn_usage(raw) else { return Vec::new() };
         self.cumulative_usage.add(&turn);
-        vec![self.envelope(
-            session_id,
-            provider,
-            raw,
-            json!({"type":"cost","cost":self.cumulative_usage.value(),"source":source}),
-        )]
+        vec![self.envelope(session_id, provider, raw,
+            json!({"type":"cost","cost":self.cumulative_usage.value(),"source":source}))]
     }
 
     pub fn begin_local_prompt(&mut self) {
@@ -2996,10 +2943,7 @@ mod tests {
         let a = claude.update("local", "claude", &raw);
         let b = codex.update("local", "codex", &raw);
         assert_eq!(kinds(&a), kinds(&b));
-        assert_eq!(
-            kinds(&a),
-            vec!["message.started", "session.state", "text.delta"]
-        );
+        assert_eq!(kinds(&a), vec!["message.started", "session.state", "text.delta"]);
         assert_eq!(serde_json::to_value(&a[2]).unwrap()["text"], "hello");
     }
 
@@ -3086,8 +3030,7 @@ mod tests {
                 "claude",
                 &json!({"sessionId":"remote","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":said}}}),
             );
-            let events =
-                normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
+            let events = normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
             assert_eq!(
                 kinds(&events),
                 vec!["message.completed", "session.state"],
@@ -3189,70 +3132,40 @@ mod tests {
 
     /// Helper: one `session/update` through the normalizer.
     fn sent(normalizer: &mut AcpNormalizer, provider: &str, update: Value) -> Vec<Event> {
-        normalizer.update(
-            "local",
-            provider,
-            &json!({"sessionId":"remote","update":update}),
-        )
+        normalizer.update("local", provider, &json!({"sessionId":"remote","update":update}))
     }
 
     /// Codex says this outright, and every adapter that speaks the draft will.
     #[test]
     fn a_compaction_is_a_standing_and_not_a_word_in_the_conversation() {
         let mut normalizer = AcpNormalizer::default();
-        sent(
-            &mut normalizer,
-            "codex",
-            json!({
-                "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Reading the spec."}
-            }),
-        );
-        let began = sent(
-            &mut normalizer,
-            "codex",
-            json!({
-                "sessionUpdate":"compaction_update","compactionId":"c1","status":"in_progress"
-            }),
-        );
+        sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Reading the spec."}
+        }));
+        let began = sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_update","compactionId":"c1","status":"in_progress"
+        }));
         assert_eq!(kinds(&began), vec!["session.state"]);
-        assert_eq!(
-            serde_json::to_value(&began[0]).unwrap()["state"],
-            "summarising"
-        );
+        assert_eq!(serde_json::to_value(&began[0]).unwrap()["state"], "summarising");
 
         // The summary the fold retains is the fold's product, not the agent
         // answering: it draws nothing and it joins no message.
-        let chunk = sent(
-            &mut normalizer,
-            "codex",
-            json!({
-                "sessionUpdate":"compaction_summary_chunk","compactionId":"c1",
-                "content":{"type":"text","text":"They were working on the board."}
-            }),
-        );
+        let chunk = sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_summary_chunk","compactionId":"c1",
+            "content":{"type":"text","text":"They were working on the board."}
+        }));
         assert!(chunk.is_empty());
 
         // Not one word of any of it reached the conversation.
         assert_eq!(
-            normalizer
-                .message_text
-                .values()
-                .cloned()
-                .collect::<Vec<_>>(),
+            normalizer.message_text.values().cloned().collect::<Vec<_>>(),
             vec!["Reading the spec.".to_string()]
         );
 
-        let done = sent(
-            &mut normalizer,
-            "codex",
-            json!({
-                "sessionUpdate":"compaction_update","compactionId":"c1","status":"completed"
-            }),
-        );
-        assert_eq!(
-            serde_json::to_value(&done[0]).unwrap()["state"],
-            "streaming"
-        );
+        let done = sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_update","compactionId":"c1","status":"completed"
+        }));
+        assert_eq!(serde_json::to_value(&done[0]).unwrap()["state"], "streaming");
     }
 
     /// The kinds are unstable and the status is an open string, so a value
@@ -3261,54 +3174,31 @@ mod tests {
     #[test]
     fn a_compaction_status_nobody_has_seen_yet_is_still_a_compaction() {
         let mut normalizer = AcpNormalizer::default();
-        let began = sent(
-            &mut normalizer,
-            "codex",
-            json!({
-                "sessionUpdate":"compaction_update","compactionId":"c1","status":"_vendor_pausing"
-            }),
-        );
-        assert_eq!(
-            serde_json::to_value(&began[0]).unwrap()["state"],
-            "summarising"
-        );
+        let began = sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_update","compactionId":"c1","status":"_vendor_pausing"
+        }));
+        assert_eq!(serde_json::to_value(&began[0]).unwrap()["state"], "summarising");
     }
 
     /// Two folds open at once: the first to finish must not end the second.
     #[test]
     fn one_compaction_ending_does_not_end_another() {
         let mut normalizer = AcpNormalizer::default();
-        sent(
-            &mut normalizer,
-            "codex",
-            json!({
-                "sessionUpdate":"compaction_update","compactionId":"a","status":"in_progress"
-            }),
-        );
-        sent(
-            &mut normalizer,
-            "codex",
-            json!({
-                "sessionUpdate":"compaction_update","compactionId":"b","status":"in_progress"
-            }),
-        );
-        let ended = sent(
-            &mut normalizer,
-            "codex",
-            json!({
-                "sessionUpdate":"compaction_update","compactionId":"a","status":"completed"
-            }),
-        );
+        sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_update","compactionId":"a","status":"in_progress"
+        }));
+        sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_update","compactionId":"b","status":"in_progress"
+        }));
+        let ended = sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_update","compactionId":"a","status":"completed"
+        }));
         // Still folding, so nothing changed and nothing was published.
         assert!(ended.is_empty());
         assert_eq!(normalizer.standing_now().map(|s| s.0), Some("summarising"));
-        sent(
-            &mut normalizer,
-            "codex",
-            json!({
-                "sessionUpdate":"compaction_update","compactionId":"b","status":"cancelled"
-            }),
-        );
+        sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_update","compactionId":"b","status":"cancelled"
+        }));
         assert_eq!(normalizer.standing_now().map(|s| s.0), None);
     }
 
@@ -3318,41 +3208,25 @@ mod tests {
     #[test]
     fn the_claude_adapters_stand_in_words_are_read_as_the_update_it_meant() {
         let mut normalizer = AcpNormalizer::default();
-        sent(
-            &mut normalizer,
-            "claude",
-            json!({
-                "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Let me follow the existing spec's shape."}
-            }),
-        );
+        sent(&mut normalizer, "claude", json!({
+            "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Let me follow the existing spec's shape."}
+        }));
         for _ in 0..9 {
-            let beat = sent(
-                &mut normalizer,
-                "claude",
-                json!({
-                    "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Compacting..."}
-                }),
-            );
+            let beat = sent(&mut normalizer, "claude", json!({
+                "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Compacting..."}
+            }));
             // Only the first one says anything; the rest are the same fold.
             assert!(beat.len() <= 1);
         }
         assert_eq!(normalizer.standing_now().map(|s| s.0), Some("summarising"));
-        sent(
-            &mut normalizer,
-            "claude",
-            json!({
-                "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"\n\nCompacting completed."}
-            }),
-        );
+        sent(&mut normalizer, "claude", json!({
+            "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"\n\nCompacting completed."}
+        }));
         assert_eq!(normalizer.standing_now().map(|s| s.0), Some("streaming"));
 
         // The sentence is exactly the sentence the agent wrote.
         assert_eq!(
-            normalizer
-                .message_text
-                .values()
-                .cloned()
-                .collect::<Vec<_>>(),
+            normalizer.message_text.values().cloned().collect::<Vec<_>>(),
             vec!["Let me follow the existing spec's shape.".to_string()]
         );
     }
@@ -3360,21 +3234,13 @@ mod tests {
     #[test]
     fn a_fold_that_failed_carries_the_reason_and_still_ends() {
         let mut normalizer = AcpNormalizer::default();
-        sent(
-            &mut normalizer,
-            "claude",
-            json!({
-                "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Compacting..."}
-            }),
-        );
-        sent(
-            &mut normalizer,
-            "claude",
-            json!({
-                "sessionUpdate":"agent_message_chunk",
-                "content":{"type":"text","text":"\n\nCompacting failed: the summary would not fit"}
-            }),
-        );
+        sent(&mut normalizer, "claude", json!({
+            "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Compacting..."}
+        }));
+        sent(&mut normalizer, "claude", json!({
+            "sessionUpdate":"agent_message_chunk",
+            "content":{"type":"text","text":"\n\nCompacting failed: the summary would not fit"}
+        }));
         assert_eq!(normalizer.standing_now().map(|s| s.0), None);
         assert!(normalizer.message_text.is_empty());
 
@@ -3413,13 +3279,9 @@ mod tests {
     #[test]
     fn a_fold_does_not_outlive_the_turn_it_began_in() {
         let mut normalizer = AcpNormalizer::default();
-        sent(
-            &mut normalizer,
-            "codex",
-            json!({
-                "sessionUpdate":"compaction_update","compactionId":"c1","status":"in_progress"
-            }),
-        );
+        sent(&mut normalizer, "codex", json!({
+            "sessionUpdate":"compaction_update","compactionId":"c1","status":"in_progress"
+        }));
         normalizer.finish_turn("local", "codex", &json!({"stopReason":"end_turn"}));
         assert_eq!(normalizer.standing_now().map(|s| s.0), None);
     }
@@ -3465,14 +3327,7 @@ mod tests {
             // used to reconstruct separately. Live and reload must agree.
             let state = serde_json::to_value(&events[1]).unwrap();
             assert_eq!(state["state"], "errored");
-            assert_eq!(
-                state["label"],
-                if kind == "refusal" {
-                    "Declined"
-                } else {
-                    "Stopped short"
-                }
-            );
+            assert_eq!(state["label"], if kind == "refusal" { "Declined" } else { "Stopped short" });
         }
     }
 
@@ -3535,11 +3390,7 @@ mod tests {
         for reason in ["end_turn", "cancelled"] {
             let mut normalizer = AcpNormalizer::default();
             let events = normalizer.finish_turn("local", "claude", &json!({"stopReason":reason}));
-            assert_eq!(
-                kinds(&events),
-                vec!["session.state"],
-                "{reason} said something"
-            );
+            assert_eq!(kinds(&events), vec!["session.state"], "{reason} said something");
         }
     }
 
@@ -3571,12 +3422,7 @@ mod tests {
         assert!(seen.contains(&json!("tool.completed")), "{seen:?}");
         // Announced once, not twice: the second pass is told to leave the row
         // it has already drawn alone.
-        assert_eq!(
-            seen.iter()
-                .filter(|kind| **kind == json!("tool.started"))
-                .count(),
-            1
-        );
+        assert_eq!(seen.iter().filter(|kind| **kind == json!("tool.started")).count(), 1);
 
         let completed = events
             .iter()
@@ -3617,10 +3463,7 @@ mod tests {
         assert_eq!(picture["toolCallId"], "call-1");
         assert_eq!(picture["messageId"], Value::Null);
         assert_eq!(picture["image"]["alt"], "the board");
-        assert!(picture["image"]["dataUrl"]
-            .as_str()
-            .unwrap()
-            .starts_with("data:image/png;base64,"));
+        assert!(picture["image"]["dataUrl"].as_str().unwrap().starts_with("data:image/png;base64,"));
 
         // Content arrives whole on every ping, not as a delta. The same
         // screenshot on the close is the same screenshot, and it is not drawn
@@ -3628,13 +3471,7 @@ mod tests {
         let mut closing = shot.clone();
         closing["update"]["status"] = json!("completed");
         let again = normalizer.update("local", "claude", &closing);
-        assert_eq!(
-            kinds(&again)
-                .iter()
-                .filter(|kind| **kind == json!("image"))
-                .count(),
-            0
-        );
+        assert_eq!(kinds(&again).iter().filter(|kind| **kind == json!("image")).count(), 0);
     }
 
     /// ACP states what a call IS and where it touched. Both were dropped, so
@@ -3643,14 +3480,10 @@ mod tests {
     #[test]
     fn what_acp_said_the_call_was_and_where_it_touched_reaches_the_row() {
         let mut normalizer = AcpNormalizer::default();
-        let opened = normalizer.update(
-            "local",
-            "claude",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"tool_call", "toolCallId":"call-1", "title":"cargo test",
-                "kind":"execute", "rawInput":{"command":"cargo test"}
-            }}),
-        );
+        let opened = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call", "toolCallId":"call-1", "title":"cargo test",
+            "kind":"execute", "rawInput":{"command":"cargo test"}
+        }}));
         let started = opened
             .iter()
             .map(|event| serde_json::to_value(event).unwrap())
@@ -3662,17 +3495,13 @@ mod tests {
         // Where a call touched arrives on a later ping -- an agent does not know
         // which files it read until it has read them -- so that alone is worth
         // re-announcing the row for.
-        let later = normalizer.update(
-            "local",
-            "claude",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"tool_call_update", "toolCallId":"call-1", "status":"in_progress",
-                "locations":[
-                    {"path":"/work/src/lib.rs","line":42},
-                    {"path":"","line":1}
-                ]
-            }}),
-        );
+        let later = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call_update", "toolCallId":"call-1", "status":"in_progress",
+            "locations":[
+                {"path":"/work/src/lib.rs","line":42},
+                {"path":"","line":1}
+            ]
+        }}));
         let refined = later
             .iter()
             .map(|event| serde_json::to_value(event).unwrap())
@@ -3681,27 +3510,14 @@ mod tests {
         // The kind it already had survives, and a place with no readable path
         // is dropped rather than drawn as an empty chip.
         assert_eq!(refined["acpKind"], "execute");
-        assert_eq!(
-            refined["locations"],
-            json!([{"path":"/work/src/lib.rs","line":42}])
-        );
+        assert_eq!(refined["locations"], json!([{"path":"/work/src/lib.rs","line":42}]));
 
         // The same places again are not the row being told anything new.
-        let again = normalizer.update(
-            "local",
-            "claude",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"tool_call_update", "toolCallId":"call-1", "status":"in_progress",
-                "locations":[{"path":"/work/src/lib.rs","line":42}]
-            }}),
-        );
-        assert_eq!(
-            kinds(&again)
-                .iter()
-                .filter(|kind| **kind == json!("tool.started"))
-                .count(),
-            0
-        );
+        let again = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call_update", "toolCallId":"call-1", "status":"in_progress",
+            "locations":[{"path":"/work/src/lib.rs","line":42}]
+        }}));
+        assert_eq!(kinds(&again).iter().filter(|kind| **kind == json!("tool.started")).count(), 0);
     }
 
     fn call_started(events: &[Event]) -> Value {
@@ -3718,19 +3534,12 @@ mod tests {
     #[test]
     fn a_call_an_agent_did_not_name_is_read_as_the_call_it_is() {
         let mut shell = AcpNormalizer::default();
-        let ran = call_started(&shell.update(
-            "local",
-            "codex",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"tool_call", "toolCallId":"exec-1", "kind":"execute",
-                "title":"rg -n needle src", "status":"in_progress",
-                "rawInput":{"command":"rg -n needle src","cwd":"/work"}
-            }}),
-        ));
-        assert_eq!(
-            ran["name"], "Bash",
-            "a shell call the agent called by its command"
-        );
+        let ran = call_started(&shell.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call", "toolCallId":"exec-1", "kind":"execute",
+            "title":"rg -n needle src", "status":"in_progress",
+            "rawInput":{"command":"rg -n needle src","cwd":"/work"}
+        }})));
+        assert_eq!(ran["name"], "Bash", "a shell call the agent called by its command");
         // The agent's own title is untouched: it is what the row falls back to,
         // and it is the whole command rather than the sentence made of it.
         assert_eq!(ran["title"], "rg -n needle src");
@@ -3738,21 +3547,14 @@ mod tests {
 
         // Codex sends a read as `path`; the rules read a file by `file_path`.
         let mut reading = AcpNormalizer::default();
-        let read = call_started(&reading.update(
-            "local",
-            "codex",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"tool_call", "toolCallId":"read-1", "kind":"read",
-                "title":"Read file '/work/src/lib.rs'", "status":"completed",
-                "rawInput":{"path":"/work/src/lib.rs"}
-            }}),
-        ));
+        let read = call_started(&reading.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call", "toolCallId":"read-1", "kind":"read",
+            "title":"Read file '/work/src/lib.rs'", "status":"completed",
+            "rawInput":{"path":"/work/src/lib.rs"}
+        }})));
         assert_eq!(read["name"], "Read");
         assert_eq!(read["input"]["file_path"], "/work/src/lib.rs");
-        assert_eq!(
-            read["input"]["path"], "/work/src/lib.rs",
-            "what the agent sent is kept"
-        );
+        assert_eq!(read["input"]["path"], "/work/src/lib.rs", "what the agent sent is kept");
 
         // A web search with terms in it, and a fetch.
         let mut searching = AcpNormalizer::default();
@@ -3762,14 +3564,10 @@ mod tests {
         }})));
         assert_eq!(searched["name"], "WebSearch");
         let mut fetching = AcpNormalizer::default();
-        let fetched = call_started(&fetching.update(
-            "local",
-            "codex",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"tool_call", "toolCallId":"web-2", "kind":"fetch",
-                "title":"Open page", "rawInput":{"url":"https://example.test/a"}
-            }}),
-        ));
+        let fetched = call_started(&fetching.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call", "toolCallId":"web-2", "kind":"fetch",
+            "title":"Open page", "rawInput":{"url":"https://example.test/a"}
+        }})));
         assert_eq!(fetched["name"], "WebFetch");
     }
 
@@ -3778,43 +3576,28 @@ mod tests {
     #[test]
     fn a_call_is_only_renamed_when_acp_and_the_arguments_both_say_what_it_is() {
         let mut named = AcpNormalizer::default();
-        let claude = call_started(&named.update(
-            "local",
-            "claude",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"tool_call", "toolCallId":"call-1", "kind":"execute",
-                "title":"Bash", "rawInput":{"command":"cargo test"},
-                "_meta":{"claudeCode":{"toolName":"KillShell"}}
-            }}),
-        ));
-        assert_eq!(
-            claude["name"], "KillShell",
-            "the kit's own name for its tool stands"
-        );
+        let claude = call_started(&named.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call", "toolCallId":"call-1", "kind":"execute",
+            "title":"Bash", "rawInput":{"command":"cargo test"},
+            "_meta":{"claudeCode":{"toolName":"KillShell"}}
+        }})));
+        assert_eq!(claude["name"], "KillShell", "the kit's own name for its tool stands");
 
         // Codex announces an edit before it says which file, and its own title
         // -- "Editing files" -- says more than a sentence about no file at all.
         let mut bare = AcpNormalizer::default();
-        let opening = call_started(&bare.update(
-            "local",
-            "codex",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"tool_call", "toolCallId":"edit-1", "kind":"edit",
-                "title":"Editing files", "status":"in_progress"
-            }}),
-        ));
+        let opening = call_started(&bare.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call", "toolCallId":"edit-1", "kind":"edit",
+            "title":"Editing files", "status":"in_progress"
+        }})));
         assert_eq!(opening["name"], "Editing files");
         assert_eq!(opening["input"], json!({}));
 
         // The file arrives on the next ping, and the row is read again then.
-        let refined = call_started(&bare.update(
-            "local",
-            "codex",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"tool_call_update", "toolCallId":"edit-1", "status":"completed",
-                "locations":[{"path":"/work/src/lib.rs","line":12}]
-            }}),
-        ));
+        let refined = call_started(&bare.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call_update", "toolCallId":"edit-1", "status":"completed",
+            "locations":[{"path":"/work/src/lib.rs","line":12}]
+        }})));
         assert_eq!(refined["name"], "Edit");
         assert_eq!(refined["input"]["file_path"], "/work/src/lib.rs");
         // A refinement that says nothing about the name does not wipe the one
@@ -3828,14 +3611,10 @@ mod tests {
     #[test]
     fn a_thought_that_links_to_a_file_is_still_a_thought() {
         let mut normalizer = AcpNormalizer::default();
-        let events = normalizer.update(
-            "local",
-            "claude",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"agent_thought_chunk",
-                "content":{"type":"resource_link","uri":"file:///work/notes.txt","name":"notes.txt"}
-            }}),
-        );
+        let events = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"agent_thought_chunk",
+            "content":{"type":"resource_link","uri":"file:///work/notes.txt","name":"notes.txt"}
+        }}));
         let thought = events
             .iter()
             .map(|event| serde_json::to_value(event).unwrap())
@@ -3853,30 +3632,22 @@ mod tests {
     #[test]
     fn a_linked_file_and_a_file_carried_whole_are_both_readable() {
         let mut normalizer = AcpNormalizer::default();
-        let linked = normalizer.update(
-            "local",
-            "claude",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"user_message_chunk",
-                "content":{"type":"resource_link","name":"notes.md","uri":"file:///work/notes.md"}
-            }}),
-        );
+        let linked = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"user_message_chunk",
+            "content":{"type":"resource_link","name":"notes.md","uri":"file:///work/notes.md"}
+        }}));
         assert_eq!(kinds(&linked), vec!["message.started", "text.delta"]);
         assert_eq!(
             serde_json::to_value(&linked[1]).unwrap()["text"],
             "[notes.md](file:///work/notes.md)"
         );
 
-        let carried = normalizer.update(
-            "local",
-            "claude",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"user_message_chunk",
-                "content":{"type":"resource","resource":{
-                    "uri":"file:///work/one.rs","mimeType":"text/x-rust","text":"fn one() {}"
-                }}
-            }}),
-        );
+        let carried = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"user_message_chunk",
+            "content":{"type":"resource","resource":{
+                "uri":"file:///work/one.rs","mimeType":"text/x-rust","text":"fn one() {}"
+            }}
+        }}));
         let text = serde_json::to_value(&carried[0]).unwrap()["text"]
             .as_str()
             .unwrap()
@@ -3892,32 +3663,21 @@ mod tests {
     #[test]
     fn an_embedded_picture_is_drawn_and_sound_stays_a_note() {
         let mut normalizer = AcpNormalizer::default();
-        let drawn = normalizer.update(
-            "local",
-            "codex",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"agent_message_chunk",
-                "content":{"type":"resource","resource":{
-                    "uri":"file:///work/shot.png","mimeType":"image/png","blob":"aGVsbG8="
-                }}
-            }}),
-        );
-        assert_eq!(
-            kinds(&drawn),
-            vec!["message.started", "session.state", "image"]
-        );
+        let drawn = normalizer.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"agent_message_chunk",
+            "content":{"type":"resource","resource":{
+                "uri":"file:///work/shot.png","mimeType":"image/png","blob":"aGVsbG8="
+            }}
+        }}));
+        assert_eq!(kinds(&drawn), vec!["message.started", "session.state", "image"]);
         let image = serde_json::to_value(&drawn[2]).unwrap();
         assert_eq!(image["image"]["mime"], "image/png");
         assert_eq!(image["image"]["dataUrl"], "data:image/png;base64,aGVsbG8=");
 
-        let heard = normalizer.update(
-            "local",
-            "codex",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"agent_message_chunk",
-                "content":{"type":"audio","mimeType":"audio/wav","data":"aGVsbG8="}
-            }}),
-        );
+        let heard = normalizer.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"agent_message_chunk",
+            "content":{"type":"audio","mimeType":"audio/wav","data":"aGVsbG8="}
+        }}));
         assert_eq!(kinds(&heard), vec!["note"]);
     }
 
@@ -3928,10 +3688,7 @@ mod tests {
             "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done\n```atelier-widget\n{\"type\":\"metrics\",\"items\":[{\"label\":\"Checks\",\"value\":\"1\"}]}\n```"}
         }}));
         // Drawn when the block closed, which is here.
-        assert_eq!(
-            kinds(&said),
-            vec!["message.started", "session.state", "text.delta", "widget"]
-        );
+        assert_eq!(kinds(&said), vec!["message.started", "session.state", "text.delta", "widget"]);
         let widget = serde_json::to_value(&said[3]).unwrap();
         assert_eq!(widget["messageId"], "acp-message-1");
         assert_eq!(widget["widget"]["type"], "metrics");
@@ -3954,16 +3711,9 @@ mod tests {
             }})
         };
 
-        let opened = normalizer.update(
-            "local",
-            "codex",
-            &chunk("Here it is.\n\n```atelier-widget\n{\"type\":\"table\",\"columns\":[\"a\"],"),
-        );
+        let opened = normalizer.update("local", "codex", &chunk("Here it is.\n\n```atelier-widget\n{\"type\":\"table\",\"columns\":[\"a\"],"));
         // Half a block is not a block: nothing to draw yet.
-        assert_eq!(
-            kinds(&opened),
-            vec!["message.started", "session.state", "text.delta"]
-        );
+        assert_eq!(kinds(&opened), vec!["message.started", "session.state", "text.delta"]);
 
         let closed = normalizer.update("local", "codex", &chunk("\"rows\":[[\"1\"]]}\n```\n"));
         assert_eq!(kinds(&closed), vec!["text.delta", "widget"]);
@@ -4001,12 +3751,7 @@ mod tests {
         }}));
         assert_eq!(
             kinds(&answer),
-            vec![
-                "message.completed",
-                "message.started",
-                "session.state",
-                "text.delta"
-            ]
+            vec!["message.completed", "message.started", "session.state", "text.delta"]
         );
         assert_eq!(
             serde_json::to_value(&answer[0]).unwrap()["messageId"],
@@ -4163,10 +3908,7 @@ mod tests {
             .find(|event| event["type"] == "session.pinned")
             .expect("the agent's clock was dropped for want of a title beside it");
         assert_eq!(pinned["updatedAt"], "2026-09-02T05:01:00.100Z");
-        assert!(
-            pinned["title"].is_null(),
-            "a chat with no new name was renamed"
-        );
+        assert!(pinned["title"].is_null(), "a chat with no new name was renamed");
     }
 
     #[test]
@@ -4189,25 +3931,15 @@ mod tests {
         // At rest both still say Ready: a chat with nothing in flight is Ready,
         // and this takes nothing away from that.
         let mut resting = AcpNormalizer::default();
-        assert_eq!(
-            states(&resting.update("local", "codex", &filing)),
-            vec!["idle"]
-        );
-        assert_eq!(
-            states(&resting.update("local", "codex", &unknown)),
-            vec!["idle"]
-        );
+        assert_eq!(states(&resting.update("local", "codex", &filing)), vec!["idle"]);
+        assert_eq!(states(&resting.update("local", "codex", &unknown)), vec!["idle"]);
 
         // Mid-turn neither of them speaks.
         let mut working = AcpNormalizer::default();
-        working.update(
-            "local",
-            "codex",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"tool_call","toolCallId":"call-1","title":"Run the tests",
-                "kind":"execute","rawInput":{"command":"cargo test --lib"}
-            }}),
-        );
+        working.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call","toolCallId":"call-1","title":"Run the tests",
+            "kind":"execute","rawInput":{"command":"cargo test --lib"}
+        }}));
         assert!(working.turn_is_open());
         assert_eq!(
             states(&working.update("local", "codex", &filing)),
@@ -4306,10 +4038,7 @@ mod tests {
         let user = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"hello"}}}));
         assert!(user.is_empty());
         let agent = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}}}));
-        assert_eq!(
-            kinds(&agent),
-            vec!["message.started", "session.state", "text.delta"]
-        );
+        assert_eq!(kinds(&agent), vec!["message.started", "session.state", "text.delta"]);
         let delayed = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"hello"}}}));
         assert!(delayed.is_empty());
         normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
@@ -4365,10 +4094,7 @@ mod tests {
             }),
         );
         // And the call that stood for it in the conversation ends with it.
-        assert_eq!(
-            kinds(&finished),
-            vec!["cost", "agent.finished", "tool.completed"]
-        );
+        assert_eq!(kinds(&finished), vec!["cost", "agent.finished", "tool.completed"]);
         let cost = serde_json::to_value(&finished[0]).unwrap();
         assert_eq!(cost["cost"]["total"], 900);
         let ended = serde_json::to_value(&finished[2]).unwrap();
@@ -4596,10 +4322,7 @@ mod tests {
                 },"_meta":{"goose":{"toolCall":{"toolName":"delegate"}}}}
             }),
         );
-        assert_eq!(
-            kinds(&started),
-            vec!["tool.started", "session.state", "agent.started"]
-        );
+        assert_eq!(kinds(&started), vec!["tool.started", "session.state", "agent.started"]);
         let agent = serde_json::to_value(&started[2]).unwrap();
         assert_eq!(agent["what"], "Review the patch");
         assert_eq!(agent["agentType"], "reviewer");
@@ -4740,16 +4463,12 @@ mod tests {
     #[test]
     fn a_command_told_in_pieces_is_one_terminal_by_the_end() {
         let mut normalizer = AcpNormalizer::default();
-        normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"remote","update":{"sessionUpdate":"tool_call","toolCallId":"call-1",
-                "title":"Terminal","status":"pending","kind":"execute","rawInput":{},
-                "content":[{"type":"terminal","terminalId":"call-1"}],
-                "_meta":{"claudeCode":{"toolName":"Bash"},"terminal_info":{"terminal_id":"call-1"}}}
-            }),
-        );
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"remote","update":{"sessionUpdate":"tool_call","toolCallId":"call-1",
+            "title":"Terminal","status":"pending","kind":"execute","rawInput":{},
+            "content":[{"type":"terminal","terminalId":"call-1"}],
+            "_meta":{"claudeCode":{"toolName":"Bash"},"terminal_info":{"terminal_id":"call-1"}}}
+        }));
         normalizer.update("local", "claude", &json!({
             "sessionId":"remote","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1",
             "title":"printf 'FAIL\\n'; exit 3","kind":"execute",
@@ -4798,15 +4517,11 @@ mod tests {
     #[test]
     fn work_the_chat_left_running_gets_a_row_the_call_alone_would_not() {
         let mut normalizer = AcpNormalizer::default();
-        normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"remote","update":{"sessionUpdate":"tool_call","toolCallId":"call-bash",
-                "title":"python3 -c 'import time; time.sleep(240)'","status":"in_progress",
-                "_meta":{"claudeCode":{"toolName":"Bash"}}}
-            }),
-        );
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"remote","update":{"sessionUpdate":"tool_call","toolCallId":"call-bash",
+            "title":"python3 -c 'import time; time.sleep(240)'","status":"in_progress",
+            "_meta":{"claudeCode":{"toolName":"Bash"}}}
+        }));
         let handed = normalizer.update("local", "claude", &json!({
             "sessionId":"remote","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-bash",
             "status":"in_progress","_meta":{"claudeCode":{"toolName":"Bash","toolResponse":{
@@ -4843,10 +4558,7 @@ mod tests {
         assert_eq!(run["kind"], "run");
         // Its own summary, not the script: what the run is for is the only part
         // of it a reader can act on.
-        assert_eq!(
-            run["what"],
-            "Two agents each reply with the single word ONE"
-        );
+        assert_eq!(run["what"], "Two agents each reply with the single word ONE");
     }
 
     /// A helper sent off asynchronously is launched the same way, and it
@@ -4855,15 +4567,11 @@ mod tests {
     #[test]
     fn a_helper_launched_asynchronously_keeps_the_one_row_it_has() {
         let mut normalizer = AcpNormalizer::default();
-        normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"remote","update":{"sessionUpdate":"tool_call","toolCallId":"call-task",
-                "title":"Task","status":"in_progress","rawInput":{"description":"Audit the tests"},
-                "_meta":{"claudeCode":{"toolName":"Task"}}}
-            }),
-        );
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"remote","update":{"sessionUpdate":"tool_call","toolCallId":"call-task",
+            "title":"Task","status":"in_progress","rawInput":{"description":"Audit the tests"},
+            "_meta":{"claudeCode":{"toolName":"Task"}}}
+        }));
         let launched = normalizer.update("local", "claude", &json!({
             "sessionId":"remote","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-task",
             "status":"in_progress","_meta":{"claudeCode":{"toolName":"Task","toolResponse":{
@@ -4963,10 +4671,7 @@ mod tests {
                 "messageId":"parent-message","content":{"type":"text","text":"PARENT DONE"}}
             }),
         );
-        assert_eq!(
-            kinds(&parent),
-            vec!["message.started", "session.state", "text.delta"]
-        );
+        assert_eq!(kinds(&parent), vec!["message.started", "session.state", "text.delta"]);
         let settled = normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
         let finished = settled
             .iter()
@@ -5012,19 +4717,12 @@ mod tests {
 
         assert_eq!(normalizer.agent_asking("task-call"), "agent-1");
 
-        let read = normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"tool_call",
-                "toolCallId":"call-read","title":"Read wheels.md","kind":"read",
-                "_meta":{"claudeCode":{"toolName":"Read","parentToolUseId":"task-call"}}}
-            }),
-        );
-        assert_eq!(
-            serde_json::to_value(&read[0]).unwrap()["parentToolCallId"],
-            "agent-1"
-        );
+        let read = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"tool_call",
+            "toolCallId":"call-read","title":"Read wheels.md","kind":"read",
+            "_meta":{"claudeCode":{"toolName":"Read","parentToolUseId":"task-call"}}}
+        }));
+        assert_eq!(serde_json::to_value(&read[0]).unwrap()["parentToolCallId"], "agent-1");
     }
 
     /**
@@ -5045,52 +4743,32 @@ mod tests {
             "subagentSessionId":"agent-1","name":"Read the docs","task":"Read wheels.md","capabilities":{}}
         }));
 
-        let read = normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"tool_call",
-                "toolCallId":"call-read","title":"Read wheels.md","kind":"read",
-                "_meta":{"claudeCode":{"toolName":"Read","parentToolUseId":"task-call"}}}
-            }),
-        );
+        let read = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"tool_call",
+            "toolCallId":"call-read","title":"Read wheels.md","kind":"read",
+            "_meta":{"claudeCode":{"toolName":"Read","parentToolUseId":"task-call"}}}
+        }));
         let started = serde_json::to_value(&read[0]).unwrap();
-        assert_eq!(
-            started["parentToolCallId"], "agent-1",
-            "the helper's call belongs to the helper"
-        );
+        assert_eq!(started["parentToolCallId"], "agent-1", "the helper's call belongs to the helper");
 
-        let said = normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
-                "messageId":"m-1","content":{"type":"text","text":"They are round."},
-                "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
-            }),
-        );
+        let said = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-1","content":{"type":"text","text":"They are round."},
+            "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
+        }));
         let message = serde_json::to_value(&said[0]).unwrap();
         assert_eq!(message["parentToolCallId"], "agent-1");
 
         // Finished, the card carries what it reported: this update says nothing
         // about a result, and those are the only words it ever sent.
-        let finished = normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"subagent_state_update",
-                "subagentSessionId":"agent-1","state":"completed"}
-            }),
-        );
-        let ended = finished
-            .iter()
-            .map(|event| serde_json::to_value(event).unwrap())
+        let finished = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"subagent_state_update",
+            "subagentSessionId":"agent-1","state":"completed"}
+        }));
+        let ended = finished.iter().map(|event| serde_json::to_value(event).unwrap())
             .find(|event| event["type"] == "tool.completed");
-        let finished = finished
-            .iter()
-            .map(|event| serde_json::to_value(event).unwrap())
-            .find(|event| event["type"] == "agent.finished")
-            .expect("nothing ended the helper");
+        let finished = finished.iter().map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "agent.finished").expect("nothing ended the helper");
         assert_eq!(finished["agentId"], "agent-1");
         assert_eq!(finished["result"], "They are round.");
         // And the row that stood for it in the conversation stops spinning.
@@ -5103,22 +4781,12 @@ mod tests {
         assert_eq!(ended["output"], "They are round.");
 
         // And the root's own words are the root's, still.
-        let root = normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
-                "messageId":"m-2","content":{"type":"text","text":"Done."}}
-            }),
-        );
-        assert_eq!(
-            kinds(&root),
-            vec!["message.started", "session.state", "text.delta"]
-        );
-        assert_eq!(
-            serde_json::to_value(&root[0]).unwrap()["parentToolCallId"],
-            Value::Null
-        );
+        let root = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-2","content":{"type":"text","text":"Done."}}
+        }));
+        assert_eq!(kinds(&root), vec!["message.started", "session.state", "text.delta"]);
+        assert_eq!(serde_json::to_value(&root[0]).unwrap()["parentToolCallId"], Value::Null);
     }
 
     /**
@@ -5169,15 +4837,11 @@ mod tests {
 
         // A command in flight is named by the command, not by the tool. The
         // reader is waiting on the build, and "Bash" tells them nothing.
-        let ran = normalizer.update(
-            "local",
-            "claude",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"tool_call","toolCallId":"call-1","title":"Run the tests",
-                "kind":"execute","rawInput":{"command":"cargo test --lib"},
-                "_meta":{"claudeCode":{"toolName":"Bash"}}
-            }}),
-        );
+        let ran = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call","toolCallId":"call-1","title":"Run the tests",
+            "kind":"execute","rawInput":{"command":"cargo test --lib"},
+            "_meta":{"claudeCode":{"toolName":"Bash"}}
+        }}));
         assert_eq!(
             standing(&ran),
             vec![("running_tool".into(), "cargo test --lib".into())],
@@ -5186,25 +4850,17 @@ mod tests {
 
         // Said again is not news: the same call pinging keeps its own row
         // current and owes the chat's standing nothing.
-        let again = normalizer.update(
-            "local",
-            "claude",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"in_progress"
-            }}),
-        );
+        let again = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"in_progress"
+        }}));
         assert_eq!(standing(&again), Vec::new());
 
         // The call is over, and the words that follow it are what the chat is
         // doing now — never the command it has finished running.
-        let done = normalizer.update(
-            "local",
-            "claude",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed",
-                "content":[{"type":"content","content":{"type":"text","text":"ok"}}]
-            }}),
-        );
+        let done = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed",
+            "content":[{"type":"content","content":{"type":"text","text":"ok"}}]
+        }}));
         let answered = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
             "sessionUpdate":"agent_message_chunk","messageId":"m-1","content":{"type":"text","text":"They pass."}
         }}));
@@ -5240,29 +4896,18 @@ mod tests {
         normalizer.update("local", "codex", &json!({"sessionId":"remote","update":{
             "sessionUpdate":"tool_call","toolCallId":"first","title":"Run first","kind":"execute"
         }}));
-        let ended = normalizer.update(
-            "local",
-            "codex",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"session_info_update","title":"Saved title",
-                "_meta":{"codex":{"threadStatus":{"type":"idle","activeFlags":[]}}}
-            }}),
-        );
+        let ended = normalizer.update("local", "codex", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"session_info_update","title":"Saved title",
+            "_meta":{"codex":{"threadStatus":{"type":"idle","activeFlags":[]}}}
+        }}));
         assert!(!normalizer.owns_prompt(first));
-        assert!(ended
-            .iter()
-            .any(|event| event.kind == EventKind::SessionState && event.fields["state"] == "idle"));
-        assert!(ended
-            .iter()
-            .any(|event| event.kind == EventKind::SessionPinned
-                && event.fields["title"] == "Saved title"));
+        assert!(ended.iter().any(|event| event.kind == EventKind::SessionState && event.fields["state"] == "idle"));
+        assert!(ended.iter().any(|event| event.kind == EventKind::SessionPinned && event.fields["title"] == "Saved title"));
         let second = normalizer.begin_prompt();
         assert!(!normalizer.owns_prompt(first));
         assert!(normalizer.owns_prompt(second));
         let usage = normalizer.prompt_usage("local", "codex", &json!({"stopReason":"end_turn"}));
-        assert!(usage
-            .iter()
-            .all(|event| event.kind != EventKind::SessionState));
+        assert!(usage.iter().all(|event| event.kind != EventKind::SessionState));
         assert!(normalizer.owns_prompt(second));
     }
 
@@ -5280,32 +4925,20 @@ mod tests {
                 let late = normalizer.update("local", provider, &json!({"sessionId":"remote","update":{
                     "sessionUpdate":"session_info_update","_meta":{"codex":{"threadStatus":{"type":"active","activeFlags":[]}}}
                 }}));
-                assert!(late
-                    .iter()
-                    .all(|event| event.kind != EventKind::SessionState));
+                assert!(late.iter().all(|event| event.kind != EventKind::SessionState));
                 let late_call = normalizer.update("local", provider, &json!({"sessionId":"remote","update":{
                     "sessionUpdate":"tool_call_update","toolCallId":"old-call", "status":"in_progress",
                     "title":"Claim the card", "rawInput":{"command":"bd update bw-105s.1 --claim"}
                 }}));
-                assert!(late_call
-                    .iter()
-                    .all(|event| event.kind != EventKind::SessionState));
+                assert!(late_call.iter().all(|event| event.kind != EventKind::SessionState));
                 normalizer.begin_local_prompt();
                 let next = normalizer.update("local", provider, &json!({"sessionId":"remote","update":{
                     "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"The next answer"}
                 }}));
-                let state = next
-                    .iter()
-                    .find(|event| event.kind == EventKind::SessionState)
+                let state = next.iter().find(|event| event.kind == EventKind::SessionState)
                     .expect("the next answer publishes its own activity");
-                assert_eq!(
-                    state.fields["state"], "streaming",
-                    "{provider} after {reason}"
-                );
-                assert!(
-                    state.fields["call"].is_null(),
-                    "an old command survived the turn ending"
-                );
+                assert_eq!(state.fields["state"], "streaming", "{provider} after {reason}");
+                assert!(state.fields["call"].is_null(), "an old command survived the turn ending");
             }
         }
     }
@@ -5313,15 +4946,11 @@ mod tests {
     #[test]
     fn a_running_call_is_published_as_what_it_is_and_not_only_as_what_it_says() {
         let mut normalizer = AcpNormalizer::default();
-        let ran = normalizer.update(
-            "local",
-            "claude",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"tool_call","toolCallId":"call-1","title":"Run some Python",
-                "kind":"execute","rawInput":{"command":"python3 -c 'import time; time.sleep(45)'"},
-                "_meta":{"claudeCode":{"toolName":"Bash"}}
-            }}),
-        );
+        let ran = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call","toolCallId":"call-1","title":"Run some Python",
+            "kind":"execute","rawInput":{"command":"python3 -c 'import time; time.sleep(45)'"},
+            "_meta":{"claudeCode":{"toolName":"Bash"}}
+        }}));
         let standing = ran
             .iter()
             .map(|event| serde_json::to_value(event).unwrap())
@@ -5334,32 +4963,22 @@ mod tests {
         );
         // And the command beside it either way: a screen that cannot place this
         // tool still has something true to draw (`chat-state.ts`, saidOfCall).
-        assert_eq!(
-            standing["detail"],
-            json!("python3 -c 'import time; time.sleep(45)'")
-        );
+        assert_eq!(standing["detail"], json!("python3 -c 'import time; time.sleep(45)'"));
 
         // An argument is not a page. This ends up on one line of a status, and
         // a file being written arrives whole.
-        let wrote = normalizer.update(
-            "local",
-            "claude",
-            &json!({"sessionId":"remote","update":{
-                "sessionUpdate":"tool_call","toolCallId":"call-2","title":"Write a file",
-                "kind":"edit","rawInput":{"file_path":"/w/a.rs","content":"x".repeat(9000)},
-                "_meta":{"claudeCode":{"toolName":"Write"}}
-            }}),
-        );
+        let wrote = normalizer.update("local", "claude", &json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call","toolCallId":"call-2","title":"Write a file",
+            "kind":"edit","rawInput":{"file_path":"/w/a.rs","content":"x".repeat(9000)},
+            "_meta":{"claudeCode":{"toolName":"Write"}}
+        }}));
         let standing = wrote
             .iter()
             .map(|event| serde_json::to_value(event).unwrap())
             .find(|event| event["type"] == "session.state")
             .expect("a second call in flight is a new standing");
         let content = standing["call"]["input"]["content"].as_str().unwrap();
-        assert!(
-            content.chars().count() <= 201,
-            "a whole file went to a status line"
-        );
+        assert!(content.chars().count() <= 201, "a whole file went to a status line");
         assert_eq!(standing["call"]["input"]["file_path"], json!("/w/a.rs"));
     }
 
@@ -5372,29 +4991,21 @@ mod tests {
         }));
 
         // The command it just started.
-        let ran = normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"tool_call",
-                "toolCallId":"call-sleep","title":"python3 -c 'time.sleep(5)'","kind":"execute",
-                "_meta":{"claudeCode":{"toolName":"Bash","parentToolUseId":"task-call"}}}
-            }),
-        );
+        let ran = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"tool_call",
+            "toolCallId":"call-sleep","title":"python3 -c 'time.sleep(5)'","kind":"execute",
+            "_meta":{"claudeCode":{"toolName":"Bash","parentToolUseId":"task-call"}}}
+        }));
         let doing = serde_json::to_value(
-            ran.iter()
-                .map(|event| serde_json::to_value(event).unwrap())
+            ran.iter().map(|event| serde_json::to_value(event).unwrap())
                 .find(|event| event["type"] == "tool.progress")
                 .expect("the sending row was never told what its helper started"),
-        )
-        .unwrap();
+        ).unwrap();
         assert_eq!(doing["toolCallId"], "agent-1");
         assert_eq!(doing["summary"], "python3 -c 'time.sleep(5)'");
         // No clock of its own, and the reader must not read the zero as one.
         assert_eq!(doing["seconds"], 0);
-        let pane = ran
-            .iter()
-            .map(|event| serde_json::to_value(event).unwrap())
+        let pane = ran.iter().map(|event| serde_json::to_value(event).unwrap())
             .find(|event| event["type"] == "agent.progress")
             .expect("the panel beside it was told nothing");
         assert_eq!(pane["doing"], "python3 -c 'time.sleep(5)'");
@@ -5408,43 +5019,29 @@ mod tests {
             "messageId":"m-1","content":{"type":"text","text":"That wait is done.\nStarting the longer one."},
             "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
         }));
-        let doing = said
-            .iter()
-            .map(|event| serde_json::to_value(event).unwrap())
+        let doing = said.iter().map(|event| serde_json::to_value(event).unwrap())
             .find(|event| event["type"] == "tool.progress")
             .expect("the sending row never heard the helper speak");
-        assert_eq!(
-            doing["summary"], "Starting the longer one.",
-            "its last line, not its first"
-        );
+        assert_eq!(doing["summary"], "Starting the longer one.", "its last line, not its first");
 
         // Said again is not news: a message is re-read on every delta, and the
         // row must not be redrawn to say what it already says.
-        let again = normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
-                "messageId":"m-1","content":{"type":"text","text":""},
-                "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
-            }),
-        );
+        let again = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-1","content":{"type":"text","text":""},
+            "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
+        }));
         assert!(
             !kinds(&again).iter().any(|kind| kind == "tool.progress"),
-            "the row was told the same thing twice: {:?}",
-            kinds(&again),
+            "the row was told the same thing twice: {:?}", kinds(&again),
         );
 
         // And a call of the chat's own says nothing about any helper.
-        let mine = normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"tool_call",
-                "toolCallId":"call-mine","title":"Read notes.md","kind":"read",
-                "_meta":{"claudeCode":{"toolName":"Read"}}}
-            }),
-        );
+        let mine = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"tool_call",
+            "toolCallId":"call-mine","title":"Read notes.md","kind":"read",
+            "_meta":{"claudeCode":{"toolName":"Read"}}}
+        }));
         assert_eq!(kinds(&mine), vec!["tool.started", "session.state"]);
     }
 
@@ -5461,50 +5058,31 @@ mod tests {
             "sessionId":"root", "update":{"sessionUpdate":"subagent_spawned",
             "subagentSessionId":"agent-1","name":"Read the docs","task":"Read wheels.md","capabilities":{}}
         }));
-        normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
-                "messageId":"m-1","content":{"type":"text","text":"I'll read both files."},
-                "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
-            }),
-        );
-        let early = normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"subagent_state_update",
-                "subagentSessionId":"agent-1","state":"completed"}
-            }),
-        );
-        let early = early
-            .iter()
-            .map(|event| serde_json::to_value(event).unwrap())
-            .find(|event| event["type"] == "agent.finished")
-            .expect("nothing ended the helper");
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-1","content":{"type":"text","text":"I'll read both files."},
+            "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
+        }));
+        let early = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"subagent_state_update",
+            "subagentSessionId":"agent-1","state":"completed"}
+        }));
+        let early = early.iter().map(|event| serde_json::to_value(event).unwrap())
+            .find(|event| event["type"] == "agent.finished").expect("nothing ended the helper");
         assert_eq!(early["result"], "I'll read both files.");
 
         // The chat's own answer, in between: measured on a real chat, the
         // manager answers first and the helper's report lands after it.
-        normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
-                "messageId":"m-root","content":{"type":"text","text":"All four steps are done."}}
-            }),
-        );
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-root","content":{"type":"text","text":"All four steps are done."}}
+        }));
         // Its actual report, after its own ending.
-        normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
-                "messageId":"m-2","content":{"type":"text","text":"They are round and hot."},
-                "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
-            }),
-        );
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-2","content":{"type":"text","text":"They are round and hot."},
+            "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
+        }));
         let settled = normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
         let corrected = settled
             .iter()
@@ -5513,10 +5091,7 @@ mod tests {
             .expect("the turn ends by saying what the helper reported");
         assert_eq!(corrected["agentId"], "agent-1");
         assert_eq!(corrected["state"], "done");
-        assert_eq!(
-            corrected["result"],
-            "I'll read both files.\n\nThey are round and hot."
-        );
+        assert_eq!(corrected["result"], "I'll read both files.\n\nThey are round and hot.");
 
         // And once said, it is not said again on the next turn.
         let quiet = normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
@@ -5533,22 +5108,14 @@ mod tests {
     #[test]
     fn a_message_replaced_in_its_own_place_is_finished_rather_than_left_open() {
         let mut normalizer = AcpNormalizer::default();
-        normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
-                "messageId":"m-1","content":{"type":"text","text":"First."}}
-            }),
-        );
-        let replaced = normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
-                "messageId":"m-2","content":{"type":"text","text":"Second."}}
-            }),
-        );
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-1","content":{"type":"text","text":"First."}}
+        }));
+        let replaced = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-2","content":{"type":"text","text":"Second."}}
+        }));
         let replaced = replaced
             .iter()
             .map(|event| serde_json::to_value(event).unwrap())
@@ -5596,39 +5163,27 @@ mod tests {
             "sessionId":"root", "update":{"sessionUpdate":"subagent_spawned",
             "subagentSessionId":"agent-1","name":"Read the docs","task":"Read wheels.md","capabilities":{}}
         }));
-        normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
-                "messageId":"m-1","content":{"type":"text","text":"I'll read both files."},
-                "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
-            }),
-        );
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-1","content":{"type":"text","text":"I'll read both files."},
+            "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
+        }));
         // The chat answering says nothing about the helper, which is still out.
-        let spoke = normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
-                "messageId":"m-root","content":{"type":"text","text":"The helper is still going."}}
-            }),
-        );
+        let spoke = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-root","content":{"type":"text","text":"The helper is still going."}}
+        }));
         assert!(
             !kinds(&spoke).iter().any(|kind| *kind == "agent.finished"),
             "the chat speaking is not an ending: {:?}",
             kinds(&spoke)
         );
 
-        normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
-                "messageId":"m-2","content":{"type":"text","text":"They are round and hot."},
-                "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
-            }),
-        );
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-2","content":{"type":"text","text":"They are round and hot."},
+            "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
+        }));
         let settled = normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
         let endings = settled
             .iter()
@@ -5638,10 +5193,7 @@ mod tests {
         assert_eq!(endings.len(), 1, "ended once, not once per guess");
         let corrected = &endings[0];
         assert_eq!(corrected["agentId"], "agent-1");
-        assert_eq!(
-            corrected["result"],
-            "I'll read both files.\n\nThey are round and hot."
-        );
+        assert_eq!(corrected["result"], "I'll read both files.\n\nThey are round and hot.");
 
         let quiet = normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
         assert!(!kinds(&quiet).iter().any(|kind| *kind == "agent.finished"));
@@ -5650,15 +5202,11 @@ mod tests {
         // the next one is added to what it already said, not put in place of
         // it: reported as the tail alone, the card would lose the report it
         // was already showing.
-        normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
-                "messageId":"m-3","content":{"type":"text","text":"And both are two lines long."},
-                "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
-            }),
-        );
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-3","content":{"type":"text","text":"And both are two lines long."},
+            "_meta":{"claudeCode":{"parentToolUseId":"task-call"}}}
+        }));
         let later = normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
         let later = later
             .iter()
@@ -5681,68 +5229,39 @@ mod tests {
     fn two_helpers_at_once_are_not_guessed_between() {
         let mut normalizer = AcpNormalizer::default();
         for agent in ["agent-1", "agent-2"] {
-            normalizer.update(
-                "local",
-                "claude",
-                &json!({
-                    "sessionId":"root", "update":{"sessionUpdate":"subagent_spawned",
-                    "subagentSessionId":agent,"name":"Helper","task":"Work","capabilities":{}}
-                }),
-            );
+            normalizer.update("local", "claude", &json!({
+                "sessionId":"root", "update":{"sessionUpdate":"subagent_spawned",
+                "subagentSessionId":agent,"name":"Helper","task":"Work","capabilities":{}}
+            }));
         }
-        let said = normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
-                "messageId":"m-1","content":{"type":"text","text":"Working"},
-                "_meta":{"claudeCode":{"parentToolUseId":"call-b"}}}
-            }),
-        );
-        assert_eq!(
-            serde_json::to_value(&said[0]).unwrap()["parentToolCallId"],
-            "call-b"
-        );
+        let said = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-1","content":{"type":"text","text":"Working"},
+            "_meta":{"claudeCode":{"parentToolUseId":"call-b"}}}
+        }));
+        assert_eq!(serde_json::to_value(&said[0]).unwrap()["parentToolCallId"], "call-b");
 
         // Said outright, the join is taken and kept.
-        normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"tool_call_update",
-                "toolCallId":"call-b","status":"in_progress",
-                "_meta":{"claudeCode":{"toolName":"Agent","toolResponse":{"agentId":"agent-2"}}}}
-            }),
-        );
-        let after = normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
-                "messageId":"m-2","content":{"type":"text","text":"Still working"},
-                "_meta":{"claudeCode":{"parentToolUseId":"call-b"}}}
-            }),
-        );
-        assert_eq!(
-            serde_json::to_value(&after[0]).unwrap()["parentToolCallId"],
-            "agent-2"
-        );
+        normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"tool_call_update",
+            "toolCallId":"call-b","status":"in_progress",
+            "_meta":{"claudeCode":{"toolName":"Agent","toolResponse":{"agentId":"agent-2"}}}}
+        }));
+        let after = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-2","content":{"type":"text","text":"Still working"},
+            "_meta":{"claudeCode":{"parentToolUseId":"call-b"}}}
+        }));
+        assert_eq!(serde_json::to_value(&after[0]).unwrap()["parentToolCallId"], "agent-2");
 
         // And with one of the two now claimed, the other's call is no longer
         // ambiguous.
-        let other = normalizer.update(
-            "local",
-            "claude",
-            &json!({
-                "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
-                "messageId":"m-3","content":{"type":"text","text":"Me too"},
-                "_meta":{"claudeCode":{"parentToolUseId":"call-a"}}}
-            }),
-        );
-        assert_eq!(
-            serde_json::to_value(&other[0]).unwrap()["parentToolCallId"],
-            "agent-1"
-        );
+        let other = normalizer.update("local", "claude", &json!({
+            "sessionId":"root", "update":{"sessionUpdate":"agent_message_chunk",
+            "messageId":"m-3","content":{"type":"text","text":"Me too"},
+            "_meta":{"claudeCode":{"parentToolUseId":"call-a"}}}
+        }));
+        assert_eq!(serde_json::to_value(&other[0]).unwrap()["parentToolCallId"], "agent-1");
     }
 
     #[test]

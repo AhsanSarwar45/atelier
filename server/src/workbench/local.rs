@@ -137,7 +137,10 @@ async fn get_json_within(runtime: Runtime, url: String, patience: Duration) -> O
         .ok()
 }
 
-fn unique_models(runtime: Runtime, values: impl IntoIterator<Item = Candidate>) -> Vec<LocalModel> {
+fn unique_models(
+    runtime: Runtime,
+    values: impl IntoIterator<Item = Candidate>,
+) -> Vec<LocalModel> {
     let mut values = values
         .into_iter()
         .filter(|candidate| !candidate.value.trim().is_empty())
@@ -342,10 +345,7 @@ pub async fn catalog() -> Vec<LocalModel> {
 /// they are the reader's own loopback ports, and knowing which one was asked
 /// is most of knowing what to start. The API key is never part of it
 /// (bw-u6cl.9).
-fn unavailable_reason(
-    models: &[LocalModel],
-    adapter: Option<&std::path::PathBuf>,
-) -> Option<String> {
+fn unavailable_reason(models: &[LocalModel], adapter: Option<&std::path::PathBuf>) -> Option<String> {
     if adapter.is_none() {
         return Some("the bundled local ACP adapter was not found".into());
     }

@@ -396,10 +396,7 @@ mod tests {
     fn this_machine() -> crate::remote::OnTheTailnet {
         crate::remote::OnTheTailnet {
             name: Some("nobara.tail58b026.ts.net".to_string()),
-            addresses: vec![
-                "100.70.11.94".to_string(),
-                "fd7a:115c:a1e0::1701:b5e".to_string(),
-            ],
+            addresses: vec!["100.70.11.94".to_string(), "fd7a:115c:a1e0::1701:b5e".to_string()],
         }
     }
 
@@ -417,10 +414,7 @@ mod tests {
             "100.70.11.94:3008",
             "[fd7a:115c:a1e0::1701:b5e]:3008",
         ] {
-            assert!(
-                answers_to(host, &this_machine()),
-                "should have accepted {host}"
-            );
+            assert!(answers_to(host, &this_machine()), "should have accepted {host}");
         }
     }
 
@@ -438,10 +432,7 @@ mod tests {
             "100.70.11.95",
             "100.64.0.1:3008",
         ] {
-            assert!(
-                !answers_to(host, &this_machine()),
-                "should have refused {host}"
-            );
+            assert!(!answers_to(host, &this_machine()), "should have refused {host}");
         }
     }
 
@@ -452,14 +443,8 @@ mod tests {
         let nowhere = crate::remote::OnTheTailnet::default();
         assert!(!answers_to("nobara.tail58b026.ts.net", &nowhere));
         assert!(!answers_to("100.70.11.94", &nowhere));
-        assert!(
-            answers_to("nobara.local", &nowhere),
-            "the LAN rule is untouched"
-        );
-        assert!(
-            answers_to("127.0.0.1:3008", &nowhere),
-            "loopback is untouched"
-        );
+        assert!(answers_to("nobara.local", &nowhere), "the LAN rule is untouched");
+        assert!(answers_to("127.0.0.1:3008", &nowhere), "loopback is untouched");
     }
 
     #[test]
@@ -502,10 +487,7 @@ mod tests {
 
     #[test]
     fn a_trailing_dot_does_not_change_where_a_name_points() {
-        assert_eq!(
-            host_is_local("nobara.local"),
-            host_is_local("nobara.local.")
-        );
+        assert_eq!(host_is_local("nobara.local"), host_is_local("nobara.local."));
         assert_eq!(host_is_local("evil.com"), host_is_local("evil.com."));
         // And it cannot be used to dodge the suffix test the other way.
         assert!(!host_is_local("evil.com.local.evil.com"));
@@ -571,10 +553,7 @@ mod tests {
         };
 
         assert_eq!(
-            ask(Some("https://evil.example.com"))
-                .await
-                .unwrap()
-                .status(),
+            ask(Some("https://evil.example.com")).await.unwrap().status(),
             StatusCode::FORBIDDEN,
             "a page on someone else's site cannot borrow the browser's good Host"
         );
@@ -584,10 +563,7 @@ mod tests {
             "an opaque origin names no place we answer to"
         );
         assert_eq!(
-            ask(Some("http://nobara.local:3008"))
-                .await
-                .unwrap()
-                .status(),
+            ask(Some("http://nobara.local:3008")).await.unwrap().status(),
             StatusCode::OK,
             "the app's own page is the case this route is for"
         );

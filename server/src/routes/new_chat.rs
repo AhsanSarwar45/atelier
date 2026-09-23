@@ -256,12 +256,7 @@ mod tests {
         Router::new().nest("/api", new_chat_routes().with_state(Arc::clone(db)))
     }
 
-    async fn ask(
-        app: &Router,
-        method: Method,
-        path: &str,
-        body: Option<Value>,
-    ) -> (StatusCode, String) {
+    async fn ask(app: &Router, method: Method, path: &str, body: Option<Value>) -> (StatusCode, String) {
         let building = Request::builder()
             .method(method)
             .uri(path)
@@ -335,13 +330,7 @@ mod tests {
     #[tokio::test]
     async fn a_star_pressed_again_clears_the_choice() {
         let (_db, app) = served();
-        ask(
-            &app,
-            Method::PUT,
-            WHERE,
-            Some(json!({ "set": "provider", "brand": "claude" })),
-        )
-        .await;
+        ask(&app, Method::PUT, WHERE, Some(json!({ "set": "provider", "brand": "claude" }))).await;
         let (status, said) = ask(
             &app,
             Method::PUT,
@@ -391,26 +380,14 @@ mod tests {
         let (db, app) = served();
         let migration = format!("{WHERE}/migration");
 
-        let (status, said) = ask(
-            &app,
-            Method::POST,
-            &migration,
-            Some(json!({ "provider": "claude" })),
-        )
-        .await;
+        let (status, said) = ask(&app, Method::POST, &migration, Some(json!({ "provider": "claude" }))).await;
         assert_eq!(status, StatusCode::OK, "{said}");
         assert_eq!(as_json(&said)["provider"], json!("claude"), "{said}");
         assert_eq!(as_json(&said)["migrated"], json!(true), "{said}");
 
         // The choice changes here, and then a second browser turns up still
         // holding the value it stored before this setting moved.
-        ask(
-            &app,
-            Method::PUT,
-            WHERE,
-            Some(json!({ "set": "provider", "brand": "codex" })),
-        )
-        .await;
+        ask(&app, Method::PUT, WHERE, Some(json!({ "set": "provider", "brand": "codex" }))).await;
         let (status, said) = ask(
             &another_browser(&db),
             Method::POST,
@@ -430,13 +407,7 @@ mod tests {
     async fn ask_every_time_was_the_old_spelling_of_no_default() {
         let (db, app) = served();
         let migration = format!("{WHERE}/migration");
-        let (status, said) = ask(
-            &app,
-            Method::POST,
-            &migration,
-            Some(json!({ "provider": "ask" })),
-        )
-        .await;
+        let (status, said) = ask(&app, Method::POST, &migration, Some(json!({ "provider": "ask" }))).await;
         assert_eq!(status, StatusCode::OK, "{said}");
         assert!(as_json(&said)["provider"].is_null(), "{said}");
         assert_eq!(

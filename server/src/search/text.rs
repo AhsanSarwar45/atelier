@@ -78,22 +78,13 @@ pub fn marked(text: &str, places: &[(usize, usize)]) -> Vec<Segment> {
     let mut at = 0;
     for &(start, end) in places {
         if start > at {
-            segments.push(Segment {
-                text: text[at..start].to_string(),
-                mark: false,
-            });
+            segments.push(Segment { text: text[at..start].to_string(), mark: false });
         }
-        segments.push(Segment {
-            text: text[start..end].to_string(),
-            mark: true,
-        });
+        segments.push(Segment { text: text[start..end].to_string(), mark: true });
         at = end;
     }
     if at < text.len() {
-        segments.push(Segment {
-            text: text[at..].to_string(),
-            mark: false,
-        });
+        segments.push(Segment { text: text[at..].to_string(), mark: false });
     }
     segments
 }
@@ -120,13 +111,7 @@ pub fn snippet(text: &str, places: &[(usize, usize)]) -> Vec<Segment> {
     // Line breaks become spaces, byte for byte, so the places still line up.
     let line: String = text[start..end]
         .chars()
-        .map(|c| {
-            if matches!(c, '\n' | '\r' | '\t') {
-                ' '
-            } else {
-                c
-            }
-        })
+        .map(|c| if matches!(c, '\n' | '\r' | '\t') { ' ' } else { c })
         .collect();
     let inside: Vec<(usize, usize)> = places
         .iter()
@@ -152,27 +137,16 @@ mod tests {
     use super::*;
 
     fn term(text: &str, prefix: bool) -> Term<()> {
-        Term {
-            text: text.into(),
-            phrase: false,
-            prefix,
-            fields: Vec::new(),
-        }
+        Term { text: text.into(), phrase: false, prefix, fields: Vec::new() }
     }
 
     #[test]
     fn a_word_is_found_whole_unless_it_is_still_being_typed() {
-        assert_eq!(
-            find("The Loader crashed", &term("loader", false)),
-            vec![(4, 10)]
-        );
+        assert_eq!(find("The Loader crashed", &term("loader", false)), vec![(4, 10)]);
         assert!(find("reloader", &term("loader", false)).is_empty());
         assert!(find("loaders", &term("loader", false)).is_empty());
         assert_eq!(find("loaders", &term("loader", true)), vec![(0, 6)]);
-        assert_eq!(
-            find("see bw-21a2.7 now", &term("bw-21a2", false)),
-            vec![(4, 11)]
-        );
+        assert_eq!(find("see bw-21a2.7 now", &term("bw-21a2", false)), vec![(4, 11)]);
     }
 
     #[test]
@@ -181,17 +155,7 @@ mod tests {
         let at = places(&text, &[&term("cobalt", false)]);
         let snippet = snippet(&text, &at);
         assert!(snippet[0].text.starts_with('…'), "{snippet:?}");
-        assert_eq!(
-            snippet
-                .iter()
-                .filter(|s| s.mark)
-                .map(|s| s.text.as_str())
-                .collect::<Vec<_>>(),
-            ["cobalt"]
-        );
-        assert!(
-            snippet.last().unwrap().text.ends_with("cache was off"),
-            "{snippet:?}"
-        );
+        assert_eq!(snippet.iter().filter(|s| s.mark).map(|s| s.text.as_str()).collect::<Vec<_>>(), ["cobalt"]);
+        assert!(snippet.last().unwrap().text.ends_with("cache was off"), "{snippet:?}");
     }
 }

@@ -20,61 +20,17 @@ use std::path::{Path, PathBuf};
 /// is Atelier's; anything else at the same name is the reader's own. Mirrors
 /// `LEGACY_SHARED`/`LEGACY_FILE_HASHES` in `machinery/join`.
 const LEGACY_SHARED: &[(&str, &str, &str)] = &[
-    (
-        "agents",
-        "general-purpose.md",
-        "d63abf84950747f2a2b1365a9c95d1a53ac847d836b88371d1a47d7f502dbb27",
-    ),
-    (
-        "agents",
-        "researcher.md",
-        "7244154fe1f74ed7083add634f557466e8d42eaaad4b0ebeb5ea1fb9aca7c2c7",
-    ),
-    (
-        "agents",
-        "reviewer.md",
-        "d2a8b3dfbf0f3eabc202899698b179577657d6746af94b55a698ec345746ca10",
-    ),
-    (
-        "agents",
-        "scout.md",
-        "eb39e1a12379b12aba74399f2c3b921e087ea1a81792e1087049bece094eb6fa",
-    ),
-    (
-        "agents",
-        "screen-check.md",
-        "c6e85486bc4dbf5aa376a3465c4e14db2d116e6394faba774aebe2f2dd31dc90",
-    ),
-    (
-        "skills",
-        "compact-handoff",
-        "47a5030d409d23812427cb2d2211002429bbcaf14f3d706a80a362ffa2ba7b03",
-    ),
-    (
-        "skills",
-        "judge-against-reference",
-        "f121ff72200361d968cd0b7688e55364c3d8953784d8e96adc32a79d204009c6",
-    ),
-    (
-        "skills",
-        "read-image",
-        "e811e46d5fe6dda247c6dbec87c8ae6c624680e2306ff7be463d607c45762e69",
-    ),
-    (
-        "skills",
-        "spec",
-        "5ab2c25e8cd877b4790a286434e6a8ad7773356268a28356224725c87436f080",
-    ),
-    (
-        "output-styles",
-        "manager.md",
-        "e48731c823d89c79fce251b12ccf1a27e0d38a26ced452b518a72ce67ecb27b1",
-    ),
-    (
-        "commands",
-        "docs-cleanup.md",
-        "5fe37092730a7f63d79c246d5add5c359b4a07e79d44c2c499b4f77a82a65876",
-    ),
+    ("agents", "general-purpose.md", "d63abf84950747f2a2b1365a9c95d1a53ac847d836b88371d1a47d7f502dbb27"),
+    ("agents", "researcher.md", "7244154fe1f74ed7083add634f557466e8d42eaaad4b0ebeb5ea1fb9aca7c2c7"),
+    ("agents", "reviewer.md", "d2a8b3dfbf0f3eabc202899698b179577657d6746af94b55a698ec345746ca10"),
+    ("agents", "scout.md", "eb39e1a12379b12aba74399f2c3b921e087ea1a81792e1087049bece094eb6fa"),
+    ("agents", "screen-check.md", "c6e85486bc4dbf5aa376a3465c4e14db2d116e6394faba774aebe2f2dd31dc90"),
+    ("skills", "compact-handoff", "47a5030d409d23812427cb2d2211002429bbcaf14f3d706a80a362ffa2ba7b03"),
+    ("skills", "judge-against-reference", "f121ff72200361d968cd0b7688e55364c3d8953784d8e96adc32a79d204009c6"),
+    ("skills", "read-image", "e811e46d5fe6dda247c6dbec87c8ae6c624680e2306ff7be463d607c45762e69"),
+    ("skills", "spec", "5ab2c25e8cd877b4790a286434e6a8ad7773356268a28356224725c87436f080"),
+    ("output-styles", "manager.md", "e48731c823d89c79fce251b12ccf1a27e0d38a26ced452b518a72ce67ecb27b1"),
+    ("commands", "docs-cleanup.md", "5fe37092730a7f63d79c246d5add5c359b4a07e79d44c2c499b4f77a82a65876"),
 ];
 
 /// The three skill folders a past release exposed to both providers. A symlink
@@ -291,7 +247,10 @@ fn strip_in_place(
     if !hooks.contains_key("SessionStart") {
         return false;
     }
-    let Some(blocks) = hooks.get_mut("SessionStart").and_then(|b| b.as_array_mut()) else {
+    let Some(blocks) = hooks
+        .get_mut("SessionStart")
+        .and_then(|b| b.as_array_mut())
+    else {
         eprintln!(
             "kept   {} — its SessionStart hooks are not a list",
             where_.display()
@@ -588,12 +547,10 @@ mod tests {
         assert!(ours_tree.contains_key(Path::new("bin/other-tool")));
 
         for settings in ["claude/settings.json", "codex/hooks.json"] {
-            let value: serde_json::Value =
-                serde_json::from_slice(match &ours_tree[Path::new(settings)] {
-                    Node::File(bytes) => bytes,
-                    other => panic!("{settings} changed kind: {other:?}"),
-                })
-                .unwrap();
+            let value: serde_json::Value = serde_json::from_slice(match &ours_tree[Path::new(settings)] {
+                Node::File(bytes) => bytes,
+                other => panic!("{settings} changed kind: {other:?}"),
+            }).unwrap();
             assert_eq!(value["permissions"]["defaultMode"], "acceptEdits");
             assert_eq!(
                 value["hooks"]["SessionStart"],

@@ -408,10 +408,7 @@ impl Store {
         transaction.execute("DELETE FROM bead_link WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM session_handoff WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM session_notice WHERE session_id = ?1", [id])?;
-        transaction.execute(
-            "DELETE FROM session_external_alias WHERE session_id = ?1",
-            [id],
-        )?;
+        transaction.execute("DELETE FROM session_external_alias WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM session WHERE id = ?1", [id])?;
         transaction.commit()
     }
@@ -606,10 +603,7 @@ impl Store {
     /// folder, and the list files a chat by the folder it holds — so a chat
     /// begun in the home folder stayed in a project it once visited
     /// (bw-6twt.1). Returns how many rows moved.
-    pub fn correct_folders(
-        &mut self,
-        found: &[(String, String, String)],
-    ) -> rusqlite::Result<usize> {
+    pub fn correct_folders(&mut self, found: &[(String, String, String)]) -> rusqlite::Result<usize> {
         let transaction = self.connection.transaction()?;
         let mut moved = 0;
         {
@@ -681,35 +675,35 @@ impl Store {
             .optional()
     }
 
-    /// Whether a saved chat is really held in the project it is filed under.
-    ///
-    /// Provider discovery used to adopt every chat an adapter listed into
-    /// whichever project was open at the time, and those rows are still on disk:
-    /// 455 of the 643 filed under one project on the owner's own machine are held
-    /// in other checkouts, in /tmp and in the home folder. The folder is the
-    /// answer, so the rows correct themselves as they are read rather than needing
-    /// the store rewritten under a running app (bw-t9no.2).
-    ///
-    /// A project with no folder of its own claims nothing, so nothing is dropped.
-    /// Every checkout git knows the project by counts as its folder, wherever git
-    /// keeps it; `folders` holds each project's once per listing (bw-ggbj.1).
-    /// A chat inside a project nested in it — one of `others`, or a folder with
-    /// its own `.atelier` — is that project's, not this one's (bw-6twt.1).
-    fn held_in_its_project(
-        session: &Session,
-        folders: &mut std::collections::HashMap<String, Vec<std::path::PathBuf>>,
-        others: &[std::path::PathBuf],
-    ) -> bool {
-        if session.project_path.is_empty() {
-            return true;
-        }
-        let folders = folders
-            .entry(session.project_path.clone())
-            .or_insert_with(|| {
-                crate::workbench::provider::folders_of(std::path::Path::new(&session.project_path))
-            });
-        crate::workbench::provider::held_in(std::path::Path::new(&session.cwd), folders, others)
+/// Whether a saved chat is really held in the project it is filed under.
+///
+/// Provider discovery used to adopt every chat an adapter listed into
+/// whichever project was open at the time, and those rows are still on disk:
+/// 455 of the 643 filed under one project on the owner's own machine are held
+/// in other checkouts, in /tmp and in the home folder. The folder is the
+/// answer, so the rows correct themselves as they are read rather than needing
+/// the store rewritten under a running app (bw-t9no.2).
+///
+/// A project with no folder of its own claims nothing, so nothing is dropped.
+/// Every checkout git knows the project by counts as its folder, wherever git
+/// keeps it; `folders` holds each project's once per listing (bw-ggbj.1).
+/// A chat inside a project nested in it — one of `others`, or a folder with
+/// its own `.atelier` — is that project's, not this one's (bw-6twt.1).
+fn held_in_its_project(
+    session: &Session,
+    folders: &mut std::collections::HashMap<String, Vec<std::path::PathBuf>>,
+    others: &[std::path::PathBuf],
+) -> bool {
+    if session.project_path.is_empty() {
+        return true;
     }
+    let folders = folders
+        .entry(session.project_path.clone())
+        .or_insert_with(|| {
+            crate::workbench::provider::folders_of(std::path::Path::new(&session.project_path))
+        });
+    crate::workbench::provider::held_in(std::path::Path::new(&session.cwd), folders, others)
+}
 
     /// What the sweep asks for: the chats in the middle of a turn.
     ///
@@ -1122,12 +1116,7 @@ impl Store {
         };
         let counting = matches!(
             state.as_str(),
-            "starting"
-                | "thinking"
-                | "streaming"
-                | "running_tool"
-                | "waiting_for_agents"
-                | "waiting_permission"
+            "starting" | "thinking" | "streaming" | "running_tool" | "waiting_for_agents" | "waiting_permission"
         );
         let shown = if state == "dormant" { "" } else { label };
         let busy_since = counting.then(|| {
@@ -1194,12 +1183,7 @@ impl Store {
             let Some(state) = state else { continue };
             let counting = matches!(
                 state.as_str(),
-                "starting"
-                    | "thinking"
-                    | "streaming"
-                    | "running_tool"
-                    | "waiting_for_agents"
-                    | "waiting_permission"
+                "starting" | "thinking" | "streaming" | "running_tool" | "waiting_for_agents" | "waiting_permission"
             );
             let activity = if counting {
                 SessionActivity {
@@ -1209,11 +1193,7 @@ impl Store {
                 }
             } else {
                 SessionActivity {
-                    label: if state == "dormant" {
-                        String::new()
-                    } else {
-                        label
-                    },
+                    label: if state == "dormant" { String::new() } else { label },
                     detail: String::new(),
                     call: Value::Null,
                     busy_since: None,
@@ -1421,9 +1401,7 @@ impl Store {
         text: &str,
     ) -> rusqlite::Result<()> {
         self.connection
-            .prepare_cached(
-                "UPDATE message SET text = text || ?1 WHERE session_id = ?2 AND message_id = ?3",
-            )?
+            .prepare_cached("UPDATE message SET text = text || ?1 WHERE session_id = ?2 AND message_id = ?3")?
             .execute(params![text, session_id, message_id])?;
         Ok(())
     }
@@ -1481,14 +1459,7 @@ impl Store {
             parts.map(Value::to_string),
             at
         ])?;
-        Ok(held_row(
-            id,
-            session_id,
-            text,
-            images.clone(),
-            parts.cloned(),
-            at,
-        ))
+        Ok(held_row(id, session_id, text, images.clone(), parts.cloned(), at))
     }
 
     /// Every message this chat is holding, oldest first.
@@ -1522,7 +1493,11 @@ impl Store {
      * `id` names a message the reader pushed; without one this takes the
      * oldest, which is what a settled chat does on its own.
      */
-    pub fn take_held(&self, session_id: &str, id: Option<&str>) -> rusqlite::Result<Option<Value>> {
+    pub fn take_held(
+        &self,
+        session_id: &str,
+        id: Option<&str>,
+    ) -> rusqlite::Result<Option<Value>> {
         let held = self.held_messages(session_id)?;
         let wanted = match id {
             Some(id) => held.into_iter().find(|row| row["id"] == json!(id)),
@@ -1561,9 +1536,7 @@ impl Store {
             .find(|row| row["id"] == json!(id));
         let gone = self
             .connection
-            .prepare_cached(
-                "DELETE FROM held_message WHERE id = ?1 AND session_id = ?2 AND sending = 0",
-            )?
+            .prepare_cached("DELETE FROM held_message WHERE id = ?1 AND session_id = ?2 AND sending = 0")?
             .execute(params![id, session_id])?;
         Ok((gone == 1).then_some(held).flatten())
     }
@@ -1618,23 +1591,13 @@ impl Store {
             "SELECT role, text FROM message WHERE session_id=?1 AND text<>'' ORDER BY at DESC LIMIT 80",
         )?;
         let mut messages = statement
-            .query_map([session_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
+            .query_map([session_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         messages.reverse();
         let mut kept = Vec::new();
         let mut length = 0usize;
         for (role, text) in messages.into_iter().rev() {
-            let line = format!(
-                "{}: {}",
-                if role == "assistant" {
-                    "Assistant"
-                } else {
-                    "User"
-                },
-                text
-            );
+            let line = format!("{}: {}", if role == "assistant" { "Assistant" } else { "User" }, text);
             if length + line.len() > 60_000 && !kept.is_empty() {
                 break;
             }
@@ -1655,19 +1618,12 @@ impl Store {
 
     pub fn saved_account_handoff(&self, session_id: &str) -> rusqlite::Result<Option<String>> {
         self.connection
-            .query_row(
-                "SELECT context FROM session_handoff WHERE session_id=?1",
-                [session_id],
-                |row| row.get(0),
-            )
+            .query_row("SELECT context FROM session_handoff WHERE session_id=?1", [session_id], |row| row.get(0))
             .optional()
     }
 
     pub fn clear_account_handoff(&self, session_id: &str) -> rusqlite::Result<()> {
-        self.connection.execute(
-            "DELETE FROM session_handoff WHERE session_id=?1",
-            [session_id],
-        )?;
+        self.connection.execute("DELETE FROM session_handoff WHERE session_id=?1", [session_id])?;
         Ok(())
     }
 
@@ -2932,9 +2888,8 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
     let notice_columns = columns(transaction, "session_notice")?;
     for column in ["since", "since_state"] {
         if !notice_columns.iter().any(|name| name == column) {
-            transaction.execute_batch(&format!(
-                "ALTER TABLE session_notice ADD COLUMN {column} TEXT;"
-            ))?;
+            transaction
+                .execute_batch(&format!("ALTER TABLE session_notice ADD COLUMN {column} TEXT;"))?;
         }
     }
 
@@ -3167,18 +3122,9 @@ mod tests {
             store.create_session(&row).unwrap();
         }
         assert_eq!(store.mark_all_dormant().unwrap(), 1);
-        assert_eq!(
-            store.get_session("stopped").unwrap().unwrap().state,
-            "stopped"
-        );
-        assert_eq!(
-            store.get_session("errored").unwrap().unwrap().state,
-            "errored"
-        );
-        assert_eq!(
-            store.get_session("streaming").unwrap().unwrap().state,
-            "dormant"
-        );
+        assert_eq!(store.get_session("stopped").unwrap().unwrap().state, "stopped");
+        assert_eq!(store.get_session("errored").unwrap().unwrap().state, "errored");
+        assert_eq!(store.get_session("streaming").unwrap().unwrap().state, "dormant");
     }
 
     /// What has been said about a chat outlives the process that said it.
@@ -3195,10 +3141,7 @@ mod tests {
         {
             let mut store = Store::open(&file).unwrap();
             store
-                .mark_read(
-                    &[("chat".to_string(), "errored".to_string())],
-                    "2026-09-22T00:00:00Z",
-                )
+                .mark_read(&[("chat".to_string(), "errored".to_string())], "2026-09-22T00:00:00Z")
                 .unwrap();
             store
                 .mark_announced("chat", "idle", "2026-09-22T00:00:00Z")
@@ -3231,14 +3174,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut store = Store::open(&root.path().join("workbench.db")).unwrap();
 
+        store.mark_announced("chat", "idle", "2026-09-22T00:00:00Z").unwrap();
         store
-            .mark_announced("chat", "idle", "2026-09-22T00:00:00Z")
-            .unwrap();
-        store
-            .mark_read(
-                &[("chat".to_string(), "idle".to_string())],
-                "2026-09-22T00:01:00Z",
-            )
+            .mark_read(&[("chat".to_string(), "idle".to_string())], "2026-09-22T00:01:00Z")
             .unwrap();
 
         assert_eq!(
@@ -3253,14 +3191,8 @@ mod tests {
         );
 
         // And the later word on each wins, rather than a second row appearing.
-        store
-            .mark_announced("chat", "errored", "2026-09-22T00:02:00Z")
-            .unwrap();
-        assert_eq!(
-            store.notices().unwrap().len(),
-            1,
-            "a chat grew a second row"
-        );
+        store.mark_announced("chat", "errored", "2026-09-22T00:02:00Z").unwrap();
+        assert_eq!(store.notices().unwrap().len(), 1, "a chat grew a second row");
         assert_eq!(
             store.notices().unwrap()["chat"].announced_state.as_deref(),
             Some("errored")
@@ -3340,8 +3272,7 @@ mod tests {
 
         let store = Store::open(&file).unwrap();
         assert_eq!(
-            store.notices().unwrap()["chat"].since,
-            appeared,
+            store.notices().unwrap()["chat"].since, appeared,
             "when the notification appeared did not outlive the process"
         );
         assert!(appeared.is_some());
@@ -3363,10 +3294,7 @@ mod tests {
             .create_session(&session("chat", "claude", None, "2026-09-22T00:00:00Z"))
             .unwrap();
         store
-            .mark_read(
-                &[("chat".to_string(), "idle".to_string())],
-                "2026-09-22T00:00:00Z",
-            )
+            .mark_read(&[("chat".to_string(), "idle".to_string())], "2026-09-22T00:00:00Z")
             .unwrap();
 
         store.delete_session("chat").unwrap();
@@ -3423,12 +3351,7 @@ mod tests {
 
         let reopened = Store::open(&path).unwrap();
         assert_eq!(
-            reopened
-                .get_session("work")
-                .unwrap()
-                .unwrap()
-                .profile
-                .as_deref(),
+            reopened.get_session("work").unwrap().unwrap().profile.as_deref(),
             Some("work")
         );
         assert_eq!(
@@ -3472,38 +3395,17 @@ mod tests {
         drop(store);
 
         let reopened = Store::open(&path).unwrap();
-        assert!(
-            reopened
-                .get_session("renamed")
-                .unwrap()
-                .unwrap()
-                .named_by_owner
-        );
-        assert!(
-            !reopened
-                .get_session("titled")
-                .unwrap()
-                .unwrap()
-                .named_by_owner
-        );
+        assert!(reopened.get_session("renamed").unwrap().unwrap().named_by_owner);
+        assert!(!reopened.get_session("titled").unwrap().unwrap().named_by_owner);
 
         reopened
             .update_session(
                 "later",
-                SessionPatch {
-                    named_by_owner: Some(true),
-                    ..Default::default()
-                },
+                SessionPatch { named_by_owner: Some(true), ..Default::default() },
                 None,
             )
             .unwrap();
-        assert!(
-            reopened
-                .get_session("later")
-                .unwrap()
-                .unwrap()
-                .named_by_owner
-        );
+        assert!(reopened.get_session("later").unwrap().unwrap().named_by_owner);
     }
 
     /// What a chat has spent is a running total, and the spend table is a sum.
@@ -3516,12 +3418,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let store = Store::open(&directory.path().join("workbench.db")).unwrap();
         store
-            .create_session(&session(
-                "chat-1",
-                "claude",
-                None,
-                "2026-08-20T00:00:00.000Z",
-            ))
+            .create_session(&session("chat-1", "claude", None, "2026-08-20T00:00:00.000Z"))
             .unwrap();
         for (at, total) in [
             ("2026-08-20T00:01:00.000Z", 100),
@@ -3630,10 +3527,7 @@ mod tests {
             ["newer", "older"]
         );
         assert!(
-            store
-                .active_session_ids()
-                .unwrap()
-                .contains(&"older".to_string()),
+            store.active_session_ids().unwrap().contains(&"older".to_string()),
             "a streaming chat was not found by the sweep's query"
         );
         assert_eq!(store.mark_all_dormant().unwrap(), 2);
@@ -3859,52 +3753,26 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("workbench.db");
         let store = Store::open(&path).unwrap();
-        store
-            .create_session(&session(
-                "chat",
-                "codex",
-                Some("thread"),
-                "2026-09-15T00:00:00Z",
-            ))
-            .unwrap();
+        store.create_session(&session("chat", "codex", Some("thread"), "2026-09-15T00:00:00Z")).unwrap();
         let rename: Event = serde_json::from_value(json!({
             "type":"session.pinned", "sessionId":"chat", "seq":1, "at":"then",
             "permissionMode":null, "model":null, "effort":null,
             "collaborationMode":null, "title":"My title"
-        }))
-        .unwrap();
+        })).unwrap();
         assert!(store.append_event(&rename).unwrap());
-        store
-            .update_session(
-                "chat",
-                SessionPatch {
-                    title: Some(Some("Generated title".into())),
-                    ..SessionPatch::default()
-                },
-                None,
-            )
-            .unwrap();
+        store.update_session("chat", SessionPatch {
+            title: Some(Some("Generated title".into())), ..SessionPatch::default()
+        }, None).unwrap();
         drop(store);
 
         let connection = Connection::open(&path).unwrap();
-        connection
-            .execute(
-                "UPDATE schema_version SET version=?1",
-                [(LEGACY_MIGRATIONS.len() - 1) as i64],
-            )
-            .unwrap();
+        connection.execute(
+            "UPDATE schema_version SET version=?1",
+            [(LEGACY_MIGRATIONS.len() - 1) as i64],
+        ).unwrap();
         drop(connection);
 
-        assert_eq!(
-            Store::open(&path)
-                .unwrap()
-                .get_session("chat")
-                .unwrap()
-                .unwrap()
-                .title
-                .as_deref(),
-            Some("My title")
-        );
+        assert_eq!(Store::open(&path).unwrap().get_session("chat").unwrap().unwrap().title.as_deref(), Some("My title"));
     }
 
     #[test]
@@ -4005,22 +3873,11 @@ mod tests {
         };
         assert_eq!(listed(&store), ["wandered"]);
         let found = vec![
-            (
-                "claude".to_string(),
-                "ext-1".to_string(),
-                "/home/person".to_string(),
-            ),
-            (
-                "codex".to_string(),
-                "ext-1".to_string(),
-                "/elsewhere".to_string(),
-            ),
+            ("claude".to_string(), "ext-1".to_string(), "/home/person".to_string()),
+            ("codex".to_string(), "ext-1".to_string(), "/elsewhere".to_string()),
         ];
         assert_eq!(store.correct_folders(&found).unwrap(), 1);
-        assert_eq!(
-            store.get_session("wandered").unwrap().unwrap().cwd,
-            "/home/person"
-        );
+        assert_eq!(store.get_session("wandered").unwrap().unwrap().cwd, "/home/person");
         assert!(listed(&store).is_empty());
         // Nothing moves a second time.
         assert_eq!(store.correct_folders(&found).unwrap(), 0);
@@ -4032,10 +3889,7 @@ mod tests {
     fn restore_sessions_leave_a_nested_projects_chats_to_it() {
         let directory = tempfile::tempdir().unwrap();
         let store = Store::open(&directory.path().join("workbench.db")).unwrap();
-        for (id, cwd) in [
-            ("home", "/project"),
-            ("nested", "/project/dev/keystone/server"),
-        ] {
+        for (id, cwd) in [("home", "/project"), ("nested", "/project/dev/keystone/server")] {
             let mut row = session(id, "claude", None, "2026-08-20T00:00:00Z");
             row.cwd = cwd.into();
             store.create_session(&row).unwrap();
@@ -4075,14 +3929,7 @@ mod tests {
         git(&["config", "user.email", "tester@atelier.test"]);
         git(&["config", "commit.gpgsign", "false"]);
         git(&["commit", "-q", "--allow-empty", "-m", "seed"]);
-        git(&[
-            "worktree",
-            "add",
-            "-q",
-            &beside.display().to_string(),
-            "-b",
-            "key-1",
-        ]);
+        git(&["worktree", "add", "-q", &beside.display().to_string(), "-b", "key-1"]);
         let beside = beside.canonicalize().unwrap();
 
         let store = Store::open(&root.path().join("workbench.db")).unwrap();
@@ -4090,13 +3937,7 @@ mod tests {
             ("here", project.clone()),
             ("beside", beside.join("apps").join("web")),
             ("another-checkout", root.path().join("aspen")),
-            (
-                "a-name-that-starts-the-same",
-                root.path()
-                    .join("worktrees")
-                    .join("keystone")
-                    .join("key-1-old"),
-            ),
+            ("a-name-that-starts-the-same", root.path().join("worktrees").join("keystone").join("key-1-old")),
         ] {
             let mut row = session(id, "claude", None, "2026-08-20T00:00:00Z");
             row.origin = "terminal".into();
@@ -4158,11 +3999,7 @@ mod tests {
                 "not-yet-read".to_string(),
             ])
         );
-        assert_eq!(
-            listed(true).len(),
-            3,
-            "the switch brings the agent's own back"
-        );
+        assert_eq!(listed(true).len(), 3, "the switch brings the agent's own back");
     }
 
     /// An untitled chat begun in a terminal is on the quick list, as it is on
@@ -4621,9 +4458,7 @@ mod tests {
             "dataUrl":"data:image/png;base64,iVBORw0KGgo=",
             "alt":"Tool image"
         });
-        append(
-            json!({"type":"tool.started","toolCallId":"read","name":"Read","title":"Read shot.png"}),
-        );
+        append(json!({"type":"tool.started","toolCallId":"read","name":"Read","title":"Read shot.png"}));
         append(json!({"type":"image","messageId":null,"toolCallId":"read","image":picture}));
         append(json!({"type":"tool.completed","toolCallId":"read","ok":true}));
 
@@ -4709,11 +4544,7 @@ mod tests {
             )
             .unwrap();
         let row: Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(
-            row["stale"],
-            Value::Null,
-            "the older row was not kept: {row}"
-        );
+        assert_eq!(row["stale"], Value::Null, "the older row was not kept: {row}");
         assert_eq!(row["title"], "Read shot.png", "it was folded again: {row}");
         let fold: i64 = store
             .connection
@@ -5168,12 +4999,7 @@ mod tests {
 
         // And the pair cannot be written twice again.
         assert!(store
-            .create_session(&session(
-                "again",
-                "claude",
-                Some("term-1"),
-                "2026-09-04T00:00:00.000Z"
-            ))
+            .create_session(&session("again", "claude", Some("term-1"), "2026-09-04T00:00:00.000Z"))
             .is_err());
     }
 
@@ -5294,17 +5120,16 @@ mod tests {
 
         let plan: Vec<String> = store
             .connection
-            .prepare(&format!(
-                "EXPLAIN QUERY PLAN {}",
-                Store::active_session_sql()
-            ))
+            .prepare(&format!("EXPLAIN QUERY PLAN {}", Store::active_session_sql()))
             .unwrap()
             .query_map([], |row| row.get::<_, String>(3))
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
-        let reaching_events: Vec<&String> =
-            plan.iter().filter(|step| step.contains("event")).collect();
+        let reaching_events: Vec<&String> = plan
+            .iter()
+            .filter(|step| step.contains("event"))
+            .collect();
         assert_eq!(
             reaching_events.len(),
             1,
@@ -5351,11 +5176,7 @@ mod tests {
         }
 
         let activities = store.session_activities().unwrap();
-        assert_eq!(
-            activities.len(),
-            2,
-            "a chat with no state row has no activity"
-        );
+        assert_eq!(activities.len(), 2, "a chat with no state row has no activity");
         assert_eq!(activities["busy"].label, "Working");
         assert_eq!(
             activities["busy"].busy_since.as_deref(),

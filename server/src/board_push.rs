@@ -34,14 +34,11 @@ fn board_root(cwd: &Path) -> PathBuf {
     } else {
         cwd.parent().unwrap_or(cwd)
     };
-    let common = crate::routes::find_git()
-        .and_then(|git| {
-            Command::new(git)
-                .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
-                .current_dir(here)
-                .output()
-                .ok()
-        })
+    let common = crate::routes::find_git().and_then(|git| Command::new(git)
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .current_dir(here)
+        .output()
+        .ok())
         .filter(|output| output.status.success())
         .map(|output| PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()))
         .filter(|path| !path.as_os_str().is_empty());

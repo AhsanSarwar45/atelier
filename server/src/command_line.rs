@@ -228,57 +228,58 @@ mod tests {
         // nobody reads. Asking has to be a thing a person can type.
         assert_eq!(ask(&["where"]), Ask::Where);
 
-        /// Bare `remote` asks, and only `install` acts.
-        ///
-        /// The two are one letter apart on the screen and worlds apart in what
-        /// they do: one prints, the other asks for a password and installs
-        /// software. A reader typing `atelier remote` to see where they stand
-        /// must not have that read as consent to install (bw-hdor.2).
-        #[test]
-        fn asking_where_it_stands_is_not_asking_it_to_install() {
-            assert_eq!(ask(&["remote"]), Ask::Remote(crate::remote::Ask::Standing));
-            assert_eq!(
-                ask(&["remote", "status"]),
-                Ask::Remote(crate::remote::Ask::Standing)
-            );
-            assert_eq!(
-                ask(&["remote", "install"]),
-                Ask::Remote(crate::remote::Ask::Install {
-                    without_asking: false
-                })
-            );
-            assert_eq!(
-                ask(&["remote", "install", "--yes"]),
-                Ask::Remote(crate::remote::Ask::Install {
-                    without_asking: true
-                })
-            );
-            assert_eq!(ask(&["remote", "onn"]), Ask::Unknown("onn".to_string()));
-        }
+    /// Bare `remote` asks, and only `install` acts.
+    ///
+    /// The two are one letter apart on the screen and worlds apart in what
+    /// they do: one prints, the other asks for a password and installs
+    /// software. A reader typing `atelier remote` to see where they stand
+    /// must not have that read as consent to install (bw-hdor.2).
+    #[test]
+    fn asking_where_it_stands_is_not_asking_it_to_install() {
+        assert_eq!(ask(&["remote"]), Ask::Remote(crate::remote::Ask::Standing));
+        assert_eq!(
+            ask(&["remote", "status"]),
+            Ask::Remote(crate::remote::Ask::Standing)
+        );
+        assert_eq!(
+            ask(&["remote", "install"]),
+            Ask::Remote(crate::remote::Ask::Install {
+                without_asking: false
+            })
+        );
+        assert_eq!(
+            ask(&["remote", "install", "--yes"]),
+            Ask::Remote(crate::remote::Ask::Install {
+                without_asking: true
+            })
+        );
+        assert_eq!(ask(&["remote", "onn"]), Ask::Unknown("onn".to_string()));
+    }
 
-        /// The help screen offers the command, and no longer offers the two
-        /// settings that moved onto the settings screen.
-        ///
-        /// Leaving `ATELIER_HOST` listed would send a reader to a variable the
-        /// installed service no longer carries, so what they set would appear to
-        /// do nothing (bw-hdor.1).
-        #[test]
-        fn the_help_screen_names_reaching_it_from_away() {
-            let help = help();
-            assert!(
-                help.contains("atelier remote install"),
-                "the command that sets it up is not offered:\n{help}"
-            );
-            assert!(
-                help.contains("Settings > Remote access"),
-                "the screen holding the switch is not named:\n{help}"
-            );
-            assert!(
-                !help.contains("ATELIER_HOST"),
-                "the help screen still sends a reader to a variable the service \
+    /// The help screen offers the command, and no longer offers the two
+    /// settings that moved onto the settings screen.
+    ///
+    /// Leaving `ATELIER_HOST` listed would send a reader to a variable the
+    /// installed service no longer carries, so what they set would appear to
+    /// do nothing (bw-hdor.1).
+    #[test]
+    fn the_help_screen_names_reaching_it_from_away() {
+        let help = help();
+        assert!(
+            help.contains("atelier remote install"),
+            "the command that sets it up is not offered:\n{help}"
+        );
+        assert!(
+            help.contains("Settings > Remote access"),
+            "the screen holding the switch is not named:\n{help}"
+        );
+        assert!(
+            !help.contains("ATELIER_HOST"),
+            "the help screen still sends a reader to a variable the service \
              does not carry:\n{help}"
-            );
-        }
+        );
+    }
+
     }
 
     #[test]

@@ -147,12 +147,7 @@ fn note(heard: &str, sessions: &Path) {
     match data.get("hook_event_name").and_then(Value::as_str) {
         // Its own word for why: `manual` is him typing /compact and watching,
         // `auto` is the window filling up, and the screen says which.
-        Some("PreCompact") => say(
-            sessions,
-            id,
-            SUMMARISING,
-            a_word(&data, &["trigger", "matcher"]),
-        ),
+        Some("PreCompact") => say(sessions, id, SUMMARISING, a_word(&data, &["trigger", "matcher"])),
         // Six seconds after the prompt goes up, not the instant it does: the
         // tool holds this notification back that long and drops it entirely if
         // he answers first, so a wait the screen names is a wait he is actually
@@ -228,10 +223,7 @@ fn asked_about(data: &Map<String, Value>) -> Option<String> {
     let Some(at) = said.find(ASKING) else {
         return Some(said);
     };
-    let tool = said[at + ASKING.len()..]
-        .trim()
-        .trim_matches('.')
-        .to_string();
+    let tool = said[at + ASKING.len()..].trim().trim_matches('.').to_string();
     Some(if tool.is_empty() { said } else { tool })
 }
 
@@ -298,10 +290,7 @@ fn unwire(settings: &Path) -> Result<usize, String> {
             if let Some(held) = block.get_mut("hooks").and_then(Value::as_array_mut) {
                 let before = held.len();
                 held.retain(|hook| {
-                    !hook
-                        .get("command")
-                        .and_then(Value::as_str)
-                        .is_some_and(ours)
+                    !hook.get("command").and_then(Value::as_str).is_some_and(ours)
                 });
                 taken += before - held.len();
             }
@@ -415,11 +404,7 @@ mod tests {
         assert_eq!(unwire(&settings).expect("the removal"), 2);
 
         let held = read(&settings);
-        assert_eq!(
-            held["model"],
-            json!("opus"),
-            "a setting of theirs was dropped"
-        );
+        assert_eq!(held["model"], json!("opus"), "a setting of theirs was dropped");
         assert_eq!(
             commands(&held, "Stop"),
             vec!["their-own-gate.py".to_string()],
@@ -549,26 +534,14 @@ mod tests {
         // registrations (bw-t26l.20).
         let home = tempfile::tempdir().expect("a folder");
         let sessions = home.path().join("sessions");
-        fire(
-            &sessions,
-            json!({"hook_event_name": "PreCompact", "session_id": CHAT}),
-        );
+        fire(&sessions, json!({"hook_event_name": "PreCompact", "session_id": CHAT}));
 
-        for gone in [
-            "PostCompact",
-            "Stop",
-            "SessionEnd",
-            "PostToolUse",
-            "UserPromptSubmit",
-        ] {
+        for gone in ["PostCompact", "Stop", "SessionEnd", "PostToolUse", "UserPromptSubmit"] {
             assert!(
                 !EVENTS.iter().any(|(event, _)| *event == gone),
                 "{gone} is still registered"
             );
-            fire(
-                &sessions,
-                json!({"hook_event_name": gone, "session_id": CHAT}),
-            );
+            fire(&sessions, json!({"hook_event_name": gone, "session_id": CHAT}));
         }
 
         assert_eq!(
@@ -585,18 +558,12 @@ mod tests {
 
         note("not json at all", &sessions);
         note("[]", &sessions);
-        note(
-            &json!({"hook_event_name": "PreCompact"}).to_string(),
-            &sessions,
-        );
+        note(&json!({"hook_event_name": "PreCompact"}).to_string(), &sessions);
         note(
             &json!({"hook_event_name": "PreCompact", "session_id": "../elsewhere"}).to_string(),
             &sessions,
         );
-        note(
-            &json!({"hook_event_name": "Whatever", "session_id": CHAT}).to_string(),
-            &sessions,
-        );
+        note(&json!({"hook_event_name": "Whatever", "session_id": CHAT}).to_string(), &sessions);
 
         assert_eq!(line(&sessions), None);
         assert!(
@@ -604,4 +571,5 @@ mod tests {
             "a name holding a path wrote outside the folder"
         );
     }
+
 }

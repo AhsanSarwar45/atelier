@@ -727,19 +727,10 @@ mod tests {
     /// A flag still decides, so a script that says `--chat` is not re-asked.
     #[test]
     fn a_flag_settles_it() {
-        assert_eq!(
-            decide_mode(Some(Mode::Chat), true, false, "Sample"),
-            Decision::Settled(Mode::Chat)
-        );
-        assert_eq!(
-            decide_mode(Some(Mode::Beads), true, false, "Sample"),
-            Decision::Settled(Mode::Beads)
-        );
+        assert_eq!(decide_mode(Some(Mode::Chat), true, false, "Sample"), Decision::Settled(Mode::Chat));
+        assert_eq!(decide_mode(Some(Mode::Beads), true, false, "Sample"), Decision::Settled(Mode::Beads));
         // Chat needs no bd, so a computer without one can still be told chat.
-        assert_eq!(
-            decide_mode(Some(Mode::Chat), false, false, "Sample"),
-            Decision::Settled(Mode::Chat)
-        );
+        assert_eq!(decide_mode(Some(Mode::Chat), false, false, "Sample"), Decision::Settled(Mode::Chat));
     }
 
     /// No bd, no question — and the reason is said rather than left to a

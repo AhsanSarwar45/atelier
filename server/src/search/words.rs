@@ -353,18 +353,16 @@ mod tests {
     #[test]
     fn a_source_decides_its_own_keys_and_the_rest_are_words() {
         let mut kinds = Vec::new();
-        let words = read(
-            "kind:bug kind:nonsense name:loader std::fs in:body crash ",
-            part,
-            |key, piece| match (key, piece.value.as_str()) {
+        let words = read("kind:bug kind:nonsense name:loader std::fs in:body crash ", part, |key, piece| {
+            match (key, piece.value.as_str()) {
                 ("kind", "bug") => {
                     kinds.push(piece.value.clone());
                     Key::Taken
                 }
                 ("kind", _) => Key::Unread,
                 _ => Key::Words,
-            },
-        );
+            }
+        });
         assert_eq!(kinds, ["bug"]);
         assert_eq!(words.ignored, ["kind:nonsense"]);
         assert_eq!(words.all[0][0].fields, [Part::Name]);

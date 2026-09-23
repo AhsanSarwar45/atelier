@@ -119,27 +119,19 @@ mod tests {
     #[test]
     fn a_script_can_read_which_ones_are_missing() {
         let rows = vec![
-            Found {
-                need: &NEEDED[0],
-                at: Some(PathBuf::from("/usr/bin/git")),
-            },
-            Found {
-                need: &NEEDED[1],
-                at: None,
-            },
+            Found { need: &NEEDED[0], at: Some(PathBuf::from("/usr/bin/git")) },
+            Found { need: &NEEDED[1], at: None },
         ];
         let said = written(&rows);
         let words: Vec<Vec<&str>> = said
             .lines()
             .map(|line| line.split_whitespace().collect())
-            .filter(|fields: &Vec<&str>| matches!(fields.get(1), Some(&"found") | Some(&"missing")))
+            .filter(|fields: &Vec<&str>| {
+                matches!(fields.get(1), Some(&"found") | Some(&"missing"))
+            })
             .collect();
 
-        assert_eq!(
-            words.len(),
-            2,
-            "one readable line for each program, in:\n{said}"
-        );
+        assert_eq!(words.len(), 2, "one readable line for each program, in:\n{said}");
         assert_eq!(words[0][0], "git");
         assert_eq!(words[0][1], "found");
         assert_eq!(words[1][0], "bd");
@@ -150,16 +142,8 @@ mod tests {
     #[test]
     fn every_program_the_app_starts_says_what_it_is_for() {
         for need in NEEDED {
-            assert!(
-                !need.carries.is_empty(),
-                "{} says nothing about itself",
-                need.name
-            );
-            assert!(
-                need.from.starts_with("https://"),
-                "{} names nowhere to get it",
-                need.name
-            );
+            assert!(!need.carries.is_empty(), "{} says nothing about itself", need.name);
+            assert!(need.from.starts_with("https://"), "{} names nowhere to get it", need.name);
         }
         let mut names: Vec<&str> = NEEDED.iter().map(|need| need.name).collect();
         names.sort_unstable();

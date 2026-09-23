@@ -35,9 +35,7 @@ const SETTLE: Duration = Duration::from_secs(3);
 
 /// The program file this process is running, as this computer names it.
 pub fn program() -> Option<PathBuf> {
-    std::env::current_exe()
-        .ok()
-        .map(|path| PathBuf::from(without_the_deleted_mark(&path.display().to_string())))
+    std::env::current_exe().ok().map(|path| PathBuf::from(without_the_deleted_mark(&path.display().to_string())))
 }
 
 /// Linux answers "where is this program" with the path and, once a newer build
@@ -81,10 +79,7 @@ pub fn look(path: &Path) -> Option<Seen> {
     let bytes = std::fs::read(path).ok()?;
     let mut hasher = DefaultHasher::new();
     bytes.hash(&mut hasher);
-    Some(Seen {
-        len: bytes.len() as u64,
-        mark: hasher.finish(),
-    })
+    Some(Seen { len: bytes.len() as u64, mark: hasher.finish() })
 }
 
 /// The short name a look is reported under.
@@ -387,9 +382,7 @@ pub fn already_serving(
 /// number.
 pub fn started_ago(since: &str, now: chrono::DateTime<chrono::Utc>) -> Option<String> {
     let then = chrono::DateTime::parse_from_rfc3339(since).ok()?;
-    let seconds = now
-        .signed_duration_since(then.with_timezone(&chrono::Utc))
-        .num_seconds();
+    let seconds = now.signed_duration_since(then.with_timezone(&chrono::Utc)).num_seconds();
     if seconds < 0 {
         return None;
     }
@@ -399,10 +392,7 @@ pub fn started_ago(since: &str, now: chrono::DateTime<chrono::Utc>) -> Option<St
         s if s < 172_800 => (s / 3600, "hour"),
         s => (s / 86_400, "day"),
     };
-    Some(format!(
-        "running for {count} {unit}{}",
-        if count == 1 { "" } else { "s" }
-    ))
+    Some(format!("running for {count} {unit}{}", if count == 1 { "" } else { "s" }))
 }
 
 /// The paragraph printed when the copy that is serving is a different program
@@ -454,10 +444,7 @@ mod tests {
     #[test]
     fn handover_happens_when_a_different_program_sits_where_this_one_started() {
         let was = Seen { len: 10, mark: 1 };
-        assert!(a_newer_build_is_there(
-            Some(was),
-            Some(Seen { len: 11, mark: 2 })
-        ));
+        assert!(a_newer_build_is_there(Some(was), Some(Seen { len: 11, mark: 2 })));
         assert!(!a_newer_build_is_there(Some(was), Some(was)));
     }
 
@@ -465,49 +452,27 @@ mod tests {
     fn handover_happens_when_the_program_it_would_restart_from_is_taken_away() {
         // A package manager that replaces a link leaves the file this process
         // is running deleted underneath it.
-        assert!(a_newer_build_is_there(
-            Some(Seen { len: 10, mark: 1 }),
-            None
-        ));
+        assert!(a_newer_build_is_there(Some(Seen { len: 10, mark: 1 }), None));
     }
 
     #[test]
     fn handover_never_happens_on_a_path_that_was_unreadable_to_begin_with() {
-        assert!(!a_newer_build_is_there(
-            None,
-            Some(Seen { len: 10, mark: 1 })
-        ));
+        assert!(!a_newer_build_is_there(None, Some(Seen { len: 10, mark: 1 })));
         assert!(!a_newer_build_is_there(None, None));
     }
 
     #[test]
     fn handover_only_where_something_would_start_it_again() {
-        assert!(something_would_start_it_again(
-            "com.example.atelier",
-            Some("abc123"),
-            None
-        ));
-        assert!(something_would_start_it_again(
-            "com.example.atelier",
-            None,
-            Some("com.example.atelier")
-        ));
+        assert!(something_would_start_it_again("com.example.atelier", Some("abc123"), None));
+        assert!(something_would_start_it_again("com.example.atelier", None, Some("com.example.atelier")));
         // A terminal on macOS carries this mark too, naming something else.
         assert!(!something_would_start_it_again(
             "com.example.atelier",
             None,
             Some("application.com.apple.Terminal.1.2")
         ));
-        assert!(!something_would_start_it_again(
-            "com.example.atelier",
-            None,
-            None
-        ));
-        assert!(!something_would_start_it_again(
-            "com.example.atelier",
-            Some(""),
-            None
-        ));
+        assert!(!something_would_start_it_again("com.example.atelier", None, None));
+        assert!(!something_would_start_it_again("com.example.atelier", Some(""), None));
     }
 
     #[test]
@@ -517,19 +482,13 @@ mod tests {
             Some(&who),
             Some("/usr/bin/atelier"),
             3008,
-            &[
-                "http://desk.local:3008".to_string(),
-                "http://192.168.1.11:3008".to_string(),
-            ],
+            &["http://desk.local:3008".to_string(), "http://192.168.1.11:3008".to_string()],
         );
         assert_eq!(code, 0, "{said}");
         assert!(said.contains("http://192.168.1.11:3008"), "{said}");
         assert!(said.contains("0.13.0"), "{said}");
         assert!(said.contains("build 0123456789abcdef"), "{said}");
-        assert!(
-            !said.contains("service install"),
-            "same program, nothing to repoint: {said}"
-        );
+        assert!(!said.contains("service install"), "same program, nothing to repoint: {said}");
     }
 
     #[test]
@@ -551,10 +510,7 @@ mod tests {
         );
         assert_eq!(code, 0, "{said}");
         assert!(said.contains("/home/me/.local/bin/atelier"), "{said}");
-        assert!(
-            said.contains("/home/linuxbrew/.linuxbrew/bin/atelier"),
-            "{said}"
-        );
+        assert!(said.contains("/home/linuxbrew/.linuxbrew/bin/atelier"), "{said}");
         assert!(said.contains("service install"), "{said}");
     }
 
@@ -574,22 +530,10 @@ mod tests {
         let now = chrono::DateTime::parse_from_rfc3339("2026-08-23T12:00:00Z")
             .unwrap()
             .with_timezone(&chrono::Utc);
-        assert_eq!(
-            started_ago("2026-08-23T11:59:59Z", now).as_deref(),
-            Some("running for 1 second")
-        );
-        assert_eq!(
-            started_ago("2026-08-23T11:50:00Z", now).as_deref(),
-            Some("running for 10 minutes")
-        );
-        assert_eq!(
-            started_ago("2026-08-23T09:00:00Z", now).as_deref(),
-            Some("running for 3 hours")
-        );
-        assert_eq!(
-            started_ago("2026-08-18T12:00:00Z", now).as_deref(),
-            Some("running for 5 days")
-        );
+        assert_eq!(started_ago("2026-08-23T11:59:59Z", now).as_deref(), Some("running for 1 second"));
+        assert_eq!(started_ago("2026-08-23T11:50:00Z", now).as_deref(), Some("running for 10 minutes"));
+        assert_eq!(started_ago("2026-08-23T09:00:00Z", now).as_deref(), Some("running for 3 hours"));
+        assert_eq!(started_ago("2026-08-18T12:00:00Z", now).as_deref(), Some("running for 5 days"));
         // A clock that disagrees is not turned into a negative age.
         assert!(started_ago("2026-08-24T12:00:00Z", now).is_none());
         assert!(started_ago("some time last week", now).is_none());
@@ -605,28 +549,16 @@ mod tests {
         let one = look(&one).expect("one is readable");
         let two = look(&two).expect("two is readable");
         assert_eq!(one.len, two.len);
-        assert_ne!(
-            one.mark, two.mark,
-            "two different builds must not share a fingerprint"
-        );
+        assert_ne!(one.mark, two.mark, "two different builds must not share a fingerprint");
         assert_ne!(print_of(&one), print_of(&two));
     }
 
     #[test]
     fn the_program_behind_a_copy_is_named_without_the_note_about_the_old_file() {
-        assert_eq!(
-            without_the_deleted_mark("/usr/bin/atelier (deleted)"),
-            "/usr/bin/atelier"
-        );
-        assert_eq!(
-            without_the_deleted_mark("/usr/bin/atelier"),
-            "/usr/bin/atelier"
-        );
+        assert_eq!(without_the_deleted_mark("/usr/bin/atelier (deleted)"), "/usr/bin/atelier");
+        assert_eq!(without_the_deleted_mark("/usr/bin/atelier"), "/usr/bin/atelier");
         // A folder somebody really did call that keeps its name.
-        assert_eq!(
-            without_the_deleted_mark("/home/me/(deleted)/atelier"),
-            "/home/me/(deleted)/atelier"
-        );
+        assert_eq!(without_the_deleted_mark("/home/me/(deleted)/atelier"), "/home/me/(deleted)/atelier");
     }
 
     #[test]
@@ -672,10 +604,7 @@ mod tests {
         std::fs::remove_file(&build).unwrap();
 
         assert_eq!(glance(&build), None);
-        assert!(
-            worth_a_look(Some(quiet), None),
-            "gone is a change, not a silence"
-        );
+        assert!(worth_a_look(Some(quiet), None), "gone is a change, not a silence");
         assert!(
             worth_a_look(None, glance(&build)),
             "a glance that never landed can settle nothing, so the full look decides"

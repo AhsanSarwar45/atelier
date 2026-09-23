@@ -155,11 +155,12 @@ pub async fn watch(
     Extension(shells): Extension<Shells>,
     FromUrl(id): FromUrl<String>,
 ) -> Response {
-    let Some(session) = Uuid::parse_str(&id)
-        .ok()
-        .and_then(|named| shells.get(named))
-    else {
-        return (StatusCode::NOT_FOUND, "Shell not found.").into_response();
+    let Some(session) = Uuid::parse_str(&id).ok().and_then(|named| shells.get(named)) else {
+        return (
+            StatusCode::NOT_FOUND,
+            "Shell not found.",
+        )
+            .into_response();
     };
 
     upgrade.on_upgrade(move |socket| carry(socket, session))
@@ -302,6 +303,7 @@ async fn to_the_shell<T: Send + 'static>(
     .ok()
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,11 +405,10 @@ mod tests {
         let (browser, server) = tokio::io::duplex(PIPE_HOLDS);
         let app = app.clone();
         tokio::spawn(async move {
-            let served =
-                hyper::service::service_fn(move |asked: Request<hyper::body::Incoming>| {
-                    let app = app.clone();
-                    async move { app.oneshot(asked.map(Body::new)).await }
-                });
+            let served = hyper::service::service_fn(move |asked: Request<hyper::body::Incoming>| {
+                let app = app.clone();
+                async move { app.oneshot(asked.map(Body::new)).await }
+            });
             let _ = hyper::server::conn::http1::Builder::new()
                 .serve_connection(TokioIo::new(server), served)
                 .with_upgrades()
@@ -485,9 +486,7 @@ mod tests {
     async fn one_frame(socket: &mut Socket) -> Vec<u8> {
         match tokio::time::timeout(PATIENCE, socket.next()).await {
             Ok(Some(Ok(Frame::Binary(run)))) => run,
-            other => {
-                panic!("the socket should have carried a frame of bytes, and carried {other:?}")
-            }
+            other => panic!("the socket should have carried a frame of bytes, and carried {other:?}"),
         }
     }
 
@@ -770,9 +769,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(250)).await;
         let replay = the_whole_replay(&mut socket).await;
         let (frames, _) = everything_carried(&mut socket).await;
-        let printed = printed
-            .await
-            .expect("the shell's output should have been gathered");
+        let printed = printed.await.expect("the shell's output should have been gathered");
 
         let carried = [replay.clone(), frames.concat()].concat();
         assert!(
@@ -859,18 +856,14 @@ mod tests {
         }
 
         socket
-            .send(Frame::Text(
-                "{\"type\":\"resize\",\"cols\":100,\"rows\":40}".to_string(),
-            ))
+            .send(Frame::Text("{\"type\":\"resize\",\"cols\":100,\"rows\":40}".to_string()))
             .await
             .expect("a socket should take a resize");
         // Asked of the shell rather than of the server. What matters is the
         // shape the program a person is about to run will see, and only the
         // shell can answer that.
         socket
-            .send(Frame::Binary(
-                b"printf 'SIZE[%s]\\n' \"$(stty size)\"\n".to_vec(),
-            ))
+            .send(Frame::Binary(b"printf 'SIZE[%s]\\n' \"$(stty size)\"\n".to_vec()))
             .await
             .expect("a socket should take keystrokes");
 
@@ -977,9 +970,7 @@ mod tests {
             .unwrap()
             .type_into(b"printf 'THEEND\\n'; exit\n")
             .expect("a shell that just started should take keystrokes");
-        let printed = printed
-            .await
-            .expect("the shell's output should have been gathered");
+        let printed = printed.await.expect("the shell's output should have been gathered");
         assert!(
             session.pump.over(),
             "the shell's output ended, so the pump should agree that it did"
@@ -1026,9 +1017,7 @@ mod tests {
             .unwrap()
             .type_into(PRINT_A_LOT)
             .expect("a shell that just started should take keystrokes");
-        printed
-            .await
-            .expect("the shell's output should have been gathered");
+        printed.await.expect("the shell's output should have been gathered");
 
         let kept = session.pump.replay();
         assert!(

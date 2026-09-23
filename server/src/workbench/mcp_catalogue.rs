@@ -105,11 +105,7 @@ pub struct Listing {
 
 fn bundled() -> &'static Bundled {
     static ONCE: OnceLock<Bundled> = OnceLock::new();
-    ONCE.get_or_init(|| {
-        serde_json::from_str(BUNDLED).expect(
-            "the bundled catalogue is built by scripts/build-mcp-catalogue.mjs and checked in",
-        )
-    })
+    ONCE.get_or_init(|| serde_json::from_str(BUNDLED).expect("the bundled catalogue is built by scripts/build-mcp-catalogue.mjs and checked in"))
 }
 
 /// The shelves, largest first, so the browser opens on something worth reading.
@@ -381,11 +377,7 @@ pub fn launch_key(command: Option<&str>, args: &[String], url: Option<&str>) -> 
             .split_once("://")
             .map(|(_, rest)| rest)
             .unwrap_or(at.as_str());
-        return at
-            .split('/')
-            .next()
-            .filter(|h| !h.is_empty())
-            .map(str::to_string);
+        return at.split('/').next().filter(|h| !h.is_empty()).map(str::to_string);
     }
     let program = command?.trim().rsplit('/').next()?.to_ascii_lowercase();
     // A runner is told what to run; anything else IS what runs, and its own
@@ -399,10 +391,7 @@ pub fn launch_key(command: Option<&str>, args: &[String], url: Option<&str>) -> 
     let mut rest = args.iter().map(String::as_str);
     let mut word = rest.next();
     while let Some(token) = word {
-        let skip_value = matches!(
-            token,
-            "-e" | "--env" | "-v" | "--volume" | "-p" | "--publish" | "--name" | "--from"
-        );
+        let skip_value = matches!(token, "-e" | "--env" | "-v" | "--volume" | "-p" | "--publish" | "--name" | "--from");
         let is_flag = token.starts_with('-');
         let is_verb = matches!(token, "run" | "exec" | "create");
         if skip_value {
@@ -425,9 +414,7 @@ fn by_launch() -> &'static HashMap<String, Entry> {
     ONCE.get_or_init(|| {
         let mut index = HashMap::new();
         for entry in &bundled().entries {
-            if let Some(key) =
-                launch_key(entry.command.as_deref(), &entry.args, entry.url.as_deref())
-            {
+            if let Some(key) = launch_key(entry.command.as_deref(), &entry.args, entry.url.as_deref()) {
                 index.entry(key).or_insert_with(|| entry.clone());
             }
         }
@@ -437,11 +424,7 @@ fn by_launch() -> &'static HashMap<String, Entry> {
 
 /// The catalogue's record for a server already on an account, matched by what
 /// starts it. `None` when the catalogue has never heard of it.
-pub fn identify(
-    command: Option<&str>,
-    args: &[String],
-    url: Option<&str>,
-) -> Option<&'static Entry> {
+pub fn identify(command: Option<&str>, args: &[String], url: Option<&str>) -> Option<&'static Entry> {
     by_launch().get(&launch_key(command, args, url)?)
 }
 
@@ -455,10 +438,7 @@ pub fn config(brand: &str, entry: &Entry, supplied: &Map<String, Value>) -> Map<
         if brand == "claude" {
             config.insert("type".to_string(), json!("http"));
         }
-        config.insert(
-            "url".to_string(),
-            json!(entry.url.clone().unwrap_or_default()),
-        );
+        config.insert("url".to_string(), json!(entry.url.clone().unwrap_or_default()));
     } else {
         if brand == "claude" {
             config.insert("type".to_string(), json!("stdio"));
@@ -496,15 +476,7 @@ mod tests {
         let found = identify(Some("docker"), &args, None).expect("the bundled set has it");
         assert_eq!(found.id, "duckduckgo");
         // The same server, pinned to a tag and started by a full path.
-        let tagged = [
-            "run",
-            "-i",
-            "--rm",
-            "-e",
-            "NOISE=1",
-            "mcp/duckduckgo:latest",
-        ]
-        .map(String::from);
+        let tagged = ["run", "-i", "--rm", "-e", "NOISE=1", "mcp/duckduckgo:latest"].map(String::from);
         assert_eq!(
             identify(Some("/usr/bin/docker"), &tagged, None).map(|e| e.id.as_str()),
             Some("duckduckgo")
@@ -518,12 +490,7 @@ mod tests {
         // wearing somebody else's icon.
         let mine = ["./my-server.py".to_string()];
         assert!(identify(Some("python3"), &mine, None).is_none());
-        assert!(identify(
-            Some("npx"),
-            &["-y".to_string(), "@nobody/nothing".to_string()],
-            None
-        )
-        .is_none());
+        assert!(identify(Some("npx"), &["-y".to_string(), "@nobody/nothing".to_string()], None).is_none());
     }
 
     #[test]
@@ -605,13 +572,7 @@ mod tests {
         assert_eq!(entry.id, "chrome-devtools");
         assert_eq!(entry.command.as_deref(), Some("npx"));
         assert_eq!(entry.args, ["-y", "chrome-devtools-mcp"]);
-        assert_eq!(
-            entry.needs,
-            [Need {
-                name: "TOKEN".to_string(),
-                description: "A token.".to_string()
-            }]
-        );
+        assert_eq!(entry.needs, [Need { name: "TOKEN".to_string(), description: "A token.".to_string() }]);
 
         // A row with nothing runnable and nothing curated to fall back on is
         // not offered at all.

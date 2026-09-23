@@ -13,12 +13,12 @@ pub mod git;
 pub mod git_watch;
 pub mod install_method;
 pub mod live;
-pub mod memory_settings;
 pub mod new_chat;
-pub mod projects;
 pub mod push;
 pub mod remote_access;
+pub mod memory_settings;
 pub mod search_settings;
+pub mod projects;
 pub mod update_run;
 pub mod update_settings;
 pub mod version;
@@ -87,12 +87,8 @@ pub fn set_tool_override(name: &str, path: Option<PathBuf>) {
     let overrides = TOOL_OVERRIDES.get_or_init(|| Mutex::new(HashMap::new()));
     if let Ok(mut overrides) = overrides.lock() {
         match path {
-            Some(path) => {
-                overrides.insert(name.to_string(), path);
-            }
-            None => {
-                overrides.remove(name);
-            }
+            Some(path) => { overrides.insert(name.to_string(), path); }
+            None => { overrides.remove(name); }
         }
     }
     forget_tools();
@@ -172,11 +168,9 @@ fn endings(pathext: Option<&OsStr>) -> Vec<String> {
 /// a whole file name and not a stem to hang `.exe` off. The bare name stays on
 /// the end because everywhere but Windows it is the only spelling there is.
 fn spellings_of(name: &str, endings: &[String]) -> Vec<String> {
-    let worn = name.rsplit_once('.').is_some_and(|(_, end)| {
-        endings
-            .iter()
-            .any(|known| known[1..].eq_ignore_ascii_case(end))
-    });
+    let worn = name
+        .rsplit_once('.')
+        .is_some_and(|(_, end)| endings.iter().any(|known| known[1..].eq_ignore_ascii_case(end)));
     if worn {
         return vec![name.to_string()];
     }
@@ -315,8 +309,9 @@ fn unix_dirs(home: Option<&Path>, mac: bool) -> Vec<PathBuf> {
 #[cfg(unix)]
 fn runnable(file: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(file)
-        .is_ok_and(|about| about.is_file() && about.permissions().mode() & 0o111 != 0)
+    std::fs::metadata(file).is_ok_and(|about| {
+        about.is_file() && about.permissions().mode() & 0o111 != 0
+    })
 }
 
 /// Whether a file found under a tool's name is one this computer can start.
@@ -391,8 +386,7 @@ pub fn find_tool(name: &str, others: &[&str]) -> Option<PathBuf> {
     }
     if let Some(path) = TOOL_OVERRIDES
         .get_or_init(|| Mutex::new(HashMap::new()))
-        .lock()
-        .ok()
+        .lock().ok()
         .and_then(|overrides| overrides.get(name).cloned())
         .filter(|path| runnable(path))
     {
@@ -408,10 +402,7 @@ pub fn find_tool(name: &str, others: &[&str]) -> Option<PathBuf> {
             None => tracing::warn!(
                 "{} not found. Searched: {}",
                 name,
-                dirs.iter()
-                    .map(|p| p.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                dirs.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
             ),
         }
         found
@@ -517,7 +508,9 @@ pub fn validate_path_security(path: &Path) -> Result<(), String> {
         let path_str = canonical_path.to_string_lossy();
         // Windows canonicalize produces \\?\C:\... (extended-length path prefix).
         // Strip that prefix before checking for actual UNC paths.
-        let normalized = path_str.strip_prefix("\\\\?\\").unwrap_or(&path_str);
+        let normalized = path_str
+            .strip_prefix("\\\\?\\")
+            .unwrap_or(&path_str);
         // Real UNC paths: \\server\share or \\?\UNC\server\share
         if normalized.starts_with("\\\\") || normalized.starts_with("UNC\\") {
             return Err("Access denied: network (UNC) paths are not allowed".to_string());
@@ -699,10 +692,7 @@ mod tests {
     #[test]
     fn an_empty_place_finds_nothing() {
         let place = tempfile::tempdir().expect("a directory of our own");
-        assert_eq!(
-            search_in(&here_endings(), &[place.path().to_path_buf()], &["bd"]),
-            None
-        );
+        assert_eq!(search_in(&here_endings(), &[place.path().to_path_buf()], &["bd"]), None);
     }
 
     /// A computer whose list of places is empty still has its tools on it.
@@ -802,11 +792,7 @@ mod tests {
         let dirs = windows_dirs(Some(&home), &told);
         for wanted in [
             home.join("AppData").join("Roaming").join("npm"),
-            home.join("AppData")
-                .join("Local")
-                .join("Programs")
-                .join("Git")
-                .join("cmd"),
+            home.join("AppData").join("Local").join("Programs").join("Git").join("cmd"),
             programs.join("Git").join("cmd"),
             programs.join("nodejs"),
             older.join("Git").join("cmd"),
@@ -834,9 +820,7 @@ mod tests {
         assert!(dirs.contains(&PathBuf::from(r"C:\Program Files").join("Git").join("cmd")));
         assert!(dirs.contains(&PathBuf::from(r"C:\Windows").join("System32")));
         assert!(
-            !dirs
-                .iter()
-                .any(|d| d.starts_with(r"C:\Program Files (x86)")),
+            !dirs.iter().any(|d| d.starts_with(r"C:\Program Files (x86)")),
             "a folder the computer never named is not invented for it"
         );
     }
@@ -852,11 +836,7 @@ mod tests {
         let file = install(&installed, "git.exe");
 
         assert_eq!(
-            search_in(
-                &windows_endings(),
-                std::slice::from_ref(&installed),
-                &["git"]
-            ),
+            search_in(&windows_endings(), std::slice::from_ref(&installed), &["git"]),
             Some(file),
             "the bare name has to reach the file wearing the ending"
         );
@@ -892,18 +872,14 @@ mod tests {
         let apple = unix_dirs(None, true);
         assert!(apple.contains(&PathBuf::from("/opt/homebrew/bin")));
         assert!(
-            apple
-                .iter()
-                .position(|d| d == &PathBuf::from("/opt/homebrew/bin"))
+            apple.iter().position(|d| d == &PathBuf::from("/opt/homebrew/bin"))
                 < apple.iter().position(|d| d == &PathBuf::from("/usr/bin")),
             "what the reader installed is preferred to what the system shipped"
         );
 
         let other = unix_dirs(None, false);
         assert!(!other.contains(&PathBuf::from("/opt/homebrew/bin")));
-        assert!(
-            other.contains(&PathBuf::from("/usr/bin")) && other.contains(&PathBuf::from("/bin"))
-        );
+        assert!(other.contains(&PathBuf::from("/usr/bin")) && other.contains(&PathBuf::from("/bin")));
     }
 
     /// A name is written out under every ending it may wear, and one already
@@ -926,11 +902,7 @@ mod tests {
             let result = validate_path_security(&PathBuf::from("\\\\server\\share\\file"));
             assert!(result.is_err());
             let err_msg = result.unwrap_err();
-            assert!(
-                err_msg.contains("denied")
-                    || err_msg.contains("Invalid")
-                    || err_msg.contains("network")
-            );
+            assert!(err_msg.contains("denied") || err_msg.contains("Invalid") || err_msg.contains("network"));
         } else {
             // Unix: paths outside home should be rejected
             let result = validate_path_security(&PathBuf::from("/etc/passwd"));
@@ -939,4 +911,5 @@ mod tests {
             assert!(err_msg.contains("denied") || err_msg.contains("Invalid"));
         }
     }
+
 }

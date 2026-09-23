@@ -118,7 +118,8 @@ mod tests {
             "{\"decision\": \"block\", \"reason\": \"Reply defers work (\\\"Future Session\\\"). Never flag work for a future agent or session: do it now, or state the concrete blocker and what input is needed.\"}\n"
         );
         assert_eq!(
-            answer(r#"{"last_assistant_message":"The session model is documented."}"#).unwrap(),
+            answer(r#"{"last_assistant_message":"The session model is documented."}"#)
+                .unwrap(),
             ""
         );
         assert_eq!(
@@ -127,4 +128,5 @@ mod tests {
             ""
         );
     }
+
 }

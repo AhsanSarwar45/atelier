@@ -365,11 +365,7 @@ mod tests {
         let frame: serde_json::Value = serde_json::from_str(&said).unwrap();
         assert_eq!(frame["kind"], "changed");
         let named = frame["paths"].as_array().unwrap();
-        let wanted = root
-            .join("src")
-            .join("new.ts")
-            .to_string_lossy()
-            .into_owned();
+        let wanted = root.join("src").join("new.ts").to_string_lossy().into_owned();
         assert!(
             named.iter().any(|p| p.as_str() == Some(wanted.as_str())),
             "the new file was not named: {named:?}"
@@ -453,9 +449,7 @@ mod tests {
         assert!(found.contains(&root));
         assert!(found.contains(&root.join("src")));
         assert!(found.contains(&root.join("src").join("workbench")));
-        assert!(!found
-            .iter()
-            .any(|d| d.starts_with(root.join("node_modules"))));
+        assert!(!found.iter().any(|d| d.starts_with(root.join("node_modules"))));
         assert!(!found.contains(&root.join("generated")));
     }
 

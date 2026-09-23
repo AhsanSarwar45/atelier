@@ -240,7 +240,10 @@ async fn asked_on_a_terminal(
     match tokio::time::timeout(ANSWER_WITHIN, reading).await {
         Err(_) => {
             let _ = killer.kill();
-            Err(format!("{} did not answer in time.", program.display()))
+            Err(format!(
+                "{} did not answer in time.",
+                program.display()
+            ))
         }
         Ok(Err(why)) => Err(format!("The answer could not be read: {why}")),
         Ok(Ok(raw)) => Ok(plain(&raw)),
@@ -354,10 +357,10 @@ impl SignIns {
         profile: &str,
         directory: Option<&Path>,
     ) -> Result<Progress, String> {
-        let variable =
-            super::profiles::variable(brand).ok_or_else(|| format!("{brand} does not sign in."))?;
-        let program =
-            program(brand).ok_or_else(|| format!("{brand} is not installed on this computer."))?;
+        let variable = super::profiles::variable(brand)
+            .ok_or_else(|| format!("{brand} does not sign in."))?;
+        let program = program(brand)
+            .ok_or_else(|| format!("{brand} is not installed on this computer."))?;
 
         // The directory has to be there before the program is told to keep an
         // identity in it, or the first thing it does is fail to write. The

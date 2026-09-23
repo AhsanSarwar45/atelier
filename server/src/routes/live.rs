@@ -47,7 +47,12 @@ use axum::{
 use futures::{sink::SinkExt, stream::StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::{convert::Infallible, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    convert::Infallible,
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -609,12 +614,7 @@ pub async fn live(
     // The Git panel, while it is on screen: its repository's git directory
     // watched, so a commit or a push made in a terminal reaches the counts the
     // panel is drawing without anybody pressing refresh (bw-8nwh.2).
-    if let Some(repo) = params
-        .git
-        .as_deref()
-        .map(str::trim)
-        .filter(|r| !r.is_empty())
-    {
+    if let Some(repo) = params.git.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
         let repo = PathBuf::from(repo);
         let tx = tx.clone();
         tokio::spawn(async move {
@@ -625,12 +625,7 @@ pub async fn live(
     // The Files tab, while it is on screen: the folder it is drawing watched,
     // so a file written from a terminal or by an agent appears in the tree
     // without anybody reopening the folder (bw-g3o3.3).
-    if let Some(root) = params
-        .fs
-        .as_deref()
-        .map(str::trim)
-        .filter(|r| !r.is_empty())
-    {
+    if let Some(root) = params.fs.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
         let root = PathBuf::from(root);
         let tx = tx.clone();
         tokio::spawn(async move {
@@ -919,12 +914,7 @@ mod tests {
 
         let paths = HashSet::from([record]);
         assert_eq!(
-            crate::workbench::external::changed_record_folders(
-                &paths,
-                std::slice::from_ref(&claude),
-                std::slice::from_ref(&codex),
-                &mut HashMap::new()
-            ),
+            crate::workbench::external::changed_record_folders(&paths, std::slice::from_ref(&claude), std::slice::from_ref(&codex), &mut HashMap::new()),
             Some(vec!["/work/codex".to_string()])
         );
     }
@@ -1013,21 +1003,8 @@ mod tests {
             })
         };
         let mut file = fs::OpenOptions::new().append(true).open(&record).unwrap();
-        writeln!(
-            file,
-            "{}",
-            note(
-                "b3ovdktbe",
-                "Background command \"Full cargo test\" completed (exit code 0)"
-            )
-        )
-        .unwrap();
-        writeln!(
-            file,
-            "{}",
-            note("a94ba500064fc0b02", "Agent \"SSH prompt\" finished")
-        )
-        .unwrap();
+        writeln!(file, "{}", note("b3ovdktbe", "Background command \"Full cargo test\" completed (exit code 0)")).unwrap();
+        writeln!(file, "{}", note("a94ba500064fc0b02", "Agent \"SSH prompt\" finished")).unwrap();
         writeln!(
             file,
             "{}",
@@ -1041,18 +1018,10 @@ mod tests {
 
         let closed = tokio::time::timeout(Duration::from_secs(2), async {
             loop {
-                let events = state
-                    .database()
-                    .events_since("chat-1".into(), 0)
-                    .await
-                    .unwrap();
+                let events = state.database().events_since("chat-1".into(), 0).await.unwrap();
                 if events.iter().any(|event| {
                     event.kind == crate::workbench::protocol::EventKind::AgentFinished
-                        && event
-                            .fields
-                            .get("agentId")
-                            .and_then(serde_json::Value::as_str)
-                            == Some("b3ovdktbe")
+                        && event.fields.get("agentId").and_then(serde_json::Value::as_str) == Some("b3ovdktbe")
                 }) {
                     break events;
                 }
@@ -1065,51 +1034,23 @@ mod tests {
             .iter()
             .find(|event| {
                 event.kind == crate::workbench::protocol::EventKind::AgentFinished
-                    && event
-                        .fields
-                        .get("agentId")
-                        .and_then(serde_json::Value::as_str)
-                        == Some("b3ovdktbe")
+                    && event.fields.get("agentId").and_then(serde_json::Value::as_str) == Some("b3ovdktbe")
             })
             .unwrap();
-        assert_eq!(
-            shell
-                .fields
-                .get("state")
-                .and_then(serde_json::Value::as_str),
-            Some("done")
-        );
-        assert_eq!(
-            shell.fields.get("at").and_then(serde_json::Value::as_str),
-            Some("2026-09-06T04:46:29Z")
-        );
+        assert_eq!(shell.fields.get("state").and_then(serde_json::Value::as_str), Some("done"));
+        assert_eq!(shell.fields.get("at").and_then(serde_json::Value::as_str), Some("2026-09-06T04:46:29Z"));
 
         tokio::time::sleep(Duration::from_millis(350)).await;
-        let events = state
-            .database()
-            .events_since("chat-1".into(), 0)
-            .await
-            .unwrap();
+        let events = state.database().events_since("chat-1".into(), 0).await.unwrap();
         assert!(
-            !events.iter().any(|event| event
-                .fields
-                .get("agentId")
-                .and_then(serde_json::Value::as_str)
-                == Some("a94ba500064fc0b02")),
+            !events.iter().any(|event| event.fields.get("agentId").and_then(serde_json::Value::as_str) == Some("a94ba500064fc0b02")),
             "a helper's ending is the driver's to report, with its own last words"
         );
         assert!(
-            !events.iter().any(|event| event
-                .fields
-                .get("text")
-                .and_then(serde_json::Value::as_str)
-                == Some("words the driver already carried")),
+            !events.iter().any(|event| event.fields.get("text").and_then(serde_json::Value::as_str) == Some("words the driver already carried")),
             "the conversation itself stays the driver's alone"
         );
-        assert!(
-            state.has_chat_follower("chat-1").await,
-            "the follower stays on beside the driver"
-        );
+        assert!(state.has_chat_follower("chat-1").await, "the follower stays on beside the driver");
     }
 
     #[tokio::test]
@@ -1180,11 +1121,7 @@ mod tests {
 
         let appeared = tokio::time::timeout(Duration::from_secs(2), async {
             loop {
-                let crate::workbench::actor::SessionUpdate::Event(event) =
-                    updates.recv().await.unwrap()
-                else {
-                    continue;
-                };
+                let crate::workbench::actor::SessionUpdate::Event(event) = updates.recv().await.unwrap() else { continue; };
                 if event.fields.get("text").and_then(serde_json::Value::as_str)
                     == Some("one shared answer")
                 {
@@ -1194,19 +1131,11 @@ mod tests {
         })
         .await;
         if appeared.is_err() {
-            let events = state
-                .database()
-                .events_since("chat-1".into(), 0)
-                .await
-                .unwrap();
+            let events = state.database().events_since("chat-1".into(), 0).await.unwrap();
             panic!("the shared follower did not publish the exact appended words: {events:?}");
         }
         tokio::time::sleep(Duration::from_millis(350)).await;
-        let events = state
-            .database()
-            .events_since("chat-1".into(), 0)
-            .await
-            .unwrap();
+        let events = state.database().events_since("chat-1".into(), 0).await.unwrap();
         assert_eq!(
             events
                 .iter()

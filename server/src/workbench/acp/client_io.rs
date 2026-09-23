@@ -109,8 +109,7 @@ fn command_line(command: &str, args: &[String]) -> String {
     std::iter::once(command)
         .chain(args.iter().map(String::as_str))
         .map(|word| {
-            if word.is_empty()
-                || word.contains(|c: char| c.is_whitespace() || c == '\'' || c == '"')
+            if word.is_empty() || word.contains(|c: char| c.is_whitespace() || c == '\'' || c == '"')
             {
                 format!("'{}'", word.replace('\'', r"'\''"))
             } else {
@@ -229,10 +228,7 @@ impl ClientIo {
         command
             .args(&request.args)
             .current_dir(cwd)
-            .env(
-                super::super::memory::CHAT_ENV,
-                request.session_id.0.as_ref(),
-            )
+            .env(super::super::memory::CHAT_ENV, request.session_id.0.as_ref())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

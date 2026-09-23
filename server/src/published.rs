@@ -76,7 +76,10 @@ pub fn checksum_for(list: &str, file: &str) -> Option<String> {
 }
 
 /// Reads the fingerprints a release publishes, from the release's own copy.
-pub async fn checksums(client: &reqwest::Client, checksums_url: &str) -> Result<String, Unproved> {
+pub async fn checksums(
+    client: &reqwest::Client,
+    checksums_url: &str,
+) -> Result<String, Unproved> {
     let response = client.get(checksums_url).send().await.map_err(|e| {
         Unproved::Interrupted(format!("Could not read the published checksums: {}", e))
     })?;
@@ -179,8 +182,8 @@ where
     let mut stream = std::pin::pin!(stream);
 
     while let Some(chunk) = stream.next().await {
-        let chunk =
-            chunk.map_err(|e| Unproved::Interrupted(format!("Download failed part way: {}", e)))?;
+        let chunk = chunk
+            .map_err(|e| Unproved::Interrupted(format!("Download failed part way: {}", e)))?;
         let chunk = chunk.as_ref();
         hasher.update(chunk);
         file.write_all(chunk)
@@ -271,15 +274,7 @@ pub async fn download_watched(
     }
 
     let total = response.content_length();
-    write_if_it_matches_watched(
-        response.bytes_stream(),
-        &published,
-        file,
-        dest,
-        total,
-        watch,
-    )
-    .await
+    write_if_it_matches_watched(response.bytes_stream(), &published, file, dest, total, watch).await
 }
 
 #[cfg(test)]
@@ -333,11 +328,7 @@ mod tests {
     #[test]
     fn test_checksum_for_ignores_a_fingerprint_in_the_wrong_column() {
         // A name that only ever appears as a fingerprint is not a file.
-        assert!(checksum_for(
-            LIST,
-            "2f1c3a1b1b6d2f4c7d3a5b8e0f9c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c"
-        )
-        .is_none());
+        assert!(checksum_for(LIST, "2f1c3a1b1b6d2f4c7d3a5b8e0f9c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c").is_none());
     }
 
     // ── a download that matches ─────────────────────────────────────────
@@ -385,12 +376,10 @@ mod tests {
             matches!(refusal, Unproved::DoesNotMatch(_)),
             "the refusal must say the checksum did not match, got: {refusal:?}"
         );
+        assert!(refusal.is_refusal(), "a mismatch is a refusal, not a hiccup");
         assert!(
-            refusal.is_refusal(),
-            "a mismatch is a refusal, not a hiccup"
-        );
-        assert!(
-            refusal.reason().contains("atelier-linux-x64") && refusal.reason().contains(&published),
+            refusal.reason().contains("atelier-linux-x64")
+                && refusal.reason().contains(&published),
             "the reason must name the file and the published checksum, got: {}",
             refusal.reason()
         );
@@ -455,10 +444,7 @@ mod tests {
             matches!(stopped, Unproved::Interrupted(_)),
             "a cut connection is an interruption, not a refusal: {stopped:?}"
         );
-        assert!(
-            !stopped.is_refusal(),
-            "an interruption is worth another try"
-        );
+        assert!(!stopped.is_refusal(), "an interruption is worth another try");
         assert!(!dest.exists(), "the part that was written must be gone");
     }
 

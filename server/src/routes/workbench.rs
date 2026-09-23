@@ -767,10 +767,7 @@ impl WorkbenchState {
         let sessions = if holds.is_empty() {
             Vec::new()
         } else {
-            self.database()
-                .list_sessions(None)
-                .await
-                .unwrap_or_default()
+            self.database().list_sessions(None).await.unwrap_or_default()
         };
         // Process provenance is classified once inside WorkbenchRegistry.
         // `holds` is therefore external by construction; this presentation
@@ -1006,10 +1003,8 @@ async fn health() -> Json<Value> {
 }
 
 async fn memory(State(state): State<WorkbenchState>) -> Result<Json<Value>, ApiError> {
-    Ok(Json(
-        serde_json::to_value(crate::workbench::memory::report(state.database()).await?)
-            .map_err(|error| error.to_string())?,
-    ))
+    Ok(Json(serde_json::to_value(crate::workbench::memory::report(state.database()).await?)
+        .map_err(|error| error.to_string())?))
 }
 
 async fn terminate_memory_process(
@@ -1506,10 +1501,7 @@ fn name_the_rows(rows: &mut [Value], project_path: Option<&str>) {
             title: row["title"].as_str(),
             named_by_owner: row["namedByOwner"].as_bool().unwrap_or(false),
             cwd: row["cwdHint"].as_str(),
-            project_path: row["projectPath"]
-                .as_str()
-                .or(project_path)
-                .unwrap_or_default(),
+            project_path: row["projectPath"].as_str().or(project_path).unwrap_or_default(),
             folder: row["folder"].as_str(),
             brand: row["brand"].as_str().unwrap_or_default(),
         });
@@ -1670,10 +1662,7 @@ type Listings = Arc<
     tokio::sync::Mutex<
         HashMap<
             (String, Option<std::path::PathBuf>),
-            (
-                std::time::Instant,
-                Vec<crate::workbench::acp::client::ListedSession>,
-            ),
+            (std::time::Instant, Vec<crate::workbench::acp::client::ListedSession>),
         >,
     >,
 >;
@@ -1828,14 +1817,7 @@ async fn provider_sessions(state: &WorkbenchState, project: Option<&str>) -> Vec
                         // And the folder: the record names the one the chat
                         // was begun in, which is the one it is resumed from
                         // and the project it belongs to (bw-6twt.1).
-                        for field in [
-                            "name",
-                            "cwd",
-                            "branch",
-                            "lastActiveAt",
-                            "lastSpokeAt",
-                            "begunBy",
-                        ] {
+                        for field in ["name", "cwd", "branch", "lastActiveAt", "lastSpokeAt", "begunBy"] {
                             match known.get(field) {
                                 Some(value) if !value.is_null() => {
                                     row[field] = value.clone();
@@ -1871,10 +1853,7 @@ async fn provider_sessions(state: &WorkbenchState, project: Option<&str>) -> Vec
             Some((
                 row["brand"].as_str()?.to_string(),
                 row["externalId"].as_str()?.to_string(),
-                row["cwd"]
-                    .as_str()
-                    .filter(|cwd| !cwd.is_empty())?
-                    .to_string(),
+                row["cwd"].as_str().filter(|cwd| !cwd.is_empty())?.to_string(),
             ))
         })
         .collect();
@@ -1980,7 +1959,9 @@ async fn recorded_sessions(
         // Every source kind, for the same reason as the Claude record above:
         // a subagent's thread left unlisted is a thread the adapter's answer
         // then adopts as a person's (bw-p61.17).
-        match crate::workbench::codex::history::list_threads(&transport, None, true).await {
+        match crate::workbench::codex::history::list_threads(&transport, None, true)
+            .await
+        {
             Ok(listed) => threads.extend(listed),
             Err(_) => {
                 state
@@ -2090,11 +2071,10 @@ async fn restore(
                 Some(answer) => answer.await?["title"].as_str().map(str::to_string),
                 None => None,
             };
-            if let Some(title) = pinned_title.as_deref().or_else(|| {
-                known["name"]
-                    .as_str()
-                    .filter(|title| !title.trim().is_empty())
-            }) {
+            if let Some(title) = pinned_title.as_deref().or_else(|| known["name"]
+                .as_str()
+                .filter(|title| !title.trim().is_empty()))
+            {
                 if row["title"].as_str() != Some(title) {
                     row["title"] = json!(title);
                     if let Some(session_id) = row["sessionId"].as_str() {
@@ -2314,17 +2294,14 @@ async fn restore(
     const UNPLACED_FOR: Duration = Duration::from_secs(600);
     static UNPLACEABLE: std::sync::LazyLock<std::sync::Mutex<HashMap<String, std::time::Instant>>> =
         std::sync::LazyLock::new(Default::default);
-    let tried = UNPLACEABLE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
+    let tried = UNPLACEABLE.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let unplaced: Vec<(String, String)> = rows
         .iter()
         .filter(|row| row["brand"] == "codex" && row["begunBy"].is_null())
         .filter(|row| {
-            row["sessionId"]
-                .as_str()
-                .is_none_or(|id| tried.get(id).is_none_or(|at| at.elapsed() >= UNPLACED_FOR))
+            row["sessionId"].as_str().is_none_or(|id| {
+                tried.get(id).is_none_or(|at| at.elapsed() >= UNPLACED_FOR)
+            })
         })
         .filter_map(|row| {
             Some((
@@ -2342,9 +2319,7 @@ async fn restore(
                 .filter_map(|(session_id, external_id)| {
                     let who = behind
                         .codex_record_anywhere(&external_id)
-                        .map(|path| {
-                            crate::workbench::codex::history::begun_by(&json!({ "path": path }))
-                        })
+                        .map(|path| crate::workbench::codex::history::begun_by(&json!({ "path": path })))
                         .unwrap_or("unknown");
                     if who == "unknown" {
                         UNPLACEABLE
@@ -3040,11 +3015,7 @@ mod tests {
     fn fixture_with_projects() -> (tempfile::TempDir, WorkbenchState, Arc<crate::db::Database>) {
         let (directory, state) = fixture();
         let projects = Arc::new(crate::db::Database::new_in_memory().unwrap());
-        (
-            directory,
-            state.with_projects(Arc::clone(&projects)),
-            projects,
-        )
+        (directory, state.with_projects(Arc::clone(&projects)), projects)
     }
 
     fn a_project(projects: &crate::db::Database, name: &str) -> String {
@@ -3121,11 +3092,7 @@ mod tests {
         let rows = asked_for_notifications(state, "").await;
 
         let ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
-        assert_eq!(
-            ids,
-            ["asking", "finished"],
-            "a chat merely working was announced, or the order was wrong"
-        );
+        assert_eq!(ids, ["asking", "finished"], "a chat merely working was announced, or the order was wrong");
         assert_eq!(rows[0]["needsAction"], true);
         assert_eq!(rows[0]["says"], "it stopped with an error");
         assert_eq!(rows[0]["projectName"], "Keystone");
@@ -3151,11 +3118,7 @@ mod tests {
         projects.delete_project(&deleted).unwrap();
         projects.archive_project(&archived).unwrap();
 
-        for (id, project) in [
-            ("kept", &live),
-            ("orphan", &deleted),
-            ("shelved", &archived),
-        ] {
+        for (id, project) in [("kept", &live), ("orphan", &deleted), ("shelved", &archived)] {
             state
                 .database()
                 .create_session(a_chat(id, project, "errored"))
@@ -3166,14 +3129,9 @@ mod tests {
         let rows = asked_for_notifications(state, "").await;
 
         let ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
-        assert_eq!(
-            ids,
-            ["kept"],
-            "a chat with no project to name was announced anyway"
-        );
+        assert_eq!(ids, ["kept"], "a chat with no project to name was announced anyway");
         assert!(
-            rows.iter()
-                .all(|r| r["projectName"].as_str().is_some_and(|n| !n.is_empty())),
+            rows.iter().all(|r| r["projectName"].as_str().is_some_and(|n| !n.is_empty())),
             "a row arrived without a project name"
         );
     }
@@ -3300,8 +3258,7 @@ mod tests {
         let rows = asked_for_notifications(state, "").await;
         let ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert_eq!(
-            ids,
-            ["asking"],
+            ids, ["asking"],
             "a cleared chat did not come back when it went on to say something else"
         );
     }
@@ -3378,9 +3335,7 @@ mod tests {
             "a test fixture's chat reached the owner's tray"
         );
         assert_eq!(
-            asked_for_notifications(state, "?include_test=true")
-                .await
-                .len(),
+            asked_for_notifications(state, "?include_test=true").await.len(),
             1,
             "a case that asked for test projects was refused them"
         );
@@ -3413,11 +3368,7 @@ mod tests {
         // to be left behind if nothing removes it.
         state
             .database()
-            .mark_announced(
-                "asking".into(),
-                "errored".into(),
-                "2026-01-01T00:00:00Z".into(),
-            )
+            .mark_announced("asking".into(), "errored".into(), "2026-01-01T00:00:00Z".into())
             .await
             .unwrap();
         assert_eq!(asked_for_notifications(state.clone(), "").await.len(), 3);
@@ -3437,8 +3388,7 @@ mod tests {
         let left = asked_for_notifications(state.clone(), "").await;
         let ids: Vec<&str> = left.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert_eq!(
-            ids,
-            ["elsewhere"],
+            ids, ["elsewhere"],
             "a deleted project's chats were still being announced"
         );
 
@@ -3459,13 +3409,7 @@ mod tests {
             assert_eq!(session.state, "dormant", "{id} was left awake");
         }
         assert_eq!(
-            state
-                .database()
-                .get_session("elsewhere".into())
-                .await
-                .unwrap()
-                .unwrap()
-                .state,
+            state.database().get_session("elsewhere".into()).await.unwrap().unwrap().state,
             "errored",
             "a chat in another project was put to sleep by an unrelated deletion"
         );
@@ -3969,9 +3913,11 @@ mod tests {
             "an answer past its window is asked again"
         );
         // And the folder is part of what makes an answer this reader's.
-        assert!(fresh_discovery(&state.discovery_cache, "/somewhere/else")
-            .await
-            .is_none());
+        assert!(
+            fresh_discovery(&state.discovery_cache, "/somewhere/else")
+                .await
+                .is_none()
+        );
     }
 
     /**
@@ -4078,9 +4024,7 @@ mod tests {
         // Another folder was never heard, and an old answer is asked afresh —
         // here there is no adapter to ask, so both are refused.
         let elsewhere = std::path::PathBuf::from("/work/other");
-        assert!(ask_provider_to_list(&state, "codex", Some(&elsewhere))
-            .await
-            .is_err());
+        assert!(ask_provider_to_list(&state, "codex", Some(&elsewhere)).await.is_err());
         state.listing_refused.lock().await.clear();
         state.listings.lock().await.insert(
             ("codex".into(), Some(folder.clone())),
@@ -4089,9 +4033,7 @@ mod tests {
                 vec![heard],
             ),
         );
-        assert!(ask_provider_to_list(&state, "codex", Some(&folder))
-            .await
-            .is_err());
+        assert!(ask_provider_to_list(&state, "codex", Some(&folder)).await.is_err());
     }
 
     #[tokio::test]

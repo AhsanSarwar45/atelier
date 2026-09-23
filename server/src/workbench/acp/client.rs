@@ -12,11 +12,11 @@ use agent_client_protocol::schema::v1::{
     AudioContent, BlobResourceContents, CancelNotification, CloseSessionRequest, ContentBlock,
     CreateElicitationRequest, CreateElicitationResponse, CreateTerminalRequest, ElicitationMode,
     EmbeddedResource, EmbeddedResourceResource, ImageContent, KillTerminalRequest,
-    ListSessionsRequest, LoadSessionRequest, Meta, NewSessionRequest, PromptRequest,
-    ReadTextFileRequest, ReleaseTerminalRequest, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, ResourceLink, ResumeSessionRequest,
+    ListSessionsRequest, LoadSessionRequest, Meta, NewSessionRequest,
+    PromptRequest, ReadTextFileRequest, ReleaseTerminalRequest, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, ResumeSessionRequest,
     SelectedPermissionOutcome, SessionConfigOptionValue, SetSessionConfigOptionRequest,
-    SetSessionModeRequest, TerminalOutputRequest, TextContent, TextResourceContents,
+    ResourceLink, SetSessionModeRequest, TerminalOutputRequest, TextContent, TextResourceContents,
     WaitForTerminalExitRequest, WriteTextFileRequest,
 };
 use agent_client_protocol::{AcpAgent, Agent, ConnectionTo, UntypedMessage};
@@ -54,16 +54,9 @@ fn remote_session_is_gone(error: &agent_client_protocol::Error, remote_id: &str)
         || said.contains("thread")
         || said.contains("rollout")
         || (!remote_id.is_empty() && said.contains(&remote_id.to_ascii_lowercase()));
-    let says_it_is_absent = [
-        "not found",
-        "no rollout",
-        "no such",
-        "does not exist",
-        "unknown",
-        "missing",
-    ]
-    .iter()
-    .any(|phrase| said.contains(phrase));
+    let says_it_is_absent = ["not found", "no rollout", "no such", "does not exist", "unknown", "missing"]
+        .iter()
+        .any(|phrase| said.contains(phrase));
     names_the_session && says_it_is_absent
 }
 
@@ -248,9 +241,11 @@ fn initialize_request(live: bool) -> Result<UntypedMessage, agent_client_protoco
     // bytes and the exit code beside it under `_meta`; unsaid, it arrives as a
     // paragraph of text with no exit code in it, which is what the screen used
     // to draw a shell from (bw-t26l.20).
-    let mut meta = json!({"subagent-transcript": true, "subagents": {}, "terminal_output": true});
+    let mut meta =
+        json!({"subagent-transcript": true, "subagents": {}, "terminal_output": true});
     if live {
-        meta["jetbrains"] = json!({"air": {"version":1,"capabilities":["nativeSubagentSessions"]}});
+        meta["jetbrains"] =
+            json!({"air": {"version":1,"capabilities":["nativeSubagentSessions"]}});
     }
     UntypedMessage::new(
         "initialize",
@@ -350,39 +345,29 @@ async fn one_shot_request(
     let method = method.to_string();
     agent_client_protocol::Client
         .builder()
-        .connect_with(
-            AcpAgent::new(config),
-            async move |connection: ConnectionTo<Agent>| {
-                let initialized = connection
-                    .send_request(initialize_request(false)?)
-                    .block_task()
-                    .await?;
-                agreed_version(&initialized)?;
-                if capability
-                    .as_deref()
-                    .is_some_and(|path| initialized.pointer(path).is_none())
-                {
-                    return Err(acp_error(format!("agent does not advertise {method}")));
+        .connect_with(AcpAgent::new(config), async move |connection: ConnectionTo<Agent>| {
+            let initialized = connection.send_request(initialize_request(false)?).block_task().await?;
+            agreed_version(&initialized)?;
+            if capability
+                .as_deref()
+                .is_some_and(|path| initialized.pointer(path).is_none())
+            {
+                return Err(acp_error(format!("agent does not advertise {method}")));
+            }
+            if method == "authenticate" {
+                let requested = params["methodId"].as_str().unwrap_or_default();
+                let offered = initialized["authMethods"]
+                    .as_array()
+                    .is_some_and(|methods| methods.iter().any(|entry| entry["id"] == requested));
+                if !offered {
+                    return Err(acp_error("agent did not advertise that authentication method"));
                 }
-                if method == "authenticate" {
-                    let requested = params["methodId"].as_str().unwrap_or_default();
-                    let offered = initialized["authMethods"]
-                        .as_array()
-                        .is_some_and(|methods| {
-                            methods.iter().any(|entry| entry["id"] == requested)
-                        });
-                    if !offered {
-                        return Err(acp_error(
-                            "agent did not advertise that authentication method",
-                        ));
-                    }
-                }
-                connection
-                    .send_request(UntypedMessage::new(&method, params)?)
-                    .block_task()
-                    .await
-            },
-        )
+            }
+            connection
+                .send_request(UntypedMessage::new(&method, params)?)
+                .block_task()
+                .await
+        })
         .await
         .map_err(|error| error.to_string())
 }
@@ -464,17 +449,17 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
         .external_id
         .clone()
         .ok_or_else(|| "saved session has no provider id".to_string())?;
-    let config = adapter::launch_config(
-        &session.brand,
-        session.model.as_deref(),
-        session.profile.as_deref(),
-    )
-    .ok_or_else(|| {
-        format!(
-            "bundled {} ACP adapter is incomplete or unavailable",
-            session.brand
-        )
-    })?;
+    let config =
+        adapter::launch_config(
+            &session.brand,
+            session.model.as_deref(),
+            session.profile.as_deref(),
+        ).ok_or_else(|| {
+            format!(
+                "bundled {} ACP adapter is incomplete or unavailable",
+                session.brand
+            )
+        })?;
     let policy = session_policy::build(Path::new(&session.cwd))?;
     let meta = session_meta(&session.brand, &policy);
     let local_id = session.id.clone();
@@ -501,8 +486,7 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
                     return Ok(());
                 }
                 let raw =
-                    super::client_io::with_terminal_output(&updates_io, notification.params())
-                        .await;
+                    super::client_io::with_terminal_output(&updates_io, notification.params()).await;
                 let events = update_normalizer
                     .lock()
                     .await
@@ -931,7 +915,12 @@ async fn record_transport_failure(database: &ChatDb, session: &Session, message:
     record_failure(database, session, message, false).await
 }
 
-async fn record_failure(database: &ChatDb, session: &Session, message: &str, signing_in: bool) {
+async fn record_failure(
+    database: &ChatDb,
+    session: &Session,
+    message: &str,
+    signing_in: bool,
+) {
     let _ = database
         .update_session(
             session.id.clone(),
@@ -1373,9 +1362,8 @@ async fn elicitation(
             ], "acp":raw
         }))?,
         _ => {
-            let declined =
-                serde_json::from_value::<CreateElicitationResponse>(json!({"action":"decline"}))
-                    .map_err(acp_error);
+            let declined = serde_json::from_value::<CreateElicitationResponse>(json!({"action":"decline"}))
+                .map_err(acp_error);
             return Ok(Box::pin(std::future::ready(declined)));
         }
     };
@@ -1519,11 +1507,7 @@ impl Default for Carries {
     /// refusing. Audio and embedded context both fall back to a resource link,
     /// which every agent MUST support, so there is nothing to gain by guessing.
     fn default() -> Self {
-        Self {
-            pictures: true,
-            audio: false,
-            embedded: false,
-        }
+        Self { pictures: true, audio: false, embedded: false }
     }
 }
 
@@ -1603,9 +1587,7 @@ fn carried_as(attachment: &Value, carries: Carries) -> Result<ContentBlock, Stri
     // a picture stopped here was stopped by what the agent said, not by us.
     let Some(path) = attachment["asset"].as_str().and_then(kept_file) else {
         return Err(if mime.starts_with("image/") && !carries.pictures {
-            format!(
-                "{name} (this agent says it cannot be sent pictures, and the file was not kept)"
-            )
+            format!("{name} (this agent says it cannot be sent pictures, and the file was not kept)")
         } else if mime.starts_with("audio/") && !carries.audio {
             format!("{name} (this agent says it cannot be sent audio, and the file was not kept)")
         } else {
@@ -2012,12 +1994,11 @@ pub(super) fn menu_fields(
     // have to allow is being left asking — either by offering the asking mode,
     // or by listing no modes at all, in which case it is asked for nothing and
     // keeps the one it started in (`workbench::answering`, `offers_mode`).
-    let lists_no_modes = modes["availableModes"].as_array().is_none_or(Vec::is_empty);
+    let lists_no_modes = modes["availableModes"]
+        .as_array()
+        .is_none_or(Vec::is_empty);
     let can_be_left_asking = lists_no_modes
-        || offers_mode(
-            modes,
-            &mode_to_acp(brand, super::super::answering::ATELIER_AUTO),
-        );
+        || offers_mode(modes, &mode_to_acp(brand, super::super::answering::ATELIER_AUTO));
     super::super::answering::offer_in_menu(&mut permission_modes, can_be_left_asking);
     json!({
         "commands":[], "skills":[], "agentDefinitions":agent_definitions, "agentControls":agent_controls,
@@ -2107,11 +2088,7 @@ impl AcpDriver {
         images: &[Value],
         content: Vec<ContentBlock>,
     ) -> Result<Value, String> {
-        let active = self
-            .normalizer
-            .lock()
-            .await
-            .request_is_active(&self.in_flight);
+        let active = self.normalizer.lock().await.request_is_active(&self.in_flight);
         // The id of the line just written is the only handle anyone has on it
         // afterwards. Dropping it here is what left the screen unable to say
         // which message to take back when the reader recalls a prompt, and
@@ -2360,33 +2337,16 @@ impl AcpDriver {
             let elicitations = status_elicitations.clone();
             Box::pin(async move {
                 let mut activity = normalizer.lock().await;
-                if !controls.is_closed()
-                    && !activity.request_is_active(&requests)
-                    && activity.turn_is_open()
-                {
+                if !controls.is_closed() && !activity.request_is_active(&requests) && activity.turn_is_open() {
                     permissions.cancel_all().await;
                     elicitations.cancel_all().await;
-                    let (ended, _) = withhold_standing(activity.finish_turn(
-                        &session_id,
-                        brand,
-                        &json!({"stopReason":"end_turn"}),
-                    ));
+                    let (ended, _) = withhold_standing(activity.finish_turn(&session_id, brand, &json!({"stopReason":"end_turn"})));
                     if !ended.is_empty() {
                         database.append_many(ended).await?;
                     }
                 }
-                let pending = permissions
-                    .pending
-                    .lock()
-                    .await
-                    .values()
-                    .any(|ask| !ask.answer.is_closed())
-                    || elicitations
-                        .pending
-                        .lock()
-                        .await
-                        .values()
-                        .any(|ask| !ask.answer.is_closed());
+                let pending = permissions.pending.lock().await.values().any(|ask| !ask.answer.is_closed())
+                    || elicitations.pending.lock().await.values().any(|ask| !ask.answer.is_closed());
                 let facts = activity.runtime_facts(!controls.is_closed(), pending, &requests);
                 super::super::status::reconcile(&database, &session_id, Some(&facts)).await
             })
@@ -2437,12 +2397,11 @@ impl AcpDriver {
                             notification.params(),
                         )
                         .await;
-                        let (events, withheld) =
-                            withhold_standing(updates_normalizer.lock().await.update(
-                                &updates_session,
-                                updates_brand,
-                                &raw,
-                            ));
+                        let (events, withheld) = withhold_standing(updates_normalizer.lock().await.update(
+                            &updates_session,
+                            updates_brand,
+                            &raw,
+                        ));
                         append(&updates_db, events).await?;
                         if withheld {
                             updates_reconcile().await.map_err(acp_error)?;
@@ -2491,7 +2450,8 @@ impl AcpDriver {
                         })
                     },
                     agent_client_protocol::on_receive_request!(),
-                );
+                )
+                ;
             let client = serving_client_io!(client, task_io);
             let agent = AcpAgent::new(config);
             let ready = Arc::new(Mutex::new(Some(ready)));
@@ -3073,17 +3033,13 @@ impl AcpDriver {
             // Persist the ending last, so no late result can overwrite it.
             if let Some(reply) = stop_reply.lock().await.take() {
                 let mut events = stopped_normalizer.lock().await.finish_turn(
-                    &stopped_session.id,
-                    brand,
-                    &json!({"stopReason":"cancelled"}),
+                    &stopped_session.id, brand, &json!({"stopReason":"cancelled"}),
                 );
                 if let Some(last) = events.last_mut() {
                     last.fields.insert("state".into(), json!("stopped"));
                     last.fields.insert("label".into(), json!("Stopped"));
                 }
-                let result = stopped_database
-                    .append_many(events)
-                    .await
+                let result = stopped_database.append_many(events).await
                     .map(|_| json!({"ok":true,"detached":true}));
                 let _ = reply.send(result);
                 return;
@@ -3097,12 +3053,10 @@ impl AcpDriver {
                     ("ACP adapter stopped during initialization".into(), false)
                 })));
             } else if !stopped_closing.load(Ordering::Acquire) {
-                let (message, signing_in) =
-                    failure.unwrap_or_else(|| ("ACP adapter stopped unexpectedly".into(), false));
+                let (message, signing_in) = failure
+                    .unwrap_or_else(|| ("ACP adapter stopped unexpectedly".into(), false));
                 let mut settled = stopped_normalizer.lock().await.finish_turn(
-                    &stopped_session.id,
-                    brand,
-                    &json!({"stopReason":"cancelled"}),
+                    &stopped_session.id, brand, &json!({"stopReason":"cancelled"}),
                 );
                 // Cleanup is shared with Stop; the transport failure supplies
                 // the terminal state instead of finish_turn's ordinary Ready.
@@ -3114,12 +3068,7 @@ impl AcpDriver {
         });
         let initialized = initialized
             .await
-            .map_err(|_| {
-                (
-                    "ACP adapter stopped during initialization".to_string(),
-                    false,
-                )
-            })
+            .map_err(|_| ("ACP adapter stopped during initialization".to_string(), false))
             .and_then(|result| result);
         if let Err((message, signing_in)) = initialized {
             record_failure(&database, &session, &message, signing_in).await;
@@ -3163,14 +3112,9 @@ impl AcpDriver {
                     command.at("text").as_str().unwrap_or_default(),
                 )
                 .await?;
-                let mut content = prompt_content(
-                    command,
-                    Carries::unpacked(self.carries.load(Ordering::SeqCst)),
-                )?;
-                let handoff = self
-                    .database
-                    .saved_account_handoff(self.session.id.clone())
-                    .await?;
+                let mut content =
+                    prompt_content(command, Carries::unpacked(self.carries.load(Ordering::SeqCst)))?;
+                let handoff = self.database.saved_account_handoff(self.session.id.clone()).await?;
                 if let Some(context) = handoff.as_deref().filter(|context| !context.is_empty()) {
                     content.insert(0, ContentBlock::Text(TextContent::new(format!(
                         "<account_handoff>\nThe account changed during this chat. Continue from this prior conversation without repeating it:\n\n{context}\n</account_handoff>"
@@ -3182,17 +3126,14 @@ impl AcpDriver {
                     .and_then(Value::as_array)
                     .map(Vec::as_slice)
                     .unwrap_or(&[]);
-                let accepted = self
-                    .submit_user_turn(
-                        command.at("text").as_str().unwrap_or_default(),
-                        images,
-                        content,
-                    )
-                    .await?;
+                let accepted = self.submit_user_turn(
+                    command.at("text").as_str().unwrap_or_default(),
+                    images,
+                    content,
+                )
+                .await?;
                 if handoff.is_some() {
-                    self.database
-                        .clear_account_handoff(self.session.id.clone())
-                        .await?;
+                    self.database.clear_account_handoff(self.session.id.clone()).await?;
                 }
                 Ok(accepted)
             }
@@ -3291,12 +3232,8 @@ impl AcpDriver {
             CommandKind::SessionMode => {
                 let selected = command.at("mode").as_str().unwrap_or_default().to_string();
                 let value = mode_to_acp(self.brand, &selected);
-                self.control(|reply| Control::Mode {
-                    value,
-                    selected,
-                    reply,
-                })
-                .await
+                self.control(|reply| Control::Mode { value, selected, reply })
+                    .await
             }
             CommandKind::SessionModel => {
                 let value = command.at("model").clone();
@@ -3326,8 +3263,7 @@ impl AcpDriver {
                 .await
             }
             CommandKind::SessionConfigOption => {
-                let key = command
-                    .at("configId")
+                let key = command.at("configId")
                     .as_str()
                     .filter(|key| !key.is_empty())
                     .ok_or_else(|| "configId is required".to_string())?
@@ -3515,29 +3451,24 @@ mod tests {
 
         // What the bundled claude adapter answers for a session it never
         // wrote down: ACP's own code, whoever asked.
-        assert!(gone(agent_client_protocol::Error::resource_not_found(
-            Some("a22f34ef-a523-4ad5-a87b-1db7aec91a41".into())
-        )));
+        assert!(gone(agent_client_protocol::Error::resource_not_found(Some(
+            "a22f34ef-a523-4ad5-a87b-1db7aec91a41".into()
+        ))));
         assert!(gone(agent_client_protocol::Error::resource_not_found(None)));
 
         // And what a provider that reaches for a plain internal error says
         // instead. It names what it could not find; that is what is read.
-        assert!(gone(
-            agent_client_protocol::Error::internal_error()
-                .data(r#"{"details":"no rollout found for thread id 01abc"}"#)
-        ));
-        assert!(gone(
-            agent_client_protocol::Error::internal_error()
-                .data("unknown session a22f34ef-a523-4ad5-a87b-1db7aec91a41")
-        ));
+        assert!(gone(agent_client_protocol::Error::internal_error().data(
+            r#"{"details":"no rollout found for thread id 01abc"}"#
+        )));
+        assert!(gone(agent_client_protocol::Error::internal_error()
+            .data("unknown session a22f34ef-a523-4ad5-a87b-1db7aec91a41")));
 
         // Everything else is a refusal to be shown, not a session to replace.
         assert!(!gone(agent_client_protocol::Error::auth_required()));
         assert!(!gone(agent_client_protocol::Error::internal_error()));
-        assert!(!gone(
-            agent_client_protocol::Error::internal_error()
-                .data("the model is overloaded, try again")
-        ));
+        assert!(!gone(agent_client_protocol::Error::internal_error()
+            .data("the model is overloaded, try again")));
     }
 
     /// A refusal is drawn in the chat, so it is written for the reader.
@@ -3547,9 +3478,9 @@ mod tests {
     /// a22f34ef-...: { "uri": "a22f34ef-..." }` on the screen (bw-m15v.3).
     #[test]
     fn a_refusal_reaches_the_reader_in_words_and_never_as_wire_text() {
-        let (said, _) = transport_failure(&agent_client_protocol::Error::resource_not_found(Some(
-            "a22f34ef-a523-4ad5-a87b-1db7aec91a41".into(),
-        )));
+        let (said, _) = transport_failure(&agent_client_protocol::Error::resource_not_found(
+            Some("a22f34ef-a523-4ad5-a87b-1db7aec91a41".into()),
+        ));
         assert!(!said.contains("a22f34ef"), "an id nobody can use: {said}");
         assert!(!said.contains('{'), "structure is not a sentence: {said}");
         assert!(said.contains("could not find this conversation"), "{said}");
@@ -3777,17 +3708,14 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         std::env::set_var("ATELIER_PRESENTATION_MEDIA_DIR", root.path());
         let bytes = b"ABC";
-        let asset =
-            crate::workbench::media::import_attachment(bytes, "one.png", root.path()).unwrap();
+        let asset = crate::workbench::media::import_attachment(bytes, "one.png", root.path()).unwrap();
 
         let command = prompt_with_images(json!([
             {"id":"one", "mime":"image/png", "dataUrl":"", "alt":"one.png", "asset":asset},
         ]));
         let content = prompt_content(&command, Carries::default()).unwrap();
         assert!(
-            content
-                .iter()
-                .any(|block| matches!(block, ContentBlock::Image(image) if image.data == "QUJD")),
+            content.iter().any(|block| matches!(block, ContentBlock::Image(image) if image.data == "QUJD")),
             "the picture did not reach the agent: {content:?}",
         );
 
@@ -3797,10 +3725,7 @@ mod tests {
             {"id":"one", "mime":"image/png", "dataUrl":"", "alt":"one.png", "asset":format!("{}.png", "b".repeat(64))},
         ]));
         assert!(
-            !prompt_content(&missing, Carries::default())
-                .unwrap()
-                .iter()
-                .any(|block| matches!(block, ContentBlock::Image(_))),
+            !prompt_content(&missing, Carries::default()).unwrap().iter().any(|block| matches!(block, ContentBlock::Image(_))),
             "a picture the store does not have became a block anyway",
         );
         std::env::remove_var("ATELIER_PRESENTATION_MEDIA_DIR");
@@ -3847,11 +3772,7 @@ mod tests {
         // The other two have neither bytes nor a file in the store, so there is
         // nothing to send. They are named in one closing line rather than
         // dropped in silence: the agent must not answer about what never came.
-        assert_eq!(
-            content.len(),
-            3,
-            "the two empty pictures must be accounted for: {content:?}"
-        );
+        assert_eq!(content.len(), 3, "the two empty pictures must be accounted for: {content:?}");
         match &content[2] {
             ContentBlock::Text(text) => {
                 assert!(text.text.starts_with("[Left off: "), "{text:?}");
@@ -3876,21 +3797,12 @@ mod tests {
             "alt": "a screenshot",
         }]));
 
-        let content = prompt_content(
-            &command,
-            Carries {
-                pictures: false,
-                ..Carries::default()
-            },
-        )
-        .unwrap();
+        let content = prompt_content(&command, Carries { pictures: false, ..Carries::default() }).unwrap();
         let words = content
             .iter()
             .map(|block| match block {
                 ContentBlock::Text(text) => text.text.clone(),
-                other => panic!(
-                    "nothing but words may go to an agent that takes no pictures, got {other:?}"
-                ),
+                other => panic!("nothing but words may go to an agent that takes no pictures, got {other:?}"),
             })
             .collect::<Vec<_>>();
         assert_eq!(words[0], "what is in this picture?");
@@ -3944,14 +3856,7 @@ mod tests {
         let recording = prompt_with_images(json!([
             {"alt":"a note.wav", "asset":keep(b"ABC", "a note.wav")},
         ]));
-        let heard = prompt_content(
-            &recording,
-            Carries {
-                audio: true,
-                ..Carries::default()
-            },
-        )
-        .unwrap();
+        let heard = prompt_content(&recording, Carries { audio: true, ..Carries::default() }).unwrap();
         match &heard[1] {
             ContentBlock::Audio(audio) => {
                 assert_eq!(audio.data, "QUJD");
@@ -3960,24 +3865,14 @@ mod tests {
             other => panic!("an agent that takes audio must be given it, got {other:?}"),
         }
         let deaf = prompt_content(&recording, Carries::default()).unwrap();
-        assert!(
-            matches!(&deaf[1], ContentBlock::ResourceLink(_)),
-            "{deaf:?}"
-        );
+        assert!(matches!(&deaf[1], ContentBlock::ResourceLink(_)), "{deaf:?}");
 
         // Words to an agent that takes embedded context go as words, not as a
         // base64 blob it would have to decode before it could read them.
         let notes = prompt_with_images(json!([
             {"alt":"notes.txt", "asset":keep(b"remember the milk", "notes.txt")},
         ]));
-        let read = prompt_content(
-            &notes,
-            Carries {
-                embedded: true,
-                ..Carries::default()
-            },
-        )
-        .unwrap();
+        let read = prompt_content(&notes, Carries { embedded: true, ..Carries::default() }).unwrap();
         match &read[1] {
             ContentBlock::Resource(held) => match &held.resource {
                 EmbeddedResourceResource::TextResourceContents(words) => {
@@ -3990,24 +3885,14 @@ mod tests {
         }
         // The same file to an agent that said nothing still arrives, as a link.
         let linked = prompt_content(&notes, Carries::default()).unwrap();
-        assert!(
-            matches!(&linked[1], ContentBlock::ResourceLink(_)),
-            "{linked:?}"
-        );
+        assert!(matches!(&linked[1], ContentBlock::ResourceLink(_)), "{linked:?}");
 
         // A file too big to embed goes as a link even to an agent that takes
         // embedded context: a prompt is not a file transfer.
         let heavy = prompt_with_images(json!([
             {"alt":"a dump.txt", "asset":keep(&vec![b'x'; EMBED_LIMIT as usize + 1], "a dump.txt")},
         ]));
-        let sent = prompt_content(
-            &heavy,
-            Carries {
-                embedded: true,
-                ..Carries::default()
-            },
-        )
-        .unwrap();
+        let sent = prompt_content(&heavy, Carries { embedded: true, ..Carries::default() }).unwrap();
         match &sent[1] {
             ContentBlock::ResourceLink(link) => {
                 assert_eq!(link.size, Some(EMBED_LIMIT as i64 + 1));
@@ -4022,27 +3907,17 @@ mod tests {
     /// that said nothing is assumed to take a picture and nothing else.
     #[test]
     fn what_an_agent_takes_is_read_off_its_own_answer() {
-        let said = |capabilities: Value| {
-            Carries::read(&json!({"agentCapabilities":{"promptCapabilities":capabilities}}))
-        };
+        let said = |capabilities: Value| Carries::read(&json!({"agentCapabilities":{"promptCapabilities":capabilities}}));
 
         assert_eq!(Carries::read(&json!({})), Carries::default());
         assert_eq!(said(json!({})), Carries::default());
         assert_eq!(
             said(json!({"image": false, "audio": false, "embeddedContext": false})),
-            Carries {
-                pictures: false,
-                audio: false,
-                embedded: false
-            },
+            Carries { pictures: false, audio: false, embedded: false },
         );
         assert_eq!(
             said(json!({"image": true, "audio": true, "embeddedContext": true})),
-            Carries {
-                pictures: true,
-                audio: true,
-                embedded: true
-            },
+            Carries { pictures: true, audio: true, embedded: true },
         );
         // Anything but a plain no leaves pictures on: they are the one kind
         // with no link to fall back to inside the conversation.
@@ -4100,8 +3975,7 @@ mod tests {
         let mut activity = AcpNormalizer::default();
         let generation = activity.begin_prompt();
         let in_flight = super::super::super::status::Requests::default();
-        let _request =
-            super::super::super::status::RequestLease::new(in_flight.clone(), generation);
+        let _request = super::super::super::status::RequestLease::new(in_flight.clone(), generation);
         let driver = AcpDriver {
             brand: "codex",
             database: database.clone(),
@@ -4161,8 +4035,7 @@ mod tests {
         let mut activity = AcpNormalizer::default();
         let generation = activity.begin_prompt();
         let in_flight = super::super::super::status::Requests::default();
-        let _request =
-            super::super::super::status::RequestLease::new(in_flight.clone(), generation);
+        let _request = super::super::super::status::RequestLease::new(in_flight.clone(), generation);
         let elicitations = Arc::new(ElicitationBroker::default());
         let (question_answer, question_result) = oneshot::channel();
         elicitations.pending.lock().await.insert(
@@ -4441,15 +4314,9 @@ mod tests {
             "options":[{"optionId":"reject","name":"No","kind":"reject_once"}]
         }))
         .unwrap();
-        let _answering = permission(
-            request,
-            database.clone(),
-            session.id.clone(),
-            broker.clone(),
-            None,
-        )
-        .await
-        .expect("the question is taken");
+        let _answering = permission(request, database.clone(), session.id.clone(), broker.clone(), None)
+            .await
+            .expect("the question is taken");
 
         assert!(
             broker.pending.lock().await.contains_key("call-1"),
@@ -5014,9 +4881,7 @@ mod tests {
         // agent it sent off included.
         for handshake in [&live, &replay] {
             assert_eq!(
-                handshake
-                    .params()
-                    .pointer("/clientCapabilities/_meta/subagent-transcript"),
+                handshake.params().pointer("/clientCapabilities/_meta/subagent-transcript"),
                 Some(&json!(true))
             );
             // Beside the real capabilities, where the adapters this app ships
@@ -5028,9 +4893,7 @@ mod tests {
                 Some(&json!({}))
             );
             assert_eq!(
-                handshake
-                    .params()
-                    .pointer("/clientCapabilities/_meta/subagents"),
+                handshake.params().pointer("/clientCapabilities/_meta/subagents"),
                 Some(&json!({}))
             );
             assert_eq!(handshake.params()["protocolVersion"], json!(SPEAKS));
@@ -5044,8 +4907,8 @@ mod tests {
     #[test]
     fn an_agent_speaking_another_acp_is_stopped_at_the_door() {
         // The pre-release version, which this app has never spoken.
-        let refused =
-            agreed_version(&json!({"protocolVersion": 0})).expect_err("version 0 is not version 1");
+        let refused = agreed_version(&json!({"protocolVersion": 0}))
+            .expect_err("version 0 is not version 1");
         let said = refused.to_string();
         assert!(said.contains("speaks ACP 0"), "{said}");
         assert!(said.contains("speaks 1"), "{said}");

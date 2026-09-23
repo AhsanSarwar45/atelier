@@ -63,12 +63,7 @@ enum Command {
     ActiveSessionIds(Reply<Vec<String>>),
     BackgroundOutputs(String, Vec<String>, Reply<Vec<(String, String)>>),
     LastModelForBrand(String, Reply<Option<String>>),
-    ListRestoreSessions(
-        Option<String>,
-        bool,
-        Vec<std::path::PathBuf>,
-        Reply<Vec<Session>>,
-    ),
+    ListRestoreSessions(Option<String>, bool, Vec<std::path::PathBuf>, Reply<Vec<Session>>),
     MarkAllDormant(Reply<usize>),
     BeadsForSessions(Vec<String>, Reply<HashMap<String, Vec<String>>>),
     BeadsForSession(String, Reply<Vec<String>>),
@@ -251,8 +246,10 @@ impl ChatDb {
         brand: String,
         external_id: String,
     ) -> Result<(), String> {
-        self.request(|reply| Command::RememberExternalAlias(session_id, brand, external_id, reply))
-            .await
+        self.request(|reply| {
+            Command::RememberExternalAlias(session_id, brand, external_id, reply)
+        })
+        .await
     }
 
     pub async fn update_session(
@@ -270,10 +267,7 @@ impl ChatDb {
             .await
     }
 
-    pub async fn correct_folders(
-        &self,
-        found: Vec<(String, String, String)>,
-    ) -> Result<usize, String> {
+    pub async fn correct_folders(&self, found: Vec<(String, String, String)>) -> Result<usize, String> {
         self.request(|reply| Command::CorrectFolders(found, reply))
             .await
     }
@@ -351,20 +345,16 @@ impl ChatDb {
             .await
     }
     pub async fn account_handoff(&self, id: String) -> Result<String, String> {
-        self.request(|reply| Command::AccountHandoff(id, reply))
-            .await
+        self.request(|reply| Command::AccountHandoff(id, reply)).await
     }
     pub async fn save_account_handoff(&self, id: String, context: String) -> Result<(), String> {
-        self.request(|reply| Command::SaveAccountHandoff(id, context, reply))
-            .await
+        self.request(|reply| Command::SaveAccountHandoff(id, context, reply)).await
     }
     pub async fn saved_account_handoff(&self, id: String) -> Result<Option<String>, String> {
-        self.request(|reply| Command::SavedAccountHandoff(id, reply))
-            .await
+        self.request(|reply| Command::SavedAccountHandoff(id, reply)).await
     }
     pub async fn clear_account_handoff(&self, id: String) -> Result<(), String> {
-        self.request(|reply| Command::ClearAccountHandoff(id, reply))
-            .await
+        self.request(|reply| Command::ClearAccountHandoff(id, reply)).await
     }
     pub async fn spend(&self) -> Result<Vec<Spend>, String> {
         self.request(Command::Spend).await
@@ -839,12 +829,16 @@ fn live_steering_menu(
     let (_, source) = live_menus
         .iter()
         .filter(|(id, _)| {
-            store.get_session(id).ok().flatten().is_some_and(|session| {
-                session.brand == target.brand
-                    && session.profile == target.profile
-                    && session.project_id == target.project_id
-                    && session.project_path == target.project_path
-            })
+            store
+                .get_session(id)
+                .ok()
+                .flatten()
+                .is_some_and(|session| {
+                    session.brand == target.brand
+                        && session.profile == target.profile
+                        && session.project_id == target.project_id
+                        && session.project_path == target.project_path
+                })
         })
         .max_by_key(|(_, menu)| {
             menu.fields
@@ -857,19 +851,11 @@ fn live_steering_menu(
     menu.fields.retain(|field, _| {
         matches!(
             field.as_str(),
-            "type"
-                | "sessionId"
-                | "seq"
-                | "at"
-                | "models"
-                | "efforts"
-                | "permissionModes"
-                | "collaborationModes"
-                | "providers"
+            "type" | "sessionId" | "seq" | "at" | "models" | "efforts"
+                | "permissionModes" | "collaborationModes" | "providers"
         )
     });
-    menu.fields
-        .insert("sessionId".into(), serde_json::json!(session_id));
+    menu.fields.insert("sessionId".into(), serde_json::json!(session_id));
     Some(menu)
 }
 
@@ -969,7 +955,9 @@ fn run(
             }
             Command::MarkSpoke(id, at, reply) => respond(reply, store.mark_spoke(&id, &at)),
             Command::CorrectFolders(found, reply) => respond(reply, store.correct_folders(&found)),
-            Command::MarkBegunBy(id, who, reply) => respond(reply, store.mark_begun_by(&id, &who)),
+            Command::MarkBegunBy(id, who, reply) => {
+                respond(reply, store.mark_begun_by(&id, &who))
+            }
             Command::LastModelForBrand(brand, reply) => {
                 respond(reply, store.last_model_for_brand(&brand))
             }
@@ -996,15 +984,9 @@ fn run(
             Command::SessionsForBead(id, reply) => respond(reply, store.sessions_for_bead(&id)),
             Command::Search(query, limit, reply) => respond(reply, store.search(&query, limit)),
             Command::AccountHandoff(id, reply) => respond(reply, store.account_handoff(&id)),
-            Command::SaveAccountHandoff(id, context, reply) => {
-                respond(reply, store.save_account_handoff(&id, &context))
-            }
-            Command::SavedAccountHandoff(id, reply) => {
-                respond(reply, store.saved_account_handoff(&id))
-            }
-            Command::ClearAccountHandoff(id, reply) => {
-                respond(reply, store.clear_account_handoff(&id))
-            }
+            Command::SaveAccountHandoff(id, context, reply) => respond(reply, store.save_account_handoff(&id, &context)),
+            Command::SavedAccountHandoff(id, reply) => respond(reply, store.saved_account_handoff(&id)),
+            Command::ClearAccountHandoff(id, reply) => respond(reply, store.clear_account_handoff(&id)),
             Command::Spend(reply) => respond(reply, store.spend()),
             Command::ToolDetails(session, tool, reply) => {
                 respond(reply, store.tool_details(&session, &tool))
@@ -1106,8 +1088,10 @@ fn run(
                             }
                             for (session_id, (from, through, event)) in ranges {
                                 if let Some(sender) = sessions.lock().unwrap().get(&session_id) {
-                                    let _ = sender
-                                        .send(SessionUpdate::ReplayCommitted { from, through });
+                                    let _ = sender.send(SessionUpdate::ReplayCommitted {
+                                        from,
+                                        through,
+                                    });
                                 }
                                 let _ = global.send(StoreUpdate {
                                     session_id,
@@ -1183,10 +1167,12 @@ fn run(
                 respond(reply, store.summary_runs(&project, limit))
             }
             Command::ViewEvents(session_id, reply) => {
-                let result = store.view_events(&session_id).map(|events| {
-                    let live = live_steering_menu(&store, &live_menus, &session_id);
-                    view_with_live_menu(events, live.as_ref())
-                });
+                let result = store
+                    .view_events(&session_id)
+                    .map(|events| {
+                        let live = live_steering_menu(&store, &live_menus, &session_id);
+                        view_with_live_menu(events, live.as_ref())
+                    });
                 respond(reply, result)
             }
             Command::HoldMessage(session_id, id, text, images, parts, at, reply) => respond(
@@ -1211,8 +1197,7 @@ fn run(
                 let result = (|| {
                     let started = std::time::Instant::now();
                     let live = live_steering_menu(&store, &live_menus, &session_id);
-                    let history =
-                        view_with_live_menu(store.view_events(&session_id)?, live.as_ref());
+                    let history = view_with_live_menu(store.view_events(&session_id)?, live.as_ref());
                     let after_history = started.elapsed();
                     let page = store.transcript_items(&session_id, None, 40)?;
                     let after_page = started.elapsed();
@@ -1285,12 +1270,7 @@ mod tests {
             .unwrap();
 
         let notices = database.notices().await.unwrap();
-        assert_eq!(
-            notices.len(),
-            2,
-            "clearing two chats wrote {} rows",
-            notices.len()
-        );
+        assert_eq!(notices.len(), 2, "clearing two chats wrote {} rows", notices.len());
         assert_eq!(notices["chat-1"].read_state.as_deref(), Some("errored"));
         assert_eq!(
             notices["chat-1"].announced_state.as_deref(),
@@ -1324,31 +1304,14 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let store = Store::open(&directory.path().join("workbench.db")).unwrap();
         let session = |id: &str, brand: &str| Session {
-            id: id.into(),
-            brand: brand.into(),
-            external_id: Some(format!("thread-{id}")),
-            project_id: "project".into(),
-            project_path: "/project".into(),
-            cwd: "/project".into(),
-            model: None,
-            permission_mode: "on-request".into(),
-            effort: None,
-            collaboration_mode: None,
-            profile: None,
-            title: None,
-            state: "dormant".into(),
-            origin: "app".into(),
-            created_at: "2026-09-14T00:00:00Z".into(),
-            last_active_at: "2026-09-14T00:00:00Z".into(),
-            last_spoke_at: None,
-            begun_by: None,
-            named_by_owner: false,
+            id: id.into(), brand: brand.into(), external_id: Some(format!("thread-{id}")),
+            project_id: "project".into(), project_path: "/project".into(), cwd: "/project".into(),
+            model: None, permission_mode: "on-request".into(), effort: None,
+            collaboration_mode: None, profile: None, title: None, state: "dormant".into(),
+            origin: "app".into(), created_at: "2026-09-14T00:00:00Z".into(),
+            last_active_at: "2026-09-14T00:00:00Z".into(), last_spoke_at: None, begun_by: None, named_by_owner: false,
         };
-        for row in [
-            session("open", "codex"),
-            session("saved", "codex"),
-            session("other", "claude"),
-        ] {
+        for row in [session("open", "codex"), session("saved", "codex"), session("other", "claude")] {
             store.create_session(&row).unwrap();
         }
         let menu: Event = serde_json::from_value(json!({
@@ -1360,8 +1323,7 @@ mod tests {
             "commands":[{"name":"project-only"}], "skills":["private"],
             "agentDefinitions":[{"name":"worker"}],
             "configOptions":[{"id":"fast","currentValue":true}]
-        }))
-        .unwrap();
+        })).unwrap();
         let live = HashMap::from([("open".to_string(), menu)]);
 
         let restored = live_steering_menu(&store, &live, "saved").unwrap();
@@ -1369,10 +1331,7 @@ mod tests {
         assert_eq!(restored.fields["models"][0]["value"], "gpt-5.6-sol");
         assert_eq!(restored.fields["efforts"][0]["value"], "high");
         for private in ["commands", "skills", "agentDefinitions", "configOptions"] {
-            assert!(
-                restored.fields.get(private).is_none(),
-                "{private} leaked between chats"
-            );
+            assert!(restored.fields.get(private).is_none(), "{private} leaked between chats");
         }
         assert!(live_steering_menu(&store, &live, "other").is_none());
     }
@@ -1404,28 +1363,14 @@ mod tests {
             seq += 1;
             persist_event(&store, "chat-1", event, seq).unwrap();
         };
-        persist(said(
-            "message.started",
-            json!({"messageId":"m1","role":"assistant"}),
-        ));
+        persist(said("message.started", json!({"messageId":"m1","role":"assistant"})));
         // A sentence in pieces, which is how one actually arrives.
-        persist(said(
-            "text.delta",
-            json!({"messageId":"m1","text":"The word is PERI"}),
-        ));
-        persist(said(
-            "text.delta",
-            json!({"messageId":"m1","text":"WINKLE in spend-a."}),
-        ));
+        persist(said("text.delta", json!({"messageId":"m1","text":"The word is PERI"})));
+        persist(said("text.delta", json!({"messageId":"m1","text":"WINKLE in spend-a."})));
         persist(said("message.completed", json!({"messageId":"m1"})));
 
         let found = store.search("PERIWINKLE", 10).unwrap();
-        assert_eq!(
-            found.len(),
-            1,
-            "the word was said once and found {} times",
-            found.len()
-        );
+        assert_eq!(found.len(), 1, "the word was said once and found {} times", found.len());
         assert_eq!(found[0].text, "The word is PERIWINKLE in spend-a.");
         assert_eq!(found[0].role, "assistant");
         // What the panel draws: the sentence, and the words as they were
@@ -1723,30 +1668,14 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("workbench.db");
         let database = ChatDb::open(&path).unwrap();
-        database
-            .create_session(Session {
-                id: "chat-1".into(),
-                brand: "codex".into(),
-                external_id: Some("thread-1".into()),
-                project_id: "project-1".into(),
-                project_path: "/project".into(),
-                cwd: "/project".into(),
-                model: Some("gpt-5".into()),
-                permission_mode: "on-request".into(),
-                effort: Some("high".into()),
-                collaboration_mode: Some("default".into()),
-                profile: None,
-                title: Some("Generated title".into()),
-                state: "idle".into(),
-                origin: "app".into(),
-                created_at: "now".into(),
-                last_active_at: "now".into(),
-                last_spoke_at: None,
-                begun_by: None,
-                named_by_owner: false,
-            })
-            .await
-            .unwrap();
+        database.create_session(Session {
+            id: "chat-1".into(), brand: "codex".into(), external_id: Some("thread-1".into()),
+            project_id: "project-1".into(), project_path: "/project".into(), cwd: "/project".into(),
+            model: Some("gpt-5".into()), permission_mode: "on-request".into(), effort: Some("high".into()),
+            collaboration_mode: Some("default".into()), profile: None, title: Some("Generated title".into()),
+            state: "idle".into(), origin: "app".into(), created_at: "now".into(), last_active_at: "now".into(),
+            last_spoke_at: None, begun_by: None, named_by_owner: false,
+        }).await.unwrap();
         for value in [
             json!({
                 "type":"session.pinned","sessionId":"chat-1","seq":0,"at":"later",
@@ -1759,38 +1688,13 @@ mod tests {
                 "title":"Generated title","acp":{"sessionUpdate":"session_info_update"}
             }),
         ] {
-            database
-                .append(serde_json::from_value(value).unwrap())
-                .await
-                .unwrap();
+            database.append(serde_json::from_value(value).unwrap()).await.unwrap();
         }
 
-        assert_eq!(
-            database
-                .get_session("chat-1".into())
-                .await
-                .unwrap()
-                .unwrap()
-                .title
-                .as_deref(),
-            Some("My title")
-        );
-        assert_eq!(
-            database.steering_menu("chat-1".into()).await.unwrap()["title"],
-            "My title"
-        );
+        assert_eq!(database.get_session("chat-1".into()).await.unwrap().unwrap().title.as_deref(), Some("My title"));
+        assert_eq!(database.steering_menu("chat-1".into()).await.unwrap()["title"], "My title");
         drop(database);
-        assert_eq!(
-            ChatDb::open(&path)
-                .unwrap()
-                .get_session("chat-1".into())
-                .await
-                .unwrap()
-                .unwrap()
-                .title
-                .as_deref(),
-            Some("My title")
-        );
+        assert_eq!(ChatDb::open(&path).unwrap().get_session("chat-1".into()).await.unwrap().unwrap().title.as_deref(), Some("My title"));
     }
 
     #[tokio::test]

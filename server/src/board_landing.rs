@@ -115,24 +115,15 @@ fn parent<'a>(row: &'a Value, ids: &HashSet<&str>) -> Option<&'a str> {
         })
 }
 pub fn belongs_to(root: &Path, id: &str, job: &str) -> bool {
-    if id == job {
-        return true;
-    }
-    let Ok(rows) = all(root) else {
-        return false;
-    };
+    if id == job { return true; }
+    let Ok(rows) = all(root) else { return false; };
     let graph = nodes(&rows);
-    let mut pending = vec![job.to_string()];
-    let mut seen = HashSet::new();
+    let mut pending = vec![job.to_string()]; let mut seen = HashSet::new();
     while let Some(parent) = pending.pop() {
-        if !seen.insert(parent.clone()) {
-            continue;
-        }
+        if !seen.insert(parent.clone()) { continue; }
         if let Some(node) = graph.iter().find(|node| node.id == parent) {
             for child in &node.children {
-                if child == id {
-                    return true;
-                }
+                if child == id { return true; }
                 pending.push(child.clone());
             }
         }
@@ -164,15 +155,8 @@ pub fn nodes(rows: &[Value]) -> Vec<Node> {
             Some(Node {
                 id: id.into(),
                 container: row["issue_type"] == "epic",
-                error: parent(row, &ids)
-                    .filter(|p| !ids.contains(p))
-                    .map(|p| format!("Missing parent {p}")),
-                status: if status(row) == "cancelled" && true_meta(row, "status_derived") {
-                    "open"
-                } else {
-                    status(row)
-                }
-                .into(),
+                error: parent(row, &ids).filter(|p| !ids.contains(p)).map(|p| format!("Missing parent {p}")),
+                status: if status(row) == "cancelled" && true_meta(row, "status_derived") { "open" } else { status(row) }.into(),
                 children: below,
                 started: row["started_at"].as_str().is_some()
                     || !matches!(status(row), "open" | "cancelled"),
@@ -196,19 +180,10 @@ fn write_status(root: &Path, row: &Value, next: &str, reason: &str) -> Result<()
         },
     ];
     if next == "cancelled" {
-        args.extend([
-            "--add-label".into(),
-            "cancelled".into(),
-            "--set-metadata".into(),
-            format!("status_derived={}", reason.starts_with("Derived from")),
-        ]);
+        args.extend(["--add-label".into(), "cancelled".into(), "--set-metadata".into(),
+            format!("status_derived={}", reason.starts_with("Derived from"))]);
     } else {
-        args.extend([
-            "--remove-label".into(),
-            "cancelled".into(),
-            "--remove-label".into(),
-            "resolution:cancelled".into(),
-        ]);
+        args.extend(["--remove-label".into(), "cancelled".into(), "--remove-label".into(), "resolution:cancelled".into()]);
     }
     args.extend([
         "--if-status".into(),
@@ -251,26 +226,17 @@ pub fn reconcile_parents(root: &Path) -> Result<(), String> {
     let rows = all(root)?;
     for decision in operation_decisions(&rows) {
         let row = rows.iter().find(|r| r["id"] == decision["id"]).unwrap();
-        write_status(
-            root,
-            row,
-            decision["to"].as_str().unwrap(),
-            decision["reason"].as_str().unwrap(),
-        )?;
+        write_status(root, row, decision["to"].as_str().unwrap(), decision["reason"].as_str().unwrap())?;
     }
     let graph = nodes(&rows);
     let projected = board_state::project(&graph);
     // Children before parents where IDs encode ancestry; projection is recursive for every ID.
-    let mut containers: Vec<_> = graph
-        .iter()
-        .filter(|n| n.container || !n.children.is_empty())
-        .collect();
+    let mut containers: Vec<_> = graph.iter().filter(|n| n.container || !n.children.is_empty()).collect();
     containers.sort_by_key(|n| std::cmp::Reverse(n.id.matches('.').count()));
     let mut errors = Vec::new();
     for node in containers {
         if let Some(error) = projected.errors.get(&node.id) {
-            errors.push(format!("{}: {error}", node.id));
-            continue;
+            errors.push(format!("{}: {error}", node.id)); continue;
         }
         let next = &projected.states[&node.id];
         let row = rows.iter().find(|r| r["id"] == node.id).unwrap();
@@ -283,11 +249,7 @@ pub fn reconcile_parents(root: &Path) -> Result<(), String> {
             )?;
         }
     }
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors.join("; "))
-    }
+    if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -354,29 +316,16 @@ fn finish(root: &Path, path: &Path, record: &mut Landing) -> Result<(), String> 
         }
         // A previous successful write followed by a reopen starts new work.
         // Recovery must never close it again from the same old transaction.
-        if row["metadata"]["landed_commit"] == record.tip {
-            continue;
-        }
-        bd(
-            root,
-            &[
-                "update".into(),
-                id.clone(),
-                "--status".into(),
-                "closed".into(),
-                "--if-status".into(),
-                row["status"].as_str().ok_or("Card has no status")?.into(),
-                "--force".into(),
-                "--set-metadata".into(),
-                format!("landed_commit={}", record.tip),
-                "--set-metadata".into(),
-                format!("landed_tree={}", record.tree),
-                "--set-metadata".into(),
-                format!("landed_branch={}", record.branch),
-                "--append-notes".into(),
-                format!("Work landed in {} at {}", record.branch, record.tip),
-            ],
-        )?;
+        if row["metadata"]["landed_commit"] == record.tip { continue; }
+        bd(root, &[
+            "update".into(), id.clone(), "--status".into(), "closed".into(),
+            "--if-status".into(), row["status"].as_str().ok_or("Card has no status")?.into(),
+            "--force".into(),
+            "--set-metadata".into(), format!("landed_commit={}", record.tip),
+            "--set-metadata".into(), format!("landed_tree={}", record.tree),
+            "--set-metadata".into(), format!("landed_branch={}", record.branch),
+            "--append-notes".into(), format!("Work landed in {} at {}", record.branch, record.tip),
+        ])?;
     }
     if let Err(error) = reconcile_parents(root) {
         eprintln!("Work landed; hierarchy still needs repair: {error}");
@@ -388,65 +337,42 @@ fn finish(root: &Path, path: &Path, record: &mut Landing) -> Result<(), String> 
 /// Git sends raw old/new/ref triples, not provider JSON. Validate the actual
 /// ref update so merge, push, and update-ref share the same completion boundary.
 pub fn reference_transaction(phase: &str, input: &str) -> Result<i32, String> {
-    if phase == "aborted" {
-        return Ok(0);
-    }
-    if !matches!(phase, "prepared" | "committed") {
-        return Err("Unknown Git transaction phase".into());
-    }
+    if phase == "aborted" { return Ok(0); }
+    if !matches!(phase, "prepared" | "committed") { return Err("Unknown Git transaction phase".into()); }
     let work = root()?;
     let branch = landing_branch(&work);
     let target = format!("refs/heads/{branch}");
     let mut touched = false;
     for line in input.lines().filter(|l| !l.trim().is_empty()) {
         let fields: Vec<_> = line.split_whitespace().collect();
-        if fields.len() != 3 {
-            return Err("Malformed Git reference transaction".into());
-        }
-        if fields[2] != target {
-            continue;
-        }
+        if fields.len() != 3 { return Err("Malformed Git reference transaction".into()); }
+        if fields[2] != target { continue; }
         touched = true;
-        if phase == "committed" {
-            continue;
-        }
+        if phase == "committed" { continue; }
         let old = git(&work, &["rev-parse", &target])?;
         let new = fields[1];
-        git(&work, &["merge-base", "--is-ancestor", &old, new]).map_err(|_| {
-            "The completed-work branch only accepts fast-forward landings".to_string()
-        })?;
+        git(&work, &["merge-base", "--is-ancestor", &old, new])
+            .map_err(|_| "The completed-work branch only accepts fast-forward landings".to_string())?;
         let dir = journal_dir(&work)?;
         let mut authorized = false;
         if dir.exists() {
             for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
                 let path = entry.map_err(|e| e.to_string())?.path();
-                if path.extension().and_then(|s| s.to_str()) != Some("json") {
-                    continue;
-                }
-                let record: Landing =
-                    serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
-                        .map_err(|e| e.to_string())?;
-                if record.complete || record.tip != new || record.branch != branch {
-                    continue;
-                }
+                if path.extension().and_then(|s| s.to_str()) != Some("json") { continue; }
+                let record: Landing = serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?;
+                if record.complete || record.tip != new || record.branch != branch { continue; }
                 if git(&work, &["rev-parse", &format!("{new}^{{tree}}")])? != record.tree {
                     return Err("Landing journal tree differs from the proposed commit".into());
                 }
-                let slot: Value = serde_json::from_str(&bd(
-                    &work,
-                    &["merge-slot".into(), "check".into(), "--json".into()],
-                )?)
-                .map_err(|e| e.to_string())?;
+                let slot: Value = serde_json::from_str(&bd(&work, &["merge-slot".into(), "check".into(), "--json".into()])?).map_err(|e| e.to_string())?;
                 if slot["holder"].as_str() != Some(record.actor.as_str()) {
                     return Err("The landing transaction does not own the merge slot".into());
                 }
                 let mut verified = false;
                 for id in &record.cards {
                     let row = card(&work, id)?;
-                    if row["assignee"]
-                        .as_str()
-                        .is_some_and(|a| !a.is_empty() && a != record.actor)
-                    {
+                    if row["assignee"].as_str().is_some_and(|a| !a.is_empty() && a != record.actor) {
                         return Err(format!("{id} changed owner during landing"));
                     }
                     prerequisites(&work, id, &record.cards)?;
@@ -459,15 +385,9 @@ pub fn reference_transaction(phase: &str, input: &str) -> Result<i32, String> {
                 break;
             }
         }
-        if !authorized {
-            return Err(
-                "No prepared landing transaction; use atelier tool board/land CARD-ID".into(),
-            );
-        }
+        if !authorized { return Err("No prepared landing transaction; use atelier tool board/land CARD-ID".into()); }
     }
-    if touched && phase == "committed" {
-        recover(&work)?;
-    }
+    if touched && phase == "committed" { recover(&work)?; }
     Ok(0)
 }
 
@@ -550,10 +470,7 @@ fn requested(rest: &[String]) -> (Option<String>, Option<String>) {
             id = Some(word.clone());
         }
     }
-    (
-        id,
-        crate::board_tools::flags(rest, "--checks-unrelated").pop(),
-    )
+    (id, crate::board_tools::flags(rest, "--checks-unrelated").pop())
 }
 
 /// The refusal an agent reads when a suite fails. It has to answer the only
@@ -570,10 +487,7 @@ fn failing_checks(id: &str) -> String {
 pub fn land(rest: &[String]) -> Result<i32, String> {
     let (asked, waiver) = requested(rest);
     let id = &asked.ok_or("board/land needs a card id")?;
-    if waiver
-        .as_ref()
-        .is_some_and(|reason| reason.trim().is_empty())
-    {
+    if waiver.as_ref().is_some_and(|reason| reason.trim().is_empty()) {
         return Err("--checks-unrelated needs the reason the failures are not this work".into());
     }
     if !id
@@ -665,10 +579,8 @@ pub fn land(rest: &[String]) -> Result<i32, String> {
         git(&work, &["rebase", &landing])?;
         let tree = git(&work, &["rev-parse", "HEAD^{tree}"])?;
         let current = card(&work, id)?;
-        let checked_suites: Vec<String> = current["metadata"]["checks_suites"]
-            .as_str()
-            .and_then(|text| serde_json::from_str(text).ok())
-            .unwrap_or_default();
+        let checked_suites: Vec<String> = current["metadata"]["checks_suites"].as_str()
+            .and_then(|text| serde_json::from_str(text).ok()).unwrap_or_default();
         // Nothing declared is nothing to run and nothing to prove: a project
         // with an empty verification list would otherwise be refused forever,
         // for want of evidence it has no way to produce.
@@ -676,44 +588,20 @@ pub fn land(rest: &[String]) -> Result<i32, String> {
         if settings.verification.commands.is_empty() {
             waived = Some("the project declares no verification suite".to_string());
         } else if (!current_proof(&current, "checks", &tree)
-            || !settings
-                .verification
-                .commands
-                .iter()
-                .all(|suite| checked_suites.contains(&suite.name)))
+            || !settings.verification.commands.iter().all(|suite| checked_suites.contains(&suite.name)))
             && checks(&[id.clone(), "--all".into()])? != 0
         {
             let Some(reason) = waiver.clone() else {
                 return Err(failing_checks(id));
             };
-            bd(
-                &work,
-                &[
-                    "--actor".into(),
-                    caller.clone(),
-                    "comments".into(),
-                    "add".into(),
-                    id.clone(),
-                    format!("checks waived for tree {tree}: {reason}"),
-                ],
-            )?;
-            metadata(
-                &work,
-                id,
-                &[
-                    ("checks_waived_tree", tree.clone()),
-                    ("checks_waived_reason", reason.clone()),
-                ],
-            )?;
+            bd(&work, &["--actor".into(), caller.clone(), "comments".into(), "add".into(), id.clone(),
+                format!("checks waived for tree {tree}: {reason}")])?;
+            metadata(&work, id, &[("checks_waived_tree", tree.clone()), ("checks_waived_reason", reason.clone())])?;
             eprintln!("Landing {id} although its checks failed: {reason}");
             waived = Some(format!("failures this work did not cause: {reason}"));
         }
-        if settings.review.external_review == "always"
-            && !current_proof(&card(&work, id)?, "review", &tree)
-        {
-            return Err(format!(
-                "Project policy requires external review of {id} before landing"
-            ));
+        if settings.review.external_review == "always" && !current_proof(&card(&work, id)?, "review", &tree) {
+            return Err(format!("Project policy requires external review of {id} before landing"));
         }
         let ids: HashSet<_> = rows.iter().filter_map(|r| r["id"].as_str()).collect();
         let mut review_ids = carried.clone();
@@ -752,20 +640,8 @@ pub fn land(rest: &[String]) -> Result<i32, String> {
                 || !settings.git.agents_may_merge_completed_work)
                 && row["metadata"]["manager_approved_tree"] != tree
             {
-                metadata(
-                    &work,
-                    &review_id,
-                    &[
-                        ("manager_review_tree", tree.clone()),
-                        ("manager_review_commit", git(&work, &["rev-parse", "HEAD"])?),
-                    ],
-                )?;
-                write_status(
-                    &work,
-                    &card(&work, id)?,
-                    "manager_review",
-                    "Waiting for manager approval of committed work",
-                )?;
+                metadata(&work, &review_id, &[("manager_review_tree", tree.clone()), ("manager_review_commit", git(&work, &["rev-parse", "HEAD"])? )])?;
+                write_status(&work, &card(&work, id)?, "manager_review", "Waiting for manager approval of committed work")?;
                 return Err(format!(
                     "{review_id} requires manager approval of this tree before landing"
                 ));
@@ -811,56 +687,34 @@ pub fn approve(root: &Path, id: &str, tree: &str) -> Result<(), String> {
     if tree.is_empty() || row["metadata"]["manager_review_tree"] != tree {
         return Err("The requested approval is stale; refresh the review evidence".into());
     }
-    let commit = row["metadata"]["manager_review_commit"]
-        .as_str()
-        .ok_or("No proposed commit")?;
+    let commit = row["metadata"]["manager_review_commit"].as_str().ok_or("No proposed commit")?;
     if git(root, &["rev-parse", &format!("{commit}^{{tree}}")])? != tree {
         return Err("The proposed commit does not match the reviewed tree".into());
     }
     metadata(root, id, &[("manager_approved_tree", tree.into())])?;
-    bd(
-        root,
-        &[
-            "comments".into(),
-            "add".into(),
-            id.into(),
-            format!("Manager approved tree {tree} before landing"),
-        ],
-    )?;
+    bd(root, &["comments".into(), "add".into(), id.into(), format!("Manager approved tree {tree} before landing")])?;
     Ok(())
 }
 
 pub fn transition(root: &Path, id: &str, next: &str, human: bool) -> Result<(), String> {
     let rows = all(root)?;
-    let row = rows
-        .iter()
-        .find(|r| r["id"] == id)
-        .ok_or("Cannot read the requested card")?;
+    let row = rows.iter().find(|r| r["id"] == id).ok_or("Cannot read the requested card")?;
     let next = board_state::normalize(next);
     let graph = nodes(&rows);
-    let node = graph
-        .iter()
-        .find(|n| n.id == id)
-        .ok_or("Missing hierarchy node")?;
+    let node = graph.iter().find(|n| n.id == id).ok_or("Missing hierarchy node")?;
     if !node.children.is_empty() || row["issue_type"] == "epic" {
         let projection = board_state::project(&graph);
-        if let Some(error) = projection.errors.get(id) {
-            return Err(error.clone());
-        }
+        if let Some(error) = projection.errors.get(id) { return Err(error.clone()); }
         if projection.states.get(id).map(String::as_str) != Some(next) {
             return Err(format!("{id} follows its required subtasks; change the subtasks or cancel scope explicitly"));
         }
         return Ok(());
     }
     if status(row) == "manager_review" && !human && next != "manager_review" {
-        return Err(format!(
-            "{id} needs the manager's decision before its state changes"
-        ));
+        return Err(format!("{id} needs the manager's decision before its state changes"));
     }
     if next == "closed" && status(row) != "closed" {
-        return Err(format!(
-            "{id} becomes Done when its work lands. Use atelier tool board/land {id}"
-        ));
+        return Err(format!("{id} becomes Done when its work lands. Use atelier tool board/land {id}"));
     }
     Ok(())
 }
@@ -900,9 +754,7 @@ pub fn reconcile_command(rest: &[String]) -> Result<i32, String> {
             continue;
         }
         let id = row["id"].as_str().ok_or("Card without id")?;
-        if operational(row) {
-            continue;
-        }
+        if operational(row) { continue; }
         if graph
             .iter()
             .any(|node| node.id == id && !node.children.is_empty())
@@ -979,9 +831,7 @@ pub fn reconcile_command(rest: &[String]) -> Result<i32, String> {
     for node in &graph {
         if let Some(error) = projection.errors.get(&node.id) {
             report.push(json!({"id":node.id,"action":"repair_hierarchy","reason":error}));
-        } else if (node.container || !node.children.is_empty())
-            && projection.states.contains_key(&node.id)
-        {
+        } else if (node.container || !node.children.is_empty()) && projection.states.contains_key(&node.id) {
             let next = &projection.states[&node.id];
             let original = rows.iter().find(|row| row["id"] == node.id).unwrap();
             if status(original) != next {
@@ -1002,28 +852,16 @@ pub fn reconcile_command(rest: &[String]) -> Result<i32, String> {
 /// Explicit recovery for an abandoned session, including legacy claims without a lease.
 /// No time heuristic or knowledge of the previous actor grants ownership on its own.
 pub fn reclaim(rest: &[String]) -> Result<i32, String> {
-    let id = rest
-        .first()
-        .filter(|id| !id.starts_with('-'))
-        .ok_or("board/reclaim needs a card id")?;
-    let from = crate::board_tools::flag(rest, "--from")
-        .filter(|s| !s.trim().is_empty())
-        .ok_or("Name the previous owner with --from")?;
-    let reason = crate::board_tools::flag(rest, "--reason")
-        .filter(|s| !s.trim().is_empty())
-        .ok_or("Record why this session is abandoned with --reason")?;
+    let id = rest.first().filter(|id| !id.starts_with('-')).ok_or("board/reclaim needs a card id")?;
+    let from = crate::board_tools::flag(rest, "--from").filter(|s| !s.trim().is_empty()).ok_or("Name the previous owner with --from")?;
+    let reason = crate::board_tools::flag(rest, "--reason").filter(|s| !s.trim().is_empty()).ok_or("Record why this session is abandoned with --reason")?;
     if !rest.iter().any(|s| s == "--abandoned") {
-        return Err(
-            "Confirm the previous session has stopped with --abandoned; do not take active work"
-                .into(),
-        );
+        return Err("Confirm the previous session has stopped with --abandoned; do not take active work".into());
     }
     let work = root()?;
     let job = git(&work, &["branch", "--show-current"])?;
-    if job == landing_branch(&work)
-        || !belongs_to(&work, id, &job)
-        || main_copy(&work, &job)? != work
-    {
+    if job == landing_branch(&work) || !belongs_to(&work, id, &job)
+        || main_copy(&work, &job)? != work {
         return Err("Recover the card inside its own job worktree".into());
     }
     let row = card(&work, id)?;
@@ -1039,153 +877,69 @@ pub fn reclaim(rest: &[String]) -> Result<i32, String> {
     recovery_allowed(&row, &from, &who)?;
     // Compare-and-set the owner and state: a concurrent reassignment cannot be stolen.
     // The explicit abandonment declaration is required even for lease-less records.
-    bd(
-        &work,
-        &[
-            "update".into(),
-            id.clone(),
-            "--assignee".into(),
-            who.clone(),
-            "--if-assignee".into(),
-            from.clone(),
-            "--if-status".into(),
-            "in_progress".into(),
-            "--append-notes".into(),
-            format!("Abandoned claim recovered from {from} by {who}: {reason}"),
-        ],
-    )?;
-    bd(
-        &work,
-        &[
-            "update".into(),
-            id.clone(),
-            "--claim".into(),
-            "--add-label".into(),
-            format!("copy:{job}"),
-        ],
-    )?;
+    bd(&work, &["update".into(), id.clone(), "--assignee".into(), who.clone(),
+        "--if-assignee".into(), from.clone(), "--if-status".into(), "in_progress".into(),
+        "--append-notes".into(), format!("Abandoned claim recovered from {from} by {who}: {reason}")])?;
+    bd(&work, &["update".into(), id.clone(), "--claim".into(), "--add-label".into(), format!("copy:{job}")])?;
     bd(&work, &["heartbeat".into(), id.clone()])?;
     reconcile_parents(&work)?;
-    println!(
-        "Recovered {id} as {who}; existing work is preserved in {}",
-        work.display()
-    );
+    println!("Recovered {id} as {who}; existing work is preserved in {}", work.display());
     Ok(0)
 }
 
 fn recovery_allowed(row: &Value, from: &str, who: &str) -> Result<(), String> {
-    if status(row) != "in_progress" {
-        return Err("Only abandoned in-progress work can be recovered; manager review and settled cards are not claimable".into());
-    }
+    if status(row) != "in_progress" { return Err("Only abandoned in-progress work can be recovered; manager review and settled cards are not claimable".into()); }
     if row["assignee"].as_str() != Some(from) || from == who {
-        return Err(
-            "The previous owner changed or is this session; inspect the card before recovering it"
-                .into(),
-        );
+        return Err("The previous owner changed or is this session; inspect the card before recovering it".into());
     }
     if let Some(raw) = row["lease_expires_at"].as_str() {
-        let lease = chrono::DateTime::parse_from_rfc3339(raw)
-            .map_err(|_| "Cannot verify an unreadable lease")?;
-        if lease > chrono::Utc::now() {
-            return Err("The previous owner has a live lease; wait for expiry and confirm the session has stopped".into());
-        }
+        let lease = chrono::DateTime::parse_from_rfc3339(raw).map_err(|_| "Cannot verify an unreadable lease")?;
+        if lease > chrono::Utc::now() { return Err("The previous owner has a live lease; wait for expiry and confirm the session has stopped".into()); }
     }
     Ok(())
 }
 
 pub fn cleanup(rest: &[String]) -> Result<i32, String> {
-    let id = rest
-        .first()
-        .filter(|id| !id.starts_with('-'))
-        .ok_or("board/cleanup needs a job id")?;
-    if rest.iter().skip(1).any(|s| s != "--force") {
-        return Err("usage: board/cleanup JOB-ID [--force]".into());
-    }
+    let id = rest.first().filter(|id| !id.starts_with('-')).ok_or("board/cleanup needs a job id")?;
+    if rest.iter().skip(1).any(|s| s != "--force") { return Err("usage: board/cleanup JOB-ID [--force]".into()); }
     let force = rest.iter().any(|s| s == "--force");
     let work = root()?;
     let base = common_root(&work);
     let rows = all(&work)?;
     let projection = board_state::project(&nodes(&rows));
-    if projection.errors.contains_key(id)
-        || !projection
-            .states
-            .get(id)
-            .is_some_and(|s| matches!(s.as_str(), "closed" | "cancelled"))
-    {
-        return Err(format!(
-            "{id} still has required work or an invalid hierarchy"
-        ));
+    if projection.errors.contains_key(id) || !projection.states.get(id).is_some_and(|s| matches!(s.as_str(), "closed" | "cancelled")) {
+        return Err(format!("{id} still has required work or an invalid hierarchy"));
     }
-    git(
-        &work,
-        &["merge-base", "--is-ancestor", id, &landing_branch(&work)],
-    )?;
+    git(&work, &["merge-base", "--is-ancestor", id, &landing_branch(&work)])?;
     let path = main_copy(&work, id)?;
-    if work == path {
-        return Err(
-            "Run board/cleanup from another checkout, outside the job being removed".into(),
-        );
-    }
+    if work == path { return Err("Run board/cleanup from another checkout, outside the job being removed".into()); }
     if !git(&path, &["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
-        return Err(
-            "Cleanup refuses tracked changes, even with --force; preserve or land them first"
-                .into(),
-        );
+        return Err("Cleanup refuses tracked changes, even with --force; preserve or land them first".into());
     }
     let output = std::process::Command::new(crate::routes::find_git().ok_or("Git is unavailable")?)
         .args(["ls-files", "--others", "--exclude-standard", "-z"])
-        .current_dir(&path)
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !output.status.success() {
-        return Err("Cannot enumerate untracked files; cleanup refused".into());
-    }
+        .current_dir(&path).output().map_err(|e| e.to_string())?;
+    if !output.status.success() { return Err("Cannot enumerate untracked files; cleanup refused".into()); }
     // Do not trim: leading spaces and embedded newlines are valid filenames.
-    let untracked = String::from_utf8(output.stdout)
-        .map_err(|_| "Cannot archive non-UTF8 paths; cleanup refused")?;
+    let untracked = String::from_utf8(output.stdout).map_err(|_| "Cannot archive non-UTF8 paths; cleanup refused")?;
     if !untracked.is_empty() {
-        if !force {
-            return Err(format!("{id} has untracked files; run board/cleanup {id} --force to archive them before removal"));
-        }
-        let common = git(
-            &work,
-            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-        )?;
+        if !force { return Err(format!("{id} has untracked files; run board/cleanup {id} --force to archive them before removal")); }
+        let common = git(&work, &["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
         let directory = Path::new(&common).join("atelier-cleanup");
         std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
-        let archive = directory.join(format!(
-            "{id}-{}.tar",
-            chrono::Utc::now()
-                .timestamp_nanos_opt()
-                .ok_or("Clock out of range")?
-        ));
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&archive)
-            .map_err(|e| e.to_string())?;
+        let archive = directory.join(format!("{id}-{}.tar", chrono::Utc::now().timestamp_nanos_opt().ok_or("Clock out of range")?));
+        let file = std::fs::OpenOptions::new().write(true).create_new(true).open(&archive).map_err(|e| e.to_string())?;
         let mut tar = tar::Builder::new(file);
         tar.follow_symlinks(false);
         for name in untracked.split('\0').filter(|s| !s.is_empty()) {
             let relative = Path::new(name);
-            if relative.is_absolute()
-                || relative
-                    .components()
-                    .any(|c| matches!(c, std::path::Component::ParentDir))
-            {
+            if relative.is_absolute() || relative.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
                 return Err("Git returned an unsafe untracked path; cleanup refused".into());
             }
             let source = path.join(relative);
-            if std::fs::symlink_metadata(&source)
-                .map_err(|e| e.to_string())?
-                .is_dir()
-            {
-                tar.append_dir_all(relative, source)
-                    .map_err(|e| e.to_string())?;
-            } else {
-                tar.append_path_with_name(source, relative)
-                    .map_err(|e| e.to_string())?;
-            }
+            if std::fs::symlink_metadata(&source).map_err(|e| e.to_string())?.is_dir() {
+                tar.append_dir_all(relative, source).map_err(|e| e.to_string())?;
+            } else { tar.append_path_with_name(source, relative).map_err(|e| e.to_string())?; }
         }
         let file = tar.into_inner().map_err(|e| e.to_string())?;
         file.sync_all().map_err(|e| e.to_string())?;
@@ -1195,19 +949,9 @@ pub fn cleanup(rest: &[String]) -> Result<i32, String> {
     if !git(&path, &["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
         return Err("Tracked files changed during cleanup; the worktree was preserved".into());
     }
-    git(
-        &path,
-        &[
-            "merge-base",
-            "--is-ancestor",
-            "HEAD",
-            &landing_branch(&work),
-        ],
-    )?;
+    git(&path, &["merge-base", "--is-ancestor", "HEAD", &landing_branch(&work)])?;
     let mut args = vec!["worktree", "remove"];
-    if force {
-        args.push("--force");
-    }
+    if force { args.push("--force"); }
     args.push(path.to_str().ok_or("Non-UTF8 worktree path")?);
     git(&base, &args)?;
     git(&base, &["branch", "-d", id])?;
@@ -1225,12 +969,10 @@ mod tests {
         assert!(recovery_allowed(&row, "other", "new").is_err());
         assert!(recovery_allowed(&row, "old", "old").is_err());
         for state in ["closed", "manager_review", "open", "cancelled"] {
-            let mut next = row.clone();
-            next["status"] = json!(state);
+            let mut next = row.clone(); next["status"] = json!(state);
             assert!(recovery_allowed(&next, "old", "new").is_err());
         }
-        let mut next = row.clone();
-        next["lease_expires_at"] = json!("2999-01-01T00:00:00Z");
+        let mut next = row.clone(); next["lease_expires_at"] = json!("2999-01-01T00:00:00Z");
         assert!(recovery_allowed(&next, "old", "new").is_err());
         next["lease_expires_at"] = json!("2000-01-01T00:00:00Z");
         assert!(recovery_allowed(&next, "old", "new").is_ok());
@@ -1249,18 +991,11 @@ mod tests {
         ];
         let decisions = operation_decisions(&rows);
         assert_eq!(decisions.len(), 3);
-        assert!(decisions
-            .iter()
-            .all(|d| d["to"] == "closed" && d["action"] == "complete_operation"));
-        let mut pending = rows.clone();
-        pending[1]["status"] = json!("open");
+        assert!(decisions.iter().all(|d| d["to"] == "closed" && d["action"] == "complete_operation"));
+        let mut pending = rows.clone(); pending[1]["status"] = json!("open");
         assert!(operation_decisions(&pending).is_empty());
-        pending[3]["notes"] =
-            json!("Superseded by landing-is-Done workflow; operation history retained");
-        assert_eq!(
-            operation_decisions(&pending)[0]["action"],
-            "restore_operation"
-        );
+        pending[3]["notes"] = json!("Superseded by landing-is-Done workflow; operation history retained");
+        assert_eq!(operation_decisions(&pending)[0]["action"], "restore_operation");
         pending[0]["labels"] = json!(["cancelled"]);
         assert!(operation_decisions(&pending).is_empty());
     }
@@ -1291,19 +1026,13 @@ mod tests {
     }
     #[test]
     fn inherited_job_labels_do_not_turn_deliverables_into_empty_epics() {
-        let row =
-            json!({"id":"leaf","issue_type":"task","status":"closed","labels":["job","step:work"]});
-        assert_eq!(
-            board_state::project(&nodes(&[row])).states["leaf"],
-            "closed"
-        );
+        let row = json!({"id":"leaf","issue_type":"task","status":"closed","labels":["job","step:work"]});
+        assert_eq!(board_state::project(&nodes(&[row])).states["leaf"], "closed");
     }
     #[test]
     fn an_empty_epic_is_never_delivered() {
         for status in ["open", "closed", "in_progress"] {
-            let result = board_state::project(&nodes(&[
-                json!({"id":"empty","issue_type":"epic","status":status}),
-            ]));
+            let result = board_state::project(&nodes(&[json!({"id":"empty","issue_type":"epic","status":status})]));
             assert_ne!(result.states["empty"], "closed");
         }
     }
@@ -1323,14 +1052,8 @@ mod tests {
     }
     #[test]
     fn a_reason_that_reads_like_a_card_id_is_not_taken_for_one() {
-        let rest: Vec<String> = [
-            "bw-dvaw.2",
-            "--checks-unrelated",
-            "bw-other.9 was already red",
-        ]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+        let rest: Vec<String> = ["bw-dvaw.2", "--checks-unrelated", "bw-other.9 was already red"]
+            .iter().map(|s| s.to_string()).collect();
         let (id, waiver) = requested(&rest);
         assert_eq!(id.as_deref(), Some("bw-dvaw.2"));
         assert_eq!(waiver.as_deref(), Some("bw-other.9 was already red"));
@@ -1352,10 +1075,7 @@ mod tests {
         };
         save(&path, &record).unwrap();
         let read: Landing = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        assert_eq!(
-            read.waived.as_deref(),
-            Some("the red suite is another card's")
-        );
+        assert_eq!(read.waived.as_deref(), Some("the red suite is another card's"));
         let older = json!({"version":1,"branch":"main","tip":"abc","tree":"tree",
             "actor":"session","cards":["job.1"],"complete":false});
         let read: Landing = serde_json::from_value(older).unwrap();

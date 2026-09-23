@@ -283,12 +283,9 @@ impl ProviderDefaultFiles {
                         .get("effortLevel")
                         .and_then(Value::as_str)
                         .map(str::to_string),
-                    permission_mode: settings
-                        .get("permissions")
-                        .and_then(Value::as_object)
+                    permission_mode: settings.get("permissions").and_then(Value::as_object)
                         .and_then(|permissions| permissions.get("defaultMode"))
-                        .and_then(Value::as_str)
-                        .map(str::to_string),
+                        .and_then(Value::as_str).map(str::to_string),
                 })
             }
             "codex" => {
@@ -304,10 +301,7 @@ impl ProviderDefaultFiles {
     }
 
     pub fn write(&self, brand: &str, kind: &str, value: &str) -> Result<ProviderDefaults, String> {
-        if !matches!(kind, "model" | "effort" | "permission")
-            || value.is_empty()
-            || value.len() > 200
-        {
+        if !matches!(kind, "model" | "effort" | "permission") || value.is_empty() || value.len() > 200 {
             return Err("provider default is invalid".into());
         }
         if kind == "permission" {
@@ -330,20 +324,10 @@ impl ProviderDefaultFiles {
                     return Err("Claude does not allow Max as a persisted default".into());
                 }
                 let mut settings = json_settings(&self.claude)?;
-                let key = if kind == "model" {
-                    "model"
-                } else if kind == "effort" {
-                    "effortLevel"
-                } else {
-                    "permissions"
-                };
+                let key = if kind == "model" { "model" } else if kind == "effort" { "effortLevel" } else { "permissions" };
                 if kind == "permission" {
-                    let permissions = settings
-                        .entry(key)
-                        .or_insert_with(|| Value::Object(Map::new()));
-                    permissions
-                        .as_object_mut()
-                        .ok_or("Claude permissions setting is not an object")?
+                    let permissions = settings.entry(key).or_insert_with(|| Value::Object(Map::new()));
+                    permissions.as_object_mut().ok_or("Claude permissions setting is not an object")?
                         .insert("defaultMode".into(), Value::String(value.into()));
                 } else if kind == "model" && value == "default" {
                     settings.remove(key);
@@ -356,13 +340,7 @@ impl ProviderDefaultFiles {
             }
             "codex" => {
                 let text = fs::read_to_string(&self.codex).unwrap_or_default();
-                let key = if kind == "model" {
-                    "model"
-                } else if kind == "effort" {
-                    "model_reasoning_effort"
-                } else {
-                    "approval_policy"
-                };
+                let key = if kind == "model" { "model" } else if kind == "effort" { "model_reasoning_effort" } else { "approval_policy" };
                 let value = (kind != "model" || value != "default").then_some(value);
                 atomic_write(
                     &self.codex,
@@ -414,18 +392,10 @@ mod tests {
             defaults.read("claude").unwrap().effort.as_deref(),
             Some("high")
         );
-        defaults
-            .write("claude", "permission", "bypassPermissions")
-            .unwrap();
-        assert_eq!(
-            defaults.read("claude").unwrap().permission_mode.as_deref(),
-            Some("bypassPermissions")
-        );
+        defaults.write("claude", "permission", "bypassPermissions").unwrap();
+        assert_eq!(defaults.read("claude").unwrap().permission_mode.as_deref(), Some("bypassPermissions"));
         defaults.write("codex", "permission", "never").unwrap();
-        assert_eq!(
-            defaults.read("codex").unwrap().permission_mode.as_deref(),
-            Some("never")
-        );
+        assert_eq!(defaults.read("codex").unwrap().permission_mode.as_deref(), Some("never"));
     }
 
     /// Starring the app's own mode leaves the provider's settings file alone.
@@ -442,11 +412,7 @@ mod tests {
 
         defaults.write("claude", "permission", "plan").unwrap();
         defaults
-            .write(
-                "claude",
-                "permission",
-                super::super::answering::ATELIER_AUTO,
-            )
+            .write("claude", "permission", super::super::answering::ATELIER_AUTO)
             .unwrap();
 
         let settings = fs::read_to_string(claude.join("settings.json")).unwrap();
@@ -470,15 +436,9 @@ mod tests {
         let defaults = ProviderDefaultFiles::new(&claude, &codex);
 
         defaults
-            .write(
-                "claude",
-                "permission",
-                super::super::answering::ATELIER_AUTO,
-            )
+            .write("claude", "permission", super::super::answering::ATELIER_AUTO)
             .unwrap();
-        defaults
-            .write("claude", "permission", "acceptEdits")
-            .unwrap();
+        defaults.write("claude", "permission", "acceptEdits").unwrap();
 
         assert_eq!(
             defaults.read("claude").unwrap().permission_mode.as_deref(),
@@ -502,17 +462,11 @@ mod tests {
         fs::create_dir_all(&project).unwrap();
         let defaults = ProviderDefaultFiles::new(&claude, &root.path().join("codex"));
         defaults
-            .write(
-                "claude",
-                "permission",
-                super::super::answering::ATELIER_AUTO,
-            )
+            .write("claude", "permission", super::super::answering::ATELIER_AUTO)
             .unwrap();
 
         assert_eq!(
-            read_owner_settings(&claude, &project)
-                .permission_mode
-                .as_deref(),
+            read_owner_settings(&claude, &project).permission_mode.as_deref(),
             Some(super::super::answering::ATELIER_AUTO)
         );
     }

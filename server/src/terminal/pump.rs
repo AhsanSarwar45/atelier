@@ -152,10 +152,7 @@ impl Kept {
         self.runs.push_back(run);
         while self.held > KEPT_PER_SHELL {
             let alive = {
-                let oldest = self
-                    .runs
-                    .front()
-                    .expect("bytes held with no run holding them");
+                let oldest = self.runs.front().expect("bytes held with no run holding them");
                 oldest.len() - self.skip
             };
             let over = self.held - KEPT_PER_SHELL;
@@ -279,10 +276,7 @@ impl Pump {
     /// replay it was given.
     pub fn attach(&self) -> (Vec<u8>, mpsc::Receiver<Message>) {
         let (to_viewer, from_pump) = mpsc::channel(MESSAGES_PER_VIEWER);
-        let mut kept = self
-            .kept
-            .lock()
-            .expect("the kept output lock is never poisoned");
+        let mut kept = self.kept.lock().expect("the kept output lock is never poisoned");
         let missed = kept.replay();
         if !kept.over {
             kept.listeners.push(to_viewer);
@@ -701,11 +695,7 @@ mod tests {
         let (_, mut viewer) = pump.attach();
         watch_until_over(&mut viewer).await;
 
-        assert_eq!(
-            pump.held(),
-            KEPT_PER_SHELL,
-            "the cap should have been reached"
-        );
+        assert_eq!(pump.held(), KEPT_PER_SHELL, "the cap should have been reached");
 
         let replay = pump.replay();
         assert!(

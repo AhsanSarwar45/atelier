@@ -146,12 +146,7 @@ pub fn parse(input: &str, now: DateTime<Local>) -> CardQuery {
             _ => return Key::Words,
         };
         let mut values = Vec::new();
-        for value in piece
-            .value
-            .split(',')
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-        {
+        for value in piece.value.split(',').map(str::trim).filter(|v| !v.is_empty()) {
             values.push(match which {
                 Trait::Status => status(value),
                 Trait::Priority => {
@@ -167,11 +162,7 @@ pub fn parse(input: &str, now: DateTime<Local>) -> CardQuery {
         if values.is_empty() {
             return Key::Unread;
         }
-        only.push(Only {
-            which,
-            values,
-            negated: piece.negated,
-        });
+        only.push(Only { which, values, negated: piece.negated });
         Key::Taken
     });
     CardQuery { words, only, dates }
@@ -210,9 +201,7 @@ pub struct Match<'a> {
 }
 
 fn instant(written: Option<&str>) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(written?)
-        .ok()
-        .map(|at| at.with_timezone(&Utc))
+    DateTime::parse_from_rfc3339(written?).ok().map(|at| at.with_timezone(&Utc))
 }
 
 fn when(bead: &Bead) -> Option<&str> {
@@ -221,19 +210,12 @@ fn when(bead: &Bead) -> Option<&str> {
 
 /// What a card says, part by part: the one searched and the one drawn.
 fn texts(bead: &Bead) -> Vec<(Field, Option<&str>, &str)> {
-    let mut texts = vec![
-        (Field::Title, None, bead.title.as_str()),
-        (Field::Title, None, bead.id.as_str()),
-    ];
+    let mut texts = vec![(Field::Title, None, bead.title.as_str()), (Field::Title, None, bead.id.as_str())];
     if let Some(description) = &bead.description {
         texts.push((Field::Description, None, description));
     }
     for comment in bead.comments.iter().flatten() {
-        texts.push((
-            Field::Comments,
-            Some(comment.author.as_str()),
-            comment.text.as_str(),
-        ));
+        texts.push((Field::Comments, Some(comment.author.as_str()), comment.text.as_str()));
     }
     if let Some(notes) = &bead.notes {
         texts.push((Field::Notes, None, notes));
@@ -267,47 +249,25 @@ fn is_under(bead: &Bead, above: &str, parents: &HashMap<&str, &str>) -> bool {
 fn has_trait(bead: &Bead, only: &Only, parents: &HashMap<&str, &str>) -> bool {
     let any = only.values.iter().any(|value| match only.which {
         Trait::Status => status_matches(&bead.status, value),
-        Trait::Type => bead
-            .issue_type
-            .as_deref()
-            .is_some_and(|t| t.eq_ignore_ascii_case(value)),
+        Trait::Type => bead.issue_type.as_deref().is_some_and(|t| t.eq_ignore_ascii_case(value)),
         Trait::Priority => bead.priority.is_some_and(|p| p.to_string() == *value),
         Trait::Under => is_under(bead, value, parents),
-        Trait::Owner => bead
-            .owner
-            .as_deref()
-            .is_some_and(|o| o.to_lowercase().contains(value.as_str())),
+        Trait::Owner => bead.owner.as_deref().is_some_and(|o| o.to_lowercase().contains(value.as_str())),
     });
     any != only.negated
 }
 
 /// The card, if it is one the query asks for, with where it was found.
-fn matched<'a>(
-    bead: &'a Bead,
-    query: &CardQuery,
-    parents: &HashMap<&str, &str>,
-) -> Option<Match<'a>> {
+fn matched<'a>(bead: &'a Bead, query: &CardQuery, parents: &HashMap<&str, &str>) -> Option<Match<'a>> {
     if !query.only.iter().all(|only| has_trait(bead, only, parents)) {
         return None;
     }
     if query.dates != Dates::default() {
         let at = instant(when(bead))?;
-        if query
-            .dates
-            .after
-            .as_deref()
-            .and_then(|a| instant(Some(a)))
-            .is_some_and(|after| at < after)
-        {
+        if query.dates.after.as_deref().and_then(|a| instant(Some(a))).is_some_and(|after| at < after) {
             return None;
         }
-        if query
-            .dates
-            .before
-            .as_deref()
-            .and_then(|b| instant(Some(b)))
-            .is_some_and(|before| at >= before)
-        {
+        if query.dates.before.as_deref().and_then(|b| instant(Some(b))).is_some_and(|before| at >= before) {
             return None;
         }
     }
@@ -320,12 +280,7 @@ fn matched<'a>(
             .filter(|(_, count)| *count > 0)
             .collect::<Vec<_>>()
     };
-    if query
-        .words
-        .none
-        .iter()
-        .any(|term| !found_in(term).is_empty())
-    {
+    if query.words.none.iter().any(|term| !found_in(term).is_empty()) {
         return None;
     }
     let mut score = 0;
@@ -347,11 +302,7 @@ fn matched<'a>(
     let mut title = None;
     let mut snippets = Vec::new();
     for (index, (field, author, said)) in texts.iter().enumerate() {
-        let aiming: Vec<&Term<Field>> = terms
-            .iter()
-            .copied()
-            .filter(|term| aimed(term, *field))
-            .collect();
+        let aiming: Vec<&Term<Field>> = terms.iter().copied().filter(|term| aimed(term, *field)).collect();
         let at = text::places(said, &aiming);
         if at.is_empty() {
             continue;
@@ -368,23 +319,11 @@ fn matched<'a>(
             _ => {}
         }
     }
-    Some(Match {
-        bead,
-        score,
-        places,
-        title,
-        snippets,
-    })
+    Some(Match { bead, score, places, title, snippets })
 }
 
 /// A page of the cards the query asks for, and where the next page starts.
-pub fn search<'a>(
-    board: &'a [Bead],
-    query: &CardQuery,
-    sort: Sort,
-    offset: usize,
-    limit: usize,
-) -> (Vec<Match<'a>>, Option<usize>) {
+pub fn search<'a>(board: &'a [Bead], query: &CardQuery, sort: Sort, offset: usize, limit: usize) -> (Vec<Match<'a>>, Option<usize>) {
     if query.is_empty() {
         return (Vec::new(), None);
     }
@@ -392,20 +331,13 @@ pub fn search<'a>(
         .iter()
         .filter_map(|bead| Some((bead.id.as_str(), bead.parent_id.as_deref()?)))
         .collect();
-    let mut found: Vec<Match> = board
-        .iter()
-        .filter_map(|bead| matched(bead, query, &parents))
-        .collect();
+    let mut found: Vec<Match> = board.iter().filter_map(|bead| matched(bead, query, &parents)).collect();
     let newest = |a: &Match, b: &Match| when(b.bead).cmp(&when(a.bead));
     match sort {
         Sort::Relevance => found.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| newest(a, b))),
         Sort::Newest => found.sort_by(newest),
         Sort::Priority => found.sort_by(|a, b| {
-            a.bead
-                .priority
-                .unwrap_or(9)
-                .cmp(&b.bead.priority.unwrap_or(9))
-                .then_with(|| newest(a, b))
+            a.bead.priority.unwrap_or(9).cmp(&b.bead.priority.unwrap_or(9)).then_with(|| newest(a, b))
         }),
     }
     let next = (found.len() > offset + limit).then_some(offset + limit);
@@ -459,13 +391,7 @@ pub async fn search_cards(
     };
     let query = parse(params.q.unwrap_or_default().trim_start(), Local::now());
     let limit = params.limit.unwrap_or(30).clamp(1, 100);
-    let (cards, next) = search(
-        &board,
-        &query,
-        Sort::from(params.sort.as_deref()),
-        params.cursor.unwrap_or(0),
-        limit,
-    );
+    let (cards, next) = search(&board, &query, Sort::from(params.sort.as_deref()), params.cursor.unwrap_or(0), limit);
     Json(json!({
         "cards": cards.iter().map(card_json).collect::<Vec<_>>(),
         "next": next,
@@ -530,12 +456,7 @@ impl Source for Cards {
         ])
     }
 
-    fn call(
-        self: Arc<Self>,
-        tool: String,
-        arguments: Value,
-        steps: Steps,
-    ) -> BoxFuture<'static, Called> {
+    fn call(self: Arc<Self>, tool: String, arguments: Value, steps: Steps) -> BoxFuture<'static, Called> {
         async move {
             let board = match self.board().await {
                 Ok(board) => board,
@@ -620,9 +541,7 @@ impl Source for Cards {
             named
                 .iter()
                 .map(|named| {
-                    let bead = board
-                        .iter()
-                        .find(|bead| bead.id.eq_ignore_ascii_case(&named.id))?;
+                    let bead = board.iter().find(|bead| bead.id.eq_ignore_ascii_case(&named.id))?;
                     Some(json!({
                         "id": bead.id,
                         "title": bead.title,
@@ -651,11 +570,7 @@ pub async fn ask(
     Json(asking): Json<Asking>,
 ) -> Response {
     if asking.question.trim().is_empty() {
-        return (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Say what the card was about.",
-        )
-            .into_response();
+        return (StatusCode::UNPROCESSABLE_ENTITY, "Say what the card was about.").into_response();
     }
     if let Err(failed) = shared_board(&dolt_manager, &db, &asking.path).await {
         return failed.into_response();
@@ -664,11 +579,7 @@ pub async fn ask(
         Ok(settings) => settings,
         Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
     };
-    let source = Arc::new(Cards {
-        dolt_manager,
-        db,
-        path: asking.path,
-    });
+    let source = Arc::new(Cards { dolt_manager, db, path: asking.path });
     agent::start(source, &asking.question, settings, |brand| {
         crate::workbench::profiles::system_dir(brand).unwrap_or_default()
     })
@@ -685,11 +596,7 @@ mod tests {
 
     fn ids(board: &[Bead], typed: &str) -> Vec<String> {
         let query = parse(typed, Local::now());
-        search(board, &query, Sort::Relevance, 0, 30)
-            .0
-            .iter()
-            .map(|m| m.bead.id.clone())
-            .collect()
+        search(board, &query, Sort::Relevance, 0, 30).0.iter().map(|m| m.bead.id.clone()).collect()
     }
 
     fn board() -> Vec<Bead> {
@@ -718,10 +625,7 @@ mod tests {
         let snippet = &found[0].snippets[0];
         assert_eq!(snippet.field, Field::Comments);
         assert_eq!(snippet.author.as_deref(), Some("sam"));
-        assert!(snippet
-            .segments
-            .iter()
-            .any(|s| s.mark && s.text == "cobalt"));
+        assert!(snippet.segments.iter().any(|s| s.mark && s.text == "cobalt"));
     }
 
     #[test]
@@ -745,9 +649,6 @@ mod tests {
     #[test]
     fn a_board_search_gives_its_agent_two_read_only_tools_and_the_board_skill() {
         let skill = agent::prompt(SKILL, "the card about the stalling loader");
-        assert!(
-            skill.starts_with("# Finding the card someone describes"),
-            "{skill}"
-        );
+        assert!(skill.starts_with("# Finding the card someone describes"), "{skill}");
     }
 }

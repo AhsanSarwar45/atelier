@@ -33,9 +33,8 @@ fn has_any(text: &str, needles: &[&str]) -> bool {
 /// character of the original.
 fn found(haystack: &str, needle: &str) -> Option<usize> {
     let (bytes, needle) = (haystack.as_bytes(), needle.as_bytes());
-    (0..=bytes.len().checked_sub(needle.len())?).find(|&at| {
-        haystack.is_char_boundary(at) && bytes[at..at + needle.len()].eq_ignore_ascii_case(needle)
-    })
+    (0..=bytes.len().checked_sub(needle.len())?)
+        .find(|&at| haystack.is_char_boundary(at) && bytes[at..at + needle.len()].eq_ignore_ascii_case(needle))
 }
 
 /// The provider's own words for when the condition lifts, quoted as it wrote
@@ -159,6 +158,7 @@ pub fn condition(brand: &str, text: &str) -> Option<Value> {
     }))
 }
 
+
 /// A Claude allowance packet, read as the condition it reports.
 ///
 /// The one path that could ever set a real `retryAt`: this kit sends the reset
@@ -202,21 +202,14 @@ mod tests {
     /// place the time is written down (bw-gao7).
     #[test]
     fn native_workbench_services_a_limit_carries_the_time_it_lifts() {
-        let signal = condition(
-            "claude",
-            "You've hit your session limit · resets 9pm (Asia/Karachi)",
-        )
-        .unwrap();
+        let signal = condition("claude", "You've hit your session limit · resets 9pm (Asia/Karachi)").unwrap();
         assert_eq!(signal["kind"], "usage_limit");
         assert_eq!(signal["resets"], "resets 9pm (Asia/Karachi)");
 
         // What the kit adds after the time is a separate clause, not part of it.
         assert_eq!(
-            condition(
-                "claude",
-                "You've hit your weekly limit · resets Aug 23, 1pm · progress saved"
-            )
-            .unwrap()["resets"],
+            condition("claude", "You've hit your weekly limit · resets Aug 23, 1pm · progress saved").unwrap()
+                ["resets"],
             "resets Aug 23, 1pm"
         );
 
@@ -232,10 +225,7 @@ mod tests {
         );
 
         // A condition that names no time says so, rather than inventing one.
-        assert_eq!(
-            condition("claude", "HTTP 429: too many requests").unwrap()["resets"],
-            Value::Null
-        );
+        assert_eq!(condition("claude", "HTTP 429: too many requests").unwrap()["resets"], Value::Null);
     }
 
     /// A kit is read in its own words, not in another kit's.
@@ -246,16 +236,10 @@ mod tests {
     #[test]
     fn native_workbench_services_each_kit_is_read_in_its_own_words() {
         let said = "You've hit your session limit · try again at 9pm";
-        assert_eq!(
-            condition("codex", said).unwrap()["resets"],
-            "try again at 9pm"
-        );
+        assert_eq!(condition("codex", said).unwrap()["resets"], "try again at 9pm");
         assert_eq!(condition("claude", said).unwrap()["resets"], Value::Null);
         // And a kit nobody has read yet is given both, rather than neither.
-        assert_eq!(
-            condition("goose", said).unwrap()["resets"],
-            "try again at 9pm"
-        );
+        assert_eq!(condition("goose", said).unwrap()["resets"], "try again at 9pm");
     }
 
     #[test]

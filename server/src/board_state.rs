@@ -84,16 +84,7 @@ pub fn project(nodes: &[Node]) -> Projection {
         } else if node.status == "cancelled" {
             Ok("cancelled".into())
         } else if node.children.is_empty() {
-            Ok(if node.container {
-                if node.started {
-                    "in_progress"
-                } else {
-                    "open"
-                }
-            } else {
-                normalize(&node.status)
-            }
-            .into())
+            Ok(if node.container { if node.started { "in_progress" } else { "open" } } else { normalize(&node.status) }.into())
         } else {
             let children: Result<Vec<String>, String> = node
                 .children

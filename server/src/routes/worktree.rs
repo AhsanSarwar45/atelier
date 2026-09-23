@@ -17,10 +17,7 @@ use super::validate_path_security;
 /// Validate repo_path, returning a FORBIDDEN response on failure.
 fn check_repo_path(repo_path: &Path) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     validate_path_security(repo_path).map_err(|e| {
-        (
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({ "error": e })),
-        )
+        (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": e })))
     })
 }
 
@@ -73,9 +70,7 @@ pub struct WorktreeStatusResponse {
 /// Returns worktree existence, path, branch, ahead/behind counts, and dirty status.
 pub async fn worktree_status(Query(params): Query<WorktreeStatusParams>) -> impl IntoResponse {
     let repo_path = Path::new(&params.repo_path);
-    if let Err(resp) = check_repo_path(repo_path) {
-        return resp.into_response();
-    }
+    if let Err(resp) = check_repo_path(repo_path) { return resp.into_response(); }
 
     // Validate repository path exists
     if !repo_path.exists() {
@@ -179,9 +174,7 @@ pub struct CreateWorktreeResponse {
 /// Returns the worktree path and whether it already existed.
 pub async fn create_worktree(Json(request): Json<CreateWorktreeRequest>) -> impl IntoResponse {
     let repo_path = Path::new(&request.repo_path);
-    if let Err(resp) = check_repo_path(repo_path) {
-        return resp.into_response();
-    }
+    if let Err(resp) = check_repo_path(repo_path) { return resp.into_response(); }
 
     // Validate repository path exists
     if !repo_path.exists() || !repo_path.is_dir() {
@@ -342,9 +335,7 @@ pub struct DeleteWorktreeResponse {
 /// ```
 pub async fn delete_worktree(Json(request): Json<DeleteWorktreeRequest>) -> impl IntoResponse {
     let repo_path = Path::new(&request.repo_path);
-    if let Err(resp) = check_repo_path(repo_path) {
-        return resp.into_response();
-    }
+    if let Err(resp) = check_repo_path(repo_path) { return resp.into_response(); }
 
     // Validate repository path exists
     if !repo_path.exists() {
@@ -480,9 +471,7 @@ pub struct ListWorktreesResponse {
 /// Returns a list of all worktrees with their paths, branches, and bead IDs.
 pub async fn list_worktrees(Query(params): Query<ListWorktreesParams>) -> impl IntoResponse {
     let repo_path = Path::new(&params.repo_path);
-    if let Err(resp) = check_repo_path(repo_path) {
-        return resp.into_response();
-    }
+    if let Err(resp) = check_repo_path(repo_path) { return resp.into_response(); }
 
     // Validate repository path exists
     if !repo_path.exists() {
@@ -545,7 +534,11 @@ fn parse_worktree_list(output: &str, repo_path: &str) -> Vec<WorktreeEntry> {
         } else if line.starts_with("branch ") {
             // Extract just the branch name from refs/heads/...
             let full_ref = line.trim_start_matches("branch ");
-            current_branch = Some(full_ref.trim_start_matches("refs/heads/").to_string());
+            current_branch = Some(
+                full_ref
+                    .trim_start_matches("refs/heads/")
+                    .to_string(),
+            );
         }
     }
 
@@ -675,10 +668,7 @@ mod tests {
     #[test]
     fn test_extract_bead_id() {
         assert_eq!(extract_bead_id("bd-BD-001"), Some("BD-001".to_string()));
-        assert_eq!(
-            extract_bead_id("bd-EPIC-001.1"),
-            Some("EPIC-001.1".to_string())
-        );
+        assert_eq!(extract_bead_id("bd-EPIC-001.1"), Some("EPIC-001.1".to_string()));
         assert_eq!(extract_bead_id("main"), None);
         assert_eq!(extract_bead_id("feature-branch"), None);
     }

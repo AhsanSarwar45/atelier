@@ -106,25 +106,14 @@ pub fn accepts_gzip(offered: Option<&str>) -> bool {
 /// header. A live event stream would be held back until a buffer filled, a
 /// connection being upgraded has no body to compress, and a partial or
 /// seekable answer would stop matching the ranges it was asked for.
-pub fn worth_compressing(
-    status: u16,
-    content_type: Option<&str>,
-    length: Option<u64>,
-    ranged: bool,
-) -> bool {
+pub fn worth_compressing(status: u16, content_type: Option<&str>, length: Option<u64>, ranged: bool) -> bool {
     if matches!(status, 101 | 204 | 206 | 304) || ranged {
         return false;
     }
     if length.is_some_and(|length| length < 1024) {
         return false;
     }
-    let Some(kind) = content_type.map(|kind| {
-        kind.split(';')
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase()
-    }) else {
+    let Some(kind) = content_type.map(|kind| kind.split(';').next().unwrap_or("").trim().to_ascii_lowercase()) else {
         return false;
     };
     if kind == "text/event-stream" {
@@ -152,82 +141,28 @@ mod tests {
         assert!(!accepts_gzip(None), "no header means the bytes as they are");
         assert!(!accepts_gzip(Some("identity")));
         assert!(!accepts_gzip(Some("br, zstd")));
-        assert!(
-            !accepts_gzip(Some("gzip;q=0, deflate")),
-            "a refusal was read as an offer"
-        );
-        assert!(
-            !accepts_gzip(Some("x-gzip-ish")),
-            "a substring was read as the token"
-        );
+        assert!(!accepts_gzip(Some("gzip;q=0, deflate")), "a refusal was read as an offer");
+        assert!(!accepts_gzip(Some("x-gzip-ish")), "a substring was read as the token");
     }
 
     #[test]
     fn a_whole_text_answer_is_compressed() {
-        assert!(worth_compressing(
-            200,
-            Some("application/json"),
-            Some(6_000_000),
-            false
-        ));
-        assert!(worth_compressing(
-            200,
-            Some("application/json; charset=utf-8"),
-            None,
-            false
-        ));
-        assert!(worth_compressing(
-            201,
-            Some("text/html; charset=utf-8"),
-            Some(4096),
-            false
-        ));
-        assert!(worth_compressing(
-            200,
-            Some("image/svg+xml"),
-            Some(8192),
-            false
-        ));
+        assert!(worth_compressing(200, Some("application/json"), Some(6_000_000), false));
+        assert!(worth_compressing(200, Some("application/json; charset=utf-8"), None, false));
+        assert!(worth_compressing(201, Some("text/html; charset=utf-8"), Some(4096), false));
+        assert!(worth_compressing(200, Some("image/svg+xml"), Some(8192), false));
     }
 
     #[test]
     fn a_stream_an_upgrade_a_range_or_a_crumb_is_not() {
-        assert!(
-            !worth_compressing(200, Some("text/event-stream"), None, false),
-            "live events would be held back"
-        );
-        assert!(
-            !worth_compressing(101, None, None, false),
-            "an upgrade has no body"
-        );
-        assert!(
-            !worth_compressing(206, Some("text/plain"), Some(1 << 20), true),
-            "a range would stop matching"
-        );
-        assert!(
-            !worth_compressing(200, Some("text/plain"), Some(1 << 20), true),
-            "a seekable file would stop matching"
-        );
-        assert!(
-            !worth_compressing(200, Some("application/json"), Some(40), false),
-            "the header costs more than it saves"
-        );
-        assert!(!worth_compressing(
-            200,
-            Some("video/mp4"),
-            Some(1 << 20),
-            false
-        ));
-        assert!(!worth_compressing(
-            200,
-            Some("image/png"),
-            Some(1 << 20),
-            false
-        ));
-        assert!(
-            !worth_compressing(200, None, Some(1 << 20), false),
-            "an unnamed body may already be packed"
-        );
+        assert!(!worth_compressing(200, Some("text/event-stream"), None, false), "live events would be held back");
+        assert!(!worth_compressing(101, None, None, false), "an upgrade has no body");
+        assert!(!worth_compressing(206, Some("text/plain"), Some(1 << 20), true), "a range would stop matching");
+        assert!(!worth_compressing(200, Some("text/plain"), Some(1 << 20), true), "a seekable file would stop matching");
+        assert!(!worth_compressing(200, Some("application/json"), Some(40), false), "the header costs more than it saves");
+        assert!(!worth_compressing(200, Some("video/mp4"), Some(1 << 20), false));
+        assert!(!worth_compressing(200, Some("image/png"), Some(1 << 20), false));
+        assert!(!worth_compressing(200, None, Some(1 << 20), false), "an unnamed body may already be packed");
         assert!(!worth_compressing(304, Some("text/html"), None, false));
     }
 
@@ -259,13 +194,7 @@ mod tests {
     fn a_file_whose_name_survives_a_rebuild_is_not() {
         // These live under `public/` and are served at the root under the same
         // name for ever, so a year-long copy would outlive several changes.
-        for same_name in [
-            "icon.svg",
-            "icon-192.png",
-            "apple-touch-icon.png",
-            "_next/image",
-            "static/x.js",
-        ] {
+        for same_name in ["icon.svg", "icon-192.png", "apple-touch-icon.png", "_next/image", "static/x.js"] {
             assert_eq!(
                 kept_for(same_name),
                 "no-cache, must-revalidate",
@@ -293,13 +222,7 @@ mod tests {
     #[test]
     fn a_screen_or_a_file_is_not() {
         // These are files with tags: they ARE kept, and asked about by tag.
-        for asked in [
-            "/",
-            "/index.html",
-            "/project",
-            "/_next/static/main.js",
-            "/apiary",
-        ] {
+        for asked in ["/", "/index.html", "/project", "/_next/static/main.js", "/apiary"] {
             assert!(
                 !about_the_work(asked),
                 "{asked} would lose its tag and be fetched whole on every visit"
@@ -331,10 +254,7 @@ mod tests {
     #[test]
     fn the_tag_is_read_back_however_the_browser_offers_it() {
         let tag = tag_for(&[3u8; 32]);
-        assert!(
-            already_held(Some(&tag), &tag),
-            "its own tag was not recognised"
-        );
+        assert!(already_held(Some(&tag), &tag), "its own tag was not recognised");
         assert!(
             already_held(Some(&format!("W/{tag}")), &tag),
             "a weakened tag was not recognised"
@@ -343,19 +263,13 @@ mod tests {
             already_held(Some(&format!("\"deadbeef\", {tag}")), &tag),
             "a tag offered alongside another was not recognised"
         );
-        assert!(
-            already_held(Some("*"), &tag),
-            "any-content was not recognised"
-        );
+        assert!(already_held(Some("*"), &tag), "any-content was not recognised");
     }
 
     #[test]
     fn a_browser_holding_something_else_is_sent_the_file() {
         let tag = tag_for(&[3u8; 32]);
-        assert!(
-            !already_held(None, &tag),
-            "a first visit was answered with nothing"
-        );
+        assert!(!already_held(None, &tag), "a first visit was answered with nothing");
         assert!(
             !already_held(Some(&tag_for(&[4u8; 32])), &tag),
             "a browser holding the previous build was told it was current"

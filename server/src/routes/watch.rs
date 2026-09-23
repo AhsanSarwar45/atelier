@@ -12,7 +12,9 @@ use axum::{
     response::sse::{Event, Sse},
 };
 use futures::stream::{Stream, StreamExt};
-use notify::{event::ModifyKind, Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{
+    event::ModifyKind, Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     convert::Infallible,
@@ -52,9 +54,7 @@ enum BoardStore {
 type DoltRevision = Vec<(PathBuf, Vec<u8>)>;
 
 fn dolt_manifests(root: &Path, at: &Path, manifests: &mut DoltRevision) {
-    let Ok(entries) = std::fs::read_dir(at) else {
-        return;
-    };
+    let Ok(entries) = std::fs::read_dir(at) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.components().any(|part| part.as_os_str() == "stats") {
@@ -64,10 +64,7 @@ fn dolt_manifests(root: &Path, at: &Path, manifests: &mut DoltRevision) {
             dolt_manifests(root, &path, manifests);
         } else if path.file_name().is_some_and(|name| name == "manifest") {
             if let Ok(contents) = std::fs::read(&path) {
-                manifests.push((
-                    path.strip_prefix(root).unwrap_or(&path).to_path_buf(),
-                    contents,
-                ));
+                manifests.push((path.strip_prefix(root).unwrap_or(&path).to_path_buf(), contents));
             }
         }
     }
@@ -120,7 +117,9 @@ impl BoardStore {
     fn is_board_change(&self, changed: &Path) -> bool {
         match self {
             BoardStore::Jsonl { file } => {
-                changed.ends_with("issues.jsonl") || changed.ends_with(".beads") || changed == file
+                changed.ends_with("issues.jsonl")
+                    || changed.ends_with(".beads")
+                    || changed == file
             }
             // Only the database's chunk journal carries rows. Dolt keeps its
             // query statistics in a second database under the server root and
@@ -148,9 +147,7 @@ impl BoardStore {
     /// this revision lets the watcher tell those two identical-looking bursts
     /// apart without a timing window (bw-hou2.1).
     fn revision(&self) -> Option<DoltRevision> {
-        let BoardStore::Dolt { root } = self else {
-            return None;
-        };
+        let BoardStore::Dolt { root } = self else { return None };
         let mut manifests = Vec::new();
         dolt_manifests(root, root, &mut manifests);
         manifests.sort_by(|a, b| a.0.cmp(&b.0));
@@ -393,9 +390,7 @@ mod tests {
         let noms = dir.path().join("quiet/.dolt/noms");
         std::fs::create_dir_all(&noms).unwrap();
         std::fs::write(noms.join("manifest"), "root-a").unwrap();
-        let store = BoardStore::Dolt {
-            root: dir.path().to_path_buf(),
-        };
+        let store = BoardStore::Dolt { root: dir.path().to_path_buf() };
         let before = store.revision();
 
         // The same bytes written again are the noise an embedded read makes.
@@ -419,7 +414,8 @@ mod tests {
 
     #[test]
     fn test_watch_params_deserialization() {
-        let params: WatchParams = serde_json::from_str(r#"{"path": "/test/project"}"#).unwrap();
+        let params: WatchParams =
+            serde_json::from_str(r#"{"path": "/test/project"}"#).unwrap();
         assert_eq!(params.path, "/test/project");
     }
 
@@ -437,7 +433,9 @@ mod tests {
         let store = BoardStore::Dolt {
             root: PathBuf::from("/p/.beads/dolt"),
         };
-        assert!(store.is_board_change(Path::new("/p/.beads/dolt/cor/.dolt/noms/journal.idx")));
+        assert!(store.is_board_change(Path::new(
+            "/p/.beads/dolt/cor/.dolt/noms/journal.idx"
+        )));
     }
 
     #[test]
@@ -492,10 +490,7 @@ mod tests {
     async fn a_window_going_away_stops_the_watcher_on_a_board_nobody_touches() {
         // Under the reader's own folder, which is where this route allows a
         // project to be at all.
-        let owner = directories::UserDirs::new()
-            .unwrap()
-            .home_dir()
-            .to_path_buf();
+        let owner = directories::UserDirs::new().unwrap().home_dir().to_path_buf();
         let project = tempfile::TempDir::new_in(&owner).unwrap();
         std::fs::create_dir_all(project.path().join(".beads")).unwrap();
 
@@ -531,10 +526,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join(".beads")).unwrap();
 
-        assert!(matches!(
-            BoardStore::resolve(&dir),
-            BoardStore::Jsonl { .. }
-        ));
+        assert!(matches!(BoardStore::resolve(&dir), BoardStore::Jsonl { .. }));
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

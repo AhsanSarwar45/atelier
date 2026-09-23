@@ -111,7 +111,8 @@ type Ending = Option<(DateTime<Utc>, Option<String>)>;
 
 /// A reply's ending and its last words, read again only when the file changed.
 fn cached_ending(record: &Path, helper: bool) -> Ending {
-    static READ: LazyLock<Mutex<HashMap<PathBuf, (u64, Ending)>>> = LazyLock::new(Default::default);
+    static READ: LazyLock<Mutex<HashMap<PathBuf, (u64, Ending)>>> =
+        LazyLock::new(Default::default);
     let size = fs::metadata(record).map(|m| m.len()).ok()?;
     let mut read = READ.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((seen, ended)) = read.get(record) {
@@ -187,19 +188,14 @@ pub fn record_endings(record: &Path) -> HashMap<String, Value> {
             let mut bytes = Vec::new();
             if file.seek(SeekFrom::Start(*offset)).is_ok() && file.read_to_end(&mut bytes).is_ok() {
                 // Only whole rows; a row being written is read next time.
-                let whole = bytes
-                    .iter()
-                    .rposition(|byte| *byte == b'\n')
-                    .map_or(0, |at| at + 1);
+                let whole = bytes.iter().rposition(|byte| *byte == b'\n').map_or(0, |at| at + 1);
                 let rows: Vec<Value> = String::from_utf8_lossy(&bytes[..whole])
                     .split('\n')
                     .filter_map(|line| serde_json::from_str(line).ok())
                     .collect();
                 for notice in super::claude::history::record_notices(&rows) {
                     if let Some(task) = notice["agentId"].as_str() {
-                        endings
-                            .entry(task.to_string())
-                            .or_insert_with(|| notice.clone());
+                        endings.entry(task.to_string()).or_insert_with(|| notice.clone());
                     }
                 }
                 *offset += whole as u64;
@@ -407,13 +403,7 @@ mod tests {
         assert_eq!(record_endings(&record)["one"]["state"], "done");
         let mut file = fs::OpenOptions::new().append(true).open(&record).unwrap();
         use std::io::Write;
-        write!(
-            file,
-            "{}\n{}",
-            notice("two", "killed"),
-            "{\"type\":\"queue-op"
-        )
-        .unwrap();
+        write!(file, "{}\n{}", notice("two", "killed"), "{\"type\":\"queue-op").unwrap();
         let endings = record_endings(&record);
         assert_eq!(endings["two"]["state"], "stopped");
         assert_eq!(endings.len(), 2);
@@ -434,16 +424,10 @@ mod tests {
         let record = directory.path().join("chat.jsonl");
         let filler = format!("{}\n", json!({"type":"user","pad":"x".repeat(4096)}));
         let mut text = filler.repeat(200);
-        text.push_str(&format!(
-            "{}\n",
-            row("assistant", Some("end_turn"), "2026-09-15T14:51:54Z")
-        ));
+        text.push_str(&format!("{}\n", row("assistant", Some("end_turn"), "2026-09-15T14:51:54Z")));
         fs::write(&record, text).unwrap();
         assert!(record_reply_ended_at(&record).is_some());
-        assert_eq!(
-            record_reply_ended_at(&directory.path().join("missing.jsonl")),
-            None
-        );
+        assert_eq!(record_reply_ended_at(&directory.path().join("missing.jsonl")), None);
     }
 
     #[cfg(target_os = "linux")]

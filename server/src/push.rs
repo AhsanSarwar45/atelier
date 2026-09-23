@@ -148,11 +148,7 @@ pub fn forget(db: &Database, endpoint: &str) -> Result<(), String> {
 
 /// Encrypt one note for one device. Separated from the send so a test can
 /// check what would go on the wire without a push service to send it to.
-pub fn seal(
-    private_key_base64: &str,
-    device: &Registration,
-    note: &Note,
-) -> Result<WebPushMessage, String> {
+pub fn seal(private_key_base64: &str, device: &Registration, note: &Note) -> Result<WebPushMessage, String> {
     let info = SubscriptionInfo::new(&device.endpoint, &device.p256dh, &device.auth);
     let mut signature = VapidSignatureBuilder::from_base64(private_key_base64, &info)
         .map_err(|e| format!("the stored push key cannot be read: {e}"))?;
@@ -173,10 +169,7 @@ pub fn seal(
 
 /// Post one sealed message, mirroring the headers `web_push`'s own
 /// `request_builder` sets, because the send is ours rather than the crate's.
-async fn post(
-    http: &reqwest::Client,
-    message: WebPushMessage,
-) -> Result<reqwest::StatusCode, String> {
+async fn post(http: &reqwest::Client, message: WebPushMessage) -> Result<reqwest::StatusCode, String> {
     let mut request = http
         .post(message.endpoint.to_string())
         .header("TTL", message.ttl.to_string());
@@ -223,9 +216,7 @@ pub async fn deliver(db: &Database, http: &reqwest::Client, note: &Note) -> Resu
         match post(http, message).await {
             Ok(status) if status.is_success() => sent += 1,
             Ok(status) if status == 404 || status == 410 => retired.push(device.endpoint.clone()),
-            Ok(status) => {
-                tracing::warn!("a push service answered {status} for {}", device.endpoint)
-            }
+            Ok(status) => tracing::warn!("a push service answered {status} for {}", device.endpoint),
             Err(why) => tracing::warn!("a push could not be sent to {}: {why}", device.endpoint),
         }
     }
@@ -273,12 +264,7 @@ pub fn watch(db: Arc<Database>, workbench: crate::routes::workbench::WorkbenchSt
             if update.event.kind != crate::workbench::protocol::EventKind::SessionState {
                 continue;
             }
-            let Some(state) = update
-                .event
-                .fields
-                .get("state")
-                .and_then(serde_json::Value::as_str)
-            else {
+            let Some(state) = update.event.fields.get("state").and_then(serde_json::Value::as_str) else {
                 continue;
             };
 
@@ -362,26 +348,17 @@ mod tests {
 
     #[test]
     fn a_note_goes_only_to_a_device_that_asked_for_its_kind() {
-        let note = Note {
-            needs_action: false,
-            ..a_note()
-        };
+        let note = Note { needs_action: false, ..a_note() };
         let mut device = a_device();
         device.updates = false;
-        assert!(
-            !note.wanted_by(&device),
-            "an update reached a device that turned updates off"
-        );
+        assert!(!note.wanted_by(&device), "an update reached a device that turned updates off");
         device.updates = true;
         assert!(note.wanted_by(&device));
 
         let urgent = a_note();
         let mut deaf = a_device();
         deaf.needs_action = false;
-        assert!(
-            !urgent.wanted_by(&deaf),
-            "a needs-action note reached a device that turned them off"
-        );
+        assert!(!urgent.wanted_by(&deaf), "a needs-action note reached a device that turned them off");
     }
 
     #[test]

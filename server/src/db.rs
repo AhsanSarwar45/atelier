@@ -502,11 +502,7 @@ impl Database {
     }
 
     /// Gets projects, optionally including archived and/or test projects
-    pub fn get_projects_filtered(
-        &self,
-        include_archived: bool,
-        include_test: bool,
-    ) -> Result<Vec<Project>, DbError> {
+    pub fn get_projects_filtered(&self, include_archived: bool, include_test: bool) -> Result<Vec<Project>, DbError> {
         let conn = self.conn.lock().unwrap();
         let mut conditions: Vec<&str> = Vec::new();
         if !include_archived {
@@ -946,36 +942,20 @@ impl Database {
 fn migrate_project_settings(conn: &Connection) -> Result<(), DbError> {
     let data_dir = crate::identity::data_dir().ok_or(DbError::PathError)?;
     let mut stmt = conn.prepare("SELECT path, local_path, uses_beads FROM projects")?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, bool>(2)?,
-            ))
-        })?
-        .collect::<SqliteResult<Vec<_>>>()?;
+    let rows = stmt.query_map([], |row| Ok((
+        row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, bool>(2)?,
+    )))?.collect::<SqliteResult<Vec<_>>>()?;
     drop(stmt);
     for (path, local_path, use_beads) in rows {
         let raw = local_path.as_deref().unwrap_or(&path);
-        if raw.starts_with("dolt://") {
-            continue;
-        }
-        let Ok(root) = std::fs::canonicalize(raw) else {
-            continue;
-        };
-        if crate::project_manifest::locate(&root, &data_dir).is_some() {
-            continue;
-        }
+        if raw.starts_with("dolt://") { continue; }
+        let Ok(root) = std::fs::canonicalize(raw) else { continue; };
+        if crate::project_manifest::locate(&root, &data_dir).is_some() { continue; }
         let mut manifest = crate::project_manifest::infer(&root);
         manifest.project.use_beads = use_beads;
         crate::project_manifest::create(
-            &root,
-            &data_dir,
-            crate::project_manifest::ManifestStorage::Personal,
-            &manifest,
-        )
-        .map_err(DbError::ProjectSettings)?;
+            &root, &data_dir, crate::project_manifest::ManifestStorage::Personal, &manifest,
+        ).map_err(DbError::ProjectSettings)?;
     }
     Ok(())
 }
@@ -1330,10 +1310,7 @@ mod tests {
             .unwrap();
 
         let found = db.get_project_by_path("M:/repos/win/project").unwrap();
-        assert!(
-            found.is_some(),
-            "forward-slash lookup should match backslash-stored path"
-        );
+        assert!(found.is_some(), "forward-slash lookup should match backslash-stored path");
         assert_eq!(found.unwrap().id, created.id);
     }
 
@@ -1353,10 +1330,7 @@ mod tests {
 
         // Initially no cache row
         let initial = db.get_cached_counts(&project.id).unwrap();
-        assert!(
-            initial.is_none(),
-            "expected no cache row before first upsert"
-        );
+        assert!(initial.is_none(), "expected no cache row before first upsert");
 
         let counts = CachedCounts {
             open: 3,

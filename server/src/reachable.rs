@@ -206,11 +206,9 @@ fn chosen(for_this_run: Option<String>, stored: Option<String>) -> Option<String
 
 /// The first of these names the environment has an answer for.
 fn for_this_run(names: &[&str]) -> Option<String> {
-    names.iter().find_map(|name| {
-        std::env::var(name)
-            .ok()
-            .filter(|said| !said.trim().is_empty())
-    })
+    names
+        .iter()
+        .find_map(|name| std::env::var(name).ok().filter(|said| !said.trim().is_empty()))
 }
 
 /// Who may reach this program: this run's answer, else the screen's, else
@@ -286,11 +284,7 @@ pub fn forget_stored_port() -> bool {
 ///
 /// The registration is still read when nothing is stored, because an install
 /// done on a chosen port must not quietly move to the default.
-pub fn port_from_either(
-    for_this_run: Option<String>,
-    stored: Option<String>,
-    service: bool,
-) -> u16 {
+pub fn port_from_either(for_this_run: Option<String>, stored: Option<String>, service: bool) -> u16 {
     if service {
         port_from(stored, for_this_run)
     } else {
@@ -315,11 +309,7 @@ pub fn port_from(first: Option<String>, then: Option<String>) -> u16 {
 
 /// One answer read as a port, or nothing if it is not one this program can take.
 fn a_port(said: Option<String>) -> Option<u16> {
-    said?
-        .trim()
-        .parse()
-        .ok()
-        .filter(|&number| usable_port(number))
+    said?.trim().parse().ok().filter(|&number| usable_port(number))
 }
 
 /// Whether a port can actually be taken on the address this copy binds.
@@ -334,11 +324,7 @@ fn a_port(said: Option<String>) -> Option<u16> {
 /// catches the case that actually happens, which is a reader typing the port
 /// of a thing they already run.
 pub fn port_is_free(host: &str, port: u16) -> bool {
-    let host = if host == "0.0.0.0" || host.is_empty() {
-        "127.0.0.1"
-    } else {
-        host
-    };
+    let host = if host == "0.0.0.0" || host.is_empty() { "127.0.0.1" } else { host };
     match format!("{host}:{port}").parse::<std::net::SocketAddr>() {
         Ok(at) => std::net::TcpListener::bind(at).is_ok(),
         // Not an address this can be asked about — the bind at start will say.
@@ -361,12 +347,7 @@ pub fn usable_port(number: u16) -> bool {
 /// leased address does not. Nothing when this program answers only here:
 /// there is no home network address then, and printing one would be a lie the
 /// reader finds out about from their phone.
-pub fn home_address(
-    host: &str,
-    port: u16,
-    network: Option<IpAddr>,
-    name: Option<&str>,
-) -> Option<String> {
+pub fn home_address(host: &str, port: u16, network: Option<IpAddr>, name: Option<&str>) -> Option<String> {
     match Listening::from(host) {
         Listening::OnlyHere => None,
         Listening::AtOneAddress => Some(format!("http://{host}:{port}")),
@@ -446,11 +427,7 @@ pub fn openable_at(
         }
         Listening::AtOneAddress => {
             let mut lines = vec![here];
-            lines.extend(ranked(
-                published,
-                vec![format!("http://{host}:{port}")],
-                port,
-            ));
+            lines.extend(ranked(published, vec![format!("http://{host}:{port}")], port));
             lines
         }
     }
@@ -542,10 +519,7 @@ mod tests {
 
     #[test]
     fn listening_only_here_says_so_instead_of_offering_an_address() {
-        let said = lines(
-            "127.0.0.1",
-            Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 11))),
-        );
+        let said = lines("127.0.0.1", Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 11))));
         assert!(
             !said.contains("192.168.1.11"),
             "an address was offered that would not answer: {said}"
@@ -571,18 +545,12 @@ mod tests {
         let said = lines("0.0.0.0", None);
         assert!(said.contains("http://localhost:3008"), "{said}");
         assert!(said.contains("unavailable"), "{said}");
-        assert!(
-            !said.contains("http://:"),
-            "half an address was printed: {said}"
-        );
+        assert!(!said.contains("http://:"), "half an address was printed: {said}");
     }
 
     #[test]
     fn a_v6_address_goes_into_a_browser_with_its_brackets() {
-        let said = lines(
-            "::",
-            Some(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1))),
-        );
+        let said = lines("::", Some(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1))));
         assert!(said.contains("http://[fe80::1]:3008"), "{said}");
     }
 
@@ -593,12 +561,8 @@ mod tests {
             Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 11))),
             "nobara.local",
         );
-        let name_at = said
-            .find("nobara.local")
-            .expect("the name was not printed: {said}");
-        let number_at = said
-            .find("192.168.1.11")
-            .expect("the number was not printed: {said}");
+        let name_at = said.find("nobara.local").expect("the name was not printed: {said}");
+        let number_at = said.find("192.168.1.11").expect("the number was not printed: {said}");
         assert!(
             name_at < number_at,
             "the number a router can change was offered first:\n{said}"
@@ -622,10 +586,7 @@ mod tests {
     fn a_computer_whose_name_is_not_found_still_gets_the_number_and_no_dead_name() {
         let said = lines("0.0.0.0", Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 11))));
         assert!(said.contains("http://192.168.1.11:3008"), "{said}");
-        assert!(
-            !said.contains(".local"),
-            "a name nothing resolves was offered:\n{said}"
-        );
+        assert!(!said.contains(".local"), "a name nothing resolves was offered:\n{said}");
     }
 
     #[test]
@@ -634,10 +595,7 @@ mod tests {
         // computer can work out its own number.
         let said = named("0.0.0.0", None, "nobara.local");
         assert!(said.contains("http://nobara.local:3008"), "{said}");
-        assert!(
-            !said.contains("no route out"),
-            "it apologised while holding the answer:\n{said}"
-        );
+        assert!(!said.contains("no route out"), "it apologised while holding the answer:\n{said}");
     }
 
     #[test]
@@ -676,10 +634,7 @@ mod tests {
         let here = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 1));
         assert!(!is_this_computer(&[here], None));
         assert!(!is_this_computer(&[], None));
-        assert!(is_this_computer(
-            &[IpAddr::V4(Ipv4Addr::new(10, 0, 0, 4))],
-            None
-        ));
+        assert!(is_this_computer(&[IpAddr::V4(Ipv4Addr::new(10, 0, 0, 4))], None));
     }
 
     #[test]
@@ -701,20 +656,11 @@ mod tests {
             offered.contains("https://nobara.tail1a2b.ts.net"),
             "the address in front was not the one offered: {offered}"
         );
-        assert!(
-            !offered.contains("http://"),
-            "a plain address was offered: {offered}"
-        );
+        assert!(!offered.contains("http://"), "a plain address was offered: {offered}");
         // Still printed, because the mesh can be down and the LAN is then all
         // the reader has left to type.
-        assert!(
-            said.contains("Network fallback   http://nobara.local:3008"),
-            "{said}"
-        );
-        assert!(
-            said.contains("Network fallback   http://192.168.1.11:3008"),
-            "{said}"
-        );
+        assert!(said.contains("Network fallback   http://nobara.local:3008"), "{said}");
+        assert!(said.contains("Network fallback   http://192.168.1.11:3008"), "{said}");
     }
 
     #[test]
@@ -722,28 +668,16 @@ mod tests {
         // The settled shape: the door faces the proxy alone. Telling this
         // reader to open it to the network would undo what they just set up.
         let said = fronted("127.0.0.1", None, None, "https://nobara.tail1a2b.ts.net");
-        assert!(
-            said.contains("Network            https://nobara.tail1a2b.ts.net"),
-            "{said}"
-        );
-        assert!(
-            !said.contains("Local access only"),
-            "it called a reachable board local: {said}"
-        );
-        assert!(
-            !said.contains("ATELIER_HOST=0.0.0.0"),
-            "it advised undoing the arrangement: {said}"
-        );
+        assert!(said.contains("Network            https://nobara.tail1a2b.ts.net"), "{said}");
+        assert!(!said.contains("Local access only"), "it called a reachable board local: {said}");
+        assert!(!said.contains("ATELIER_HOST=0.0.0.0"), "it advised undoing the arrangement: {said}");
     }
 
     #[test]
     fn a_computer_with_no_route_out_behind_something_in_front_has_an_address_after_all() {
         let said = fronted("0.0.0.0", None, None, "https://nobara.tail1a2b.ts.net");
         assert!(said.contains("https://nobara.tail1a2b.ts.net"), "{said}");
-        assert!(
-            !said.contains("unavailable"),
-            "it reported nothing while holding an address: {said}"
-        );
+        assert!(!said.contains("unavailable"), "it reported nothing while holding an address: {said}");
     }
 
     #[test]
@@ -790,7 +724,10 @@ mod tests {
 
     #[test]
     fn the_screens_answer_is_used_when_this_run_has_none() {
-        assert_eq!(bind_host_from(None, Some("127.0.0.1".into())), "127.0.0.1");
+        assert_eq!(
+            bind_host_from(None, Some("127.0.0.1".into())),
+            "127.0.0.1"
+        );
     }
 
     #[test]
@@ -821,10 +758,7 @@ mod tests {
     #[test]
     fn a_stored_answer_is_trimmed_before_it_is_believed() {
         // It arrives from a text box.
-        assert_eq!(
-            bind_host_from(None, Some("  127.0.0.1  ".into())),
-            "127.0.0.1"
-        );
+        assert_eq!(bind_host_from(None, Some("  127.0.0.1  ".into())), "127.0.0.1");
     }
 
     #[test]
@@ -877,28 +811,19 @@ mod tests {
         // Below 1024 needs privileges the app does not have, so a stored 80
         // would make every later start fail to bind with nothing on screen
         // explaining why. Fall back rather than refuse to run.
-        assert_eq!(
-            port_from(None, Some("80".into())),
-            crate::command_line::PORT
-        );
+        assert_eq!(port_from(None, Some("80".into())), crate::command_line::PORT);
         assert!(!usable_port(1023));
         assert!(usable_port(1024));
     }
 
     #[test]
     fn a_port_that_is_not_a_number_is_not_a_port() {
-        assert_eq!(
-            port_from(None, Some("soon".into())),
-            crate::command_line::PORT
-        );
+        assert_eq!(port_from(None, Some("soon".into())), crate::command_line::PORT);
     }
 
     #[test]
     fn a_hand_started_copy_is_told_its_port_by_the_person_who_started_it() {
-        assert_eq!(
-            port_from_either(Some("5000".into()), Some("4100".into()), false),
-            5000
-        );
+        assert_eq!(port_from_either(Some("5000".into()), Some("4100".into()), false), 5000);
     }
 
     #[test]
@@ -906,10 +831,7 @@ mod tests {
         // The registration handed it 5000 when the reader installed. They have
         // since asked for 4100 on the screen and pressed Restart. Coming back
         // on 5000 would land them on a dead address.
-        assert_eq!(
-            port_from_either(Some("5000".into()), Some("4100".into()), true),
-            4100
-        );
+        assert_eq!(port_from_either(Some("5000".into()), Some("4100".into()), true), 4100);
     }
 
     #[test]
@@ -919,14 +841,8 @@ mod tests {
 
     #[test]
     fn a_service_started_copy_with_a_nonsense_saved_port_is_not_moved_by_it() {
-        assert_eq!(
-            port_from_either(Some("5000".into()), Some("80".into()), true),
-            5000
-        );
-        assert_eq!(
-            port_from_either(Some("5000".into()), Some("soon".into()), true),
-            5000
-        );
+        assert_eq!(port_from_either(Some("5000".into()), Some("80".into()), true), 5000);
+        assert_eq!(port_from_either(Some("5000".into()), Some("soon".into()), true), 5000);
     }
 
     #[test]
@@ -948,10 +864,7 @@ mod tests {
 
     #[test]
     fn keeping_to_itself_has_no_home_address_to_offer() {
-        assert_eq!(
-            home_address("127.0.0.1", 3008, None, Some("desk.local")),
-            None
-        );
+        assert_eq!(home_address("127.0.0.1", 3008, None, Some("desk.local")), None);
     }
 
     #[test]
@@ -968,10 +881,7 @@ mod tests {
         // multicast answerer has no name, and then there is nothing to check.
         let network = on_this_network();
         if let Some(name) = name_on_this_network(network) {
-            assert!(
-                name.ends_with(".local"),
-                "{name} is not a local network name"
-            );
+            assert!(name.ends_with(".local"), "{name} is not a local network name");
             assert!(!name.starts_with('.'), "{name} has no name in front of it");
         }
     }
@@ -981,14 +891,8 @@ mod tests {
         // The one part that asks the operating system. A machine running tests
         // may have no route out, and then there is nothing to check.
         if let Some(address) = on_this_network() {
-            assert!(
-                !address.is_loopback(),
-                "{address} is this computer talking to itself"
-            );
-            assert!(
-                !address.is_unspecified(),
-                "{address} is not an address anyone can reach"
-            );
+            assert!(!address.is_loopback(), "{address} is this computer talking to itself");
+            assert!(!address.is_unspecified(), "{address} is not an address anyone can reach");
         }
     }
 }

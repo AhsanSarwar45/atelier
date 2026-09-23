@@ -126,10 +126,7 @@ mod tests {
 
     #[test]
     fn every_other_mode_is_the_providers_own_word() {
-        assert_eq!(
-            provider_mode("claude", "bypassPermissions"),
-            "bypassPermissions"
-        );
+        assert_eq!(provider_mode("claude", "bypassPermissions"), "bypassPermissions");
         assert_eq!(provider_mode("codex", "never"), "never");
     }
 
@@ -173,25 +170,18 @@ mod tests {
             {"id":"allow-once","kind":"allow_once"},
             {"id":"reject","kind":"reject_once"}
         ]);
-        assert_eq!(
-            allow_option(options.as_array().unwrap()).as_deref(),
-            Some("allow-once")
-        );
+        assert_eq!(allow_option(options.as_array().unwrap()).as_deref(), Some("allow-once"));
     }
 
     #[test]
     fn an_agent_offering_only_a_standing_rule_is_still_answered() {
         let options = json!([{"id":"yes","kind":"allow_always"},{"id":"no","kind":"reject_once"}]);
-        assert_eq!(
-            allow_option(options.as_array().unwrap()).as_deref(),
-            Some("yes")
-        );
+        assert_eq!(allow_option(options.as_array().unwrap()).as_deref(), Some("yes"));
     }
 
     #[test]
     fn a_card_with_nothing_to_approve_is_left_for_the_owner() {
-        let options =
-            json!([{"id":"no","kind":"reject_once"},{"id":"never","kind":"reject_always"}]);
+        let options = json!([{"id":"no","kind":"reject_once"},{"id":"never","kind":"reject_always"}]);
         assert_eq!(allow_option(options.as_array().unwrap()), None);
         assert_eq!(allow_option(&[]), None);
     }
@@ -205,9 +195,6 @@ mod tests {
             {"id":"allowance-denied","kind":"reject_once"},
             {"id":"proceed","kind":"allow_once"}
         ]);
-        assert_eq!(
-            allow_option(options.as_array().unwrap()).as_deref(),
-            Some("proceed")
-        );
+        assert_eq!(allow_option(options.as_array().unwrap()).as_deref(), Some("proceed"));
     }
 }
