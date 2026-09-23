@@ -143,7 +143,8 @@ pub fn helper_reply(record: &Path, agent_id: &str) -> Ending {
 
 /// A chat's record, found once. Looking means reading every project folder
 /// of the account, so a record not written yet is looked for again only
-/// after a while.
+/// after a while. The hold beat and every chat follower ask this for each live
+/// chat every two seconds; uncached, that listing never stopped (bw-ifjt.2).
 pub fn find_record(config: &Path, session_id: &str) -> Option<PathBuf> {
     static FOUND: LazyLock<Mutex<HashMap<(PathBuf, String), (Instant, Option<PathBuf>)>>> =
         LazyLock::new(Default::default);
@@ -325,6 +326,25 @@ mod tests {
 
     fn row(kind: &str, stop: Option<&str>, at: &str) -> Value {
         json!({"type":kind,"timestamp":at,"message":{"stop_reason":stop}})
+    }
+
+    /// Once found, a record is not looked for again: the project folders can
+    /// no longer be listed, and the record still comes back.
+    #[test]
+    fn a_found_record_is_not_looked_for_again() {
+        use std::os::unix::fs::PermissionsExt;
+        let config = tempfile::tempdir().unwrap();
+        let chat = "6f729ab8-6b7d-4ad6-a78e-5dc8cc05eddb";
+        let projects = config.path().join("projects");
+        let record = projects.join("-home-someone").join(format!("{chat}.jsonl"));
+        fs::create_dir_all(record.parent().unwrap()).unwrap();
+        fs::write(&record, "").unwrap();
+        assert_eq!(find_record(config.path(), chat), Some(record.clone()));
+
+        fs::set_permissions(&projects, fs::Permissions::from_mode(0o300)).unwrap();
+        assert!(fs::read_dir(&projects).is_err());
+        assert_eq!(find_record(config.path(), chat), Some(record));
+        fs::set_permissions(&projects, fs::Permissions::from_mode(0o700)).unwrap();
     }
 
     #[test]

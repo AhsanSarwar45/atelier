@@ -787,7 +787,7 @@ pub fn claude_holds(config: &Path, proc_root: &Path, now_ms: i64) -> Vec<Provide
     let mut holds: Vec<_> = sessions_by_id
         .into_values()
         .map(|(marker, pids)| {
-            let record = crate::workbench::claude::history::find_record(config, &marker.session_id);
+            let record = crate::workbench::liveness::find_record(config, &marker.session_id);
             let spoke_at = record.as_deref().and_then(record_spoke_at);
             let said = told(&sessions, &marker.session_id, now_ms, spoke_at);
             let (doing, since, detail, was_told) = if let Some((doing, since, detail)) = said {
