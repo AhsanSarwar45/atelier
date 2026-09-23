@@ -1446,7 +1446,7 @@ async fn chat_name_preview(
     let problems = chat_name::problems(&input.chat_name);
     let sessions = state
         .database()
-        .list_restore_sessions(Some(input.project_id), false)
+        .list_restore_sessions(Some(input.project_id), false, registered_roots(&state))
         .await?;
     let draft = input.chat_name;
     let chats = tokio::task::spawn_blocking(move || {
@@ -1778,7 +1778,10 @@ async fn provider_sessions(state: &WorkbenchState, project: Option<&str>) -> Vec
                         // chat whose last word is 10:00 AM sits under 10:14 PM,
                         // the minute its file happened to be written, and only
                         // when the adapter is the one answering (bw-t26l.20).
-                        for field in ["name", "branch", "lastActiveAt", "lastSpokeAt", "begunBy"] {
+                        // And the folder: the record names the one the chat
+                        // was begun in, which is the one it is resumed from
+                        // and the project it belongs to (bw-6twt.1).
+                        for field in ["name", "cwd", "branch", "lastActiveAt", "lastSpokeAt", "begunBy"] {
                             match known.get(field) {
                                 Some(value) if !value.is_null() => {
                                     row[field] = value.clone();
@@ -1804,7 +1807,25 @@ async fn provider_sessions(state: &WorkbenchState, project: Option<&str>) -> Vec
     // held in other checkouts, in /tmp and in the home folder, and each one
     // was adopted into that project on sight. The folder a chat says it is in
     // is the only thing that decides which project lists it (bw-t9no.1).
-    only_in_this_folder(&mut rows, folders.as_deref());
+    // The record's folder is the one a chat was begun in, and every saved row
+    // is put back there before any list is drawn from the saved rows: a row
+    // adopted while a chat's last `cd` named its folder is otherwise listed in
+    // the project it once visited (bw-6twt.1).
+    let found: Vec<(String, String, String)> = rows
+        .iter()
+        .filter_map(|row| {
+            Some((
+                row["brand"].as_str()?.to_string(),
+                row["externalId"].as_str()?.to_string(),
+                row["cwd"].as_str().filter(|cwd| !cwd.is_empty())?.to_string(),
+            ))
+        })
+        .collect();
+    if let Err(error) = state.database().correct_folders(found).await {
+        tracing::warn!(%error, "could not put saved chats back in their own folders");
+    }
+    let others = registered_roots(state);
+    only_in_this_folder(&mut rows, folders.as_deref(), &others);
     // Everyone's, whichever way the switch is set, each saying who began it.
     // The switch is applied by `restore`, after the saved rows have been
     // corrected by what is listed here: applied any earlier, a saved row an
@@ -1815,16 +1836,36 @@ async fn provider_sessions(state: &WorkbenchState, project: Option<&str>) -> Vec
 /// Drop every listed chat that is not held in one of this project's checkouts.
 ///
 /// A chat placed nowhere at all is dropped with them: an unplaceable chat
-/// belongs to no project, and the reader asked for one.
-fn only_in_this_folder(rows: &mut Vec<Value>, folders: Option<&[std::path::PathBuf]>) {
+/// belongs to no project, and the reader asked for one. So is a chat inside a
+/// project nested in this one — one of `others`, or a folder with its own
+/// `.atelier` — which that project lists instead (bw-6twt.1).
+fn only_in_this_folder(
+    rows: &mut Vec<Value>,
+    folders: Option<&[std::path::PathBuf]>,
+    others: &[std::path::PathBuf],
+) {
     let Some(folders) = folders else {
         return;
     };
     rows.retain(|row| {
         row["cwd"].as_str().is_some_and(|cwd| {
-            crate::workbench::provider::held_in(std::path::Path::new(cwd), folders)
+            crate::workbench::provider::held_in(std::path::Path::new(cwd), folders, others)
         })
     });
+}
+
+/// The roots of every registered project, archived and test ones included:
+/// each keeps its own chats out of any project it sits inside (bw-6twt.1).
+fn registered_roots(state: &WorkbenchState) -> Vec<std::path::PathBuf> {
+    let Some(projects) = state.projects() else {
+        return Vec::new();
+    };
+    let Ok(known) = projects.get_projects_filtered(true, true) else {
+        return Vec::new();
+    };
+    crate::workbench::provider::project_roots(known.iter().flat_map(|project| {
+        std::iter::once(project.path.as_str()).chain(project.local_path.as_deref())
+    }))
 }
 
 /// What the provider's own record says about the saved chats.
@@ -1925,9 +1966,17 @@ async fn restore(
     Query(query): Query<RestoreQuery>,
 ) -> Result<Json<Vec<Value>>, ApiError> {
     let everything = query.all.is_some();
+    // The full answer asks the providers first: discovery puts each saved row
+    // back in the folder its chat was begun in, and a row read before that is
+    // drawn in the project it wandered into for one more load (bw-6twt.1).
+    let known_sessions = if query.local.is_some() {
+        Vec::new()
+    } else {
+        provider_sessions_shared(&state, query.path.as_deref()).await
+    };
     let sessions = state
         .database()
-        .list_restore_sessions(query.project.clone(), everything)
+        .list_restore_sessions(query.project.clone(), everything, registered_roots(&state))
         .await?;
     let ids = sessions.iter().map(|session| session.id.clone()).collect();
     let mut beads = state.database().beads_for_sessions(ids).await?;
@@ -1962,7 +2011,6 @@ async fn restore(
             restore_row(session, linked, &holds, &checkouts)
         })
         .collect();
-    let known_sessions = provider_sessions_shared(&state, query.path.as_deref()).await;
     for known in known_sessions {
         let key = format!(
             "{}:{}",
@@ -3756,7 +3804,7 @@ mod tests {
             project.to_path_buf(),
             std::path::PathBuf::from("/home/ahsan/dev/worktrees/corsetta/c-2"),
         ];
-        only_in_this_folder(&mut rows, Some(&folders));
+        only_in_this_folder(&mut rows, Some(&folders), &[]);
         let listed: Vec<&str> = rows
             .iter()
             .map(|row| row["externalId"].as_str().unwrap())
@@ -3766,7 +3814,7 @@ mod tests {
         // Asked about no project at all — the machine-wide sweep — nothing is
         // dropped, because there is no folder to be outside of.
         let mut every = vec![json!({"externalId":"anywhere","cwd":"/tmp"})];
-        only_in_this_folder(&mut every, None);
+        only_in_this_folder(&mut every, None, &[]);
         assert_eq!(every.len(), 1);
     }
 

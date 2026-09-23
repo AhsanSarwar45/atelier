@@ -203,9 +203,44 @@ pub(crate) fn folders_of(project: &Path) -> Vec<PathBuf> {
     folders
 }
 
-/// Whether `cwd` is one of `folders`, or somewhere inside one of them.
-pub(crate) fn held_in(cwd: &Path, folders: &[PathBuf]) -> bool {
-    folders.iter().any(|folder| cwd.starts_with(folder))
+/// Whether `cwd` is one of `folders`, or somewhere inside one of them, and
+/// not inside another project on the way down.
+///
+/// A project nested in this one keeps its own chats: the home folder's list
+/// does not hold `~/dev/beads-web`'s. A folder is another project when it is
+/// one of `others` — the roots of the registered projects — or carries its own
+/// `.atelier`. Only the folders between the chat and the nearest of this
+/// project's own checkouts are asked, so a worktree of this project that
+/// carries `.atelier` is still this project's.
+pub(crate) fn held_in(cwd: &Path, folders: &[PathBuf], others: &[PathBuf]) -> bool {
+    let Some(nearest) = folders
+        .iter()
+        .filter(|folder| cwd.starts_with(folder))
+        .max_by_key(|folder| folder.components().count())
+    else {
+        return false;
+    };
+    !cwd.ancestors()
+        .take_while(|dir| *dir != nearest.as_path())
+        .any(|dir| others.iter().any(|other| other == dir) || dir.join(".atelier").is_dir())
+}
+
+/// The roots of the registered projects, each as it was named and as it
+/// really is on disk, for [`held_in`] to leave to themselves.
+pub(crate) fn project_roots<'a>(paths: impl IntoIterator<Item = &'a str>) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for path in paths.into_iter().filter(|path| !path.is_empty()) {
+        let named = PathBuf::from(path);
+        if let Ok(real) = named.canonicalize() {
+            if !roots.contains(&real) {
+                roots.push(real);
+            }
+        }
+        if !roots.contains(&named) {
+            roots.push(named);
+        }
+    }
+    roots
 }
 
 /// Where a chat the app starts is allowed to work.
@@ -1133,6 +1168,50 @@ mod tests {
 
     /// A chat being read back out of a tool's own record is not somebody
     /// choosing a place now — and its worktree may well be gone.
+    /// A project inside another keeps its own chats: the home folder's list
+    /// leaves out a registered project and a folder with its own `.atelier`,
+    /// and a chat above the project is never the project's (bw-6twt.1).
+    #[test]
+    fn a_nested_project_keeps_its_own_chats() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let registered = home.join("dev").join("beads-web");
+        let marked = home.join("dev").join("marked");
+        std::fs::create_dir_all(registered.join("server")).unwrap();
+        std::fs::create_dir_all(marked.join(".atelier")).unwrap();
+        std::fs::create_dir_all(home.join("notes")).unwrap();
+        let others = project_roots([registered.to_str().unwrap()]);
+        let held = |cwd: &Path| held_in(cwd, &[home.clone()], &others);
+        assert!(held(&home));
+        assert!(held(&home.join("notes")));
+        assert!(held(&home.join("dev")));
+        assert!(!held(&registered));
+        assert!(!held(&registered.join("server")));
+        assert!(!held(&marked));
+        assert!(!held(&marked.join("src")));
+        // Each nested project lists its own, even though the home folder is
+        // registered too and is above it.
+        let everyone = project_roots([home.to_str().unwrap(), registered.to_str().unwrap()]);
+        assert!(held_in(&registered.join("server"), &[registered.clone()], &everyone));
+        assert!(held_in(&marked, &[marked.clone()], &everyone));
+        // A chat begun above a project is never that project's.
+        assert!(!held_in(&home, &[registered.clone()], &everyone));
+    }
+
+    /// A worktree of the project that carries its own `.atelier` is still one
+    /// of the project's checkouts, so its chats stay on the project's list.
+    #[test]
+    fn a_worktree_carrying_atelier_is_still_the_projects() {
+        let (_root, project) = a_project_with_a_worktree();
+        let tree = project.join("worktrees").join("bw-1");
+        std::fs::create_dir_all(tree.join(".atelier")).unwrap();
+        std::fs::create_dir_all(project.join(".atelier")).unwrap();
+        let folders = folders_of(&project);
+        let others = project_roots([project.to_str().unwrap()]);
+        assert!(held_in(&tree.canonicalize().unwrap(), &folders, &others));
+        assert!(held_in(&tree.join("src"), &folders, &others));
+    }
+
     #[test]
     fn a_chat_being_imported_keeps_the_folder_its_own_record_carries() {
         let (root, project) = a_project_with_a_worktree();

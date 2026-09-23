@@ -596,6 +596,28 @@ impl Store {
         Ok(())
     }
 
+    /// Put each saved chat back in the folder its provider's record says it
+    /// was begun in, given as `(brand, external id, folder)`.
+    ///
+    /// Rows adopted while the record was read by its last `cd` carry that
+    /// folder, and the list files a chat by the folder it holds — so a chat
+    /// begun in the home folder stayed in a project it once visited
+    /// (bw-6twt.1). Returns how many rows moved.
+    pub fn correct_folders(&mut self, found: &[(String, String, String)]) -> rusqlite::Result<usize> {
+        let transaction = self.connection.transaction()?;
+        let mut moved = 0;
+        {
+            let mut statement = transaction.prepare(
+                "UPDATE session SET cwd = ?3 WHERE brand = ?1 AND external_id = ?2 AND cwd <> ?3",
+            )?;
+            for (brand, external_id, cwd) in found {
+                moved += statement.execute(params![brand, external_id, cwd])?;
+            }
+        }
+        transaction.commit()?;
+        Ok(moved)
+    }
+
     pub fn get_session(&self, id: &str) -> rusqlite::Result<Option<Session>> {
         self.connection
             .query_row(
@@ -665,9 +687,12 @@ impl Store {
 /// A project with no folder of its own claims nothing, so nothing is dropped.
 /// Every checkout git knows the project by counts as its folder, wherever git
 /// keeps it; `folders` holds each project's once per listing (bw-ggbj.1).
+/// A chat inside a project nested in it — one of `others`, or a folder with
+/// its own `.atelier` — is that project's, not this one's (bw-6twt.1).
 fn held_in_its_project(
     session: &Session,
     folders: &mut std::collections::HashMap<String, Vec<std::path::PathBuf>>,
+    others: &[std::path::PathBuf],
 ) -> bool {
     if session.project_path.is_empty() {
         return true;
@@ -677,7 +702,7 @@ fn held_in_its_project(
         .or_insert_with(|| {
             crate::workbench::provider::folders_of(std::path::Path::new(&session.project_path))
         });
-    crate::workbench::provider::held_in(std::path::Path::new(&session.cwd), folders)
+    crate::workbench::provider::held_in(std::path::Path::new(&session.cwd), folders, others)
 }
 
     /// What the sweep asks for: the chats in the middle of a turn.
@@ -785,16 +810,18 @@ fn held_in_its_project(
     /// terminal, which the full answer shows, so those rows dropped out on
     /// every refresh and came back when discovery finished (bw-og6k).
     ///
-    /// `everything` deliberately exposes every row for diagnosis.
+    /// `everything` deliberately exposes every row for diagnosis. `others` are
+    /// the registered projects' roots, whose chats stay their own.
     pub fn list_restore_sessions(
         &self,
         project_id: Option<&str>,
         everything: bool,
+        others: &[std::path::PathBuf],
     ) -> rusqlite::Result<Vec<Session>> {
         if everything {
             let mut found = self.list_sessions(project_id)?;
             let mut folders = std::collections::HashMap::new();
-            found.retain(|session| Self::held_in_its_project(session, &mut folders));
+            found.retain(|session| Self::held_in_its_project(session, &mut folders, others));
             return Ok(found);
         }
         let visible = "COALESCE(begun_by, '') <> 'agent'";
@@ -816,7 +843,7 @@ fn held_in_its_project(
                 .collect::<rusqlite::Result<_>>()?,
         };
         let mut folders = std::collections::HashMap::new();
-        found.retain(|session| Self::held_in_its_project(session, &mut folders));
+        found.retain(|session| Self::held_in_its_project(session, &mut folders, others));
         Ok(found)
     }
 
@@ -3812,7 +3839,7 @@ mod tests {
 
         for everything in [false, true] {
             let listed = store
-                .list_restore_sessions(Some("project-1"), everything)
+                .list_restore_sessions(Some("project-1"), everything, &[])
                 .unwrap()
                 .into_iter()
                 .map(|row| row.id)
@@ -3823,6 +3850,58 @@ mod tests {
                 "showing the agents' own chats: {everything}"
             );
         }
+    }
+
+    /// A chat saved under the folder its last `cd` named is put back in the
+    /// one it was begun in, and leaves the project it only visited
+    /// (bw-6twt.1).
+    #[test]
+    fn a_saved_chat_moves_back_to_the_folder_it_was_begun_in() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let mut row = session("wandered", "claude", Some("ext-1"), "2026-08-20T00:00:00Z");
+        row.origin = "terminal".into();
+        row.cwd = "/project".into();
+        store.create_session(&row).unwrap();
+        let listed = |store: &Store| {
+            store
+                .list_restore_sessions(Some("project-1"), false, &[])
+                .unwrap()
+                .into_iter()
+                .map(|row| row.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(listed(&store), ["wandered"]);
+        let found = vec![
+            ("claude".to_string(), "ext-1".to_string(), "/home/person".to_string()),
+            ("codex".to_string(), "ext-1".to_string(), "/elsewhere".to_string()),
+        ];
+        assert_eq!(store.correct_folders(&found).unwrap(), 1);
+        assert_eq!(store.get_session("wandered").unwrap().unwrap().cwd, "/home/person");
+        assert!(listed(&store).is_empty());
+        // Nothing moves a second time.
+        assert_eq!(store.correct_folders(&found).unwrap(), 0);
+    }
+
+    /// A chat inside a registered project nested in this one is that
+    /// project's, not this one's (bw-6twt.1).
+    #[test]
+    fn restore_sessions_leave_a_nested_projects_chats_to_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        for (id, cwd) in [("home", "/project"), ("nested", "/project/dev/beads-web/server")] {
+            let mut row = session(id, "claude", None, "2026-08-20T00:00:00Z");
+            row.cwd = cwd.into();
+            store.create_session(&row).unwrap();
+        }
+        let others = [std::path::PathBuf::from("/project/dev/beads-web")];
+        let listed: Vec<_> = store
+            .list_restore_sessions(Some("project-1"), false, &others)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(listed, ["home"]);
     }
 
     /// A worktree git keeps outside the project's own folder is still the
@@ -3869,7 +3948,7 @@ mod tests {
 
         for everything in [false, true] {
             let listed = store
-                .list_restore_sessions(Some("project-1"), everything)
+                .list_restore_sessions(Some("project-1"), everything, &[])
                 .unwrap()
                 .into_iter()
                 .map(|row| row.id)
@@ -3905,7 +3984,7 @@ mod tests {
 
         let listed = |everything| {
             store
-                .list_restore_sessions(Some("project-1"), everything)
+                .list_restore_sessions(Some("project-1"), everything, &[])
                 .unwrap()
                 .into_iter()
                 .map(|row| row.id)
@@ -3944,7 +4023,7 @@ mod tests {
         assert!(store.append_event(&message).unwrap());
 
         let normal = store
-            .list_restore_sessions(Some("project-1"), false)
+            .list_restore_sessions(Some("project-1"), false, &[])
             .unwrap()
             .into_iter()
             .map(|row| row.id)
@@ -3955,7 +4034,7 @@ mod tests {
         );
         assert_eq!(
             store
-                .list_restore_sessions(Some("project-1"), true)
+                .list_restore_sessions(Some("project-1"), true, &[])
                 .unwrap()
                 .len(),
             3
@@ -3989,7 +4068,7 @@ mod tests {
         store.create_session(&from_outside).unwrap();
 
         let offered = store
-            .list_restore_sessions(Some("project-1"), false)
+            .list_restore_sessions(Some("project-1"), false, &[])
             .unwrap()
             .into_iter()
             .map(|row| row.id)

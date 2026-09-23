@@ -58,11 +58,12 @@ enum Command {
     UpdateSession(String, SessionPatch, Option<String>, Reply<()>),
     MarkSpoke(String, String, Reply<()>),
     MarkBegunBy(String, String, Reply<()>),
+    CorrectFolders(Vec<(String, String, String)>, Reply<usize>),
     ListSessions(Option<String>, Reply<Vec<Session>>),
     ActiveSessionIds(Reply<Vec<String>>),
     BackgroundOutputs(String, Vec<String>, Reply<Vec<(String, String)>>),
     LastModelForBrand(String, Reply<Option<String>>),
-    ListRestoreSessions(Option<String>, bool, Reply<Vec<Session>>),
+    ListRestoreSessions(Option<String>, bool, Vec<std::path::PathBuf>, Reply<Vec<Session>>),
     MarkAllDormant(Reply<usize>),
     BeadsForSessions(Vec<String>, Reply<HashMap<String, Vec<String>>>),
     BeadsForSession(String, Reply<Vec<String>>),
@@ -266,6 +267,11 @@ impl ChatDb {
             .await
     }
 
+    pub async fn correct_folders(&self, found: Vec<(String, String, String)>) -> Result<usize, String> {
+        self.request(|reply| Command::CorrectFolders(found, reply))
+            .await
+    }
+
     pub async fn mark_begun_by(&self, id: String, who: String) -> Result<(), String> {
         self.request(|reply| Command::MarkBegunBy(id, who, reply))
             .await
@@ -298,8 +304,9 @@ impl ChatDb {
         &self,
         project_id: Option<String>,
         everything: bool,
+        others: Vec<std::path::PathBuf>,
     ) -> Result<Vec<Session>, String> {
-        self.request(|reply| Command::ListRestoreSessions(project_id, everything, reply))
+        self.request(|reply| Command::ListRestoreSessions(project_id, everything, others, reply))
             .await
     }
 
@@ -947,6 +954,7 @@ fn run(
                 respond(reply, store.update_session(&id, patch, touch_at.as_deref()))
             }
             Command::MarkSpoke(id, at, reply) => respond(reply, store.mark_spoke(&id, &at)),
+            Command::CorrectFolders(found, reply) => respond(reply, store.correct_folders(&found)),
             Command::MarkBegunBy(id, who, reply) => {
                 respond(reply, store.mark_begun_by(&id, &who))
             }
@@ -960,9 +968,9 @@ fn run(
             Command::ListSessions(project_id, reply) => {
                 respond(reply, store.list_sessions(project_id.as_deref()))
             }
-            Command::ListRestoreSessions(project_id, everything, reply) => respond(
+            Command::ListRestoreSessions(project_id, everything, others, reply) => respond(
                 reply,
-                store.list_restore_sessions(project_id.as_deref(), everything),
+                store.list_restore_sessions(project_id.as_deref(), everything, &others),
             ),
             Command::MarkAllDormant(reply) => respond(reply, store.mark_all_dormant()),
             Command::BeadsForSessions(ids, reply) => respond(reply, store.beads_for_sessions(&ids)),

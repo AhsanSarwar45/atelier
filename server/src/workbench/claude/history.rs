@@ -734,7 +734,12 @@ fn summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
     let mut has_primary_conversation = false;
     let mut started_by_a_person = None;
     for row in &rows {
-        cwd = as_nonempty(&row["cwd"]).map(PathBuf::from).or(cwd);
+        // The folder the chat was begun in, not the last one it wandered into.
+        // A `cd` moves every later row's `cwd`, and a chat begun in the home
+        // folder that once stepped into a project was filed under that project
+        // for good. Claude keeps the record under the folder it was begun in
+        // and resumes it only from there, so that is the chat's folder.
+        cwd = cwd.or_else(|| as_nonempty(&row["cwd"]).map(PathBuf::from));
         branch = as_nonempty(&row["gitBranch"]).or(branch);
         custom_title = as_nonempty(&row["customTitle"]).or(custom_title);
         own_title = as_nonempty(&row["aiTitle"]).or(own_title);
@@ -2138,6 +2143,23 @@ mod tests {
         assert_eq!(sessions[0].git_branch.as_deref(), Some("ours"));
         assert!(find_record(home.path(), CHAT).is_some());
         assert!(find_record(home.path(), "../../etc/passwd").is_none());
+    }
+
+    /// A chat begun in the home folder that later stepped into a project is
+    /// still the home folder's: the folder it began in is where its record is
+    /// kept and where it resumes from (bw-6twt.1).
+    #[test]
+    fn claude_discovery_files_a_chat_under_the_folder_it_was_begun_in() {
+        let home = tempdir().unwrap();
+        let dir = home.path().join("projects/-home-person");
+        create_dir_all(&dir).unwrap();
+        write(dir.join(format!("{CHAT}.jsonl")), [
+            json!({"type":"user","cwd":"/home/person","message":{"content":"hello"}}),
+            json!({"type":"assistant","cwd":"/home/person/dev/corsetta","message":{"content":[]}}),
+        ].iter().map(Value::to_string).collect::<Vec<_>>().join("\n")).unwrap();
+        let sessions = list_sessions(home.path(), None, false);
+        assert_eq!(sessions[0].cwd.as_deref(), Some(Path::new("/home/person")));
+        assert!(list_sessions(home.path(), Some(Path::new("/home/person/dev/corsetta")), false).is_empty());
     }
 
     #[test]
