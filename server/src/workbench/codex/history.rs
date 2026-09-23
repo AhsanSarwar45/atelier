@@ -69,7 +69,7 @@ pub fn last_spoke_at(path: &Path) -> Option<String> {
     remembered(path, Asked::Spoke, human_message)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 enum Asked {
     Happened,
     Spoke,
@@ -78,7 +78,7 @@ enum Asked {
 
 /// What one rollout answered, and how long it was and when it was written
 /// when it did.
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct Answered {
     len: u64,
     /// Just past the last whole row when it was read. A row still being
@@ -88,10 +88,75 @@ struct Answered {
     answer: Option<Value>,
 }
 
-fn answers() -> &'static Mutex<HashMap<(PathBuf, Asked), Answered>> {
-    static ANSWERS: OnceLock<Mutex<HashMap<(PathBuf, Asked), Answered>>> = OnceLock::new();
-    ANSWERS.get_or_init(Default::default)
+type Answers = HashMap<(PathBuf, Asked), Answered>;
+
+fn answers() -> &'static Mutex<Answers> {
+    static ANSWERS: OnceLock<Mutex<Answers>> = OnceLock::new();
+    ANSWERS.get_or_init(|| {
+        Mutex::new(
+            ANSWER_STORE
+                .get()
+                .map(|store| load_answers(store))
+                .unwrap_or_default(),
+        )
+    })
 }
+
+/// Where the rollout answers are kept between runs, when they are kept.
+static ANSWER_STORE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Keep what every rollout answered in `store`, so a restart does not read
+/// them all again.
+///
+/// Held only in memory, the first discovery after every start read every
+/// rollout on the machine from its end back to its last matching row —
+/// measured at 346 MB against 2.3 GB of rollouts, the same as with no
+/// memory at all. A rollout is read again only when its size or clock moved
+/// (bw-sppo.2).
+pub fn keep_answers_in(store: PathBuf) {
+    let _ = ANSWER_STORE.set(store);
+}
+
+fn load_answers(store: &Path) -> Answers {
+    fs::read(store)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Vec<((PathBuf, Asked), Answered)>>(&bytes).ok())
+        .map(|known| known.into_iter().collect())
+        .unwrap_or_default()
+}
+
+/// Write what is known, leaving out rollouts that are gone. Written beside
+/// and renamed over, so a reader never finds half a file.
+fn save_answers(store: &Path, known: &Answers) -> std::io::Result<()> {
+    let kept: Vec<(&(PathBuf, Asked), &Answered)> =
+        known.iter().filter(|((path, _), _)| path.exists()).collect();
+    let beside = store.with_extension("json.part");
+    fs::write(&beside, serde_json::to_vec(&kept)?)?;
+    fs::rename(&beside, store)
+}
+
+/// Save the answers if anything changed since the last save, at most twice a
+/// minute. Discovery calls this once it has asked every rollout.
+pub fn saved_answers() {
+    static SAVED: Mutex<Option<(std::time::Instant, usize)>> = Mutex::new(None);
+    let Some(store) = ANSWER_STORE.get() else {
+        return;
+    };
+    let mut saved = SAVED.lock().unwrap_or_else(|e| e.into_inner());
+    let recently = saved.is_some_and(|(at, _)| at.elapsed() < Duration::from_secs(30));
+    let known = answers().lock().unwrap_or_else(|e| e.into_inner());
+    let learned = LEARNED.load(std::sync::atomic::Ordering::Relaxed);
+    if recently || saved.is_some_and(|(_, then)| then == learned) {
+        return;
+    }
+    match save_answers(store, &known) {
+        Ok(()) => *saved = Some((std::time::Instant::now(), learned)),
+        Err(error) => tracing::warn!(%error, "could not keep Codex rollout answers"),
+    }
+}
+
+/// How many answers have been read from a rollout rather than remembered.
+static LEARNED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// A rollout's answer, read again only when the file changed, and then only
 /// the part it added.
@@ -123,6 +188,7 @@ fn remembered(path: &Path, asked: Asked, accept: impl Fn(&Value) -> bool) -> Opt
             .or(known.answer),
         _ => last_row_timestamp(path, 0, &accept).map(Value::String),
     };
+    LEARNED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     answers().lock().unwrap_or_else(|e| e.into_inner()).insert(
         key,
         Answered {
@@ -268,6 +334,7 @@ fn session_source(path: &Path) -> Option<Value> {
         }
     }
     let answer = read_session_source(path);
+    LEARNED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     answers().lock().unwrap_or_else(|e| e.into_inner()).insert(
         key,
         Answered {
@@ -672,6 +739,37 @@ pub(crate) fn agent_definitions(cwd: &Path, profile: Option<&str>) -> Vec<Value>
 
 #[cfg(test)]
 mod tests {
+    /// What the last run learned about each rollout is known after a
+    /// restart, and a rollout that is gone is not kept (bw-sppo.2).
+    #[test]
+    fn rollout_answers_outlive_a_restart() {
+        use super::{load_answers, save_answers, Answered, Asked};
+        let directory = tempfile::tempdir().unwrap();
+        let rollout = directory.path().join("rollout.jsonl");
+        std::fs::write(&rollout, "{}\n").unwrap();
+        let gone = directory.path().join("gone.jsonl");
+        let answered = Answered {
+            len: 3,
+            whole: 3,
+            modified: Some(std::time::SystemTime::UNIX_EPOCH),
+            answer: Some(serde_json::json!("2026-01-01T00:00:00Z")),
+        };
+        let known = std::collections::HashMap::from([
+            ((rollout.clone(), Asked::Spoke), answered.clone()),
+            ((gone, Asked::Spoke), answered),
+        ]);
+        let store = directory.path().join("answers.json");
+        save_answers(&store, &known).unwrap();
+        let loaded = load_answers(&store);
+        assert_eq!(loaded.len(), 1);
+        let kept = &loaded[&(rollout, Asked::Spoke)];
+        assert_eq!(kept.whole, 3);
+        assert_eq!(kept.answer, Some(serde_json::json!("2026-01-01T00:00:00Z")));
+
+        std::fs::write(&store, "not json").unwrap();
+        assert!(load_answers(&store).is_empty());
+    }
+
     /// An unchanged rollout answers without being opened, and one that grew is
     /// read only for what it added (bw-69sa.1).
     #[test]

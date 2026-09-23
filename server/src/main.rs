@@ -506,6 +506,7 @@ async fn serve(open_browser: bool) {
     // What each Claude record said, kept beside the app's data so a restart
     // does not read every record again (bw-69sa.3).
     workbench::claude::history::keep_summaries_in(data_dir.join("claude-summaries.json"));
+    workbench::codex::history::keep_answers_in(data_dir.join("codex-rollouts.json"));
     let mut workbench_state =
         routes::workbench::WorkbenchState::new(registry).with_projects(database.clone());
     match workbench::search_index::SearchIndex::open(

@@ -1953,6 +1953,11 @@ async fn recorded_sessions(
     // answers put together (bw-5ihw.8).
     let mut threads: Vec<Value> = Vec::new();
     for home in state.codex_account_homes() {
+        let stamp = codex_listing_stamp(home.as_deref());
+        if let Some(listed) = listed_threads(home.as_deref(), &stamp) {
+            threads.extend(listed);
+            continue;
+        }
         let Ok(transport) = state.codex_reader(cwd, home.as_deref()).await else {
             continue;
         };
@@ -1962,7 +1967,10 @@ async fn recorded_sessions(
         match crate::workbench::codex::history::list_threads(&transport, None, true)
             .await
         {
-            Ok(listed) => threads.extend(listed),
+            Ok(listed) => {
+                remember_threads(home.as_deref(), stamp, &listed);
+                threads.extend(listed)
+            }
             Err(_) => {
                 state
                     .forget_codex_reader(cwd, home.as_deref(), &transport)
@@ -1970,7 +1978,7 @@ async fn recorded_sessions(
             }
         }
     }
-    threads
+    let rows = threads
         .into_iter()
         .filter_map(|thread| {
             let id = thread["id"].as_str()?;
@@ -1994,7 +2002,75 @@ async fn recorded_sessions(
                 "name":thread.get("name").filter(|v|!v.is_null()).cloned().unwrap_or_else(||json!(crate::workbench::metadata::conversation_title(preview))),
                 "cwd":thread["cwd"],"branch":thread["gitInfo"]["branch"],"lastSpokeAt":thread["path"].as_str().and_then(|path|crate::workbench::codex::history::last_spoke_at(std::path::Path::new(path)))}))
         })
-        .collect()
+        .collect::<Vec<_>>();
+    let _ = tokio::task::spawn_blocking(crate::workbench::codex::history::saved_answers).await;
+    rows
+}
+
+/// How long a Codex thread list stands while nothing it is drawn from moved.
+const THREADS_KEPT: Duration = Duration::from_secs(300);
+
+type ListedThreads =
+    HashMap<Option<std::path::PathBuf>, (String, std::time::Instant, Vec<Value>)>;
+
+static LISTED_THREADS: std::sync::LazyLock<std::sync::Mutex<ListedThreads>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// What a Codex account's thread list is drawn from, as sizes and clocks:
+/// its state database and the folders a new thread's rollout lands in. When
+/// none moved there is no new thread, no renamed one and none deleted, and
+/// asking the app-server to page through every thread again learns nothing.
+/// A thread's own clocks are read from its rollout on every discovery
+/// regardless (bw-sppo.2).
+fn codex_listing_stamp(home: Option<&std::path::Path>) -> String {
+    let Some(home) = home
+        .map(std::path::Path::to_path_buf)
+        .or_else(|| crate::workbench::profiles::system_dir("codex"))
+    else {
+        return String::new();
+    };
+    let mut places: Vec<std::path::PathBuf> = std::fs::read_dir(&home)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("state") || name.starts_with("session_index"))
+        })
+        .collect();
+    let today = chrono::Local::now().date_naive();
+    for day in [today, today - chrono::Days::new(1)] {
+        places.push(home.join("sessions").join(day.format("%Y/%m/%d").to_string()));
+    }
+    places.sort();
+    places
+        .iter()
+        .map(|place| match std::fs::metadata(place) {
+            Ok(meta) => format!(
+                "{}:{}:{:?}",
+                place.display(),
+                meta.len(),
+                meta.modified().ok()
+            ),
+            Err(_) => format!("{}:-", place.display()),
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn listed_threads(home: Option<&std::path::Path>, stamp: &str) -> Option<Vec<Value>> {
+    let listed = LISTED_THREADS.lock().unwrap_or_else(|e| e.into_inner());
+    let (known, at, threads) = listed.get(&home.map(std::path::Path::to_path_buf))?;
+    (!stamp.is_empty() && known == stamp && at.elapsed() < THREADS_KEPT).then(|| threads.clone())
+}
+
+fn remember_threads(home: Option<&std::path::Path>, stamp: String, threads: &[Value]) {
+    LISTED_THREADS.lock().unwrap_or_else(|e| e.into_inner()).insert(
+        home.map(std::path::Path::to_path_buf),
+        (stamp, std::time::Instant::now(), threads.to_vec()),
+    );
 }
 
 async fn restore(
@@ -4034,6 +4110,38 @@ mod tests {
             ),
         );
         assert!(ask_provider_to_list(&state, "codex", Some(&folder)).await.is_err());
+    }
+
+    /**
+     * A Codex thread list is asked again only when what it is drawn from
+     * moved: a new rollout today, or the state database (bw-sppo.2).
+     */
+    #[test]
+    fn native_workbench_reuses_a_codex_thread_list_until_a_thread_is_added() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path();
+        std::fs::write(home.join("state_5.sqlite"), "state").unwrap();
+        let stamp = codex_listing_stamp(Some(home));
+        remember_threads(Some(home), stamp.clone(), &[json!({"id":"thread-one"})]);
+        assert_eq!(
+            listed_threads(Some(home), &codex_listing_stamp(Some(home))),
+            Some(vec![json!({"id":"thread-one"})])
+        );
+
+        // A new rollout lands in today's folder: the old list is not reused.
+        let today = home
+            .join("sessions")
+            .join(chrono::Local::now().date_naive().format("%Y/%m/%d").to_string());
+        std::fs::create_dir_all(&today).unwrap();
+        std::fs::write(today.join("rollout-new.jsonl"), "{}\n").unwrap();
+        let moved = codex_listing_stamp(Some(home));
+        assert_ne!(moved, stamp);
+        assert_eq!(listed_threads(Some(home), &moved), None);
+
+        // Nor when the state database changes.
+        remember_threads(Some(home), moved.clone(), &[]);
+        std::fs::write(home.join("state_5.sqlite"), "state, renamed").unwrap();
+        assert_eq!(listed_threads(Some(home), &codex_listing_stamp(Some(home))), None);
     }
 
     #[tokio::test]
