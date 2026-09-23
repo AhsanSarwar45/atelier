@@ -2061,6 +2061,11 @@ fn menu_event(session_id: &str, mut menu: Value) -> Result<Event, String> {
 
 pub struct AcpDriver {
     shared_library: super::super::library::Snapshot,
+    // Resumed provider histories may retain the previous system/developer
+    // instructions even when session metadata is replaced. Deliver the same
+    // pinned guidance at the first accepted turn of every connection as well.
+    // This is transport-neutral and never changes the user's stored message.
+    pending_guidance: Option<String>,
     brand: &'static str,
     database: ChatDb,
     session: Session,
@@ -3087,6 +3092,7 @@ impl AcpDriver {
             .await?
             .unwrap_or(session);
         Ok(Self {
+            pending_guidance: Some(shared_library.guidance()),
             shared_library,
             brand,
             database,
@@ -3127,6 +3133,11 @@ impl AcpDriver {
                 if let Some(text) = expansion { expanded_command.fields.insert("text".into(), json!(text)); }
                 let mut content =
                     prompt_content(&expanded_command, Carries::unpacked(self.carries.load(Ordering::SeqCst)))?;
+                if let Some(guidance) = &self.pending_guidance {
+                    content.insert(0, ContentBlock::Text(TextContent::new(format!(
+                        "<atelier_connection_guidance>\nThe user-configured shared guidance for this connection follows. It replaces earlier shared-library instructions, skill catalogs, and output-style selections in this conversation. Do not carry forward removed guidance or infer the current style from earlier responses. Provider safety rules and explicit user requests still apply.\n\n{guidance}\n</atelier_connection_guidance>"
+                    ))));
+                }
                 let handoff = self.database.saved_account_handoff(self.session.id.clone()).await?;
                 if let Some(context) = handoff.as_deref().filter(|context| !context.is_empty()) {
                     content.insert(0, ContentBlock::Text(TextContent::new(format!(
@@ -3145,6 +3156,7 @@ impl AcpDriver {
                     content,
                 )
                 .await?;
+                self.pending_guidance = None;
                 if handoff.is_some() {
                     self.database.clear_account_handoff(self.session.id.clone()).await?;
                 }
@@ -3978,6 +3990,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn connection_guidance_retries_then_sends_once_for_every_provider_without_changing_user_text() {
+        for brand in ["claude", "codex", "local"] {
+            let root = tempfile::tempdir().unwrap();
+            let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+            let session = test_session("idle");
+            database.create_session(session.clone()).await.unwrap();
+            let (controls, mut requests) = mpsc::unbounded_channel();
+            let (_, ended) = mpsc::unbounded_channel();
+            let mut driver = AcpDriver {
+                shared_library: Default::default(),
+                pending_guidance: Some("CURRENT instruction and style 日本語".into()),
+                brand,
+                database: database.clone(), session, controls, ended,
+                permissions: Arc::new(PermissionBroker::default()),
+                elicitations: Arc::new(ElicitationBroker::default()),
+                carries: Arc::new(AtomicU8::new(Carries::default().packed())),
+                normalizer: Arc::new(Mutex::new(AcpNormalizer::default())),
+                reconcile: Arc::new(|| Box::pin(async { Ok(json!({})) })),
+                in_flight: Default::default(),
+            };
+            let command = Command {
+                kind: CommandKind::PromptSend,
+                fields: serde_json::Map::from_iter([("text".into(), json!("User request"))]),
+            };
+            for attempt in 0..3 {
+                let (result, ()) = tokio::join!(driver.run(&command), async {
+                    let Control::Prompt { content, reply } = requests.recv().await.unwrap() else {
+                        panic!("expected prompt");
+                    };
+                    let wire = serde_json::to_value(content).unwrap();
+                    if attempt < 2 {
+                        assert_eq!(wire.as_array().unwrap().len(), 2, "{brand}");
+                        assert!(wire[0]["text"].as_str().unwrap().contains("CURRENT instruction and style 日本語"));
+                        assert_eq!(wire[1]["text"], "User request");
+                    } else {
+                        assert_eq!(wire, json!([{"type":"text","text":"User request"}]));
+                    }
+                    reply.send(if attempt == 0 { Err("retry".into()) } else { Ok(json!({"ok":true})) }).unwrap();
+                });
+                assert_eq!(result.is_ok(), attempt != 0);
+                assert_eq!(driver.pending_guidance.is_some(), attempt == 0);
+            }
+            let events = database.events_since("chat-1".into(), 0).await.unwrap();
+            let text: Vec<_> = events.iter().filter(|event| event.kind == crate::workbench::protocol::EventKind::TextDelta).collect();
+            assert!(!text.is_empty());
+            assert!(text.iter().all(|event| event.fields["text"] == "User request"));
+        }
+    }
+
+    #[tokio::test]
     async fn a_second_user_turn_steers_the_active_turn_and_stays_durable() {
         let root = tempfile::tempdir().unwrap();
         let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
@@ -3991,6 +4053,7 @@ mod tests {
         let _request = super::super::super::status::RequestLease::new(in_flight.clone(), generation);
         let driver = AcpDriver {
             shared_library: Default::default(),
+            pending_guidance: None,
             brand: "codex",
             database: database.clone(),
             session,
@@ -4073,6 +4136,7 @@ mod tests {
         );
         let driver = AcpDriver {
             shared_library: Default::default(),
+            pending_guidance: None,
             brand: "claude",
             database: database.clone(),
             session,
@@ -4136,6 +4200,7 @@ mod tests {
         let (_, ended) = mpsc::unbounded_channel();
         let driver = AcpDriver {
             shared_library: Default::default(),
+            pending_guidance: None,
             brand: "codex",
             database: database.clone(),
             session,
@@ -4526,6 +4591,7 @@ mod tests {
         let (_, ended) = mpsc::unbounded_channel();
         let driver = AcpDriver {
             shared_library: Default::default(),
+            pending_guidance: None,
             brand: "claude",
             database: database.clone(),
             session,
@@ -4607,6 +4673,7 @@ mod tests {
         let (_, ended) = mpsc::unbounded_channel();
         let mut driver = AcpDriver {
             shared_library: Default::default(),
+            pending_guidance: None,
             brand: "claude",
             database: database.clone(),
             session,

@@ -44,6 +44,9 @@ changes remain inherited. Replacements are resolved before conditions, so an
 inapplicable replacement cannot unexpectedly revive the global content.
 “Reset to global” removes the customization. Removed global sources leave an
 explanation and a way to forget their saved customization.
+Inside the parameter editor, inherited keys reset to their global values;
+project-only keys can be removed. Saving a value identical to the global source
+removes that override, so subsequent global edits remain inherited.
 
 Parameters substitute `{{name}}` once without interpreting the result. Supporting
 text resources use relative names, such as `references/testing.md`, and are read
@@ -71,6 +74,11 @@ items. Skills read during a connection retain their original version even if the
 source changes. Settings changes apply on new connections, including resume;
 they cannot remove old text from conversation history. Start a fresh chat when
 old instructions must no longer remain in context.
+The first accepted user turn of each connection also carries the current shared
+guidance as a separate context block. This common ACP path refreshes resumed
+conversations whose provider retains earlier system/developer instructions.
+It does not rewrite the user's stored message, is retried if sending fails, and
+is not repeated on subsequent turns of the same connection.
 
 The read-only CLI uses the same resolver:
 
@@ -91,3 +99,8 @@ Verification: `tests/e2e/shared-library.spec.ts` drives both editors, reloads,
 conditions, local parameters, styles, native import, stale writes, the MCP reader,
 and (with `BEADS_E2E_LIVE_PROVIDERS=1`) real Claude and Codex turns. Run through
 `scripts/workbench-e2e.sh` with explicit free ports and a worktree-local run folder.
+`shared-library-edge-cases.spec.ts` adds editor collisions/reset, stale browser
+tabs, condition errors, orphan/conflict handling, and live automatic/manual skill,
+nested-resource, output-style, reconnect and two-project isolation cases.
+`shared-library-lab.spec.ts` is an opt-in (`BEADS_LIBRARY_LAB=1`) bounded harness
+for Chrome DevTools MCP exploration; its readiness wait is not a coverage test.

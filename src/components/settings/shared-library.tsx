@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Panel } from '@/components/ui/panel';
 import { Picker } from '@/components/ui/picker';
 import { request } from '@/lib/api';
+import { buildCustomization, nextEntryName } from '@/lib/shared-guidance';
 import { sendCommand } from '@/workbench/use-session';
 
 type Condition = { op: string; path?: string; text?: string; pattern?: string; pointer?: string; key?: string; value?: unknown; name?: string; conditions?: Condition[]; condition?: Condition };
@@ -19,7 +20,7 @@ interface Override { disabled?: boolean; content?: string | null; when?: Conditi
 interface Library { items: Item[]; overrides: Record<string, Override>; output_style?: string | null }
 interface Evaluation { matched: boolean | null; reason: string; children: Evaluation[] }
 interface Row { item: Item; source: string; customized: boolean; state: string; evaluation: Evaluation; missing: string[] }
-interface Answer { library: Library; revision: string; resolved: { revision: string; items: Row[] }; guidance: string; orphaned?: string[] }
+interface Answer { library: Library; revision: string; source_revision: string; resolved: { revision: string; items: Row[] }; guidance: string; orphaned?: string[]; inherited: Item[] }
 const names: Record<Kind, string> = { instruction: 'Instructions', skill: 'Skills', output_style: 'Output styles' };
 const states: Record<string, string> = { available: 'Available', not_applicable: 'Does not apply', unknown: 'Needs evaluation', unavailable: 'Missing requirements', disabled: 'Disabled here', not_selected: 'Not selected', conflict: 'ID conflict' };
 const conditionNames: Record<string, string> = { always: 'Always', all: 'All conditions', any: 'Any condition', not: 'Not', file_exists: 'File exists', folder_exists: 'Folder exists', file_contains: 'File contains text', file_matches: 'Filename matches pattern', file_regex: 'File matches regular expression', within: 'In the folder of any matching file', dependency: 'Package declares dependency', json_exists: 'JSON value exists', json_equals: 'JSON value equals', toml_equals: 'TOML value equals', yaml_equals: 'YAML value equals', project_beads: 'Project has a board' };
@@ -56,13 +57,13 @@ function Conditions({ value, onChange, depth = 0 }: { value: Condition; onChange
 function Evidence({ value }: { value: Evaluation }) {
   return <div className="text-xs text-t-secondary"><span>{value.matched === null ? '?' : value.matched ? '✓' : '—'} {value.reason}</span>{value.children.map((child, i) => <div key={i} className="ml-3 mt-1 border-l border-border pl-2"><Evidence value={child} /></div>)}</div>;
 }
-function Entries({ label, value, onChange }: { label: string; value: Record<string, string>; onChange: (v: Record<string, string>) => void }) {
+function Entries({ label, value, onChange, defaults = {} }: { label: string; value: Record<string, string>; onChange: (v: Record<string, string>) => void; defaults?: Record<string, string> }) {
   const entries = Object.entries(value);
   const update = (index: number, key: string, text: string) => {
     if (entries.some(([existing], i) => i !== index && existing === key)) return;
     onChange(Object.fromEntries(entries.map((pair, i) => i === index ? [key, text] : pair)));
   };
-  return <fieldset className="space-y-2"><legend className="text-sm font-medium">{label}</legend>{entries.map(([key, text], i) => <Panel key={i} tone="frame" className="space-y-2"><div className="flex gap-2"><Input aria-label={`${label} name`} value={key} onChange={e => update(i, e.target.value, text)} /><Button variant="ghost" aria-label={`Remove ${label.toLowerCase()}`} onClick={() => onChange(Object.fromEntries(entries.filter((_, n) => i !== n)))}><Trash2 className="size-4" /></Button></div><Textarea aria-label={`${label} value`} value={text} onChange={e => update(i, key, e.target.value)} /></Panel>)}<Button variant="outline" onClick={() => onChange({ ...value, [`new-${entries.length + 1}`]: '' })}>Add {label.toLowerCase()}</Button></fieldset>;
+  return <fieldset className="space-y-2"><legend className="text-sm font-medium">{label}</legend>{entries.map(([key, text], i) => <Panel key={i} tone="frame" className="space-y-2"><div className="flex gap-2"><Input aria-label={`${label} name`} disabled={Object.hasOwn(defaults, key)} value={key} onChange={e => update(i, e.target.value, text)} /><Button variant="ghost" aria-label={Object.hasOwn(defaults, key) ? `Reset ${label.toLowerCase()} to global` : `Remove ${label.toLowerCase()}`} disabled={Object.hasOwn(defaults, key) && defaults[key] === text} onClick={() => Object.hasOwn(defaults, key) ? update(i, key, defaults[key]) : onChange(Object.fromEntries(entries.filter((_, n) => i !== n)))}><Trash2 className="size-4" /></Button></div><Textarea aria-label={`${label} value`} value={text} onChange={e => update(i, key, e.target.value)} /></Panel>)}<Button variant="outline" onClick={() => onChange({ ...value, [nextEntryName(value)]: '' })}>Add {label.toLowerCase()}</Button></fieldset>;
 }
 
 export function SharedLibrary({ projectPath }: { projectPath?: string }) {
@@ -77,11 +78,11 @@ export function SharedLibrary({ projectPath }: { projectPath?: string }) {
   const [projects, setProjects] = useState<{ name: string; path: string; localPath?: string }[]>([]);
   const [imports, setImports] = useState<{ name: string; path: string; category: string }[]>();
   const url = `/api/settings/library?${new URLSearchParams(projectPath ? { path: projectPath } : preview ? { preview } : {})}`;
-  const load = useCallback(async () => {
-    try { const response = await request(url); if (!response.ok) throw new Error(await response.text()); setAnswer(await response.json()); setError(''); }
-    catch (e) { setError(String(e)); }
+  const load = useCallback(async (signal?: AbortSignal) => {
+    try { const response = await request(url, { signal }); if (!response.ok) throw new Error(await response.text()); const next = await response.json(); if (!signal?.aborted) { setAnswer(next); setError(''); } }
+    catch (e) { if (!signal?.aborted) setError(String(e)); }
   }, [url]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, [load]);
   useEffect(() => { if (!projectPath) void request('/api/projects').then(r => r.json()).then(setProjects).catch(() => {}); }, [projectPath]);
   useEffect(() => {
     if (!draft) return;
@@ -92,7 +93,7 @@ export function SharedLibrary({ projectPath }: { projectPath?: string }) {
     if (!answer) return;
     setSaving(true); setError(''); setNotice('');
     try {
-      const response = await request(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ library, revision: answer.revision }) });
+      const response = await request(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ library, revision: answer.revision, source_revision: answer.source_revision }) });
       if (!response.ok) throw new Error(await response.text());
       setAnswer(await response.json()); setDraft(undefined); setEditing(undefined); setNotice('Saved. New and reconnected chats receive these changes.');
     } catch (e) { setError(String(e)); } finally { setSaving(false); }
@@ -116,6 +117,7 @@ export function SharedLibrary({ projectPath }: { projectPath?: string }) {
     } catch (e) { setError(String(e)); }
   }
   const inherited = editing?.source === 'global' && !!projectPath;
+  const source = inherited ? answer?.inherited.find(item => item.id === editing?.item.id) : undefined;
   const patch = (change: Partial<Item>) => setDraft(d => d ? { ...d, ...change } : d);
   const rows = answer?.resolved.items.filter(r => r.item.kind === kind) ?? [];
   return <div className="space-y-5" data-testid="shared-library">
@@ -140,14 +142,14 @@ export function SharedLibrary({ projectPath }: { projectPath?: string }) {
         {draft.kind === 'skill' && <label className="flex items-center gap-2 text-sm"><Checkbox checked={draft.automatic} onCheckedChange={checked => patch({ automatic: checked === true })} />Allow automatic selection by the agent</label>}
         <label className="block space-y-1 text-sm"><span>Requires executables (comma separated)</span><Input aria-label="Required executables" disabled={inherited} placeholder="e.g. git, npm" value={draft.requires.join(', ')} onChange={e => patch({ requires: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} /></label>
         <label className="block space-y-1 text-sm"><span>Bundle (optional grouping)</span><Input aria-label="Bundle" disabled={inherited} value={draft.bundle} onChange={e => patch({ bundle: e.target.value })} /></label>
-        <details><summary className="cursor-pointer text-sm">Parameters and supporting resources</summary><div className="mt-3 space-y-4"><p className="text-xs text-t-secondary">Use {'{{parameter-name}}'} in content. Resources are text files read through the same shared skill tool.</p><Entries label="Parameters" value={draft.parameters} onChange={parameters => patch({ parameters })} />{!inherited && <Entries label="Resources" value={draft.resources} onChange={resources => patch({ resources })} />}</div></details>
+        <details><summary className="cursor-pointer text-sm">Parameters and supporting resources</summary><div className="mt-3 space-y-4"><p className="text-xs text-t-secondary">Use {'{{parameter-name}}'} in content. Resources are text files read through the same shared skill tool.{inherited ? ' Reset an inherited parameter to use its global value; remove project-only parameters to stop overriding them.' : ''}</p><Entries label="Parameters" value={draft.parameters} defaults={source?.parameters} onChange={parameters => patch({ parameters })} />{!inherited && <Entries label="Resources" value={draft.resources} onChange={resources => patch({ resources })} />}</div></details>
         <div className="flex gap-2"><Button disabled={saving || !draft.id || !draft.name} onClick={() => {
           if (!editing && answer.library.items.some(item => item.id === draft.id)) { setError('This ID already exists. Choose a different ID or edit the existing item.'); return; }
           const library = structuredClone(answer.library);
           if (inherited) {
-            const global = editing!.item;
+            if (!source) { setError('The global source has changed. Reload before customizing it.'); return; }
             const prior = library.overrides[draft.id] ?? {};
-            library.overrides[draft.id] = { ...prior, ...(draft.content !== global.content ? { content: draft.content } : {}), ...(JSON.stringify(draft.when) !== JSON.stringify(global.when) ? { when: draft.when } : {}), ...(draft.automatic !== global.automatic ? { automatic: draft.automatic } : {}), parameters: { ...prior.parameters, ...Object.fromEntries(Object.entries(draft.parameters).filter(([key, value]) => global.parameters[key] !== value)) } };
+            library.overrides[draft.id] = buildCustomization(draft, source, prior.disabled);
           } else { library.items = [...library.items.filter(i => i.id !== draft.id), draft]; }
           void persist(library);
         }}><Save className="mr-1 size-4" />{saving ? 'Saving…' : 'Save item'}</Button><Button variant="outline" disabled={saving} onClick={() => { setDraft(undefined); setEditing(undefined); }}>Cancel</Button></div>

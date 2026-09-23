@@ -613,6 +613,99 @@ mod tests {
         assert!(validate(&library, false).unwrap_err().contains("2 MiB"));
     }
     #[test]
+    fn every_condition_operator_has_positive_negative_and_missing_data_cases() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("src")).unwrap();
+        fs::write(root.path().join("src/index.ts"), "export const answer = 42;\n").unwrap();
+        fs::write(root.path().join("package.json"), r#"{"dependencies":{"next":"16"},"scripts":{"test":"vitest"},"private":true}"#).unwrap();
+        fs::write(root.path().join("Cargo.toml"), "[package]\nname = 'demo'\n").unwrap();
+        fs::write(root.path().join("config.yaml"), "build:\n  enabled: true\n").unwrap();
+        let cases = [
+            (Condition::Always, true),
+            (Condition::FileExists { path: "src/index.ts".into() }, true),
+            (Condition::FileExists { path: "src".into() }, false),
+            (Condition::FolderExists { path: "src".into() }, true),
+            (Condition::FolderExists { path: "src/index.ts".into() }, false),
+            (Condition::FileContains { path: "src/index.ts".into(), text: "answer = 42".into() }, true),
+            (Condition::FileContains { path: "src/index.ts".into(), text: "answer = 43".into() }, false),
+            (Condition::FileRegex { path: "src/index.ts".into(), pattern: r"answer\s*=\s*\d+".into() }, true),
+            (Condition::FileRegex { path: "src/index.ts".into(), pattern: "^no-match$".into() }, false),
+            (Condition::FileMatches { pattern: "src/*.ts".into() }, true),
+            (Condition::FileMatches { pattern: "src/*.rs".into() }, false),
+            (Condition::Dependency { path: "package.json".into(), name: "next".into() }, true),
+            (Condition::Dependency { path: "package.json".into(), name: "react".into() }, false),
+            (Condition::JsonExists { path: "package.json".into(), pointer: "/scripts/test".into() }, true),
+            (Condition::JsonExists { path: "package.json".into(), pointer: "/scripts/absent".into() }, false),
+            (Condition::JsonEquals { path: "package.json".into(), pointer: "/private".into(), value: json!(true) }, true),
+            (Condition::JsonEquals { path: "package.json".into(), pointer: "/private".into(), value: json!("true") }, false),
+            (Condition::TomlEquals { path: "Cargo.toml".into(), key: "package.name".into(), value: json!("demo") }, true),
+            (Condition::TomlEquals { path: "Cargo.toml".into(), key: "package.name".into(), value: json!("other") }, false),
+            (Condition::YamlEquals { path: "config.yaml".into(), pointer: "/build/enabled".into(), value: json!(true) }, true),
+            (Condition::YamlEquals { path: "config.yaml".into(), pointer: "/build/enabled".into(), value: json!(false) }, false),
+            (Condition::JsonExists { path: "missing.json".into(), pointer: "/a".into() }, false),
+            (Condition::Not { condition: Box::new(Condition::FileExists { path: "missing".into() }) }, true),
+            (Condition::All { conditions: vec![Condition::Always, Condition::ProjectBeads] }, true),
+            (Condition::Any { conditions: vec![Condition::FileExists { path: "missing".into() }, Condition::Always] }, true),
+            (Condition::ProjectBeads, true),
+        ];
+        for (condition, expected) in cases {
+            condition.validate(0).unwrap();
+            assert_eq!(condition.evaluate(Some(root.path()), true).matched, Some(expected), "{condition:?}");
+        }
+        assert_eq!(Condition::ProjectBeads.evaluate(Some(root.path()), false).matched, Some(false));
+        for condition in [
+            Condition::JsonExists { path: "src/index.ts".into(), pointer: "/x".into() },
+            Condition::TomlEquals { path: "src/index.ts".into(), key: "x".into(), value: json!(1) },
+            Condition::YamlEquals { path: "src".into(), pointer: "/x".into(), value: json!(1) },
+        ] {
+            assert_eq!(condition.evaluate(Some(root.path()), false).matched, None);
+            assert_eq!(Condition::Not { condition: Box::new(condition) }.evaluate(Some(root.path()), false).matched, None);
+        }
+    }
+
+    #[test]
+    fn projects_do_not_share_overrides_styles_or_private_skills() {
+        let data = tempfile::tempdir().unwrap();
+        let roots = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+        for root in &roots { crate::project_manifest::create(root.path(), data.path(), crate::project_manifest::ManifestStorage::Personal, &crate::project_manifest::infer_virtual("Isolation")).unwrap(); }
+        let global = Library { items: vec![item("common", Kind::Skill, "global"), item("style", Kind::OutputStyle, "GLOBAL STYLE")], output_style: Some("style".into()), ..Default::default() };
+        save(data.path(), None, &global);
+        let mut alpha = Library { items: vec![item("alpha-only", Kind::Skill, "ALPHA SECRET")], output_style: Some(String::new()), ..Default::default() };
+        alpha.overrides.insert("common".into(), Override { content: Some("alpha".into()), ..Default::default() });
+        save(data.path(), Some(roots[0].path()), &alpha);
+        let a = resolve(data.path(), Some(roots[0].path())).unwrap();
+        let b = resolve(data.path(), Some(roots[1].path())).unwrap();
+        assert_eq!(a.read_skill("common", None).unwrap(), "alpha");
+        assert_eq!(b.read_skill("common", None).unwrap(), "global");
+        assert!(b.read_skill("alpha-only", None).is_err());
+        assert!(!a.guidance().contains("GLOBAL STYLE"));
+        assert!(b.guidance().contains("GLOBAL STYLE"));
+        assert_ne!(a.revision, b.revision);
+    }
+
+    #[test]
+    fn manual_skills_are_invocable_but_not_advertised_and_substitution_is_literal() {
+        let (data, root) = fixture();
+        let mut manual = item("manual", Kind::Skill, "{{one}} {{unknown}}");
+        manual.automatic = false;
+        manual.description = "MANUAL TRIGGER".into();
+        manual.parameters.insert("one".into(), "{{two}} $(touch should-not-exist)".into());
+        manual.parameters.insert("two".into(), "MUST NOT EXPAND".into());
+        manual.resources.insert("references/deep/check.md".into(), "Unicode: 日本語 🧪 {{one}}".into());
+        save(data.path(), None, &Library { items: vec![manual], ..Default::default() });
+        let snap = resolve(data.path(), Some(root.path())).unwrap();
+        assert!(!snap.guidance().contains("MANUAL TRIGGER"));
+        assert_eq!(snap.commands()[0]["name"], "skill:manual");
+        let expanded = snap.expand("/skill:manual `literal`\nsecond line").unwrap().unwrap();
+        assert!(expanded.contains("{{two}} $(touch should-not-exist) {{unknown}}"));
+        assert!(expanded.contains("`literal`\nsecond line"));
+        assert!(!expanded.contains("MUST NOT EXPAND"));
+        assert!(snap.read_skill("manual", Some("references/deep/check.md")).unwrap().contains("日本語 🧪"));
+        assert!(snap.expand("/skill:missing").is_err());
+        assert!(snap.expand("/native-command").unwrap().is_none());
+        assert!(snap.read_skill("manual", Some("../check.md")).is_err());
+    }
+    #[test]
     fn global_project_and_style_resolve_without_merging_content() {
         let (data, root) = fixture();
         let mut global = Library::default();
@@ -897,7 +990,22 @@ pub fn write(
     library: &Library,
     expected: &str,
 ) -> Result<(), String> {
+    write_with_source(data, root, library, expected, None)
+}
+
+pub fn write_with_source(
+    data: &Path,
+    root: Option<&Path>,
+    library: &Library,
+    expected: &str,
+    source_revision: Option<&str>,
+) -> Result<(), String> {
     let _guard = WRITES.lock().map_err(|e| e.to_string())?;
+    if let Some(expected) = source_revision.filter(|_| root.is_some()) {
+        if revision(&read(data, None)?) != expected {
+            return Err("Global library changed in another editor. Reload before customizing it.".into());
+        }
+    }
     validate(library, root.is_some())?;
     let path = library_path(data, root)?;
     if revision(&read_path(&path)?) != expected {
@@ -1119,7 +1227,11 @@ impl Snapshot {
         )))
     }
     pub fn guidance(&self) -> String {
+        // Native resume can retain older instruction blocks. The connector
+        // repeats this snapshot once at connection start; that current block
+        // supersedes prior snapshots rather than accumulating their styles.
         let mut pieces = vec![format!("Shared library revision: {}. Content is pinned for this connection; settings changes apply on reconnect. Shared skills use atelier_skill_read; explicitly selected skills arrive in the user turn. Read a relevant automatic skill before using its procedure. If the tool is unavailable, use `atelier tool skills read {} ID [RESOURCE]`. Native provider instructions may also apply. Project customizations replace the corresponding global settings. Output styles affect presentation, never tool permissions or required result formats.", self.revision, self.revision)];
+        pieces.push("On a later connection, atelier_connection_guidance supplies the current user-configured library and supersedes this snapshot, including its instructions and output style. Earlier responses are history, not current configuration.".into());
         if let Ok(data) = data_dir() {
             pieces.push(format!("Read-only workers without the skill tool or shell may read the same pinned skill content and resources from {}. Only items whose state is available apply.", data.join("library-snapshots").join(format!("{}.json", self.revision)).display()));
         }

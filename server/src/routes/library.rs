@@ -39,7 +39,7 @@ fn answer(scope: &Scope) -> Result<Value, String> {
         .filter(|id| !global.items.iter().any(|item| &item.id == *id))
         .collect();
     Ok(
-        json!({"library":held,"revision":library::revision(&held),"resolved":resolved,"guidance":resolved.guidance(),"orphaned":orphaned}),
+        json!({"library":held,"revision":library::revision(&held),"source_revision":library::revision(&global),"resolved":resolved,"guidance":resolved.guidance(),"orphaned":orphaned,"inherited":global.items}),
     )
 }
 async fn read(Query(scope): Query<Scope>) -> Result<Json<Value>, Refusal> {
@@ -54,6 +54,7 @@ async fn read(Query(scope): Query<Scope>) -> Result<Json<Value>, Refusal> {
 struct Update {
     library: library::Library,
     revision: String,
+    source_revision: Option<String>,
 }
 async fn write(
     Query(scope): Query<Scope>,
@@ -86,7 +87,7 @@ async fn write(
                 return Err("Select an existing output style".into());
             }
         }
-        library::write(&data, path.as_deref(), &update.library, &update.revision)?;
+        library::write_with_source(&data, path.as_deref(), &update.library, &update.revision, update.source_revision.as_deref())?;
         answer(&scope)
     })
     .await
