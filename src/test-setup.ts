@@ -1,4 +1,12 @@
 import '@testing-library/jest-dom/vitest';
+import { setTimeout as nextTimerTurn } from 'node:timers';
+import { afterAll } from 'vitest';
+
+// Radix restores focus on a zero-delay timer after React unmounts. Let the
+// final testing-library cleanup finish in this file's jsdom realm before
+// Vitest replaces its Event constructors for the next file. Use a real timer
+// so a test's fake clock cannot strand teardown; do not suppress its errors.
+afterAll(() => new Promise<void>(resolve => nextTimerTurn(resolve, 0)));
 
 // jsdom has no layout, so it ships none of the browser's ways of hearing that
 // something changed size. A screen that watches its own panes needs one to
