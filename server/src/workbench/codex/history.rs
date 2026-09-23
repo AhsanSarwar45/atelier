@@ -3,9 +3,11 @@
 use super::transport::{CodexTransport, CodexTransportError};
 use serde_json::{json, Value};
 use std::fs::{self, File};
+use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, SystemTime};
 
 const MODES: &[&str] = &["untrusted", "on-request", "never"];
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -60,11 +62,71 @@ fn human_message(row: &Value) -> bool {
 /// worked in since March then reports the moment this app happened to look at
 /// it. The rows carry the truth (bw-t26l.22).
 pub fn last_happened_at(path: &Path) -> Option<String> {
-    last_row_timestamp(path, |_| true)
+    remembered(path, Asked::Happened, |_| true)
 }
 
 pub fn last_spoke_at(path: &Path) -> Option<String> {
-    last_row_timestamp(path, human_message)
+    remembered(path, Asked::Spoke, human_message)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Asked {
+    Happened,
+    Spoke,
+    Source,
+}
+
+/// What one rollout answered, and how long it was and when it was written
+/// when it did.
+#[derive(Clone)]
+struct Answered {
+    len: u64,
+    modified: Option<SystemTime>,
+    answer: Option<Value>,
+}
+
+fn answers() -> &'static Mutex<HashMap<(PathBuf, Asked), Answered>> {
+    static ANSWERS: OnceLock<Mutex<HashMap<(PathBuf, Asked), Answered>>> = OnceLock::new();
+    ANSWERS.get_or_init(Default::default)
+}
+
+/// A rollout's answer, read again only when the file changed, and then only
+/// the part it added.
+///
+/// Discovery asks every rollout on the machine each time the sidebar loads,
+/// and a load follows any write to any chat. A thread with no person's
+/// message near its end was read from its last byte to its first on every one
+/// of those — the same ten old files, nine megabytes a second, around the
+/// clock (bw-69sa.1). A rollout only grows, so a later matching row can only
+/// be in what it added; a file that shrank or was rewritten in place is read
+/// whole again.
+fn remembered(path: &Path, asked: Asked, accept: impl Fn(&Value) -> bool) -> Option<String> {
+    let meta = fs::metadata(path).ok()?;
+    let (len, modified) = (meta.len(), meta.modified().ok());
+    let key = (path.to_path_buf(), asked);
+    let known = answers()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+        .cloned();
+    let answer = match known {
+        Some(known) if known.len == len && known.modified == modified => return known
+            .answer
+            .and_then(|answer| answer.as_str().map(str::to_string)),
+        Some(known) if known.len < len => last_row_timestamp(path, known.len, &accept)
+            .map(Value::String)
+            .or(known.answer),
+        _ => last_row_timestamp(path, 0, &accept).map(Value::String),
+    };
+    answers().lock().unwrap_or_else(|e| e.into_inner()).insert(
+        key,
+        Answered {
+            len,
+            modified,
+            answer: answer.clone(),
+        },
+    );
+    answer.and_then(|answer| answer.as_str().map(str::to_string))
 }
 
 /// The timestamp of the last row the test accepts, read backwards in complete
@@ -72,18 +134,20 @@ pub fn last_spoke_at(path: &Path) -> Option<String> {
 /// file's end; a fixed tail window silently answers with a later row that does
 /// not match. Blocks are joined across their boundary and reading stops at the
 /// first matching row, so the common case remains one bounded tail read.
-fn last_row_timestamp(path: &Path, accept: impl Fn(&Value) -> bool) -> Option<String> {
+///
+/// `floor` is where an earlier read already looked: nothing before it is read.
+fn last_row_timestamp(path: &Path, floor: u64, accept: impl Fn(&Value) -> bool) -> Option<String> {
     const BLOCK: u64 = 256 * 1024;
     let mut file = File::open(path).ok()?;
     let mut end = file.metadata().ok()?.len();
     let mut suffix = Vec::new();
-    while end > 0 {
-        let start = end.saturating_sub(BLOCK);
+    while end > floor {
+        let start = end.saturating_sub(BLOCK).max(floor);
         file.seek(SeekFrom::Start(start)).ok()?;
         let mut bytes = vec![0; (end - start) as usize];
         file.read_exact(&mut bytes).ok()?;
         bytes.extend_from_slice(&suffix);
-        let complete_from = if start == 0 {
+        let complete_from = if start == floor {
             0
         } else if let Some(newline) = bytes.iter().position(|byte| *byte == b'\n') {
             suffix = bytes[..newline].to_vec();
@@ -166,6 +230,28 @@ fn by_a_subagent(source: &Value) -> bool {
 /// names a subagent is the answer; `source` is the answer otherwise, as it
 /// always was.
 fn session_source(path: &Path) -> Option<Value> {
+    // The first line is written once, so a rollout that has not shrunk
+    // answers what it answered before.
+    let len = fs::metadata(path).ok()?.len();
+    let key = (path.to_path_buf(), Asked::Source);
+    if let Some(known) = answers().lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        if known.len <= len && known.answer.is_some() {
+            return known.answer.clone();
+        }
+    }
+    let answer = read_session_source(path);
+    answers().lock().unwrap_or_else(|e| e.into_inner()).insert(
+        key,
+        Answered {
+            len,
+            modified: None,
+            answer: answer.clone(),
+        },
+    );
+    answer
+}
+
+fn read_session_source(path: &Path) -> Option<Value> {
     let file = File::open(path).ok()?;
     let mut line = String::new();
     std::io::BufRead::read_line(&mut std::io::BufReader::new(file), &mut line).ok()?;
@@ -557,6 +643,51 @@ pub(crate) fn agent_definitions(cwd: &Path, profile: Option<&str>) -> Vec<Value>
 
 #[cfg(test)]
 mod tests {
+    /// An unchanged rollout answers without being opened, and one that grew is
+    /// read only for what it added (bw-69sa.1).
+    #[test]
+    fn a_rollout_is_read_again_only_for_what_it_added() {
+        use super::{last_happened_at, last_spoke_at};
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("rollout.jsonl");
+        let spoke = |at: &str| {
+            format!("{{\"timestamp\":\"{at}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"user_message\"}}}}\n")
+        };
+        let worked = |at: &str| {
+            format!("{{\"timestamp\":\"{at}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"agent_message\"}}}}\n")
+        };
+        std::fs::write(&path, spoke("2026-01-01T00:00:00Z") + &worked("2026-01-01T00:00:05Z")).unwrap();
+        assert_eq!(last_spoke_at(&path).as_deref(), Some("2026-01-01T00:00:00Z"));
+
+        // Unreadable, yet unchanged: the answer stands without a read.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        assert_eq!(last_spoke_at(&path).as_deref(), Some("2026-01-01T00:00:00Z"));
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        // What was already read is not read again: the old row is changed in
+        // place, the file grows by a row that is not a person's, and the
+        // answer is still the one the old row gave.
+        let old = std::fs::read_to_string(&path).unwrap();
+        let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.write_all(old.replacen("2026-01-01T00:00:00Z", "2026-02-02T00:00:00Z", 1).as_bytes()).unwrap();
+        file.write_all(worked("2026-01-01T00:00:09Z").as_bytes()).unwrap();
+        drop(file);
+        assert_eq!(last_spoke_at(&path).as_deref(), Some("2026-01-01T00:00:00Z"));
+        assert_eq!(last_happened_at(&path).as_deref(), Some("2026-01-01T00:00:09Z"));
+
+        // A later person's row in the growth is the new answer.
+        let mut file = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        file.write_all(spoke("2026-01-01T00:00:12Z").as_bytes()).unwrap();
+        drop(file);
+        assert_eq!(last_spoke_at(&path).as_deref(), Some("2026-01-01T00:00:12Z"));
+
+        // A rewrite that shrinks the file is read whole again.
+        std::fs::write(&path, spoke("2026-03-03T00:00:00Z")).unwrap();
+        assert_eq!(last_spoke_at(&path).as_deref(), Some("2026-03-03T00:00:00Z"));
+    }
+
     /**
      * A thread is the agents' own when its rollout says a subagent began it.
      *

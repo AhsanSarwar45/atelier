@@ -2249,10 +2249,24 @@ async fn restore(
     // of the owner's 144 guardian chats were placed this way and no other.
     // Bounded, because a row with no rollout anywhere is looked for on every
     // load (bw-p61.17).
+    //
+    // A row that could not be placed is not looked for again for a while.
+    // Each look walks every account's whole sessions tree, and the same fifty
+    // unplaceable rows were walked for on every load, which a write to any
+    // chat triggers (bw-69sa.1).
     const PLACE_AT_MOST: usize = 50;
+    const UNPLACED_FOR: Duration = Duration::from_secs(600);
+    static UNPLACEABLE: std::sync::LazyLock<std::sync::Mutex<HashMap<String, std::time::Instant>>> =
+        std::sync::LazyLock::new(Default::default);
+    let tried = UNPLACEABLE.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let unplaced: Vec<(String, String)> = rows
         .iter()
         .filter(|row| row["brand"] == "codex" && row["begunBy"].is_null())
+        .filter(|row| {
+            row["sessionId"].as_str().is_none_or(|id| {
+                tried.get(id).is_none_or(|at| at.elapsed() >= UNPLACED_FOR)
+            })
+        })
         .filter_map(|row| {
             Some((
                 row["sessionId"].as_str()?.to_string(),
@@ -2267,9 +2281,18 @@ async fn restore(
             unplaced
                 .into_iter()
                 .filter_map(|(session_id, external_id)| {
-                    let path = behind.codex_record_anywhere(&external_id)?;
-                    let who = crate::workbench::codex::history::begun_by(&json!({ "path": path }));
-                    (who != "unknown").then_some((session_id, who))
+                    let who = behind
+                        .codex_record_anywhere(&external_id)
+                        .map(|path| crate::workbench::codex::history::begun_by(&json!({ "path": path })))
+                        .unwrap_or("unknown");
+                    if who == "unknown" {
+                        UNPLACEABLE
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(session_id, std::time::Instant::now());
+                        return None;
+                    }
+                    Some((session_id, who))
                 })
                 .collect::<Vec<_>>()
         })
