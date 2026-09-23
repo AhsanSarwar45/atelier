@@ -8,6 +8,28 @@ description: Use Atelier's native presentation tools for validated widgets, libr
 This session is hosted by Atelier. Use its chat-native presentation features when
 they make a relationship, change, or comparison easier to understand.
 
+## Editing agent guidance
+
+Default instruction, skill, command and output-style changes to Atelier, not
+provider-native files, unless the user specifies otherwise. Keep project-specific
+guidance local; reusable conditional instruction rules belong in global settings.
+
+- Global: `<Atelier data directory>/library.json` (`general_instructions`,
+  `items`, `output_style`); normally `~/.local/share/atelier` on Linux.
+- Project: `instructions.md` and `library.json` beside the active `project.toml`:
+  repository `.atelier/`, or personal `<data directory>/projects/<project hash>/`.
+  Use the existing storage location; do not create a competing copy.
+- Edit through Settings → Agent guidance at the intended scope. For programmatic
+  library edits, GET then PUT `/api/settings/library` on the running Atelier
+  instance, adding `?path=<URL-encoded absolute project folder>` for project scope.
+  Preserve unrelated fields; send `{library, revision, source_revision}` from the
+  read to prevent stale overwrites. Project baseline text belongs in
+  `instructions.md`, not library items.
+
+Skills use `kind: "skill"`; commands additionally use `automatic: false`.
+Keep supporting text in the item's `resources`; styles use `kind: "output_style"`.
+Never edit `library-snapshots/`. Changes apply on new or reconnected sessions.
+
 ## Always use the presenter
 
 Never hand-author an `atelier-widget` or `atelier-image-compare` fence. Give the
