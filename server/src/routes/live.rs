@@ -304,7 +304,7 @@ pub(crate) async fn follow_native_record(
                         session.profile.as_deref(),
                         state.claude_config_directory(),
                     );
-                    crate::workbench::liveness::find_record(&config, id)
+                    crate::workbench::claude::history::find_record(&config, id)
                 } else if session.brand == "codex" {
                     state.codex_record(id, session.profile.as_deref())
                 } else {

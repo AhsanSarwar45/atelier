@@ -1732,9 +1732,15 @@ pub struct HelperFollower {
     outcomes: HashMap<String, bool>,
     ended: HashSet<String>,
     seen: HashSet<String>,
-    /// The rows so far of each helper still being written, and where its file
-    /// was read up to. A helper that ends gives its rows back.
+    /// The rows so far of each helper being written, and where its file was
+    /// read up to. A helper sent to work in the background has its result
+    /// the moment it starts and goes on writing, so being settled is no sign
+    /// a file is done; one quiet for a minute gives its rows back instead.
     tails: HashMap<String, HelperTail>,
+    /// Helpers whose dispatch call is not known yet. Claude may write the
+    /// `meta.json` naming it after the transcript stops growing, so these are
+    /// asked again each tick until it appears.
+    unnamed: HashSet<String>,
     /// Each helper's latest summary, so settling one never reopens its file.
     finishes: HashMap<String, Value>,
     #[cfg_attr(not(test), allow(dead_code))]
@@ -1744,6 +1750,16 @@ pub struct HelperFollower {
 struct HelperTail {
     tail: crate::workbench::external::LineTail,
     rows: Vec<Value>,
+    grew_at: std::time::Instant,
+}
+
+/// How long a helper's file may sit unchanged before its rows are let go.
+const TAIL_KEPT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// The dispatch call a helper's `meta.json` names, if it has been written.
+fn helper_call(path: &Path, agent: &str) -> Option<String> {
+    let meta = fs::read_to_string(path.with_file_name(format!("agent-{agent}.meta.json"))).ok()?;
+    as_nonempty(&serde_json::from_str::<Value>(&meta).ok()?["toolUseId"])
 }
 
 impl HelperFollower {
@@ -1756,6 +1772,7 @@ impl HelperFollower {
             ended: HashSet::new(),
             seen: HashSet::new(),
             tails: HashMap::new(),
+            unnamed: HashSet::new(),
             finishes: HashMap::new(),
             bytes_read: 0,
         }
@@ -1773,6 +1790,8 @@ impl HelperFollower {
                 .insert(helper.agent_id.clone(), helper.finish.clone());
             if let Some(call) = &helper.tool_call_id {
                 follower.calls.insert(call.clone(), helper.agent_id.clone());
+            } else {
+                follower.unnamed.insert(helper.agent_id.clone());
             }
             for event in &helper.events {
                 follower
@@ -1845,16 +1864,17 @@ impl HelperFollower {
                 _ => held = None,
             }
         }
-        let helper = match held {
+        let mut helper = match held {
             Some(helper) => helper,
             None => {
                 let (rows, through) = helper_rows(path)?;
                 self.bytes_read += fs::metadata(path).map(|meta| meta.len()).unwrap_or(through);
                 let mut tail = crate::workbench::external::LineTail::new(path);
                 tail.seek(through);
-                HelperTail { tail, rows }
+                HelperTail { tail, rows, grew_at: std::time::Instant::now() }
             }
         };
+        helper.grew_at = std::time::Instant::now();
         let size = helper.tail.through_line();
         let facts = helper_facts_from(path, agent.to_string(), &helper.rows, size);
         self.tails.insert(agent.to_string(), helper);
@@ -1900,6 +1920,12 @@ impl HelperFollower {
                 continue;
             };
             if self.sizes.get(&agent) == Some(&size) {
+                if self.unnamed.contains(&agent) {
+                    if let Some(call) = helper_call(&path, &agent) {
+                        self.unnamed.remove(&agent);
+                        self.calls.insert(call, agent);
+                    }
+                }
                 continue;
             }
             let Some(helper) = self.grown(&path, &agent) else {
@@ -1908,7 +1934,10 @@ impl HelperFollower {
             self.sizes.insert(agent.clone(), size);
             self.finishes.insert(agent.clone(), helper.finish.clone());
             if let Some(call) = &helper.tool_call_id {
+                self.unnamed.remove(&agent);
                 self.calls.insert(call.clone(), agent.clone());
+            } else {
+                self.unnamed.insert(agent.clone());
             }
             for event in &helper.events {
                 if self.ended.contains(&agent) && event["type"] == "agent.progress" {
@@ -1945,8 +1974,7 @@ impl HelperFollower {
                 finished.push(finish);
             }
         }
-        // A settled helper is not written to again; its rows are dead weight.
-        self.tails.retain(|agent, _| !self.ended.contains(agent));
+        self.tails.retain(|_, helper| helper.grew_at.elapsed() < TAIL_KEPT);
         (updates, finished)
     }
 }
@@ -3128,6 +3156,65 @@ mod tests {
         // A rewritten file is read again from the start.
         write(&busy, row("busy-new", "Fresh")).unwrap();
         assert!(follower.poll(&[]).0.iter().any(|event| event["text"] == "Fresh"));
+    }
+
+    /// A helper sent to work in the background has its result as soon as it
+    /// starts and keeps writing. Being settled must not cost it a full read
+    /// on every tick after (bw-ifjt.1).
+    #[test]
+    fn a_settled_helper_that_keeps_writing_is_still_read_only_for_growth() {
+        let home = tempdir().unwrap();
+        let record = home.path().join(format!("{CHAT}.jsonl"));
+        write(&record, "").unwrap();
+        let helper_dir = record.with_file_name(CHAT).join("subagents");
+        create_dir_all(&helper_dir).unwrap();
+        write(helper_dir.join("agent-bg.meta.json"), json!({"toolUseId":"call-bg"}).to_string()).unwrap();
+        let row = |uuid: &str, text: &str| {
+            json!({"type":"assistant","uuid":uuid,"timestamp":"2026-08-30T00:00:01Z",
+                "message":{"content":[{"type":"text","text":text}]}})
+            .to_string()
+                + "\n"
+        };
+        let path = helper_dir.join("agent-bg.jsonl");
+        write(&path, row("bg-1", "Launched")).unwrap();
+        let mut follower = HelperFollower::after_import(&record);
+        let handed_off = vec![json!({"type":"tool.completed","toolCallId":"call-bg","ok":true})];
+        assert!(!follower.poll(&handed_off).1.is_empty(), "settled at once");
+
+        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+        file.write_all(row("bg-2", "Still going").as_bytes()).unwrap();
+        assert!(follower.poll(&[]).0.iter().any(|event| event["text"] == "Still going"));
+        let before = follower.bytes_read;
+        let more = row("bg-3", "And more");
+        file.write_all(more.as_bytes()).unwrap();
+        assert!(follower.poll(&[]).0.iter().any(|event| event["text"] == "And more"));
+        assert_eq!(follower.bytes_read - before, more.len() as u64);
+    }
+
+    /// The `meta.json` naming a helper's call can land after its transcript
+    /// has stopped growing; the helper must still settle when its call does.
+    #[test]
+    fn a_helper_named_after_its_transcript_stopped_still_settles() {
+        let home = tempdir().unwrap();
+        let record = home.path().join(format!("{CHAT}.jsonl"));
+        write(&record, "").unwrap();
+        let helper_dir = record.with_file_name(CHAT).join("subagents");
+        create_dir_all(&helper_dir).unwrap();
+        write(
+            helper_dir.join("agent-late.jsonl"),
+            json!({"type":"assistant","uuid":"late-1","timestamp":"2026-08-30T00:00:01Z",
+                "message":{"content":[{"type":"text","text":"Done"}]}})
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+        let mut follower = HelperFollower::after_import(&record);
+        assert_eq!(follower.poll(&[]), (vec![], vec![]));
+        write(helper_dir.join("agent-late.meta.json"), json!({"toolUseId":"call-late"}).to_string()).unwrap();
+        follower.poll(&[]);
+        let parent = vec![json!({"type":"tool.completed","toolCallId":"call-late","ok":true})];
+        let (_, done) = follower.poll(&parent);
+        assert!(done.iter().any(|event| event["type"] == "agent.finished" && event["agentId"] == "late"));
     }
 
     /// A chat reads the transcript belonging to its own account.

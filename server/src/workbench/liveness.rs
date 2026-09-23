@@ -143,8 +143,10 @@ pub fn helper_reply(record: &Path, agent_id: &str) -> Ending {
 
 /// A chat's record, found once. Looking means reading every project folder
 /// of the account, so a record not written yet is looked for again only
-/// after a while. The hold beat and every chat follower ask this for each live
-/// chat every two seconds; uncached, that listing never stopped (bw-ifjt.2).
+/// after a while. The hold beat asks this for each live chat every two
+/// seconds; uncached, that listing never stopped (bw-ifjt.2). A follower that
+/// is starting does not ask here: it gives up on a miss and is not retried,
+/// so it must not be handed a miss that is ten seconds old.
 pub fn find_record(config: &Path, session_id: &str) -> Option<PathBuf> {
     static FOUND: LazyLock<Mutex<HashMap<(PathBuf, String), (Instant, Option<PathBuf>)>>> =
         LazyLock::new(Default::default);
