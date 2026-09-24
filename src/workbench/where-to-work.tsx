@@ -21,9 +21,10 @@ import { FolderGit2, GitBranch, Plus } from 'lucide-react';
 
 import * as api from '@/lib/api';
 import type { GitBranch as Branch, GitTree } from '@/lib/api';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Picker } from '@/components/ui/picker';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Tooltip } from '@/components/ui/tooltip';
 import { SectionHeading } from '@/workbench/section-heading';
 
 /** The place a chat is to be started in, as the person has said it so far. */
@@ -193,22 +194,29 @@ export function WhereToWork({
   return (
     <section className="flex flex-col gap-2" data-testid="where-to-work">
       <SectionHeading>Worktree</SectionHeading>
-      <div className="grid grid-cols-3 gap-2" role="group" aria-label="Worktree">
+      <ToggleGroup
+        type="single"
+        variant="outline"
+        size="md"
+        className="grid grid-cols-3 gap-2"
+        aria-label="Worktree"
+        value={value.kind}
+        onValueChange={(kind) => pick(kind as Where['kind'])}
+      >
         {modes.map((mode) => (
-          <Button
-            key={mode.kind}
-            type="button"
-            variant={value.kind === mode.kind ? 'primary' : 'outline'}
-            disabled={disabled || (mode.kind === 'existing' && worktrees.length === 0)}
-            data-testid={`where-${mode.kind}`}
-            title={mode.title}
-            onClick={() => pick(mode.kind)}
-          >
-            {mode.icon}
-            <span className="truncate">{mode.label}</span>
-          </Button>
+          <Tooltip key={mode.kind} label={mode.title} wrapperClassName="w-full">
+            <ToggleGroupItem
+              value={mode.kind}
+              disabled={disabled || (mode.kind === 'existing' && worktrees.length === 0)}
+              data-testid={`where-${mode.kind}`}
+              className="w-full"
+            >
+              {mode.icon}
+              <span className="truncate">{mode.label}</span>
+            </ToggleGroupItem>
+          </Tooltip>
         ))}
-      </div>
+      </ToggleGroup>
 
       {value.kind === 'existing' && (
         <Picker
@@ -260,26 +268,32 @@ export function WhereToWork({
               Folder: {folderName(value.name)}
             </p>
           )}
-          <div className="flex gap-2" role="group" aria-label="Branch">
-            <Button
-              type="button"
-              variant={value.create ? 'primary' : 'outline'}
-              disabled={disabled}
-              data-testid="where-branch-new"
-              onClick={() => onChange({ ...value, create: true, branch: suggestedBranch(value.name) })}
-            >
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="md"
+            className="gap-2"
+            aria-label="Branch"
+            value={value.create ? 'new' : 'existing'}
+            onValueChange={(which) =>
+              onChange(
+                which === 'new'
+                  ? { ...value, create: true, branch: suggestedBranch(value.name) }
+                  : { ...value, create: false, branch: '' },
+              )
+            }
+          >
+            <ToggleGroupItem value="new" disabled={disabled} data-testid="where-branch-new">
               New branch
-            </Button>
-            <Button
-              type="button"
-              variant={value.create ? 'outline' : 'primary'}
+            </ToggleGroupItem>
+            <ToggleGroupItem
+              value="existing"
               disabled={disabled || bases.length === 0}
               data-testid="where-branch-existing"
-              onClick={() => onChange({ ...value, create: false, branch: '' })}
             >
               Existing branch
-            </Button>
-          </div>
+            </ToggleGroupItem>
+          </ToggleGroup>
           {value.create ? (
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <Input

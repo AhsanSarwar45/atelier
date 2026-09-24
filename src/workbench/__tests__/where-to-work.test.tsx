@@ -130,7 +130,8 @@ describe('the picker on the screen', () => {
     await waitFor(() => expect(screen.getByTestId('where-project')).toHaveTextContent('Project root'));
     // The folder is the tooltip, not the label: its basename is often a name
     // the reader has never seen.
-    expect(screen.getByTestId('where-project')).toHaveAttribute('title', '/home/dev/app');
+    fireEvent.pointerMove(screen.getByTestId('where-project'), { pointerType: 'mouse' });
+    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('/home/dev/app'), { timeout: 2000 });
     expect(screen.getByTestId('where-existing')).toBeEnabled();
     expect(screen.getByTestId('where-new')).toBeEnabled();
   });
