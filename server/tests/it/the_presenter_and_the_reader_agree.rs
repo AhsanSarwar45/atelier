@@ -8,7 +8,7 @@
 
 use serde_json::Value;
 
-const CORPUS: &str = include_str!("../../tests/fixtures/presentation-corpus.json");
+const CORPUS: &str = include_str!("../../../tests/fixtures/presentation-corpus.json");
 
 struct Case {
     name: String,

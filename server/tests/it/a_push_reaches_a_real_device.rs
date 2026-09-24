@@ -16,7 +16,7 @@
 //!
 //! ```text
 //! ATELIER_DATA_DIR=/path/used/by/the/running/app \
-//!   cargo test --test a_push_reaches_a_real_device -- --ignored --nocapture
+//!   cargo test --test it a_push_reaches_a_real_device:: -- --ignored --nocapture
 //! ```
 
 use atelier::db::Database;

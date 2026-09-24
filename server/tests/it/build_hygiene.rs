@@ -43,6 +43,25 @@ fn nothing_looks_for_a_folder_in_someones_home() {
     );
 }
 
+/// Cargo makes every `.rs` file directly under `tests/` a program of its own,
+/// and each links a full copy of the server. Seventeen linking at once put a
+/// chat past its memory limit, so every integration test is a module of the
+/// one program in `tests/it/`.
+#[test]
+fn every_integration_test_is_a_module_of_one_program() {
+    let tests = repo_root().join("server/tests");
+    let programs: Vec<_> = std::fs::read_dir(&tests)
+        .expect("the tests folder exists")
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
+        .collect();
+    assert!(
+        programs.is_empty(),
+        "these files would each become a separate test program; make them modules in tests/it/main.rs: {programs:#?}"
+    );
+}
+
 #[test]
 fn embedded_assets_are_baked_in_for_debug_builds() {
     let manifest = std::fs::read_to_string(repo_root().join("server/Cargo.toml"))

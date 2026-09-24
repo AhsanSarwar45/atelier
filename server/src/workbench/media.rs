@@ -512,7 +512,7 @@ pub fn import_artifact(
 /// The one contract, on the presenter's side. `src/workbench/chat-widgets.ts`
 /// holds the reader's side of it and `tests/fixtures/presentation-corpus.json`
 /// records the verdict both must reach; a rule changed here without changing
-/// the corpus fails `tests/the_presenter_and_the_reader_agree.rs`.
+/// the corpus fails `tests/it/the_presenter_and_the_reader_agree.rs`.
 ///
 /// Every refusal names the field at fault, because the agent that wrote the
 /// payload sees only this string and cannot look at what was drawn.
