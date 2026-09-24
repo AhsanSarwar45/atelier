@@ -1179,6 +1179,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_new_chats_record_is_followed_once_its_driver_writes_it() {
+        let (directory, state) = workbench_fixture();
+        let external = "55555555-5555-4555-8555-555555555555";
+        let record = driven_claude_chat(&directory, &state, external).await;
+        // A new chat: the kit has not written its record yet.
+        fs::remove_file(&record).unwrap();
+        state.follow_the_driven();
+        state.pretend_driver("chat-1").await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        fs::write(&record, "{\"type\":\"meta\",\"cwd\":\"/work/project\"}\n").unwrap();
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        assert!(state.has_chat_follower("chat-1").await, "nobody read the record once it appeared");
+        driven_answer(&record, "driven-1", "the first answer of a new chat");
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let size = fs::metadata(&record).unwrap().len() as i64;
+        assert_eq!(state.database().followed_to("chat-1".into()).await.unwrap(), Some(size));
+
+        state.forget_driver("chat-1").await;
+        let stopped = tokio::time::timeout(Duration::from_secs(5), async {
+            while state.has_chat_follower("chat-1").await {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await;
+        assert!(stopped.is_ok(), "the follower outlived its driver");
+        let (_lease, start) = state.chat_follow_subscription("chat-1").await;
+        let control = start.unwrap();
+        let follow_state = state.clone();
+        tokio::spawn(async move {
+            follow_native_record(follow_state, "chat-1".into(), control).await;
+        });
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert!(!says(&state, "the first answer of a new chat").await);
+    }
+
+    #[tokio::test]
     async fn a_driven_chat_nobody_opened_is_not_read_again_when_its_driver_goes() {
         let (directory, state) = workbench_fixture();
         let record =

@@ -611,6 +611,16 @@ impl WorkbenchState {
         }
     }
 
+    /// Whether this lease still holds open the chat's running follower.
+    async fn is_following(&self, session_id: &str, lease: Option<&ChatFollowLease>) -> bool {
+        let Some(lease) = lease else { return false };
+        self.chat_followers
+            .lock()
+            .await
+            .get(session_id)
+            .is_some_and(|current| Arc::ptr_eq(current, &lease.control))
+    }
+
     #[cfg(test)]
     pub(crate) async fn has_chat_follower(&self, session_id: &str) -> bool {
         self.chat_followers.lock().await.contains_key(session_id)
@@ -731,16 +741,24 @@ impl WorkbenchState {
         if session.brand != "claude" {
             return;
         }
-        let (lease, start) = self.chat_follow_subscription(&session_id).await;
-        if let Some(control) = start {
-            let state = self.clone();
-            let id = session_id.clone();
-            tokio::spawn(async move {
-                crate::routes::live::follow_native_record(state, id, control).await;
-            });
-        }
+        // A follower can end while its driver lives: a new chat's record is
+        // not written until its first entry lands, and a follower that finds
+        // no record goes at once. So the lease is renewed whenever the reading
+        // it holds open is no longer the chat's.
+        let mut lease: Option<ChatFollowLease> = None;
         let mut beat = tokio::time::interval(Duration::from_millis(500));
         while self.has_driver(&session_id).await {
+            if !self.is_following(&session_id, lease.as_ref()).await {
+                let (renewed, start) = self.chat_follow_subscription(&session_id).await;
+                lease = Some(renewed);
+                if let Some(control) = start {
+                    let state = self.clone();
+                    let id = session_id.clone();
+                    tokio::spawn(async move {
+                        crate::routes::live::follow_native_record(state, id, control).await;
+                    });
+                }
+            }
             beat.tick().await;
         }
         // The end of the turn is still landing in the record; the follower
