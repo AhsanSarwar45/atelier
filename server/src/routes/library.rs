@@ -32,14 +32,14 @@ fn answer(scope: &Scope) -> Result<Value, String> {
     let preview = root(scope.preview.as_deref())?;
     let held = library::read(&data, path.as_deref())?;
     let resolved = library::resolve(&data, path.as_deref().or(preview.as_deref()))?;
-    let global = library::read(&data, None)?;
+    let global = library::resolve(&data, None)?;
     let orphaned: Vec<_> = held
         .overrides
         .keys()
-        .filter(|id| !global.items.iter().any(|item| &item.id == *id))
+        .filter(|id| !global.items.iter().any(|row| &row.item.id == *id))
         .collect();
     Ok(
-        json!({"library":held,"revision":library::revision(&held),"source_revision":library::revision(&global),"resolved":resolved,"guidance":resolved.guidance(),"orphaned":orphaned,"inherited":global.items}),
+        json!({"library":held,"revision":library::revision(&held),"source_revision":library::source_revision(&data)?,"resolved":resolved,"guidance":resolved.guidance(),"orphaned":orphaned,"inherited":global.items.into_iter().filter(|r|r.source == "global").map(|r|r.item).collect::<Vec<_>>()}),
     )
 }
 async fn read(Query(scope): Query<Scope>) -> Result<Json<Value>, Refusal> {
@@ -63,10 +63,10 @@ async fn write(
     tokio::task::spawn_blocking(move || {
         let data = library::data_dir()?;
         let path = root(scope.path.as_deref())?;
-        let global = library::read(&data, None)?;
+        let global = library::resolve(&data, None)?;
         if path.is_some() {
             for item in &update.library.items {
-                if global.items.iter().any(|g| g.id == item.id) {
+                if global.items.iter().any(|g| g.item.id == item.id) {
                     return Err("Use Customize to override an inherited item".into());
                 }
             }
@@ -81,7 +81,7 @@ async fn write(
                 .library
                 .items
                 .iter()
-                .chain(global.items.iter().filter(|_| path.is_some()))
+                .chain(global.items.iter().filter(|_| path.is_some()).map(|r| &r.item))
                 .any(|i| i.id == id && i.kind == library::Kind::OutputStyle);
             if !found {
                 return Err("Select an existing output style".into());

@@ -16,8 +16,9 @@ guidance local; reusable conditional instruction rules belong in global settings
 
 - Run `atelier tool skills locations [--project PATH]` to find the actual global
   and project instruction/library files. Use those paths, not provider folders
-  or guessed locations. Skills, commands and styles are items in `library.json`,
-  not separate skill files; global baseline text is `general_instructions`.
+  or guessed locations. Create skills in `skills/<id>/SKILL.md` under the returned
+  scope, keeping scripts, references and assets beside it. Optional `atelier.json`
+  sets conditions, requirements, parameters and `automatic` (false for commands).
 - Edit through Settings → Agent guidance at the intended scope. For programmatic
   library edits, GET then PUT `/api/settings/library` on the running Atelier
   instance, adding `?path=<URL-encoded absolute project folder>` for project scope.
@@ -25,9 +26,9 @@ guidance local; reusable conditional instruction rules belong in global settings
   read to prevent stale overwrites. Project baseline text belongs in
   `instructions.md`, not library items.
 
-Skills use `kind: "skill"`; commands additionally use `automatic: false`.
-Keep supporting text in the item's `resources`; styles use `kind: "output_style"`.
-Never edit `library-snapshots/`. Changes apply on new or reconnected sessions.
+Text-only items remain supported in `library.json`; styles use `kind: "output_style"`
+and global baseline text uses `general_instructions`. Never edit `library-snapshots/`
+or `skill-bundles/`; those are pinned copies. Reconnect to apply source changes.
 
 ## Always use the presenter
 

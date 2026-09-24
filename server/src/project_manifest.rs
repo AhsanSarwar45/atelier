@@ -540,12 +540,31 @@ pub fn move_to(root: &Path, data_dir: &Path, storage: ManifestStorage) -> Result
     if library_source.exists() && library_destination.exists() {
         return Err("A shared library already exists at the destination; resolve it before moving project settings".into());
     }
+    let skills_source = located.path.with_file_name("skills");
+    let skills_destination = destination.with_file_name("skills");
+    if skills_source.exists() && skills_destination.exists() {
+        return Err("Skill folders already exist at the destination; resolve them before moving project settings".into());
+    }
     let library = if library_source.exists() { Some(fs::read(&library_source).map_err(|e| e.to_string())?) } else { None };
+    // Move the complete tree, not just SKILL.md. Refuse a cross-device move
+    // before touching manifests rather than leaving half a skill behind.
+    let moved_skills = skills_source.exists();
+    if moved_skills {
+        fs::create_dir_all(destination.parent().unwrap()).map_err(|e| e.to_string())?;
+        fs::rename(&skills_source, &skills_destination).map_err(|e| format!("Cannot move skill folders; project settings remain unchanged: {e}"))?;
+    }
+    let written = (|| -> Result<(), String> {
     if let Some(bytes) = &library { crate::workbench::provider_defaults::atomic_write(&library_destination, bytes)?; }
     write_atomic(&destination, &located.manifest)?;
     // The instructions are half of what a project says about itself; a move
     // that left them behind would look like a move that erased them.
     write_instructions(&destination, &located.instructions)?;
+    Ok(())
+    })();
+    if let Err(error) = written {
+        if moved_skills { fs::rename(&skills_destination, &skills_source).map_err(|e| format!("{error}; skill folders remain at {}: {e}", skills_destination.display()))?; }
+        return Err(error);
+    }
     write_instructions(&located.path, "")?;
     fs::remove_file(&located.path).map_err(|error| format!("new manifest was written but {} could not be removed: {error}", located.path.display()))?;
     if library.is_some() { fs::remove_file(library_source).map_err(|e| e.to_string())?; }

@@ -165,6 +165,8 @@ impl Evaluation {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Resolved {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<super::skill_folders::Folder>,
     pub item: Item,
     pub source: String,
     pub customized: bool,
@@ -184,7 +186,7 @@ fn digest(bytes: &[u8]) -> String {
 pub fn data_dir() -> Result<PathBuf, String> {
     crate::identity::data_dir().ok_or_else(|| "Atelier data directory unavailable".into())
 }
-fn safe_relative(path: &str) -> Result<(), String> {
+pub(super) fn safe_relative(path: &str) -> Result<(), String> {
     if path.is_empty()
         || path.contains('\\')
         || Path::new(path)
@@ -981,7 +983,7 @@ mod tests {
         );
     }
 }
-fn valid_id(id: &str) -> bool {
+pub(super) fn valid_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 80
         && id
@@ -1011,6 +1013,12 @@ pub fn read(data: &Path, root: Option<&Path>) -> Result<Library, String> {
 pub fn revision(library: &Library) -> String {
     digest(&serde_json::to_vec(library).expect("serializable library"))
 }
+pub fn source_revision(data: &Path) -> Result<String, String> {
+    let global = read(data, None)?;
+    let folders = super::skill_folders::discover(&data.join("skills"))?;
+    if folders.is_empty() { return Ok(revision(&global)); }
+    Ok(digest(&serde_json::to_vec(&(global, folders.into_iter().map(|s| s.item).collect::<Vec<_>>())).map_err(|e| e.to_string())?))
+}
 pub fn write(
     data: &Path,
     root: Option<&Path>,
@@ -1029,12 +1037,17 @@ pub fn write_with_source(
 ) -> Result<(), String> {
     let _guard = WRITES.lock().map_err(|e| e.to_string())?;
     if let Some(expected) = source_revision.filter(|_| root.is_some()) {
-        if revision(&read(data, None)?) != expected {
+        if self::source_revision(data)? != expected {
             return Err("Global library changed in another editor. Reload before customizing it.".into());
         }
     }
     validate(library, root.is_some())?;
     let path = library_path(data, root)?;
+    let folder_ids: std::collections::HashSet<_> = super::skill_folders::discover(&path.with_file_name("skills"))?
+        .into_iter().map(|s| s.item.id).collect();
+    if library.items.iter().any(|item| folder_ids.contains(&item.id)) {
+        return Err("A skill folder already owns this ID. Edit its SKILL.md or choose another ID.".into());
+    }
     if revision(&read_path(&path)?) != expected {
         return Err("Library changed in another editor. Reload before saving.".into());
     }
@@ -1078,14 +1091,29 @@ fn builtins() -> Vec<Item> {
     .collect()
 }
 pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
-    let global = read(data, None)?;
+    let mut global = read(data, None)?;
     validate(&global, false)?;
     let located = root.and_then(|r| crate::project_manifest::locate(r, data));
-    let local = match &located {
+    let mut local = match &located {
         Some(p) => read_path(&p.path.with_file_name("library.json"))?,
         None => Library::default(),
     };
     validate(&local, true)?;
+    let mut folders = BTreeMap::new();
+    for (scope, library, base) in [
+        ("global", &mut global, Some(data.to_path_buf())),
+        ("project", &mut local, located.as_ref().and_then(|p| p.path.parent().map(Path::to_path_buf))),
+    ] {
+        if let Some(base) = base {
+            for source in super::skill_folders::discover(&base.join("skills"))? {
+                if library.items.iter().any(|i| i.id == source.item.id) {
+                    return Err(format!("Skill {} exists in both {scope} library.json and a skill folder; keep one source", source.item.id));
+                }
+                folders.insert((scope.to_string(), source.item.id.clone()), source.directory);
+                library.items.push(source.item);
+            }
+        }
+    }
     let beads = located
         .as_ref()
         .is_some_and(|p| p.manifest.project.use_beads);
@@ -1164,7 +1192,10 @@ pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
         } else {
             "available"
         };
+        let folder = folders.get(&(source.to_string(), id.clone()))
+            .map(|path| super::skill_folders::pin(data, path, &item)).transpose()?;
         resolved.push(Resolved {
+            folder,
             item,
             source: source.into(),
             customized: over.is_some(),
@@ -1218,6 +1249,7 @@ impl Snapshot {
             return Err(format!("{} is {}", row.item.name, row.state));
         }
         let text = match resource {
+            Some(name) if row.folder.is_some() => return super::skill_folders::read(row.folder.as_ref().unwrap(), name),
             Some(name) => row
                 .item
                 .resources
@@ -1226,6 +1258,9 @@ impl Snapshot {
             None => &row.item.content,
         };
         let mut text = text.clone();
+        if let Some(folder) = &row.folder {
+            text.push_str(&format!("\n\nSkill directory: {}\nResolve relative paths from this directory. Read references and run helpers with your existing filesystem/shell tools and permissions. This is a pinned copy: write generated output elsewhere, not into this directory.", folder.directory.display()));
+        }
         // Replace placeholders once, never recursively interpret substituted values.
         let pattern = regex::Regex::new(r"\{\{([a-z0-9-]+)\}\}").expect("constant regex");
         text = pattern
@@ -1354,14 +1389,15 @@ fn locations(data: &Path, folder: &Path) -> Result<Value, String> {
             "root": root, "storage": storage, "manifest": manifest,
             "instructions": crate::project_manifest::instructions_path(&manifest),
             "library": manifest.with_file_name("library.json"),
+            "skills": manifest.with_file_name("skills"),
         }))
     }).transpose()?;
     Ok(json!({
-        "global": {"library": data.join("library.json"), "instructions_field": "general_instructions"},
+        "global": {"library": data.join("library.json"), "skills": data.join("skills"), "instructions_field": "general_instructions"},
         "project": project,
         "project_registered": project.is_some(),
         "project_root": root,
-        "format": "Skills, commands and output styles are items in library.json, not separate files. Commands are skills with automatic=false; output_style selects a style ID.",
+        "format": "Skills are folders under skills/<id>/SKILL.md with scripts, references and assets preserved. Text-only library.json items remain supported. Commands are skills with automatic=false; output_style selects a style ID.",
         "note": "Paths may not exist until first save. No project settings were created. Edit sources, never library-snapshots; reconnect to apply changes.",
     }))
 }

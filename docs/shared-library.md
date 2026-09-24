@@ -1,10 +1,9 @@
 # Shared guidance
 
-Settings → Shared library manages global instructions, skills and output styles.
-Project Settings → Shared library shows the effective library for that project,
-with global items inherited and project items stored beside its project manifest.
-The existing project Instructions field continues to supply its base guidance.
-Conditional rules are instruction items with an availability condition.
+Settings → Agent guidance manages global instructions, conditional rules, skills,
+commands and output styles. Project Settings → Agent guidance supplies project
+instructions and project skills, commands and styles. Reusable conditional rules
+are managed globally, not in a second project instructions editor.
 
 Instructions and the selected output style enter each provider's session policy.
 Skills contribute a short catalogue entry and load on demand through the same
@@ -51,14 +50,43 @@ removes that override, so subsequent global edits remain inherited.
 Parameters substitute `{{name}}` once without interpreting the result. Supporting
 text resources use relative names, such as `references/testing.md`, and are read
 with the same MCP tool by passing `id` and `resource`. A bundle name groups related
-entries without loading them all. Binary assets and arbitrary executable probes
-are not library resources. Permissions, hooks, credentials and native subagent
+entries without loading them all. JSON resources hold text; complete skill folders
+also support scripts and binary assets. Conditions never execute probes.
+Permissions, hooks, credentials and native subagent
 execution remain provider settings; importing text does not translate those.
 
-Native-file import copies the selected instructions, rules, skill, command, or
+Native-file import copies only the selected instructions, rules, skill, command, or
 output-style file. It leaves the original untouched and warns about independent
 native loading. Supporting references must be copied into Resources. Review the
 old source before retiring it; Atelier never silently deletes native guidance.
+
+## Complete skill folders
+
+Run `atelier tool skills locations` for the global and project `skills` directories.
+Put a skill at `skills/<stable-id>/SKILL.md`, preserving its scripts, references,
+templates and assets beneath that directory. No provider-specific copy is needed.
+The folder ID is lowercase kebab-case; it must not collide with a JSON item in the
+same scope. SKILL.md accepts YAML `name` and `description` metadata.
+Optional `atelier.json` supplies `when`, `requires`, `parameters` and `automatic`.
+Set `automatic: false` for a command; native `disable-model-invocation: true` is
+also recognized. Other native frontmatter stays in the file but does not grant
+permissions or configure provider runtimes.
+
+Each connection receives a content-addressed copy of the complete folder.
+Reading the skill returns its absolute pinned directory; agents read assets and
+execute helpers there through their normal filesystem/shell tools and permissions.
+Atelier does not execute helpers during discovery or install their dependencies.
+Keep generated output outside the pinned directory. Source edits apply on reconnect;
+old sessions retain their original supporting files. Parameters apply to the skill
+body, not arbitrary script or binary bytes. Internal symlinks are copied as files;
+escaping links, cycles, special files and oversized bundles are refused. Limits:
+128 KiB instructions, 64 MiB per asset, 256 MiB and 4096 files per skill. Git internals
+and Python bytecode caches are omitted. The text reader accepts resources up to
+2 MiB; larger or binary resources are used directly through the returned path.
+
+Folder-backed cards show their editable source path. Edit those files directly;
+project customizations still use the shared settings editor. To migrate a complete
+native skill, copy its whole folder, not just SKILL.md through native-file import.
 
 ## Persistence and running chats
 
@@ -69,7 +97,7 @@ writes and atomic replacement. Files remain human-readable JSON.
 
 Each connection receives an immutable, content-addressed snapshot containing
 resolved items, source information, condition evidence, content and resources.
-The composer inspector shows that connection's revision and included/available
+The compact Guidance badge opens a popover showing included/available
 items. Skills read during a connection retain their original version even if the
 source changes. Settings changes apply on new connections, including resume;
 they cannot remove old text from conversation history. Start a fresh chat when
@@ -96,8 +124,8 @@ atelier tool skills read REVISION ID references/testing.md
 including repository versus personal storage. It finds the project from the
 current folder (or `--project`), handles linked worktrees, and creates no settings
 or snapshots. An unregistered folder returns `project: null`; register it before
-creating project guidance. Skills, commands and styles are library items, not
-individual provider-native files.
+creating project guidance. Skills and commands can be complete folders or text-only
+library items; output styles remain library items.
 
 `atelier tool skills mcp REVISION` serves the same snapshot through stdio MCP.
 Read-only review workers receive shared project guidance and can read the pinned

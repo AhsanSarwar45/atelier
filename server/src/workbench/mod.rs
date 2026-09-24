@@ -19,6 +19,7 @@ pub mod external;
 pub mod hunks;
 pub mod kit_words;
 pub mod library;
+mod skill_folders;
 pub mod lifecycle;
 pub mod liveness;
 pub mod local;
