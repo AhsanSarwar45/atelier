@@ -39,6 +39,7 @@ import { History, Search } from 'lucide-react';
 import { ToolButton } from '@/components/shell';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { request } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -128,7 +129,6 @@ export function HistoryPanel({
   const [looking, setLooking] = useState('');
   const [at, setAt] = useState(0);
   const box = useRef<HTMLDivElement | null>(null);
-  const panel = useRef<HTMLDivElement | null>(null);
   // Fixed at the moment the panel opened. A clock read during the render would
   // give every row a new answer on every keystroke, and "3m ago" does not need
   // to be right to the second it is read in.
@@ -202,24 +202,17 @@ export function HistoryPanel({
 
   /**
    * A press anywhere but here puts the panel away, the way it does for every
-   * other panel in the app (bw-l6hd.2). Escape already did this; a reader who
-   * reaches for the screen rather than the keyboard had nothing to reach for,
-   * because the panel covers its terminal edge to edge and the only press that
-   * closed it was on the button it came out of.
+   * other panel in the app (bw-l6hd.2) — the sheet's own dismissing does that.
+   * The panel covers its terminal edge to edge, so without it a reader who
+   * reaches for the screen rather than the keyboard had nothing to reach for.
    *
-   * That button is the one place exempted. It toggles, so closing here on the
-   * way down would only have it open again on the way up.
+   * The button it came out of is the one place exempted. It toggles, so
+   * closing here on the way down would only have it open again on the way up.
    */
-  useEffect(() => {
-    const away = (event: PointerEvent) => {
-      const at = event.target as Element | null;
-      if (!at || panel.current?.contains(at)) return;
-      if (at.closest?.('[data-testid="terminal-history-open"]')) return;
-      onClose();
-    };
-    document.addEventListener('pointerdown', away);
-    return () => document.removeEventListener('pointerdown', away);
-  }, [onClose]);
+  const away = (event: CustomEvent) => {
+    const at = event.target as Element | null;
+    if (at?.closest?.('[data-testid="terminal-history-open"]')) event.preventDefault();
+  };
 
   const empty = (): string => {
     if (why) return why;
@@ -232,14 +225,21 @@ export function HistoryPanel({
   };
 
   return (
-    <div
-      ref={panel}
+    // A sheet held inside the terminal's own box, over the grid and no further:
+    // the library's non-modal sheet, drawn where it is written, so the tab
+    // strip above it and the app beside it still take presses.
+    <Sheet contained open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <SheetContent
+      side="top"
+      hideClose
+      overlayClassName="hidden"
+      aria-describedby={undefined}
       data-testid="terminal-history-panel"
-      role="dialog"
-      aria-label="Command history"
-      className="absolute inset-0 z-10 flex flex-col bg-surface-overlay"
+      className="inset-0 z-10 flex h-full flex-col gap-0 border-0 bg-surface-overlay p-0 shadow-none"
       onKeyDown={keyed}
+      onPointerDownOutside={away}
     >
+      <SheetTitle className="sr-only">Command history</SheetTitle>
       <div className="flex shrink-0 items-center gap-2 border-b border-border/40 px-2 py-1.5">
         <Search className="size-3.5 shrink-0 text-t-tertiary" aria-hidden />
         <Input
@@ -289,6 +289,7 @@ export function HistoryPanel({
       <p className="shrink-0 border-t border-border/40 px-3 py-1 text-[10px] text-t-tertiary">
         The one you pick goes to the prompt to run or change — nothing is run for you.
       </p>
-    </div>
+    </SheetContent>
+    </Sheet>
   );
 }

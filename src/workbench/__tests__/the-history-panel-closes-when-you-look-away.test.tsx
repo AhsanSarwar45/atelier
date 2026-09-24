@@ -76,3 +76,17 @@ it('stops listening once it is gone', async () => {
 
   expect(onClose, 'the panel is still watching the page after it was taken away').not.toHaveBeenCalled();
 });
+
+it('closes on Escape, and keeps the Escape from reaching the window behind it', async () => {
+  const onClose = vi.fn();
+  await drawn(onClose);
+  const behind = vi.fn();
+  window.addEventListener('keydown', behind);
+  try {
+    await act(async () => void fireEvent.keyDown(screen.getByTestId('terminal-history-search'), { key: 'Escape' }));
+    expect(onClose).toHaveBeenCalled();
+    expect(behind, 'the Escape went on to the shell as well').not.toHaveBeenCalled();
+  } finally {
+    window.removeEventListener('keydown', behind);
+  }
+});

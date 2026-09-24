@@ -33,8 +33,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { BeadChip } from '@/components/bead-chip-row';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { NOT_PHONE_SCREEN } from '@/lib/screen-width';
+import { NOT_PHONE_SCREEN, usePhoneScreen } from '@/lib/screen-width';
 import { cn } from '@/lib/utils';
 import { byJob, jobTitle } from '@/workbench/cards-by-job';
 import type { SentAway, TranscriptItem } from '@/workbench/fold';
@@ -187,6 +188,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
  */
 export type RailView = 'chat' | 'git';
 
+/** What the sheet is called to a screen reader on a phone. */
+const RAIL_LABEL = 'What this chat has touched';
+
 /** What each view is called on the strip that chooses it. */
 const RAIL_TAB: Record<RailView, string> = { chat: 'Agents', git: 'Git' };
 
@@ -258,6 +262,14 @@ export interface ChatRightRailProps {
   views?: readonly RailView[];
   /** Choosing one of them. Without it the strip is drawn but does nothing. */
   onPickView?: (view: RailView) => void;
+  /**
+   * The sheet's id on a phone, for the bar button that opens it to name in its
+   * `aria-controls` — which is also what keeps a press on that button from
+   * counting as a press outside the sheet.
+   */
+  id?: string;
+  /** What the dimming beside the phone sheet is called in a test. */
+  scrimTestId?: string;
 }
 
 const NOTHING: never[] = [];
@@ -285,14 +297,37 @@ export function ChatRightRail({
   onToggle,
   views = ['chat', 'git'],
   onPickView,
+  id,
+  scrimTestId = 'chat-right-rail-scrim',
 }: ChatRightRailProps) {
+  const phone = usePhoneScreen();
   const jobs = useMemo(() => byJob(cards), [cards]);
   const cardStatuses = useKnownCardStatuses(projectPath);
   // Cards belong to the project; what git has to say belongs to this chat's own
   // folder. They are the same path only for a chat started in the checkout.
   const gitPath = workingIn ?? projectPath;
   return (
-    <div
+    // The library's sheet held inside the work area: on a phone a sheet down
+    // the right edge with its own dimming beside it, and on a wide screen
+    // (`docked`) nothing but the column of the row it has always been. Kept
+    // drawn while shut, so a half-written commit message is still there when
+    // it opens again, and so it can fold rather than jump.
+    <Sheet
+      contained
+      docked={!phone}
+      open={open}
+      onOpenChange={(wanted) => {
+        if (wanted !== open) onToggle();
+      }}
+    >
+    <SheetContent
+      forceMount
+      side="right"
+      hideClose
+      id={id}
+      aria-label={phone ? (views.includes('chat') ? RAIL_LABEL : 'Git') : undefined}
+      aria-describedby={undefined}
+      overlayProps={{ 'data-testid': scrimTestId, 'data-open': open }}
       data-testid="chat-right-rail"
       data-open={open}
       data-view={view}
@@ -316,7 +351,7 @@ export function ChatRightRail({
             // ends flush with the bars, so there is no gap and no stray box —
             // the door simply stays in the hand that opened it.
             cn(
-              'absolute inset-y-0 right-0 z-50 w-72 max-w-[85vw] border-l shadow-2xl',
+              'absolute inset-y-0 right-0 z-50 w-72 max-w-[85vw] border-l shadow-2xl sm:max-w-[85vw]',
               'md:static md:inset-auto md:z-30 md:h-full md:w-[var(--chat-right-rail-width)] md:max-w-none md:shadow-none',
             )
           : // Shut, it takes no width at all, on a wide screen as much as on
@@ -324,7 +359,7 @@ export function ChatRightRail({
             // edge WAS the handle; the handle is on the bar now, so what was
             // left was two centimetres of bordered nothing down the side of
             // every wide chat (bw-81wt.17).
-            'h-full w-0',
+            'h-full w-0 border-l-0',
       )}
     >
       {/* Mounted whether or not it is open: a panel that unmounts on the way out
@@ -436,6 +471,7 @@ export function ChatRightRail({
             </>
           )}
       </div>
-    </div>
+    </SheetContent>
+    </Sheet>
   );
 }

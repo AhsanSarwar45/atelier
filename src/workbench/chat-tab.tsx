@@ -8,7 +8,7 @@
 'use client';
 import { ActiveGuidance } from './active-guidance';
 
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type KeyboardEvent, type ReactNode, type RefObject, type SetStateAction } from 'react';
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type KeyboardEvent, type ReactNode, type RefObject, type SetStateAction } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -45,6 +45,7 @@ import { type Mentions } from '@/components/markdown-body';
 import { TabLead, TabTools, TabTrail, ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   DropdownMenu,
@@ -1323,6 +1324,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const { diffOpen, flipDiff: rememberDiff } = useGitDiff();
   /** Watched, because it decides which of the two rules below applies. */
   const phone = usePhoneScreen();
+  // What the bar's two rail buttons name in `aria-controls`: the sheets they
+  // open on a phone, which is also how a sheet knows a press on its own door
+  // is not a press outside it.
+  const chatListId = useId();
+  const detailsId = useId();
   /**
    * Three switches on a wide screen, two on a phone, or the conversation stays
    * where it is.
@@ -2148,6 +2154,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           label={phone ? 'Chats' : leftOpen ? 'Hide chats' : 'Show chats'}
           data-testid="chat-rail-toggle"
           data-collapsed={!leftOpen}
+          aria-controls={chatListId}
           onClick={() => (phone ? setRailOpen((v) => !v) : flipLeft())}
         />
       </TabLead>
@@ -2193,6 +2200,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             emphasis={rightOpen ? 'loud' : 'quiet'}
             data-testid="chat-right-rail-toggle"
             data-open={rightOpen}
+            aria-controls={detailsId}
             onClick={flipRight}
           />
         )}
@@ -2322,7 +2330,18 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         </DialogContent>
       </Dialog>
 
-      <div
+      {/* The library's sheet held inside the work area on a phone, with its own
+          dimming beside it; on a wide screen (`docked`) a column of the row.
+          Kept drawn while shut, so it slides rather than snaps. */}
+      <Sheet contained docked={!phone} open={railOpen} onOpenChange={setRailOpen}>
+      <SheetContent
+        forceMount
+        side="left"
+        hideClose
+        id={chatListId}
+        aria-label={phone ? 'Chats' : undefined}
+        aria-describedby={undefined}
+        overlayProps={{ 'data-testid': 'chat-rail-scrim', 'data-open': railOpen }}
         data-testid="chat-rail"
         data-open={railOpen}
         style={{ '--chat-left-rail-width': `${leftWidth}px` } as CSSProperties}
@@ -2337,7 +2356,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           // is a column of the row again, and behind the popups as it always
           // was.
           'z-50 h-full shrink-0 bg-background transition-transform md:relative md:z-30 md:translate-x-0',
-          'absolute inset-y-0 left-0 md:w-[var(--chat-left-rail-width)]',
+          // As wide as the list inside it, with no edge of its own, rather than
+          // the three-quarter-width bordered sheet the library would draw.
+          'absolute inset-y-0 left-0 w-auto max-w-none border-r-0 sm:max-w-none md:w-[var(--chat-left-rail-width)]',
           railOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full',
           // Folded away by hand on a wide screen (bw-flq1.1).
           !leftOpen && 'md:hidden',
@@ -2357,7 +2378,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           onNewChat={newChat}
           startingNewChat={starting !== null}
         />
-      </div>
+      </SheetContent>
+      </Sheet>
       {leftOpen && (
         <ResizeDivider
           side="left"
@@ -2366,32 +2388,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           maximum={() => (shellRef.current?.clientWidth ?? window.innerWidth) - (rightOpen && sessionId ? rightWidth : 0) - MIN_CHAT_WIDTH}
         />
       )}
-      {/* Mounted either way and faded, so the darkening arrives with the panel
-          instead of snapping on in front of it (bw-7ks.22.12). */}
-      <Button
-        type="button"
-        variant="foreground"
-        aria-hidden={!railOpen}
-        tabIndex={railOpen ? 0 : -1}
-        aria-label="Close the chat list"
-        data-testid="chat-rail-scrim"
-        data-open={railOpen}
-        className={cn(
-          // Over the work area, like the sheet it belongs to: the dimming
-          // stops where the sheet stops, so the two read as one surface rather
-          // than two panels arguing. It reaches the bars no further than the
-          // sheet does, because a reader has to be able to press the button he
-          // opened this from (bw-e3dw.9).
-          // 80% and not 40%, which is what an opened card already uses: the
-          // app's own background is 9,9,11, so a light wash over it moves
-          // nothing an eye can see — what dims is the WRITING behind the
-          // sheet, and 40% left it perfectly readable (bw-81wt.30).
-          'absolute inset-0 z-40 h-auto rounded-none bg-black/80 p-0 md:hidden',
-          'transition-opacity duration-200 ease-out motion-reduce:transition-none',
-          railOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
-        )}
-        onClick={() => setRailOpen(false)}
-      />
       <div className="flex min-w-0 flex-1 flex-col">{inner}</div>
       {/* The chat's own column. Only when there IS a chat: an empty rail beside
           an empty screen says nothing and takes width to say it. */}
@@ -2431,34 +2427,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             openCommit={openCommit}
             onToggle={flipRight}
             onPickView={pickView}
+            id={detailsId}
           />
         </>
-      )}
-      {sessionId && (
-        <Button
-          type="button"
-          variant="foreground"
-          aria-hidden={!rightOpen}
-          tabIndex={rightOpen ? 0 : -1}
-          aria-label="Close what this chat has touched"
-          data-testid="chat-right-rail-scrim"
-          data-open={rightOpen}
-          className={cn(
-            // Over the work area, like the sheet it belongs to: the dimming
-            // stops where the sheet stops, so the two read as one surface
-            // rather than two panels arguing. It reaches the bars no further
-            // than the sheet does, because a reader has to be able to press
-            // the button he opened this from (bw-e3dw.9).
-            // 80% and not 40%, which is what an opened card already uses: the
-            // app's own background is 9,9,11, so a light wash over it moves
-            // nothing an eye can see — what dims is the WRITING behind the
-            // sheet, and 40% left it perfectly readable (bw-81wt.30).
-            'absolute inset-0 z-40 h-auto rounded-none bg-black/80 p-0 md:hidden',
-            'transition-opacity duration-200 ease-out motion-reduce:transition-none',
-            rightOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
-          )}
-          onClick={flipRight}
-        />
       )}
     </div>
   );

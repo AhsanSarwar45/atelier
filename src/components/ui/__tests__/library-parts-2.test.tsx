@@ -94,6 +94,103 @@ describe('a sheet held inside a box', () => {
     expect(screen.queryByTestId('drawer')).toBeNull();
   });
 
+  it('moves focus in when it opens and back to its trigger when it shuts', () => {
+    render(<Drawer />);
+    const trigger = screen.getByRole('button', { name: 'Chats' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(screen.getByTestId('drawer').contains(document.activeElement)).toBe(true);
+    expect(screen.getByRole('dialog', { name: 'Chats' })).toBe(screen.getByTestId('drawer'));
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(trigger).toHaveFocus();
+  });
+
+  it('closes on a press outside, but not on a press on the control that names it', () => {
+    function Rail() {
+      const [open, setOpen] = React.useState(true);
+      return (
+        <div style={{ position: 'relative' }}>
+          <button type="button" aria-controls="rail" onClick={() => setOpen((was) => !was)}>
+            Door
+          </button>
+          <button type="button">Elsewhere</button>
+          <Sheet contained open={open} onOpenChange={setOpen}>
+            <SheetContent id="rail" data-testid="rail" aria-describedby={undefined}>
+              <SheetTitle>Rail</SheetTitle>
+            </SheetContent>
+          </Sheet>
+        </div>
+      );
+    }
+    render(<Rail />);
+    const door = screen.getByRole('button', { name: 'Door' });
+    fireEvent.pointerDown(door);
+    expect(screen.getByTestId('rail')).toBeInTheDocument();
+    fireEvent.click(door);
+    expect(screen.queryByTestId('rail')).toBeNull();
+    fireEvent.click(door);
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Elsewhere' }));
+    expect(screen.queryByTestId('rail')).toBeNull();
+  });
+
+  it('leaves an Escape a menu inside it already answered to that menu', () => {
+    const onOpenChange = vi.fn();
+    render(
+      <Sheet contained defaultOpen onOpenChange={onOpenChange}>
+        <SheetContent data-testid="drawer" aria-describedby={undefined}>
+          <SheetTitle>Chats</SheetTitle>
+          <input aria-label="Inside" onKeyDown={(event) => event.key === 'Escape' && event.preventDefault()} />
+        </SheetContent>
+      </Sheet>,
+    );
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Inside' }), { key: 'Escape' });
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId('drawer')).toBeInTheDocument();
+  });
+
+  it('stays drawn while shut when asked, out of reach, with its dimming faded', () => {
+    function Kept({ open }: { open: boolean }) {
+      return (
+        <Sheet contained open={open}>
+          <SheetContent forceMount data-testid="drawer" overlayProps={{ 'data-testid': 'scrim' }} aria-describedby={undefined}>
+            <SheetTitle>Files</SheetTitle>
+            <input aria-label="Typed into" defaultValue="" />
+          </SheetContent>
+        </Sheet>
+      );
+    }
+    const { rerender } = render(<Kept open />);
+    fireEvent.change(screen.getByLabelText('Typed into'), { target: { value: 'half a message' } });
+    rerender(<Kept open={false} />);
+    const drawer = screen.getByTestId('drawer');
+    expect(drawer).toHaveAttribute('data-state', 'closed');
+    expect(drawer).toHaveAttribute('inert');
+    expect(screen.getByTestId('scrim')).toHaveClass('opacity-0', 'pointer-events-none');
+    // What was in it is still there when it comes back.
+    rerender(<Kept open />);
+    expect(screen.getByLabelText('Typed into')).toHaveValue('half a message');
+    expect(screen.getByTestId('drawer')).not.toHaveAttribute('inert');
+  });
+
+  it('is only a column of the row when docked: no dialog, no dimming, no dismissing', () => {
+    const onOpenChange = vi.fn();
+    render(
+      <Sheet contained docked open={false} onOpenChange={onOpenChange}>
+        <SheetContent forceMount data-testid="column" className="w-72" aria-describedby={undefined}>
+          <button type="button">A chat</button>
+        </SheetContent>
+      </Sheet>,
+    );
+    const column = screen.getByTestId('column');
+    expect(column).not.toHaveAttribute('role');
+    expect(column).not.toHaveAttribute('inert');
+    expect(column).not.toHaveClass('absolute');
+    expect(document.querySelector('[data-slot="sheet-overlay"]')).toBeNull();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    fireEvent.pointerDown(document.body);
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
   it('is still the window-wide sheet it always was without the option', () => {
     render(
       <div data-testid="work-area">

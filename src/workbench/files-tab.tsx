@@ -30,14 +30,14 @@
  * place the files are shown, and remembered per project.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 import { FileText, PanelLeft, PanelRight, PanelRightClose, Search } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { TabLead, TabTrail, ToolButton } from '@/components/shell';
-import { Button } from '@/components/ui/button';
 import { Picker } from '@/components/ui/picker';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { addressWith } from '@/lib/address';
 import * as api from '@/lib/api';
 import type { GitTree } from '@/lib/api';
@@ -148,6 +148,11 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
   const [rightOpen, flipRight] = useRightRail();
   const { diffOpen, flipDiff } = useGitDiff();
   const phone = usePhoneScreen();
+  // What the bar's two buttons name in `aria-controls`: the sheets they open,
+  // which is also how a sheet knows a press on its own door is not a press
+  // outside it.
+  const treeId = useId();
+  const gitId = useId();
   /** The file the Git panel last asked the diff to show (bw-pstm.1). */
   const [diffFocus, setDiffFocus] = useState<DiffFocus | null>(null);
   /** The commit the diff pane is showing, or null for the working tree. */
@@ -439,6 +444,7 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
           className="md:hidden"
           data-testid="files-rail-toggle"
           data-open={railOpen}
+          aria-controls={treeId}
           onClick={() => setRailOpen((showing) => !showing)}
         />
       </TabLead>
@@ -465,10 +471,24 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
           emphasis={rightOpen ? 'loud' : 'quiet'}
           data-testid="files-right-rail-toggle"
           data-open={rightOpen}
+          aria-controls={gitId}
           onClick={flipRight}
         />
       </TabTrail>
-      <div
+      {/* The library's sheet held inside this box: on a phone a sheet from the
+          left edge with its own dimming beside it, over the work area only,
+          like the chat's two (bw-e3dw.9); on a wide screen (`docked`) the
+          column it has always been. Kept drawn while shut, so the folders
+          opened in it stay open and it slides rather than snaps. */}
+      <Sheet contained docked={!phone} open={railOpen} onOpenChange={setRailOpen}>
+      <SheetContent
+        forceMount
+        side="left"
+        hideClose
+        id={treeId}
+        aria-label={phone ? 'File tree' : undefined}
+        aria-describedby={undefined}
+        overlayProps={{ 'data-testid': 'files-rail-scrim', 'data-open': railOpen }}
         data-testid="files-rail"
         data-open={railOpen}
         style={{ '--files-rail-width': `${width}px` } as CSSProperties}
@@ -478,7 +498,7 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
           // read in. On a wide screen the column it has always been, its width
           // the one the divider drags.
           'z-50 flex h-full shrink-0 flex-col border-r border-border/40 bg-background transition-transform md:relative md:z-30 md:translate-x-0',
-          'absolute inset-y-0 left-0 w-72 max-w-[85vw] md:w-[var(--files-rail-width)]',
+          'absolute inset-y-0 left-0 w-72 max-w-[85vw] sm:max-w-[85vw] md:w-[var(--files-rail-width)]',
           railOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full',
         )}
       >
@@ -504,30 +524,13 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
         <div className="flex min-h-0 flex-1 flex-col" data-testid="files-tree-slot">
           <FileTree root={root} selected={file} onOpen={openFile} onMoved={moved} />
         </div>
-      </div>
+      </SheetContent>
+      </Sheet>
       <ResizeDivider
         side="left"
         value={width}
         onChange={changeWidth}
         maximum={() => (typeof window === 'undefined' ? Infinity : window.innerWidth - MIN_VIEWER_WIDTH)}
-      />
-      {/* Mounted either way and faded, so the darkening arrives with the sheet
-          instead of snapping on in front of it. Over the work area only, like
-          the sheet it belongs to and like the chat's two (bw-e3dw.9). */}
-      <Button
-        type="button"
-        variant="foreground"
-        aria-hidden={!railOpen}
-        tabIndex={railOpen ? 0 : -1}
-        aria-label="Close the file tree"
-        data-testid="files-rail-scrim"
-        data-open={railOpen}
-        className={cn(
-          'absolute inset-0 z-40 h-auto rounded-none bg-black/80 p-0 md:hidden',
-          'transition-opacity duration-200 ease-out motion-reduce:transition-none',
-          railOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
-        )}
-        onClick={() => setRailOpen(false)}
       />
       <div
         className="flex min-h-0 min-w-0 flex-1 flex-col"
@@ -601,23 +604,8 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
         onShowWorkingTree={showWorkingTreeInDiff}
         openCommit={openCommit}
         onToggle={flipRight}
-      />
-      {/* The sheet's scrim, as the tree's is: mounted either way and faded, so
-          the darkening arrives with the sheet rather than in front of it. */}
-      <Button
-        type="button"
-        variant="foreground"
-        aria-hidden={!rightOpen}
-        tabIndex={rightOpen ? 0 : -1}
-        aria-label="Close Git"
-        data-testid="files-right-rail-scrim"
-        data-open={rightOpen}
-        className={cn(
-          'absolute inset-0 z-40 h-auto rounded-none bg-black/80 p-0 md:hidden',
-          'transition-opacity duration-200 ease-out motion-reduce:transition-none',
-          rightOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
-        )}
-        onClick={flipRight}
+        id={gitId}
+        scrimTestId="files-right-rail-scrim"
       />
     </div>
   );
