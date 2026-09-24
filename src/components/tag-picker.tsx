@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Row } from "@/components/ui/row";
 import type { Tag } from "@/lib/db";
 import {
   getTags,
@@ -137,14 +138,14 @@ export function TagPicker({
           {allTags.length > 0 && (
             <div className="space-y-1">
               {allTags.map((tag) => (
-                <Button
+                <Row
                   key={tag.id}
-                  variant="ghost"
-                  size="sm"
-                  className="h-auto w-full justify-start gap-2 px-2 py-1.5 text-left text-sm font-normal"
+                  gap="md"
+                  inset="sm"
+                  radius="md"
+                  className="text-sm"
                   onClick={() => handleToggleTag(tag)}
                   disabled={isLoading}
-                  type="button"
                   aria-pressed={isTagSelected(tag.id)}
                 >
                   <div
@@ -155,7 +156,7 @@ export function TagPicker({
                   {isTagSelected(tag.id) && (
                     <Check className="h-4 w-4 text-success shrink-0" aria-hidden="true" />
                   )}
-                </Button>
+                </Row>
               ))}
             </div>
           )}
@@ -209,16 +210,16 @@ export function TagPicker({
               </div>
             </div>
           ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-auto w-full justify-start gap-2 px-2 py-1.5 text-left text-sm font-normal text-t-tertiary"
+            <Row
+              gap="md"
+              inset="sm"
+              radius="md"
+              className="text-sm text-t-tertiary"
               onClick={() => setIsCreating(true)}
-              type="button"
             >
               <Plus className="h-4 w-4" aria-hidden="true" />
               <span>Create new tag</span>
-            </Button>
+            </Row>
           )}
         </div>
       </PopoverContent>

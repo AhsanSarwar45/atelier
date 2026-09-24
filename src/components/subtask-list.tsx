@@ -3,6 +3,7 @@
 import { Ban, Check, Circle, Clock, Eye, FileCheck, Link2, type LucideIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Row } from "@/components/ui/row";
 import { truncate } from "@/lib/bead-utils";
 import { classesFor } from "@/lib/state-styles";
 import { cn } from "@/lib/utils";
@@ -74,16 +75,17 @@ export function SubtaskList({
   return (
     <div className="space-y-1">
       {displayChildren.map((child) => (
-        <Button
+        <Row
           key={child.id}
-          variant="ghost"
-          size="sm"
+          gap="md"
+          inset="sm"
+          radius="md"
           onClick={(e) => {
             e.stopPropagation();
             onChildClick(child);
           }}
           aria-label={`Open task: ${child.title}`}
-          className="h-auto w-full items-start justify-start gap-2 px-2 py-1.5 text-left font-normal"
+          className="group items-start"
         >
           <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
             {getStatusIcon(child.status)}
@@ -117,7 +119,7 @@ export function SubtaskList({
           )}>
             {STATE_BY_ID[child.status]?.label ?? child.status}
           </div>
-        </Button>
+        </Row>
       ))}
       {onToggle && childTasks.length > maxCollapsed ? (
         <Button

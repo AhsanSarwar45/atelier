@@ -20,6 +20,7 @@ import { SubtaskList } from "@/components/subtask-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
+import { Row } from "@/components/ui/row";
 import {
   Select,
   SelectContent,
@@ -441,12 +442,14 @@ export function BeadDetail({
               <Panel inset="md">
                 <div className="space-y-1">
                   {relatedTasks.map((related) => (
-                    <Button
+                    <Row
                       key={related.id}
-                      variant="ghost"
+                      gap="md"
+                      inset="sm"
+                      radius="md"
                       onClick={() => onChildClick(related)}
                       aria-label={`Open related task: ${related.title}`}
-                      className="group h-auto w-full justify-start gap-2 px-2 py-1.5 text-left font-normal"
+                      className="group"
                     >
                       <Circle
                         className={cn("size-2 flex-shrink-0 fill-current", getStatusDotColor(related.status))}
@@ -466,7 +469,7 @@ export function BeadDetail({
                       <Badge variant="outline" size="xs" className="flex-shrink-0">
                         {formatStatus(related.status)}
                       </Badge>
-                    </Button>
+                    </Row>
                   ))}
                 </div>
               </Panel>

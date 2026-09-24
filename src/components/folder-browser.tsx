@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel, panelVariants } from "@/components/ui/panel";
 import { ReadFailed } from "@/components/ui/read-failed";
+import { Row } from "@/components/ui/row";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip } from "@/components/ui/tooltip";
 import * as api from "@/lib/api";
@@ -341,20 +342,17 @@ export function FolderBrowser({
             </div>
           ) : (
             directories.map((dir, index) => (
-              <Button
+              <Row
                 key={dir.path}
-                type="button"
-                variant="ghost"
-                size="sm"
+                gap="md"
+                inset="sm"
+                radius="md"
                 role="option"
                 selected={selectedIndex === index}
                 aria-selected={selectedIndex === index}
                 onClick={() => setSelectedIndex(index)}
                 onDoubleClick={() => navigateToDirectory(dir.path)}
-                className={cn(
-                  "h-auto w-full justify-start gap-2 px-2 py-1.5 text-left text-sm font-normal",
-                  dir.hasBeads && "border-l-2 border-info"
-                )}
+                className={cn("text-sm", dir.hasBeads && "border-l-2 border-info")}
               >
                 {selectedIndex === index ? (
                   <FolderOpen className="size-4 shrink-0 text-t-tertiary" />
@@ -372,7 +370,7 @@ export function FolderBrowser({
                     .beads
                   </Badge>
                 )}
-              </Button>
+              </Row>
             ))
           )}
         </div>
