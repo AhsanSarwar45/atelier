@@ -8,7 +8,62 @@ import { X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
-const Sheet = SheetPrimitive.Root
+/*
+ * A sheet held inside a box rather than over the window. The chat's two rails
+ * and the Files tab's drawer slide over the work area on a phone and stop at
+ * its edges, so the bar they were opened from stays uncovered and its toggle
+ * can still be pressed (bw-e3dw.9). A window-wide modal cannot do that: it
+ * covers the bar and turns every press outside itself off.
+ *
+ * So a `contained` sheet is not portalled — it is drawn where it is written,
+ * `absolute` against the nearest positioned box — and it is not modal, so the
+ * rest of the screen still takes presses. Escape and a press outside still
+ * close it, a press on its own trigger is left to the trigger, and focus moves
+ * into it when it opens and back when it shuts. The dimming behind it is the
+ * sheet's own, since a non-modal dialog draws none.
+ */
+const SheetContainedContext = React.createContext<{
+  contained: boolean
+  open: boolean
+  close: () => void
+}>({ contained: false, open: false, close: () => {} })
+
+type SheetProps = React.ComponentPropsWithoutRef<typeof SheetPrimitive.Root> & {
+  contained?: boolean
+}
+
+function Sheet({
+  contained = false,
+  open: openProp,
+  defaultOpen = false,
+  onOpenChange,
+  modal,
+  ...props
+}: SheetProps) {
+  const [openState, setOpenState] = React.useState(defaultOpen)
+  const open = openProp ?? openState
+  const change = React.useCallback(
+    (next: boolean) => {
+      if (openProp === undefined) setOpenState(next)
+      onOpenChange?.(next)
+    },
+    [openProp, onOpenChange]
+  )
+  const held = React.useMemo(
+    () => ({ contained, open, close: () => change(false) }),
+    [contained, open, change]
+  )
+  return (
+    <SheetContainedContext.Provider value={held}>
+      <SheetPrimitive.Root
+        open={open}
+        onOpenChange={change}
+        modal={contained ? false : modal}
+        {...props}
+      />
+    </SheetContainedContext.Provider>
+  )
+}
 
 const SheetTrigger = SheetPrimitive.Trigger
 
@@ -68,12 +123,12 @@ interface SheetContentProps
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps
->(({ side = "right", className, children, overlayClassName, hideClose, ...props }, ref) => (
-  <SheetPortal>
-    <SheetOverlay className={overlayClassName} />
+>(({ side = "right", className, children, overlayClassName, hideClose, ...props }, ref) => {
+  const { contained, open, close } = React.useContext(SheetContainedContext)
+  const content = (
     <SheetPrimitive.Content
       ref={ref}
-      className={cn(sheetVariants({ side }), className)}
+      className={cn(sheetVariants({ side }), contained && "absolute", className)}
       {...props}
     >
       {!hideClose && (
@@ -84,8 +139,33 @@ const SheetContent = React.forwardRef<
       )}
       {children}
     </SheetPrimitive.Content>
-  </SheetPortal>
-))
+  )
+  if (!contained) {
+    return (
+      <SheetPortal>
+        <SheetOverlay className={overlayClassName} />
+        {content}
+      </SheetPortal>
+    )
+  }
+  return (
+    <>
+      {open && (
+        <div
+          aria-hidden="true"
+          data-slot="sheet-overlay"
+          data-state="open"
+          className={cn(
+            "absolute inset-0 z-40 bg-black/80 animate-in fade-in-0",
+            overlayClassName
+          )}
+          onClick={close}
+        />
+      )}
+      {content}
+    </>
+  )
+})
 SheetContent.displayName = SheetPrimitive.Content.displayName
 
 const SheetHeader = ({

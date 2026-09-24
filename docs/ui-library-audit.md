@@ -36,25 +36,25 @@ About 160 findings in 73 files. Most are small.
 Each of these is added to `src/components/ui/` before the screens that need
 it are moved onto it.
 
-| Gap | Hand-built today in |
-|---|---|
-| Spinner, and a loading state on `Button` | about 40 `Loader2 animate-spin` in 25 files |
-| Switch | shared-library |
-| Collapsible (disclosure) | shared-library, active-guidance, bead-detail, transcript-rows, sent-away, git-diff-view, chat-tab todo panel, mcp-servers-panel |
-| Toggle group (segmented single choice) | file-preview, commit-search, picture-viewer, visual-artifact-view, start-from-card, where-to-work, chat-tab, catalogue category bars, search scope |
-| Button group (split button) | chat-sidebar, chat-tab |
-| Tiny button size (20 px) | file-viewer, file-preview, commit-details, filter-tree, chat-tab, terminal-tabs |
-| Input with icon slots and a size | commit-search, mcp-catalogue, plugin-catalogue (`QueryBox` in `src/search/parts.tsx` already does this) |
-| Progress with a tone | usage-view, token-view, transcript-rows |
-| Separator used everywhere a divider is drawn | about 20 `h-px` / `border-t` divs |
-| Context menu at the pointer | menu-anchor (used by path-menu, agent-files-browser, file-tree) |
-| Popover at a selection | file-viewer, diff-table "Copy text" boxes |
-| A sheet held inside a box rather than the window | chat-tab, files-tab, chat-right-rail phone drawers |
-| Closable editor tabs | open-files-strip, terminal-tabs |
-| Table | chat-widget-view |
-| Confirmation (`AlertDialog`) | project-settings and dependencies-settings `window.confirm`; shared-library, file-actions, git-view and usage-view faking it with `Dialog role="alertdialog"` |
-| Tag colour on `Badge` | page, project-card, tag-picker use inline hex styles |
-| Success tone on `Button` | sign-off, update-banner |
+| Gap | Hand-built today in | Library part |
+|---|---|---|
+| Spinner, and a loading state on `Button` | about 40 `Loader2 animate-spin` in 25 files | `Spinner` (`spinner.tsx`), `Button loading` |
+| Switch | shared-library | `Switch` (`switch.tsx`) |
+| Collapsible (disclosure) | shared-library, active-guidance, bead-detail, transcript-rows, sent-away, git-diff-view, chat-tab todo panel, mcp-servers-panel | `Collapsible`, `CollapsibleTriggerRow`, `CollapsibleContent` (`collapsible.tsx`) |
+| Toggle group (segmented single choice) | file-preview, commit-search, picture-viewer, visual-artifact-view, start-from-card, where-to-work, chat-tab, catalogue category bars, search scope | `ToggleGroup`, `ToggleGroupItem` (`toggle-group.tsx`) |
+| Button group (split button) | chat-sidebar, chat-tab | `ButtonGroup` (`button-group.tsx`) |
+| Tiny button size (20 px) | file-viewer, file-preview, commit-details, filter-tree, chat-tab, terminal-tabs | `Button size="2xs"` (with `mode="icon"` for icon-only) |
+| Input with icon slots and a size | commit-search, mcp-catalogue, plugin-catalogue (`QueryBox` in `src/search/parts.tsx` already does this) | `Input size="sm"` with `start` / `end`; `QueryBox` now wraps it |
+| Progress with a tone | usage-view, token-view, transcript-rows | `Progress tone` |
+| Separator used everywhere a divider is drawn | about 20 `h-px` / `border-t` divs | `Separator` (already in the library) |
+| Context menu at the pointer | menu-anchor (used by path-menu, agent-files-browser, file-tree) | `ContextMenu` (`context-menu.tsx`); `PointerAnchor` (`point-anchor.tsx`) for a `DropdownMenu` at a point |
+| Popover at a selection | file-viewer, diff-table "Copy text" boxes | `PopoverAtPoint` (`point-anchor.tsx`) inside a `Popover` |
+| A sheet held inside a box rather than the window | chat-tab, files-tab, chat-right-rail phone drawers | `Sheet contained` |
+| Closable editor tabs | open-files-strip, terminal-tabs | `TabsList variant="strip"` with `TabsTrigger onClose` |
+| Table | chat-widget-view | `Table`, `TableHeader`, `TableBody`, `TableRow`, `TableHead`, `TableCell` (`table.tsx`) |
+| Confirmation (`AlertDialog`) | project-settings and dependencies-settings `window.confirm`; shared-library, file-actions, git-view and usage-view faking it with `Dialog role="alertdialog"` | `AlertDialog` (already in the library) |
+| Tag colour on `Badge` | page, project-card, tag-picker use inline hex styles | `Badge color` (with `colorFill`) |
+| Success tone on `Button` | sign-off, update-banner | `Button variant="success"` |
 
 ## Left alone on purpose
 
