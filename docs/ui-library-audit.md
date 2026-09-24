@@ -49,7 +49,7 @@ it are moved onto it.
 | A sheet held inside a box rather than the window | chat-tab, files-tab, chat-right-rail phone drawers |
 | Closable editor tabs | open-files-strip, terminal-tabs |
 | Table | chat-widget-view |
-| Confirmation (`AlertDialog`) | project-settings `window.confirm`, shared-library and file-actions faking it with `Dialog role="alertdialog"` |
+| Confirmation (`AlertDialog`) | project-settings and dependencies-settings `window.confirm`; shared-library, file-actions, git-view and usage-view faking it with `Dialog role="alertdialog"` |
 | Tag colour on `Badge` | page, project-card, tag-picker use inline hex styles |
 | Success tone on `Button` | sign-off, update-banner |
 
@@ -77,7 +77,10 @@ drawing but use library parts for any ordinary control inside them.
 - `src/workbench/visual-artifact-view.tsx:131-142` | full-screen modal with its own portal and Escape | `Overlay`
 - `src/components/project-settings-screen.tsx:345` | `window.confirm` for deleting a project | `AlertDialog`
 - `src/components/settings/shared-library.tsx:257` | `Dialog` given `role="alertdialog"` by hand | `AlertDialog`
+- `src/workbench/dependencies-settings.tsx:68` | `window.confirm` for installing the tracker CLI | `AlertDialog`
 - `src/workbench/file-actions.tsx:311` | `Dialog` given `role="alertdialog"` because `AlertDialog` was broken | `AlertDialog`
+- `src/workbench/git-view.tsx:1179` | `Dialog` given `role="alertdialog"` and repainted | `AlertDialog`
+- `src/workbench/usage-view.tsx:306` | `Dialog` given `role="alertdialog"` | `AlertDialog`
 - `src/workbench/terminal-history.tsx:235` | in-pane popup (`role="dialog"`, `absolute inset-0`) | `Popover`
 - `src/workbench/file-viewer.tsx:434` and `src/workbench/diff-table.tsx:441` | `position: fixed` "Copy text" box with its own open state | `Popover` at a virtual anchor
 - `src/workbench/menu-anchor.tsx:66` | portalled zero-size trigger to open a menu at the pointer | context menu
