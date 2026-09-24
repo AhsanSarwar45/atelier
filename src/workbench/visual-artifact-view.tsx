@@ -8,6 +8,7 @@ import mermaid from 'mermaid';
 import { motion } from 'motion/react';
 import '@xyflow/react/dist/style.css';
 
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Overlay } from '@/components/ui/overlay';
@@ -90,18 +91,20 @@ function SceneView({ artifact }: { artifact: SceneArtifact }) {
   </div>;
 }
 
-const toneClass = { primary: 'border-primary/50 bg-primary/10', neutral: 'border-border bg-muted/30', success: 'border-success/50 bg-success/10', warning: 'border-warning/50 bg-warning/10' };
+// A mock-up's tones, in the library's words: the chip's variant and the box's tone.
+const chipTone = { primary: 'primary', neutral: 'secondary', success: 'success', warning: 'warning' } as const;
+const boxTone = { primary: 'accent', neutral: 'default', success: 'success', warning: 'attention' } as const;
 
 function MockupItem({ item, hidden, onAction }: { item: MockupComponent; hidden: Set<string>; onAction: (item: MockupComponent) => void }) {
   if (hidden.has(item.id)) return null;
   const children = item.children?.map((child) => <MockupItem key={child.id} item={child} hidden={hidden} onAction={onAction} />);
   if (item.type === 'heading') return <h2 data-component={item.id} className="text-2xl font-semibold tracking-tight">{item.text}</h2>;
   if (item.type === 'text') return <p data-component={item.id} className="text-sm leading-relaxed text-muted-foreground">{item.text}</p>;
-  if (item.type === 'badge') return <span data-component={item.id} className={`w-fit rounded-full border px-2.5 py-1 text-xs font-medium ${toneClass[item.tone ?? 'neutral']}`}>{item.text}</span>;
+  if (item.type === 'badge') return <Badge data-component={item.id} variant={chipTone[item.tone ?? 'neutral']} appearance="outline" size="lg" shape="circle" className="w-fit">{item.text}</Badge>;
   if (item.type === 'divider') return <Separator decorative={false} data-component={item.id} />;
   if (item.type === 'input') return <label data-component={item.id} className="grid gap-1.5 text-sm font-medium">{item.label}<Input aria-label={item.label} placeholder={item.placeholder} className="h-10 font-normal" /></label>;
   if (item.type === 'button') return <Button data-component={item.id} type="button" variant={item.tone === 'neutral' ? 'outline' : 'primary'} onClick={() => onAction(item)}>{item.text}</Button>;
-  if (item.type === 'card') return <Panel asChild inset="none" data-component={item.id} className={`grid gap-3 rounded-xl p-4 shadow-sm ${toneClass[item.tone ?? 'neutral']}`}><section>{item.text && <h3 className="font-semibold">{item.text}</h3>}{children}</section></Panel>;
+  if (item.type === 'card') return <Panel asChild tone={boxTone[item.tone ?? 'neutral']} inset="md" data-component={item.id} className="grid gap-3"><section>{item.text && <h3 className="font-semibold">{item.text}</h3>}{children}</section></Panel>;
   return <div data-component={item.id} className="grid gap-3">{children}</div>;
 }
 
@@ -143,7 +146,7 @@ export function VisualArtifactView({ asset }: { asset: string }) {
       <div className="min-h-0 flex-1 overflow-auto p-6"><VisualArtifactContent key={`full-${reset}`} artifact={artifact} /></div>
     </Overlay>) : null;
   return <div className="relative">
-    <Panel tone="overlay" inset="none" className="absolute right-2 top-2 z-10 flex gap-1 rounded-lg bg-background/90 p-1 shadow-sm backdrop-blur">
+    <Panel tone="overlay" inset="bar" className="absolute right-2 top-2 z-10 flex gap-1">
       <Button type="button" size="icon" variant="ghost" aria-label="Reset artifact" onClick={() => setReset((value) => value + 1)}><RotateCcw className="size-4" /></Button>
       <Button type="button" size="icon" variant="ghost" aria-label="Open artifact full screen" onClick={() => setExpanded(true)}><Maximize2 className="size-4" /></Button>
     </Panel>

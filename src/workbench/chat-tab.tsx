@@ -883,14 +883,14 @@ function ComposerBody({
       {/* His own commands and skills, as this session announced them (§7). */}
       <CommandMenu matches={matches} active={pick} onPick={take} />
       {steerError && (
-        <p data-testid="steer-error" className="mb-2 text-xs text-red-500">
-          {steerError}
-        </p>
+        <Panel asChild tone="danger" className="mb-2 text-xs text-danger">
+          <p data-testid="steer-error">{steerError}</p>
+        </Panel>
       )}
       {sendError && (
-        <p data-testid="send-error" className="mb-2 text-xs text-red-500">
-          {sendError}
-        </p>
+        <Panel asChild tone="danger" className="mb-2 text-xs text-danger">
+          <p data-testid="send-error">{sendError}</p>
+        </Panel>
       )}
       {/* Out of sight rather than `display: none`. A phone browser will not
           open its chooser for a control that was never laid out, so the
@@ -2485,7 +2485,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               ))}
           </ul>
         )}
-        {startError && <p className="max-w-lg text-center text-sm text-red-500">{startError}</p>}
+        {startError && <Panel asChild tone="danger" className="max-w-lg text-center text-sm text-danger"><p>{startError}</p></Panel>}
       </div>,
     );
   }
@@ -2710,7 +2710,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             target={params.get('message')}
           />
         )}
-        {view.error && <div className="text-sm text-red-500">{view.error}</div>}
+        {view.error && <Panel tone="danger" className="text-sm text-danger">{view.error}</Panel>}
         {/* What it is doing, where he is looking. Present exactly while it owes
             an answer (docs/agent-workbench.md §8.2.2) — whoever owes it, which
             is the whole of what `workingLine` decides. Not while the chat is

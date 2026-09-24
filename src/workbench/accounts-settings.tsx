@@ -35,6 +35,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Panel } from '@/components/ui/panel';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
 import { NO_DEFAULTS, readNewChatDefaults, saveNewChatProfile, type NewChatDefaults } from '@/workbench/new-chat-defaults';
@@ -326,89 +327,91 @@ export function AccountsSettings() {
                 Add account
               </Button>
             </div>
-            <ul className="divide-y divide-border rounded-md border border-border">
-              {group.profiles.map((profile) => (
-                <li
-                  key={profile.id}
-                  className="flex items-center gap-3 px-3 py-2"
-                  data-testid={`account-${brand}-${profile.id}`}
-                >
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label={`Open new chats on ${profile.name}`}
-                    aria-pressed={(defaults.profiles[brand] ?? 'system') === profile.id}
-                    disabled={busy !== null}
-                    onClick={() => void star(brand, profile.id)}
-                    data-testid={`account-default-${brand}-${profile.id}`}
+            <Panel asChild tone="frame" inset="none" className="divide-y divide-border">
+              <ul>
+                {group.profiles.map((profile) => (
+                  <li
+                    key={profile.id}
+                    className="flex items-center gap-3 px-3 py-2"
+                    data-testid={`account-${brand}-${profile.id}`}
                   >
-                    <Star className={(defaults.profiles[brand] ?? 'system') === profile.id ? 'h-3.5 w-3.5 fill-current text-warning' : 'h-3.5 w-3.5 text-t-muted'} />
-                  </Button>
-                  <div className="min-w-0 flex-1">
-                    {renaming?.brand === brand && renaming.id === profile.id ? (
-                      <Input
-                        value={renaming.name}
-                        autoFocus
-                        aria-label="Account name"
-                        className="h-7 text-sm"
-                        onChange={(e) => setRenaming({ ...renaming, name: e.target.value })}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') void rename();
-                          if (e.key === 'Escape') setRenaming(null);
-                        }}
-                        onBlur={() => void rename()}
-                        data-testid={`account-rename-input-${brand}-${profile.id}`}
-                      />
-                    ) : (
-                      <p className="flex items-center gap-1 truncate text-sm text-t-primary">
-                        {profile.name}
-                        {!profile.system && (
-                          <Button
-                            variant="ghost"
-                            size="xs"
-                            aria-label={`Rename ${profile.name}`}
-                            className="h-5 w-5 p-0 text-t-muted"
-                            onClick={() => setRenaming({ brand, id: profile.id, name: profile.name })}
-                            data-testid={`account-rename-${brand}-${profile.id}`}
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </Button>
-                        )}
-                      </p>
-                    )}
-                    <p className="truncate text-xs text-t-muted" data-testid={`account-standing-${brand}-${profile.id}`}>
-                      {standingWords(group.standing[profile.id])}
-                    </p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busy !== null}
-                    onClick={() => void signIn(brand, profile)}
-                    data-testid={`account-signin-${brand}-${profile.id}`}
-                  >
-                    <LogIn className="mr-1 h-3.5 w-3.5" />
-                    {group.standing[profile.id]?.signedIn ? 'Sign in again' : 'Sign in'}
-                  </Button>
-                  {/* The system account is the directory the server booted
-                      with. Removing it would delete the login somebody made in
-                      a terminal, which this screen did not make and does not
-                      get to throw away. */}
-                  {!profile.system && (
                     <Button
                       variant="ghost"
                       size="sm"
+                      aria-label={`Open new chats on ${profile.name}`}
+                      aria-pressed={(defaults.profiles[brand] ?? 'system') === profile.id}
                       disabled={busy !== null}
-                      aria-label={`Remove ${profile.name}`}
-                      onClick={() => void remove(brand, profile)}
-                      data-testid={`account-remove-${brand}-${profile.id}`}
+                      onClick={() => void star(brand, profile.id)}
+                      data-testid={`account-default-${brand}-${profile.id}`}
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Star className={(defaults.profiles[brand] ?? 'system') === profile.id ? 'h-3.5 w-3.5 fill-current text-warning' : 'h-3.5 w-3.5 text-t-muted'} />
                     </Button>
-                  )}
-                </li>
-              ))}
-            </ul>
+                    <div className="min-w-0 flex-1">
+                      {renaming?.brand === brand && renaming.id === profile.id ? (
+                        <Input
+                          value={renaming.name}
+                          autoFocus
+                          aria-label="Account name"
+                          className="h-7 text-sm"
+                          onChange={(e) => setRenaming({ ...renaming, name: e.target.value })}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') void rename();
+                            if (e.key === 'Escape') setRenaming(null);
+                          }}
+                          onBlur={() => void rename()}
+                          data-testid={`account-rename-input-${brand}-${profile.id}`}
+                        />
+                      ) : (
+                        <p className="flex items-center gap-1 truncate text-sm text-t-primary">
+                          {profile.name}
+                          {!profile.system && (
+                            <Button
+                              variant="ghost"
+                              size="xs"
+                              aria-label={`Rename ${profile.name}`}
+                              className="h-5 w-5 p-0 text-t-muted"
+                              onClick={() => setRenaming({ brand, id: profile.id, name: profile.name })}
+                              data-testid={`account-rename-${brand}-${profile.id}`}
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </p>
+                      )}
+                      <p className="truncate text-xs text-t-muted" data-testid={`account-standing-${brand}-${profile.id}`}>
+                        {standingWords(group.standing[profile.id])}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={busy !== null}
+                      onClick={() => void signIn(brand, profile)}
+                      data-testid={`account-signin-${brand}-${profile.id}`}
+                    >
+                      <LogIn className="mr-1 h-3.5 w-3.5" />
+                      {group.standing[profile.id]?.signedIn ? 'Sign in again' : 'Sign in'}
+                    </Button>
+                    {/* The system account is the directory the server booted
+                        with. Removing it would delete the login somebody made in
+                        a terminal, which this screen did not make and does not
+                        get to throw away. */}
+                    {!profile.system && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy !== null}
+                        aria-label={`Remove ${profile.name}`}
+                        onClick={() => void remove(brand, profile)}
+                        data-testid={`account-remove-${brand}-${profile.id}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </li>
+                ))}
+  </ul>
+            </Panel>
           </div>
         );
       })}

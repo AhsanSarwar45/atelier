@@ -38,6 +38,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { Panel } from '@/components/ui/panel';
 import { Tooltip } from '@/components/ui/tooltip';
 import { toast } from '@/hooks/use-toast';
 import { git, projects as projectList, request } from '@/lib/api';
@@ -758,9 +759,9 @@ export function ChatSidebar({
       )}
 
       {failed && (
-        <p data-testid="restore-error" className="border-b border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          {failed}
-        </p>
+        <Panel asChild shape="strip" tone="danger" className="text-xs text-destructive">
+          <p data-testid="restore-error">{failed}</p>
+        </Panel>
       )}
 
       {/*
@@ -772,9 +773,9 @@ export function ChatSidebar({
         fault, because there is exactly one thing to do (bw-96is.24, bw-kr4m).
       */}
       {outOfStep && (
-        <p data-testid="helper-stale" className="border-b border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
-          Chat status is unavailable. Restart Atelier.
-        </p>
+        <Panel asChild shape="strip" tone="attention" className="text-xs text-warning">
+          <p data-testid="helper-stale">Chat status is unavailable. Restart Atelier.</p>
+        </Panel>
       )}
 
       <div data-testid="chat-list" className="min-h-0 flex-1 overflow-y-auto">

@@ -22,6 +22,7 @@ import { Copy, ExternalLink, FolderOpen, Pencil } from 'lucide-react';
 import { isMarkdownPath } from '@/components/file-kinds';
 import { BadgeDot } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Panel } from '@/components/ui/panel';
 import { PopoverAtPoint, type PointerAt } from '@/components/ui/point-anchor';
 import { Popover, PopoverContent } from '@/components/ui/popover';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -368,9 +369,9 @@ export function FileViewer({
         <Notice testId="file-viewer-binary">Binary file, {humaneSize(file.size)}</Notice>
       ) : plain ? (
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="shrink-0 border-b border-b-default bg-surface-inset/40 px-3 py-1 text-[11px] text-t-muted">
+          <Panel shape="strip" inset="xs" className="shrink-0 text-[11px] text-t-muted">
             Too large to colour — showing it plain.
-          </div>
+          </Panel>
           <pre data-testid="file-viewer-plain" className="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs leading-relaxed text-t-secondary">
             {file.text}
           </pre>
@@ -378,14 +379,17 @@ export function FileViewer({
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
           {file.truncated && (
-            <div data-testid="file-viewer-truncated" className="shrink-0 border-b border-b-default bg-warning/10 px-3 py-1 text-[11px] text-t-secondary">
+            <Panel shape="strip" tone="attention" inset="xs" data-testid="file-viewer-truncated" className="shrink-0 text-[11px] text-t-secondary">
               Showing the first 2 MiB
-            </div>
+            </Panel>
           )}
           {edits.outside && (
-            <div
+            <Panel
+              shape="strip"
+              tone="attention"
+              inset="xs"
               data-testid="file-viewer-outside"
-              className="flex shrink-0 items-center gap-2 border-b border-b-default bg-warning/10 px-3 py-1 text-[11px] text-t-secondary"
+              className="flex shrink-0 items-center gap-2 text-[11px] text-t-secondary"
             >
               <span className="flex-1 truncate">This file changed on disk while you were editing it.</span>
               <Button
@@ -408,7 +412,7 @@ export function FileViewer({
               >
                 Keep mine
               </Button>
-            </div>
+            </Panel>
           )}
           <div data-testid="file-viewer" className="flex min-h-0 min-w-0 flex-1 flex-col" data-dirty={edits.dirty ? '' : undefined}>
             {rendered ? (

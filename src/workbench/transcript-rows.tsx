@@ -1277,7 +1277,7 @@ export const PlanProposalCard = memo(function PlanProposalCard({
   return (
     <Panel tone="attention" inset="md" data-testid="plan-card" data-plan-state="proposed">
       <div className="text-sm font-medium text-foreground">Proposed plan</div>
-      <Panel inset="md" className="mt-3 bg-background/50">
+      <Panel tone="nested" inset="md" className="mt-3">
         <MarkdownBody className="text-sm">{item.markdown}</MarkdownBody>
       </Panel>
       <div className="mt-3 grid gap-2">
@@ -1413,36 +1413,35 @@ export const QuestionCard = memo(function QuestionCard({
                   {question.options.map((option) => {
                     const selected = draft.optionIds.includes(option.id);
                     return (
-                      <label key={option.id} className={cn(
-                        'flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5',
-                        selected ? 'border-primary bg-primary/10' : 'border-border hover:bg-muted/50',
+                      <Panel asChild key={option.id} tone={selected ? 'accent' : 'frame'} className={cn(
+                        'flex cursor-pointer items-start gap-3',
+                        !selected && 'hover:bg-muted/50',
                       )}>
-                        <Checkbox
-                          className="mt-0.5"
-                          checked={selected}
-                          onCheckedChange={() => choose(option.id)}
-                          aria-label={option.label}
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-medium text-foreground">{option.label}</span>
-                          {option.description && <span className="mt-0.5 block text-xs text-muted-foreground">{option.description}</span>}
-                          {option.preview && (
-                            <details className="mt-2 text-xs" onClick={(event) => event.stopPropagation()}>
-                              <summary className="cursor-pointer text-primary">Preview</summary>
-                              <MarkdownBody className="mt-2 text-xs">{option.preview}</MarkdownBody>
-                            </details>
-                          )}
-                        </span>
-                      </label>
+                        <label>
+                          <Checkbox
+                            className="mt-0.5"
+                            checked={selected}
+                            onCheckedChange={() => choose(option.id)}
+                            aria-label={option.label}
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-medium text-foreground">{option.label}</span>
+                            {option.description && <span className="mt-0.5 block text-xs text-muted-foreground">{option.description}</span>}
+                            {option.preview && (
+                              <details className="mt-2 text-xs" onClick={(event) => event.stopPropagation()}>
+                                <summary className="cursor-pointer text-primary">Preview</summary>
+                                <MarkdownBody className="mt-2 text-xs">{option.preview}</MarkdownBody>
+                              </details>
+                            )}
+                          </span>
+                        </label>
+                      </Panel>
                     );
                   })}
                 </div>
               )}
               {(question.allowCustom || question.selection === 'text') && (
-                <Panel inset="sm" className={cn(
-                  'mt-2 flex items-start gap-3 py-2.5',
-                  draft.custom && 'border-primary bg-primary/10',
-                )}>
+                <Panel tone={draft.custom ? 'accent' : 'default'} className="mt-2 flex items-start gap-3">
                   {question.selection !== 'text' && (
                     <Checkbox
                       className="mt-0.5"

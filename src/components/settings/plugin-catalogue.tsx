@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Panel } from '@/components/ui/panel';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Tooltip } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
@@ -199,11 +200,13 @@ export function PluginCatalogue({ brand, scope, onInstalled }: { brand: Brand; s
               No matches
             </p>
           ) : (
-            <ul className="max-h-[50vh] divide-y divide-border overflow-y-auto rounded-md border border-border" data-testid="plugin-catalogue-list">
-              {shown.map((entry) => (
-                <Row key={entry.id} entry={entry} busy={busy === entry.id} onInstall={install} />
-              ))}
-            </ul>
+            <Panel asChild tone="frame" inset="none" className="max-h-[50vh] divide-y divide-border overflow-y-auto">
+              <ul data-testid="plugin-catalogue-list">
+                {shown.map((entry) => (
+                  <Row key={entry.id} entry={entry} busy={busy === entry.id} onInstall={install} />
+                ))}
+              </ul>
+            </Panel>
           )}
         </DialogContent>
       </Dialog>

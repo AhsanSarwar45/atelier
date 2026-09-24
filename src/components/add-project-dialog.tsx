@@ -16,7 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Panel, panelVariants } from "@/components/ui/panel";
+import { Panel } from "@/components/ui/panel";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
@@ -225,10 +225,9 @@ export function AddProjectDialog({
                     <Button
                       key={db.name}
                       type="button"
-                      variant="ghost"
+                      variant="outline"
                       onClick={() => handleDoltQuickAdd(db)}
                       disabled={isSubmitting}
-                      className={cn(panelVariants({ inset: 'sm' }), "h-auto gap-1.5 py-1.5 text-sm font-normal")}
                     >
                       {db.project_name}
                     </Button>

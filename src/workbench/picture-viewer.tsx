@@ -89,7 +89,7 @@ function ZoomViewport({ transform, onChange, children, testId }: {
 
 function Controls({ transform, onChange }: { transform: ImageTransform; onChange: (transform: ImageTransform) => void }) {
   return (
-    <Panel tone="overlay" inset="none" className="absolute left-1/2 top-4 z-20 flex -translate-x-1/2 gap-1 bg-black/70 p-1" data-testid="picture-zoom-controls">
+    <Panel tone="media" inset="bar" className="absolute left-1/2 top-4 z-20 flex -translate-x-1/2 gap-1" data-testid="picture-zoom-controls">
       <Button variant="ghost" mode="icon" size="sm" aria-label="Zoom out" disabled={transform.scale === MIN_SCALE} className="text-white" onClick={() => onChange(changedScale(transform, -0.5))}><Minus /></Button>
       <span className="flex min-w-14 items-center justify-center text-xs text-white" data-testid="picture-zoom-level">{Math.round(transform.scale * 100)}%</span>
       <Button variant="ghost" mode="icon" size="sm" aria-label="Zoom in" disabled={transform.scale === MAX_SCALE} className="text-white" onClick={() => onChange(changedScale(transform, 0.5))}><Plus /></Button>
@@ -216,7 +216,7 @@ export function PictureViewer({ image, onClose }: { image: LookableImage; onClos
       <DialogContent shape="screen" hideClose overlayClassName="bg-black/80" aria-describedby={undefined} aria-label={label || 'Picture'} data-testid="picture-viewer" className="flex h-full w-full flex-col items-center justify-center p-2 pb-16 pt-16 sm:p-6 sm:pb-16 sm:pt-16">
         <DialogTitle className="sr-only">{label || 'Picture'}</DialogTitle>
         <Controls transform={transform} onChange={setTransform} />
-        {comparison && <Panel tone="overlay" inset="none" className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 gap-1 bg-black/70 p-1" aria-label="Comparison layout">
+        {comparison && <Panel tone="media" inset="bar" className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 gap-1" aria-label="Comparison layout">
           <Button type="button" variant="ghost" size="sm" aria-pressed={comparisonMode === 'side_by_side'} className={comparisonMode === 'side_by_side' ? 'bg-white/20 text-white' : 'text-white'} onClick={() => setComparisonMode('side_by_side')}>Side by side</Button>
           <Button type="button" variant="ghost" size="sm" aria-pressed={comparisonMode === 'wipe'} className={comparisonMode === 'wipe' ? 'bg-white/20 text-white' : 'text-white'} onClick={() => setComparisonMode('wipe')}>Wipe</Button>
         </Panel>}
