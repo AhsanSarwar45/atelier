@@ -149,6 +149,49 @@ Unknown fields, broken references and files over 1 MiB are rejected. The
 libraries are built into Atelier, so an artifact renders the same for Codex,
 Claude, and other shell-capable agents.
 
+## Browser
+
+All Chrome work goes through `atelier tool chrome`: opening, checking,
+clicking through, testing, QA, console and network checks, and screenshots.
+It gives this worktree (or this folder, outside git) one private Chrome with
+its own profile and DevTools port. Nobody else uses it.
+
+| Do | Run |
+|---|---|
+| Start, headed on the person's display | `atelier tool chrome up` |
+| Start without a window, only when asked or no display exists | `atelier tool chrome up --headless` |
+| Put the port and driver path into the shell | `eval "$(atelier tool chrome env)"` |
+| Check it | `atelier tool chrome status` |
+| Stop, or stop and delete the profile | `atelier tool chrome down`, `atelier tool chrome down --wipe` |
+
+Always run `down` when finished. Never stop a browser by name (`pkill`,
+`killall`), never pick a fixed port or a shared profile, and never attach to a
+DevTools port or profile you did not start.
+
+Drive it with the bundled Node driver (Node 22 or later). Give each simulated
+user their own context, so their logins never overwrite each other:
+
+```js
+const { newContext, Session } = await import(process.env.ATELIER_CHROME_DRIVER);
+const { targetId } = await newContext();      // own cookies and storage
+const s = await Session.attach(targetId);
+await s.goto('http://127.0.0.1:4173/');       // waits through redirects
+await s.waitForText('Dashboard');
+await s.typeInto('document.querySelector("#q")', 'text');
+await s.shot('/tmp/after.png');
+```
+
+`Session` also has `resize(w, h)` (kept across `goto`), `text()`, `url()`,
+`eval(body)` (an async function body; `return` a value), `events` (console and
+network), `startRecording()`/`stopRecording()` and `responseBody(id)`.
+`disposeContext(id)` closes one user. The page is told it has a mouse, so a
+headless run does not fall back to a touch layout.
+
+A browser tool your provider supplies (for example a DevTools MCP server) is
+acceptable only when it starts its own temporary profile for this session and
+gives each user a separate context. If you cannot confirm that, use
+`atelier tool chrome`.
+
 ## Visual proof
 
 For every visual change, capture the relevant screen before editing and again
@@ -158,10 +201,20 @@ meaningful before state, capture the result and show it with
 `atelier tool present image`. Do this before handing the work back; do not wait
 for the manager to ask.
 
-Capture with `atelier tool screen-check` (`--help` for syntax). It navigates
-only the URL you give. It never starts, stops, installs or reconfigures the app;
-the app must already be running at that URL. Web captures use a fresh browser profile, never your
-cookies or session. If you are unsure which route fits, run
+Pick the route by how the screen is reached:
+
+- Reached by clicking, typing or signing in as one or more users: drive it in
+  `atelier tool chrome`, save it with `s.shot(path)`, then show it with
+  `present image --file` or `present compare --before ... --after ...`. To have
+  it judged, pass the file to `screen-check check --type image`.
+- Reached by a URL or a declarative recipe, and it needs a settled, judged
+  frame: `atelier tool screen-check`. It starts its own throwaway headless
+  Chrome for each capture and deletes it afterwards, so its frames never carry
+  your logins or another run's state. Do not point it at `atelier tool chrome`.
+
+Screen-check (`--help` for syntax) navigates only the URL you give. It never
+starts, stops, installs or reconfigures the app; the app must already be
+running at that URL. If you are unsure which screen-check route fits, run
 `atelier tool screen-check plan [--target URL|FILE] [--window-id ID] [--recipe FILE]`
 and follow the command it returns; do not widen the capture.
 
@@ -169,8 +222,8 @@ and follow the command it returns; do not widen the capture.
 |---|---|
 | Page already in the right state | `--type web --target URL` |
 | Login, cookies, headers, clicks, typing, navigation, uploads or waits | `--recipe FILE` |
-| Native app, simulator, remote desktop or an already logged-in browser | one window: `--type window --window-id ID` |
-| Pixels another authorized tool already prepared | `--type image --target FILE` |
+| Native app, simulator or remote desktop | one window: `--type window --window-id ID` |
+| A screenshot from `atelier tool chrome` or another authorized tool | `--type image --target FILE` |
 | Before and after already captured | `compare --before FILE --after FILE` |
 
 Commands:

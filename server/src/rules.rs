@@ -573,6 +573,9 @@ pub async fn tool(name: &str, rest: &[String]) -> Result<i32, String> {
     if name == "screen-check" {
         return crate::workbench::cli::screen_check(rest).await;
     }
+    if name == "chrome" {
+        return crate::workbench::chrome::run(rest).await;
+    }
     if let Some(result) = crate::board_tools::run(name, rest) {
         return result;
     }
