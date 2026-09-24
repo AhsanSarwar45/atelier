@@ -355,6 +355,9 @@ function fromSummary(
   };
 }
 
+/** How far a chat's clock has to move before a word is worth telling every screen. */
+const ACTIVE_CLOCK_STEP_MS = 1_000;
+
 function patch(id: string, change: Partial<LiveSession>): void {
   const at = sessions.findIndex((s) => s.id === id);
   if (at < 0) return;
@@ -555,10 +558,17 @@ function absorb(frame: WatchFrame): void {
     case 'ask.resolved':
       patch(e.sessionId, { waitingFor: null, lastActiveAt: e.at });
       break;
-    case 'text.delta':
+    case 'text.delta': {
       if (!moves(e.sessionId)) return;
+      // A word moves nothing but this clock, and every screen that reads the
+      // list redraws when it moves. An agent sends a word every few
+      // milliseconds; the clock is drawn to the minute. Once a second is
+      // plenty (bw-4slk).
+      const was = sessions.find((s) => s.id === e.sessionId)?.lastActiveAt;
+      if (was && Math.abs(Date.parse(e.at) - Date.parse(was)) < ACTIVE_CLOCK_STEP_MS) return;
       patch(e.sessionId, { lastActiveAt: e.at });
       break;
+    }
     case 'link.bead': {
       const had = sessions.find((s) => s.id === e.sessionId)?.beads ?? [];
       if (had.includes(e.beadId)) return;
@@ -655,6 +665,23 @@ export function useLiveSessions(): LiveSession[] {
     subscribe,
     () => snapshot,
     () => EMPTY,
+  );
+}
+
+/**
+ * The one chat that answers `which`, live — and the same object for as long as
+ * that chat has not changed.
+ *
+ * A screen that wants one chat and reads the whole list is redrawn whenever any
+ * chat says anything; with a dozen agents at work that is the open chat's whole
+ * screen, many times a second, for news about other chats (bw-4slk). A chat
+ * that did not change keeps its object (`patch`), so this answer holds still.
+ */
+export function useLiveSessionWhere(which: (s: LiveSession) => boolean): LiveSession | undefined {
+  return useSyncExternalStore(
+    subscribe,
+    () => snapshot.find(which),
+    () => undefined,
   );
 }
 

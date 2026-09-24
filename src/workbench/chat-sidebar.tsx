@@ -21,7 +21,7 @@
  */
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Bot, ChevronDown, Copy, ExternalLink, Loader2, MoreVertical, Pencil, Plus, Power, Search } from 'lucide-react';
 
@@ -388,6 +388,355 @@ export function withLive(
   return marked.sort(byWhatIsWorking);
 }
 
+interface ChatRowProps {
+  row: RestoreRow;
+  /** This row is the chat on screen. */
+  open: boolean;
+  busy: boolean;
+  ending: boolean;
+  onEnter: (row: RestoreRow) => void;
+  onEnd: (row: RestoreRow) => void;
+  onMenu: (row: RestoreRow, at: PointerAt) => void;
+}
+
+/**
+ * Two rows that say the same thing. The list is rebuilt from the live feed on
+ * every pass, so a row is a new object each time even when nothing on it moved;
+ * comparing what it holds is what lets one chat's change redraw one row.
+ */
+function sameRow(a: RestoreRow, b: RestoreRow): boolean {
+  if (a === b) return true;
+  const keys = Object.keys(a) as (keyof RestoreRow)[];
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((k) => a[k] === b[k]);
+}
+
+/**
+ * One chat in the list.
+ *
+ * Its own component and remembered, because the list above it is redrawn
+ * whenever any chat says anything: an agent answering in one chat redrew every
+ * row of forty, chips, tooltips and all, on every word (bw-4slk).
+ */
+const ChatRow = memo(function ChatRow({ row, open, busy, ending, onEnter, onEnd, onMenu }: ChatRowProps) {
+  const key = rowKey(row);
+  const closable = canClose(row);
+  const ownership = sessionOwnership(row.state, row.externalId, row.runningElsewhere === true);
+  const state = chatState({
+    state: row.state,
+    label: row.activity,
+    detail: row.activityDetail || null,
+    call: row.activityCall ?? null,
+    since: row.busySince ? Date.parse(row.busySince) : null,
+    held: row.held ?? (ownership.kind === 'elsewhere' ? {
+      id: row.externalId ?? '',
+      holder: row.origin === 'terminal' ? 'terminal' : 'program',
+      doing: 'working',
+      since: null,
+    } : null),
+    // A chat he has never spoken in is not coming back from
+    // anywhere. Only a row the stream built for a chat made this
+    // second says that outright; a row off the list says nothing
+    // about it, and reads as spoken in, which is how every row read
+    // before the question was asked.
+    spokenIn: row.lastSpokeAt !== null,
+  });
+  // In the restore list this is activity, not availability. A row
+  // with our agent attached (the close control proves it) and no
+  // turn in flight is idle. The shared reader calls that standing
+  // "Ready" elsewhere; on this row the manager asked for the
+  // literal current activity: Idle (bw-zpyl.10).
+  const rowState = closable && row.state === 'idle' ? { ...state, word: 'Idle' } : state;
+  // Whether the second line has a status to draw. Only where the
+  // holder has said something we can draw: the chip draws nothing
+  // at all for a hold that claims neither a state nor a verb, and
+  // that clause would otherwise open a line under the name saying
+  // nothing anybody can read.
+  const says =
+    busy ||
+    ending ||
+    closable ||
+    state.working ||
+    state.waiting ||
+    (ownership.kind === 'elsewhere' && rowState.word !== '');
+  return (
+    <div
+      data-testid="restore-row"
+      data-row-key={key}
+      // The conversation's own id, which a resume does not change:
+      // the row a terminal session is offered on is the row it
+      // comes back on.
+      data-external-id={row.externalId ?? ''}
+      data-origin={row.origin}
+      data-brand={row.brand}
+      data-state={row.state}
+      // Somebody is working in this conversation right now, in a
+      // terminal or under another host. Not the same fact as
+      // `state`, which is what our own driver knows (protocol.ts).
+      data-running={row.runningElsewhere ? 'yes' : 'no'}
+      // The cards this chat worked on. Carried, not drawn — the ids
+      // are what a chat is looked up by, and the row has no room.
+      data-beads={row.beads.join(' ')}
+      // Where it ran, the same way: the chat's own bar draws this
+      // and its branch, so drawing it here too spent a line of a
+      // two-line row saying what the next screen says anyway.
+      data-folder={row.folder ?? ''}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onMenu(row, { left: event.clientX, top: event.clientY });
+      }}
+      // Two lines, never three: the name, then what it is doing.
+      // Everything else — the time, whoever else is in there — rides
+      // on one of those two lines, because a rail this narrow turns
+      // a third row into a wall of half-sentences.
+      className={cn(
+        'group/row px-3 py-2 text-sm',
+        open && 'bg-accent',
+      )}
+    >
+      {/* Centred, not sat on the name's baseline. The clock is
+          three points smaller and in another typeface, and a shared
+          baseline dropped it visibly below the middle of the name
+          beside it — the two boxes are the same height, so centring
+          them is what puts the clock on the name's own line. */}
+      <div data-testid="row-line-name" className="flex items-center gap-2">
+        {row.brand === 'local'
+          ? <ModelIcon brand={row.brand} model={row.model} className="text-muted-foreground" />
+          : <BrandIcon brand={row.brand} className="text-muted-foreground" />}
+        <Button
+          type="button"
+          variant="foreground"
+          size="inherit"
+          // Laid out as a row, not written into a sentence, so it
+          // takes the thumb floor back as a reach band (bw-e3dw.18).
+          data-reach="row"
+          data-testid="row-name"
+          // `truncate` on the WORDS, not on the button: it sets
+          // overflow:hidden, and a reach band is a ::before of the
+          // button's, so on the button it was clipped to the 20px
+          // line and the row stayed 20px to a thumb (bw-e3dw.18).
+          className="min-w-0 flex-1 justify-start p-0 text-left text-foreground"
+          disabled={busy}
+          onClick={() => onEnter(row)}
+        >
+          <span className="truncate">{row.name}</span>
+        </Button>
+        {/* Said once, here, and nowhere else on the row. There
+            used to be a badge under this as well, spelling out
+            "external" beside the chip — two marks for one fact on a
+            two-line row, and the mark beside the name is the one
+            the reader meets first (the manager, 2026-09-03). What
+            the badge alone carried, the holder, moved into this
+            tooltip rather than being dropped: a terminal somebody
+            types in and a program driving the kit are not the same
+            thing to whoever is deciding whether to take the chat. */}
+        {state.external && (
+          <Tooltip label={`${HOLDER_WORD[state.external.holder]}.`}>
+            <span
+              data-testid="external-origin"
+              data-holder={state.external.holder}
+              aria-label={`${HOLDER_WORD[state.external.holder]}.`}
+              className="flex size-3.5 shrink-0 items-center text-muted-foreground"
+            >
+              <ExternalLink aria-hidden="true" className="size-3.5" />
+            </span>
+          </Tooltip>
+        )}
+        {/*
+          The control is drawn OVER the clock, not beside it. Beside
+          it, a button nobody could see still held its own width and
+          its gap on all forty rows, so every name in the list was
+          cut short to keep room for it (the manager, 2026-08-26).
+          Over it, the name has the whole line, and nothing moves
+          when the pointer arrives: this box is the clock's width
+          either way. The clock is what it covers because the clock
+          is the one thing on that end worth less than the control
+          while the reader is on the row.
+
+          Kept off the rail until then: a 288px list is already two
+          lines of small type per chat, and a button on every row is
+          forty things to read past to find the name — the same
+          reason the pill is not drawn on a sleeping row. Focus
+          brings it back for a reader who never hovers anything.
+
+          Only where there is an agent to take away. A sleeping chat
+          has none, and a chat another program is driving has none
+          of ours: closing that one from here would call it asleep
+          while a terminal went on typing into it (registry.ts,
+          runningElsewhere).
+
+          Both of these belong to the pointer, so a phone is shown
+          neither. The control needs a hover to appear and a thumb
+          has none; the menu button beside it already carries Close
+          chat (bw-rpgh.1). Without the control this end of the
+          name's line was a clock every long title was being cut
+          short for, so on a phone the clock moves down to the
+          second line (bw-8kk4.1).
+        */}
+        <span className="relative hidden shrink-0 items-center md:flex">
+          <span
+            className={cn(
+              'font-mono text-[11px] text-muted-foreground',
+              closable &&
+                'transition-opacity group-focus-within/row:opacity-0 group-hover/row:opacity-0',
+            )}
+          >
+            {/*
+              When something last happened in the chat, not when he
+              last spoke in it. The two clocks answer two questions
+              and the row asks both at once: the list is ordered by
+              the last message HE sent, so a chat he is waiting on
+              holds its place while its agent works — and the time
+              printed on the row says how long ago that work was, so
+              a chat whose agent has been writing for ten minutes
+              reads as ten minutes old rather than as an hour
+              (bw-t26l.22).
+            */}
+            {clockTime(row.lastActiveAt)}
+          </span>
+          {closable && (
+            <Tooltip label="Close chat">
+              <Button
+                type="button"
+                variant="ghost"
+                mode="icon"
+                size="xs"
+                data-testid="row-close"
+                aria-label={`Close ${row.name}`}
+                disabled={ending}
+                className="absolute -right-1.5 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEnd(row);
+                }}
+              >
+                <Power className="size-3.5" aria-hidden="true" />
+              </Button>
+            </Tooltip>
+          )}
+        </span>
+        {/*
+          The same menu the desktop reaches by right-clicking, on a
+          button, because a phone has no right click and the close
+          control above only appears under a pointer that hovers
+          (bw-rpgh.1). Drawn on every row rather than on hover: a
+          thumb has nothing to hover with, so a control it cannot
+          summon is a control it does not have.
+
+          Phone only. On a desktop the rail is already crowded by
+          forty of these, and the right click is there.
+        */}
+        <Button
+          type="button"
+          variant="ghost"
+          mode="icon"
+          size="xs"
+          data-testid="row-menu"
+          aria-label={`Actions for ${row.name}`}
+          // Painted the height of the line it stands on, and given
+          // an invisible 44px band instead of a 44px box
+          // (globals.css, `data-reach='band'`). Floored the usual
+          // way, this one button made the name's line 44px tall on
+          // a phone: the name floated in the middle of it with
+          // twelve pixels of air above and eight below the time,
+          // and the same twelve opened a seam between the row's
+          // two lines — 'a weird rough look' (bw-2fhj). Nothing
+          // else on the row is pressable within twelve pixels of
+          // it and the band ends exactly on the row's padding, so
+          // it takes no press meant for the name beside it.
+          data-reach="band"
+          className="size-5 shrink-0 md:hidden"
+          onClick={(event) => {
+            event.stopPropagation();
+            // Anchored under the button rather than at the finger:
+            // a tap reports a point somewhere inside the button,
+            // and a menu hung off that lands under the thumb that
+            // opened it.
+            const box = event.currentTarget.getBoundingClientRect();
+            onMenu(row, { left: box.left, top: box.bottom });
+          }}
+        >
+          <MoreVertical className="size-4" aria-hidden="true" />
+        </Button>
+      </div>
+      {/*
+        What it is doing is the second line, and the whole of it. It
+        used to be the third, under a chip naming the folder — which
+        the chat's own bar names again the moment the row is clicked,
+        so the rail was spending a line of three on a fact the next
+        screen carries anyway (the manager, 2026-08-23).
+
+        Whoever else is in there is said beside the name and not
+        again here: the badge that used to ride at the far end of
+        this line said "external" a second time on a row that had
+        already said it (the manager, 2026-09-03).
+
+        The same reading the chat's own line draws, in the same words
+        (chat-state.ts). A row that is asleep says nothing at all,
+        because most of the list is asleep and a pill on every one of
+        them is a pill on none (bw-96is).
+
+        On a phone the line is drawn even then, because the clock
+        rides on it there and a sleeping row still has a time. On a
+        desktop the clock is up on the name's line, so a line with no
+        chip would be an empty one and stays away (bw-8kk4.1).
+      */}
+      <div
+        data-testid="row-line-status"
+        className={cn(
+          'mt-1 flex min-w-0 items-center gap-1 overflow-hidden',
+          !says && 'md:hidden',
+        )}
+      >
+        {busy || ending ? (
+          <Badge
+            variant="warning"
+            appearance="light"
+            size="sm"
+            shape="circle"
+            data-testid="row-pill"
+            data-pill={busy ? 'opening' : 'ending'}
+            className="shrink-0"
+          >
+            {busy ? 'opening' : 'ending'}
+          </Badge>
+        ) : (
+          // The chip refuses to shrink everywhere else, which is
+          // right where it stands beside body text. Here it has
+          // the line to itself and what it is on cuts short only
+          // when the rail is genuinely too narrow for it
+          // (bw-jaoz.14.14).
+          //
+          // The word without its clause is not a rich status:
+          // "Helping", "Retrying" or "Summarising" only becomes
+          // actionable when the helper, reset time, or current
+          // work remains visible. ChatStateChip middle-ellipsizes
+          // that clause rather than dropping it.
+          says && <ChatStateChip state={rowState} testId="row-pill" className="min-w-0 shrink" />
+        )}
+        {/*
+          The clock, on a phone only — the name's line hands it down
+          here so a long title keeps that end of the line
+          (bw-8kk4.1). Last and unshrinkable, with the chip taking
+          the squeeze instead: a status long enough to fill the line
+          middle-ellipsizes, and the time it would otherwise have
+          shoved off the screen stays where the eye looks for it.
+        */}
+        <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground md:hidden">
+          {clockTime(row.lastActiveAt)}
+        </span>
+      </div>
+    </div>
+  );
+}, (a, b) =>
+  a.open === b.open
+  && a.busy === b.busy
+  && a.ending === b.ending
+  && a.onEnter === b.onEnter
+  && a.onEnd === b.onEnd
+  && a.onMenu === b.onMenu
+  && sameRow(a.row, b.row));
+
 interface ChatSidebarProps {
   projectId: string;
   projectPath: string;
@@ -408,7 +757,7 @@ interface ChatSidebarProps {
   startingNewChat?: boolean;
 }
 
-export function ChatSidebar({
+export const ChatSidebar = memo(function ChatSidebar({
   projectId,
   projectPath,
   openSessionId,
@@ -654,6 +1003,8 @@ export function ChatSidebar({
     }
   }, [renaming, title]);
 
+  const openMenu = useCallback((row: RestoreRow, at: PointerAt) => setMenu({ row, at }), []);
+
   const copyId = useCallback((row: RestoreRow) => {
     const id = row.sessionId ?? row.externalId;
     if (!id) return;
@@ -789,314 +1140,17 @@ export function ChatSidebar({
             </div>
             {group.rows.map((row) => {
               const key = rowKey(row);
-              const closable = canClose(row);
-              const ownership = sessionOwnership(row.state, row.externalId, row.runningElsewhere === true);
-              const state = chatState({
-                state: row.state,
-                label: row.activity,
-                detail: row.activityDetail || null,
-                call: row.activityCall ?? null,
-                since: row.busySince ? Date.parse(row.busySince) : null,
-                held: row.held ?? (ownership.kind === 'elsewhere' ? {
-                  id: row.externalId ?? '',
-                  holder: row.origin === 'terminal' ? 'terminal' : 'program',
-                  doing: 'working',
-                  since: null,
-                } : null),
-                // A chat he has never spoken in is not coming back from
-                // anywhere. Only a row the stream built for a chat made this
-                // second says that outright; a row off the list says nothing
-                // about it, and reads as spoken in, which is how every row read
-                // before the question was asked.
-                spokenIn: row.lastSpokeAt !== null,
-              });
-              // In the restore list this is activity, not availability. A row
-              // with our agent attached (the close control proves it) and no
-              // turn in flight is idle. The shared reader calls that standing
-              // "Ready" elsewhere; on this row the manager asked for the
-              // literal current activity: Idle (bw-zpyl.10).
-              const rowState = closable && row.state === 'idle' ? { ...state, word: 'Idle' } : state;
-              // Whether the second line has a status to draw. Only where the
-              // holder has said something we can draw: the chip draws nothing
-              // at all for a hold that claims neither a state nor a verb, and
-              // that clause would otherwise open a line under the name saying
-              // nothing anybody can read.
-              const says =
-                busy === key ||
-                ending === key ||
-                closable ||
-                state.working ||
-                state.waiting ||
-                (ownership.kind === 'elsewhere' && rowState.word !== '');
               return (
-                <div
+                <ChatRow
                   key={key}
-                  data-testid="restore-row"
-                  data-row-key={key}
-                  // The conversation's own id, which a resume does not change:
-                  // the row a terminal session is offered on is the row it
-                  // comes back on.
-                  data-external-id={row.externalId ?? ''}
-                  data-origin={row.origin}
-                  data-brand={row.brand}
-                  data-state={row.state}
-                  // Somebody is working in this conversation right now, in a
-                  // terminal or under another host. Not the same fact as
-                  // `state`, which is what our own driver knows (protocol.ts).
-                  data-running={row.runningElsewhere ? 'yes' : 'no'}
-                  // The cards this chat worked on. Carried, not drawn — the ids
-                  // are what a chat is looked up by, and the row has no room.
-                  data-beads={row.beads.join(' ')}
-                  // Where it ran, the same way: the chat's own bar draws this
-                  // and its branch, so drawing it here too spent a line of a
-                  // two-line row saying what the next screen says anyway.
-                  data-folder={row.folder ?? ''}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    setMenu({ row, at: { left: event.clientX, top: event.clientY } });
-                  }}
-                  // Two lines, never three: the name, then what it is doing.
-                  // Everything else — the time, whoever else is in there — rides
-                  // on one of those two lines, because a rail this narrow turns
-                  // a third row into a wall of half-sentences.
-                  className={cn(
-                    'group/row px-3 py-2 text-sm',
-                    row.sessionId && row.sessionId === openSessionId && 'bg-accent',
-                  )}
-                >
-                  {/* Centred, not sat on the name's baseline. The clock is
-                      three points smaller and in another typeface, and a shared
-                      baseline dropped it visibly below the middle of the name
-                      beside it — the two boxes are the same height, so centring
-                      them is what puts the clock on the name's own line. */}
-                  <div data-testid="row-line-name" className="flex items-center gap-2">
-                    {row.brand === 'local'
-                      ? <ModelIcon brand={row.brand} model={row.model} className="text-muted-foreground" />
-                      : <BrandIcon brand={row.brand} className="text-muted-foreground" />}
-                    <Button
-                      type="button"
-                      variant="foreground"
-                      size="inherit"
-                      // Laid out as a row, not written into a sentence, so it
-                      // takes the thumb floor back as a reach band (bw-e3dw.18).
-                      data-reach="row"
-                      data-testid="row-name"
-                      // `truncate` on the WORDS, not on the button: it sets
-                      // overflow:hidden, and a reach band is a ::before of the
-                      // button's, so on the button it was clipped to the 20px
-                      // line and the row stayed 20px to a thumb (bw-e3dw.18).
-                      className="min-w-0 flex-1 justify-start p-0 text-left text-foreground"
-                      disabled={busy === key}
-                      onClick={() => enter(row)}
-                    >
-                      <span className="truncate">{row.name}</span>
-                    </Button>
-                    {/* Said once, here, and nowhere else on the row. There
-                        used to be a badge under this as well, spelling out
-                        "external" beside the chip — two marks for one fact on a
-                        two-line row, and the mark beside the name is the one
-                        the reader meets first (the manager, 2026-09-03). What
-                        the badge alone carried, the holder, moved into this
-                        tooltip rather than being dropped: a terminal somebody
-                        types in and a program driving the kit are not the same
-                        thing to whoever is deciding whether to take the chat. */}
-                    {state.external && (
-                      <Tooltip label={`${HOLDER_WORD[state.external.holder]}.`}>
-                        <span
-                          data-testid="external-origin"
-                          data-holder={state.external.holder}
-                          aria-label={`${HOLDER_WORD[state.external.holder]}.`}
-                          className="flex size-3.5 shrink-0 items-center text-muted-foreground"
-                        >
-                          <ExternalLink aria-hidden="true" className="size-3.5" />
-                        </span>
-                      </Tooltip>
-                    )}
-                    {/*
-                      The control is drawn OVER the clock, not beside it. Beside
-                      it, a button nobody could see still held its own width and
-                      its gap on all forty rows, so every name in the list was
-                      cut short to keep room for it (the manager, 2026-08-26).
-                      Over it, the name has the whole line, and nothing moves
-                      when the pointer arrives: this box is the clock's width
-                      either way. The clock is what it covers because the clock
-                      is the one thing on that end worth less than the control
-                      while the reader is on the row.
-
-                      Kept off the rail until then: a 288px list is already two
-                      lines of small type per chat, and a button on every row is
-                      forty things to read past to find the name — the same
-                      reason the pill is not drawn on a sleeping row. Focus
-                      brings it back for a reader who never hovers anything.
-
-                      Only where there is an agent to take away. A sleeping chat
-                      has none, and a chat another program is driving has none
-                      of ours: closing that one from here would call it asleep
-                      while a terminal went on typing into it (registry.ts,
-                      runningElsewhere).
-
-                      Both of these belong to the pointer, so a phone is shown
-                      neither. The control needs a hover to appear and a thumb
-                      has none; the menu button beside it already carries Close
-                      chat (bw-rpgh.1). Without the control this end of the
-                      name's line was a clock every long title was being cut
-                      short for, so on a phone the clock moves down to the
-                      second line (bw-8kk4.1).
-                    */}
-                    <span className="relative hidden shrink-0 items-center md:flex">
-                      <span
-                        className={cn(
-                          'font-mono text-[11px] text-muted-foreground',
-                          closable &&
-                            'transition-opacity group-focus-within/row:opacity-0 group-hover/row:opacity-0',
-                        )}
-                      >
-                        {/*
-                          When something last happened in the chat, not when he
-                          last spoke in it. The two clocks answer two questions
-                          and the row asks both at once: the list is ordered by
-                          the last message HE sent, so a chat he is waiting on
-                          holds its place while its agent works — and the time
-                          printed on the row says how long ago that work was, so
-                          a chat whose agent has been writing for ten minutes
-                          reads as ten minutes old rather than as an hour
-                          (bw-t26l.22).
-                        */}
-                        {clockTime(row.lastActiveAt)}
-                      </span>
-                      {closable && (
-                        <Tooltip label="Close chat">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            mode="icon"
-                            size="xs"
-                            data-testid="row-close"
-                            aria-label={`Close ${row.name}`}
-                            disabled={ending === key}
-                            className="absolute -right-1.5 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              end(row);
-                            }}
-                          >
-                            <Power className="size-3.5" aria-hidden="true" />
-                          </Button>
-                        </Tooltip>
-                      )}
-                    </span>
-                    {/*
-                      The same menu the desktop reaches by right-clicking, on a
-                      button, because a phone has no right click and the close
-                      control above only appears under a pointer that hovers
-                      (bw-rpgh.1). Drawn on every row rather than on hover: a
-                      thumb has nothing to hover with, so a control it cannot
-                      summon is a control it does not have.
-
-                      Phone only. On a desktop the rail is already crowded by
-                      forty of these, and the right click is there.
-                    */}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      mode="icon"
-                      size="xs"
-                      data-testid="row-menu"
-                      aria-label={`Actions for ${row.name}`}
-                      // Painted the height of the line it stands on, and given
-                      // an invisible 44px band instead of a 44px box
-                      // (globals.css, `data-reach='band'`). Floored the usual
-                      // way, this one button made the name's line 44px tall on
-                      // a phone: the name floated in the middle of it with
-                      // twelve pixels of air above and eight below the time,
-                      // and the same twelve opened a seam between the row's
-                      // two lines — 'a weird rough look' (bw-2fhj). Nothing
-                      // else on the row is pressable within twelve pixels of
-                      // it and the band ends exactly on the row's padding, so
-                      // it takes no press meant for the name beside it.
-                      data-reach="band"
-                      className="size-5 shrink-0 md:hidden"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        // Anchored under the button rather than at the finger:
-                        // a tap reports a point somewhere inside the button,
-                        // and a menu hung off that lands under the thumb that
-                        // opened it.
-                        const box = event.currentTarget.getBoundingClientRect();
-                        setMenu({ row, at: { left: box.left, top: box.bottom } });
-                      }}
-                    >
-                      <MoreVertical className="size-4" aria-hidden="true" />
-                    </Button>
-                  </div>
-                  {/*
-                    What it is doing is the second line, and the whole of it. It
-                    used to be the third, under a chip naming the folder — which
-                    the chat's own bar names again the moment the row is clicked,
-                    so the rail was spending a line of three on a fact the next
-                    screen carries anyway (the manager, 2026-08-23).
-
-                    Whoever else is in there is said beside the name and not
-                    again here: the badge that used to ride at the far end of
-                    this line said "external" a second time on a row that had
-                    already said it (the manager, 2026-09-03).
-
-                    The same reading the chat's own line draws, in the same words
-                    (chat-state.ts). A row that is asleep says nothing at all,
-                    because most of the list is asleep and a pill on every one of
-                    them is a pill on none (bw-96is).
-
-                    On a phone the line is drawn even then, because the clock
-                    rides on it there and a sleeping row still has a time. On a
-                    desktop the clock is up on the name's line, so a line with no
-                    chip would be an empty one and stays away (bw-8kk4.1).
-                  */}
-                  <div
-                    data-testid="row-line-status"
-                    className={cn(
-                      'mt-1 flex min-w-0 items-center gap-1 overflow-hidden',
-                      !says && 'md:hidden',
-                    )}
-                  >
-                    {busy === key || ending === key ? (
-                      <Badge
-                        variant="warning"
-                        appearance="light"
-                        size="sm"
-                        shape="circle"
-                        data-testid="row-pill"
-                        data-pill={busy === key ? 'opening' : 'ending'}
-                        className="shrink-0"
-                      >
-                        {busy === key ? 'opening' : 'ending'}
-                      </Badge>
-                    ) : (
-                      // The chip refuses to shrink everywhere else, which is
-                      // right where it stands beside body text. Here it has
-                      // the line to itself and what it is on cuts short only
-                      // when the rail is genuinely too narrow for it
-                      // (bw-jaoz.14.14).
-                      //
-                      // The word without its clause is not a rich status:
-                      // "Helping", "Retrying" or "Summarising" only becomes
-                      // actionable when the helper, reset time, or current
-                      // work remains visible. ChatStateChip middle-ellipsizes
-                      // that clause rather than dropping it.
-                      says && <ChatStateChip state={rowState} testId="row-pill" className="min-w-0 shrink" />
-                    )}
-                    {/*
-                      The clock, on a phone only — the name's line hands it down
-                      here so a long title keeps that end of the line
-                      (bw-8kk4.1). Last and unshrinkable, with the chip taking
-                      the squeeze instead: a status long enough to fill the line
-                      middle-ellipsizes, and the time it would otherwise have
-                      shoved off the screen stays where the eye looks for it.
-                    */}
-                    <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground md:hidden">
-                      {clockTime(row.lastActiveAt)}
-                    </span>
-                  </div>
-                </div>
+                  row={row}
+                  open={Boolean(row.sessionId) && row.sessionId === openSessionId}
+                  busy={busy === key}
+                  ending={ending === key}
+                  onEnter={enter}
+                  onEnd={end}
+                  onMenu={openMenu}
+                />
               );
             })}
           </div>
@@ -1172,4 +1226,4 @@ export function ChatSidebar({
       </Dialog>
     </aside>
   );
-}
+});

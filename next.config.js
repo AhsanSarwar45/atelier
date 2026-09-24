@@ -15,6 +15,11 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  // RENDER_NAMES=1 keeps component names in the built screens, so a render
+  // count (tests/e2e/chat-render-counts.spec.ts) can say what ran.
+  ...(process.env.RENDER_NAMES
+    ? { webpack: (config) => ({ ...config, optimization: { ...config.optimization, minimize: false } }) }
+    : {}),
 };
 
 module.exports = nextConfig;

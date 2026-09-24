@@ -9,6 +9,14 @@
  * would have been the wrong trade. Here they belong to neither screen.
  */
 
+/**
+ * One formatter each, made once. `toLocaleDateString` builds a new formatter
+ * on every call, and the chat rail asks for a heading per row on every redraw.
+ * Made on first use, so a test that sets the clock's zone still gets it.
+ */
+let dayFormat: Intl.DateTimeFormat | undefined;
+let clockFormat: Intl.DateTimeFormat | undefined;
+
 /** Today, Yesterday, then the date itself. */
 export function dayHeading(iso: string, now = new Date()): string {
   const then = new Date(iso);
@@ -16,7 +24,8 @@ export function dayHeading(iso: string, now = new Date()): string {
   const days = Math.round((midnight(now) - midnight(then)) / 86_400_000);
   if (days <= 0) return 'Today';
   if (days === 1) return 'Yesterday';
-  return then.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  dayFormat ??= new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' });
+  return dayFormat.format(then);
 }
 
 /**
@@ -25,7 +34,8 @@ export function dayHeading(iso: string, now = new Date()): string {
  * nothing.
  */
 export function clockTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  clockFormat ??= new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
+  return clockFormat.format(new Date(iso));
 }
 
 /**

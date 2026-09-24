@@ -5,9 +5,9 @@
  * a fenced block or an address looks the same wherever it was written. There is
  * no second renderer; a place that needs different spacing passes `tight`.
  */
-import { useState, type ComponentPropsWithoutRef, type ReactNode } from "react";
+import { memo, useMemo, useState, type ComponentPropsWithoutRef, type ReactNode } from "react";
 
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
@@ -452,6 +452,75 @@ function localImageSource(src: string, base?: string): string | null {
   return `/api/fs/media?path=${encodeURIComponent(target.path)}`;
 }
 
+/**
+ * GitHub's own additions, because that is the dialect agents and card fields
+ * are written in: tables, task lists, strikethrough, and a bare address
+ * becoming a link without anyone having to bracket it.
+ */
+type PluggableList = NonNullable<Options["rehypePlugins"]>;
+
+const REMARK_PLUGINS: PluggableList = [remarkGfm, remarkBreaks];
+
+/** Anything that reaches across a blank line to text outside its own block. */
+const SPANS_BLANK_LINES = /^ {0,3}\[[^\]]+\]:|<!--|<(pre|script|style|textarea)[\s>]/im;
+const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+/** A line that may carry on the block above it even after a blank line. */
+const CARRIES_ON = /^(\s|[-*+](\s|$)|\d{1,9}[.)](\s|$)|>)/;
+
+/**
+ * The words cut into top-level blocks that parse the same apart as together.
+ *
+ * An answer streams in at the end, and parsing it whole re-reads every
+ * paragraph already written, once a frame. Cut into blocks, only the last one
+ * is still changing; the rest are drawn once and kept. A cut is made only
+ * before a line that starts a new block by itself: after a blank line, outside
+ * a fence, and not an item, an indented line or a quote that could belong to
+ * the block above. Words holding anything that reaches across blank lines — a
+ * reference definition, a comment, raw preformatted HTML — stay whole.
+ */
+export function markdownBlocks(text: string): string[] {
+  if (SPANS_BLANK_LINES.test(text)) return [text];
+  const lines = text.split("\n");
+  const blocks: string[] = [];
+  let from = 0;
+  let fence: string | null = null;
+  let blankBefore = false;
+  let at = 0;
+  lines.forEach((line, index) => {
+    const opens = FENCE.exec(line)?.[1];
+    if (fence === null && blankBefore && index > 0 && line.trim() !== "" && !CARRIES_ON.test(line)) {
+      blocks.push(text.slice(from, at));
+      from = at;
+    }
+    if (fence === null) {
+      if (opens) fence = opens;
+    } else if (opens && opens[0] === fence[0] && opens.length >= fence.length && line.trim() === opens) {
+      fence = null;
+    }
+    blankBefore = line.trim() === "";
+    at += line.length + 1;
+  });
+  blocks.push(text.slice(from));
+  return blocks;
+}
+
+/** One block of the words, parsed again only when its own text changes. */
+const MarkdownBlock = memo(function MarkdownBlock({
+  text,
+  components,
+  rehypePlugins,
+}: {
+  text: string;
+  components: Components;
+  rehypePlugins: PluggableList;
+}) {
+  return (
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={rehypePlugins} components={components}>
+      {text}
+    </ReactMarkdown>
+  );
+});
+
 export function MarkdownBody({
   children,
   className,
@@ -473,87 +542,90 @@ export function MarkdownBody({
   // chat message or a card's own field: one set of handlers on the body, and
   // not a handler on each badge inside it (bw-g3o3.9).
   const paths = usePathActions();
+  // Made once per set of mentions, not on every draw. A new `components` object
+  // is a new component TYPE for every link, code block and marked name, and
+  // React throws away and rebuilds each of those elements whenever a type
+  // changes — once a frame for an answer that is still streaming in.
+  const components = useMemo<Components>(() => ({
+    // Every fenced block is a box with a copy button in its corner; an
+    // inline `word` is not a block and is untouched (bw-o4rj.1).
+    pre: ({ node, ...props }) => (
+      <CodeBlock code={writtenCode(node)} {...props} />
+    ),
+    img: ({ node, ...props }) => {
+      const src = String(props.src ?? '');
+      const local = localImageSource(src, base);
+      return (
+        <img
+          {...props}
+          src={local ?? src}
+          className={cn('max-h-[70vh] max-w-full rounded-lg object-contain', props.className)}
+          data-testid={local ? 'markdown-local-image' : 'markdown-image'}
+        />
+      );
+    },
+    // A link leaves for its own tab and cannot reach back into this one —
+    // unless it names something of ours, in which case it is a chip, and
+    // opens where every other chip opens: inside this window.
+    //
+    // Only when the writer gave it no words of their own. A bare address
+    // is machinery the reader never wanted to see; `[read it](…)` is a
+    // sentence somebody wrote, and swapping it for the report's title
+    // threw those words away (bw-8fh2.5).
+    a: ({ node, ...props }) => {
+      const href = String(props.href ?? '');
+      const ours = wroteItOut(href, textOf(props.children)) ? mentions?.link?.(href) : null;
+      if (ours) return <>{ours}</>;
+      const local = localTarget(href, base);
+      if (local) return (
+        <FileLinkBadge href={href} target={local}>
+          {props.children}
+        </FileLinkBadge>
+      );
+      const web = webTarget(href);
+      if (web) return <WebLinkBadge href={href} target={web}>{props.children}</WebLinkBadge>;
+      return <a {...props} target="_blank" rel="noopener noreferrer" data-testid="markdown-link" />;
+    },
+    // A name the rewriting step marked. Everything else drawn as a span
+    // stays a span, so nothing about ordinary text changes.
+    span: ({ node, ...props }) => {
+      const marks = props as Record<string, string | undefined>;
+      const card = marks['data-card-mention'];
+      if (card && mentions) return <>{mentions.card(card)}</>;
+      const attached = marks['data-attachment-mention'];
+      if (attached !== undefined && mentions?.attachment) {
+        return <>{mentions.attachment(Number(attached))}</>;
+      }
+      const path = marks['data-path-mention'];
+      if (path && mentions?.path) {
+        const line = marks['data-path-line'];
+        const written = textOf(props.children);
+        return (
+          <>
+            {mentions.path(
+              path,
+              written || path,
+              line ? Number(line) : null,
+              lastLineOf(marks['data-path-range']),
+              marks['data-path-in-code'] !== undefined,
+            )}
+          </>
+        );
+      }
+      return <span {...props} />;
+    },
+  }), [base, mentions]);
+  const rehypePlugins = useMemo<PluggableList>(
+    () => (mentions ? [rehypeHighlight, [rehypeMentions, mentions.split]] : [rehypeHighlight]),
+    [mentions],
+  );
+  const blocks = useMemo(() => markdownBlocks(children), [children]);
   return (
     <>
     <div className={cn(PROSE_CLASSES, className)} {...paths.chips}>
-      <ReactMarkdown
-        // GitHub's own additions, because that is the dialect agents and card
-        // fields are written in: tables, task lists, strikethrough, and a bare
-        // address becoming a link without anyone having to bracket it.
-        remarkPlugins={[remarkGfm, remarkBreaks]}
-        rehypePlugins={mentions ? [rehypeHighlight, [rehypeMentions, mentions.split]] : [rehypeHighlight]}
-        components={{
-          // Every fenced block is a box with a copy button in its corner; an
-          // inline `word` is not a block and is untouched (bw-o4rj.1).
-          pre: ({ node, ...props }) => (
-            <CodeBlock code={writtenCode(node)} {...props} />
-          ),
-          img: ({ node, ...props }) => {
-            const src = String(props.src ?? '');
-            const local = localImageSource(src, base);
-            return (
-              <img
-                {...props}
-                src={local ?? src}
-                className={cn('max-h-[70vh] max-w-full rounded-lg object-contain', props.className)}
-                data-testid={local ? 'markdown-local-image' : 'markdown-image'}
-              />
-            );
-          },
-          // A link leaves for its own tab and cannot reach back into this one —
-          // unless it names something of ours, in which case it is a chip, and
-          // opens where every other chip opens: inside this window.
-          //
-          // Only when the writer gave it no words of their own. A bare address
-          // is machinery the reader never wanted to see; `[read it](…)` is a
-          // sentence somebody wrote, and swapping it for the report's title
-          // threw those words away (bw-8fh2.5).
-          a: ({ node, ...props }) => {
-            const href = String(props.href ?? '');
-            const ours = wroteItOut(href, textOf(props.children)) ? mentions?.link?.(href) : null;
-            if (ours) return <>{ours}</>;
-            const local = localTarget(href, base);
-            if (local) return (
-              <FileLinkBadge href={href} target={local}>
-                {props.children}
-              </FileLinkBadge>
-            );
-            const web = webTarget(href);
-            if (web) return <WebLinkBadge href={href} target={web}>{props.children}</WebLinkBadge>;
-            return <a {...props} target="_blank" rel="noopener noreferrer" data-testid="markdown-link" />;
-          },
-          // A name the rewriting step marked. Everything else drawn as a span
-          // stays a span, so nothing about ordinary text changes.
-          span: ({ node, ...props }) => {
-            const marks = props as Record<string, string | undefined>;
-            const card = marks['data-card-mention'];
-            if (card && mentions) return <>{mentions.card(card)}</>;
-            const attached = marks['data-attachment-mention'];
-            if (attached !== undefined && mentions?.attachment) {
-              return <>{mentions.attachment(Number(attached))}</>;
-            }
-            const path = marks['data-path-mention'];
-            if (path && mentions?.path) {
-              const line = marks['data-path-line'];
-              const written = textOf(props.children);
-              return (
-                <>
-                  {mentions.path(
-                    path,
-                    written || path,
-                    line ? Number(line) : null,
-                    lastLineOf(marks['data-path-range']),
-                    marks['data-path-in-code'] !== undefined,
-                  )}
-                </>
-              );
-            }
-            return <span {...props} />;
-          },
-        }}
-      >
-        {children}
-      </ReactMarkdown>
+      {blocks.map((block, index) => (
+        <MarkdownBlock key={index} text={block} components={components} rehypePlugins={rehypePlugins} />
+      ))}
     </div>
     {/* Outside the prose, which styles its own first and last child. */}
     {paths.menu}

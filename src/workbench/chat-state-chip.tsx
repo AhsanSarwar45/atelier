@@ -84,6 +84,9 @@ let tick = Date.now();
 function subscribe(fn: () => void): () => void {
   listeners.add(fn);
   if (!beat) {
+    // Nobody was counting, so the second held here is as old as the last chip
+    // that was; React reads it again straight after this and redraws.
+    tick = Date.now();
     beat = setInterval(() => {
       tick = Date.now();
       listeners.forEach((f) => f());
@@ -97,12 +100,19 @@ function subscribe(fn: () => void): () => void {
   };
 }
 
-/** The current second, shared by every chip on the page. */
-function useSecond(): number {
+const still = () => () => undefined;
+const never = () => 0;
+
+/**
+ * The current second, shared by every chip on the page — for a chip that is
+ * counting. One that is not has nothing to redraw each second, and forty idle
+ * rows in the list each redrew once a second for no change (bw-4slk).
+ */
+function useSecond(counting: boolean): number {
   return useSyncExternalStore(
-    subscribe,
-    () => tick,
-    () => 0,
+    counting ? subscribe : still,
+    counting ? () => tick : never,
+    never,
   );
 }
 
@@ -190,7 +200,7 @@ export function ChatStateChip({
   testId?: string;
   className?: string;
 }) {
-  const now = useSecond();
+  const now = useSecond(Boolean(state.since));
   // Whether seconds are counted is the reading's call, not this file's: it
   // nulls `since` for everything at rest. Gating on `working` on top of that
   // silently dropped the one clock that matters most — how long a chat has been

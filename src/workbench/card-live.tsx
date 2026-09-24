@@ -10,10 +10,10 @@
 
 import { Row } from '@/components/ui/row';
 import { ChatStateChip } from '@/workbench/chat-state-chip';
-import { isLive, liveState, useLiveSessions } from '@/workbench/live';
+import { isLive, liveState, useLiveSessionWhere } from '@/workbench/live';
 
 export function CardLiveChat({ beadId }: { beadId: string }) {
-  const live = useLiveSessions().find((s) => isLive(s) && s.beads.includes(beadId));
+  const live = useLiveSessionWhere((s) => isLive(s) && s.beads.includes(beadId));
   if (!live) return null;
 
   // A link rather than a button that navigates: a card is drawn in places that

@@ -13,7 +13,7 @@
  */
 'use client';
 
-import { memo, useContext, useEffect, useReducer, useState, type ReactNode } from 'react';
+import { memo, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 
 import { request } from '@/lib/api';
 
@@ -1210,14 +1210,21 @@ function RichMessageContent({ item, mentions, onLook }: {
   // blocks the regex finds, the slices handed to `words` — is measured against
   // the same string the markers are in.
   const visibleText = withChipMarkers(withoutProposedPlans(item.text), chips);
-  const drawn: Mentions = {
+  // The same mentions from one frame to the next while the words stream in, so
+  // the paragraphs already written are not parsed again (MarkdownBody). The
+  // chips are read at the moment a marker is drawn; which images they are is
+  // what the memo keys on.
+  const chipsNow = useRef(chips);
+  chipsNow.current = chips;
+  const drawn = useMemo<Mentions>(() => ({
     ...mentions,
     split: (text) => attachmentsIn(text, mentions.split),
     attachment: (index) => {
-      const chip = chips[index];
+      const chip = chipsNow.current[index];
       return chip ? <AttachmentChip image={chip.image} onLook={onLook} /> : null;
     },
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the images are what the chips are
+  }), [mentions, onLook, item.images]);
   const words = (text: string) => {
     if (text) parts.push(<MarkdownBody key={`words-${part++}`} className="text-sm" mentions={drawn}>{text}</MarkdownBody>);
   };

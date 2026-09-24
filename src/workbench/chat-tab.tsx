@@ -8,7 +8,7 @@
 'use client';
 import { ActiveGuidance } from './active-guidance';
 
-import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type KeyboardEvent, type ReactNode, type RefObject, type SetStateAction } from 'react';
+import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type KeyboardEvent, type ReactNode, type RefObject, type SetStateAction } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -96,7 +96,7 @@ import { PathChip } from '@/workbench/path-chip';
 import { pathsIn, type Rooted } from '@/workbench/paths';
 import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
-import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
+import { useHeldFactsAreOld, useHolds, useLiveSessionWhere, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, sentAway, showing as stillShowing, type KindId } from '@/workbench/message-filter';
 import type { Brand, CommandInfo, HeldMessage, LookableImage, ProfileChoice, SessionConfigOption, TodoItem } from '@/workbench/protocol';
 import type { SessionMenu } from '@/workbench/fold';
@@ -122,6 +122,7 @@ import { AttachmentViewer } from '@/workbench/attachment-viewer';
 import { useEpicChecklist } from '@/workbench/epic-checklist';
 import { firstAvailableProvider, providerIsAvailable, useProviders, whyUnavailable } from '@/workbench/providers';
 import { ModelIcon } from '@/workbench/model-icon';
+import { useSteadyCallback } from '@/hooks/use-steady-callback';
 import { MemoryBadge } from '@/workbench/memory-badge';
 import { DEFAULT_PANEL_WIDTH, ResizeDivider, rememberedPanelWidth } from '@/workbench/resize-divider';
 import * as api from '@/lib/api';
@@ -765,7 +766,7 @@ export function enterPushesThrough(event: ComposerKey): boolean {
  * The line lives in `drafts.ts` instead, and what reads it is this box and the
  * Send button, each following it on its own. A keystroke now costs the box.
  */
-function ComposerBody({
+const ComposerBody = memo(function ComposerBody({
   sessionId,
   where,
   attached,
@@ -948,7 +949,7 @@ function ComposerBody({
       />
     </>
   );
-}
+});
 
 /**
  * Send, Send now and Queue.
@@ -959,7 +960,7 @@ function ComposerBody({
  * follow that answer rather than the line, and redraw when the box goes from
  * empty to not — twice a message, instead of once a key (bw-zez4).
  */
-function SendButtons({
+const SendButtons = memo(function SendButtons({
   sessionId,
   blocked,
   midTurn,
@@ -1036,7 +1037,7 @@ function SendButtons({
       )}
     </>
   );
-}
+});
 
 export default function ChatTab({ projectId, projectPath, openSessionId }: ChatTabProps) {
   // One set of handlers for every file chip in the conversation, wherever it
@@ -1484,6 +1485,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     setShowing('new-chat');
   }, [availableBrand, newBrand, newChatDefault, providers]);
   /**
+   * The chat list's own handlers, held so the list is left alone while this
+   * screen redraws for every word an agent writes (bw-4slk).
+   */
+  const openFromList = useCallback((id: string) => {
+    setRailOpen(false);
+    open(id);
+  }, [open]);
+  const openSearch = useCallback(() => setShowing('search'), []);
+  /**
    * Whether the list also holds the chats an agent started for another chat.
    * Off unless he says otherwise, and remembered, because it is a way of
    * looking rather than a thing to set again each visit.
@@ -1706,7 +1716,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // The stream first: it is already connected when a chat is opened, while the
   // chat's own facts are a board query away and the box must refuse from the
   // first frame it draws (live.ts, LiveSession.externalId).
-  const live = useLiveSessions().find((s) => s.id === sessionId);
+  const live = useLiveSessionWhere((s) => s.id === sessionId);
   const sessionBrand = live?.brand ?? facts?.brand ?? 'claude';
   /** A local chat with no model chosen cannot send anything, typed or not. */
   const cannotSend = sessionBrand === 'local' && !view.model;
@@ -2131,6 +2141,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     const markers = read.map((picture) => imageMarker(picture.id)).join(' ');
     setDraft((was) => `${was.slice(0, at)}${markers}${was.slice(at)}`);
   }
+  // Steady identities so the memoized composer and send buttons skip the
+  // redraw every streamed word gives this shell.
+  const composerKeySteady = useSteadyCallback(composerKey);
+  const absorbSteady = useSteadyCallback((files: FileList | File[] | null, at?: number) => void absorb(files, at));
+  const submitSteady = useSteadyCallback(() => void submit());
+  const holdSteady = useSteadyCallback(() => void hold());
 
   if (!projectId || !projectPath) {
     return <div className="p-8 text-muted-foreground">Select a project</div>;
@@ -2369,8 +2385,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           projectPath={projectPath}
           openSessionId={sessionId}
           everything={everything}
-          onOpen={(id) => { setRailOpen(false); open(id); }}
-          onSearch={() => setShowing('search')}
+          onOpen={openFromList}
+          onSearch={openSearch}
           onToggleEverything={flipEverything}
           // Same reason as `onOpen`: the drawer opened to reach this button, and
           // its job is done once the chat it starts exists — left open, it would
@@ -2780,9 +2796,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             sendError={sendError}
             picker={picker}
             typing={typing}
-            absorb={(files, at) => void absorb(files, at)}
+            absorb={absorbSteady}
             completeFiles={completeFiles}
-            onKey={composerKey}
+            onKey={composerKeySteady}
           />
           {/* The row asks its OWN width, not the window's, and that is what
               `[container-type:inline-size]` is here for. Above `md` the chat's
@@ -3007,8 +3023,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               sessionId={chatId}
               blocked={cannotSend}
               midTurn={midTurn}
-              onSend={() => void submit()}
-              onHold={() => void hold()}
+              onSend={submitSteady}
+              onHold={holdSteady}
             />
           </div>
         </Panel>

@@ -49,6 +49,7 @@ vi.mock('@/workbench/live', () => ({
   useHeldFactsAreOld: () => false,
   useHolds: () => new Map(),
   useLiveSessions: () => [],
+  useLiveSessionWhere: () => undefined,
   usePlanUsage: () => ({ available: false, plan: null, session: null, week: null, opus: null, at: null }),
   useRunningElsewhere: () => new Set<string>(),
   useRunningSaidAt: () => null,
