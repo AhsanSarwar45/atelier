@@ -89,7 +89,7 @@ test.describe('the board is read once, not once per part that asks', () => {
     // Straight to the board: what the list of projects asks for on the way is
     // its own question, and its own card.
     const asked = await asksDuring(page, async () => {
-      await page.goto(`/project?id=${project.id}`);
+      await page.goto(`/project?id=${project.id}&tab=board`);
       await cards(page).first().waitFor({ timeout: WAY_IN_MS });
       // A part that asks late is still a part that asks.
       await page.waitForTimeout(2_000);

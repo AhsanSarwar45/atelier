@@ -38,7 +38,7 @@ vi.mock('@/components/shell', () => ({
 }));
 
 vi.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams('id=p1'),
+  useSearchParams: () => new URLSearchParams('id=p1&tab=board'),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }));
 

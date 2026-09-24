@@ -32,7 +32,7 @@ if (!owner) {
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1920, height: 1200 } });
-await page.goto(`${HOST}/project?id=${owner.id}`);
+await page.goto(`${HOST}/project?id=${owner.id}&tab=board`);
 await page.locator('[data-column]').first().waitFor({ state: 'visible', timeout: 30_000 });
 await page.locator(`[data-column="${MANAGER}"]`).waitFor({ state: 'visible', timeout: 30_000 });
 

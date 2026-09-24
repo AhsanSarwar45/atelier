@@ -28,14 +28,14 @@ vi.mock('@/components/shell', () => ({
 }));
 
 describe('retiring reports as a destination', () => {
-  it('shows only Chat and Board and sends an old report address to the board', () => {
-    expect(whereFrom(params).tab).toBe('board');
+  it('shows only Chat and Board and sends an old report address to the chat', async () => {
+    expect(whereFrom(params).tab).toBe('chat');
 
     render(<ProjectPage />);
 
     expect(screen.getByRole('tab', { name: 'Chat' })).toBeVisible();
     expect(screen.getByRole('tab', { name: 'Board' })).toBeVisible();
     expect(screen.queryByRole('tab', { name: /report/i })).not.toBeInTheDocument();
-    expect(screen.getByTestId('board')).toBeVisible();
+    expect(await screen.findByTestId('chat-tab')).toBeVisible();
   });
 });

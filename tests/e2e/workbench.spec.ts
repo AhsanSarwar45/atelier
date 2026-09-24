@@ -845,7 +845,7 @@ test.describe('workbench', () => {
 
     const project = await projectAt(request, FIXTURE);
     try {
-      await page.goto(`/project?id=${project.id}`);
+      await page.goto(`/project?id=${project.id}&tab=board`);
 
       // Open the card, and start a chat from it.
       await page.locator(`[data-bead-id="${PARENT_CARD}"]`).first().click();

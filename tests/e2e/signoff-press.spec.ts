@@ -218,7 +218,7 @@ test.describe("the manager's sign-off", () => {
     const project = await projectAt(request, PROJECT_DIR);
 
     try {
-      await page.goto(`/project?id=${project.id}`);
+      await page.goto(`/project?id=${project.id}&tab=board`);
       const card = cardIn(page, MANAGER);
       await expect(card, 'the fixture job never reached the manager’s column').toBeVisible({ timeout: 60_000 });
 

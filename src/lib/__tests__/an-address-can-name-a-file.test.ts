@@ -25,10 +25,11 @@ describe('the address can name a file', () => {
     expect(whereFrom(new URLSearchParams('tab=chat&file=/work/a.ts')).tab).toBe('chat');
   });
 
-  it('leaves the older destinations exactly where they were', () => {
+  it('opens on the chat when the address names no tab it knows', () => {
     expect(whereFrom(new URLSearchParams('chat=s1')).tab).toBe('chat');
-    expect(whereFrom(new URLSearchParams('')).tab).toBe('board');
-    expect(whereFrom(new URLSearchParams('tab=reports')).tab).toBe('board');
+    expect(whereFrom(new URLSearchParams('')).tab).toBe('chat');
+    expect(whereFrom(new URLSearchParams('tab=reports')).tab).toBe('chat');
+    expect(whereFrom(new URLSearchParams('tab=board')).tab).toBe('board');
   });
 
   it('keeps no file and no line when the address names neither', () => {

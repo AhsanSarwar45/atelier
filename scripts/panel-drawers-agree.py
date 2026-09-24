@@ -167,7 +167,7 @@ def main():
     match = [p for p in projects if p["path"] == args.project]
     if not match:
         sys.exit(f"the screen does not know a project at {args.project}")
-    page = f"{args.url}/project?id={match[0]['id']}"
+    page = f"{args.url}/project?id={match[0]['id']}&tab=board"
 
     seen = {}
     b = Browser()

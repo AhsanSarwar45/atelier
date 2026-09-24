@@ -237,7 +237,7 @@ def main():
         try:
             b.send("Page.enable")
             b.send("Runtime.enable")
-            b.send("Page.navigate", url=f"{args.url}/project?id={project['id']}")
+            b.send("Page.navigate", url=f"{args.url}/project?id={project['id']}&tab=board")
             # Waited for rather than slept through: a fixed sleep was long
             # enough on a warm app and not on a cold one, and a cold app read
             # too early reports an empty screen as a broken board.

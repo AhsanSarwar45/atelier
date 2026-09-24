@@ -89,8 +89,9 @@ test.describe('project board themes', () => {
       return;
     }
 
-    await projectLink.click();
-    await page.waitForLoadState('networkidle');
+    // A project opens on its chat; these shots are of the board.
+    const href = await projectLink.getAttribute('href');
+    await page.goto(`${href}&tab=board`, { waitUntil: 'networkidle' });
   });
 
   for (const theme of THEMES) {

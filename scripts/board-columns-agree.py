@@ -221,7 +221,7 @@ def main():
     try:
         b.send("Page.enable")
         b.send("Runtime.enable")
-        b.send("Page.navigate", url=f"{args.url}/project?id={match[0]['id']}")
+        b.send("Page.navigate", url=f"{args.url}/project?id={match[0]['id']}&tab=board")
         time.sleep(8)
         drawn = b.js(READ_COLUMNS)
         reports = b.js(READ_REPORTS)
