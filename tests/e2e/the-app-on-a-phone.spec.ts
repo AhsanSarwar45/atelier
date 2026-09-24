@@ -681,6 +681,8 @@ test('every screen at a phone width, judged', async ({ page, request }) => {
           externalId: 'fixture',
           brand: 'claude',
           title: 'A chat read on a phone',
+          // The rail reads the server's name for a chat, not its title (bw-mv45.1).
+          name: 'A chat read on a phone',
           state: 'idle',
           lastActiveAt: new Date(0).toISOString(),
           cwdHint: fixture,
@@ -701,6 +703,7 @@ test('every screen at a phone width, judged', async ({ page, request }) => {
         runningElsewhere: false,
         held: null,
         title: 'A chat read on a phone',
+        name: 'A chat read on a phone',
         cwd: fixture,
         beads: [],
       },
