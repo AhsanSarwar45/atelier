@@ -49,12 +49,15 @@ it are moved onto it.
 | Separator used everywhere a divider is drawn | about 20 `h-px` / `border-t` divs | `Separator` (already in the library) |
 | Context menu at the pointer | menu-anchor (used by path-menu, agent-files-browser, file-tree) | `ContextMenu` (`context-menu.tsx`); `PointerAnchor` (`point-anchor.tsx`) for a `DropdownMenu` at a point |
 | Popover at a selection | file-viewer, diff-table "Copy text" boxes | `PopoverAtPoint` (`point-anchor.tsx`) inside a `Popover` |
-| A sheet held inside a box rather than the window | chat-tab, files-tab, chat-right-rail phone drawers | `Sheet contained` |
+| A sheet held inside a box rather than the window | chat-tab, files-tab, chat-right-rail phone drawers, terminal-history | `Sheet contained`, with `docked` (a plain column on wide screens) and `forceMount` (kept drawn, inert, while shut) |
 | Closable editor tabs | open-files-strip, terminal-tabs | `TabsList variant="strip"` with `TabsTrigger onClose` |
 | Table | chat-widget-view | `Table`, `TableHeader`, `TableBody`, `TableRow`, `TableHead`, `TableCell` (`table.tsx`) |
-| Confirmation (`AlertDialog`) | project-settings and dependencies-settings `window.confirm`; shared-library, file-actions, git-view and usage-view faking it with `Dialog role="alertdialog"` | `AlertDialog` (already in the library) |
+| Confirmation (`AlertDialog`) | project-settings and dependencies-settings `window.confirm`; shared-library, file-actions, git-view and usage-view faking it with `Dialog role="alertdialog"` | `AlertDialog` (already in the library); `AlertDialogContent shape="sheet"` for the usage reset |
 | Tag colour on `Badge` | page, project-card, tag-picker use inline hex styles | `Badge color` (with `colorFill`) |
 | Success tone on `Button` | sign-off, update-banner | `Button variant="success"` |
+| A lasting notice in the window's corner | update-banner | `Notice` (`notice.tsx`) |
+| A portal into a slot or onto the body | shell toolbar slots, terminal-window | `Portal` (`portal.tsx`) |
+| A non-modal floating window | terminal-window | `FloatingWindow` (`floating-window.tsx`) |
 
 ## Left alone on purpose
 
@@ -64,8 +67,9 @@ drawing but use library parts for any ordinary control inside them.
 - The code editor, terminal pane, diff cells, status donut, token bar and
   diagram nodes in chat widgets.
 - The before/after wipe handle in image-comparison and picture-viewer.
-- Draggable dividers (`split-column`, `resize-divider`) and the terminal's
-  floating, draggable window with its resize handles.
+- Draggable dividers (`split-column`, `resize-divider`), and the drag and
+  resize handles of the terminal's floating window. The window's frame is the
+  library's `FloatingWindow`.
 - Hidden form mirrors (`chat-tab.tsx:901` file input, `composer-editor.tsx:392`
   textarea).
 - Colour swatches whose colour is the data (color-picker, theme-switcher).
@@ -74,21 +78,23 @@ drawing but use library parts for any ordinary control inside them.
 
 `path:line | what is hand-built | library replacement`
 
-### Popups and drawers
+### Popups and drawers (done in bw-weih.4)
 
-- `src/components/modal-layer.tsx:39` | modal with its own portal, `role="dialog"`, backdrop, focus and inert handling | `Dialog` / `Overlay`
-- `src/workbench/visual-artifact-view.tsx:131-142` | full-screen modal with its own portal and Escape | `Overlay`
-- `src/components/project-settings-screen.tsx:345` | `window.confirm` for deleting a project | `AlertDialog`
-- `src/components/settings/shared-library.tsx:257` | `Dialog` given `role="alertdialog"` by hand | `AlertDialog`
-- `src/workbench/dependencies-settings.tsx:68` | `window.confirm` for installing the tracker CLI | `AlertDialog`
-- `src/workbench/file-actions.tsx:311` | `Dialog` given `role="alertdialog"` because `AlertDialog` was broken | `AlertDialog`
-- `src/workbench/git-view.tsx:1179` | `Dialog` given `role="alertdialog"` and repainted | `AlertDialog`
-- `src/workbench/usage-view.tsx:306` | `Dialog` given `role="alertdialog"` | `AlertDialog`
-- `src/workbench/terminal-history.tsx:235` | in-pane popup (`role="dialog"`, `absolute inset-0`) | `Popover`
-- `src/workbench/file-viewer.tsx:434` and `src/workbench/diff-table.tsx:441` | `position: fixed` "Copy text" box with its own open state | `Popover` at a virtual anchor
-- `src/workbench/menu-anchor.tsx:66` | portalled zero-size trigger to open a menu at the pointer | context menu
-- `src/workbench/chat-right-rail.tsx:303`, `src/workbench/chat-tab.tsx:2327-2460`, `src/workbench/files-tab.tsx:471-622` | slide-in drawers with a scrim made from a repainted `Button` | `Sheet`
-- `src/components/update-banner.tsx:91` | fixed-position slide-in notice | `Panel` placed by a library notice, or toast
+- `modal-layer.tsx` → deleted; project settings use `Overlay`
+- `visual-artifact-view.tsx` full-screen view → `Overlay`, closing on Escape
+- `project-settings-screen.tsx` delete-project `window.confirm` → `AlertDialog`
+- `shared-library.tsx` hand-set `role="alertdialog"` → `AlertDialog`; the discard-draft `window.confirm` → `AlertDialog` too
+- `dependencies-settings.tsx` install-tracker `window.confirm` → `AlertDialog`
+- `file-actions.tsx` delete question → its own `AlertDialog`; the name box stays a `Dialog`
+- `git-view.tsx` confirmation → `AlertDialog`
+- `usage-view.tsx` reset confirmation → `AlertDialog` with `AlertDialogContent shape="sheet"`
+- `terminal-history.tsx` in-pane popup → `Sheet contained`
+- `file-viewer.tsx`, `diff-table.tsx` "Copy text" box → `Popover` with `PopoverAtPoint`
+- `menu-anchor.tsx` → already a re-export of the library's `PointerAnchor`; unchanged
+- `chat-right-rail.tsx`, `chat-tab.tsx`, `files-tab.tsx` drawers and scrims → `Sheet contained` with `docked` and `forceMount`
+- `update-banner.tsx` slide-in notice → `Panel` placed by `Notice`
+- `terminal-window.tsx` portal and hand-set `role="dialog"` → `FloatingWindow`; the drag and resize handles stay the terminal's
+- `shell.tsx` toolbar-slot portals → `Portal`
 
 ### Buttons reshaped into rows
 
