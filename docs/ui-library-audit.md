@@ -192,16 +192,16 @@ drawing but use library parts for any ordinary control inside them.
 - `token-view.tsx` local `Card` → renamed `TitledPanel`; nothing shadows the library's `Card`
 - `add-project-dialog.tsx` Local boards choices → `Button variant="outline"`, no Panel classes
 
-### Tabs, toggles, switches and disclosures
+### Tabs, toggles, switches and disclosures (done in bw-weih.7)
 
-- Tab strips built from `role="tab"` → `Tabs`: `open-files-strip.tsx:83`, `terminal-tabs.tsx:73`
-- Single choice from primary/outline `Button`s → toggle group or `RadioGroup`: `file-preview.tsx:172`, `commit-search.tsx:115`, `picture-viewer.tsx:220`, `visual-artifact-view.tsx:87`, `start-from-card.tsx:66`, `where-to-work.tsx:196, 263`, `chat-tab.tsx:2228`, `transcript-rows.tsx:1279`, `shared-library.tsx:214`
-- `Checkbox` used for a single-choice question → `RadioGroup`: `transcript-rows.tsx:1414`
-- Hand-drawn switch → `Switch`: `shared-library.tsx:246`
-- `<details>` disclosures → Collapsible: `bead-detail.tsx:411, 423`, `active-guidance.tsx:26`, `shared-library.tsx:231, 232, 249, 255, 295, 300, 301, 302`, `transcript-rows.tsx:1424`, `mcp-servers-panel.tsx:75`
-- Split buttons → button group: `chat-sidebar.tsx:709`, `chat-tab.tsx:371`
-- Native `<datalist>` → `Picker`: `add-project-dialog.tsx:370`
-- Native `title=` hover text → `Tooltip`: `where-to-work.tsx:204`
+- Tab strips built from `role="tab"` → `Tabs`: the open-files strip and the terminal's shells are now the library's tab strip; an editor tab can wear a mark in place of its cross.
+- Single choice from primary/outline `Button`s → toggle group or `RadioGroup`: Source / Preview, the picture comparison's layout, the commit filter's time windows, an animation's named states, the card's agent, where a new chat works and on which branch, a new chat's agent and account, and the shared library's categories are `ToggleGroup`s (it gained `outline`, `media` and `optional`); what to do with a plan is a `RadioGroup`.
+- `Checkbox` used for a single-choice question → `RadioGroup`: a question with one answer is a `RadioGroup`, its own-words answer one more option.
+- Hand-drawn switch → `Switch`: the shared library's "On for this project" is the library `Switch` beside its words.
+- `<details>` disclosures → Collapsible: a card's Design and Notes, the guidance diagnostics, every fold in the shared library (Supporting material and Advanced settings keep their panel heading as the trigger), an option's preview, and an MCP server's launch command, which was a button flipping its own state.
+- Split buttons → button group: New Chat and its options in the sidebar; `chat-tab.tsx` already used `ButtonGroup`.
+- Native `<datalist>` → `Picker`: the landing branch is a `Picker` when the folder has branches, and stays a typed `Input` when it has none. `terminal-settings.tsx:138` keeps its datalist: a shell is any path the reader types, and the library has no free-text combobox yet.
+- Native `title=` hover text → `Tooltip`: where-to-work's project folder is a `Tooltip`.
 
 ### Buttons restyled by class
 
