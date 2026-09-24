@@ -20,6 +20,7 @@ import Link from "next/link";
 import { Download, Loader2, RefreshCw, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Notice } from "@/components/ui/notice";
 import { Panel } from "@/components/ui/panel";
 import { Progress } from "@/components/ui/progress";
 import * as api from "@/lib/api";
@@ -77,22 +78,17 @@ export function UpdateBanner() {
   const failed = run.phase === "failed";
 
   return (
-    // Below anything that opens over the screen, not beside it. A phone panel
-    // is a sheet with a dimmed page behind it, and this notice used to float
-    // at the same height as that dimming: the sheet covered its left two
-    // thirds and the strip sticking out past the sheet read as a torn-off
-    // fragment of a sentence. Underneath the dimming it is background, which
-    // is what a notice about a future release is while somebody is busy
-    // (bw-81wt.33).
-    //
-    // Pinned to both edges on a phone and to the right above it, so the width
-    // is the screen's rather than a fixed 384 that started off the left edge
-    // of a 390 phone (bw-81wt.33).
+    // The library's corner for a lasting notice: below anything that opens
+    // over the screen rather than beside it, and pinned to both edges on a
+    // phone (bw-81wt.33). Not a toast, which would time out, be swiped away
+    // and sit over the dimming — this carries its own controls and progress,
+    // and stays until it is answered.
+    <Notice>
     <Panel
       tone="overlay"
       inset="none"
       data-testid="update-banner"
-      className="fixed bottom-4 left-4 right-4 z-30 sm:left-auto sm:max-w-sm border-success/30 p-4 animate-in slide-in-from-bottom-4 fade-in duration-300"
+      className="border-success/30 p-4"
     >
       {/* The close control is a row item, not something floated over the
           words. It used to be positioned absolutely at `right-2 top-2` with
@@ -190,5 +186,6 @@ export function UpdateBanner() {
         </Button>
       </div>
     </Panel>
+    </Notice>
   );
 }
