@@ -7,6 +7,7 @@ import { Trash2 } from 'lucide-react';
 
 import { ColorPicker } from '@/components/color-picker';
 import { SettingsGroup } from '@/components/settings/section';
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ReadFailed } from '@/components/ui/read-failed';
@@ -23,6 +24,9 @@ export function TagsSettings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [deleting, setDeleting] = useState<Tag | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -60,12 +64,18 @@ export function TagsSettings() {
     }
   };
 
-  const remove = async (id: string) => {
+  const remove = async () => {
+    if (!deleting) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
     try {
-      await deleteTag(id);
-      setTags((prev) => prev.filter((t) => t.id !== id));
+      await deleteTag(deleting.id);
+      setTags((prev) => prev.filter((t) => t.id !== deleting.id));
+      setDeleting(null);
     } catch (e) {
-      console.error('Failed to delete tag:', e);
+      setDeleteError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeleteBusy(false);
     }
   };
 
@@ -105,7 +115,7 @@ export function TagsSettings() {
                 variant="ghost"
                 mode="icon"
                 size="sm"
-                onClick={() => remove(tag.id)}
+                onClick={() => { setDeleting(tag); setDeleteError(null); }}
                 aria-label={`Delete tag ${tag.name}`}
               >
                 <Trash2 className="size-4" aria-hidden="true" />
@@ -141,6 +151,17 @@ export function TagsSettings() {
           </div>
         </div>
       )}
+      <AlertDialog open={deleting !== null} onOpenChange={(open) => { if (!open && !deleteBusy) setDeleting(null); }}>
+        <AlertDialogContent>
+          <AlertDialogTitle>Delete {deleting?.name}?</AlertDialogTitle>
+          <AlertDialogDescription>The tag is taken off every project that carries it. This cannot be undone.</AlertDialogDescription>
+          {deleteError && <p role="alert" className="text-sm text-danger">{deleteError}</p>}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteBusy}>Cancel</AlertDialogCancel>
+            <Button variant="destructive" disabled={deleteBusy} onClick={() => void remove()}>{deleteBusy ? 'Deleting…' : 'Delete tag'}</Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SettingsGroup>
   );
 }
