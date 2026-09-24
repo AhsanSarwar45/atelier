@@ -538,6 +538,10 @@ async fn serve(open_browser: bool) {
     // (workbench/memory_limit.rs).
     workbench::memory_limit::watch(database.clone(), workbench_state.registry().clone());
 
+    // What keeps a driven chat's place in its provider record while nobody has
+    // it open, so its turns are not read again as new when the driver goes.
+    workbench_state.follow_the_driven();
+
     // Initialize Dolt connection manager. Local boards already backed by Dolt
     // are brought up through bd before the read-ahead can fall back to stale
     // JSONL, then checked for the rest of this process's lifetime.

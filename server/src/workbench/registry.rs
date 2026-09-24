@@ -387,6 +387,9 @@ pub struct WorkbenchRegistry {
     /// connection: a person who reloads the page mid-sign-in should find the
     /// same code waiting, not a new one (signin.rs).
     signins: Arc<super::signin::SignIns>,
+    /// The id of every chat a driver has just been attached to, for whoever
+    /// has to read beside it for as long as it lives (bw-6n29).
+    attached: tokio::sync::broadcast::Sender<String>,
 }
 
 impl WorkbenchRegistry {
@@ -481,7 +484,13 @@ impl WorkbenchRegistry {
             defaults,
             profiles,
             signins: Arc::default(),
+            attached: tokio::sync::broadcast::channel(64).0,
         }
+    }
+
+    /// Hear of each driver as it is attached.
+    pub fn subscribe_attached(&self) -> tokio::sync::broadcast::Receiver<String> {
+        self.attached.subscribe()
     }
 
     pub fn database(&self) -> &ChatDb {
@@ -756,6 +765,13 @@ impl WorkbenchRegistry {
                 reconcile: None,
             },
         );
+        let _ = self.attached.send(session_id.to_string());
+    }
+
+    /// The stand-in driver going away, as a stop or a crash takes one.
+    #[cfg(test)]
+    pub(crate) async fn forget_driver(&self, session_id: &str) {
+        self.drivers.write().await.remove(session_id);
     }
 
     /// Reading by URL is the same operation as clicking a stored row. It does
@@ -799,6 +815,7 @@ impl WorkbenchRegistry {
             },
         );
         drop(drivers);
+        let _ = self.attached.send(session_id.clone());
         let live = self.drivers.clone();
         let database = self.database.clone();
         tokio::spawn(async move {

@@ -225,6 +225,10 @@ impl WorkbenchState {
     pub(crate) async fn pretend_driver(&self, session_id: &str) {
         self.registry.pretend_driver(session_id).await
     }
+    #[cfg(test)]
+    pub(crate) async fn forget_driver(&self, session_id: &str) {
+        self.registry.forget_driver(session_id).await
+    }
     pub(crate) async fn looked_at(&self, session_id: &str) {
         self.registry.looked_at(session_id).await
     }
@@ -689,6 +693,60 @@ impl WorkbenchState {
                 _ = usage_tick.tick() => self.spread_usage(),
             }
         }
+    }
+
+    /**
+     * Keep reading the record of every Claude chat this server drives, for as
+     * long as its driver lives, whether or not anybody has it open.
+     *
+     * The byte cursor into a record only moves while a follower reads it, and
+     * a follower only ran while a browser looked at the chat. A chat working
+     * unwatched left its cursor where its driver was attached, so when the
+     * driver went — a stop, a memory stop, a restart — the next follower read
+     * the whole driven stretch as somebody else's work and appended every
+     * message again at the end of the chat (bw-6n29). Beside a driver the
+     * follower only advances the cursor and records the notices ACP never
+     * carries, so keeping it running is the same work a watched chat does.
+     */
+    pub fn follow_the_driven(&self) {
+        let state = self.clone();
+        let mut attached = self.registry.subscribe_attached();
+        tokio::spawn(async move {
+            loop {
+                let session_id = match attached.recv().await {
+                    Ok(id) => id,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return,
+                };
+                let state = state.clone();
+                tokio::spawn(async move { state.follow_while_driven(session_id).await });
+            }
+        });
+    }
+
+    pub(crate) async fn follow_while_driven(&self, session_id: String) {
+        let Ok(Some(session)) = self.database().get_session(session_id.clone()).await else {
+            return;
+        };
+        if session.brand != "claude" {
+            return;
+        }
+        let (lease, start) = self.chat_follow_subscription(&session_id).await;
+        if let Some(control) = start {
+            let state = self.clone();
+            let id = session_id.clone();
+            tokio::spawn(async move {
+                crate::routes::live::follow_native_record(state, id, control).await;
+            });
+        }
+        let mut beat = tokio::time::interval(Duration::from_millis(500));
+        while self.has_driver(&session_id).await {
+            beat.tick().await;
+        }
+        // The end of the turn is still landing in the record; the follower
+        // counts it as the driver's for this long, so it must still be reading.
+        tokio::time::sleep(crate::routes::live::DRIVER_SETTLES + Duration::from_secs(1)).await;
+        drop(lease);
     }
 
     /**
