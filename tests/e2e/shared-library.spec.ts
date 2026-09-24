@@ -96,11 +96,11 @@ test('global and project editors persist conditional skills, instructions and ex
   await page.getByTestId('editor-support').locator('summary').click();
   await page.getByLabel('Parameters value').fill('PROJECT-NEXT');
   await saved(page);
-  await page.getByTestId('library-item-frontend-review').getByRole('button', { name: 'Disable here', exact: true }).click();
+  await page.getByTestId('library-item-frontend-review').getByRole('switch', { name: 'Enable Frontend review for this project', exact: true }).click();
   await expect(page.getByTestId('library-item-frontend-review')).toContainText('Disabled here');
   await page.reload(); await page.getByRole('button', { name: 'Skills', exact: true }).click();
   await expect(page.getByTestId('library-item-frontend-review')).toContainText('Disabled here');
-  await page.getByTestId('library-item-frontend-review').getByRole('button', { name: 'Enable here', exact: true }).click();
+  await page.getByTestId('library-item-frontend-review').getByRole('switch', { name: 'Enable Frontend review for this project', exact: true }).click();
   await expect(page.getByTestId('library-item-frontend-review')).toContainText('Available');
   const held = await (await request.get(`${api}?path=${encodeURIComponent(project.path)}`)).json();
   expect(held.library.overrides['frontend-review'].parameters.framework).toBe('PROJECT-NEXT');

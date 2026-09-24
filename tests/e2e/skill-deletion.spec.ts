@@ -1,0 +1,93 @@
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { expect, test } from '@playwright/test';
+
+test('delete a skill folder in its own scope without touching another project', async ({ page, request }) => {
+  test.setTimeout(120_000);
+  const run = process.env.WORKBENCH_E2E_RUN!;
+  const root = mkdtempSync(join(run, 'delete-skill-project-'));
+  execFileSync('git', ['init', '-q', '-b', 'main', root]);
+  const project = await (await request.post('/api/projects', { data: { name: 'Delete project skills', path: root } })).json();
+  await request.get(`/api/projects/${project.id}/settings`);
+  const locations = JSON.parse(execFileSync(process.env.ATELIER_BINARY!, ['tool', 'skills', 'locations', '--project', root], { encoding: 'utf8' }));
+  const folders = [join(locations.global.skills, 'delete-shared'), join(locations.project.skills, 'delete-local')];
+  const asset = Buffer.from([0, 255, 99, 128]);
+  for (const [index, folder] of folders.entries()) {
+    mkdirSync(join(folder, 'assets'), { recursive: true });
+    writeFileSync(join(folder, 'assets/data.bin'), asset);
+    writeFileSync(join(folder, 'SKILL.md'), `---\nname: ${index ? 'Local deletion proof' : 'Shared deletion proof'}\ndescription: Deletion fixture\n---\nKeep supporting assets.\n`);
+  }
+  const commandFolder = join(locations.global.skills, 'delete-command');
+  mkdirSync(commandFolder, { recursive: true });
+  writeFileSync(join(commandFolder, 'SKILL.md'), '---\nname: Command deletion proof\ndescription: Command fixture\n---\nManual command text.\n');
+  writeFileSync(join(commandFolder, 'atelier.json'), '{"automatic":false}');
+  const library = await (await request.get('/api/settings/library')).json();
+  library.library.items.push({ id: 'delete-text', kind: 'skill', name: 'Text deletion proof', description: 'Text fixture', content: 'Only delete this item.' });
+  expect((await request.put('/api/settings/library', { data: { library: library.library, revision: library.revision, source_revision: library.source_revision } })).ok()).toBeTruthy();
+  try {
+    await page.goto('/settings?section=library');
+    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    const shared = page.getByTestId('library-item-delete-shared');
+    await expect(shared).toBeVisible();
+    mkdirSync('tests/results/skill-deletion', { recursive: true });
+    await page.screenshot({ path: `tests/results/skill-deletion/global-${process.env.ATELIER_CAPTURE_BEFORE ? 'before' : 'after'}.png` });
+    await page.goto(`/project?id=${project.id}&settings=library`);
+    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    const local = page.getByTestId('library-item-delete-local');
+    await expect(local).toBeVisible();
+    await page.screenshot({ path: `tests/results/skill-deletion/project-${process.env.ATELIER_CAPTURE_BEFORE ? 'before' : 'after'}.png` });
+    if (process.env.ATELIER_CAPTURE_BEFORE) return;
+    await expect(shared.getByRole('button', { name: 'Delete…', exact: true })).toHaveCount(0);
+    await local.getByRole('button', { name: 'Delete…', exact: true }).click();
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toContainText(folders[1]);
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    expect(existsSync(folders[1])).toBe(true);
+    await local.getByRole('button', { name: 'Delete…', exact: true }).click();
+    // A supporting asset changed since the confirmation was opened. Refuse stale deletion.
+    writeFileSync(join(folders[1], 'assets/data.bin'), Buffer.from([8, 9, 10]));
+    await dialog.getByRole('button', { name: 'Delete skill', exact: true }).click();
+    await expect(dialog.getByRole('alert')).toBeVisible();
+    expect(existsSync(folders[1])).toBe(true);
+    expect(readFileSync(join(folders[1], 'assets/data.bin'))).toEqual(Buffer.from([8, 9, 10]));
+    await dialog.getByRole('button', { name: 'Reload settings', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await local.getByRole('button', { name: 'Delete…', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Delete skill', exact: true }).click();
+    await expect(local).toHaveCount(0);
+    expect(existsSync(folders[1])).toBe(false);
+    expect(readFileSync(join(folders[0], 'assets/data.bin'))).toEqual(asset);
+    await page.reload();
+    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    await expect(local).toHaveCount(0);
+    await page.goto('/settings?section=library');
+    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    await shared.getByRole('button', { name: 'Delete…', exact: true }).click();
+    await expect(dialog).toContainText(folders[0]);
+    await expect(dialog).toHaveCSS('opacity', '1');
+    await expect(dialog).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await page.screenshot({ path: 'tests/results/skill-deletion/confirmation.png', animations: 'disabled' });
+    const deletion = page.waitForResponse(r => r.request().method() === 'DELETE' && r.url().includes('/api/settings/library/skill/delete'));
+    await dialog.getByRole('button', { name: 'Delete skill', exact: true }).click();
+    const result = await (await deletion).json();
+    await expect(shared).toHaveCount(0);
+    expect(existsSync(folders[0])).toBe(false);
+    expect(readFileSync(join(result.archive, 'assets/data.bin'))).toEqual(asset);
+    const textRow = page.getByTestId('library-item-delete-text');
+    await textRow.getByRole('button', { name: 'Delete…', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Delete skill', exact: true }).click();
+    await expect(textRow).toHaveCount(0);
+    await page.getByRole('button', { name: 'Commands', exact: true }).click();
+    const commandRow = page.getByTestId('library-item-delete-command');
+    await commandRow.getByRole('button', { name: 'Delete…', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Delete command', exact: true }).click();
+    await expect(commandRow).toHaveCount(0);
+    expect(existsSync(commandFolder)).toBe(false);
+  } finally {
+    await request.delete(`/api/projects/${project.id}`);
+    for (const folder of folders) rmSync(folder, { recursive: true, force: true });
+    rmSync(commandFolder, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});

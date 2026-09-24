@@ -37,6 +37,20 @@ local agent environment; remote runtimes would need their own fact transport.
 
 ## Inheritance and resources
 
+Project Settings → Agent guidance → Skills (or Commands) has an **On/Off for
+this project** switch on every non-built-in skill. It covers inherited global
+and project-local skills, both folder-backed and text-only. Switching off stores
+only a project override; it preserves the source and any customizations and does
+not affect global settings or another project. Switching on restores eligibility,
+not a bypass of conditions, missing tools, invalid folders or ID conflicts.
+
+Disabled skills are absent from new/reconnected sessions' discovery and command
+lists, and their skill reads and explicit invocations are refused. Existing
+sessions retain their pinned snapshot until reconnected. This is guidance
+selection, not a filesystem permission boundary. Built-in workflow instructions
+are not optional skills. “Reset to global” resets all customizations, including
+the off switch; switching on alone preserves other customizations.
+
 Stable IDs identify items. Projects customize a global item's conditions,
 automatic selection, parameters, or content explicitly; unrelated global
 changes remain inherited. Replacements are resolved before conditions, so an
@@ -61,6 +75,17 @@ native loading. Supporting references must be copied into Resources. Review the
 old source before retiring it; Atelier never silently deletes native guidance.
 
 ## Complete skill folders
+
+User-owned entries have **Delete…** in their owning settings scope, including
+folder skills and commands. The confirmation identifies the scope, source path
+and file count. Folder deletion moves the entire folder into a unique
+`deleted-skills/` archive beside that scope's library, preserving scripts, assets
+and links without following them. The result displays the recovery path; move
+that archived folder back to `skills/<id>` to restore it after checking the ID
+is free. A whole-folder revision refuses stale deletion, including changed assets.
+Text-only entries are removed from `library.json` after confirmation. Project
+settings cannot delete an inherited global item; use its project off switch.
+Built-ins cannot be deleted. Pinned session copies are retained until reconnect.
 
 Run `atelier tool skills locations` for the global and project `skills` directories.
 Put a skill at `skills/<stable-id>/SKILL.md`, preserving its scripts, references,

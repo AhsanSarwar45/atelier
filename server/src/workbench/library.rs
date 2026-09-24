@@ -1156,6 +1156,10 @@ pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
     }
     let mut resolved = vec![];
     for (id, (mut item, source)) in items {
+        // Local skill switches share project storage with inherited overrides,
+        // but must never apply stale inherited content to a local source.
+        let disabled = (source == "global" || (source == "project" && item.kind == Kind::Skill))
+            && local.overrides.get(&id).is_some_and(|over| over.disabled);
         let over = if source == "global" {
             local.overrides.get(&id)
         } else {
@@ -1186,7 +1190,7 @@ pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
             .collect();
         let mut state = if conflicts.contains(&id) {
             "conflict"
-        } else if over.is_some_and(|o| o.disabled) {
+        } else if disabled {
             "disabled"
         } else if item.kind == Kind::OutputStyle && item.id != output_style {
             "not_selected"

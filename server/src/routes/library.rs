@@ -41,7 +41,7 @@ fn answer(scope: &Scope) -> Result<Value, String> {
     let orphaned: Vec<_> = held
         .overrides
         .keys()
-        .filter(|id| !global.items.iter().any(|row| &row.item.id == *id))
+        .filter(|id| !global.items.iter().chain(resolved.items.iter()).any(|row| &row.item.id == *id))
         .collect();
     Ok(
         json!({"library":held,"revision":library::revision(&held),"source_revision":library::source_revision(&data)?,"resolved":resolved,"guidance":resolved.guidance(),"orphaned":orphaned,"inherited":global.items.into_iter().filter(|r|r.source == "global").map(|r|r.item).collect::<Vec<_>>()}),
@@ -126,10 +126,29 @@ async fn write_skill(Query(scope): Query<SkillScope>, Json(update): Json<SkillUp
         skill_folders::edit_write(&data, path.as_deref(), &scope.id, &update.item, &update.revision)
     }).await.map_err(|e| error(e.to_string()))?.map(Json).map_err(error)
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeleteSkill { revision: String }
+async fn plan_delete_skill(Query(scope): Query<SkillScope>) -> Result<Json<skill_folders::DeletePlan>, Refusal> {
+    tokio::task::spawn_blocking(move || {
+        let data = library::data_dir()?;
+        let path = root(scope.path.as_deref())?;
+        skill_folders::delete_read(&data, path.as_deref(), &scope.id)
+    }).await.map_err(|e| error(e.to_string()))?.map(Json).map_err(error)
+}
+async fn delete_skill(Query(scope): Query<SkillScope>, Json(update): Json<DeleteSkill>) -> Result<Json<Value>, Refusal> {
+    tokio::task::spawn_blocking(move || {
+        let data = library::data_dir()?;
+        let path = root(scope.path.as_deref())?;
+        skill_folders::delete_write(&data, path.as_deref(), &scope.id, &update.revision)
+            .map(|archive| json!({"archive": archive}))
+    }).await.map_err(|e| error(e.to_string()))?.map(Json).map_err(error)
+}
 pub fn routes() -> Router<crate::routes::projects::AppState> {
     Router::new()
         .route("/settings/library", get(read).put(write))
         .route("/settings/library/skill", get(read_skill).put(write_skill))
+        .route("/settings/library/skill/delete", get(plan_delete_skill).delete(delete_skill))
         .layer(middleware::from_fn(crate::local_host::require_local_host))
 }
 

@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Panel } from '@/components/ui/panel';
 import { Picker } from '@/components/ui/picker';
+import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { request } from '@/lib/api';
 import { buildCustomization, nextEntryName, suggestedItemId } from '@/lib/shared-guidance';
 import { sendCommand } from '@/workbench/use-session';
@@ -86,6 +87,8 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
   const [editing, setEditing] = useState<Row>();
   const [folderRevision, setFolderRevision] = useState<string>();
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState<{ row: Row; revision?: string; source?: string; files?: number }>();
+  const [deleteError, setDeleteError] = useState('');
   const [preview, setPreview] = useState('');
   const [projects, setProjects] = useState<{ name: string; path: string; localPath?: string }[]>([]);
   const [imports, setImports] = useState<{ name: string; path: string; category: string }[]>();
@@ -112,6 +115,47 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
   }
   function folderUrl(id: string) {
     return `/api/settings/library/skill?${new URLSearchParams({ id, ...(projectPath ? { path: projectPath } : {}) })}`;
+  }
+  function setProjectSkillEnabled(id: string, enabled: boolean) {
+    if (!answer || !projectPath) return;
+    const library = structuredClone(answer.library);
+    const override = { ...library.overrides[id] };
+    if (enabled) delete override.disabled;
+    else override.disabled = true;
+    if (Object.keys(override).length) library.overrides[id] = override;
+    else delete library.overrides[id];
+    void persist(library);
+  }
+  async function prepareDelete(row: Row) {
+    setDeleteError(''); setDeleting({ row });
+    if (!row.folder_source) return;
+    setSaving(true);
+    try {
+      const response = await request(folderUrl(row.item.id).replace('/skill?', '/skill/delete?'));
+      if (!response.ok) throw new Error(await response.text());
+      setDeleting({ row, ...await response.json() });
+    } catch (e) { setDeleteError(String(e)); } finally { setSaving(false); }
+  }
+  async function deleteItem() {
+    if (!deleting || !answer) return;
+    const { row, revision } = deleting;
+    setSaving(true); setDeleteError(''); setNotice('');
+    try {
+      let archive: string | undefined;
+      if (row.folder_source) {
+        const response = await request(folderUrl(row.item.id).replace('/skill?', '/skill/delete?'), { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision }) });
+        if (!response.ok) throw new Error(await response.text());
+        archive = (await response.json()).archive;
+        await load();
+      } else {
+        const library = { ...answer.library, items: answer.library.items.filter(i => i.id !== row.item.id), output_style: answer.library.output_style === row.item.id ? '' : answer.library.output_style };
+        const response = await request(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ library, revision: answer.revision, source_revision: answer.source_revision }) });
+        if (!response.ok) throw new Error(await response.text());
+        setAnswer(await response.json());
+      }
+      setDeleting(undefined);
+      setNotice(`Deleted ${row.item.name}. ${archive ? `Recoverable folder archive: ${archive}. ` : ''}New and reconnected chats receive this change; existing snapshots retain their copy.`);
+    } catch (e) { setDeleteError(String(e)); } finally { setSaving(false); }
   }
   async function edit(row: Row) {
     setError(''); setNotice(''); setFolderRevision(undefined);
@@ -166,11 +210,12 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
     {notice && <p role="status" className="text-sm text-t-secondary">{notice}</p>}
     {!answer && !error && <p>Loading library…</p>}
     {answer && <>
-      {answer.orphaned?.map(id => <Panel key={id} tone="attention" className="text-sm">Global source removed: {id}. {!projectRules && <Button variant="ghost" disabled={!!draft || saving} onClick={() => { const library = structuredClone(answer.library); delete library.overrides[id]; void persist(library); }}>Forget customization</Button>}</Panel>)}
+      {answer.orphaned?.map(id => <Panel key={id} tone="attention" className="text-sm">Source removed: {id}. {!projectRules && <Button variant="ghost" disabled={!!draft || saving} onClick={() => { const library = structuredClone(answer.library); delete library.overrides[id]; void persist(library); }}>Forget customization</Button>}</Panel>)}
       {!draft && <><div className="flex flex-wrap gap-1 border-b border-border/60 pb-2" role="group" aria-label="Library categories">{Object.entries(names).map(([id, label]) => <Button key={id} variant={category === id ? 'secondary' : 'ghost'} aria-pressed={category === id} onClick={() => { setCategory(id as Category); setImports(undefined); }}>{label}</Button>)}</div></>}
       <div hidden={!!draft || kind !== 'instruction'} className="space-y-6">{projectPath ? projectInstructions : <><GeneralInstructions saved={answer.library.general_instructions ?? ''} saving={saving} onSave={text => persist({ ...answer.library, general_instructions: text })} /><div className="border-t border-border/60 pt-6"><h3 className="font-semibold">Reusable instructions</h3><p className="mt-1 text-sm text-t-secondary">Create rules here. Their conditions determine which projects receive them.</p></div></>}</div>
       {!draft && !projectRules && <div className="flex flex-wrap items-start justify-between gap-3"><p className="max-w-sm text-sm text-t-secondary">{category === 'command' ? 'Procedures you run explicitly from the chat composer. Commands are never chosen automatically by the agent.' : descriptions[kind]}</p><div className="flex flex-wrap gap-2"><Button onClick={() => create()}><Plus className="mr-1 size-4" />Add {itemLabel}</Button><Button variant="ghost" onClick={() => void importNative()}>Import native file</Button></div></div>}
       {!draft && kind === 'output_style' && <Panel className="space-y-2"><span className="text-sm font-medium">Selected output style</span><Picker label="Selected output style" disabled={saving} value={answer.library.output_style ?? '__inherit'} onChange={value => void persist({ ...answer.library, output_style: value === '__inherit' ? null : value })} choices={[{ value: '__inherit', label: projectPath ? 'Use global selection' : 'No style selected' }, { value: '', label: 'No shared output style' }, ...answer.resolved.items.filter(r => r.item.kind === 'output_style' && (projectPath || r.source !== 'project')).map(r => ({ value: r.item.id, label: r.item.name }))]} /><p className="text-xs text-t-muted">Applies to new and reconnected chats. Shared across providers. Claude’s native output-style selection is ignored in Atelier.</p></Panel>}
+      {!draft && projectPath && kind === 'skill' && <Panel className="space-y-2"><h3 className="font-medium">Choose what this project can use</h3><p className="text-sm text-t-secondary">Switch off any {category === 'command' ? 'command' : 'skill'} this project does not need. This keeps its files and customizations, and changes nothing globally or in other projects.</p><p className="text-xs text-t-muted">Applies to new and reconnected chats, including explicit invocations. Switching on still respects conditions and required tools.</p></Panel>}
       {imports && <Panel tone="frame" className="space-y-2"><p className="text-sm">Choose a file to copy into {names[category].toLowerCase()}.</p>{imports.length === 0 && <p className="text-sm">No native files found.</p>}{imports.map(f => <Button key={f.path} variant="ghost" className="h-auto w-full justify-start whitespace-normal text-left" onClick={() => void copyNative(f)}>{f.name} · {f.category}</Button>)}<Button variant="outline" onClick={() => setImports(undefined)}>Cancel import</Button></Panel>}
       {projectRules ? <ProjectInstructionSummary rows={answer.resolved.items.filter(row => row.item.kind === 'instruction')} /> : draft ? <section className="min-w-0 space-y-6" aria-label="Library item editor" data-testid="library-editor">
         <header className="space-y-3"><Button variant="ghost" size="sm" disabled={saving} onClick={() => { if (window.confirm('Discard this draft and return to the library?')) { setDraft(undefined); setEditing(undefined); } }}><ArrowLeft className="mr-2 size-4" />Back to {names[category].toLowerCase()}</Button><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-semibold">{inherited ? 'Customize' : editing ? 'Edit' : 'New'} {itemLabel}</h2><Badge>{projectPath ? 'This project only' : 'All projects'}</Badge></div><p className="text-sm text-t-secondary">{inherited ? 'Overrides affect only this project. Unchanged fields keep following the global version.' : projectPath ? 'This guidance belongs to this project and is shared by its providers.' : 'Changes are shared with every project that inherits this item.'}</p></header>
@@ -198,16 +243,29 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
         }}><Save className="mr-1 size-4" />{saving ? 'Saving…' : 'Save item'}</Button></div></footer>
       </section> : <div className="space-y-3">{rows.length === 0 && <Panel tone="frame" className="text-sm text-t-secondary">No {names[category].toLowerCase()} yet. Add one to share it across providers.</Panel>}{rows.map(row => <Panel key={row.item.id} tone="frame" className="space-y-2" data-testid={`library-item-${row.item.id}`}>
         <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-medium">{row.item.name}</h3><p className="text-xs text-t-muted">{row.source}{row.customized ? ' · customized here' : ''}{row.item.bundle ? ` · ${row.item.bundle}` : ''}{row.item.kind === 'skill' ? ` · /skill:${row.item.id}` : ''}</p></div><Badge>{states[row.state] ?? row.state}</Badge></div>
+        {projectPath && row.item.kind === 'skill' && row.source !== 'built-in' && <Button variant="outline" size="sm" role="switch" aria-checked={!answer.library.overrides[row.item.id]?.disabled} aria-label={`Enable ${row.item.name} for this project`} disabled={saving} onClick={() => setProjectSkillEnabled(row.item.id, !!answer.library.overrides[row.item.id]?.disabled)}><span aria-hidden="true" className={`inline-flex h-5 w-9 shrink-0 items-center rounded-full px-0.5 ${answer.library.overrides[row.item.id]?.disabled ? 'bg-t-muted/40' : 'bg-primary'}`}><span className={`size-4 rounded-full bg-background ${answer.library.overrides[row.item.id]?.disabled ? '' : 'translate-x-4'}`} /></span>{answer.library.overrides[row.item.id]?.disabled ? 'Off for this project' : 'On for this project'}</Button>}
         {row.item.description && <p className="text-sm text-t-secondary">{row.item.description}</p>}
         {row.folder_source && <p className="break-all text-xs text-t-secondary">Folder-backed skill. Edit instructions and settings here; scripts and assets stay in <code>{row.folder_source}</code>.</p>}
         <details><summary className="cursor-pointer text-xs text-t-secondary">Why? · Inspect content</summary><div className="mt-2 space-y-2"><Evidence value={row.evaluation} />{row.missing.length > 0 && <p className="text-xs">Missing: {row.missing.join(', ')}</p>}<pre className="max-h-60 overflow-auto whitespace-pre-wrap rounded bg-surface-overlay p-3 text-xs">{row.item.content}</pre></div></details>
         {row.source !== 'built-in' && !(row.source === 'project' && !projectPath) && <div className="flex flex-wrap gap-2">
           {(!row.folder_source || row.state !== 'invalid') && <Button variant="outline" size="sm" disabled={saving} onClick={() => void edit(row)}>{projectPath && row.source === 'global' ? 'Customize' : 'Edit'}</Button>}
-          {projectPath && row.source === 'global' ? <><Button variant="ghost" size="sm" disabled={saving} onClick={() => void persist({ ...answer.library, overrides: { ...answer.library.overrides, [row.item.id]: { ...answer.library.overrides[row.item.id], disabled: row.state !== 'disabled' } } })}>{row.state === 'disabled' ? 'Enable here' : 'Disable here'}</Button>{row.customized && <Button variant="ghost" size="sm" disabled={saving} onClick={() => { const library = structuredClone(answer.library); delete library.overrides[row.item.id]; void persist(library); }}>Reset to global</Button>}</> : !row.folder_source && <Button variant="ghost" size="sm" disabled={saving} onClick={() => { if (window.confirm(`Remove ${row.item.name} from this library? Existing chat snapshots retain their copy.`)) void persist({ ...answer.library, items: answer.library.items.filter(i => i.id !== row.item.id), output_style: answer.library.output_style === row.item.id ? '' : answer.library.output_style }); }}>Remove</Button>}
+          {projectPath && row.source === 'global' ? <>{row.item.kind !== 'skill' && <Button variant="ghost" size="sm" disabled={saving} onClick={() => void persist({ ...answer.library, overrides: { ...answer.library.overrides, [row.item.id]: { ...answer.library.overrides[row.item.id], disabled: row.state !== 'disabled' } } })}>{row.state === 'disabled' ? 'Enable here' : 'Disable here'}</Button>}{row.customized && <Button variant="ghost" size="sm" disabled={saving} onClick={() => { const library = structuredClone(answer.library); delete library.overrides[row.item.id]; void persist(library); }}>Reset to global</Button>}</> : <Button variant="ghost" size="sm" className="text-danger" disabled={saving} onClick={() => void prepareDelete(row)}>Delete…</Button>}
         </div>}
       </Panel>)}</div>}
       {!draft && <details className="border-t border-border/40 pt-4"><summary className="cursor-pointer text-sm font-medium">Preview and diagnostics</summary><div className="mt-4 space-y-4">{!projectPath && <div className="space-y-2"><span className="text-sm">Evaluate for project</span><Picker label="Evaluate for project" value={preview} onChange={setPreview} choices={[{ value: '', label: 'Choose a project to explain conditions' }, ...projects.filter(p => !(p.localPath || p.path).startsWith('dolt://')).map(p => ({ value: p.localPath || p.path, label: p.name }))]} /></div>}<h3 className="text-sm font-medium">Saved session preview</h3><p className="break-all text-xs text-t-muted">Revision {answer.resolved.revision}. Instructions and the selected style are included; skills are loaded on use. Current chats retain their connection’s snapshot.</p><pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">{answer.guidance}</pre></div></details>}
     </>}
+    <Dialog open={!!deleting} onOpenChange={open => { if (!open && !saving) setDeleting(undefined); }}>
+      <DialogContent role="alertdialog" hideClose>
+        <DialogTitle>Delete {deleting?.row.item.name}?</DialogTitle>
+        <DialogDescription>
+          {projectPath ? 'This removes the item owned by this project.' : 'This removes the global item for every project that inherits it.'}
+          {deleting?.row.folder_source ? <><span className="mt-2 block">The entire skill folder, including scripts and assets, will move to a recoverable archive outside the active library.</span><span className="mt-2 block break-all font-mono text-xs">{deleting.source ?? deleting.row.folder_source}</span>{deleting.files !== undefined && <span className="mt-1 block">{deleting.files} files or links included.</span>}</> : <span className="mt-2 block">This deletes the saved library entry. There is no undo button.</span>}
+          <span className="mt-2 block">Existing chat snapshots retain their copy until reconnected.</span>
+        </DialogDescription>
+        {deleteError && <div role="alert" className="text-sm text-danger"><p>{deleteError}</p><Button variant="ghost" disabled={saving} onClick={() => { setDeleting(undefined); void load(); }}>Reload settings</Button></div>}
+        <DialogFooter><Button variant="outline" disabled={saving} onClick={() => setDeleting(undefined)}>Cancel</Button><Button variant="destructive" disabled={saving || !!deleteError || (!!deleting?.row.folder_source && !deleting.revision)} onClick={() => void deleteItem()}>{saving ? 'Please wait…' : `Delete ${deleting?.row.item.kind === 'skill' ? deleting.row.item.automatic ? 'skill' : 'command' : deleting?.row.item.kind === 'output_style' ? 'output style' : 'instruction'}`}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>;
 }
 

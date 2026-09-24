@@ -15,6 +15,145 @@ fn setup() -> (tempfile::TempDir, tempfile::TempDir) {
 }
 
 #[test]
+fn folder_deletion_archives_exact_scope_and_preserves_pinned_copies() {
+    use atelier::workbench::skill_folders::{delete_read, delete_write};
+    for local in [false, true] {
+        let (data, project) = setup();
+        let scope = local.then_some(project.path());
+        let base = if local { project.path().join(".atelier") } else { data.path().to_path_buf() };
+        put(&base, "skills/removable/SKILL.md", "Original procedure");
+        put(&base, "skills/removable/assets/binary", [0, 255, 8]);
+        put(&base, "skills/removable/scripts/run.py", "print('original')");
+        let pinned = library::resolve(data.path(), scope).unwrap();
+        let plan = delete_read(data.path(), scope, "removable").unwrap();
+        assert_eq!(plan.files, 3);
+        assert_eq!(plan.source, fs::canonicalize(base.join("skills/removable")).unwrap());
+        assert!(delete_read(data.path(), if local { None } else { Some(project.path()) }, "removable").is_err());
+        put(&base, "skills/removable/assets/binary", [0, 255, 9]);
+        assert!(delete_write(data.path(), scope, "removable", &plan.revision).unwrap_err().contains("changed"));
+        let plan = delete_read(data.path(), scope, "removable").unwrap();
+        put(&base, "skills/removable/SKILL.md", "Updated procedure");
+        assert!(delete_write(data.path(), scope, "removable", &plan.revision).is_err());
+        let plan = delete_read(data.path(), scope, "removable").unwrap();
+        let archive = delete_write(data.path(), scope, "removable", &plan.revision).unwrap();
+        assert!(archive.starts_with(base.join("deleted-skills")));
+        assert!(!base.join("skills/removable").exists());
+        assert_eq!(fs::read(archive.join("assets/binary")).unwrap(), [0,255,9]);
+        assert_eq!(fs::read_to_string(archive.join("scripts/run.py")).unwrap(), "print('original')");
+        assert_eq!(fs::read_to_string(archive.join("SKILL.md")).unwrap(), "Updated procedure");
+        assert!(library::resolve(data.path(), scope).unwrap().read_skill("removable", None).is_err());
+        assert!(pinned.read_skill("removable", None).unwrap().contains("Original procedure"));
+        assert_eq!(fs::read(pinned.items.iter().find(|row| row.item.id == "removable").unwrap().folder.as_ref().unwrap().directory.join("assets/binary")).unwrap(), [0,255,8]);
+        assert!(delete_read(data.path(), scope, "../removable").is_err());
+        assert!(delete_read(data.path(), scope, "atelier-app").is_err());
+        put(&base, "skills/invalid/SKILL.md", "---\ninvalid: [");
+        put(&base, "skills/invalid/atelier.json", "not JSON");
+        let invalid = delete_read(data.path(), scope, "invalid").unwrap();
+        let archive = delete_write(data.path(), scope, "invalid", &invalid.revision).unwrap();
+        assert_eq!(fs::read_to_string(archive.join("atelier.json")).unwrap(), "not JSON");
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn folder_deletion_never_follows_links_and_refuses_linked_roots_or_archives() {
+    use atelier::workbench::skill_folders::{delete_read, delete_write};
+    use std::os::unix::fs::symlink;
+    let (data, project) = setup();
+    put(data.path(), "skills/links/SKILL.md", "Body");
+    put(project.path(), "outside", "Do not modify");
+    symlink(project.path().join("outside"), data.path().join("skills/links/outside-link")).unwrap();
+    symlink("SKILL.md", data.path().join("skills/links/internal-link")).unwrap();
+    symlink("absent", data.path().join("skills/links/dangling-link")).unwrap();
+    let plan = delete_read(data.path(), None, "links").unwrap();
+    assert_eq!(plan.files, 4);
+    symlink(data.path().join("skills/links"), data.path().join("skills/root-link")).unwrap();
+    assert!(delete_read(data.path(), None, "root-link").is_err());
+    symlink(project.path(), data.path().join("deleted-skills")).unwrap();
+    assert!(delete_write(data.path(), None, "links", &plan.revision).is_err());
+    fs::remove_file(data.path().join("deleted-skills")).unwrap();
+    let archive = delete_write(data.path(), None, "links", &plan.revision).unwrap();
+    assert_eq!(fs::read_link(archive.join("outside-link")).unwrap(), project.path().join("outside"));
+    assert_eq!(fs::read_link(archive.join("internal-link")).unwrap(), Path::new("SKILL.md"));
+    assert_eq!(fs::read_link(archive.join("dangling-link")).unwrap(), Path::new("absent"));
+    assert_eq!(fs::read_to_string(project.path().join("outside")).unwrap(), "Do not modify");
+    let alternate = tempfile::tempdir().unwrap();
+    fs::create_dir_all(alternate.path().join("source/one")).unwrap();
+    put(alternate.path(), "source/one/SKILL.md", "Body");
+    symlink(alternate.path().join("source"), alternate.path().join("skills")).unwrap();
+    assert!(delete_read(alternate.path(), None, "one").is_err());
+}
+
+#[test]
+fn project_skill_switches_cover_both_sources_and_storage_formats() {
+    for folder in [false, true] {
+        for local in [false, true] {
+            for automatic in [false, true] {
+                let (data, project) = setup();
+                let other = tempfile::tempdir().unwrap();
+                project_manifest::create(other.path(), data.path(), ManifestStorage::Repository,
+                    &project_manifest::infer_virtual("Other project")).unwrap();
+                let scope = local.then_some(project.path());
+                if folder {
+                    let base = if local { project.path().join(".atelier") } else { data.path().to_path_buf() };
+                    put(&base, "skills/toggle/SKILL.md", "---\nname: Toggle\ndescription: Distinct trigger\n---\nOriginal {{value}}");
+                    put(&base, "skills/toggle/references/guide.md", "Supporting resource");
+                    put(&base, "skills/toggle/atelier.json", serde_json::to_vec(&serde_json::json!({
+                        "automatic": automatic, "parameters": {"value": "original"}
+                    })).unwrap());
+                } else {
+                    let held = library::read(data.path(), scope).unwrap();
+                    let mut changed = held.clone();
+                    changed.items.push(serde_json::from_value(serde_json::json!({
+                        "id": "toggle", "name": "Toggle", "kind": "skill", "description": "Distinct trigger",
+                        "content": "Original {{value}}", "automatic": automatic,
+                        "parameters": {"value": "original"}, "resources": {"references/guide.md": "Supporting resource"}
+                    })).unwrap());
+                    library::write(data.path(), scope, &changed, &library::revision(&held)).unwrap();
+                }
+                let global_before = library::resolve(data.path(), None).unwrap();
+                let other_before = library::resolve(data.path(), Some(other.path())).unwrap();
+                let before = library::resolve(data.path(), Some(project.path())).unwrap();
+                assert!(before.read_skill("toggle", None).unwrap().contains("Original original"));
+                let held = library::read(data.path(), Some(project.path())).unwrap();
+                let mut changed = held.clone();
+                changed.overrides.insert("toggle".into(), serde_json::from_value(serde_json::json!({
+                    "disabled": true, "content": "Custom {{value}}", "automatic": !automatic,
+                    "parameters": {"value": "custom"}, "when": {"op": "always"}
+                })).unwrap());
+                library::write(data.path(), Some(project.path()), &changed, &library::revision(&held)).unwrap();
+                assert!(library::read(data.path(), Some(project.path())).unwrap().overrides["toggle"].disabled);
+                let off = library::resolve(data.path(), Some(project.path())).unwrap();
+                assert_eq!(off.items.iter().find(|row| row.item.id == "toggle").unwrap().state, "disabled");
+                assert!(!off.guidance().contains("Available skill toggle"));
+                assert!(!off.commands().iter().any(|command| command["name"] == "skill:toggle"));
+                assert!(off.mcp_servers().unwrap().is_empty());
+                assert!(off.read_skill("toggle", None).unwrap_err().contains("disabled"));
+                assert!(off.read_skill("toggle", Some("references/guide.md")).is_err());
+                assert!(off.expand("/skill:toggle arguments").is_err());
+                assert_eq!(library::resolve(data.path(), None).unwrap().revision, global_before.revision);
+                assert_eq!(library::resolve(data.path(), Some(other.path())).unwrap().revision, other_before.revision);
+                // A pre-existing connection keeps its immutable snapshot until reconnect.
+                assert!(before.read_skill("toggle", None).is_ok());
+                let held = library::read(data.path(), Some(project.path())).unwrap();
+                let mut changed = held.clone();
+                changed.overrides.get_mut("toggle").unwrap().disabled = false;
+                library::write(data.path(), Some(project.path()), &changed, &library::revision(&held)).unwrap();
+                let on = library::resolve(data.path(), Some(project.path())).unwrap();
+                let row = on.items.iter().find(|row| row.item.id == "toggle").unwrap();
+                assert_eq!(row.state, "available");
+                assert_eq!(row.item.automatic, if local { automatic } else { !automatic });
+                assert_eq!(on.guidance().contains("Available skill toggle"), row.item.automatic);
+                assert!(on.read_skill("toggle", None).unwrap().contains(if local { "Original original" } else { "Custom custom" }));
+                assert!(on.commands().iter().any(|command| command["name"] == "skill:toggle"));
+                assert!(on.expand("/skill:toggle arguments").is_ok());
+                assert!(on.read_skill("toggle", Some("references/guide.md")).is_ok());
+            }
+        }
+    }
+}
+
+#[test]
 fn folder_editor_preserves_native_metadata_assets_and_refuses_stale_writes() {
     use atelier::workbench::skill_folders::{edit_read, edit_write};
     let (data, project) = setup();

@@ -53,6 +53,86 @@ pub struct Editor {
     pub revision: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct DeletePlan {
+    pub revision: String,
+    pub source: PathBuf,
+    pub files: usize,
+}
+
+fn deletion_path(data: &Path, root: Option<&Path>, id: &str) -> Result<PathBuf, String> {
+    if !super::library::valid_id(id) || id.starts_with("atelier-") { return Err("Invalid skill folder ID".into()); }
+    let scope = super::library::library_path(data, root)?.parent().unwrap().to_path_buf();
+    let path = scope.join("skills").join(id);
+    for target in [&scope, &scope.join("skills"), &path] {
+        let metadata = fs::symlink_metadata(target).map_err(|e| e.to_string())?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() { return Err("Cannot delete a symlinked or non-directory skill source".into()); }
+    }
+    // Invalid metadata is still removable. Never parse it or follow its links.
+    fs::symlink_metadata(path.join("SKILL.md")).map_err(|_| "Skill folder not found".to_string())?;
+    fs::canonicalize(path).map_err(|e| e.to_string())
+}
+
+fn deletion_plan(path: &Path) -> Result<DeletePlan, String> {
+    fn walk(path: &Path, relative: &Path, hash: &mut Sha256, entries: &mut usize, files: &mut usize, total: &mut u64, depth: usize) -> Result<(), String> {
+        if depth > 40 || *entries >= 4096 { return Err("Skill deletion exceeds 40 levels or 4096 entries".into()); }
+        *entries += 1;
+        let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+        let name = relative.as_os_str().as_encoded_bytes();
+        hash.update((name.len() as u64).to_le_bytes()); hash.update(name);
+        #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; hash.update(metadata.permissions().mode().to_le_bytes()); }
+        if metadata.file_type().is_symlink() {
+            hash.update(b"link");
+            let target = fs::read_link(path).map_err(|e| e.to_string())?;
+            let bytes = target.as_os_str().as_encoded_bytes();
+            hash.update((bytes.len() as u64).to_le_bytes()); hash.update(bytes); *files += 1;
+        } else if metadata.is_dir() {
+            hash.update(b"directory");
+            let mut children = fs::read_dir(path).map_err(|e| e.to_string())?
+                .take(4097).map(|entry| entry.map(|entry| entry.file_name())).collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+            if children.len() > 4096 { return Err("Skill deletion exceeds 4096 entries".into()); }
+            children.sort();
+            for child in children { walk(&path.join(&child), &relative.join(&child), hash, entries, files, total, depth + 1)?; }
+        } else if metadata.is_file() {
+            if metadata.len() > 64 * 1024 * 1024 || *total + metadata.len() > 256 * 1024 * 1024 { return Err("Skill deletion exceeds 64 MiB/file or 256 MiB total".into()); }
+            let bytes = bounded_read(path, (64 * 1024 * 1024).min(256 * 1024 * 1024 - *total))?;
+            hash.update(b"file"); hash.update((bytes.len() as u64).to_le_bytes()); hash.update(&bytes);
+            *total += bytes.len() as u64; *files += 1;
+        } else { return Err("Cannot delete a skill containing special files".into()); }
+        Ok(())
+    }
+    let mut hash = Sha256::new();
+    let (mut entries, mut files, mut total) = (0, 0, 0);
+    walk(path, Path::new(""), &mut hash, &mut entries, &mut files, &mut total, 0)?;
+    Ok(DeletePlan { revision: format!("{:x}", hash.finalize()), source: path.into(), files })
+}
+
+pub fn delete_read(data: &Path, root: Option<&Path>, id: &str) -> Result<DeletePlan, String> {
+    let _guard = super::library::WRITES.lock().map_err(|e| e.to_string())?;
+    deletion_plan(&deletion_path(data, root, id)?)
+}
+
+pub fn delete_write(data: &Path, root: Option<&Path>, id: &str, expected: &str) -> Result<PathBuf, String> {
+    let _guard = super::library::WRITES.lock().map_err(|e| e.to_string())?;
+    let path = deletion_path(data, root, id)?;
+    if deletion_plan(&path)?.revision != expected { return Err("Skill changed in another editor. Reload before deleting.".into()); }
+    let archive_root = path.parent().unwrap().parent().unwrap().join("deleted-skills");
+    match fs::create_dir(&archive_root) {
+        Ok(()) => (),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => (),
+        Err(error) => return Err(error.to_string()),
+    }
+    let metadata = fs::symlink_metadata(&archive_root).map_err(|e| e.to_string())?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() { return Err("Skill archive must be a real directory".into()); }
+    let archive = tempfile::Builder::new().prefix("deleted-").tempdir_in(&archive_root).map_err(|e| e.to_string())?;
+    let destination = archive.path().join(id);
+    // Catch ordinary external writes during preparation as well as stale dialogs.
+    if deletion_path(data, root, id)? != path || deletion_plan(&path)?.revision != expected { return Err("Skill changed in another editor. Reload before deleting.".into()); }
+    fs::rename(&path, &destination).map_err(|e| e.to_string())?;
+    let _ = archive.keep();
+    Ok(destination)
+}
+
 fn editable_path(data: &Path, root: Option<&Path>, id: &str) -> Result<PathBuf, String> {
     if !super::library::valid_id(id) || id.starts_with("atelier-") {
         return Err("Invalid skill folder ID".into());
