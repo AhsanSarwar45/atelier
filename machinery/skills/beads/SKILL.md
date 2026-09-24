@@ -7,9 +7,9 @@ description: Use Atelier's native Beads workflow commands for durable work track
 
 ## Completion contract
 
-Done means `board/land` put the work on the project's completed-work branch
-(main here). Nothing else makes work Done; deployment, cleanup and presentation
-are not part of it.
+Done means landed on the project's completed-work branch (main here). A card
+becomes Done only through `board/land`. Installation, deployment, cleanup and
+presentation are not part of Done.
 
 A card is Todo until claimed, then In Progress. Review and Manager Review come
 before landing. Cancelled means the scope was withdrawn, not delivered; record
@@ -31,7 +31,8 @@ Reopening a child reopens its ancestors.
 1. Find existing work with `bd ready`, `bd list` or `bd search`. Read its
    acceptance with `bd show ID`.
 2. If nothing fits, create a job. Each `--do` adds one work item; without
-   `--do`, one item repeats the job. `job under` adds items later.
+   `--do`, the job gets one item with the same what and done. `job under` adds
+   items later.
 
    ```bash
    atelier tool board/job new --what 'OUTCOME' --done 'ACCEPTANCE' --area AREA --kind bug --do 'WORK|ACCEPTANCE'
@@ -41,7 +42,8 @@ Reopening a child reopens its ancestors.
    Ticket-writing preferences are guidance, not gates. Any nonempty acceptance
    is enough. Do not add checking or teardown cards to fit a template.
 3. Make one worktree for the whole job, then claim the child you work on. Do not
-   claim the epic. An older standalone card is its own job.
+   claim the epic. For an older standalone card, its ID is the job ID; claim
+   that card itself.
 
    ```bash
    git -C . worktree add worktrees/JOB-ID -b JOB-ID
@@ -69,17 +71,20 @@ atelier tool review CARD-ID --provider claude
 atelier tool board/land CARD-ID
 ```
 
-- The commit subject must start with the card ID: `CARD-ID: outcome` or
-  `fix(CARD-ID): outcome`. A mention elsewhere does not count.
+- The card ID must appear in the commit subject before the first colon:
+  `CARD-ID: outcome` or `fix(CARD-ID): outcome`. A mention after the colon or
+  in the body does not count.
 - `checks` is optional. `board/land` runs any missing checks itself.
 - Review follows the project's `external_review` policy. With `always`,
-  `board/land` requires it. With `agent_decides`, you choose. With `never`, the
-  review tool refuses. Use the external-review skill for the review itself, and
-  resolve its findings before landing.
+  `board/land` requires it. With `agent_decides`, it is your call unless the
+  card or a parent requires it (it is in Review, or was created with review
+  steps); then `board/land` requires it too. With `never`, the review tool
+  refuses. Run `atelier tool review`; the external-review skill describes how.
+  Resolve findings before landing.
 - Checks and review apply to the exact committed tree. Any change to the tree
   makes them stale. A rebase that keeps the tree does not.
-- If the project requires visual proof, capture it before landing. The lander
-  does not check it for you.
+- Capture visual proof for interface changes (see the Atelier instructions)
+  before landing. The lander does not check it for you.
 - Only the manager records a manager decision, and it must exist before landing.
 - `board/land` checks review and approval, rebases, fast-forwards main and
   closes every card the commits name. With no declared suite there is no check
@@ -100,8 +105,8 @@ So a failing suite is never a reason to mark work blocked. Always run
 
 ## Ownership
 
-Hooks stamp your session as the board actor. Act only on cards your session
-owns; another card's assignee is not yours to act as.
+Hooks stamp your session as the board actor. Act only on cards you have
+claimed; another card's assignee is not yours to act as.
 
 If an account or session change stranded your claim, first confirm the old
 session has stopped. Then run this inside the job worktree:
@@ -118,8 +123,8 @@ active.
   headers; read its evidence before applying.
 - Old workflow-step cards (labelled `no-code` plus a `step:` label) are not
   deliverables. `board/land` refuses them. Reconcile marks them Done when the
-  work they belong to lands; they are never marked Cancelled. `--retire-steps`
-  is an alias for reconcile.
+  work they belong to lands; they are never marked Cancelled. The
+  `--retire-steps` flag is accepted and does the same as plain reconcile.
 - After the job is Done, run `atelier tool board/cleanup JOB-ID` from another
   checkout. `--force` first archives untracked files in the common Git
   directory; ignored build output is deleted. Tracked changes always stop
@@ -147,7 +152,8 @@ If a gate refuses a command wrongly, rerun only that command with a reason:
 keeps your actor. Then record it at once with
 `bd update CARD-ID --append-notes='Hook friction: command; refusal; expected behavior; workaround'`.
 This works after landing too and needs no new card. If you own the gate's
-repair, also add the entry to the repository's hook-friction journal.
+repair, also add the entry to a hook-friction journal in that job's worktree.
+Never edit the main checkout after landing just to log it.
 
 Never export a standing bypass, reassign the card to the Git user, or use a
 bypass to fake completion. Declared suites run without it.

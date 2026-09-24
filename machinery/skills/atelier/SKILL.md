@@ -53,14 +53,14 @@ If another Atelier tool already returned the image as an asset, pass
 Images must be PNG, JPEG, GIF or WebP, up to 25 MiB. Never invent an asset name
 or put a temporary path in widget JSON.
 
-Write source files in the project or a temporary directory. The presenter
-uploads its bytes to the running Atelier app. The app validates them, writes
-them to the one durable media directory every copy of Atelier on the computer
-reads, and returns the block. The image is kept in content-addressed storage,
-so it remains available after reload, even when you present from a worktree's
-own copy of the app. You only need read access to the source file. You must
-never create or write `ATELIER_DATA_DIR` or `presentation-media`, set a
-media-directory variable, or request provider-specific filesystem permission.
+Write source files in the project or a temporary directory; you need only
+read access. The presenter uploads its bytes to the running Atelier app. The
+app validates them, writes them to the one durable media directory every copy
+of Atelier on the computer reads, and returns the block. Because it is
+content-addressed storage, the image remains available after reload, even from
+a worktree's copy of the app. You must never create or write
+`ATELIER_DATA_DIR` or `presentation-media`, set a media-directory variable, or
+request provider-specific filesystem permission.
 
 ## Widgets
 
@@ -115,7 +115,7 @@ layout from the relationship:
 Use 2–12 nodes, in reading, actor, cycle or layer order. Use 1–20 edges, only
 for real relationships. Use 1–12 steps; each step lists the nodes it activates.
 Optional `evidence` holds at most 12 items of `label`, absolute `path` and
-positive `line`. Atelier assigns semantic accent colors automatically, so labels
+optional positive `line`. Atelier assigns semantic accent colors automatically, so labels
 must carry the meaning without color. Show uncertainty in prose, never as a
 drawn relationship. Never include HTML, JavaScript, remote code, executable
 instructions or data URLs.
@@ -159,11 +159,11 @@ meaningful before state, capture the result and show it with
 for the manager to ask.
 
 Capture with `atelier tool screen-check` (`--help` for syntax). It navigates
-only the URL you give. It never starts, stops, installs or reconfigures the app,
-so start the app first. Web captures use a fresh browser profile, never your
+only the URL you give. It never starts, stops, installs or reconfigures the app;
+the app must already be running at that URL. Web captures use a fresh browser profile, never your
 cookies or session. If you are unsure which route fits, run
 `atelier tool screen-check plan [--target URL|FILE] [--window-id ID] [--recipe FILE]`
-and follow the command it returns.
+and follow the command it returns; do not widen the capture.
 
 | Need | Use |
 |---|---|
@@ -199,7 +199,9 @@ check. Accept the verdict; do not reopen the images to judge them again.
 
 ### Browser recipes
 
-A recipe is JSON with these fields; unknown fields are rejected:
+Top-level fields: `url`, `timeout_ms`, `device` or `viewport`
+(`{width, height}`), `locale`, `timezone`, `theme`, `auth`, `actions`,
+`settle`, `capture`. Anything else is rejected. Example:
 
 ```json
 {
@@ -235,15 +237,16 @@ A recipe is JSON with these fields; unknown fields are rejected:
   cannot work. Set `settle.disable_animations` to `false` only when the
   animation is the evidence.
 - `capture.mode`: `viewport` (default), `full_page`, `element` with one stable
-  `selector`, or `clip` with `capture.clip` set to non-negative `x`, `y`,
-  `width` and `height`.
+  `selector`, or `clip` with `capture.clip` set to `{x, y, width, height}`:
+  `x` and `y` at least 0, `width` and `height` at least 1.
 - `device` is `desktop`, `tablet` or `mobile` and fixes viewport, scale and
   touch. Do not combine it with `viewport`. `locale` and `timezone` default to
   `en-US` and `UTC`; set them when the state depends on them.
 
 ### Reading results
 
-- Browser captures include visible DOM text. `check` and `compare` report
+- Browser captures report the final URL, redirects, status, console and
+  network failure counts, visible DOM text and an accessibility outline. `check` and `compare` report
   `visible_text.source=vision`; never present vision text as DOM text or merge
   the two.
 - Image and window captures have no text until a check runs
