@@ -245,71 +245,75 @@ function ResetRow({
   const granted = expiryReads(reset.grantedAt);
   const refills = clearsReads(reset.clears);
   return (
-    <li
-      className="rounded-md border border-border/60 bg-background/60 p-3"
+    <Panel
+      asChild
+      tone="frame"
+      inset="md"
       data-testid="usage-reset"
       data-reset={reset.id}
       data-usable={reset.usable}
     >
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-foreground">{reset.title}</p>
-          {reset.detail && <p className="mt-0.5 text-xs text-muted-foreground">{reset.detail}</p>}
-          <p className="mt-1 text-[11px] text-muted-foreground" data-testid="usage-reset-expiry">
-            {expires ? `Expires ${expires}${until ? ` · in ${until}` : ''}` : 'Does not expire'}
-            {granted ? ` · Granted ${granted}` : ''}
-            {reset.left !== null && reset.left > 1 ? ` · ${reset.left} uses left` : ''}
-          </p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">Refills your {refills}</p>
-        </div>
-        {!confirming && (
-          <Button
-            size="xs"
-            variant="outline"
-            className="shrink-0"
-            data-testid="usage-reset-use"
-            disabled={!reset.usable || busy}
-            onClick={onAsk}
-          >
-            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-            Use reset
-          </Button>
-        )}
-      </div>
-      {confirming && (
-        <Panel
-          tone="attention"
-          inset="md"
-          className="mt-3"
-          role="alertdialog"
-          aria-labelledby={`reset-ask-${reset.id}`}
-          data-testid="usage-reset-confirmation"
-        >
-          <p id={`reset-ask-${reset.id}`} className="text-sm font-medium text-foreground">
-            Use this reset now?
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            It refills your {refills} straight away and cannot be undone.
-            {spentReads(reset, windows) ? ` ${spentReads(reset, windows)}` : ''}
-          </p>
-          <div className="mt-3 flex justify-end gap-2">
-            <Button size="xs" variant="ghost" data-testid="usage-reset-cancel" disabled={busy} onClick={onCancel}>
-              Keep it
-            </Button>
+        <li>
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-foreground">{reset.title}</p>
+            {reset.detail && <p className="mt-0.5 text-xs text-muted-foreground">{reset.detail}</p>}
+            <p className="mt-1 text-[11px] text-muted-foreground" data-testid="usage-reset-expiry">
+              {expires ? `Expires ${expires}${until ? ` · in ${until}` : ''}` : 'Does not expire'}
+              {granted ? ` · Granted ${granted}` : ''}
+              {reset.left !== null && reset.left > 1 ? ` · ${reset.left} uses left` : ''}
+            </p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">Refills your {refills}</p>
+          </div>
+          {!confirming && (
             <Button
               size="xs"
-              variant="primary"
-              data-testid="usage-reset-confirm"
-              disabled={busy}
-              autoFocus
-              onClick={onConfirm}
+              variant="outline"
+              className="shrink-0"
+              data-testid="usage-reset-use"
+              disabled={!reset.usable || busy}
+              onClick={onAsk}
             >
-              {busy ? 'Using reset…' : 'Yes, use reset'}
+              <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+              Use reset
             </Button>
-          </div>
-        </Panel>
-      )}
-    </li>
+          )}
+        </div>
+        {confirming && (
+          <Panel
+            tone="attention"
+            inset="md"
+            className="mt-3"
+            role="alertdialog"
+            aria-labelledby={`reset-ask-${reset.id}`}
+            data-testid="usage-reset-confirmation"
+          >
+            <p id={`reset-ask-${reset.id}`} className="text-sm font-medium text-foreground">
+              Use this reset now?
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              It refills your {refills} straight away and cannot be undone.
+              {spentReads(reset, windows) ? ` ${spentReads(reset, windows)}` : ''}
+            </p>
+            <div className="mt-3 flex justify-end gap-2">
+              <Button size="xs" variant="ghost" data-testid="usage-reset-cancel" disabled={busy} onClick={onCancel}>
+                Keep it
+              </Button>
+              <Button
+                size="xs"
+                variant="primary"
+                data-testid="usage-reset-confirm"
+                disabled={busy}
+                autoFocus
+                onClick={onConfirm}
+              >
+                {busy ? 'Using reset…' : 'Yes, use reset'}
+              </Button>
+            </div>
+          </Panel>
+        )}
+        </li>
+    </Panel>
   );
 }
 
