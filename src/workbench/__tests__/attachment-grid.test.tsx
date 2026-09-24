@@ -120,6 +120,14 @@ describe('a message’s pictures on the page', () => {
     expect(looked).toHaveBeenCalledWith(expect.objectContaining({ alt: 'Picture 5' }));
   });
 
+  it('holds each picture in a button named for it, so a keyboard can open it too', () => {
+    const { looked } = drawn(2);
+    const second = screen.getByRole('button', { name: 'Picture 2' });
+    expect(second.querySelector('img[data-testid="message-image"]')).not.toBeNull();
+    fireEvent.click(second);
+    expect(looked).toHaveBeenCalledWith(expect.objectContaining({ alt: 'Picture 2' }));
+  });
+
   it('draws nothing at all for a message with no pictures in it', () => {
     render(<AttachmentGrid files={[]} onLook={vi.fn()} />);
     expect(screen.queryByTestId('attachment-grid')).toBeNull();

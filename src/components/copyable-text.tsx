@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 
 import { Check } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -44,12 +45,21 @@ export function CopyableText({ children, copyText, className }: CopyableTextProp
 
   return (
     <Tooltip label={`Copy ${copyText}`}>
-      <span
+      {/* A button, so the keyboard can copy it too. It is a word on a line
+          of text — a card's id — so on a phone it takes the invisible band
+          rather than the painted floor that would make the line 44px tall. */}
+      <Button
+        type="button"
+        mode="link"
+        variant="inverse"
+        underline="solid"
+        size="inherit"
+        data-reach="band"
         onClick={handleCopy}
-        className={cn("cursor-copy hover:text-t-secondary transition-colors", className)}
+        className={cn("cursor-copy", className)}
       >
         {children}
-      </span>
+      </Button>
     </Tooltip>
   );
 }

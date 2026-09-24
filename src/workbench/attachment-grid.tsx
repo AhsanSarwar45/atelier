@@ -106,20 +106,27 @@ export function AttachmentGrid({ files, onLook }: AttachmentGridProps): JSX.Elem
         // takes the common cell and `AttachmentFace` fills it.
         if (look === 'picture') {
           return (
-            // eslint-disable-next-line @next/next/no-img-element
+            // The picture is inside a button rather than clicked itself, so a
+            // keyboard can reach it and a screen reader hears it as something to
+            // press; the picture keeps its own name, which is the button's too.
             <Tooltip key={i} label="Open full size">
-              <img
-                data-testid="message-image"
-                src={attachmentSrc(file)}
-                alt={file.alt}
+              <Button
+                type="button"
+                variant="foreground"
+                size="none"
+                data-testid="message-image-open"
                 onClick={press}
-                className={cn(
-                  THUMB,
-                  'cursor-zoom-in',
-                  alone ? 'justify-self-start object-contain' : 'aspect-[4/3] w-full object-cover',
-                )}
-                style={alone ? inlineMediaBounds(file) : undefined}
-              />
+                className={cn('block cursor-zoom-in p-0', alone ? 'justify-self-start' : 'w-full')}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  data-testid="message-image"
+                  src={attachmentSrc(file)}
+                  alt={file.alt}
+                  className={cn(THUMB, alone ? 'object-contain' : 'aspect-[4/3] w-full object-cover')}
+                  style={alone ? inlineMediaBounds(file) : undefined}
+                />
+              </Button>
             </Tooltip>
           );
         }
