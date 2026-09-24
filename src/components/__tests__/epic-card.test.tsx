@@ -247,7 +247,7 @@ describe('what a card says it is made of', () => {
       />
     );
     const label = screen.getByText(/1 in progress/);
-    const dot = label.querySelector('div');
+    const dot = label.querySelector('[data-slot="badge-dot"]');
     expect(dot?.className).toMatch(/status-progress/);
     expect(dot?.className).not.toMatch(/status-open/);
   });
