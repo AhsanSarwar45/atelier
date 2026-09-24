@@ -58,6 +58,8 @@ it are moved onto it.
 | A lasting notice in the window's corner | update-banner | `Notice` (`notice.tsx`) |
 | A portal into a slot or onto the body | shell toolbar slots, terminal-window | `Portal` (`portal.tsx`) |
 | A non-modal floating window | terminal-window | `FloatingWindow` (`floating-window.tsx`) |
+| A row laid out as a line of pieces, and a row heading its own box | the rows below | `Row gap`, `Row inset="xs"`, `Row look="quiet"` |
+| A quiet link, a success link, a link inside a sentence | accounts-settings, update-banner, the raw `<a>` links, copyable-text, path-chip | `Button mode="link"` with `variant="dim"` / `variant="success"` / `size="inherit"` |
 
 ## Left alone on purpose
 
@@ -73,6 +75,11 @@ drawing but use library parts for any ordinary control inside them.
 - Hidden form mirrors (`chat-tab.tsx:901` file input, `composer-editor.tsx:392`
   textarea).
 - Colour swatches whose colour is the data (color-picker, theme-switcher).
+- A file chip in the line that opens a tool row (`transcript-rows.tsx`, set
+  through `ChipsInAControl` in `path-chip.tsx`). That line is itself a button,
+  and a button cannot hold another one: the browser closes the outer one at the
+  inner one's tag. The chip there stays a marked `span` that the conversation's
+  listener answers; the same file is a button in the row's body and header.
 
 ## Findings by file
 
@@ -96,31 +103,36 @@ drawing but use library parts for any ordinary control inside them.
 - `terminal-window.tsx` portal and hand-set `role="dialog"` → `FloatingWindow`; the drag and resize handles stay the terminal's
 - `shell.tsx` toolbar-slot portals → `Portal`
 
-### Buttons reshaped into rows
+### Buttons reshaped into rows (done in bw-weih.5)
 
-`Button` with `h-auto w-full justify-start` (or similar) standing in for a list row → `Row`.
+`Row` gained `gap` (a row laid out as a line of pieces), `inset="xs"` and `look="quiet"` (a row heading a box of its own, which lifts its words instead of filling).
 
-- `src/components/agent-files-browser.tsx:235` (file list)
-- `src/components/bead-detail.tsx:445` (related tasks)
-- `src/components/folder-browser.tsx:344` (folder options)
-- `src/components/tag-picker.tsx:140, 212`
-- `src/components/subtask-list.tsx:77`
-- `src/workbench/chat-tab.tsx:682` (todo header)
-- `src/workbench/commit-log.tsx:232`
-- `src/workbench/git-diff-view.tsx:115`
-- `src/workbench/terminal-history.tsx:267`
-- `src/workbench/transcript-rows.tsx:354, 645, 771, 854`
-- `src/workbench/sent-away.tsx:490`
-- `src/workbench/filter-tree.tsx:136`
-- `src/workbench/card-live.tsx:22` (`<a>` styled as a row)
+- `agent-files-browser.tsx` file list and "Available to create" → `Row gap="lg"`, the open file `selected`
+- `bead-detail.tsx` related tasks → `Row gap="md"`
+- `folder-browser.tsx` folder options → `Row role="option"`, the chosen folder `selected`; the beads bar on its edge stays
+- `tag-picker.tsx` tag list and "Create new tag" → `Row gap="md"`
+- `subtask-list.tsx` sub-tasks → `Row gap="md"`, top-aligned
+- `chat-tab.tsx` checklist header → `Row gap="md"`
+- `commit-log.tsx` commits → `Row inset="xs"`, the open commit `selected`; the bar down its edge stays
+- `git-diff-view.tsx` file line → `Row look="quiet"`
+- `terminal-history.tsx` commands → `Row inset="xs"`, the one the arrows are on `selected`
+- `transcript-rows.tsx` "Show all lines" → `Row inset="xs"`; tool, note and thinking lines → `Row look="quiet"` (the note line keeps its family colour and brightens instead)
+- `sent-away.tsx` "show the finished" toggle → `Row gap="sm" inset="xs"`
+- `filter-tree.tsx` kind name → `Row look="quiet"`
+- `card-live.tsx` `<a>` → `Row asChild` around the link
 
-### Links, clickable spans and images
+### Links, clickable spans and images (done in bw-weih.5)
 
-- `src/components/settings/shared-library.tsx:298`, `src/components/settings/provider-settings-panel.tsx:387`, `src/workbench/transcript-rows.tsx:176` | raw `<a className="text-primary underline">` | `Button mode="link" asChild`
-- `src/workbench/accounts-settings.tsx:479`, `src/components/update-banner.tsx:145`, `src/workbench/commit-details.tsx:181, 205` | `Button` turned into a link by class | `Button mode="link"`
-- `src/components/copyable-text.tsx:46` | clickable `<span>` with no keyboard access | `Button`
-- `src/workbench/attachment-grid.tsx:111` | clickable `<img>` | wrapped in `Button`
-- `src/workbench/path-chip.tsx:97`, `src/workbench/git-view.tsx:305` | clickable spans through a delegated listener | `Button mode="link"`
+`Button mode="link"` gained a quiet muted link (`variant="dim"`), a success-coloured one (`variant="success"`), an inline form for a link inside a sentence (`size="inherit"`), and a focus ring.
+
+- `shared-library.tsx`, `provider-settings-panel.tsx`, `transcript-rows.tsx` raw `<a>` → `Button mode="link" underlined="solid" size="inherit" asChild`
+- `accounts-settings.tsx` "Enter a sign-in code" → `Button mode="link" variant="dim" underlined="solid"`
+- `update-banner.tsx` "Update & Restart" → `Button mode="link" variant="success"`; "Skip this version" and "Details" beside it → `Button mode="link" variant="dim"`
+- `commit-details.tsx` "More" / "Less" and the parent commits → `Button mode="link" variant="foreground" size="2xs"`
+- `copyable-text.tsx` clickable `<span>` → `Button mode="link" size="inherit"`, with the band reach on a phone
+- `attachment-grid.tsx` clickable `<img>` → the picture inside a `Button`
+- `path-chip.tsx` link chip → `Button mode="link" size="inherit"`; the chips built into painted HTML are the same button spelled out from `buttonVariants`; the listener is unchanged
+- `git-view.tsx` file name → `Button mode="link" size="inherit"` with the row reach; the listener is unchanged
 
 ### Dividers
 
