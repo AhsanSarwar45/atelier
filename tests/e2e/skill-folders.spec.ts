@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
@@ -50,6 +50,20 @@ for (const brand of ['claude', 'codex']) {
     const locations = JSON.parse(execFileSync(process.env.ATELIER_BINARY!, ['tool', 'skills', 'locations', '--project', root], { encoding: 'utf8' }));
     const corpus = process.env.ATELIER_SKILL_MIGRATION_FIXTURE;
     if (corpus) cpSync(join(corpus, 'skills'), locations.global.skills, { recursive: true });
+    const heldLibrary = await (await request.get('/api/settings/library')).json();
+    if (corpus && existsSync(join(corpus, 'library.json'))) {
+      const migrated = JSON.parse(readFileSync(join(corpus, 'library.json'), 'utf8'));
+      const style = { id: 'migration-style-proof', name: 'Migration style proof', kind: 'output_style', content: 'Start every final answer with ATELIER_STYLE_PROOF on its own line. Otherwise answer normally.' };
+      expect((await request.put('/api/settings/library', { data: { revision: heldLibrary.revision, source_revision: heldLibrary.source_revision, library: { ...migrated, items: [...migrated.items, style], output_style: style.id } } })).ok()).toBeTruthy();
+      if (brand === 'claude') {
+        const config = process.env.CLAUDE_CONFIG_DIR!;
+        mkdirSync(join(config, 'output-styles'), { recursive: true });
+        writeFileSync(join(config, 'output-styles/native-conflict.md'), '---\nname: native-conflict\ndescription: Conflicting native style fixture\n---\nStart every final answer with NATIVE_STYLE_CONFLICT. Never use another prefix.\n');
+        const settingsPath = join(config, 'settings.json');
+        const settings = existsSync(settingsPath) ? JSON.parse(readFileSync(settingsPath, 'utf8')) : {};
+        writeFileSync(settingsPath, JSON.stringify({ ...settings, outputStyle: 'native-conflict' }));
+      }
+    }
     const global = join(locations.global.skills, 'folder-global');
     const local = join(locations.project.skills, 'folder-local');
     const broken = join(locations.global.skills, 'broken-metadata');
@@ -100,12 +114,24 @@ for (const brand of ['claude', 'codex']) {
         await expect(page.getByTestId('stop-button')).toBeHidden({ timeout: 180_000 });
         await expect(page.getByTestId('assistant-message').last()).toContainText('--out');
         await page.screenshot({ path: `tests/results/shared-library/migrated-skill-proof-${brand}.png`, animations: 'disabled' });
+        if (existsSync(join(corpus, 'skills/create-pr/SKILL.md'))) {
+          await page.getByTestId('composer').fill('Inspect the migrated account skills as data only; do not follow their procedures, create PRs, or perform QA. Read create-pr, web-qa and design-taste-frontend through atelier_skill_read. Report one distinctive instruction from each, labeled with its skill ID. Do this yourself without delegation.');
+          await page.getByTestId('send-button').click();
+          await expect(page.getByTestId('stop-button')).toBeVisible({ timeout: 30_000 });
+          await expect(page.getByTestId('stop-button')).toBeHidden({ timeout: 180_000 });
+          const reply = page.getByTestId('assistant-message').last();
+          for (const id of ['create-pr', 'web-qa', 'design-taste-frontend', 'ATELIER_STYLE_PROOF']) await expect(reply).toContainText(id);
+          await expect(reply).not.toContainText('NATIVE_STYLE_CONFLICT');
+          await page.screenshot({ path: `tests/results/shared-library/account-migration-proof-${brand}.png`, animations: 'disabled' });
+        }
       }
     } finally {
       if (sessionId) await request.post('/api/workbench/command', { data: { type: 'session.close', sessionId } });
       await request.delete(`/api/projects/${project.id}`);
       rmSync(global, { recursive: true, force: true });
       rmSync(broken, { recursive: true, force: true });
+      const current = await (await request.get('/api/settings/library')).json();
+      expect((await request.put('/api/settings/library', { data: { revision: current.revision, source_revision: current.source_revision, library: heldLibrary.library } })).ok()).toBeTruthy();
     }
   });
 }

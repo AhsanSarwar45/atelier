@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { CLAUDE_PAGES, CODEX_PAGES } from '@/components/settings/provider-schema';
 
 describe('provider setting descriptions', () => {
+  it('does not offer a competing native output-style control', () => {
+    expect(CLAUDE_PAGES.flatMap(page => page.groups.flatMap(group => group.settings)).some(setting => setting.key === 'outputStyle')).toBe(false);
+  });
   it('explains every setting beside its control', () => {
     for (const page of [...CLAUDE_PAGES, ...CODEX_PAGES]) {
       for (const group of page.groups) {

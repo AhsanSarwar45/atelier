@@ -65,6 +65,10 @@ impl ClaudeSessionOptions {
             "--include-partial-messages".into(),
             "--include-hook-events".into(),
             "--setting-sources=user,project,local".into(),
+            // Atelier owns presentation guidance. Override only the native
+            // style for this process; keep account/project hooks and permissions.
+            "--settings".into(),
+            r#"{"outputStyle":"default"}"#.into(),
         ];
         if self.without_mcp_servers {
             args.push("--strict-mcp-config".into());
@@ -623,6 +627,14 @@ mod tests {
         // it must not be told to use only the (empty) list named on the line.
         assert!(!args.iter().any(|arg| arg == "--strict-mcp-config"));
         assert!(!args.iter().any(|arg| arg == "--mcp-config"));
+    }
+
+    #[test]
+    fn native_claude_uses_atelier_style_without_disabling_native_settings() {
+        let args = ClaudeSessionOptions::default().command_args();
+        let settings = args.windows(2).find(|pair| pair[0] == "--settings").unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&settings[1]).unwrap(), json!({"outputStyle":"default"}));
+        assert!(args.iter().any(|arg| arg == "--setting-sources=user,project,local"));
     }
 
     #[test]

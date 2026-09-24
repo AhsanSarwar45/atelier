@@ -86,9 +86,24 @@ and Python bytecode caches are omitted. The text reader accepts resources up to
 An invalid folder is shown as unavailable with its error and editable source
 path; it does not prevent valid skills, chats or the settings editor from loading.
 
-Folder-backed cards show their editable source path. Edit those files directly;
-project customizations still use the shared settings editor. To migrate a complete
+Folder-backed cards offer Edit for instructions, name, description, conditions,
+requirements and parameters. Saves preserve supporting scripts/assets and native
+YAML fields, and reject stale drafts; YAML comments/formatting may be normalized.
+Project customizations still use the shared settings editor. Supporting files can
+be edited directly at the source path. To migrate a complete
 native skill, copy its whole folder, not just SKILL.md through native-file import.
+
+Atelier chats use the shared output-style selection: a project selection replaces
+the global selection. Native Claude and Claude ACP sessions explicitly select the
+provider's default style so its separate outputStyle setting does not compete.
+Other native settings, hooks, permissions and MCP remain enabled. Administrative
+managed policy is not bypassed. Provider settings link to Agent guidance instead
+of exposing a second style selector; native terminal sessions remain unchanged.
+
+Agent files has a right-click Delete file action in global and project settings.
+It confirms the exact account/scope path and deletes only that file (a symlink is
+unlinked, not followed). Deleting SKILL.md does not delete its sibling scripts or
+assets. The action is not a migration tool and does not automatically archive files.
 
 ## Persistence and running chats
 

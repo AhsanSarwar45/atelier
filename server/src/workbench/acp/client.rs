@@ -873,6 +873,12 @@ fn session_meta(brand: &str, policy: &str) -> Meta {
     let mut meta = Meta::new();
     meta.insert("atelier".into(), json!({"sessionPolicy": policy}));
     if brand == "claude" {
+        // The pinned Claude ACP adapter forwards these SDK options to its
+        // per-process flag-settings layer. Leave native settings files intact.
+        meta.insert(
+            "claudeCode".into(),
+            json!({"options":{"settings":{"outputStyle":"default"}}}),
+        );
         meta.insert(
             "systemPrompt".into(),
             json!({
@@ -4968,6 +4974,16 @@ mod tests {
         assert_eq!(claude["systemPrompt"]["type"], "preset");
         assert_eq!(claude["systemPrompt"]["preset"], "claude_code");
         assert_eq!(claude["systemPrompt"]["append"], "shared policy");
+    }
+
+    #[test]
+    fn acp_claude_uses_atelier_style_without_replacing_other_native_settings() {
+        let claude = session_meta("claude", "shared policy");
+        assert_eq!(claude["claudeCode"]["options"], json!({"settings":{"outputStyle":"default"}}));
+        assert_eq!(claude["systemPrompt"]["append"], "shared policy");
+        for brand in ["codex", "local"] {
+            assert!(!session_meta(brand, "shared policy").contains_key("claudeCode"));
+        }
     }
 
     /// Measured against the pinned claude adapter (0.73.0): a `session/load`

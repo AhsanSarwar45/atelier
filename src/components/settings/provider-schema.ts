@@ -125,9 +125,6 @@ export const CLAUDE_PAGES: ProviderPageDef[] = [
         id: 'behaviour',
         title: 'Behaviour',
         settings: [
-          { key: 'outputStyle', label: 'Output style', description: 'Controls how Claude writes responses', control: { kind: 'choice', free: true, plus: 'outputStyles', choices: [
-            { value: 'Default', label: 'Default' }, { value: 'Proactive', label: 'Proactive' }, { value: 'Concise', label: 'Concise' }, { value: 'Explanatory', label: 'Explanatory' }, { value: 'Learning', label: 'Learning' },
-          ] } },
           { key: 'language', label: 'Language', description: 'Preferred language for responses', control: { kind: 'choice', free: true, choices: LANGUAGES } },
           { key: 'autoCompactEnabled', label: 'Compact automatically', description: 'Summarize older context before the limit is reached', control: yesNo },
           { key: 'autoCompactWindow', label: 'Compact at', description: 'Token count that starts automatic compaction', control: { kind: 'number', min: 100000, max: 1000000, step: 10000 } },

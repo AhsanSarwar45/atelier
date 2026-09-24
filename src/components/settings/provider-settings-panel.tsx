@@ -384,6 +384,11 @@ export function ProviderSettingsPanel({
 
   return (
     <div data-testid={`provider-settings-${brand}-${page}`}>
+      {brand === 'claude' && page === 'defaults' && <p className="mb-4 text-sm text-t-secondary" data-testid="shared-output-style-link">Output styles are managed in Agent guidance for all providers. Claude’s native output-style setting does not apply to Atelier chats. <a className="text-primary underline underline-offset-4" href="/settings?section=library&guidance=output_style" onClick={event => {
+        if (scope.kind !== 'project') return;
+        event.preventDefault();
+        const destination = new URL(window.location.href); destination.searchParams.set('settings', 'library'); destination.searchParams.set('guidance', 'output_style'); window.location.assign(destination);
+      }}>Manage output styles</a></p>}
       {refused && (
         <Panel tone="danger" role="alert" className="mb-4 text-sm text-danger">
           {refused}
