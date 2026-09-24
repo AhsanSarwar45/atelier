@@ -112,13 +112,10 @@ export function TagPicker({
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
-          size="sm"
+          size="2xs"
+          radius="full"
           aria-label="Add tag"
-          className={cn(
-            "h-6 gap-1 rounded-full px-2 text-xs text-t-tertiary",
-            "hover:bg-surface-overlay",
-            className
-          )}
+          className={cn("text-t-tertiary hover:bg-surface-overlay", className)}
           onClick={(e) => {
             // Only stop propagation to prevent Link navigation
             // Do NOT call e.preventDefault() - let Radix handle the click
@@ -189,17 +186,16 @@ export function TagPicker({
               </div>
               <div className="flex items-center gap-1">
                 <Button
-                  size="sm"
-                  className="h-7 flex-1"
+                  size="xs"
+                  className="flex-1"
                   onClick={handleCreateTag}
                   disabled={!newTagName.trim() || isLoading}
                 >
                   Create
                 </Button>
                 <Button
-                  size="sm"
+                  size="xs"
                   variant="ghost"
-                  className="h-7"
                   onClick={handleCancelCreate}
                   aria-label="Cancel"
                 >

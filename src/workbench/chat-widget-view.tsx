@@ -238,7 +238,7 @@ export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
       <figure>
         <Tooltip label="Open full size">
         <Button type="button" variant="foreground" aria-label={`Open ${widget.alt} to zoom`}
-          className="group relative block h-auto w-full whitespace-normal p-0" onClick={() => setLooking({ mime: 'image/*', dataUrl: presentationAssetUrl(widget.asset), alt: widget.alt })}>
+          size="none" className="group relative block w-full whitespace-normal" onClick={() => setLooking({ mime: 'image/*', dataUrl: presentationAssetUrl(widget.asset), alt: widget.alt })}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={presentationAssetUrl(widget.asset)} alt={widget.alt} className="max-h-[38rem] w-full cursor-zoom-in rounded-md object-contain transition-opacity group-hover:opacity-90" />
           <span aria-hidden className="absolute right-2 top-2 rounded-full bg-background/90 p-2 shadow"><ZoomIn className="size-4" /></span>

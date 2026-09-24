@@ -456,7 +456,7 @@ export function ContextChip({
           size="inherit"
           data-testid="context-chip-open"
           aria-label={`Context usage: ${used.toLocaleString()} of ${room.toLocaleString()} tokens`}
-          className="gap-1 p-0"
+          className="gap-1"
           onClick={onOpen}
         >
           {/* Its own mark, like the coins on the cost chip beside it: three bare

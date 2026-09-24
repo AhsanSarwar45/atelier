@@ -1492,9 +1492,9 @@ export const QuestionCard = memo(function QuestionCard({
               )}
               <Button
                 type="button"
-                variant="ghost"
-                size="sm"
-                className="mt-1 h-7 px-1 text-xs text-muted-foreground"
+                variant="dim"
+                size="xs"
+                className="mt-1 px-1"
                 onClick={() => change(question.id, (current) => ({ ...current, noteOpen: !current.noteOpen }))}
               >
                 {draft.noteOpen ? 'Hide note' : 'Add note'}

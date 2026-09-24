@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Copy, ExternalLink, FolderOpen, Pencil } from 'lucide-react';
 
 import { isMarkdownPath } from '@/components/file-kinds';
+import { ToolButton } from '@/components/shell';
 import { BadgeDot } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
@@ -293,8 +294,8 @@ export function FileViewer({
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              className="h-6 px-2 text-[11px] text-t-muted hover:text-t-primary"
+              size="2xs"
+              className="text-t-muted hover:text-t-primary"
               disabled={!edits.dirty || edits.saving}
               data-testid="file-viewer-save"
               onClick={() => void save()}
@@ -302,61 +303,41 @@ export function FileViewer({
               {edits.saving ? 'Saving…' : 'Save'}
             </Button>
           ) : (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 text-t-muted hover:text-t-primary"
-              title="Edit this file"
-              aria-label="Edit this file"
+            <ToolButton
+              size="2xs"
+              icon={<Pencil />}
+              label="Edit this file"
               data-testid="file-viewer-edit"
               onClick={startEditing}
-            >
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
+            />
           ))}
         {file?.kind === 'text' && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 text-t-muted hover:text-t-primary"
-            title="Copy text"
-            aria-label="Copy text"
+          <ToolButton
+            size="2xs"
+            icon={<Copy />}
+            label="Copy text"
             data-testid="file-viewer-copy-text"
             // Pressing it must not be what takes the selection away, or the
             // button would hand over the whole file instead of the lines the
             // reader had just picked out.
             onMouseDown={(event) => event.preventDefault()}
             onClick={copyText}
-          >
-            <Copy className="h-3.5 w-3.5" />
-          </Button>
+          />
         )}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 text-t-muted hover:text-t-primary"
-          title="Open in editor"
-          aria-label="Open in editor"
+        <ToolButton
+          size="2xs"
+          icon={<ExternalLink />}
+          label="Open in editor"
           data-testid="file-viewer-open-editor"
           onClick={() => openLocalPath(path, 'vscode', line)}
-        >
-          <ExternalLink className="h-3.5 w-3.5" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 text-t-muted hover:text-t-primary"
-          title="Reveal in file manager"
-          aria-label="Reveal in file manager"
+        />
+        <ToolButton
+          size="2xs"
+          icon={<FolderOpen />}
+          label="Reveal in file manager"
           data-testid="file-viewer-reveal"
           onClick={() => openLocalPath(path, 'finder')}
-        >
-          <FolderOpen className="h-3.5 w-3.5" />
-        </Button>
+        />
       </div>
 
       {error ? (
@@ -395,8 +376,7 @@ export function FileViewer({
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
-                className="h-5 px-2 text-[11px]"
+                size="2xs"
                 data-testid="file-viewer-reload"
                 onClick={edits.reload}
               >
@@ -405,8 +385,7 @@ export function FileViewer({
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
-                className="h-5 px-2 text-[11px]"
+                size="2xs"
                 data-testid="file-viewer-keep"
                 onClick={edits.keep}
               >

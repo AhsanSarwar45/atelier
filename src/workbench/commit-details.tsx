@@ -141,9 +141,9 @@ export function CommitDetails({ commit, files, onOpen, onLeave }: CommitDetailsP
         </Tooltip>
         <Tooltip label={copied ? 'Copied' : 'Copy the full name'}>
           <Button
-            size="xs"
+            size="2xs"
             variant="ghost"
-            className="h-5 gap-1 px-1 font-mono text-[10px]"
+            className="font-mono"
             data-testid="commit-sha"
             onClick={() => void copy()}
           >

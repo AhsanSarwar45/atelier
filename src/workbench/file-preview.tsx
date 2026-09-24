@@ -271,22 +271,22 @@ function ImagePreview({ path, src, swap }: { path: string; src?: string; swap?: 
         </span>
         <span className="flex-1" />
         <div data-testid="file-preview-zoom" className="flex items-center gap-1">
-          <Button type="button" variant="ghost" size="icon" className="h-5 w-5" aria-label="Zoom out" onClick={() => step(-1)}>
-            <Minus className="h-3 w-3" />
+          <Button type="button" variant="ghost" size="2xs" mode="icon" aria-label="Zoom out" onClick={() => step(-1)}>
+            <Minus />
           </Button>
           <Button
             type="button"
-            size="xs"
+            size="2xs"
             variant="ghost"
             data-testid="file-preview-zoom-level"
-            className="h-5 min-w-[3.5rem] px-1 text-[11px] tabular-nums"
+            className="min-w-[3.5rem] tabular-nums"
             aria-label="Reset zoom and position"
             onClick={() => setTransform(NO_TRANSFORM)}
           >
             {Math.round(zoom * 100)}%
           </Button>
-          <Button type="button" variant="ghost" size="icon" className="h-5 w-5" aria-label="Zoom in" onClick={() => step(1)}>
-            <Plus className="h-3 w-3" />
+          <Button type="button" variant="ghost" size="2xs" mode="icon" aria-label="Zoom in" onClick={() => step(1)}>
+            <Plus />
           </Button>
           {/* The other half of a reachable fit. A floor low enough to fit a
               12000px picture is 3%, and reaching 3% by wheeling — on a phone,
@@ -295,13 +295,13 @@ function ImagePreview({ path, src, swap }: { path: string; src?: string; swap?: 
           <Button
             type="button"
             variant="ghost"
-            size="icon"
-            className="h-5 w-5"
+            size="2xs"
+            mode="icon"
             data-testid="file-preview-fit"
             aria-label="Fit picture to view"
             onClick={() => setTransform({ scale: fitted, x: 0, y: 0 })}
           >
-            <Maximize className="h-3 w-3" />
+            <Maximize />
           </Button>
         </div>
         {/* An SVG reads as source too, and its switch belongs on the bar it

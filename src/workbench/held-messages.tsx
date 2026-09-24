@@ -91,7 +91,7 @@ export function HeldMessages({
                 size="sm"
                 aria-label="Send now"
                 data-testid="held-message-push"
-                className="rounded-full"
+                radius="full"
                 disabled={busyId !== null}
                 onClick={() => onPush(message)}
               >
@@ -105,7 +105,7 @@ export function HeldMessages({
                 size="sm"
                 aria-label="Edit waiting message"
                 data-testid="held-message-edit"
-                className="rounded-full"
+                radius="full"
                 disabled={busyId !== null}
                 onClick={() => onEdit(message)}
               >
@@ -119,7 +119,7 @@ export function HeldMessages({
                 size="sm"
                 aria-label="Drop waiting message"
                 data-testid="held-message-drop"
-                className="rounded-full"
+                radius="full"
                 disabled={busyId !== null}
                 onClick={() => onDrop(message)}
               >

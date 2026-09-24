@@ -395,12 +395,12 @@ const buttonVariants = cva(
       {
         size: 'xs',
         mode: 'icon',
-        className: 'w-7 h-7 p-0 [[&_svg:not([class*=size-])]:size-3.5',
+        className: 'w-7 h-7 p-0 [&_svg:not([class*=size-])]:size-3.5',
       },
       {
         size: 'sm',
         mode: 'icon',
-        className: 'w-8 h-8 p-0 [[&_svg:not([class*=size-])]:size-3.5',
+        className: 'w-8 h-8 p-0 [&_svg:not([class*=size-])]:size-3.5',
       },
       {
         size: 'md',

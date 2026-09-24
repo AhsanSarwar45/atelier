@@ -383,18 +383,24 @@ const Badge = React.forwardRef<HTMLSpanElement, BadgeOwnProps>(function Badge(
   );
 });
 
+/**
+ * The small press inside a chip — the cross that takes a branch off a list.
+ * A real button, so the keyboard reaches it and Enter presses it; it was a
+ * `span` wearing `role="button"`, which a screen reader announced and a Tab
+ * key walked straight past.
+ */
 function BadgeButton({
   className,
   variant,
   asChild = false,
   ...props
 }: React.ComponentProps<'button'> & VariantProps<typeof badgeButtonVariants> & { asChild?: boolean }) {
-  const Comp = asChild ? SlotPrimitive.Slot : 'span';
+  const Comp = asChild ? SlotPrimitive.Slot : 'button';
   return (
     <Comp
       data-slot="badge-button"
       className={cn(badgeButtonVariants({ variant, className }))}
-      role="button"
+      {...(asChild ? {} : { type: 'button' as const })}
       {...props}
     />
   );

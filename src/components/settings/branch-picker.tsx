@@ -9,8 +9,7 @@ import { useState } from 'react';
 
 import { X } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Badge, BadgeButton } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -87,9 +86,9 @@ export function BranchesPicker({ id, value, branches, onChange, testid }: { id: 
           {value.map((b) => (
             <Badge key={b} variant="secondary" className="gap-1 font-mono text-xs" data-testid={`${testid}-${b}`}>
               {b}
-              <Button variant="ghost" size="xs" className="h-4 w-4 p-0" aria-label={`Remove ${b}`} onClick={() => onChange(value.filter((v) => v !== b))}>
-                <X className="size-3" />
-              </Button>
+              <BadgeButton aria-label={`Remove ${b}`} onClick={() => onChange(value.filter((v) => v !== b))}>
+                <X />
+              </BadgeButton>
             </Badge>
           ))}
         </div>

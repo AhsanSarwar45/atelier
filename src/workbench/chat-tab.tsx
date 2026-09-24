@@ -279,13 +279,10 @@ function DefaultStar({
   return (
     <Tooltip label={why ?? (on ? 'Default' : 'Make default')}>
       <Button
-        size={segment ? 'md' : 'xs'}
+        size={segment ? 'md' : '2xs'}
+        mode="icon"
         variant={variant}
-        className={cn(
-          'shrink-0 p-0',
-          segment ? 'w-9' : 'h-5 w-5 rounded-sm',
-          className,
-        )}
+        className={className}
         data-testid={testid}
         data-default={on}
         aria-pressed={on}
@@ -422,12 +419,13 @@ export function Picker({
         <Tooltip label={label}>
           <Button
             variant="ghost"
-            size="sm"
+            size="xs"
+            radius="full"
             data-testid={testid}
             data-current={current ?? ''}
             data-asleep={asleep}
             aria-label={label}
-            className="h-7 gap-1.5 rounded-full px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+            className="gap-1.5 text-muted-foreground hover:text-foreground"
           >
             {icon}
             <span className="max-w-[18ch] truncate">{shown}</span>
@@ -970,7 +968,7 @@ const SendButtons = memo(function SendButtons({
             size="sm"
             aria-label="Send now"
             data-testid="send-now-button"
-            className="rounded-full"
+            radius="full"
             onClick={onSend}
           >
             <ArrowUp className="h-4 w-4" />
@@ -984,7 +982,7 @@ const SendButtons = memo(function SendButtons({
             size="sm"
             aria-label="Queue"
             data-testid="queue-button"
-            className="rounded-full"
+            radius="full"
             onClick={onHold}
           >
             <Clock3 className="h-4 w-4" />
@@ -999,7 +997,7 @@ const SendButtons = memo(function SendButtons({
           size="sm"
           aria-label="Send"
           data-testid="send-button"
-          className="rounded-full"
+          radius="full"
           onClick={onSend}
           // Nothing about who holds the chat here: a held one draws no
           // box at all a few lines up, so a second half to this test
@@ -2819,7 +2817,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 size="sm"
                 aria-label="Attach a picture or a file"
                 data-testid="attach-picture"
-                className="rounded-full text-muted-foreground"
+                radius="full" className="text-muted-foreground"
                 onClick={() => picker.current?.click()}
               >
                 <Paperclip className="h-4 w-4" />
@@ -2958,7 +2956,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 size="sm"
                 aria-label="Chat settings"
                 data-testid="mobile-composer-settings"
-                className="rounded-full text-muted-foreground composer-wide:hidden"
+                radius="full" className="text-muted-foreground composer-wide:hidden"
                 onClick={() => setComposerSettingsOpen(true)}
               >
                 <SlidersHorizontal className="h-4 w-4" />
@@ -2995,7 +2993,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 size="sm"
                 aria-label="Stop"
                 data-testid="stop-button"
-                className="rounded-full"
+                radius="full"
                 onClick={() => {
                   setSendError(null);
                   // A Stop that did not stop anything has to say so. It used to

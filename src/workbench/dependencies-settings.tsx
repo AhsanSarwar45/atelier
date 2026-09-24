@@ -96,7 +96,7 @@ export function DependenciesSettings() {
     {tools.map((tool, index) => <Fragment key={tool.tool}>{index > 0 && <Separator />}<div>
       <div className="flex items-start justify-between gap-3">
         <div><p className="font-medium capitalize text-t-secondary">{tool.tool}</p><p className="text-xs text-t-muted">For {tool.requiredFor} · {tool.version ?? (tool.found ? 'Found' : 'Not found')}</p></div>
-        <Button variant="primary" mode="link" underline="solid" size="sm" className="text-xs" asChild><a href={docs[tool.tool]} target="_blank" rel="noreferrer">Install guide <ExternalLink className="size-3" /></a></Button>
+        <Button variant="primary" mode="link" underline="solid" size="sm" asChild><a href={docs[tool.tool]} target="_blank" rel="noreferrer">Install guide <ExternalLink className="size-3" /></a></Button>
       </div>
       <div className="mt-2 flex gap-2">
         <Input className="flex-1 font-mono" aria-label={`${tool.tool} path`} value={paths[tool.tool] ?? ''} placeholder="Search PATH automatically" onChange={(e) => setPaths((old) => ({ ...old, [tool.tool]: e.target.value }))} />
