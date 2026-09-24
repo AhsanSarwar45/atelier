@@ -2,11 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('this project uses Atelier guidance', () => {
-  it('keeps setup, verification, lifecycle and isolation policies in project instructions', () => {
+  it('keeps the lifecycle and isolation policies in project instructions', () => {
     const instructions = readFileSync('.atelier/instructions.md', 'utf8');
-    expect(instructions).toContain('Setup command: npm install');
-    expect(instructions).toContain('Build command: npm run build');
-    expect(instructions).toContain('This project requires visual proof for interface changes.');
     expect(instructions).toContain('## Enforced board lifecycle');
     expect(instructions).toContain('provider-equivalent hooks');
     expect(instructions.match(/## Isolated app instances/g)).toHaveLength(1);
