@@ -45,6 +45,7 @@ import { type Mentions } from '@/components/markdown-body';
 import { TabLead, TabTools, TabTrail, ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ButtonGroup } from '@/components/ui/button-group';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -58,6 +59,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Panel } from '@/components/ui/panel';
 import { Row } from '@/components/ui/row';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
 import { useHeldAtTheEnd } from '@/hooks/held-at-the-end';
@@ -306,7 +308,7 @@ function DefaultStar({
         variant={variant}
         className={cn(
           'shrink-0 p-0',
-          segment ? 'w-9 rounded-l-none' : 'h-5 w-5 rounded-sm',
+          segment ? 'w-9' : 'h-5 w-5 rounded-sm',
           className,
         )}
         data-testid={testid}
@@ -351,21 +353,22 @@ function DefaultStar({
  * (bw-ospn.1).
  */
 function ChoiceWithStar({
+  value,
   chosen,
   disabled,
   why,
   testid,
-  onPick,
   star,
   className,
   children,
 }: {
+  /** What the surrounding `ToggleGroup` hears when this one is taken. */
+  value: string;
   chosen: boolean;
   disabled?: boolean;
   /** Why this choice cannot be taken, said on hover over the choice itself. */
   why?: ReactNode;
   testid: string;
-  onPick: () => void;
   star: { on: boolean; what: string; testid: string; onChoose: () => void };
   /** On the choice half, for the cases that want their words left-aligned. */
   className?: string;
@@ -373,32 +376,30 @@ function ChoiceWithStar({
 }) {
   const variant = chosen ? 'primary' : 'outline';
   return (
-    <div className="flex min-w-0">
-      <Tooltip side="bottom" label={why} wrapperClassName="min-w-0 flex-1 rounded-r-none">
-        <Button
-          className={cn('w-full min-w-0 flex-1 rounded-r-none', className)}
-          variant={variant}
+    // One line between the halves, whichever way round they are painted: a
+    // filled choice draws its own, and two outlined ones would otherwise stack
+    // their borders into a two-pixel seam.
+    <ButtonGroup seam={chosen ? 'line' : 'overlap'}>
+      <Tooltip side="bottom" label={why} wrapperClassName="min-w-0 flex-1">
+        <ToggleGroupItem
+          value={value}
+          className={cn('w-full min-w-0 flex-1', className)}
           data-testid={testid}
-          onClick={onPick}
           disabled={disabled}
         >
           {children}
-        </Button>
+        </ToggleGroupItem>
       </Tooltip>
       <DefaultStar
         segment
         variant={variant}
-        // One line between the halves, whichever way round they are painted:
-        // a filled choice draws its own, and two outlined ones would otherwise
-        // stack their borders into a two-pixel seam.
-        className={chosen ? 'border-l border-primary-foreground/20' : '-ml-px'}
         on={star.on}
         what={star.what}
         disabled={disabled}
         testid={star.testid}
         onChoose={star.onChoose}
       />
-    </div>
+    </ButtonGroup>
   );
 }
 
@@ -2249,7 +2250,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               takes no pointer events and so is never hovered at all. */}
           <div className="flex flex-col gap-2" data-testid="new-chat-agents">
           <SectionHeading>Agent</SectionHeading>
-          <div className="grid grid-cols-2 gap-2">
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="md"
+            className="grid grid-cols-2 gap-2"
+            aria-label="Agent"
+            value={newBrand}
+            onValueChange={(brand) => setNewBrand(brand as Brand)}
+          >
             {/* The star means what it means in the model and effort menus:
                 this is the one the dialog opens holding. It replaced a
                 checkbox in the footer that could only ever speak for
@@ -2257,6 +2266,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             {providers.map((provider) => (
               <ChoiceWithStar
                 key={provider.brand}
+                value={provider.brand}
                 chosen={newBrand === provider.brand}
                 disabled={!provider.available}
                 why={
@@ -2267,7 +2277,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                   )
                 }
                 testid={`new-chat-provider-${provider.brand}`}
-                onPick={() => setNewBrand(provider.brand)}
                 star={{
                   on: newChatDefault === provider.brand,
                   what: brandName(provider.brand),
@@ -2279,7 +2288,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 <BrandIcon brand={provider.brand} /> {brandName(provider.brand)}
               </ChoiceWithStar>
             ))}
-          </div>
+          </ToggleGroup>
           </div>
           {/* Which account, between which agent and where to work. `local`
               runs on this computer and has nothing to sign in to, so it has no
@@ -2290,14 +2299,22 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               {newAccountsUnread ? (
                 <p className="text-xs text-t-muted">{newAccountsUnread}</p>
               ) : (
-                <div className="grid grid-cols-2 gap-2">
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  size="md"
+                  className="grid grid-cols-2 gap-2"
+                  aria-label="Account"
+                  value={newAccount}
+                  onValueChange={(id) => setNewProfile((was) => ({ ...was, [newBrand]: id }))}
+                >
                   {newAccounts.map((profile) => (
                     <ChoiceWithStar
                       key={profile.id}
+                      value={profile.id}
                       chosen={newAccount === profile.id}
                       className="justify-start"
                       testid={`new-chat-profile-${profile.id}`}
-                      onPick={() => setNewProfile((was) => ({ ...was, [newBrand]: profile.id }))}
                       star={{
                         on: (newChatDefaults.profiles[newBrand] ?? 'system') === profile.id,
                         what: profile.name,
@@ -2314,7 +2331,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                       <span className="truncate">{profile.name}</span>
                     </ChoiceWithStar>
                   ))}
-                </div>
+                </ToggleGroup>
               )}
             </div>
           )}

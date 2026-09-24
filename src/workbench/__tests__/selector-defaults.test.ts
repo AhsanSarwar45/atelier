@@ -59,8 +59,8 @@ describe('new-chat provider default', () => {
     // The seam: the choice is square on its right, the star square on its
     // left, and one line between them either way the pair is painted.
     const split = source.slice(source.indexOf('function ChoiceWithStar('), source.indexOf('export function Picker('));
-    expect(split).toContain('rounded-r-none');
-    expect(split).toContain("chosen ? 'border-l border-primary-foreground/20' : '-ml-px'");
+    expect(split).toContain("<ButtonGroup seam={chosen ? 'line' : 'overlap'}>");
+    expect(split).toContain('<ToggleGroupItem');
     expect(split).toContain('segment');
     // Both halves wear the same face, so neither looks like a stray.
     expect(split).toContain("const variant = chosen ? 'primary' : 'outline';");

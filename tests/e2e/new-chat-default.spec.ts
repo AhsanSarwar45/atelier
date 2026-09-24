@@ -57,7 +57,7 @@ test('a starred provider is what the dialog opens on, and never a way past it', 
     // that provider, rather than starting a chat without asking.
     await page.getByTestId('new-chat-tool').click();
     await expect(dialog).toBeVisible();
-    await expect(page.getByTestId('new-chat-provider-codex')).toHaveClass(/bg-primary/);
+    await expect(page.getByTestId('new-chat-provider-codex')).toHaveAttribute('data-state', 'on');
 
     // One account and no section: an Account row that only ever says "System"
     // is a question with one answer. The local brand never has one at all,

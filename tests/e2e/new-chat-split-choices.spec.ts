@@ -71,12 +71,15 @@ test('every provider and account is one split control with its star', async ({ p
     // and the two are the same height.
     const claude = page.getByTestId('new-chat-provider-claude');
     const claudeStar = page.getByTestId('new-chat-provider-default-claude');
-    await expect(claude).toHaveClass(/rounded-r-none/);
-    await expect(claudeStar).toHaveClass(/rounded-l-none/);
     const account = page.getByTestId('new-chat-profile-system');
     const accountStar = page.getByTestId('new-chat-profile-default-system');
-    await expect(account).toHaveClass(/rounded-r-none/);
-    await expect(accountStar).toHaveClass(/rounded-l-none/);
+    // Squared by the button group they stand in, not by a class of their own.
+    for (const choice of [claude, account]) {
+      expect(await choice.evaluate((el) => getComputedStyle(el).borderTopRightRadius)).toBe('0px');
+    }
+    for (const starred of [claudeStar, accountStar]) {
+      expect(await starred.evaluate((el) => getComputedStyle(el).borderTopLeftRadius)).toBe('0px');
+    }
 
     // Attached, with nothing between them: the star begins where the choice
     // ends, and they start and end at the same heights.
@@ -92,12 +95,12 @@ test('every provider and account is one split control with its star', async ({ p
     // The star is still its own button: with an account picked, starring a
     // different one moves the default and leaves the pick alone.
     await page.getByTestId('new-chat-profile-azeem').click();
-    await expect(page.getByTestId('new-chat-profile-azeem')).toHaveClass(/bg-primary/);
+    await expect(page.getByTestId('new-chat-profile-azeem')).toHaveAttribute('data-state', 'on');
     const star = page.getByTestId('new-chat-profile-default-tapforce');
     await star.click();
     await expect(star).toHaveAttribute('data-default', 'true');
-    await expect(page.getByTestId('new-chat-profile-azeem')).toHaveClass(/bg-primary/);
-    await expect(page.getByTestId('new-chat-profile-tapforce')).not.toHaveClass(/bg-primary/);
+    await expect(page.getByTestId('new-chat-profile-azeem')).toHaveAttribute('data-state', 'on');
+    await expect(page.getByTestId('new-chat-profile-tapforce')).toHaveAttribute('data-state', 'off');
   } finally {
     await request.delete(`/api/projects/${project.id}`);
     rmSync(FIXTURE, { recursive: true, force: true });
