@@ -28,6 +28,7 @@ import { Bot, ChevronDown, Copy, ExternalLink, Loader2, MoreVertical, Pencil, Pl
 import { ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ButtonGroup } from '@/components/ui/button-group';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   DropdownMenu,
@@ -1058,12 +1059,11 @@ export const ChatSidebar = memo(function ChatSidebar({
             />
           )}
           {onNewChat && (
-            <div className="ml-auto flex shrink-0">
+            <ButtonGroup seam="line" className="ml-auto shrink-0">
               <Button
                 size="sm"
                 variant="primary"
                 radius="md"
-                className="rounded-r-none border-r border-primary-foreground/20"
                 data-testid="new-chat-tool"
                 aria-label="New Chat"
                 disabled={startingNewChat || !anyProviderAvailable}
@@ -1078,7 +1078,7 @@ export const ChatSidebar = memo(function ChatSidebar({
                     size="sm"
                     variant="primary"
                     radius="md"
-                    className="rounded-l-none px-2"
+                    className="px-2"
                     aria-label="New chat options"
                     data-testid="new-chat-menu"
                     disabled={startingNewChat || !anyProviderAvailable}
@@ -1104,7 +1104,7 @@ export const ChatSidebar = memo(function ChatSidebar({
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
-            </div>
+            </ButtonGroup>
           )}
         </div>
       )}
