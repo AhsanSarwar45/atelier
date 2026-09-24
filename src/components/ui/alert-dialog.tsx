@@ -45,13 +45,21 @@ AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName
 
 const AlertDialogContent = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>
->(({ className, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content> & {
+    /**
+     * `box` floats mid-screen everywhere; `sheet` is the same box on a wide
+     * screen and a sheet on the bottom edge of a phone, as the plain dialog's
+     * own `sheet` shape is — for a question asked from a screen that is itself
+     * held in one hand.
+     */
+    shape?: "box" | "sheet"
+  }
+>(({ className, shape = "box", ...props }, ref) => (
   <AlertDialogPortal>
     <AlertDialogOverlay />
     <AlertDialogPrimitive.Content
       ref={ref}
-      className={cn(dialogVariants({ shape: "box" }), className)}
+      className={cn(dialogVariants({ shape }), className)}
       {...props}
     />
   </AlertDialogPortal>

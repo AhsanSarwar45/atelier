@@ -20,7 +20,7 @@ import { useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Panel } from '@/components/ui/panel';
 import { Tooltip } from '@/components/ui/tooltip';
 import { usePlanUsage } from '@/workbench/live';
@@ -296,35 +296,48 @@ function ConfirmReset({
   onConfirm: () => void;
 }) {
   const spent = reset ? spentReads(reset, windows) : null;
+  const confirm = useRef<HTMLButtonElement>(null);
   return (
-    <Dialog
+    <AlertDialog
       open={reset !== null}
       onOpenChange={(open) => {
         if (!open && !busy) onCancel();
       }}
     >
-      <DialogContent shape="sheet" hideClose role="alertdialog" className="sm:max-w-md" data-testid="usage-reset-confirmation">
+      <AlertDialogContent
+        shape="sheet"
+        className="sm:max-w-md"
+        data-testid="usage-reset-confirmation"
+        // The yes is where the reader lands, as it was: they pressed a reset on
+        // purpose, and the window only makes sure they meant it.
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          confirm.current?.focus();
+        }}
+      >
         {reset && (
           <>
-            <DialogHeader>
-              <DialogTitle>Use this reset now?</DialogTitle>
-              <DialogDescription>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Use this reset now?</AlertDialogTitle>
+              <AlertDialogDescription>
                 {reset.title} refills your {clearsReads(reset.clears)} straight away. This cannot be undone.
                 {spent ? ` ${spent}` : ''}
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter className="gap-2">
-              <Button variant="outline" data-testid="usage-reset-cancel" disabled={busy} onClick={onCancel}>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="gap-2">
+              <AlertDialogCancel data-testid="usage-reset-cancel" disabled={busy}>
                 Keep it
-              </Button>
-              <Button variant="primary" data-testid="usage-reset-confirm" disabled={busy} autoFocus onClick={onConfirm}>
+              </AlertDialogCancel>
+              {/* A plain button: the window stays up, saying so, until the
+                  reset has been spent. */}
+              <Button ref={confirm} variant="primary" data-testid="usage-reset-confirm" disabled={busy} onClick={onConfirm}>
                 {busy ? 'Using reset…' : 'Yes, use reset'}
               </Button>
-            </DialogFooter>
+            </AlertDialogFooter>
           </>
         )}
-      </DialogContent>
-    </Dialog>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

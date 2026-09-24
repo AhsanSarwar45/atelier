@@ -4,7 +4,16 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { Download, ExternalLink, Loader2, RefreshCw } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { request } from '@/lib/api';
 import { onBootstrap } from '@/workbench/live-wire';
@@ -33,6 +42,8 @@ export function DependenciesSettings() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
+  // The install downloads and runs a program, so it is asked about first.
+  const [asking, setAsking] = useState(false);
 
   const load = useCallback(async () => {
     const response = await request('/api/environment');
@@ -65,7 +76,6 @@ export function DependenciesSettings() {
   }
 
   async function installBd() {
-    if (!window.confirm('Download the latest verified task tracker CLI and install it in ~/.beads/bin?')) return;
     setBusy('bd'); setError(null); setProgress('Starting tracker installation…');
     try {
       const response = await request('/api/environment/bd/install', {
@@ -89,11 +99,21 @@ export function DependenciesSettings() {
       <div className="mt-2 flex gap-2">
         <Input className="flex-1 font-mono" aria-label={`${tool.tool} path`} value={paths[tool.tool] ?? ''} placeholder="Search PATH automatically" onChange={(e) => setPaths((old) => ({ ...old, [tool.tool]: e.target.value }))} />
         <Button size="sm" variant="outline" disabled={busy === tool.tool} onClick={() => void save(tool.tool)}>Save</Button>
-        {tool.tool === 'bd' && !tool.found && <Button size="sm" disabled={busy === 'bd'} onClick={() => void installBd()}>{busy === 'bd' ? <Loader2 className="animate-spin" /> : <Download />} Install</Button>}
+        {tool.tool === 'bd' && !tool.found && <Button size="sm" disabled={busy === 'bd'} onClick={() => setAsking(true)}>{busy === 'bd' ? <Loader2 className="animate-spin" /> : <Download />} Install</Button>}
       </div>
       {!tool.found && <p className="mt-1 text-xs text-danger">{tool.hint}</p>}
     </div>)}
     {progress && <p className="flex items-center gap-2 text-xs text-t-muted"><RefreshCw className={busy === 'bd' ? 'size-3 animate-spin' : 'size-3'} />{progress}</p>}
     {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+    <AlertDialog open={asking} onOpenChange={setAsking}>
+      <AlertDialogContent>
+        <AlertDialogTitle>Install the task tracker?</AlertDialogTitle>
+        <AlertDialogDescription>Download the latest verified task tracker CLI and install it in ~/.beads/bin?</AlertDialogDescription>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction className={buttonVariants({ variant: 'primary' })} onClick={() => void installBd()}>Install</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>;
 }

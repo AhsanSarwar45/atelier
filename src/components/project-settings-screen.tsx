@@ -27,6 +27,15 @@ import type { Layer, Scope } from '@/components/settings/provider-settings-api';
 import { ProviderSettingsPanel } from '@/components/settings/provider-settings-panel';
 import { SettingRow, SettingsGroup } from '@/components/settings/section';
 import { SettingsScreen, type SettingsSectionDef } from '@/components/settings/settings-screen';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -101,6 +110,7 @@ export function ProjectSettingsScreen({
   const [browsing, setBrowsing] = useState<'path' | 'localPath' | null>(null);
   const [browserPath, setBrowserPath] = useState('');
   const [saving, setSaving] = useState(false);
+  const [askingDelete, setAskingDelete] = useState(false);
   const [manifest, setManifest] = useState<ProjectManifest | null>(null);
   const [instructions, setInstructions] = useState('');
   const [savedInstructions, setSavedInstructions] = useState('');
@@ -341,14 +351,22 @@ export function ProjectSettingsScreen({
               <Button
                 variant="destructive"
                 size="sm"
-                onClick={() => {
-                  if (window.confirm('Remove this project from the list? Its cards and files are not touched.')) {
-                    void leave(() => api.projects.delete(projectId), 'Removed');
-                  }
-                }}
+                onClick={() => setAskingDelete(true)}
               >
                 <Trash2 /> Delete
               </Button>
+              <AlertDialog open={askingDelete} onOpenChange={setAskingDelete}>
+                <AlertDialogContent>
+                  <AlertDialogTitle>Remove this project from the list?</AlertDialogTitle>
+                  <AlertDialogDescription>Its cards and files are not touched.</AlertDialogDescription>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => void leave(() => api.projects.delete(projectId), 'Removed')}>
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </SettingRow>
           </SettingsGroup>
         </>

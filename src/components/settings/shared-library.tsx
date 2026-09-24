@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Panel } from '@/components/ui/panel';
 import { Picker } from '@/components/ui/picker';
-import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { request } from '@/lib/api';
 import { buildCustomization, nextEntryName, suggestedItemId } from '@/lib/shared-guidance';
 import { sendCommand } from '@/workbench/use-session';
@@ -254,18 +254,18 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
       </Panel>)}</div>}
       {!draft && <details className="border-t border-border/40 pt-4"><summary className="cursor-pointer text-sm font-medium">Preview and diagnostics</summary><div className="mt-4 space-y-4">{!projectPath && <div className="space-y-2"><span className="text-sm">Evaluate for project</span><Picker label="Evaluate for project" value={preview} onChange={setPreview} choices={[{ value: '', label: 'Choose a project to explain conditions' }, ...projects.filter(p => !(p.localPath || p.path).startsWith('dolt://')).map(p => ({ value: p.localPath || p.path, label: p.name }))]} /></div>}<h3 className="text-sm font-medium">Saved session preview</h3><p className="break-all text-xs text-t-muted">Revision {answer.resolved.revision}. Instructions and the selected style are included; skills are loaded on use. Current chats retain their connection’s snapshot.</p><pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">{answer.guidance}</pre></div></details>}
     </>}
-    <Dialog open={!!deleting} onOpenChange={open => { if (!open && !saving) setDeleting(undefined); }}>
-      <DialogContent role="alertdialog" hideClose>
-        <DialogTitle>Delete {deleting?.row.item.name}?</DialogTitle>
-        <DialogDescription>
+    <AlertDialog open={!!deleting} onOpenChange={open => { if (!open && !saving) setDeleting(undefined); }}>
+      <AlertDialogContent>
+        <AlertDialogTitle>Delete {deleting?.row.item.name}?</AlertDialogTitle>
+        <AlertDialogDescription>
           {projectPath ? 'This removes the item owned by this project.' : 'This removes the global item for every project that inherits it.'}
           {deleting?.row.folder_source ? <><span className="mt-2 block">The entire skill folder, including scripts and assets, will move to a recoverable archive outside the active library.</span><span className="mt-2 block break-all font-mono text-xs">{deleting.source ?? deleting.row.folder_source}</span>{deleting.files !== undefined && <span className="mt-1 block">{deleting.files} files or links included.</span>}</> : <span className="mt-2 block">This deletes the saved library entry. There is no undo button.</span>}
           <span className="mt-2 block">Existing chat snapshots retain their copy until reconnected.</span>
-        </DialogDescription>
+        </AlertDialogDescription>
         {deleteError && <div role="alert" className="text-sm text-danger"><p>{deleteError}</p><Button variant="ghost" disabled={saving} onClick={() => { setDeleting(undefined); void load(); }}>Reload settings</Button></div>}
-        <DialogFooter><Button variant="outline" disabled={saving} onClick={() => setDeleting(undefined)}>Cancel</Button><Button variant="destructive" disabled={saving || !!deleteError || (!!deleting?.row.folder_source && !deleting.revision)} onClick={() => void deleteItem()}>{saving ? 'Please wait…' : `Delete ${deleting?.row.item.kind === 'skill' ? deleting.row.item.automatic ? 'skill' : 'command' : deleting?.row.item.kind === 'output_style' ? 'output style' : 'instruction'}`}</Button></DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <AlertDialogFooter><AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel><Button variant="destructive" disabled={saving || !!deleteError || (!!deleting?.row.folder_source && !deleting.revision)} onClick={() => void deleteItem()}>{saving ? 'Please wait…' : `Delete ${deleting?.row.item.kind === 'skill' ? deleting.row.item.automatic ? 'skill' : 'command' : deleting?.row.item.kind === 'output_style' ? 'output style' : 'instruction'}`}</Button></AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>;
 }
 

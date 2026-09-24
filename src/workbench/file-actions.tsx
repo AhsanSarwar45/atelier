@@ -38,7 +38,16 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 
 import { Copy, FilePlus2, FolderPlus, Pencil, Trash2 } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Button, buttonVariants } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -156,6 +165,9 @@ function refused(what: string, why: unknown): void {
  */
 export function useFileActions(onMoved?: PathMoved, onMade?: (path: string) => void): FileActions {
   const [asked, setAsked] = useState<Asked | null>(null);
+  // What the Trash question was last asked about. It outlives `asked` so the
+  // sentence stays put while the window fades out.
+  const [deleting, setDeleting] = useState<Asked | null>(null);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const box = useRef<HTMLInputElement>(null);
@@ -174,6 +186,7 @@ export function useFileActions(onMoved?: PathMoved, onMade?: (path: string) => v
   const ask = useCallback((what: Asked['what'], target: PathInCheckout) => {
     setName(makesSomething(what) ? '' : nameOf(target.path));
     setAsked({ what, target });
+    if (what === 'delete') setDeleting({ what, target });
   }, []);
 
   const remove = useCallback(async () => {
@@ -302,40 +315,39 @@ export function useFileActions(onMoved?: PathMoved, onMade?: (path: string) => v
   );
 
   const dialogs = (
-    <Dialog open={asked !== null} onOpenChange={(open) => { if (!open) setAsked(null); }}>
-      {asked?.what === 'delete' ? (
-        // A decision to be answered rather than a form to fill in, so it is
-        // announced as one — built out of the app's own dialog, the way the Git
-        // rail's confirmation is (`git-view.tsx`). `alert-dialog.tsx` is
-        // reached by nothing in the app and asks for theme variables no theme
-        // defines, so it would draw its dim in an invalid colour.
-        <DialogContent
-          role="alertdialog"
+    <>
+    {/* A decision to be answered rather than a form to fill in, so it is the
+        library's confirmation window, announced as one. */}
+    <AlertDialog open={asked?.what === 'delete'} onOpenChange={(open) => { if (!open) setAsked(null); }}>
+        <AlertDialogContent
           className="w-[90vw] gap-3 sm:max-w-md"
           data-testid="path-delete-dialog"
         >
-          <DialogHeader>
-            <DialogTitle>Move to Trash?</DialogTitle>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Move to Trash?</AlertDialogTitle>
             {/* Where it goes, in the sentence the reader answers — not in a
                 toast afterwards. This is the only call in the app that cannot
                 be undone from inside it, so what "delete" means here is said
                 out loud: the desktop's trash, restorable from the file manager,
                 and a folder takes everything in it. */}
-            <DialogDescription className="break-words">
-              {nameOf(asked.target.path)}{asked.target.kind === 'dir' ? ' and its contents' : ''} will move to Trash.
+            <AlertDialogDescription className="break-words">
+              {deleting ? nameOf(deleting.target.path) : ''}{deleting?.target.kind === 'dir' ? ' and its contents' : ''} will move to Trash.
               Restore it from your file manager if needed.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2">
-            <Button variant="ghost" disabled={busy} data-testid="path-delete-cancel" onClick={() => setAsked(null)}>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel className={buttonVariants({ variant: 'ghost' })} disabled={busy} data-testid="path-delete-cancel">
               Keep
-            </Button>
+            </AlertDialogCancel>
+            {/* A plain button, not the dialog's own action: the window stays up
+                until the move has happened, so a failure is said inside it. */}
             <Button variant="destructive" disabled={busy} data-testid="path-delete-confirm" onClick={() => void remove()}>
               Move to Trash
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      ) : (
+          </AlertDialogFooter>
+        </AlertDialogContent>
+    </AlertDialog>
+    <Dialog open={asked !== null && asked.what !== 'delete'} onOpenChange={(open) => { if (!open) setAsked(null); }}>
       // One box for all three, because they are one question — what is this
       // called — asked about a name that exists or one that does not yet.
       <DialogContent className="sm:max-w-md" data-testid="path-name-dialog">
@@ -384,8 +396,8 @@ export function useFileActions(onMoved?: PathMoved, onMade?: (path: string) => v
           </DialogFooter>
         </form>
       </DialogContent>
-      )}
     </Dialog>
+    </>
   );
 
   return { items, dialogs };

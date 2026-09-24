@@ -42,8 +42,18 @@ import {
 } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -1161,42 +1171,33 @@ export function GitView({
           away should stop the reader, which is what a modal is for. It says
           what would go, in the words of the thing itself, and the button that
           agrees is the only red one in it. Keep is the way out and does nothing
-          at all; so are Escape, the cross and a press on the dim behind. */}
-      <Dialog
+          at all; so is Escape. It is the library's confirmation window, so a
+          press on the dim behind it does not count as an answer. */}
+      <AlertDialog
         open={asking !== null}
         onOpenChange={(wanted) => {
           if (!wanted) setAsking(null);
         }}
       >
         {asking && (
-          // A decision that has to be answered rather than a form to fill in,
-          // so it is announced as one. The app's dialog is the part it is
-          // built from either way — `alert-dialog.tsx` is reached by nothing
-          // in the app and asks for `--dialog-overlay`, `--dialog-z` and
-          // `--mix-card-5-bg`, none of which any theme defines, so it would
-          // draw its dim in an invalid colour at no stacking order at all.
-          <DialogContent
-            role="alertdialog"
+          <AlertDialogContent
             className="w-[90vw] gap-3 border-b-default bg-surface-raised sm:max-w-md"
             data-testid="git-confirm-dialog"
           >
-            <DialogHeader>
-              <DialogTitle className="text-base text-t-primary">{asking.verb}</DialogTitle>
-              <DialogDescription className="break-words">{asking.said}</DialogDescription>
-            </DialogHeader>
-            <DialogFooter className="gap-2">
-              <Button
-                size="sm"
-                variant="ghost"
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-base text-t-primary">{asking.verb}</AlertDialogTitle>
+              <AlertDialogDescription className="break-words">{asking.said}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="gap-2">
+              <AlertDialogCancel
+                className={buttonVariants({ variant: 'ghost', size: 'sm' })}
                 disabled={busy}
                 data-testid="git-confirm-cancel"
-                onClick={() => setAsking(null)}
               >
                 Keep
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
+              </AlertDialogCancel>
+              <AlertDialogAction
+                className={buttonVariants({ variant: 'destructive', size: 'sm' })}
                 disabled={busy}
                 data-testid="git-confirm"
                 onClick={() => {
@@ -1206,11 +1207,11 @@ export function GitView({
                 }}
               >
                 {asking.verb}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
         )}
-      </Dialog>
+      </AlertDialog>
 
       {fault && (
         <div className="px-3 py-2">

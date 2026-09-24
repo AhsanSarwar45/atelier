@@ -2,7 +2,6 @@
 
 import { useEffect, useId, useMemo, useState } from 'react';
 import { Maximize2, RotateCcw, X } from 'lucide-react';
-import { createPortal } from 'react-dom';
 import { Background, Controls, ReactFlow, type Edge, type Node } from '@xyflow/react';
 import ELK from 'elkjs/lib/elk.bundled.js';
 import mermaid from 'mermaid';
@@ -11,6 +10,7 @@ import '@xyflow/react/dist/style.css';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Overlay } from '@/components/ui/overlay';
 import { Panel } from '@/components/ui/panel';
 import { request } from '@/lib/api';
 import type { FlowArtifact, MermaidArtifact, MockupArtifact, MockupComponent, SceneArtifact, SceneElement, VisualArtifact } from './visual-artifacts';
@@ -135,11 +135,12 @@ export function VisualArtifactView({ asset }: { asset: string }) {
   }, [expanded]);
   if (error) return <p role="alert" className="p-4 text-sm text-destructive">{error}</p>;
   if (!artifact) return <div role="status" className="p-6 text-center text-sm text-muted-foreground">Loading visual…</div>;
-  const fullScreen = expanded && typeof document !== 'undefined' ? createPortal(
-    <div role="dialog" aria-modal="true" aria-labelledby="artifact-dialog-title" style={{ position: 'fixed', inset: 0, zIndex: 1000, backgroundColor: 'hsl(var(--background))', color: 'hsl(var(--foreground))' }} className="flex flex-col overflow-hidden">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b px-4"><h2 id="artifact-dialog-title" className="text-lg font-semibold">{artifact.title}</h2><div className="flex gap-1"><Button type="button" size="icon" variant="ghost" aria-label="Reset full-screen artifact" onClick={() => setReset((value) => value + 1)}><RotateCcw className="size-4" /></Button><Button autoFocus type="button" size="icon" variant="ghost" aria-label="Close full-screen artifact" onClick={() => setExpanded(false)}><X className="size-4" /></Button></div></header>
+  // The library's full-screen window: Escape and focus are its, not this file's.
+  const fullScreen = expanded ? (
+    <Overlay label={artifact.title} onClose={() => setExpanded(false)} className="flex-col items-stretch justify-start overflow-hidden bg-background p-0 text-foreground sm:p-0">
+      <header className="flex h-14 shrink-0 items-center justify-between border-b px-4"><h2 className="text-lg font-semibold">{artifact.title}</h2><div className="flex gap-1"><Button type="button" size="icon" variant="ghost" aria-label="Reset full-screen artifact" onClick={() => setReset((value) => value + 1)}><RotateCcw className="size-4" /></Button><Button autoFocus type="button" size="icon" variant="ghost" aria-label="Close full-screen artifact" onClick={() => setExpanded(false)}><X className="size-4" /></Button></div></header>
       <div className="min-h-0 flex-1 overflow-auto p-6"><VisualArtifactContent key={`full-${reset}`} artifact={artifact} /></div>
-    </div>, document.body) : null;
+    </Overlay>) : null;
   return <div className="relative">
     <Panel tone="overlay" inset="none" className="absolute right-2 top-2 z-10 flex gap-1 rounded-lg bg-background/90 p-1 shadow-sm backdrop-blur">
       <Button type="button" size="icon" variant="ghost" aria-label="Reset artifact" onClick={() => setReset((value) => value + 1)}><RotateCcw className="size-4" /></Button>

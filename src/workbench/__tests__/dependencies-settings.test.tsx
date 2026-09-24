@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DependenciesSettings } from '../dependencies-settings';
@@ -26,7 +26,6 @@ describe('Dependencies settings', () => {
   });
 
   it('reports every dependency and sends one explicit consent for Beads installation', async () => {
-    const consent = vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<DependenciesSettings />);
 
     expect(await screen.findByText('browser')).toBeVisible();
@@ -34,7 +33,13 @@ describe('Dependencies settings', () => {
     expect(screen.getByText('codex')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Install' }));
 
-    await waitFor(() => expect(consent).toHaveBeenCalledTimes(1));
+    // Nothing is sent until the reader says yes in the window that asks.
+    const asking = await screen.findByRole('alertdialog');
+    expect(asking).toHaveTextContent('Download the latest verified task tracker CLI and install it in ~/.beads/bin?');
+    expect(requestMock.mock.calls.some(([url]) => url === '/api/environment/bd/install')).toBe(false);
+    fireEvent.click(within(asking).getByRole('button', { name: 'Install' }));
+
+    await waitFor(() => expect(requestMock.mock.calls.filter(([url]) => url === '/api/environment/bd/install')).toHaveLength(1));
     const install = requestMock.mock.calls.find(([url]) => url === '/api/environment/bd/install');
     expect(install).toBeDefined();
     expect(JSON.parse(install![1].body)).toEqual({ consent: true });

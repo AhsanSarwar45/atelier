@@ -10,13 +10,13 @@ import { EllipsisVertical, Folder, Home, MessageSquare, SquareKanban } from 'luc
 
 import { BackLink } from '@/components/back-link';
 import { ProjectSwitcher } from '@/components/project-switcher';
-import { ModalLayer } from '@/components/modal-layer';
 // Only drawn once a card is opened, and it brings the markdown and code
 // highlighter with it, so the board draws without them (bw-fbzd.7).
 const CardPanel = dynamic(() => import('@/components/card-panel').then((m) => m.CardPanel), { ssr: false });
 const ProjectSettingsScreen = dynamic(() => import('@/components/project-settings-screen').then((m) => m.ProjectSettingsScreen), { ssr: false });
 import { Shell } from '@/components/shell';
 import { Button } from '@/components/ui/button';
+import { Overlay } from '@/components/ui/overlay';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useProject } from '@/hooks/use-project';
@@ -350,7 +350,11 @@ function ProjectTabs() {
       )}
 
       {project && openSettings && (
-        <ModalLayer label={`${project.name} settings`} data-testid="project-settings">
+        // The library window, not a box drawn over the page: the board behind it
+        // cannot be reached while it is open, focus moves in on open and back on
+        // close. It has no `onClose` — the way out is the bar's own arrow, which
+        // steps the address back, so Escape leaves it where it is, as it did.
+        <Overlay label={`${project.name} settings`} testId="project-settings" className="block p-0 sm:p-0">
           <ProjectSettingsScreen
             projectId={project.id}
             projectName={project.name}
@@ -365,7 +369,7 @@ function ProjectTabs() {
             backSteps={() => stepsOut((url) => !url.searchParams.has('settings'), settingsPushes.current)}
             onUpdated={refetch}
           />
-        </ModalLayer>
+        </Overlay>
       )}
     </Shell>
   );
