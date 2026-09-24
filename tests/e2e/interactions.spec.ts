@@ -65,13 +65,13 @@ test('questions and proposed plans share one complete interaction language', asy
     await route.continue({ url: url.toString() });
   });
   await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{
-    sessionId: CHAT, externalId: 'fixture-thread', brand: 'codex', projectId: 'fixture', title: 'Interaction cards',
+    sessionId: CHAT, externalId: 'fixture-thread', brand: 'codex', projectId: 'fixture', title: 'Interaction cards', name: 'Interaction cards',
     state: 'waiting_permission', lastActiveAt: new Date(0).toISOString(), cwdHint: process.cwd(), runningElsewhere: false, held: null, beads: [],
   }] }));
   await page.route(/\/api\/workbench\/command$/, (route) => route.fulfill({ json: {} }));
   await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: {
     sessionId: CHAT, origin: 'terminal', brand: 'codex', externalId: 'fixture-thread', runningElsewhere: false,
-    held: null, title: 'Interaction cards', cwd: process.cwd(), folder: 'bw-bxq7', branch: 'bw-bxq7', beads: [],
+    held: null, title: 'Interaction cards', name: 'Interaction cards', cwd: process.cwd(), folder: 'bw-bxq7', branch: 'bw-bxq7', beads: [],
   } }));
 
   let project: { id: string } | null = null;
