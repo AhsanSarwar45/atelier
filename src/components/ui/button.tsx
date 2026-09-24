@@ -4,6 +4,7 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { ChevronDown, LucideIcon } from 'lucide-react';
 import { Slot as SlotPrimitive } from 'radix-ui';
 
+import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 
 const buttonVariants = cva(
@@ -29,6 +30,11 @@ const buttonVariants = cva(
         ghost:
           'text-foreground hover:bg-accent hover:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground',
         dim: 'text-muted-foreground hover:text-foreground data-[state=open]:text-foreground',
+        // A yes that moves work forward — approve, update — drawn in the
+        // theme's success colour rather than filled, as sign-off and the update
+        // notice each used to spell out for themselves.
+        success:
+          'bg-background text-success border border-success/30 hover:bg-success/10 hover:text-success/80 data-[state=open]:bg-success/10',
         foreground: '',
         inverse: '',
       },
@@ -54,6 +60,10 @@ const buttonVariants = cva(
         md: 'h-9 px-3 gap-1.5 text-sm [&_svg:not([class*=size-])]:size-4',
         sm: 'h-8 px-2.5 gap-1.5 text-xs [&_svg:not([class*=size-])]:size-3.5',
         xs: 'h-7 px-2 gap-1 text-xs [&_svg:not([class*=size-])]:size-3.5',
+        // The twenty-pixel button that lives in a pane's own toolbar — a file
+        // viewer's Source / Preview, a terminal tab's close — which six screens
+        // were making by squashing `xs` with `h-5` by hand.
+        '2xs': 'h-5 px-2 gap-1 text-[11px] [&_svg:not([class*=size-])]:size-3',
         icon: 'size-9 [&_svg:not([class*=size-])]:size-4 shrink-0',
         // For a button another sized component has adopted, which is the case
         // whenever `<Badge asChild>` wraps one: the chip already says how tall
@@ -127,6 +137,11 @@ const buttonVariants = cva(
       },
 
       // Auto height
+      {
+        size: '2xs',
+        autoHeight: true,
+        className: 'h-auto min-h-5',
+      },
       {
         size: 'xs',
         autoHeight: true,
@@ -324,12 +339,22 @@ const buttonVariants = cva(
         className: 'bg-transparent text-destructive/90 hover:bg-destructive/5 data-[state=open]:bg-destructive/5',
       },
       {
+        variant: 'success',
+        appearance: 'ghost',
+        className: 'bg-transparent border-transparent hover:bg-success/5 data-[state=open]:bg-success/5',
+      },
+      {
         variant: 'ghost',
         mode: 'icon',
         className: 'text-muted-foreground',
       },
 
       // Size
+      {
+        size: '2xs',
+        mode: 'icon',
+        className: 'w-5 h-5 p-0 [&_svg:not([class*=size-])]:size-3',
+      },
       {
         size: 'xs',
         mode: 'icon',
@@ -397,6 +422,12 @@ const Button = React.forwardRef<
     VariantProps<typeof buttonVariants> & {
       selected?: boolean;
       asChild?: boolean;
+      /**
+       * Work the button started is still going: a spinner is drawn before the
+       * label, the button stops taking presses, and `aria-busy` says why. The
+       * label itself is the caller's, so it can say "Saving…" if it likes.
+       */
+      loading?: boolean;
     }
 >(
   (
@@ -413,11 +444,15 @@ const Button = React.forwardRef<
       underline,
       asChild = false,
       placeholder = false,
+      loading = false,
+      disabled,
+      children,
       ...props
     },
     ref
   ) => {
     const Comp = asChild ? SlotPrimitive.Slot : 'button';
+    const off = disabled || loading;
     return (
       <Comp
         ref={ref}
@@ -435,11 +470,21 @@ const Button = React.forwardRef<
             underline,
             className,
           }),
-          asChild && props.disabled && 'pointer-events-none opacity-50',
+          asChild && off && 'pointer-events-none opacity-50',
         )}
         {...(selected && { 'data-state': 'open' })}
+        {...(loading && { 'aria-busy': true })}
+        disabled={off}
         {...props}
-      />
+      >
+        {/* A Slot takes one child, so beside a spinner the caller's element is
+            marked as the one the button's props land on — as a sibling, not
+            inside a fragment, which the Slot would not look into. */}
+        {loading ? [
+          <Spinner key="spinner" size="inherit" />,
+          asChild ? <SlotPrimitive.Slottable key="child">{children}</SlotPrimitive.Slottable> : <React.Fragment key="child">{children}</React.Fragment>,
+        ] : children}
+      </Comp>
     );
   }
 );

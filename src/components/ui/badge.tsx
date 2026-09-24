@@ -304,7 +304,30 @@ type BadgeOwnProps = React.ComponentProps<'span'> &
      * theme in `globals.css` (docs/designs/app-shell.md §1.5).
      */
     hue?: number;
+    /**
+     * A colour the DATA carries as a hex string — a tag's own `#rrggbb`. The
+     * chip is washed in it, lettered and edged in it; `colorFill` says how
+     * hard. It overrides `variant`, and it is the one place in the app a tag's
+     * hex becomes a style, so the screens that show tags write none of their
+     * own.
+     */
+    color?: string;
+    /**
+     * `tint` is how a tag reads resting; `faint` is paler still, for a choice
+     * not taken; `solid` fills the chip with the colour, for a choice taken.
+     */
+    colorFill?: 'tint' | 'faint' | 'solid';
   };
+
+/*
+ * The look of a chip drawn in a hex colour. The two-digit suffixes are alpha:
+ * `20` is an eighth of the colour, `10` a sixteenth, `50` a third.
+ */
+function colorStyle(color: string, fill: 'tint' | 'faint' | 'solid'): React.CSSProperties {
+  if (fill === 'solid') return { backgroundColor: color, color: '#fff', borderColor: color };
+  if (fill === 'faint') return { backgroundColor: `${color}10`, color, borderColor: `${color}50` };
+  return { backgroundColor: `${color}20`, color, borderColor: color };
+}
 
 /**
  * Forwards its ref, and that is load-bearing rather than tidy.
@@ -319,22 +342,29 @@ type BadgeOwnProps = React.ComponentProps<'span'> &
  * running copy 2026-08-19).
  */
 const Badge = React.forwardRef<HTMLSpanElement, BadgeOwnProps>(function Badge(
-  { className, variant, size, appearance, shape, asChild = false, disabled, hue, style, ...props },
+  { className, variant, size, appearance, shape, asChild = false, disabled, hue, color, colorFill = 'tint', style, ...props },
   ref,
 ) {
   const Comp = asChild ? SlotPrimitive.Slot : 'span';
   const hued = hue !== undefined;
+  const colored = !hued && !!color;
 
   return (
     <Comp
       ref={ref}
       data-slot="badge"
       className={cn(
-        badgeVariants({ variant: hued ? 'outline' : variant, size, appearance, shape, disabled }),
+        badgeVariants({ variant: hued || colored ? 'outline' : variant, size, appearance, shape, disabled }),
         hued && (appearance === 'light' ? 'badge-hue' : 'badge-hue badge-hue-strong'),
         className,
       )}
-      style={hued ? ({ ...style, '--tag-h': String(hue) } as React.CSSProperties) : style}
+      style={
+        hued
+          ? ({ ...style, '--tag-h': String(hue) } as React.CSSProperties)
+          : colored
+            ? { ...colorStyle(color, colorFill), ...style }
+            : style
+      }
       {...props}
     />
   );

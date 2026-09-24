@@ -44,17 +44,22 @@ export function Excerpt({ label, mono, children }: { label: ReactNode; mono?: bo
   );
 }
 
-/** The box a search or a question is typed into, with what it does drawn inside it. */
+/**
+ * The box a search or a question is typed into, with what it does drawn inside
+ * it. The library's field does the drawing; this only fixes the size of the
+ * words and lets the box take the room its row leaves it.
+ */
 export const QueryBox = forwardRef<HTMLInputElement, ComponentProps<typeof Input> & { icon: ReactNode }>(function QueryBox(
-  { icon, className, ...props },
+  { icon, className, containerClassName, ...props },
   ref,
 ) {
   return (
-    <div className="relative min-w-0 flex-1">
-      <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground [&_svg]:size-4">
-        {icon}
-      </span>
-      <Input ref={ref} className={cn('w-full pl-8 text-sm', className)} {...props} />
-    </div>
+    <Input
+      ref={ref}
+      start={icon}
+      containerClassName={cn('flex-1', containerClassName)}
+      className={cn('text-sm', className)}
+      {...props}
+    />
   );
 });
