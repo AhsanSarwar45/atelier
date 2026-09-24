@@ -203,36 +203,21 @@ drawing but use library parts for any ordinary control inside them.
 - Native `<datalist>` → `Picker`: the landing branch is a `Picker` when the folder has branches, and stays a typed `Input` when it has none. `terminal-settings.tsx:138` keeps its datalist: a shell is any path the reader types, and the library has no free-text combobox yet.
 - Native `title=` hover text → `Tooltip`: where-to-work's project folder is a `Tooltip`.
 
-### Buttons restyled by class
+### Buttons restyled by class (done in bw-weih.8)
 
-Buttons resized, recoloured or rounded by `className` where the library has,
-or will have, a size, variant or radius for it.
+Buttons resized, recoloured or rounded by `className` now take the library's
+size, variant and radius props.
 
-- `chat-tab.tsx:300, 450, 995, 1009, 1024, 2843, 2982, 3019, 3050`
-- `file-viewer.tsx:290-354, 388`
-- `file-preview.tsx:275`
-- `commit-details.tsx:143`
-- `filter-tree.tsx:117`
-- `open-files-strip.tsx:141`
-- `terminal-tabs.tsx:121, 132, 169`
-- `terminal-history.tsx:111, 255`
-- `usage-view.tsx:472`, `token-view.tsx:393`
-- `transcript-rows.tsx:1463`
-- `held-messages.tsx:94, 108, 122`
-- `accounts-settings.tsx:366`
-- `settings-screen.tsx:80`, `shell.tsx:314` (ToolButton)
-- `tag-picker.tsx:111`
-- `branch-picker.tsx:90`
-- `markdown-body.tsx:178`
-- `create-bead-dialog.tsx:125` (Input)
-- `sign-off.tsx:62`
-- `picture-viewer.tsx:93, 226`
-- `git-view.tsx:894` (Picker)
-- `commit-search.tsx:60-85, 70, 125, 219` (Input)
-- `mcp-catalogue.tsx:200`, `plugin-catalogue.tsx:161` (search icon over Input)
-- `chat-widget-view.tsx:213, 218`
-- `dependencies-settings.tsx:87`
-- `project-switcher.tsx:107` (inline rotate)
+- Round buttons (the composer's controls, held messages, a chat's menus) are `radius="full"`.
+- The twenty-pixel pane-toolbar buttons (the file viewer's save, reload and keep; the picture zoom; a commit's sha; the rename pencil; the tree's fold; the terminal's plus and history) are `size="2xs"`, with `mode="icon"` when square. The file viewer's four icon buttons are `ToolButton`s, so their hover words are a `Tooltip` rather than `title=`. The `xs` and `sm` icon sizes had a `[[` typo that left their icons unsized; it is fixed.
+- The settings back arrow is a `ToolButton`; the approve button is the `success` variant; the question note toggle is `dim`.
+- A picture's zoom and close are the new `media` variant, as the toggle group already had.
+- The tags "Create" and "Cancel", the usage and token closes, and the copy-code button use sizes from the library; the image widget is `size="none"`.
+- A branch chip's cross is `BadgeButton`, which is now a real `<button>`.
+- Every `Loader2 animate-spin` is `Spinner`, sized by its prop (`chat-state-chip` keeps Loader2 as an icon in its table of states).
+- Inputs: the search boxes carry their icon and clear button in `Input`'s `start` and `end` slots, and the commit filter's fields are `size="sm"`. The new card dialog's fields use the library's own colours.
+- `Picker` gained `appearance="inline"` for the git pane's branch, which is written as the words of its line.
+- The project switcher's arrow turns by class, not inline style.
 
 ### Board cards
 
