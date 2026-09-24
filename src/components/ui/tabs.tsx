@@ -7,6 +7,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Tooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 /*
@@ -80,8 +81,16 @@ type TabsTriggerProps = React.ComponentPropsWithoutRef<
    * tab the current one, and Tab reaches it from the keyboard.
    */
   onClose?: () => void
-  /** What the cross is called out loud: "Close index.ts". */
+  /** What the cross is called, out loud and on hover: "Close index.ts". */
   closeLabel?: string
+  /** On the cross, for a test to find it by. */
+  closeTestId?: string
+  /**
+   * Drawn in place of the cross — a file's unsaved dot. The tab still closes
+   * on a middle click; only the one-click way out is taken away, so a reader
+   * does not throw away an edit by aiming at the wrong pixel.
+   */
+  closeMark?: React.ReactNode
   /** On the box that holds the tab and its cross, when it has one. */
   containerClassName?: string
 }
@@ -89,8 +98,14 @@ type TabsTriggerProps = React.ComponentPropsWithoutRef<
 const TabsTrigger = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.Trigger>,
   TabsTriggerProps
->(({ className, onClose, closeLabel, containerClassName, ...props }, ref) => {
+>(({ className, onClose, closeLabel, closeTestId, closeMark, containerClassName, ...given }, ref) => {
   const variant = React.useContext(TabsVariantContext)
+  // A tab wrapped in a `Tooltip` is handed the tooltip's own `data-state`
+  // ("closed", "delayed-open"), which would otherwise land after the tab's
+  // "active" and take the lit look off the current tab.
+  const { "data-state": _tooltipState, ...props } = given as typeof given & {
+    "data-state"?: string
+  }
   const trigger = (
     <TabsPrimitive.Trigger
       ref={ref}
@@ -122,26 +137,31 @@ const TabsTrigger = React.forwardRef<
       }}
     >
       {trigger}
-      <Button
-        type="button"
-        size="2xs"
-        mode="icon"
-        variant="ghost"
-        data-slot="tab-close"
-        aria-label={closeLabel ?? "Close"}
-        className={cn(
-          "mr-1 size-4 text-t-faint hover:text-t-primary [&_svg]:size-3",
-          // Out of the way until the tab is being used, so a strip at rest
-          // reads as names rather than as a row of crosses.
-          "opacity-0 focus-visible:opacity-100 group-hover/tab:opacity-100 group-focus-within/tab:opacity-100 group-has-[[data-state=active]]/tab:opacity-100"
-        )}
-        onClick={(event) => {
-          event.stopPropagation()
-          onClose()
-        }}
-      >
-        <X aria-hidden="true" />
-      </Button>
+      {closeMark ?? (
+        <Tooltip label={closeLabel}>
+          <Button
+            type="button"
+            size="2xs"
+            mode="icon"
+            variant="ghost"
+            data-slot="tab-close"
+            data-testid={closeTestId}
+            aria-label={closeLabel ?? "Close"}
+            className={cn(
+              "mr-1 size-4 text-t-faint hover:text-t-primary [&_svg]:size-3",
+              // Out of the way until the tab is being used, so a strip at rest
+              // reads as names rather than as a row of crosses.
+              "opacity-0 focus-visible:opacity-100 group-hover/tab:opacity-100 group-focus-within/tab:opacity-100 group-has-[[data-state=active]]/tab:opacity-100"
+            )}
+            onClick={(event) => {
+              event.stopPropagation()
+              onClose()
+            }}
+          >
+            <X aria-hidden="true" />
+          </Button>
+        </Tooltip>
+      )}
     </div>
   )
 })

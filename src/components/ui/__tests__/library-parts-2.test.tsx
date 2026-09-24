@@ -15,6 +15,7 @@ import { Row } from '@/components/ui/row';
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tooltip } from '@/components/ui/tooltip';
 import { PointerAnchor as OldPointerAnchor } from '@/workbench/menu-anchor';
 
 describe('a popover or a menu at a point', () => {
@@ -253,6 +254,43 @@ describe('editor tabs', () => {
       new MouseEvent('auxclick', { bubbles: true, button: 1 }),
     );
     expect(onClose).toHaveBeenCalledWith('a.ts');
+  });
+
+  it('draws a mark in place of the cross that still closes on a middle click, and names the cross for a test', () => {
+    const onClose = vi.fn();
+    render(
+      <Tabs value="a.ts">
+        <TabsList variant="strip" aria-label="Open files">
+          <TabsTrigger value="a.ts" onClose={onClose} closeMark={<span data-testid="dot" />}>
+            a.ts
+          </TabsTrigger>
+          <TabsTrigger value="b.ts" onClose={() => {}} closeLabel="Close b.ts" closeTestId="cross">
+            b.ts
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>,
+    );
+    expect(screen.getByTestId('dot')).toBeTruthy();
+    expect(screen.getAllByTestId('cross')).toHaveLength(1);
+    expect(screen.getByTestId('cross')).toHaveAccessibleName('Close b.ts');
+    fireEvent(
+      screen.getByRole('tab', { name: 'a.ts' }),
+      new MouseEvent('auxclick', { bubbles: true, button: 1 }),
+    );
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the current tab lit when it wears a tooltip', () => {
+    render(
+      <Tabs value="a.ts">
+        <TabsList variant="strip" aria-label="Shells">
+          <Tooltip label="/home/a">
+            <TabsTrigger value="a.ts">a.ts</TabsTrigger>
+          </Tooltip>
+        </TabsList>
+      </Tabs>,
+    );
+    expect(screen.getByRole('tab', { name: 'a.ts' })).toHaveAttribute('data-state', 'active');
   });
 
   it('draws the strip look, and the pill of choices as it was', () => {
