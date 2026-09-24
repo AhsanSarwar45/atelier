@@ -19,6 +19,7 @@ import { useEffect, type MouseEvent } from 'react';
 import { X } from 'lucide-react';
 
 import { FILE_KINDS, fileKind } from '@/components/file-kinds';
+import { BadgeDot } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -132,10 +133,11 @@ export function OpenFilesStrip({
               <Icon className={cn('h-3.5 w-3.5 shrink-0', inkFor(file.path))} />
               <span className={cn('truncate', file.preview && 'italic')}>{tabName(file.path)}</span>
               {unsaved ? (
-                <span
+                <BadgeDot
+                  solid
                   data-testid="open-file-dirty"
                   aria-label="Unsaved changes"
-                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-t-secondary"
+                  className="text-t-secondary"
                 />
               ) : (
                 <Button

@@ -26,7 +26,7 @@ import { useEffect, useState } from 'react';
 
 import { Gauge, X } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
+import { Badge, BadgeDot } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -272,7 +272,7 @@ function Window({ window: w }: { window: WindowNow }) {
       <ul className="mt-2 space-y-1">
         {bar.map((s, i) => (
           <li key={s.name} className="flex items-center gap-2 text-xs" data-testid="token-piece" data-piece={s.name}>
-            <span className={`h-2 w-2 shrink-0 rounded-full ${bandColour(i, s.room)}`} aria-hidden="true" />
+            <BadgeDot size="sm" solid className={bandColour(i, s.room)} aria-hidden="true" />
             <span className={`truncate ${s.room ? 'text-muted-foreground' : 'text-foreground'}`}>{s.name}</span>
             <span className="ml-auto shrink-0 font-mono text-muted-foreground">
               {big(s.tokens)} · {pct(s.tokens, w.window)}

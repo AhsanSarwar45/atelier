@@ -20,7 +20,7 @@ import { request } from '@/lib/api';
 import { Brain, ChevronRight, Hand, Loader2 } from 'lucide-react';
 
 import { MarkdownBody, type Mentions } from '@/components/markdown-body';
-import { Badge } from '@/components/ui/badge';
+import { Badge, BadgeDot } from '@/components/ui/badge';
 import { FILE_BADGE_CLASS, FILE_KINDS, fileKind } from '@/components/file-kinds';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -579,7 +579,7 @@ export const ToolRow = memo(function ToolRow({
     });
   }, [open, item.detailsDeferred, item.id, detail, sessionId]);
   const dot =
-    item.status === 'running' ? 'bg-amber-400 animate-pulse' : item.status === 'ok' ? 'bg-emerald-500' : 'bg-red-500';
+    item.status === 'running' ? 'text-amber-400 animate-pulse' : item.status === 'ok' ? 'text-emerald-500' : 'text-red-500';
   // A shell row's arguments ARE its command: written out as `key: value` it
   // read as a form rather than as the line that was run (bw-4wcd.2). Asked of
   // ACP as well as of the name, because "the shell tool is called Bash" is true
@@ -657,7 +657,7 @@ export const ToolRow = memo(function ToolRow({
           disabled={!hasBody}
           onClick={() => setOpen(!open)}
         >
-          <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
+          <BadgeDot size="sm" solid className={dot} />
           {hasBody && (
             <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} />
           )}
@@ -1160,6 +1160,7 @@ function AttachmentChip({ image, onLook }: { image: ImagePayload; onLook: (image
         appearance="outline"
         size="sm"
         shape="circle"
+        wrap
         className={cn(FILE_BADGE_CLASS, 'cursor-zoom-in', FILE_KINDS[kind].color)}
       >
         {/* `size="none"`: the badge around it already sets the height, the

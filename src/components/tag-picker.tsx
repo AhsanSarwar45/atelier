@@ -5,7 +5,7 @@ import * as React from "react";
 import { Plus, Check, X } from "lucide-react";
 
 import { ColorPicker } from "@/components/color-picker";
-import { Badge } from "@/components/ui/badge";
+import { Badge, BadgeDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -149,10 +149,7 @@ export function TagPicker({
                   disabled={isLoading}
                   aria-pressed={isTagSelected(tag.id)}
                 >
-                  <div
-                    className="h-3 w-3 rounded-full shrink-0"
-                    style={{ backgroundColor: tag.color }}
-                  />
+                  <BadgeDot size="md" solid color={tag.color} />
                   <span className="flex-1 truncate">{tag.name}</span>
                   {isTagSelected(tag.id) && (
                     <Check className="h-4 w-4 text-success shrink-0" aria-hidden="true" />

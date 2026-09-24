@@ -9,7 +9,7 @@ import { Plus, Github, Search, X, Archive } from "lucide-react";
 import { AddProjectDialog } from "@/components/add-project-dialog";
 import { ProjectCard } from "@/components/project-card";
 import { Shell } from "@/components/shell";
-import { Badge } from "@/components/ui/badge";
+import { Badge, BadgeDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RoiuiCard } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -183,7 +183,7 @@ export default function ProjectsPage() {
           {/* Loading status line */}
           {loadingStatus && (
             <div className="mb-4 flex items-center gap-2 text-xs text-t-muted animate-pulse">
-              <div className="h-1.5 w-1.5 rounded-full bg-info animate-ping" />
+              <BadgeDot solid className="text-info animate-ping" />
               {loadingStatus}
             </div>
           )}

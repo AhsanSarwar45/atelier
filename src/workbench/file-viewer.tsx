@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Copy, ExternalLink, FolderOpen, Pencil } from 'lucide-react';
 
 import { isMarkdownPath } from '@/components/file-kinds';
+import { BadgeDot } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { PopoverAtPoint, type PointerAt } from '@/components/ui/point-anchor';
 import { Popover, PopoverContent } from '@/components/ui/popover';
@@ -104,10 +105,11 @@ function Breadcrumb({ relative }: { relative: string }) {
 function UnsavedDot() {
   return (
     <Tooltip label="Unsaved changes">
-      <span
+      <BadgeDot
+        solid
         data-testid="file-viewer-dirty"
         aria-label="Unsaved changes"
-        className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
+        className="text-warning"
       />
     </Tooltip>
   );

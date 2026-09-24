@@ -8,7 +8,7 @@ import { BeadTags } from "@/components/bead-tags";
 import { CopyableText } from "@/components/copyable-text";
 import { DependencyBadge } from "@/components/dependency-badge";
 import { SubtaskList } from "@/components/subtask-list";
-import { Badge } from "@/components/ui/badge";
+import { Badge, BadgeDot } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useTheme } from "@/hooks/use-theme";
 import { getStatusDotColor, isBlockedBy, truncate } from "@/lib/bead-utils";
@@ -161,7 +161,7 @@ export const EpicCard = memo(function EpicCard({
             <span className="flex items-center gap-1">
               {/* The In Progress colour, taken off the one list of states — it
                   wore the Todo colour, so the dot named another state. */}
-              <div className={cn("w-2 h-2 rounded-full bg-current", getStatusDotColor(WORKING))} aria-hidden="true" />
+              <BadgeDot size="sm" solid className={getStatusDotColor(WORKING)} aria-hidden="true" />
               {progress.inProgress} in progress
             </span>
           )}
@@ -170,13 +170,13 @@ export const EpicCard = memo(function EpicCard({
               full bar over a longer list unexplained. */}
           {progress.dropped > 0 && (
             <span className="flex items-center gap-1">
-              <div className={cn("w-2 h-2 rounded-full bg-current", getStatusDotColor('cancelled'))} aria-hidden="true" />
+              <BadgeDot size="sm" solid className={getStatusDotColor('cancelled')} aria-hidden="true" />
               {progress.dropped} dropped
             </span>
           )}
           {progress.blocked > 0 && (
             <span className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-danger" aria-hidden="true" />
+              <BadgeDot size="sm" solid className="text-danger" aria-hidden="true" />
               {progress.blocked} blocked
             </span>
           )}
