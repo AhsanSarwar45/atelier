@@ -515,6 +515,31 @@ impl WorkbenchState {
         }
     }
 
+    /// Read every account of every brand, each on its own task, and send each
+    /// reading the moment it lands.
+    ///
+    /// An allowance belongs to a login, and the browser keeps them apart by
+    /// the profile named here (bw-5ihw.8). The readings used to be taken one
+    /// after another and sent together, so Codex waited behind every Claude
+    /// account's native request, and a wake of the poller in the middle threw
+    /// the whole round away. A reading already cached comes back at once, and
+    /// the per-account refresh lock keeps two rounds from asking twice
+    /// (bw-kde0.1).
+    fn spread_usage(&self) {
+        for brand in ["claude", "codex"] {
+            for (profile, _) in self.registry.every_account(brand) {
+                let state = self.clone();
+                tokio::spawn(async move {
+                    if let Ok(usage) = state.account_usage(brand, Some(&profile)).await {
+                        let _ = state.watch_polls.send(
+                            json!({"kind":"usage","brand":brand,"profile":profile,"usage":usage}),
+                        );
+                    }
+                });
+            }
+        }
+    }
+
     pub(crate) async fn watch_poll_subscription(
         &self,
     ) -> (broadcast::Receiver<Value>, WatchPollLease) {
@@ -529,6 +554,11 @@ impl WorkbenchState {
         if !running {
             let state = self.clone();
             *poller = Some(tokio::spawn(async move { state.run_watch_poller().await }));
+        } else {
+            // A page that joins a running poller would otherwise draw no plan
+            // chip until its next beat, up to half a minute away. The first
+            // beat of a new poller already does this.
+            self.spread_usage();
         }
         (receiver, lease)
     }
@@ -656,41 +686,7 @@ impl WorkbenchState {
                     let holds = self.publish_holds().await;
                     self.keep_following_the_worked_in(&holds, &mut followed).await;
                 },
-                _ = usage_tick.tick() => {
-                    // Every account of every brand, not one reading per brand:
-                    // an allowance belongs to a login, and the browser keeps
-                    // them apart by the profile named here (bw-5ihw.8).
-                    let asking: Vec<(&str, String)> = ["claude", "codex"]
-                        .iter()
-                        .flat_map(|brand| {
-                            self.registry
-                                .every_account(brand)
-                                .into_iter()
-                                .map(move |(id, _)| (*brand, id))
-                        })
-                        .collect();
-                    let readings = async {
-                        let mut readings = Vec::new();
-                        for (brand, profile) in &asking {
-                            readings.push((
-                                *brand,
-                                profile.clone(),
-                                self.account_usage(brand, Some(profile)).await,
-                            ));
-                        }
-                        readings
-                    };
-                    tokio::select! {
-                        _ = self.watch_poll_wake.notified() => {},
-                        readings = readings => {
-                            for (brand, profile, result) in readings {
-                                if let Ok(usage) = result {
-                                    let _ = self.watch_polls.send(json!({"kind":"usage","brand":brand,"profile":profile,"usage":usage}));
-                                }
-                            }
-                        }
-                    }
-                },
+                _ = usage_tick.tick() => self.spread_usage(),
             }
         }
     }
@@ -3751,6 +3747,41 @@ mod tests {
         })
         .await
         .expect("the shared poller outlived its last browser");
+    }
+
+    #[tokio::test]
+    async fn a_page_joining_the_poller_hears_codex_at_once_even_while_claude_is_slow() {
+        let (_directory, state) = fixture();
+        state.usage_cache.lock().await.insert(
+            usage_key("codex", crate::workbench::profiles::SYSTEM),
+            (std::time::Instant::now(), json!({"brand":"codex"})),
+        );
+        // Claude's reading is stuck mid-request: nothing cached, lock held.
+        let claude = state
+            .usage_refresh(&usage_key("claude", crate::workbench::profiles::SYSTEM))
+            .await;
+        let _claude_busy = claude.lock().await;
+
+        async fn codex(receiver: &mut broadcast::Receiver<Value>) -> Value {
+            loop {
+                let frame = receiver.recv().await.unwrap();
+                if frame["kind"] == "usage" && frame["brand"] == "codex" {
+                    return frame;
+                }
+            }
+        }
+        let (mut first_rx, _first) = state.watch_poll_subscription().await;
+        tokio::time::timeout(Duration::from_millis(500), codex(&mut first_rx))
+            .await
+            .expect("the first beat waited for Claude before sending Codex");
+        // A second page joins the running poller between beats, and must not
+        // wait up to half a minute for the next one (bw-kde0.1).
+        let (mut second_rx, _second) = state.watch_poll_subscription().await;
+        let frame = tokio::time::timeout(Duration::from_millis(500), codex(&mut second_rx))
+            .await
+            .expect("a joining page heard nothing until the next beat");
+        assert_eq!(frame["profile"], crate::workbench::profiles::SYSTEM);
+        assert_eq!(frame["usage"]["brand"], "codex");
     }
 
     #[tokio::test]
