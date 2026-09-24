@@ -230,15 +230,15 @@ test('fullscreen comparisons share a mode toggle and stack side-by-side pictures
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: 'tests/results/image-compare-mobile-fullscreen.png', animations: 'disabled' });
 
-    await expect(dialog.getByRole('button', { name: 'Side by side' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(dialog.getByRole('radio', { name: 'Side by side' })).toHaveAttribute('aria-checked', 'true');
     const viewports = dialog.locator('[data-testid^=comparison-zoom-viewport-]');
     const [beforeBox, afterBox] = await Promise.all([viewports.nth(0).boundingBox(), viewports.nth(1).boundingBox()]);
     if (!beforeBox || !afterBox) throw new Error('Expected both fullscreen comparison pictures');
     expect(afterBox.y, 'mobile side-by-side pictures did not stack').toBeGreaterThan(beforeBox.y + beforeBox.height);
 
-    await dialog.getByRole('button', { name: 'Wipe' }).click();
+    await dialog.getByRole('radio', { name: 'Wipe' }).click();
     await expect(dialog.getByTestId('picture-viewer-comparison')).toHaveAttribute('data-mode', 'wipe');
-    await expect(dialog.getByRole('button', { name: 'Wipe' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(dialog.getByRole('radio', { name: 'Wipe' })).toHaveAttribute('aria-checked', 'true');
   } finally { if (project) await request.delete(`/api/projects/${project.id}`); }
 });
 
@@ -292,8 +292,8 @@ test('a wide, short wipe comparison keeps its labels and zoom button clear of th
     await zoom.click();
     const dialog = page.getByTestId('picture-viewer');
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByRole('button', { name: 'Wipe' })).toHaveAttribute('aria-pressed', 'true');
-    await expect(dialog.getByRole('button', { name: 'Side by side' })).toHaveAttribute('aria-pressed', 'false');
+    await expect(dialog.getByRole('radio', { name: 'Wipe' })).toHaveAttribute('aria-checked', 'true');
+    await expect(dialog.getByRole('radio', { name: 'Side by side' })).toHaveAttribute('aria-checked', 'false');
     const split = dialog.getByRole('slider', { name: 'Before and after split' });
     await expect(split).toHaveAttribute('aria-valuenow', '50');
     expect(await dialog.locator('input[type=range]').count(), 'the expanded view still has a bare range control').toBe(0);

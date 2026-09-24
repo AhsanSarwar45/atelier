@@ -28,6 +28,7 @@ import { Maximize, Minus, Plus } from 'lucide-react';
 import { fileKind, isMarkdownPath } from '@/components/file-kinds';
 import { MarkdownBody } from '@/components/markdown-body';
 import { Button } from '@/components/ui/button';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
 import { mediaUrl } from '@/workbench/attachment-store';
 import { CodeEditor } from '@/workbench/code-editor';
@@ -171,22 +172,20 @@ function Bar({ children }: { children: ReactNode }) {
 /** The Source / Preview switch, for the kinds that are legibly both. */
 export function SourceSwitch({ showing, onChange }: { showing: 'source' | 'preview'; onChange: (next: 'source' | 'preview') => void }) {
   return (
-    <div data-testid="file-preview-switch" className="flex items-center gap-0.5">
+    <ToggleGroup
+      type="single"
+      size="2xs"
+      aria-label="Show the file as"
+      data-testid="file-preview-switch"
+      value={showing}
+      onValueChange={(next) => onChange(next as 'source' | 'preview')}
+    >
       {(['preview', 'source'] as const).map((which) => (
-        <Button
-          key={which}
-          type="button"
-          size="xs"
-          variant={showing === which ? 'secondary' : 'ghost'}
-          data-testid={`file-preview-${which}`}
-          aria-pressed={showing === which}
-          className="h-5 px-2 capitalize"
-          onClick={() => onChange(which)}
-        >
+        <ToggleGroupItem key={which} value={which} data-testid={`file-preview-${which}`} className="capitalize">
           {which}
-        </Button>
+        </ToggleGroupItem>
       ))}
-    </div>
+    </ToggleGroup>
   );
 }
 

@@ -6,6 +6,7 @@ import { GripVertical, Minus, Plus, RotateCcw, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Panel } from '@/components/ui/panel';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import type { ImageComparison, ImagePayload, LookableImage } from '@/workbench/protocol';
 import { NO_TRANSFORM, clampScale, useZoomPan, type ImageTransform } from '@/workbench/zoom-pan';
 import { attachmentSrc } from '@/workbench/attachment-store';
@@ -216,9 +217,11 @@ export function PictureViewer({ image, onClose }: { image: LookableImage; onClos
       <DialogContent shape="screen" hideClose overlayClassName="bg-black/80" aria-describedby={undefined} aria-label={label || 'Picture'} data-testid="picture-viewer" className="flex h-full w-full flex-col items-center justify-center p-2 pb-16 pt-16 sm:p-6 sm:pb-16 sm:pt-16">
         <DialogTitle className="sr-only">{label || 'Picture'}</DialogTitle>
         <Controls transform={transform} onChange={setTransform} />
-        {comparison && <Panel tone="media" inset="bar" className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 gap-1" aria-label="Comparison layout">
-          <Button type="button" variant="ghost" size="sm" aria-pressed={comparisonMode === 'side_by_side'} className={comparisonMode === 'side_by_side' ? 'bg-white/20 text-white' : 'text-white'} onClick={() => setComparisonMode('side_by_side')}>Side by side</Button>
-          <Button type="button" variant="ghost" size="sm" aria-pressed={comparisonMode === 'wipe'} className={comparisonMode === 'wipe' ? 'bg-white/20 text-white' : 'text-white'} onClick={() => setComparisonMode('wipe')}>Wipe</Button>
+        {comparison && <Panel asChild tone="media" inset="bar">
+          <ToggleGroup type="single" variant="media" size="sm" className="absolute bottom-3 left-1/2 z-20 -translate-x-1/2 gap-1" aria-label="Comparison layout" value={comparisonMode ?? ''} onValueChange={(mode) => setComparisonMode(mode as ImageComparison['mode'])}>
+            <ToggleGroupItem value="side_by_side">Side by side</ToggleGroupItem>
+            <ToggleGroupItem value="wipe">Wipe</ToggleGroupItem>
+          </ToggleGroup>
         </Panel>}
         {comparison && comparisonMode === 'side_by_side' && <SideBySide comparison={comparison} transform={transform} onChange={setTransform} />}
         {comparison && comparisonMode === 'wipe' && <Wipe comparison={comparison} transform={transform} onChange={setTransform} />}
