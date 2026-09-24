@@ -14,7 +14,7 @@ use std::{
 
 const MAX_TEXT: usize = 128 * 1024;
 const MAX_LIBRARY: usize = 2 * 1024 * 1024;
-static WRITES: Mutex<()> = Mutex::new(());
+pub(super) static WRITES: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -992,7 +992,7 @@ pub(super) fn valid_id(id: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
-fn library_path(data: &Path, root: Option<&Path>) -> Result<PathBuf, String> {
+pub(super) fn library_path(data: &Path, root: Option<&Path>) -> Result<PathBuf, String> {
     match root {
         None => Ok(data.join("library.json")),
         Some(root) => {
@@ -1095,6 +1095,7 @@ fn builtins() -> Vec<Item> {
     .collect()
 }
 pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
+    let _guard = WRITES.lock().map_err(|e| e.to_string())?;
     let mut global = read(data, None)?;
     validate(&global, false)?;
     let located = root.and_then(|r| crate::project_manifest::locate(r, data));

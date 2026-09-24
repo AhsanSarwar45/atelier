@@ -15,6 +15,89 @@ fn setup() -> (tempfile::TempDir, tempfile::TempDir) {
 }
 
 #[test]
+fn folder_editor_preserves_native_metadata_assets_and_refuses_stale_writes() {
+    use atelier::workbench::skill_folders::{edit_read, edit_write};
+    let (data, project) = setup();
+    let source = data.path().join("skills/editable");
+    put(&source, "SKILL.md", "---\nname: Original\nallowed-tools: [Read, Bash]\ncustom: {nested: true}\n---\nUse {{name}}.");
+    put(&source, "atelier.json", r#"{"parameters":{"name":"World"}}"#);
+    put(&source, "assets/binary", [0, 255, 7]);
+    put(&source, "scripts/run.py", "print('unchanged')");
+    let before = edit_read(data.path(), None, "editable").unwrap();
+    assert_eq!(before.item.content, "Use {{name}}.");
+    let mut edited = before.item.clone();
+    edited.name = "Edited".into(); edited.description = "Changed description".into();
+    edited.content = "Updated {{name}}.".into(); edited.automatic = false;
+    edited.requires = vec!["python3".into()];
+    edited.when = serde_json::from_str(r#"{"op":"file_exists","path":"package.json"}"#).unwrap();
+    let after = edit_write(data.path(), None, "editable", &edited, &before.revision).unwrap();
+    assert_ne!(before.revision, after.revision);
+    assert_eq!(after.item.content, edited.content);
+    assert!(!after.item.automatic);
+    assert_eq!(serde_json::to_value(&after.item.when).unwrap(), serde_json::json!({"op":"file_exists","path":"package.json"}));
+    assert_eq!(after.item.requires, ["python3"]);
+    assert_eq!(after.item.parameters.get("name").unwrap(), "World");
+    let text = fs::read_to_string(source.join("SKILL.md")).unwrap();
+    assert!(text.contains("allowed-tools:")); assert!(text.contains("nested: true"));
+    assert_eq!(fs::read(source.join("assets/binary")).unwrap(), [0,255,7]);
+    assert_eq!(fs::read_to_string(source.join("scripts/run.py")).unwrap(), "print('unchanged')");
+    assert!(edit_write(data.path(), None, "editable", &edited, &before.revision).unwrap_err().contains("changed"));
+    assert!(edit_read(data.path(), Some(project.path()), "editable").is_err(), "Project editor cannot write inherited global source");
+    assert!(edit_read(data.path(), None, "../editable").is_err());
+    let snapshot = library::resolve(data.path(), None).unwrap();
+    assert!(!snapshot.items.iter().find(|r| r.item.id == "editable").unwrap().item.automatic);
+    put(project.path(), ".atelier/skills/local/SKILL.md", "Local body");
+    let local = edit_read(data.path(), Some(project.path()), "local").unwrap();
+    let mut item = local.item; item.content = "Edited local".into();
+    edit_write(data.path(), Some(project.path()), "local", &item, &local.revision).unwrap();
+    assert!(fs::read_to_string(project.path().join(".atelier/skills/local/SKILL.md")).unwrap().contains("Edited local"));
+}
+
+#[test]
+#[cfg(unix)]
+fn folder_editor_refuses_symlinked_sources_and_metadata() {
+    use atelier::workbench::skill_folders::edit_read;
+    use std::os::unix::fs::symlink;
+    let (data, project) = setup();
+    put(project.path(), "outside/SKILL.md", "Outside");
+    fs::create_dir_all(data.path().join("skills")).unwrap();
+    symlink(project.path().join("outside"), data.path().join("skills/linked")).unwrap();
+    assert!(edit_read(data.path(), None, "linked").unwrap_err().contains("symlink"));
+    put(data.path(), "skills/metadata/SKILL.md", "Body");
+    put(project.path(), "settings.json", "{}");
+    symlink(project.path().join("settings.json"), data.path().join("skills/metadata/atelier.json")).unwrap();
+    assert!(edit_read(data.path(), None, "metadata").unwrap_err().contains("symlink"));
+}
+
+#[test]
+fn folder_editor_serializes_competing_writers_and_detects_native_metadata_edits() {
+    use atelier::workbench::skill_folders::{edit_read, edit_write};
+    let (data, _) = setup();
+    put(data.path(), "skills/race/SKILL.md", "Original");
+    let before = edit_read(data.path(), None, "race").unwrap();
+    let results = std::thread::scope(|scope| {
+        let threads: Vec<_> = ["First", "Second"].into_iter().map(|content| {
+            let mut item = before.item.clone(); item.content = content.into();
+            let data = data.path(); let revision = &before.revision;
+            scope.spawn(move || edit_write(data, None, "race", &item, revision))
+        }).collect();
+        threads.into_iter().map(|thread| thread.join().unwrap()).collect::<Vec<_>>()
+    });
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    let before = edit_read(data.path(), None, "race").unwrap();
+    let skill = data.path().join("skills/race/SKILL.md");
+    let text = fs::read_to_string(&skill).unwrap().replacen("---\n", "---\nnative-extra: preserved\n", 1);
+    fs::write(&skill, text).unwrap();
+    assert!(edit_write(data.path(), None, "race", &before.item, &before.revision).unwrap_err().contains("changed"));
+    let before = edit_read(data.path(), None, "race").unwrap();
+    let mut invalid = before.item.clone(); invalid.kind = library::Kind::Instruction;
+    assert!(edit_write(data.path(), None, "race", &invalid, &before.revision).is_err());
+    invalid = before.item.clone(); invalid.content = "x".repeat(128 * 1024);
+    assert!(edit_write(data.path(), None, "race", &invalid, &before.revision).is_err());
+    assert_eq!(edit_read(data.path(), None, "race").unwrap().revision, before.revision);
+}
+
+#[test]
 fn complete_folders_keep_binary_large_resources_scripts_and_pinned_versions() {
     let (data, project) = setup();
     let source = data.path().join("skills/package");

@@ -38,13 +38,102 @@ pub struct Source {
     pub error: Option<String>,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct Settings {
     when: Condition,
     requires: Vec<String>,
     parameters: BTreeMap<String, String>,
     automatic: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Editor {
+    pub item: Item,
+    pub revision: String,
+}
+
+fn editable_path(data: &Path, root: Option<&Path>, id: &str) -> Result<PathBuf, String> {
+    if !super::library::valid_id(id) || id.starts_with("atelier-") {
+        return Err("Invalid skill folder ID".into());
+    }
+    let scope = super::library::library_path(data, root)?.parent().unwrap().to_path_buf();
+    let scope = fs::canonicalize(scope).map_err(|e| e.to_string())?;
+    let path = scope.join("skills").join(id);
+    // Editing a link could change an unrelated provider/source folder. Refuse
+    // linked roots and files even when discovery can read them safely.
+    for target in [scope.join("skills"), path.clone(), path.join("SKILL.md"), path.join("atelier.json")] {
+        match fs::symlink_metadata(&target) {
+            Ok(meta) if meta.file_type().is_symlink() => return Err("Cannot edit a symlinked skill source".into()),
+            Ok(meta) if target.file_name().is_some_and(|n| n == "SKILL.md" || n == "atelier.json") && !meta.is_file() => return Err("Skill metadata must be regular files".into()),
+            Ok(_) => (),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && target == path.join("atelier.json") => (),
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Ok(path)
+}
+
+fn editor_at(path: &Path, id: &str) -> Result<Editor, String> {
+    let source = discover(path.parent().unwrap())?.into_iter().find(|s| s.item.id == id)
+        .ok_or("Skill folder not found")?;
+    if let Some(error) = source.error { return Err(error); }
+    let mut hash = Sha256::new();
+    for name in ["SKILL.md", "atelier.json"] {
+        let file = path.join(name);
+        if file.exists() {
+            let bytes = bounded_read(&file, 128 * 1024)?;
+            hash.update([1]); hash.update((bytes.len() as u64).to_le_bytes()); hash.update(bytes);
+        } else { hash.update([0]); }
+    }
+    Ok(Editor { item: source.item, revision: format!("{:x}", hash.finalize()) })
+}
+
+pub fn edit_read(data: &Path, root: Option<&Path>, id: &str) -> Result<Editor, String> {
+    let _guard = super::library::WRITES.lock().map_err(|e| e.to_string())?;
+    editor_at(&editable_path(data, root, id)?, id)
+}
+
+pub fn edit_write(data: &Path, root: Option<&Path>, id: &str, item: &Item, expected: &str) -> Result<Editor, String> {
+    let _guard = super::library::WRITES.lock().map_err(|e| e.to_string())?;
+    if item.id != id || item.kind != Kind::Skill || !item.resources.is_empty() || !item.bundle.is_empty() {
+        return Err("Folder editing cannot change ID, kind, resources or bundle".into());
+    }
+    super::library::validate(&super::library::Library { items: vec![item.clone()], ..Default::default() }, root.is_some())?;
+    let path = editable_path(data, root, id)?;
+    if editor_at(&path, id)?.revision != expected { return Err("Skill changed in another editor. Reload before saving.".into()); }
+    let original = bounded_read(&path.join("SKILL.md"), 128 * 1024)?;
+    let text = String::from_utf8(original.clone()).map_err(|e| e.to_string())?.replace("\r\n", "\n");
+    let (header, _) = frontmatter(&text)?;
+    let mut metadata: serde_yaml::Value = serde_yaml::from_str(header).map_err(|e| e.to_string())?;
+    if metadata.is_null() { metadata = serde_yaml::Value::Mapping(Default::default()); }
+    let mapping = metadata.as_mapping_mut().ok_or("Skill frontmatter must be a mapping")?;
+    mapping.insert("name".into(), item.name.clone().into());
+    mapping.insert("description".into(), item.description.clone().into());
+    let skill = format!("---\n{}---\n\n{}\n", serde_yaml::to_string(&metadata).map_err(|e| e.to_string())?, item.content);
+    let settings = serde_json::to_vec_pretty(&Settings { when: item.when.clone(), requires: item.requires.clone(), parameters: item.parameters.clone(), automatic: Some(item.automatic) }).map_err(|e| e.to_string())?;
+    if skill.len() > 128 * 1024 || settings.len() > 128 * 1024 { return Err("Skill metadata exceeds 128 KiB".into()); }
+    // Same-filesystem temporary files are prepared before either source changes.
+    // The shared resolver/writer lock hides the pair while committing; restore
+    // SKILL.md if committing the sidecar fails.
+    let prepare = |bytes: &[u8]| -> Result<tempfile::NamedTempFile, String> {
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new_in(&path).map_err(|e| e.to_string())?;
+        file.write_all(bytes).and_then(|_| file.as_file().sync_all()).map_err(|e| e.to_string())?;
+        Ok(file)
+    };
+    let skill_temp = prepare(skill.as_bytes())?;
+    let settings_temp = prepare(&settings)?;
+    // Recheck after preparing to catch ordinary external file edits.
+    editable_path(data, root, id)?;
+    if editor_at(&path, id)?.revision != expected { return Err("Skill changed in another editor. Reload before saving.".into()); }
+    skill_temp.persist(path.join("SKILL.md")).map_err(|e| e.to_string())?;
+    if let Err(error) = settings_temp.persist(path.join("atelier.json")) {
+        super::provider_defaults::atomic_write(&path.join("SKILL.md"), &original)
+            .map_err(|rollback| format!("{error}; restoring SKILL.md failed: {rollback}"))?;
+        return Err(error.to_string());
+    }
+    editor_at(&path, id)
 }
 
 /// The folder name is the stable library ID. SKILL.md keeps native metadata;
