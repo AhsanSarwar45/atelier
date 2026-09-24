@@ -29,7 +29,11 @@ describe('new-chat provider default', () => {
     expect(source).toContain('testid: `new-chat-provider-default-${provider.brand}`,');
     expect(source).toContain("setNewChatDefault(newChatDefault === provider.brand ? 'ask' : provider.brand)");
     expect(source).not.toContain('data-testid="new-chat-default"');
-    expect(source).not.toContain("import { Checkbox } from '@/components/ui/checkbox'");
+    // The one tick left in this file is the agent's checklist, which shows
+    // each item's state; no other part of the chat draws a checkbox.
+    const checklist = source.slice(source.indexOf('export function TodoPanel('), source.indexOf('/** What the writing box reads off a keystroke'));
+    expect(checklist).toContain('<Checkbox');
+    expect(source.replace(checklist, '')).not.toContain('<Checkbox');
   });
 
   it('opens the dialog even when a provider is starred', () => {

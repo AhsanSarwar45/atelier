@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
+import { Progress } from '@/components/ui/progress';
 import { Row } from '@/components/ui/row';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -1007,26 +1008,21 @@ export function WorkingLine({
   return (
     <div className="flex flex-col gap-1">
       {line}
-      <div
+      <Progress
         data-testid="summarising-bar"
         data-fill={Math.round(filling * 100)}
         data-held={held}
-        role="progressbar"
         aria-label="Compaction progress"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(filling * 100)}
+        value={Math.round(filling * 100)}
+        size="xs"
+        // Fed a reading a second: it glides between them.
+        pace="steady"
         // Compact, which is what he asked for: a bar the width of the words
         // above it reads as a bar. Stretched across the whole transcript it
         // read as a hairline rule under the line, and a rule is not a
         // measurement of anything.
-        className="mx-1 h-1 w-40 max-w-full overflow-hidden rounded-full bg-muted"
-      >
-        <div
-          className={cn('h-full rounded-full bg-primary transition-[width] duration-1000 ease-linear', held && 'animate-pulse')}
-          style={{ width: `${filling * 100}%` }}
-        />
-      </div>
+        className={cn('mx-1 w-40 max-w-full', held && 'animate-pulse')}
+      />
     </div>
   );
 }

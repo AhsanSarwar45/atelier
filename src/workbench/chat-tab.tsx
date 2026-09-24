@@ -45,6 +45,7 @@ import { type Mentions } from '@/components/markdown-body';
 import { TabLead, TabTools, TabTrail, ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
@@ -669,6 +670,7 @@ export function TodoPanel({ items }: { items: TodoItem[] }) {
   // header, and the reader unfolds it when they want it (bw-i7pg.1).
   const [expanded, setExpanded] = useState(false);
   const wasComplete = useRef(allComplete);
+  const tickId = useId();
 
   useEffect(() => {
     // A plan that becomes active while the chat is open deserves to be seen.
@@ -709,19 +711,17 @@ export function TodoPanel({ items }: { items: TodoItem[] }) {
       >
         {items.map((t) => (
           <li key={t.id} data-testid="todo-item" data-todo-status={t.status} className="flex items-center gap-2 text-sm">
-            <span
-              className={cn(
-                'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border text-[10px]',
-                t.status === 'completed'
-                  ? 'border-emerald-500 bg-emerald-500/20 text-emerald-300'
-                  : t.status === 'in_progress'
-                    ? 'animate-pulse border-amber-400 bg-amber-400/20 text-amber-300'
-                    : 'border-border text-transparent',
-              )}
-            >
-              {t.status === 'completed' ? '✓' : t.status === 'in_progress' ? '●' : ''}
-            </span>
-            <span className={cn(t.status === 'completed' && 'text-muted-foreground line-through')}>{t.text}</span>
+            {/* The agent's tick, not the reader's: it shows the state and is
+                not a control, so it is kept out of the tab order. The one the
+                agent is on is the half-ticked box, pulsing. */}
+            <Checkbox
+              checked={t.status === 'completed' ? true : t.status === 'in_progress' ? 'indeterminate' : false}
+              aria-readonly="true"
+              aria-labelledby={`${tickId}-${t.id}`}
+              tabIndex={-1}
+              className={cn(t.status === 'in_progress' && 'animate-pulse')}
+            />
+            <span id={`${tickId}-${t.id}`} className={cn(t.status === 'completed' && 'text-muted-foreground line-through')}>{t.text}</span>
           </li>
         ))}
       </ul>

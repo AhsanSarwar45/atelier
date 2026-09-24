@@ -29,6 +29,7 @@ import { Gauge, X } from 'lucide-react';
 import { Badge, BadgeDot } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
+import { Progress } from '@/components/ui/progress';
 import { Tooltip } from '@/components/ui/tooltip';
 import { request } from '@/lib/api';
 import { reads, TIGHT } from '@/workbench/context-window';
@@ -173,7 +174,7 @@ const BANDS = [
 
 const bandColour = (i: number, room: boolean): string => (room ? 'bg-muted' : BANDS[i % BANDS.length]!);
 
-function Card({ title, children, testId }: { title: string; children: React.ReactNode; testId?: string }) {
+function TitledPanel({ title, children, testId }: { title: string; children: React.ReactNode; testId?: string }) {
   return (
     <Panel inset="md" data-testid={testId}>
       <h3 className="text-sm font-semibold text-foreground">{title}</h3>
@@ -237,7 +238,7 @@ function Window({ window: w }: { window: WindowNow }) {
   const bar = stripesOf(w);
   const mark = w.forgetsAt !== null ? Math.min(100, (w.forgetsAt / w.window) * 100) : null;
   return (
-    <Card title="Context window" testId="token-window">
+    <TitledPanel title="Context window" testId="token-window">
       <div className="mt-1 flex items-baseline gap-2 text-sm">
         <span className="font-mono text-foreground" data-testid="token-window-figure">
           {reads(w.used, w.window)}
@@ -296,7 +297,7 @@ function Window({ window: w }: { window: WindowNow }) {
       )}
 
       {w.inside && <Conversation inside={w.inside} />}
-    </Card>
+    </TitledPanel>
   );
 }
 
@@ -304,7 +305,7 @@ function Window({ window: w }: { window: WindowNow }) {
 function Spent({ spent }: { spent: TaskSpend }) {
   const rows = splitRows(spent.total);
   return (
-    <Card title="Total usage" testId="token-spent">
+    <TitledPanel title="Total usage" testId="token-spent">
       <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="font-mono text-2xl text-foreground" data-testid="token-spent-total" data-total={spent.total.total}>
           {big(spent.total.total)}
@@ -324,9 +325,7 @@ function Spent({ spent }: { spent: TaskSpend }) {
                 {big(r.tokens)} · {pct(r.tokens, spent.total.total)}
               </span>
             </div>
-            <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-muted">
-              <div className="h-full rounded-full bg-primary" style={{ width: `${pctWidth(r.tokens, spent.total.total)}%` }} />
-            </div>
+            <Progress size="xs" value={pctWidth(r.tokens, spent.total.total)} aria-label={`${r.label} share`} className="mt-0.5" />
             {r.note && <p className="mt-0.5 text-[11px] text-muted-foreground">{r.note}</p>}
           </li>
         ))}
@@ -347,7 +346,7 @@ function Spent({ spent }: { spent: TaskSpend }) {
           of={spent.total.total}
         />
       </div>
-    </Card>
+    </TitledPanel>
   );
 }
 

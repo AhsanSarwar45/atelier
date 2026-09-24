@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Panel } from '@/components/ui/panel';
+import { Progress } from '@/components/ui/progress';
 import { Tooltip } from '@/components/ui/tooltip';
 import { usePlanUsage } from '@/workbench/live';
 import { CHIP_GAP } from '@/workbench/what-it-runs';
@@ -54,11 +55,11 @@ import { Overlay, overlayPanel } from '@/components/ui/overlay';
  * ------------------------------------------------------------------ */
 
 /** One colour per state of trouble, taken from the theme rather than spelled here. */
-const BAR: Record<Severity, string> = {
-  normal: 'bg-primary',
-  warning: 'bg-[var(--color-warning-accent)]',
-  critical: 'bg-destructive',
-};
+const BAR = {
+  normal: 'default',
+  warning: 'warning',
+  critical: 'danger',
+} as const satisfies Record<Severity, 'default' | 'warning' | 'danger'>;
 
 export function severityVariant(severity: Severity): 'secondary' | 'warning' | 'destructive' {
   return severity === 'critical' ? 'destructive' : severity === 'warning' ? 'warning' : 'secondary';
@@ -75,9 +76,13 @@ function Window({ window: w, now }: { window: PlanWindow; now: Date }) {
       </div>
       {/* The bar is what a percentage is FOR: three windows read side by side
           are compared by eye, not by arithmetic. */}
-      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-        <div className={`h-full rounded-full ${BAR[w.severity]}`} style={{ width: `${Math.min(100, Math.max(0, w.percent ?? 0))}%` }} />
-      </div>
+      <Progress
+        size="sm"
+        tone={BAR[w.severity]}
+        value={Math.min(100, Math.max(0, w.percent ?? 0))}
+        aria-label={`${w.label} used`}
+        className="mt-1"
+      />
       <p className="mt-1 text-[11px] text-muted-foreground">
         {clock ? `Resets ${clock}${until ? ` · in ${until}` : ''}` : 'No reset time given'}
       </p>
