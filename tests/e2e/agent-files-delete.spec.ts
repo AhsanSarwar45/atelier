@@ -33,7 +33,17 @@ test('delete exact agent files in global and project settings', async ({ page, r
     await expect(page.getByRole('menuitem', { name: 'Delete file…' })).toBeVisible();
     await page.screenshot({ path: join(results, `${scope}-menu-after.png`), fullPage: true, animations: 'disabled' });
     await page.getByRole('menuitem', { name: 'Delete file…' }).click();
-    await expect(page.getByRole('alertdialog')).toContainText(file);
+    const confirm = page.getByRole('alertdialog');
+    await expect(confirm).toContainText(file);
+    await page.screenshot({ path: join(results, `${scope}-confirm.png`), animations: 'disabled' });
+    // The box and the dim behind it are painted, not left see-through: the
+    // library dialog once named colours this app never defines (bw-weih.1).
+    const painted = (el: Element) => {
+      const { backgroundColor } = getComputedStyle(el);
+      return backgroundColor !== 'transparent' && !/rgba\(.*,\s*0\)$/.test(backgroundColor);
+    };
+    expect(await confirm.evaluate(painted)).toBe(true);
+    expect(await page.locator('[data-slot="alert-dialog-overlay"]').evaluate(painted)).toBe(true);
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     expect(existsSync(file)).toBe(true);
     await row.click({ button: 'right' });

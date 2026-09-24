@@ -14,7 +14,7 @@ import { ChevronLeft, ChevronRight, Copy, ExternalLink, FileCode2, FilePlus2, Fo
 
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
-import { AlertDialog, AlertDialogContent, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter } from '@/components/ui/alert-dialog';
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter } from '@/components/ui/alert-dialog';
 import { PointerAnchor, type PointerAt } from '@/workbench/menu-anchor';
 import { Input } from '@/components/ui/input';
 import { ReadFailed } from '@/components/ui/read-failed';
@@ -264,7 +264,7 @@ export function AgentFilesBrowser({
           </AlertDialogDescription>
           {deleteError && <p role="alert" className="text-sm text-danger">{deleteError}</p>}
           <AlertDialogFooter>
-            <Button variant="outline" disabled={deleteBusy} onClick={() => setDeleting(null)}>Cancel</Button>
+            <AlertDialogCancel disabled={deleteBusy}>Cancel</AlertDialogCancel>
             <Button variant="destructive" disabled={deleteBusy} onClick={() => void deleteFile()}>{deleteBusy ? 'Deleting…' : 'Delete file'}</Button>
           </AlertDialogFooter>
         </AlertDialogContent>
