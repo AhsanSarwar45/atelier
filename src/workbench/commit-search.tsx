@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import {
@@ -111,21 +112,26 @@ export function CommitSearch({ line, onLine, found, reading }: CommitSearchProps
               />
               <div className="flex flex-col gap-1.5">
                 <span className="text-[11px] font-medium text-t-secondary">Since</span>
-                <div className="flex flex-wrap gap-1">
+                <ToggleGroup
+                  type="single"
+                  optional
+                  variant="outline"
+                  aria-label="Since, as a window"
+                  className="flex-wrap gap-1"
+                  value={query.since ?? ''}
+                  // Pressing the window already chosen takes it away again.
+                  onValueChange={(since) => set('since', since || undefined)}
+                >
                   {WHEN.map((window) => (
-                    <Button
+                    <ToggleGroupItem
                       key={window.word}
-                      size="xs"
-                      variant={query.since === window.since ? 'primary' : 'outline'}
+                      value={window.since}
                       data-testid={`commit-filter-since-${window.word.replace(/\s/g, '-')}`}
-                      onClick={() =>
-                        set('since', query.since === window.since ? undefined : window.since)
-                      }
                     >
                       {window.word}
-                    </Button>
+                    </ToggleGroupItem>
                   ))}
-                </div>
+                </ToggleGroup>
                 <Input
                   value={query.since ?? ''}
                   onChange={(event) => set('since', event.target.value)}
