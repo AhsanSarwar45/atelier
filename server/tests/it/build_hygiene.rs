@@ -62,6 +62,23 @@ fn every_integration_test_is_a_module_of_one_program() {
     );
 }
 
+/// Full debug info made each test program about 325 MB, nearly all of it
+/// debug sections, and linking it cost a gigabyte. Line tables alone keep
+/// file and line numbers in a panic for a fraction of that.
+#[test]
+fn debug_builds_keep_line_tables_only() {
+    let manifest: toml::Value = std::fs::read_to_string(repo_root().join("server/Cargo.toml"))
+        .expect("the server manifest exists")
+        .parse()
+        .expect("the server manifest is TOML");
+    let debug = manifest
+        .get("profile")
+        .and_then(|profile| profile.get("dev"))
+        .and_then(|dev| dev.get("debug"))
+        .and_then(|debug| debug.as_str());
+    assert_eq!(debug, Some("line-tables-only"), "[profile.dev] debug");
+}
+
 #[test]
 fn embedded_assets_are_baked_in_for_debug_builds() {
     let manifest = std::fs::read_to_string(repo_root().join("server/Cargo.toml"))

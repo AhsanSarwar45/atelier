@@ -135,6 +135,11 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-feature
 # let the optimiser see across crates, and symbols are left out of the file
 # (bw-fbzd.3). Panics still unwind, so one failed request does not take the
 # server down with it.
+# Line tables keep a panic's file and line; full debug info made every test
+# program about 325 MB and cost a gigabyte to link (bw-tj2a.2).
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 lto = "fat"
 codegen-units = 1
