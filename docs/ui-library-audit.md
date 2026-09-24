@@ -13,10 +13,10 @@ colours this app never defines. It was fixed in bw-weih.1.
 
 ## What was found
 
-Raw HTML controls are nearly gone. Four remain: the screen-reader-only
-`<button>` on each board card (`bead-card.tsx:131`, `epic-card.tsx:117`, moved
-in batch 7), and two hidden form mirrors with no library equivalent
-(`chat-tab.tsx:901` file input, `composer-editor.tsx:392` textarea). What
+Raw HTML controls are nearly gone. Two remain, hidden form mirrors with no
+library equivalent (`chat-tab.tsx:901` file input, `composer-editor.tsx:392`
+textarea). The board cards' screen-reader-only `<button>` moved into the
+library as `BoardCardSelect` in batch 7. What
 remains falls into three kinds:
 
 1. **Library parts reshaped by `className`.** A `Button` forced into a list
@@ -219,10 +219,11 @@ size, variant and radius props.
 - `Picker` gained `appearance="inline"` for the git pane's branch, which is written as the words of its line.
 - The project switcher's arrow turns by class, not inline style.
 
-### Board cards
+### Board cards and tree rows (done in bw-weih.9)
 
-- `bead-card.tsx:131-318`, `epic-card.tsx:117-311` | clickable card surfaces in three layouts, each a `div` copying Card styling with a screen-reader-only raw `<button>` | `Card` with an interactive variant
-- `file-tree.tsx:454`, `filter-tree.tsx:105` | tree rows as clickable `div role="treeitem"` | `Row`
+- `bead-card.tsx`, `epic-card.tsx` → `BoardCard shape kind selected settled blocked` (`ui/card/board-card.tsx`), which holds the six surfaces (three theme shapes, task and job) exactly as the cards drew them. The out-of-sight select button is `BoardCardSelect`, so neither card draws a raw `<button>`. Before and after were recorded in five themes, at rest, hovered and focused: every computed style and every pixel matched.
+- `file-tree.tsx` rows → `Row asChild look="tree" inset="none"` around the `treeitem`, the open file `selected`. `Row` gained `look="tree"`, the tree's own surface colours.
+- `filter-tree.tsx` kind line stays a plain `div role="treeitem"`: it is not clickable itself, and the part that is, its name, is already a `Row`.
 
 ## How the work is split
 

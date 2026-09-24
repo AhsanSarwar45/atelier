@@ -9,15 +9,16 @@ import { CopyableText } from "@/components/copyable-text";
 import { DependencyBadge } from "@/components/dependency-badge";
 import { SubtaskList } from "@/components/subtask-list";
 import { Badge, BadgeDot } from "@/components/ui/badge";
+import { BoardCard, BoardCardSelect } from "@/components/ui/card/board-card";
 import { Progress } from "@/components/ui/progress";
 import { useTheme } from "@/hooks/use-theme";
 import { getStatusDotColor, isBlockedBy, truncate } from "@/lib/bead-utils";
 import { commentCountOf } from "@/lib/beads-parser";
 import { computeEpicProgress, progressPercent } from "@/lib/epic-parser";
 import { cn } from "@/lib/utils";
-import { CardLiveChat } from "@/workbench/card-live";
 import { WORKING, standing } from "@/types";
 import type { Bead, Epic } from "@/types";
+import { CardLiveChat } from "@/workbench/card-live";
 
 export interface EpicCardProps {
   /** Epic bead with children */
@@ -101,27 +102,14 @@ export const EpicCard = memo(function EpicCard({
 
   const { layout } = useTheme();
 
-  // Selecting the card is one real button, kept out of sight, with the card's
-  // ring drawn when it has focus. The whole card used to be the button, and a
-  // button may not hold others: the copy, dependency, child and chat controls
-  // inside it were read as part of its name, and a key pressed on any of them
-  // could open the card as well (bw-lf8i.4). A press anywhere else on the card
-  // still selects it.
+  // Selecting the card is BoardCardSelect, one real button kept out of sight
+  // (bw-lf8i.4); a press anywhere else on the card still selects it.
   const interactionProps = {
     "data-bead-id": epic.id,
     // Which card the press was about, for a reader with several jobs standing
     // in his column and for the checks that time the answer.
     onClick: () => onSelect(epic),
   };
-  const selectButton = (
-    <button
-      type="button"
-      data-card-select
-      aria-label={`Select epic: ${epic.title}`}
-      className="sr-only"
-      onClick={(e) => { e.stopPropagation(); onSelect(epic); }}
-    />
-  );
 
   /**
    * How much of the job is done: the count, the bar, and what stands behind
@@ -213,17 +201,13 @@ export const EpicCard = memo(function EpicCard({
   // ─── Layout: compact-row (Linear Minimal) ───
   if (layout === 'compact-row') {
     return (
-      <div
+      <BoardCard
         {...interactionProps}
-        className={cn(
-          "theme-card relative cursor-pointer p-2.5 bg-card border border-epic/20",
-          "hover:bg-surface-overlay/50",
-          "has-[[data-card-select]:focus-visible]:ring-2 has-[[data-card-select]:focus-visible]:ring-epic",
-          isSettled && "opacity-45",
-          isSelected && "bg-epic/5 outline outline-1 outline-epic/20"
-        )}
+        shape="compact-row" kind="epic"
+        selected={isSelected}
+        settled={isSettled}
       >
-        {selectButton}
+        <BoardCardSelect label={`Select epic: ${epic.title}`} onSelect={() => onSelect(epic)} />
         <div className="flex items-start gap-2.5">
           <Layers className="h-4 w-4 text-epic shrink-0 mt-0.5" aria-hidden="true" />
           <div className="flex-1 min-w-0 space-y-2">
@@ -241,24 +225,20 @@ export const EpicCard = memo(function EpicCard({
             <CardLiveChat beadId={epic.id} />
           </div>
         </div>
-      </div>
+      </BoardCard>
     );
   }
 
   // ─── Layout: property-tags (Notion Warm / GitHub Clean) ───
   if (layout === 'property-tags') {
     return (
-      <div
+      <BoardCard
         {...interactionProps}
-        className={cn(
-          "theme-card relative cursor-pointer p-3 bg-card border border-epic/30",
-          "hover:bg-surface-inset/30",
-          "has-[[data-card-select]:focus-visible]:ring-2 has-[[data-card-select]:focus-visible]:ring-epic",
-          isSettled && "opacity-45",
-          isSelected && "ring-2 ring-epic ring-offset-2 ring-offset-surface-base"
-        )}
+        shape="property-tags" kind="epic"
+        selected={isSelected}
+        settled={isSettled}
       >
-        {selectButton}
+        <BoardCardSelect label={`Select epic: ${epic.title}`} onSelect={() => onSelect(epic)} />
         <div className="space-y-2">
           {/* Title */}
           <h3 className="font-semibold text-sm leading-tight text-t-primary">
@@ -293,24 +273,19 @@ export const EpicCard = memo(function EpicCard({
 
           {childrenSection}
         </div>
-      </div>
+      </BoardCard>
     );
   }
 
   // ─── Layout: standard (Default / Glassmorphism / Neo-Brutalist / Soft Light) ───
   return (
-    <div
+    <BoardCard
       {...interactionProps}
-      className={cn(
-        "theme-card relative cursor-pointer p-4",
-        "bg-surface-raised/70",
-        "border border-b-default/60 border-l-2 border-l-epic",
-        "has-[[data-card-select]:focus-visible]:ring-2 has-[[data-card-select]:focus-visible]:ring-epic has-[[data-card-select]:focus-visible]:ring-offset-2 has-[[data-card-select]:focus-visible]:ring-offset-surface-base",
-        isSettled && "opacity-45",
-        isSelected && "ring-2 ring-epic ring-offset-2 ring-offset-surface-base"
-      )}
+      shape="standard" kind="epic"
+      selected={isSelected}
+      settled={isSettled}
     >
-      {selectButton}
+      <BoardCardSelect label={`Select epic: ${epic.title}`} onSelect={() => onSelect(epic)} />
       <div className="space-y-3">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -362,6 +337,6 @@ export const EpicCard = memo(function EpicCard({
           <CardLiveChat beadId={epic.id} />
         </div>
       </div>
-    </div>
+    </BoardCard>
   );
 });

@@ -47,8 +47,10 @@ import { ChevronDown, ChevronRight, Eye, EyeOff } from 'lucide-react';
 import { FileIcon } from '@/components/file-icon';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent } from '@/components/ui/dropdown-menu';
+import { Row } from '@/components/ui/row';
 import { Tooltip } from '@/components/ui/tooltip';
 import { fs as fsApi, type FsTreeEntry, type GitStatus } from '@/lib/api';
+import { cn } from '@/lib/utils';
 import { type PathMoved } from '@/workbench/file-actions';
 import { STATUS_LOOK, type FileState } from '@/workbench/git-view';
 import { PointerAnchor } from '@/workbench/menu-anchor';
@@ -451,54 +453,60 @@ export default function FileTree({ root, selected, onOpen, onMoved }: FileTreePr
             const tone = state ? TONE_CLASS[STATUS_LOOK[state].tone] : '';
             const chosen = entry.path === selected;
             return (
-              <div
+              <Row
                 key={item.key}
-                role="treeitem"
-                aria-level={row.depth + 1}
-                aria-selected={chosen}
-                aria-expanded={entry.kind === 'dir' ? row.open : undefined}
-                data-testid="files-tree-row"
-                data-path={entry.path}
-                data-kind={entry.kind}
-                data-depth={row.depth}
-                data-ignored={entry.ignored ? 'yes' : undefined}
-                data-status={state ?? undefined}
-                data-cursor={entry.path === cursor ? 'yes' : undefined}
-                onClick={() => choose(row)}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  setCursor(entry.path);
-                  setMenu({ row, at: { left: event.clientX, top: event.clientY } });
-                }}
-                style={{ height: `${ROW_HEIGHT}px`, transform: `translateY(${item.start}px)` }}
-                className={[
-                  'absolute inset-x-0 top-0 flex cursor-pointer select-none items-center pr-2 text-[13px]',
-                  chosen ? 'bg-surface-overlay' : 'hover:bg-surface-overlay/60',
-                  entry.ignored ? 'opacity-45' : '',
-                ].join(' ')}
+                asChild
+                look="tree"
+                inset="none"
+                selected={chosen}
               >
-                {/* The indent guides: one hairline per level crossed, drawn as
-                    the left edge of a spacer rather than a background image, so
-                    they line up with the chevron whatever the row holds. */}
-                {Array.from({ length: row.depth }, (_, level) => (
-                  <span
-                    key={level}
-                    aria-hidden="true"
-                    data-testid="files-tree-guide"
-                    className="h-full shrink-0 border-l border-border/40"
-                    style={{ width: `${INDENT}px` }}
-                  />
-                ))}
-                <span className="flex h-full w-4 shrink-0 items-center justify-center">
-                  {entry.kind === 'dir'
-                    ? (row.open
-                        ? <ChevronDown className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
-                        : <ChevronRight className="h-3 w-3 text-muted-foreground" aria-hidden="true" />)
-                    : null}
-                </span>
-                <FileIcon name={entry.name} kind={entry.kind} open={row.open} />
-                <span className={`ml-1.5 truncate ${tone}`}>{entry.name}</span>
-              </div>
+                <div
+                  role="treeitem"
+                  aria-level={row.depth + 1}
+                  aria-selected={chosen}
+                  aria-expanded={entry.kind === 'dir' ? row.open : undefined}
+                  data-testid="files-tree-row"
+                  data-path={entry.path}
+                  data-kind={entry.kind}
+                  data-depth={row.depth}
+                  data-ignored={entry.ignored ? 'yes' : undefined}
+                  data-status={state ?? undefined}
+                  data-cursor={entry.path === cursor ? 'yes' : undefined}
+                  onClick={() => choose(row)}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setCursor(entry.path);
+                    setMenu({ row, at: { left: event.clientX, top: event.clientY } });
+                  }}
+                  style={{ height: `${ROW_HEIGHT}px`, transform: `translateY(${item.start}px)` }}
+                  className={cn(
+                    'absolute inset-x-0 top-0 flex select-none items-center pr-2 text-[13px]',
+                    entry.ignored && 'opacity-45',
+                  )}
+                >
+                  {/* The indent guides: one hairline per level crossed, drawn as
+                      the left edge of a spacer rather than a background image, so
+                      they line up with the chevron whatever the row holds. */}
+                  {Array.from({ length: row.depth }, (_, level) => (
+                    <span
+                      key={level}
+                      aria-hidden="true"
+                      data-testid="files-tree-guide"
+                      className="h-full shrink-0 border-l border-border/40"
+                      style={{ width: `${INDENT}px` }}
+                    />
+                  ))}
+                  <span className="flex h-full w-4 shrink-0 items-center justify-center">
+                    {entry.kind === 'dir'
+                      ? (row.open
+                          ? <ChevronDown className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
+                          : <ChevronRight className="h-3 w-3 text-muted-foreground" aria-hidden="true" />)
+                      : null}
+                  </span>
+                  <FileIcon name={entry.name} kind={entry.kind} open={row.open} />
+                  <span className={`ml-1.5 truncate ${tone}`}>{entry.name}</span>
+                </div>
+              </Row>
             );
           })}
         </div>

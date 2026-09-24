@@ -39,6 +39,11 @@ const rowVariants = cva(
         quiet:
           'hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring ' +
           'data-[state=selected]:text-foreground',
+        // A line in a tree of files: lit a little under the pointer and fully
+        // for the open one, in the surface colours the tree sits on rather than
+        // the accent a menu uses (bw-weih.9).
+        tree:
+          'hover:bg-surface-overlay/60 data-[state=selected]:bg-surface-overlay data-[state=selected]:hover:bg-surface-overlay',
       },
       /** The space between the pieces of a row laid out as a line. */
       gap: {
