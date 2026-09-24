@@ -320,12 +320,18 @@ pub(crate) async fn follow_native_record(
     // A driver that died with the last run of the server left its stretch
     // ahead of the cursor; it is handed back before this reads from there.
     state.hand_back_if_orphaned(&session.id).await;
-    let followed_to = state
-        .database()
-        .followed_to(session_id.clone())
-        .await
-        .ok()
-        .flatten();
+    // With no cursor, a follower starts at the record's end, except beside a
+    // driver: there it starts where the driver began, so a note already in
+    // the driver's stretch is not skipped.
+    let followed_to = match state.database().followed_to(session_id.clone()).await {
+        Ok(Some(at)) => Some(at),
+        _ => state
+            .database()
+            .driven_from(session_id.clone())
+            .await
+            .ok()
+            .flatten(),
+    };
     let mut claude_tail = (session.brand == "claude").then(|| {
         let mut tail = crate::workbench::external::LineTail::new(&record);
         if let Some(at) = followed_to {
@@ -1277,6 +1283,30 @@ mod tests {
         state.let_driver_go("chat-1").await;
         assert!(shell_ended(&state, "bshell03").await, "a new chat's shell still shows as running");
         assert_eq!(state.database().driven_from("chat-1".into()).await.unwrap(), None);
+    }
+
+    /// A new chat opened while its driver runs still ends the shells that
+    /// finished before anybody looked.
+    #[tokio::test]
+    async fn a_new_chat_opened_mid_run_still_ends_its_earlier_shells() {
+        let (directory, state) = workbench_fixture();
+        let record = new_chat(&directory, &state, "claude", "99999999-9999-4999-8999-999999999999").await;
+        fs::remove_file(&record).unwrap();
+        // Read in, but with no cursor yet: the one a follower keeps is trusted.
+        state.database().mark_imported("chat-1".into()).await.unwrap();
+        state.pretend_driver("chat-1").await;
+        fs::write(&record, "{\"type\":\"meta\",\"cwd\":\"/work/project\"}\n").unwrap();
+        shell_started(&state, "bshell04").await;
+        write_line(&record, shell_finished("bshell04"));
+        write_line(&record, claude_answer("driven-1", "an answer the driver carried"));
+
+        let (_lease, start) = state.chat_follow_subscription("chat-1").await;
+        start_following(&state, start.unwrap());
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        state.let_driver_go("chat-1").await;
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert!(shell_ended(&state, "bshell04").await, "a shell that ended before the chat was opened still shows as running");
+        assert!(!says(&state, "an answer the driver carried").await);
     }
 
     /// A driver that died with the server leaves its mark; the next run hands
