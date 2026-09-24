@@ -73,12 +73,12 @@ describe('Agent files browser', () => {
     render(<AgentFilesBrowser {...(project ? { projectPath: '/repo' } : { profileId: 'work' })} />);
     const target = await screen.findByTestId('agent-file-CLAUDE.md');
     fireEvent.contextMenu(target, { clientX: 50, clientY: 80 });
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete file…' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete file' }));
     expect(await screen.findByRole('alertdialog')).toHaveTextContent(file.path);
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(removed).toBe(false);
     fireEvent.contextMenu(target);
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete file…' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete file' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Delete file', exact: true }));
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith({ type: 'agent-files.delete', path: file.path, ...(project ? { projectPath: '/repo' } : { profileId: 'work' }) }));
     await waitFor(() => expect(screen.queryByTestId('agent-file-CLAUDE.md')).not.toBeInTheDocument());
@@ -93,7 +93,7 @@ describe('Agent files browser', () => {
     });
     render(<AgentFilesBrowser />);
     fireEvent.contextMenu(await screen.findByTestId('agent-file-CLAUDE.md'));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete file…' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete file' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Delete file', exact: true }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Permission denied');
     expect(screen.getByTestId('agent-file-CLAUDE.md')).toBeInTheDocument();

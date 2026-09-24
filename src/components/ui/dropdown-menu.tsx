@@ -19,6 +19,11 @@ export const menuContentClassName =
 export const menuItemClassName =
   "relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0"
 
+// A choice that destroys something — delete, remove — in the theme's danger
+// colour, so no screen tints its own menu items to say so.
+export const menuItemDestructiveClassName =
+  "text-destructive focus:bg-destructive/10 focus:text-destructive"
+
 export const menuSeparatorClassName = "-mx-1 my-1 h-px bg-muted"
 
 const DropdownMenu = DropdownMenuPrimitive.Root
@@ -94,12 +99,14 @@ const DropdownMenuItem = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item> & {
     inset?: boolean
+    variant?: "default" | "destructive"
   }
->(({ className, inset, ...props }, ref) => (
+>(({ className, inset, variant = "default", ...props }, ref) => (
   <DropdownMenuPrimitive.Item
     ref={ref}
     className={cn(
       menuItemClassName,
+      variant === "destructive" && menuItemDestructiveClassName,
       inset && "pl-8",
       className
     )}

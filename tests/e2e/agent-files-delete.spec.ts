@@ -30,9 +30,9 @@ test('delete exact agent files in global and project settings', async ({ page, r
       continue;
     }
     await row.click({ button: 'right' });
-    await expect(page.getByRole('menuitem', { name: 'Delete file…' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Delete file' })).toBeVisible();
     await page.screenshot({ path: join(results, `${scope}-menu-after.png`), fullPage: true, animations: 'disabled' });
-    await page.getByRole('menuitem', { name: 'Delete file…' }).click();
+    await page.getByRole('menuitem', { name: 'Delete file' }).click();
     const confirm = page.getByRole('alertdialog');
     await expect(confirm).toContainText(file);
     await page.screenshot({ path: join(results, `${scope}-confirm.png`), animations: 'disabled' });
@@ -47,7 +47,7 @@ test('delete exact agent files in global and project settings', async ({ page, r
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     expect(existsSync(file)).toBe(true);
     await row.click({ button: 'right' });
-    await page.getByRole('menuitem', { name: 'Delete file…' }).click();
+    await page.getByRole('menuitem', { name: 'Delete file' }).click();
     await page.getByRole('button', { name: 'Delete file', exact: true }).click();
     await expect(row).toHaveCount(0);
     await expect(page.getByText('No file selected')).toBeVisible();

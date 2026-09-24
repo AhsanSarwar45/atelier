@@ -7,6 +7,7 @@ import * as ContextMenuPrimitive from "@radix-ui/react-context-menu"
 import {
   menuContentClassName,
   menuItemClassName,
+  menuItemDestructiveClassName,
   menuSeparatorClassName,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
@@ -46,11 +47,12 @@ const ContextMenuItem = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Item> & {
     inset?: boolean
+    variant?: "default" | "destructive"
   }
->(({ className, inset, ...props }, ref) => (
+>(({ className, inset, variant = "default", ...props }, ref) => (
   <ContextMenuPrimitive.Item
     ref={ref}
-    className={cn(menuItemClassName, inset && "pl-8", className)}
+    className={cn(menuItemClassName, variant === "destructive" && menuItemDestructiveClassName, inset && "pl-8", className)}
     {...props}
   />
 ))

@@ -253,7 +253,7 @@ export function AgentFilesBrowser({
       <DropdownMenu open={menu !== null} onOpenChange={(open) => { if (!open) setMenu(null); }}>
         <PointerAnchor at={menu?.at ?? null} />
         <DropdownMenuContent align="start" collisionPadding={8}>
-          <DropdownMenuItem className="text-danger" onSelect={() => { setDeleting(menu?.file ?? null); setDeleteError(null); setMenu(null); }}>Delete file…</DropdownMenuItem>
+          <DropdownMenuItem variant="destructive" onSelect={() => { setDeleting(menu?.file ?? null); setDeleteError(null); setMenu(null); }}>Delete file</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <AlertDialog open={deleting !== null} onOpenChange={(open) => { if (!open && !deleteBusy) setDeleting(null); }}>

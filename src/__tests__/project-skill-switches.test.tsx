@@ -59,7 +59,7 @@ describe('project skill switches', () => {
     request.mockResolvedValue({ ok: true, json: async () => answer() });
     render(<SharedLibrary projectPath="/repo" />);
     fireEvent.click(await screen.findByRole('radio', { name: 'Skills', exact: true }));
-    expect(within(screen.getByTestId('library-item-proof')).queryByRole('button', { name: 'Delete…' })).toBeNull();
+    expect(within(screen.getByTestId('library-item-proof')).queryByRole('button', { name: 'Delete' })).toBeNull();
   });
 
   it('confirms complete folder deletion and sends the prepared revision', async () => {
@@ -74,12 +74,12 @@ describe('project skill switches', () => {
     } }));
     render(<SharedLibrary />);
     fireEvent.click(await screen.findByRole('radio', { name: 'Skills', exact: true }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     expect(await screen.findByRole('alertdialog')).toHaveTextContent('scripts and assets');
     await waitFor(() => expect(screen.getByRole('button', { name: 'Delete skill', exact: true })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Cancel', exact: true }));
     expect(deleted).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: 'Delete…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Delete skill', exact: true })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Delete skill', exact: true }));
     await waitFor(() => expect(screen.queryByTestId('library-item-proof')).toBeNull());

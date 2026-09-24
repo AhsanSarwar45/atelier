@@ -76,7 +76,7 @@ old source before retiring it; Atelier never silently deletes native guidance.
 
 ## Complete skill folders
 
-User-owned entries have **Delete…** in their owning settings scope, including
+User-owned entries have **Delete** in their owning settings scope, including
 folder skills and commands. The confirmation identifies the scope, source path
 and file count. Folder deletion moves the entire folder into a unique
 `deleted-skills/` archive beside that scope's library, preserving scripts, assets
