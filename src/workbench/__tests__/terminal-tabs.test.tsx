@@ -12,7 +12,7 @@
  * anything is; a hidden tab is hidden by an attribute the page understands, not
  * by a class no stylesheet in this bench has read.
  */
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Terminal } from '@xterm/xterm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -255,7 +255,7 @@ describe('the terminal window’s tabs', () => {
     running = [shell('live-1', '/home/ahsan/dev/corsetta'), shell('live-2', '/home/ahsan/dev/beads-web')];
     await open();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'corsetta' }));
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'corsetta' }));
     const first = paneFor('live-1');
     first.socket.opens();
 
@@ -271,7 +271,7 @@ describe('the terminal window’s tabs', () => {
     const box = scrollbox('live-1');
     box.scrollTop = 240;
 
-    fireEvent.click(screen.getByRole('tab', { name: 'beads-web' }));
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'beads-web' }));
 
     expect(bodyOf('live-1'), 'a tab that is not showing is still drawn, only hidden').toBeInTheDocument();
     expect(bodyOf('live-1')?.hidden, 'and it is hidden by the page’s own rule').toBe(true);
@@ -282,7 +282,7 @@ describe('the terminal window’s tabs', () => {
     ).not.toBe(Socket.CLOSED);
     expect(disposed, 'and nothing was torn down to hide it').toEqual([]);
 
-    fireEvent.click(screen.getByRole('tab', { name: 'corsetta' }));
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'corsetta' }));
     const again = paneFor('live-1');
 
     expect(again.builds, 'coming back to a tab must not build it a second time').toBe(1);
@@ -343,7 +343,7 @@ describe('the terminal window’s tabs', () => {
     const second = paneFor('live-2');
 
     fireEvent.click(
-      within(screen.getAllByTestId('terminal-tab')[0]).getByRole('button', {
+      screen.getByRole('button', {
         name: 'Close the shell in /home/ahsan/dev/corsetta',
       }),
     );

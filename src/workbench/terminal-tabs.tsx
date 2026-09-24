@@ -27,10 +27,10 @@
 import dynamic from 'next/dynamic';
 import { useCallback, useState, type ReactNode } from 'react';
 
-import { Plus, X } from 'lucide-react';
+import { Plus } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
-import { Button } from '@/components/ui/button';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
@@ -70,107 +70,80 @@ const INTERRUPT = '\x03';
 function TabStrip({ searching, onSearch }: { searching: boolean; onSearch: () => void }) {
   const { tabs, active, select, closeTab, openTab, opening, typeInto } = useTerminalShells();
   return (
-    <div
-      role="tablist"
-      aria-label="Shells"
-      data-testid="terminal-tab-strip"
-      className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border/40 bg-surface-overlay px-2 py-1"
-    >
-      {tabs.map((tab) => {
-        const showing = tab.id === active;
-        return (
-          <div
-            key={tab.id}
-            data-testid="terminal-tab"
-            className={cn(
-              'flex shrink-0 items-center rounded-sm pr-0.5',
-              showing ? 'bg-surface-base' : 'hover:bg-surface-base/60',
-            )}
-          >
-            {/* The name and the cross are two controls side by side rather than
-                one inside the other: a button inside a button is neither valid
-                nor operable, and closing a tab is not a way of selecting it.
-                The library's `Button` and not a bare one with paint on it: a tab
-                is a control, and the house keeps every control's paint in one
-                place (`scripts/one-library.py`). What is left here is which of
-                the two it is, which is the only thing a tab knows that a button
-                does not. */}
-            <Tooltip label={tabWhere(tab.folder)}>
-              <Button
-                variant="ghost"
-                size="xs"
-                role="tab"
-                aria-selected={showing}
-                onClick={() => select(tab.id)}
-                className={cn(
-                  'h-6 max-w-40 truncate px-2 font-normal',
-                  showing ? 'text-t-primary' : 'text-t-tertiary hover:text-t-primary',
-                )}
-              >
-                {tabName(tab.folder)}
-              </Button>
-            </Tooltip>
-            <ToolButton
-              icon={<X />}
+    // Taken with the mouse or with Enter and Space; the arrow keys only walk
+    // along the row, so passing a shell does not pull the keyboard into it.
+    <Tabs value={active ?? ''} onValueChange={select} activationMode="manual">
+      <TabsList variant="strip" aria-label="Shells" data-testid="terminal-tab-strip">
+        {tabs.map((tab) => (
+          // The name and the cross are two controls side by side rather than
+          // one inside the other: the library's closable tab keeps them apart,
+          // because a button inside a button is neither valid nor operable, and
+          // closing a tab is not a way of selecting it.
+          <Tooltip key={tab.id} label={tabWhere(tab.folder)}>
+            <TabsTrigger
+              value={tab.id}
+              data-testid="terminal-tab"
+              onClose={() => closeTab(tab.id)}
               // Named by the folder rather than by the short name on the tab:
               // two shells in two projects called `web` are one tab apart, and
               // this is the label somebody closing one by ear hears.
-              label={`Close the shell in ${tabWhere(tab.folder)}`}
-              onClick={() => closeTab(tab.id)}
-              size="xs"
-              className="size-5 p-0"
-            />
-          </div>
-        );
-      })}
-      <ToolButton
-        icon={<Plus />}
-        label="Open another shell"
-        onClick={openTab}
-        busy={opening}
-        size="xs"
-        className="size-5 p-0"
-      />
-      {/*
-        * Pushed to the far end, away from the crosses. It is the one control on
-        * this strip that does not open or close anything, and a button that
-        * searched sitting next to a row of buttons that close is a button
-        * somebody presses by accident on the way to the wrong one.
-        */}
-      <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
+              closeLabel={`Close the shell in ${tabWhere(tab.folder)}`}
+            >
+              <span className="max-w-40 truncate">{tabName(tab.folder)}</span>
+            </TabsTrigger>
+          </Tooltip>
+        ))}
+        <div className="flex shrink-0 items-center px-1">
+          <ToolButton
+            icon={<Plus />}
+            label="Open another shell"
+            onClick={openTab}
+            busy={opening}
+            size="xs"
+            className="size-5 p-0"
+          />
+        </div>
         {/*
-          * The only way to stop a running command used to be a Ctrl key, which
-          * a phone does not have: a command that would not stop could not be
-          * stopped at all from a phone, and closing the tab kills the whole
-          * shell rather than the one thing running in it (bw-ad3r.10). The
-          * bytes already have a road — the pane publishes its own `type` to the
-          * shells context — so this only has to say the word.
-          *
-          * On the strip rather than down by the keyboard because the strip is
-          * always in view: a key bar pinned to the bottom would sit under the
-          * on-screen keyboard unless it tracked the inset, and the reader who
-          * needs this most is the one who cannot get the keyboard up at all.
-          * Shown on every screen: a keyboard can send this, but a trackpad in
-          * a full-screen terminal is not always holding one.
+          * Pushed to the far end, away from the crosses. It is the one control on
+          * this strip that does not open or close anything, and a button that
+          * searched sitting next to a row of buttons that close is a button
+          * somebody presses by accident on the way to the wrong one.
           */}
-        <ToolButton
-          // Its own name, not a picture of one. `^C` is what a terminal prints
-          // when it takes an interrupt and what every person who has ever
-          // needed one is looking for; no glyph carries that, and the drawing
-          // this started as — a bare diagonal stroke — said nothing at all.
-          icon={<span aria-hidden className="font-mono text-[10px] leading-none">^C</span>}
-          label="Stop what is running (Ctrl-C)"
-          data-testid="terminal-interrupt"
-          disabled={!active}
-          onClick={() => {
-            if (active) typeInto(active, INTERRUPT);
-          }}
-          size="xs"
-          className="h-5 w-auto px-1.5"
-        />
-        <HistoryButton open={searching} onOpen={onSearch} />
-      </div>
-    </div>
+        <div className="ml-auto flex shrink-0 items-center gap-1 pl-2 pr-2">
+          {/*
+            * The only way to stop a running command used to be a Ctrl key, which
+            * a phone does not have: a command that would not stop could not be
+            * stopped at all from a phone, and closing the tab kills the whole
+            * shell rather than the one thing running in it (bw-ad3r.10). The
+            * bytes already have a road — the pane publishes its own `type` to the
+            * shells context — so this only has to say the word.
+            *
+            * On the strip rather than down by the keyboard because the strip is
+            * always in view: a key bar pinned to the bottom would sit under the
+            * on-screen keyboard unless it tracked the inset, and the reader who
+            * needs this most is the one who cannot get the keyboard up at all.
+            * Shown on every screen: a keyboard can send this, but a trackpad in
+            * a full-screen terminal is not always holding one.
+            */}
+          <ToolButton
+            // Its own name, not a picture of one. `^C` is what a terminal prints
+            // when it takes an interrupt and what every person who has ever
+            // needed one is looking for; no glyph carries that, and the drawing
+            // this started as — a bare diagonal stroke — said nothing at all.
+            icon={<span aria-hidden className="font-mono text-[10px] leading-none">^C</span>}
+            label="Stop what is running (Ctrl-C)"
+            data-testid="terminal-interrupt"
+            disabled={!active}
+            onClick={() => {
+              if (active) typeInto(active, INTERRUPT);
+            }}
+            size="xs"
+            className="h-5 w-auto px-1.5"
+          />
+          <HistoryButton open={searching} onOpen={onSearch} />
+        </div>
+      </TabsList>
+    </Tabs>
   );
 }
 
