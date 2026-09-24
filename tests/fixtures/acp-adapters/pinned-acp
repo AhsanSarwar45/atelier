@@ -24,6 +24,7 @@ const WIRE = process.env.PINNED_ACP_WIRE ?? join(process.cwd(), 'pinned-acp-wire
 /** What this process has been told since it started. Never read at load. */
 const modes = new Map();
 const efforts = new Map();
+const fast = new Map();
 let started = 0;
 
 function note(method, params) {
@@ -41,7 +42,10 @@ function availableModes() {
   ];
 }
 
-function configOptions(effort) {
+const EFFORTS = ['low', 'medium', 'high'];
+
+/** Fast mode is off in a fresh process, as it is in the real adapter. */
+function configOptions(effort, fastMode = false) {
   return [
     {
       id: 'reasoning_effort',
@@ -54,6 +58,13 @@ function configOptions(effort) {
         { value: 'medium', name: 'Medium' },
         { value: 'high', name: 'High' },
       ],
+    },
+    {
+      id: 'fast-mode',
+      name: 'Fast mode',
+      description: 'Run with lower latency',
+      type: 'boolean',
+      currentValue: fastMode,
     },
   ];
 }
@@ -108,6 +119,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     // The forgetting. A fresh process knows only its defaults.
     modes.set(sessionId, DEFAULT_MODE);
     efforts.set(sessionId, DEFAULT_EFFORT);
+    fast.set(sessionId, false);
     say({
       id,
       result: {
@@ -129,8 +141,14 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   }
 
   if (method === 'session/set_config_option') {
+    // Refused the way the real adapter refuses a level its model lacks.
+    if (params?.configId === 'reasoning_effort' && !EFFORTS.includes(params?.value)) {
+      say({ id, error: { code: -32602, message: `Invalid value for config option reasoning_effort: ${params?.value}` } });
+      return;
+    }
     if (params?.configId === 'reasoning_effort') efforts.set(sessionId, params?.value);
-    say({ id, result: { configOptions: configOptions(efforts.get(sessionId)) } });
+    if (params?.configId === 'fast-mode') fast.set(sessionId, params?.value === true || params?.value === 'on');
+    say({ id, result: { configOptions: configOptions(efforts.get(sessionId), fast.get(sessionId)) } });
     return;
   }
 

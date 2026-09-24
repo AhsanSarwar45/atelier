@@ -94,6 +94,7 @@ enum Command {
     SummaryRuns(String, usize, Reply<Vec<i64>>),
     ViewEvents(String, Reply<Vec<Event>>),
     SteeringMenu(String, Reply<serde_json::Value>),
+    OfferedMenu(String, Reply<serde_json::Value>),
     Snapshot(String, Reply<SnapshotParts>),
     TranscriptItems(String, Option<i64>, usize, Reply<TranscriptItemPage>),
     AgentTranscriptItems(
@@ -466,6 +467,13 @@ impl ChatDb {
             .await
     }
 
+    /// The choices a chat is offered, including those a stopped chat is
+    /// shown from its provider's last menu (bw-y5dc.1).
+    pub async fn offered_menu(&self, session_id: String) -> Result<serde_json::Value, String> {
+        self.request(|reply| Command::OfferedMenu(session_id, reply))
+            .await
+    }
+
     /// Hold one message the reader wrote but has not sent (bw-r54j.1).
     pub async fn hold_message(
         &self,
@@ -825,9 +833,10 @@ fn view_with_live_menu(mut events: Vec<Event>, live: Option<&Event>) -> Vec<Even
 
 /// The installed provider's current steering choices for a saved chat.
 ///
-/// Menus are deliberately not durable: models and modes can change when the
+/// A chat's history never keeps a menu: models and modes can change when the
 /// provider is upgraded. They are provider facts, though, rather than facts of
-/// one conversation. Reopening a dormant chat used to show no picker until its
+/// one conversation, so the provider's last menu is kept beside the chats for
+/// a stopped one to be set from until it wakes (bw-y5dc.1). Reopening a dormant chat used to show no picker until its
 /// first prompt woke that exact session, even when another session on the same
 /// provider had just advertised the current catalogue. Reuse only those
 /// provider-wide choices; commands, skills, agents and config values remain
@@ -841,7 +850,7 @@ fn live_steering_menu(
         return Some(menu.clone());
     }
     let target = store.get_session(session_id).ok().flatten()?;
-    let (_, source) = live_menus
+    let borrowed = live_menus
         .iter()
         .filter(|(id, _)| {
             store
@@ -861,17 +870,67 @@ fn live_steering_menu(
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("")
                 .to_string()
-        })?;
-    let mut menu = source.clone();
+        })
+        .map(|(_, menu)| menu.clone());
+    // No chat on this provider has spoken since the app started. What it
+    // offered last time is still the best account of it, and a stopped chat
+    // with no effort or Fast mode to set could only be changed by waking it
+    // with a message first (bw-y5dc.1).
+    let mut menu = match borrowed {
+        Some(menu) => menu,
+        None => {
+            let catalogue = store.provider_catalogue(session_id).ok().flatten()?;
+            let mut fields = catalogue.as_object().cloned().unwrap_or_default();
+            fields.insert("type".into(), serde_json::json!("session.menu"));
+            fields.insert("seq".into(), serde_json::json!(0));
+            fields.insert("at".into(), serde_json::json!(target.last_active_at));
+            serde_json::from_value(serde_json::Value::Object(fields)).ok()?
+        }
+    };
     menu.fields.retain(|field, _| {
-        matches!(
-            field.as_str(),
-            "type" | "sessionId" | "seq" | "at" | "models" | "efforts"
-                | "permissionModes" | "collaborationModes" | "providers"
-        )
+        matches!(field.as_str(), "type" | "sessionId" | "seq" | "at")
+            || super::store::PROVIDER_CATALOGUE_FIELDS.contains(&field.as_str())
     });
     menu.fields.insert("sessionId".into(), serde_json::json!(session_id));
+    // The options are the provider's; the values set on them are this chat's.
+    let pinned = store.steering_menu(session_id).ok();
+    if let Some(options) = menu
+        .fields
+        .get_mut("configOptions")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for option in options {
+            let own = pinned
+                .as_ref()
+                .and_then(|pinned| pinned["configOptions"].as_array())
+                .into_iter()
+                .flatten()
+                .find(|patch| patch["id"] == option["id"]);
+            if let Some(own) = own {
+                option["currentValue"] = own["currentValue"].clone();
+            }
+        }
+    }
     Some(menu)
+}
+
+fn remember_catalogue(store: &Store, session_id: &str, menu: &Event) {
+    let menu = serde_json::Value::Object(menu.fields.clone());
+    if let Err(error) = store.remember_provider_catalogue(session_id, &menu) {
+        tracing::warn!(session_id, %error, "could not remember the provider's catalogue");
+    }
+}
+
+/// What a chat may be set to: the menu it is shown, whether its own
+/// provider announced it or it was borrowed for a stopped chat.
+fn offered_menu(
+    store: &Store,
+    live_menus: &HashMap<String, Event>,
+    session_id: &str,
+) -> serde_json::Value {
+    live_steering_menu(store, live_menus, session_id)
+        .map(|menu| serde_json::Value::Object(menu.fields))
+        .unwrap_or_else(|| serde_json::json!({}))
 }
 
 fn steering_menu(
@@ -934,8 +993,9 @@ fn run(
 ) {
     let mut agent_lifecycles: HashMap<String, super::lifecycle::AgentLifecycle> = HashMap::new();
     // Provider catalogues describe the installed provider right now. They are
-    // broadcast and replayed while this process is alive, but never restored
-    // from a chat's durable history.
+    // broadcast and replayed while this process is alive, and never restored
+    // from a chat's durable history; only the provider's own last menu is
+    // (`Store::provider_catalogue`).
     let mut live_menus: HashMap<String, Event> = HashMap::new();
     while let Some(command) = commands.blocking_recv() {
         match command {
@@ -1028,6 +1088,7 @@ fn run(
                     Ok(Some((session_id, seq, mut event))) => {
                         preserve_shared_library(&mut event, live_menus.get(&session_id));
                         if event.kind == EventKind::SessionMenu {
+                            remember_catalogue(&store, &session_id, &event);
                             live_menus.insert(session_id.clone(), event.clone());
                         }
                         publish_event(&global, &sessions, session_id, seq, event.clone());
@@ -1089,6 +1150,7 @@ fn run(
                         for (session_id, _, event) in &mut stored {
                             preserve_shared_library(event, live_menus.get(session_id));
                             if event.kind == EventKind::SessionMenu {
+                                remember_catalogue(&store, session_id, event);
                                 live_menus.insert(session_id.clone(), event.clone());
                             }
                         }
@@ -1209,6 +1271,9 @@ fn run(
             Command::ForgetHeld(id, reply) => respond(reply, store.forget_held(&id)),
             Command::SteeringMenu(session_id, reply) => {
                 respond(reply, steering_menu(&store, &live_menus, &session_id))
+            }
+            Command::OfferedMenu(session_id, reply) => {
+                let _ = reply.send(Ok(offered_menu(&store, &live_menus, &session_id)));
             }
             Command::Snapshot(session_id, reply) => {
                 let result = (|| {
@@ -1356,15 +1421,75 @@ mod tests {
             "configOptions":[{"id":"fast","currentValue":true}]
         })).unwrap();
         let live = HashMap::from([("open".to_string(), menu)]);
+        let pinned: Event = serde_json::from_value(json!({
+            "type":"session.pinned", "sessionId":"saved", "seq":1, "at":"2026-09-14T00:30:00Z",
+            "permissionMode":null, "model":null, "effort":null, "collaborationMode":null,
+            "configOptions":[{"id":"fast","currentValue":false}]
+        })).unwrap();
+        assert!(store.append_event(&pinned).unwrap());
 
         let restored = live_steering_menu(&store, &live, "saved").unwrap();
         assert_eq!(restored.fields["sessionId"], "saved");
         assert_eq!(restored.fields["models"][0]["value"], "gpt-5.6-sol");
         assert_eq!(restored.fields["efforts"][0]["value"], "high");
-        for private in ["commands", "skills", "agentDefinitions", "configOptions", "sharedLibrary"] {
+        for private in ["commands", "skills", "agentDefinitions", "sharedLibrary"] {
             assert!(restored.fields.get(private).is_none(), "{private} leaked between chats");
         }
+        // The option is the provider's, so a stopped chat can be set with it;
+        // the value is the one this chat chose, not the chat it came from.
+        assert_eq!(restored.fields["configOptions"], json!([{"id":"fast","currentValue":false}]));
         assert!(live_steering_menu(&store, &live, "other").is_none());
+    }
+
+    /// A restart forgets every live menu. A stopped chat still has the
+    /// choices its provider offered last time, so its effort and Fast mode
+    /// can be set before the message that wakes it (bw-y5dc.1).
+    #[test]
+    fn a_stopped_chat_is_offered_its_providers_last_menu_after_a_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let session = |id: &str, project: &str, profile: Option<&str>| Session {
+            id: id.into(), brand: "claude".into(), external_id: Some(format!("thread-{id}")),
+            project_id: project.into(), project_path: format!("/{project}"), cwd: format!("/{project}"),
+            model: None, permission_mode: "default".into(), effort: None,
+            collaboration_mode: None, profile: profile.map(str::to_string), title: None, state: "dormant".into(),
+            origin: "app".into(), created_at: "2026-09-14T00:00:00Z".into(),
+            last_active_at: "2026-09-14T00:00:00Z".into(), last_spoke_at: None, begun_by: None, named_by_owner: false,
+        };
+        for row in [
+            session("spoke", "here", None),
+            session("stopped", "here", None),
+            session("elsewhere", "there", None),
+            session("other-account", "here", Some("work")),
+        ] {
+            store.create_session(&row).unwrap();
+        }
+        let menu = json!({
+            "type":"session.menu", "sessionId":"spoke", "seq":3, "at":"2026-09-14T01:00:00Z",
+            "models":[{"value":"default","displayName":"Default"}],
+            "efforts":[{"value":"default","displayName":"Default"},{"value":"high","displayName":"High"}],
+            "commands":[{"name":"project-only"}],
+            "configOptions":[
+                {"id":"fast-mode","name":"Fast mode","type":"boolean","currentValue":false},
+                {"id":"agent","type":"select","currentValue":"default","options":[{"value":"reviewer"}]}
+            ]
+        });
+        store.remember_provider_catalogue("spoke", &menu).unwrap();
+        let nothing_live = HashMap::new();
+
+        let offered = live_steering_menu(&store, &nothing_live, "stopped").unwrap();
+        assert_eq!(offered.kind, EventKind::SessionMenu);
+        assert_eq!(offered.fields["sessionId"], "stopped");
+        assert_eq!(offered.fields["efforts"][1]["value"], "high");
+        assert_eq!(offered.fields["configOptions"][0]["id"], "fast-mode");
+        assert!(offered.fields.get("commands").is_none());
+
+        // Another project may allow its provider different things.
+        assert!(live_steering_menu(&store, &nothing_live, "elsewhere").is_none());
+
+        // Another account is another provider install as far as this knows.
+        assert!(live_steering_menu(&store, &nothing_live, "other-account").is_none());
+        assert_eq!(offered_menu(&store, &nothing_live, "stopped")["configOptions"][0]["id"], "fast-mode");
     }
 
     /// Everything ever said, in the table the search reads.
@@ -1637,14 +1762,20 @@ mod tests {
         assert!(menu.fields.get("models").is_none());
         drop(durable);
 
+        // The chat's history never holds the catalogue, but the reopened chat
+        // is offered what its provider last announced, kept beside the chats
+        // for exactly this, so it can be set before it is woken (bw-y5dc.1).
         let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
-        assert!(database
+        let menus = database
             .snapshot("chat-1".into())
             .await
             .unwrap()
             .history
-            .iter()
-            .all(|event| event.kind != EventKind::SessionMenu));
+            .into_iter()
+            .filter(|event| event.kind == EventKind::SessionMenu)
+            .collect::<Vec<_>>();
+        assert_eq!(menus.len(), 1);
+        assert_eq!(menus[0].fields["models"][0]["id"], "gpt-5");
     }
 
     #[tokio::test]

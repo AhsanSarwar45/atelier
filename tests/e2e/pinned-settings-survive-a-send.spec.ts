@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext } from '@playwright/test';
+
+import { restartInstance } from './restart';
 
 /**
  * The mode and the effort a chat was set to are still set after a message.
@@ -32,6 +35,18 @@ const EFFORT = 'high';
 
 function backend(): string {
   return process.env.BEADS_E2E_BACKEND ?? '';
+}
+
+/** Waits until the chat has no agent, which is what a stopped chat is. */
+async function untilStopped(request: APIRequestContext, project: Project, chat: string) {
+  const q = new URLSearchParams({ project: project.id, path: project.path, all: '1' });
+  await expect.poll(async () => {
+    const rows = (await (await request.get(`${backend()}/api/workbench/restore?${q}`)).json()) as {
+      sessionId: string | null;
+      state: string;
+    }[];
+    return rows.find((r) => r.sessionId === chat)?.state;
+  }, { timeout: 60_000 }).toBe('dormant');
 }
 
 interface Project {
@@ -83,7 +98,8 @@ function wire(): Asked[] {
 
 test.describe('what a chat is set to survives sending a message', () => {
   // Two agent launches, each one a process.
-  test.describe.configure({ timeout: 300_000 });
+  // Serial: one case restarts the server every case shares.
+  test.describe.configure({ timeout: 300_000, mode: 'serial' });
 
   test.skip(
     process.env.PINNED_ACP_FIXTURE !== '1',
@@ -228,6 +244,106 @@ test.describe('what a chat is set to survives sending a message', () => {
 
     const shot = process.env.PINNED_ACP_SHOT;
     if (shot) await page.screenshot({ path: shot, fullPage: true });
+  });
+
+  /**
+   * A restart forgets every menu a provider announced, and a stopped chat
+   * cannot ask for one without being woken. It used to show no effort and no
+   * Fast mode at all, so changing either meant sending a throwaway message,
+   * stopping, setting it and sending again (bw-y5dc.1).
+   */
+  test('a stopped chat can set its effort and Fast mode after the app restarts', async ({ page, request }) => {
+    const api = backend();
+    const project = await pinnedProject(request);
+    const command = async (data: Record<string, unknown>) => {
+      const response = await request.post(`${api}/api/workbench/command`, { data });
+      expect(response.ok(), await response.text()).toBe(true);
+      return response.json() as Promise<Record<string, unknown>>;
+    };
+
+    const started = (await command({
+      type: 'session.start', projectId: project.id, projectPath: project.path, brand: 'claude',
+    })) as { id: string };
+    const chat = started.id;
+    await command({ type: 'prompt.send', sessionId: chat, text: 'The first message.' });
+    await page.goto(`/project?id=${project.id}&tab=chat&chat=${chat}`);
+    await expect(page.getByTestId('config-fast-mode-picker')).toBeVisible({ timeout: HELLO_MS });
+    await command({ type: 'session.close', sessionId: chat });
+    await untilStopped(request, project, chat);
+
+    await restartInstance({
+      binary: process.env.ATELIER_BINARY ?? join(__dirname, '..', '..', 'server', 'target', 'debug', 'atelier'),
+      serverPort: Number(process.env.BEADS_WEB_PORT),
+      sidecarPort: Number(process.env.BEADS_WORKBENCH_PORT),
+      env: process.env,
+      healthUrl: `${process.env.BEADS_E2E_URL}/api/workbench/health`,
+      logFile: join(process.env.WORKBENCH_E2E_RUN!, 'server.log'),
+    });
+    const launchesBeforeOpen = wire().filter((asked) => asked.method === 'session/load').length;
+
+    await page.goto(`/project?id=${project.id}&tab=chat&chat=${chat}`);
+    await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+    const controls = page.getByTestId('desktop-composer-settings');
+    const effort = controls.getByTestId('effort-picker');
+    const fast = controls.getByTestId('config-fast-mode-picker');
+    await expect(effort).toBeVisible({ timeout: 60_000 });
+    await expect(fast).toBeVisible();
+    await expect(effort).toHaveAttribute('data-asleep', 'true');
+
+    await effort.click();
+    await page.locator('[data-testid="effort-picker-option"][data-value="high"]').click();
+    await expect(effort).toHaveAttribute('data-current', EFFORT);
+    await fast.click();
+    await page.locator('[data-testid="config-fast-mode-picker-option"][data-value="true"]').click();
+    await expect(fast).toHaveAttribute('data-current', 'true');
+    // Drawing the controls and setting them woke nothing.
+    expect(wire().filter((asked) => asked.method === 'session/load')).toHaveLength(launchesBeforeOpen);
+    const shot = process.env.PINNED_ACP_RESTART_SHOT;
+    if (shot) await page.getByTestId('desktop-composer-settings').screenshot({ path: shot });
+
+    const beforeSend = wire().length;
+    await command({ type: 'prompt.send', sessionId: chat, text: 'The message that wakes it.' });
+    await expect.poll(() => {
+      const woken = wire().slice(beforeSend);
+      const loaded = woken.findIndex((asked) => asked.method === 'session/load');
+      if (loaded < 0) return 'not woken';
+      const after = woken.slice(loaded);
+      const toldEffort = after.some((a) => a.method === 'session/set_config_option'
+        && a.params?.configId === 'reasoning_effort' && a.params?.value === EFFORT);
+      const toldFast = after.some((a) => a.method === 'session/set_config_option'
+        && a.params?.configId === 'fast-mode' && a.params?.value === true);
+      return `effort ${toldEffort}, fast ${toldFast}`;
+    }, { timeout: HELLO_MS }).toBe('effort true, fast true');
+  });
+
+  /**
+   * A level remembered from an earlier menu that the woken agent no longer
+   * offers is left out, rather than refusing the message that woke it.
+   */
+  test('an effort the woken agent no longer offers does not stop it waking', async ({ request }) => {
+    const api = backend();
+    const project = await pinnedProject(request);
+    const command = async (data: Record<string, unknown>) => {
+      const response = await request.post(`${api}/api/workbench/command`, { data });
+      expect(response.ok(), await response.text()).toBe(true);
+      return response.json() as Promise<Record<string, unknown>>;
+    };
+    const started = (await command({
+      type: 'session.start', projectId: project.id, projectPath: project.path, brand: 'claude',
+    })) as { id: string };
+    const chat = started.id;
+    await command({ type: 'prompt.send', sessionId: chat, text: 'The first message.' });
+    await command({ type: 'session.close', sessionId: chat });
+    await untilStopped(request, project, chat);
+    await command({ type: 'session.effort', sessionId: chat, effort: 'max' });
+
+    const beforeSend = wire().length;
+    await command({ type: 'prompt.send', sessionId: chat, text: 'Still answered.' });
+    await expect.poll(() => wire().slice(beforeSend).some((asked) => asked.method === 'session/prompt'), {
+      timeout: HELLO_MS,
+    }).toBe(true);
+    expect(wire().slice(beforeSend).some((asked) => asked.method === 'session/set_config_option'
+      && asked.params?.value === 'max')).toBe(false);
   });
 
   test('a cold old Codex chat draws its four controls with no live menu', async ({ page, request }) => {

@@ -41,6 +41,18 @@ pub fn import_recipe(brand: &str) -> i64 {
 /// 1: a picture a call answered with is kept on the call's row (bw-343e.1).
 const TRANSCRIPT_FOLD_VERSION: i64 = 1;
 
+/// The parts of a provider's menu that describe the provider rather than one
+/// chat: its commands, skills and agents stay with the chat that announced
+/// them (bw-y5dc.1).
+pub const PROVIDER_CATALOGUE_FIELDS: &[&str] = &[
+    "models",
+    "efforts",
+    "permissionModes",
+    "collaborationModes",
+    "providers",
+    "configOptions",
+];
+
 const LEGACY_MIGRATIONS: &[&str] = &[
     r#"CREATE TABLE session (
          id TEXT PRIMARY KEY,
@@ -1366,6 +1378,59 @@ fn held_in_its_project(
             answer["title"] = json!(title);
         }
         Ok(answer)
+    }
+
+    /// Write down what a chat's provider just offered, for the stopped chats
+    /// of the same provider account that cannot ask it (bw-y5dc.1).
+    pub fn remember_provider_catalogue(&self, session_id: &str, menu: &Value) -> rusqlite::Result<()> {
+        let Some(session) = self.get_session(session_id)? else {
+            return Ok(());
+        };
+        let catalogue = menu
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter(|(field, _)| PROVIDER_CATALOGUE_FIELDS.contains(&field.as_str()))
+            .map(|(field, value)| (field.clone(), value.clone()))
+            .collect::<serde_json::Map<_, _>>();
+        let at = menu["at"].as_str().map(str::to_string).unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+        self.connection.execute(
+            "INSERT INTO provider_catalogue (brand, profile, project_id, project_path, at, json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT (brand, profile, project_id, project_path)
+             DO UPDATE SET at = excluded.at, json = excluded.json",
+            params![
+                session.brand,
+                session.profile.unwrap_or_default(),
+                session.project_id,
+                session.project_path,
+                at,
+                Value::Object(catalogue).to_string(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// What this chat's provider account last offered in this chat's project.
+    pub fn provider_catalogue(&self, session_id: &str) -> rusqlite::Result<Option<Value>> {
+        let Some(session) = self.get_session(session_id)? else {
+            return Ok(None);
+        };
+        self.connection
+            .query_row(
+                "SELECT json FROM provider_catalogue
+                 WHERE brand = ?1 AND profile = ?2 AND project_id = ?3 AND project_path = ?4",
+                params![
+                    session.brand,
+                    session.profile.unwrap_or_default(),
+                    session.project_id,
+                    session.project_path,
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|json| serde_json::from_str(&json).map_err(json_error))
+            .transpose()
     }
 
     /// The title the person explicitly chose, distinct from the provider's
@@ -2881,6 +2946,25 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
          );
          CREATE INDEX IF NOT EXISTS held_message_in_order
            ON held_message(session_id, position);",
+    )?;
+    /*
+      The choices a provider last offered, one row per provider account and
+      project: a project's own settings can narrow what its provider allows. Kept beside the chats rather than in any one chat's history:
+      they are the installed provider's facts, and a chat restored from its
+      own old menu would bring back a catalogue from before an upgrade. What a
+      stopped chat is shown until its next message wakes it; the menu the woken
+      provider announces then replaces it (bw-y5dc.1).
+    */
+    transaction.execute_batch(
+        "CREATE TABLE IF NOT EXISTS provider_catalogue (
+           brand TEXT NOT NULL,
+           profile TEXT NOT NULL,
+           project_id TEXT NOT NULL,
+           project_path TEXT NOT NULL,
+           at TEXT NOT NULL,
+           json TEXT NOT NULL,
+           PRIMARY KEY (brand, profile, project_id, project_path)
+         );",
     )?;
     transaction.execute_batch(
         "CREATE TABLE IF NOT EXISTS session_handoff (

@@ -1124,7 +1124,7 @@ impl WorkbenchRegistry {
             }
             CommandKind::SessionModel => {
                 let model = Self::field(command, "model")?;
-                let menu = self.database.steering_menu(session_id.to_string()).await?;
+                let menu = self.database.offered_menu(session_id.to_string()).await?;
                 if model != "default"
                     && !menu["models"]
                         .as_array()
@@ -1151,7 +1151,7 @@ impl WorkbenchRegistry {
                     .ok_or_else(|| {
                         "a session config value must be a boolean or string".to_string()
                     })?;
-                let menu = self.database.steering_menu(session_id.to_string()).await?;
+                let menu = self.database.offered_menu(session_id.to_string()).await?;
                 let option = menu["configOptions"]
                     .as_array()
                     .into_iter()

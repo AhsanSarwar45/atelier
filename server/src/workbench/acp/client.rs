@@ -1864,6 +1864,23 @@ fn current_option(options: &Value, ids: &[&str]) -> Value {
         .unwrap_or(Value::Null)
 }
 
+/// Whether a select option would take this value: one of its choices, grouped
+/// or not, or the value it already holds.
+fn offers_config_value(options: &Value, id: &str, value: &str) -> bool {
+    let Some(option) = options.as_array().into_iter().flatten().find(|option| option["id"] == id) else {
+        return false;
+    };
+    option["currentValue"] == value
+        || option["options"].as_array().into_iter().flatten().any(|choice| {
+            choice["value"] == value
+                || choice["options"].as_array().into_iter().flatten().any(|inner| inner["value"] == value)
+        })
+}
+
+fn desired_is_offered(options: &Value, id: &str, value: &Value) -> bool {
+    value.as_str().is_some_and(|value| offers_config_value(options, id, value))
+}
+
 fn extra_config_options(options: &Value) -> Vec<Value> {
     options
         .as_array()
@@ -2688,6 +2705,13 @@ impl AcpDriver {
                         ] {
                             if let Some(desired) = desired.filter(|value| !value.is_empty() && *value != "default") {
                                 let Some(key) = config_option_id(&config_options, &target) else { continue };
+                                // A stopped chat can be set from the menu its
+                                // provider offered last time, and a level that
+                                // model has since lost would otherwise refuse
+                                // the very message waking it (bw-y5dc.1). The
+                                // model is left to the adapter, which takes
+                                // aliases its list does not spell out.
+                                if !matches!(target, ConfigTarget::Model) && !offers_config_value(&config_options, &key, desired) { continue }
                                 let desired = if brand == super::super::local::BRAND && matches!(target, ConfigTarget::Model) {
                                     super::super::local::decode_model(desired).map(|(_, model)| model).unwrap_or(desired)
                                 } else { desired };
@@ -2700,6 +2724,7 @@ impl AcpDriver {
                             let Some(remote) = config_options.as_array().into_iter().flatten().find(|option| option["id"] == key) else { continue };
                             if remote["currentValue"] == saved["currentValue"] { continue; }
                             let Some(desired) = config_option_value(&saved["currentValue"]) else { continue };
+                            if remote["type"] == "select" && !desired_is_offered(&config_options, &key, &saved["currentValue"]) { continue }
                             let response = connection.send_request(SetSessionConfigOptionRequest::new(remote_id.clone(), key, desired)).block_task().await?;
                             config_options = serde_json::to_value(response.config_options).map_err(acp_error)?;
                         }
