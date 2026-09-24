@@ -2,11 +2,12 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 
-import { Loader2, Pencil } from "lucide-react";
+import { Pencil } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 
 interface EditableFieldProps {
@@ -114,7 +115,7 @@ export function EditableField({
   if (isSaving) {
     return (
       <span className={cn("inline-flex items-center gap-1.5", className)}>
-        <Loader2 className="size-3 animate-spin text-t-muted" />
+        <Spinner size="2xs" className="text-t-muted" />
         <span className="text-t-muted">Saving…</span>
       </span>
     );

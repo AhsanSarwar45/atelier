@@ -17,7 +17,7 @@ import { memo, useContext, useEffect, useMemo, useReducer, useRef, useState, typ
 
 import { request } from '@/lib/api';
 
-import { Brain, ChevronRight, Hand, Loader2 } from 'lucide-react';
+import { Brain, ChevronRight, Hand } from 'lucide-react';
 
 import { MarkdownBody, type Mentions } from '@/components/markdown-body';
 import { Badge, BadgeDot } from '@/components/ui/badge';
@@ -32,6 +32,7 @@ import { RadioGroup, RadioGroupItem, RadioGroupOption } from '@/components/ui/ra
 import { Row } from '@/components/ui/row';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
+import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import type { Doing } from '@/workbench/chat-state';
 import { forHowLong } from '@/workbench/elapsed';
@@ -967,7 +968,7 @@ export function WorkingLine({
       {waiting ? (
         <Hand className="h-4 w-4 shrink-0 animate-pulse" aria-hidden="true" />
       ) : (
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" aria-hidden="true" />
+        <Spinner className="shrink-0 text-primary" />
       )}
       {/* Waiting on him is not the agent working, and the line must not pretend
           otherwise — it is the one state where the screen is asking, not telling. */}

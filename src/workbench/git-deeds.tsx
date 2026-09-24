@@ -20,23 +20,10 @@
  */
 'use client';
 
-import {
-  Check,
-  CloudDownload,
-  Download,
-  GitBranch,
-  GitCommitVertical,
-  Loader2,
-  Minus,
-  Plus,
-  Trash2,
-  TriangleAlert,
-  Undo2,
-  Upload,
-  type LucideIcon,
-} from 'lucide-react';
+import { Check, CloudDownload, Download, GitBranch, GitCommitVertical, Minus, Plus, Trash2, TriangleAlert, Undo2, Upload, type LucideIcon } from 'lucide-react';
 
 import { toast } from '@/hooks/use-toast';
+import { Spinner } from '@/components/ui/spinner';
 
 /** One thing the panel can do to a repository. */
 export type GitDeed =
@@ -144,7 +131,7 @@ export function reportOn(deed: GitDeed, note?: string): DeedReport {
   const words = DEEDS[deed];
   const raised = toast({
     variant: 'running',
-    icon: <Loader2 className="size-4 animate-spin text-t-tertiary motion-reduce:animate-none" />,
+    icon: <Spinner className="text-t-tertiary motion-reduce:animate-none" />,
     title: words.doing,
     description: note,
     duration: WHILE_IT_RUNS_MS,

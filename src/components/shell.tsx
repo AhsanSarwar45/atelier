@@ -17,7 +17,7 @@ import { createContext, forwardRef, useContext, useEffect, useState, type ReactN
 
 import Link from 'next/link';
 
-import { Loader2, Menu, Settings, SquareTerminal } from 'lucide-react';
+import { Menu, Settings, SquareTerminal } from 'lucide-react';
 
 import { GlobalSettingsButton } from '@/components/global-settings-button';
 import { Button } from '@/components/ui/button';
@@ -29,6 +29,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip } from '@/components/ui/tooltip';
+import { Spinner } from '@/components/ui/spinner';
 import { watchKeyboard } from '@/lib/keyboard-inset';
 import { cn } from '@/lib/utils';
 import { useTerminalShells } from '@/workbench/terminal-shells';
@@ -333,7 +334,7 @@ export const ToolButton = forwardRef<
           )}
           {...rest}
       >
-        {busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : icon}
+        {busy ? <Spinner size="inherit" /> : icon}
       </Button>
     </Tooltip>
   );

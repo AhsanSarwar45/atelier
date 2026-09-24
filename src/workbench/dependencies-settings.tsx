@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useState } from 'react';
 
-import { Download, ExternalLink, Loader2, RefreshCw } from 'lucide-react';
+import { Download, ExternalLink, RefreshCw } from 'lucide-react';
 
 import {
   AlertDialog,
@@ -16,6 +16,7 @@ import {
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
+import { Spinner } from '@/components/ui/spinner';
 import { request } from '@/lib/api';
 import { onBootstrap } from '@/workbench/live-wire';
 
@@ -100,7 +101,7 @@ export function DependenciesSettings() {
       <div className="mt-2 flex gap-2">
         <Input className="flex-1 font-mono" aria-label={`${tool.tool} path`} value={paths[tool.tool] ?? ''} placeholder="Search PATH automatically" onChange={(e) => setPaths((old) => ({ ...old, [tool.tool]: e.target.value }))} />
         <Button size="sm" variant="outline" disabled={busy === tool.tool} onClick={() => void save(tool.tool)}>Save</Button>
-        {tool.tool === 'bd' && !tool.found && <Button size="sm" disabled={busy === 'bd'} onClick={() => setAsking(true)}>{busy === 'bd' ? <Loader2 className="animate-spin" /> : <Download />} Install</Button>}
+        {tool.tool === 'bd' && !tool.found && <Button size="sm" disabled={busy === 'bd'} onClick={() => setAsking(true)}>{busy === 'bd' ? <Spinner size="inherit" /> : <Download />} Install</Button>}
       </div>
       {!tool.found && <p className="mt-1 text-xs text-danger">{tool.hint}</p>}
     </div></Fragment>)}

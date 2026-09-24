@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Loader2, Search, Store } from 'lucide-react';
+import { Search, Store } from 'lucide-react';
 
 import { KindIcon } from '@/components/settings/kind-icon';
 import type { Scope } from '@/components/settings/provider-settings-api';
@@ -23,6 +23,7 @@ import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Tooltip } from '@/components/ui/tooltip';
+import { Spinner } from '@/components/ui/spinner';
 import { useToast } from '@/hooks/use-toast';
 import type { Brand, ExtensionKindList, OfferedPlugin, PluginCatalogue as Catalogue, SettingsScope } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
@@ -82,7 +83,7 @@ function Row({ entry, busy, onInstall }: { entry: OfferedPlugin; busy: boolean; 
         onClick={() => void onInstall(entry)}
         data-testid={`plugin-catalogue-install-${entry.id}`}
       >
-        {busy && <Loader2 className="animate-spin" />} {entry.installed ? 'Installed' : 'Install'}
+        {busy && <Spinner size="inherit" />} {entry.installed ? 'Installed' : 'Install'}
       </Button>
     </li>
   );
@@ -193,7 +194,7 @@ export function PluginCatalogue({ brand, scope, onInstalled }: { brand: Brand; s
             <ReadFailed what="Plugins unavailable" why={unread} onRetry={() => setAttempt((n) => n + 1)} />
           ) : !catalogue ? (
             <p className="flex items-center gap-2 p-3 text-sm text-t-tertiary">
-              <Loader2 className="size-4 animate-spin" /> Reading…
+              <Spinner /> Reading…
             </p>
           ) : shown.length === 0 ? (
             <p className="p-3 text-sm text-t-tertiary" data-testid="plugin-catalogue-none">

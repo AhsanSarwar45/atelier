@@ -91,7 +91,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Check, Copy, ExternalLink, Loader2 } from "lucide-react";
+import { Check, Copy, ExternalLink } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -108,6 +108,7 @@ import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
 import { RadioGroup, RadioGroupOption } from "@/components/ui/radio-group";
 import { ReadFailed } from "@/components/ui/read-failed";
+import { Spinner } from "@/components/ui/spinner";
 import {
   remoteAccess,
   RemoteAccessRefused,
@@ -335,7 +336,7 @@ export function RemoteAccessSettings() {
           data-testid="remote-serving"
         >
           {flipping && (
-            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            <Spinner />
           )}
           {flipping ? flipping : held.serving ? "Disable" : "Enable"}
         </Button>
@@ -513,7 +514,7 @@ export function RemoteAccessSettings() {
               data-testid="remote-restart-now"
             >
               {restarting && (
-                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                <Spinner />
               )}
               {restarting ? "Restarting…" : "Restart now"}
             </Button>

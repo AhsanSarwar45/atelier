@@ -11,10 +11,11 @@
 
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
-import { CornerDownLeft, Loader2, Sparkles, Square } from 'lucide-react';
+import { CornerDownLeft, Sparkles, Square } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Row } from '@/components/ui/row';
+import { Spinner } from '@/components/ui/spinner';
 import * as api from '@/lib/api';
 import { QueryBox } from '@/search/parts';
 import type { AskSearch, Found } from '@/search/source';
@@ -195,7 +196,7 @@ export function Ask<Thing extends Found>({
         </div>
         {(running || by) && (
           <div data-testid="ai-search-by" className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            {running && <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />}
+            {running && <Spinner size="2xs" />}
             <span className="capitalize">{by ?? 'Starting'}</span>
           </div>
         )}

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 
-import { Folder, Loader2, FolderSearch, Database } from "lucide-react";
+import { Folder, FolderSearch, Database } from "lucide-react";
 
 import { FolderBrowser } from "@/components/folder-browser";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import { Picker } from "@/components/ui/picker";
 import { Panel } from "@/components/ui/panel";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip } from "@/components/ui/tooltip";
+import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import type { DoltDatabase, ManifestStorage, ProjectManifest } from "@/lib/api";
@@ -304,7 +305,7 @@ export function AddProjectDialog({
                 >
                   {isValidating ? (
                     <>
-                      <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                      <Spinner />
                       Checking…
                     </>
                   ) : (

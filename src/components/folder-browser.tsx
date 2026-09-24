@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useId } from "react";
 
-import { Folder, FolderOpen, ChevronRight, Home, Loader2 } from "lucide-react";
+import { Folder, FolderOpen, ChevronRight, Home } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { ReadFailed } from "@/components/ui/read-failed";
 import { Row } from "@/components/ui/row";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip } from "@/components/ui/tooltip";
+import { Spinner } from "@/components/ui/spinner";
 import * as api from "@/lib/api";
 import type { FsEntry } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -325,7 +326,7 @@ export function FolderBrowser({
         <div ref={listRef} className="p-2" role="listbox" aria-label="Directories">
           {loading ? (
             <div className="flex items-center justify-center py-8 text-t-muted">
-              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+              <Spinner />
               <span className="ml-2 text-sm">Loading...</span>
             </div>
           ) : error ? (

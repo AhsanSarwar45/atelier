@@ -5,7 +5,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { AlertTriangle, Archive, ArchiveRestore, Code, FolderOpen, Loader2, Settings } from "lucide-react";
+import { AlertTriangle, Archive, ArchiveRestore, Code, FolderOpen, Settings } from "lucide-react";
 
 import { StatusDonut } from "@/components/status-donut";
 import { TagPicker } from "@/components/tag-picker";
@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip } from "@/components/ui/tooltip";
+import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import type { Tag } from "@/lib/db";
@@ -264,7 +265,7 @@ export function ProjectCard({
                         disabled={isOpening !== null}
                       >
                         {isOpening === 'vscode' ? (
-                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                          <Spinner />
                         ) : (
                           <Code className="h-4 w-4" aria-hidden="true" />
                         )}
@@ -275,7 +276,7 @@ export function ProjectCard({
                         disabled={isOpening !== null}
                       >
                         {isOpening === 'cursor' ? (
-                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                          <Spinner />
                         ) : (
                           <Code className="h-4 w-4" aria-hidden="true" />
                         )}
@@ -286,7 +287,7 @@ export function ProjectCard({
                         disabled={isOpening !== null}
                       >
                         {isOpening === 'finder' ? (
-                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                          <Spinner />
                         ) : (
                           <FolderOpen className="h-4 w-4" aria-hidden="true" />
                         )}

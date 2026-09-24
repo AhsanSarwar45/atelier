@@ -16,7 +16,7 @@
 
 import { useMemo, useState } from 'react';
 
-import { Copy, Loader2 } from 'lucide-react';
+import { Copy } from 'lucide-react';
 
 import { pagesFor, type Brand } from '@/components/settings/provider-schema';
 import { getPath, readSettings, writeSettings } from '@/components/settings/provider-settings-api';
@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tooltip } from '@/components/ui/tooltip';
+import { Spinner } from '@/components/ui/spinner';
 import { useToast } from '@/hooks/use-toast';
 import type { ExtensionItem, ExtensionKind, McpServer, ProfileChoice } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
@@ -202,7 +203,7 @@ export function CopyToAccounts({ brand, from, profiles, page }: { brand: Brand; 
               Cancel
             </Button>
             <Button disabled={busy || accounts.size === 0 || ticked.size === 0} onClick={() => void copy()} data-testid="copy-to-accounts-confirm">
-              {busy && <Loader2 className="animate-spin" />} Copy
+              {busy && <Spinner size="inherit" />} Copy
             </Button>
           </DialogFooter>
         </DialogContent>

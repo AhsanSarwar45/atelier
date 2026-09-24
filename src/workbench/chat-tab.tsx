@@ -12,33 +12,7 @@ import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import {
-  ArrowDown,
-  ArrowUp,
-  ChevronDown,
-  ChevronRight,
-  Clock3,
-  Folder,
-  FolderGit2,
-  Gauge,
-  GitBranch,
-  Loader2,
-  ListChecks,
-  MessageSquare,
-  PanelLeft,
-  PanelLeftClose,
-  PanelRight,
-  PanelRightClose,
-  Paperclip,
-  Plus,
-  ShieldCheck,
-  SlidersHorizontal,
-  Square,
-  Star,
-  UserRound,
-  Workflow,
-  X,
-} from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Clock3, Folder, FolderGit2, Gauge, GitBranch, ListChecks, MessageSquare, PanelLeft, PanelLeftClose, PanelRight, PanelRightClose, Paperclip, Plus, ShieldCheck, SlidersHorizontal, Square, Star, UserRound, Workflow, X } from 'lucide-react';
 
 import { BeadChip } from '@/components/bead-chip-row';
 import { type Mentions } from '@/components/markdown-body';
@@ -62,6 +36,7 @@ import { Row } from '@/components/ui/row';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
+import { Spinner } from '@/components/ui/spinner';
 import { useHeldAtTheEnd } from '@/hooks/held-at-the-end';
 import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
@@ -2482,7 +2457,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         aria-live="polite"
         className="flex flex-1 flex-col items-center justify-center gap-3"
       >
-        <Loader2 className="size-6 animate-spin text-muted-foreground motion-reduce:animate-none" aria-hidden="true" />
+        <Spinner className="size-6 text-muted-foreground motion-reduce:animate-none" />
         <p className="text-sm text-muted-foreground">Starting {brandName(starting.brand)} chat…</p>
       </div>,
     );
@@ -2712,7 +2687,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             role="status"
             className="flex min-h-32 items-center justify-center gap-2 text-sm text-muted-foreground"
           >
-            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            <Spinner />
             Loading conversation…
           </div>
         )}

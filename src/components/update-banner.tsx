@@ -17,12 +17,13 @@ import { useState, useEffect, useCallback } from "react";
 
 import Link from "next/link";
 
-import { Download, Loader2, RefreshCw, X } from "lucide-react";
+import { Download, RefreshCw, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/notice";
 import { Panel } from "@/components/ui/panel";
 import { Progress } from "@/components/ui/progress";
+import { Spinner } from "@/components/ui/spinner";
 import * as api from "@/lib/api";
 import { howFar, inWords, useUpdateRun, whatTheServerSaid } from "@/lib/update-run";
 
@@ -146,7 +147,7 @@ export function UpdateBanner() {
                 disabled={busy}
               >
                 {busy ? (
-                  <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                  <Spinner size="2xs" />
                 ) : (
                   <RefreshCw className="size-3" aria-hidden="true" />
                 )}

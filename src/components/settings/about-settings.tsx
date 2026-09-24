@@ -15,11 +15,12 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Download, ExternalLink, Loader2, RefreshCw, RotateCcw } from 'lucide-react';
+import { Download, ExternalLink, RefreshCw, RotateCcw } from 'lucide-react';
 
 import { SettingsGroup, SettingRow } from '@/components/settings/section';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Spinner } from '@/components/ui/spinner';
 import * as api from '@/lib/api';
 import { howFar, inWords, useUpdateRun, whatTheServerSaid } from '@/lib/update-run';
 
@@ -109,7 +110,7 @@ export function AboutSettings() {
             data-testid="about-check"
           >
             {checking ? (
-              <Loader2 className="animate-spin" aria-hidden="true" />
+              <Spinner size="inherit" />
             ) : (
               <RefreshCw aria-hidden="true" />
             )}
@@ -161,7 +162,7 @@ export function AboutSettings() {
                 data-testid="about-update-now"
               >
                 {busy ? (
-                  <Loader2 className="animate-spin" aria-hidden="true" />
+                  <Spinner size="inherit" />
                 ) : (
                   <Download aria-hidden="true" />
                 )}

@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 
 import { useRouter } from 'next/navigation';
 
-import { Archive, ArchiveRestore, FolderSearch, GitBranch, Loader2, NotebookPen, ScrollText, Settings2, ShieldCheck, Tag, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, FolderSearch, GitBranch, NotebookPen, ScrollText, Settings2, ShieldCheck, Tag, Trash2 } from 'lucide-react';
 
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
 import { SharedLibrary } from '@/components/settings/shared-library';
@@ -41,6 +41,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Spinner } from '@/components/ui/spinner';
 import { useToast } from '@/hooks/use-toast';
 import * as api from '@/lib/api';
 import type { ChatNamePart, ManifestStorage, ProjectManifest } from '@/lib/api';
@@ -254,7 +255,7 @@ export function ProjectSettingsScreen({
 
   const saveButton = (
     <Button size="sm" className="ml-auto" disabled={!dirty || saving} onClick={() => void save()} data-testid="project-settings-save">
-      {saving && <Loader2 className="size-4 animate-spin" />} Save
+      {saving && <Spinner />} Save
     </Button>
   );
 

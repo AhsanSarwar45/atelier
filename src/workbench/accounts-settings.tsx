@@ -23,7 +23,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { Check, ExternalLink, Loader2, LogIn, Pencil, Plus, Star, Trash2, TriangleAlert } from 'lucide-react';
+import { Check, ExternalLink, LogIn, Pencil, Plus, Star, Trash2, TriangleAlert } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -37,6 +37,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { ReadFailed } from '@/components/ui/read-failed';
+import { Spinner } from '@/components/ui/spinner';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
 import { NO_DEFAULTS, readNewChatDefaults, saveNewChatProfile, type NewChatDefaults } from '@/workbench/new-chat-defaults';
 import type { Brand, ProfileChoice, ProfileStanding, SignInProgress } from '@/workbench/protocol';
@@ -555,7 +556,7 @@ function SignInSteps({ brand, progress }: { brand: Brand; progress: SignInProgre
   if (progress.state === 'starting' || !progress.url) {
     return (
       <p className="flex items-center gap-2 text-sm text-t-muted" data-testid="account-signin-state">
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner />
         Starting…
       </p>
     );
@@ -594,7 +595,7 @@ function SignInSteps({ brand, progress }: { brand: Brand; progress: SignInProgre
         </>
       )}
       <p className="mt-4 flex items-center gap-2 text-xs text-t-muted">
-        <Loader2 className="h-3 w-3 animate-spin" />
+        <Spinner size="2xs" />
         {progress.code ? 'Waiting for verification…' : 'Waiting for sign-in…'}
       </p>
     </div>

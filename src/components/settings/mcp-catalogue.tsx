@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Boxes, Loader2, Plus, Search } from 'lucide-react';
+import { Boxes, Plus, Search } from 'lucide-react';
 
 import { KindIcon } from '@/components/settings/kind-icon';
 import type { Scope } from '@/components/settings/provider-settings-api';
@@ -26,6 +26,7 @@ import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Tooltip } from '@/components/ui/tooltip';
+import { Spinner } from '@/components/ui/spinner';
 import { useToast } from '@/hooks/use-toast';
 import type { Brand, McpCatalogue as Catalogue, McpCatalogueEntry, McpServer, McpSource, SettingsScope } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
@@ -98,7 +99,7 @@ function Row({
           onClick={() => (needs.length > 0 && !asking ? setAsking(true) : void onAdd(entry, given))}
           data-testid={`catalogue-add-${entry.id}`}
         >
-          {busy ? <Loader2 className="animate-spin" /> : <Plus />} Add
+          {busy ? <Spinner size="inherit" /> : <Plus />} Add
         </Button>
       </div>
       {asking && needs.length > 0 && (
@@ -118,7 +119,7 @@ function Row({
             </div>
           ))}
           <Button size="sm" disabled={busy || missing} onClick={() => void onAdd(entry, given)} data-testid={`catalogue-confirm-${entry.id}`}>
-            {busy && <Loader2 className="animate-spin" />} Add
+            {busy && <Spinner size="inherit" />} Add
           </Button>
         </div>
       )}
@@ -232,7 +233,7 @@ export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; 
             <ReadFailed what="Catalogue unavailable" why={unread} onRetry={() => setSearch((s) => `${s}`)} />
           ) : !catalogue ? (
             <p className="flex items-center gap-2 p-3 text-sm text-t-tertiary">
-              <Loader2 className="size-4 animate-spin" /> Reading…
+              <Spinner /> Reading…
             </p>
           ) : shown.length === 0 ? (
             <p className="p-3 text-sm text-t-tertiary" data-testid="mcp-catalogue-none">

@@ -11,7 +11,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Loader2 } from 'lucide-react';
 
 import { pagesFor, type Brand, type Control, type SettingDef } from '@/components/settings/provider-schema';
 import {
@@ -33,6 +32,7 @@ import { ReadFailed } from '@/components/ui/read-failed';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
+import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -377,7 +377,7 @@ export function ProviderSettingsPanel({
   if (!view || !drawn) {
     return (
       <p className="flex items-center gap-2 p-3 text-sm text-t-tertiary">
-        <Loader2 className="size-4 animate-spin" /> Reading…
+        <Spinner /> Reading…
       </p>
     );
   }
@@ -414,7 +414,7 @@ export function ProviderSettingsPanel({
                   label={
                     <span className="flex items-center gap-2">
                       {def.label}
-                      {busy === def.key && <Loader2 className="size-3 animate-spin text-t-muted" />}
+                      {busy === def.key && <Spinner size="2xs" className="text-t-muted" />}
                     </span>
                   }
                   description={

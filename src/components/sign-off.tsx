@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 
-import { CheckCircle2, Loader2 } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { toast } from "@/hooks/use-toast";
 import { truncate } from "@/lib/bead-utils";
 import * as api from "@/lib/api";
@@ -70,7 +71,7 @@ export function SignOffButton({ isMarking, onPress, className }: SignOffButtonPr
       )}
     >
       {isMarking
-        ? <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+        ? <Spinner size="2xs" />
         : <CheckCircle2 className="size-3" aria-hidden="true" />}
       {isMarking ? 'Approving…' : 'Approve reviewed change'}
     </Button>

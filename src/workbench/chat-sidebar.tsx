@@ -23,7 +23,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Bot, ChevronDown, Copy, ExternalLink, Loader2, MoreVertical, Pencil, Plus, Power, Search } from 'lucide-react';
+import { Bot, ChevronDown, Copy, ExternalLink, MoreVertical, Pencil, Plus, Power, Search } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
@@ -41,6 +41,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { Tooltip } from '@/components/ui/tooltip';
+import { Spinner } from '@/components/ui/spinner';
 import { toast } from '@/hooks/use-toast';
 import { git, projects as projectList, request } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -1069,7 +1070,7 @@ export const ChatSidebar = memo(function ChatSidebar({
                 disabled={startingNewChat || !anyProviderAvailable}
                 onClick={() => onNewChat()}
               >
-                {startingNewChat ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Plus data-testid="new-chat-plus" aria-hidden="true" />}
+                {startingNewChat ? <Spinner size="inherit" /> : <Plus data-testid="new-chat-plus" aria-hidden="true" />}
                 {startingNewChat ? 'Starting…' : 'New Chat'}
               </Button>
               <DropdownMenu>

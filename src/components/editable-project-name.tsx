@@ -2,10 +2,11 @@
 
 import { useState, useRef, useEffect } from "react";
 
-import { Pencil, Check, X, Loader2 } from "lucide-react";
+import { Pencil, Check, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Popover,
   PopoverContent,
@@ -148,7 +149,7 @@ export function EditableProjectName({
                 >
                   {isSubmitting ? (
                     <>
-                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                      <Spinner size="xs" className="mr-1" />
                       Saving...
                     </>
                   ) : (

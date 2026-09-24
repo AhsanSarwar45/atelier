@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Loader2, Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 
 import { KindIcon } from '@/components/settings/kind-icon';
 import { wireScope } from '@/components/settings/mcp-servers-panel';
@@ -21,6 +21,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Tooltip } from '@/components/ui/tooltip';
+import { Spinner } from '@/components/ui/spinner';
 import { useToast } from '@/hooks/use-toast';
 import type { Brand, ExtensionItem, ExtensionKind, ExtensionKindList } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
@@ -92,7 +93,7 @@ function AddOne({
               Cancel
             </Button>
             <Button disabled={busy || !value.trim()} onClick={() => void go()} data-testid={`${testid}-submit`}>
-              {busy && <Loader2 className="animate-spin" />} Add
+              {busy && <Spinner size="inherit" />} Add
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -143,7 +144,7 @@ export function ExtensionsPanel({ brand, scope }: { brand: Brand; scope: Scope }
   if (!kinds) {
     return (
       <p className="flex items-center gap-2 p-3 text-sm text-t-tertiary">
-        <Loader2 className="size-4 animate-spin" /> Reading…
+        <Spinner /> Reading…
       </p>
     );
   }
@@ -214,7 +215,7 @@ export function ExtensionsPanel({ brand, scope }: { brand: Brand; scope: Scope }
                           {item.source === 'user' ? 'Account' : 'Project'}
                         </Badge>
                       )}
-                      {busy === key && <Loader2 className="size-3 animate-spin text-t-muted" />}
+                      {busy === key && <Spinner size="2xs" className="text-t-muted" />}
                     </div>
                     {detail && (
                       <Tooltip label={detail}>
