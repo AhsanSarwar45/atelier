@@ -193,6 +193,12 @@ describe('ButtonGroup', () => {
     expect(group.className).toContain('[&>*:not(:first-child)]:rounded-l-none');
     expect(group.className).toContain('[&>*:not(:last-child)]:rounded-r-none');
   });
+
+  it('squares a toggle choice held inside a wrapper, as it does a button', () => {
+    render(<ButtonGroup aria-label="Agent" />);
+    const group = screen.getByRole('group', { name: 'Agent' });
+    expect(group.className).toContain('[&>*:not(:last-child)_[data-slot=toggle-group-item]]:rounded-r-none');
+  });
 });
 
 describe('Input', () => {

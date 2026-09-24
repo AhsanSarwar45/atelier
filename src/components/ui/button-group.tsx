@@ -11,13 +11,14 @@ import { cn } from "@/lib/utils"
  * `rounded-l-none` on the other and a seam of their own choosing.
  *
  * The corners are squared where two buttons meet, on the buttons themselves or
- * on the first `Button` inside a wrapper such as a tooltip's. `seam` says how
- * the join is drawn: `line` is a faint rule, for filled buttons, whose own
+ * on the first `Button` inside a wrapper such as a tooltip's — or a toggle
+ * group's choice, which is one half of a split control when a star to make it
+ * the default sits beside it. `seam` says how the join is drawn: `line` is a faint rule, for filled buttons, whose own
  * edges would otherwise run together; `overlap` pulls each outlined button one
  * pixel over the last, so two borders make one line rather than two.
  */
 const buttonGroupVariants = cva(
-  "flex min-w-0 [&>*:not(:first-child)]:rounded-l-none [&>*:not(:last-child)]:rounded-r-none [&>*:not(:first-child)_[data-slot=button]]:rounded-l-none [&>*:not(:last-child)_[data-slot=button]]:rounded-r-none",
+  "flex min-w-0 [&>*:not(:first-child)]:rounded-l-none [&>*:not(:last-child)]:rounded-r-none [&>*:not(:first-child)_[data-slot=button]]:rounded-l-none [&>*:not(:last-child)_[data-slot=button]]:rounded-r-none [&>*:not(:first-child)_[data-slot=toggle-group-item]]:rounded-l-none [&>*:not(:last-child)_[data-slot=toggle-group-item]]:rounded-r-none",
   {
     variants: {
       seam: {
