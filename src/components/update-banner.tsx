@@ -139,11 +139,11 @@ export function UpdateBanner() {
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1">
             {canUpdate && (
               <Button
-                variant="ghost"
+                mode="link"
+                variant="success"
                 size="xs"
                 onClick={() => void start()}
                 disabled={busy}
-                className="px-0 text-success hover:bg-transparent hover:text-success/80"
               >
                 {busy ? (
                   <Loader2 className="size-3 animate-spin" aria-hidden="true" />
@@ -156,18 +156,18 @@ export function UpdateBanner() {
 
             {!busy && (
               <Button
+                mode="link"
                 variant="dim"
                 size="xs"
                 onClick={() => void skip()}
                 disabled={skipping || !info.latest}
-                className="px-0"
                 data-testid="update-skip"
               >
                 Skip this version
               </Button>
             )}
 
-            <Button asChild variant="dim" size="xs" className="px-0 underline underline-offset-2">
+            <Button asChild mode="link" variant="dim" underlined="solid" size="xs">
               <Link href="/settings?section=about">Details</Link>
             </Button>
           </div>

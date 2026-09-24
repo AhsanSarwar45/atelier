@@ -179,9 +179,10 @@ export function CommitDetails({ commit, files, onOpen, onLeave }: CommitDetailsP
           </p>
           {long && (
             <Button
-              size="xs"
-              variant="ghost"
-              className="h-5 px-1 text-[11px]"
+              mode="link"
+              variant="foreground"
+              underline="solid"
+              size="2xs"
               data-testid="commit-body-more"
               onClick={() => setOpen(!open)}
             >
@@ -204,14 +205,15 @@ export function CommitDetails({ commit, files, onOpen, onLeave }: CommitDetailsP
             {commit.parents.map((parent) => (
               <Button
                 key={parent}
-                size="xs"
-                variant="ghost"
-                className="h-5 px-1 font-mono text-[10px]"
+                mode="link"
+                variant="foreground"
+                underline="solid"
+                size="2xs"
                 data-testid="commit-parent"
                 data-sha={parent}
                 onClick={() => onOpen?.(parent)}
               >
-                {parent.slice(0, 7)}
+                <span className="font-mono text-[10px]">{parent.slice(0, 7)}</span>
               </Button>
             ))}
           </span>

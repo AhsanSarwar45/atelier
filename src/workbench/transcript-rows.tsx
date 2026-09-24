@@ -174,7 +174,13 @@ export const PermissionCard = memo(function PermissionCard({
       {title !== toolName && (
         <div className="mt-0.5 break-all font-mono text-xs text-muted-foreground">{title}</div>
       )}
-      {href && <a href={href} target="_blank" rel="noreferrer" className="mt-2 block break-all text-xs text-primary underline">Open {href}</a>}
+      {href && (
+        <p className="mt-2 break-all text-xs">
+          <Button mode="link" underlined="solid" size="inherit" asChild>
+            <a href={href} target="_blank" rel="noreferrer">Open {href}</a>
+          </Button>
+        </p>
+      )}
       <div className="mt-3 flex flex-wrap gap-2">
         {options.map((o) => (
           <Button

@@ -478,9 +478,11 @@ export function AccountsSettings() {
           {signing?.progress.state === 'paste-the-code' && !typing && (
             <Button
               type="button"
-              variant="foreground"
-              size="inherit"
-              className="h-auto min-h-0 self-start p-0 text-xs font-normal text-t-muted underline transition-colors hover:text-t-secondary"
+              mode="link"
+              variant="dim"
+              underlined="solid"
+              size="sm"
+              className="self-start"
               onClick={() => setTyping(true)}
               data-testid="account-signin-has-code"
             >
