@@ -56,7 +56,7 @@ import { ANSWERED_BY_APP, NOBODY_ANSWERED, refuses } from '@/workbench/protocol'
 import type { AskOption, ImagePayload, LookableImage } from '@/workbench/protocol';
 import { Chipped, Line, SplitPaths, withChips } from '@/workbench/split-paths';
 import { ChipsInAControl, PathChip } from '@/workbench/path-chip';
-import { sendCommand, type TranscriptItem } from '@/workbench/use-session';
+import { sendCommand, useLatestItem, type TranscriptItem } from '@/workbench/use-session';
 
 /**
  * One permission card. Collapses to its answer once the human has clicked.
@@ -1546,7 +1546,7 @@ export const QuestionCard = memo(function QuestionCard({
  * object only when that item changed — or a value the chat holds still.
  */
 export const TranscriptRow = memo(function TranscriptRow({
-  item,
+  item: drawnAs,
   sessionId,
   mentions,
   onLook,
@@ -1556,6 +1556,9 @@ export const TranscriptRow = memo(function TranscriptRow({
   mentions: Mentions;
   onLook: (image: LookableImage) => void;
 }) {
+  // The transcript is drawn from the chat's shape, which stands still while an
+  // answer is written; the answer's own row reads its words here (bw-j29w).
+  const item = useLatestItem(sessionId, drawnAs);
   switch (item.kind) {
     case 'tool':
       return <ToolRow item={item} nested={sentOff(item.parentId)} sessionId={sessionId} onLook={onLook} />;

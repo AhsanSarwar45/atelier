@@ -416,15 +416,66 @@ test('a keystroke costs the same whether or not the agent is talking', async ({ 
     return Object.fromEntries(metrics.map((m) => [m.name, m.value]));
   };
 
+  // The same page with nothing arriving, so the stream's cost can be told apart
+  // from what the page costs just being open.
+  if (process.env.TYPING_IDLE) {
+    const idleFrom = await thread();
+    await page.waitForTimeout(WARMUP_MS);
+    const idleTo = await thread();
+    console.log(`PERF idle     ${JSON.stringify({
+      scriptMs: Math.round((idleTo.ScriptDuration - idleFrom.ScriptDuration) * 1000),
+      taskMs: Math.round((idleTo.TaskDuration - idleFrom.TaskDuration) * 1000),
+      overMs: WARMUP_MS,
+    })}`);
+  }
   const before = await thread();
   if (process.env.TYPING_PROFILE) {
     await cdp.send('Profiler.enable');
     await cdp.send('Profiler.setSamplingInterval', { interval: 200 });
     await cdp.send('Profiler.start');
   }
+  // What the browser itself spent the thread on, by the name of each piece of
+  // work, when the profile says most of it was not script at all.
+  const traced: Array<{ name: string; dur?: number; ph: string; tid: number; args?: { name?: string } }> = [];
+  let tracingDone: Promise<void> | null = null;
+  if (process.env.TYPING_TRACE) {
+    cdp.on('Tracing.dataCollected', ({ value }) => { traced.push(...(value as typeof traced)); });
+    tracingDone = new Promise((resolve) => cdp.once('Tracing.tracingComplete', () => resolve()));
+    await cdp.send('Tracing.start', {
+      traceConfig: { includedCategories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'blink', 'v8', '__metadata'] },
+      transferMode: 'ReportEvents',
+    });
+  }
   await page.evaluate((everyMs) => (window as unknown as { __stream: { start(ms: number): void } }).__stream.start(everyMs), EVERY_MS);
   await page.waitForTimeout(WARMUP_MS);
   const after = await thread();
+  if (tracingDone) {
+    await cdp.send('Tracing.end');
+    await tracingDone;
+    const main = new Set(traced.filter((e) => e.name === 'thread_name' && e.args?.name === 'CrRendererMain').map((e) => e.tid));
+    // Self time: each piece of work less the pieces nested inside it.
+    const spent = new Map<string, number>();
+    const work = traced
+      .filter((e) => e.ph === 'X' && main.has(e.tid) && e.dur)
+      .map((e) => ({ name: e.name, ts: (e as unknown as { ts: number }).ts, dur: e.dur! }))
+      .sort((a, b) => a.ts - b.ts || b.dur - a.dur);
+    const open: Array<{ name: string; end: number; self: number }> = [];
+    const close = (upTo: number) => {
+      while (open.length && open[open.length - 1]!.end <= upTo) {
+        const done = open.pop()!;
+        spent.set(done.name, (spent.get(done.name) ?? 0) + done.self);
+      }
+    };
+    for (const e of work) {
+      close(e.ts);
+      if (open.length) open[open.length - 1]!.self -= e.dur;
+      open.push({ name: e.name, end: e.ts + e.dur, self: e.dur });
+    }
+    close(Infinity);
+    for (const [name, us] of [...spent.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30)) {
+      console.log(`TRACE ${String(Math.round(us / 1000)).padStart(6)}ms  ${name}`);
+    }
+  }
   if (process.env.TYPING_PROFILE) {
     const { profile } = await cdp.send('Profiler.stop');
     // Self time per function, so the run names what it spent the thread on

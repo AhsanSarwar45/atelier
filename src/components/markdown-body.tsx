@@ -462,6 +462,22 @@ type PluggableList = NonNullable<Options["rehypePlugins"]>;
 
 const REMARK_PLUGINS: PluggableList = [remarkGfm, remarkBreaks];
 
+/**
+ * Code highlighting, set up once for the page.
+ *
+ * `rehype-highlight` builds a highlighter and registers every language it
+ * bundles each time the plugin is set up, and react-markdown sets its plugins
+ * up again on every render. An answer being written renders its last block
+ * once per word, so every word registered some forty languages before a single
+ * one was used (bw-j29w). The transform it returns keeps nothing between
+ * documents, so one serves every block.
+ */
+let highlighting: ReturnType<typeof rehypeHighlight> | null = null;
+function rehypeHighlightOnce() {
+  highlighting ??= rehypeHighlight();
+  return highlighting;
+}
+
 /** Anything that reaches across a blank line to text outside its own block. */
 const SPANS_BLANK_LINES = /^ {0,3}\[[^\]]+\]:|<!--|<(pre|script|style|textarea)[\s>]/im;
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
@@ -617,7 +633,7 @@ export function MarkdownBody({
     },
   }), [base, mentions]);
   const rehypePlugins = useMemo<PluggableList>(
-    () => (mentions ? [rehypeHighlight, [rehypeMentions, mentions.split]] : [rehypeHighlight]),
+    () => (mentions ? [rehypeHighlightOnce, [rehypeMentions, mentions.split]] : [rehypeHighlightOnce]),
     [mentions],
   );
   const blocks = useMemo(() => markdownBlocks(children), [children]);

@@ -17,7 +17,7 @@ describe('the provider-neutral collaboration mode control', () => {
   });
 
   it('pins the selected working style independently of permission mode', () => {
-    expect(block).toContain("type: 'session.collaboration-mode', sessionId, mode");
+    expect(block).toContain("type: 'session.collaboration-mode', sessionId: chatId, mode");
     expect(block).toContain('current={view.collaborationMode}');
     expect(block).not.toContain("type: 'session.mode'");
   });

@@ -20,7 +20,8 @@ import { keepFile } from '@/workbench/attachment-store';
 import { looksLikeAPicture } from '@/workbench/composer-attachments';
 import { pictureShape } from '@/workbench/picture-shape';
 import { onChat } from '@/workbench/live-wire';
-import { asView, EMPTY, reduce, type SessionView } from '@/workbench/fold';
+import { asView, EMPTY, reduce, type SessionView, type TranscriptItem } from '@/workbench/fold';
+import { kitSpoke } from '@/workbench/machine-words';
 import type { ImagePayload, SessionFacts, SessionState, WbpCommand, WbpEvent } from '@/workbench/protocol';
 
 export {
@@ -201,6 +202,12 @@ export type LoadedSessionView = SessionView & {
 
 interface CachedSession {
   view: SessionView;
+  /**
+   * The same chat, moved on only when something other than the words of an
+   * answer being written changed. Everything around the transcript reads this;
+   * the one row being written reads its own words (`useLatestItem`).
+   */
+  shape: SessionView;
   ready: boolean;
   /** Live tail frames that arrived before the opening item page. */
   pending: WbpEvent[];
@@ -217,7 +224,7 @@ function cached(id: string): CachedSession {
   let entry = cachedSessions.get(id);
   if (!entry) {
     entry = {
-      view: EMPTY, ready: false, pending: [], listeners: new Set(), notifyFrame: null,
+      view: EMPTY, shape: EMPTY, ready: false, pending: [], listeners: new Set(), notifyFrame: null,
       loadingOlder: false, touched: Date.now(),
     };
     cachedSessions.set(id, entry);
@@ -235,6 +242,7 @@ function cached(id: string): CachedSession {
 function publishCached(id: string, view: SessionView, ready?: boolean, immediate = false): void {
   const entry = cached(id);
   entry.view = view;
+  if (!onlyWordsGrew(entry.shape, view)) entry.shape = view;
   if (ready !== undefined) entry.ready = ready;
   const notify = () => {
     entry.notifyFrame = null;
@@ -250,6 +258,84 @@ function publishCached(id: string, view: SessionView, ready?: boolean, immediate
   } else if (entry.notifyFrame === null) {
     entry.notifyFrame = requestAnimationFrame(notify);
   }
+}
+
+/**
+ * Whether `next` differs from `held` only in the words of answers and thoughts
+ * already on the page.
+ *
+ * A streamed word changes one row's text and nothing else, and that is most of
+ * what a working chat sends. Every toolbar, rail and dialog of the chat screen
+ * hung off the whole view, so each word ran all of them again (bw-j29w). A
+ * change that could move anything but that row's own words — a row appearing,
+ * one starting to show because it stopped being empty, a line that reads as
+ * the kit speaking, a user's own message the sent line is matched against —
+ * is a change of shape.
+ */
+export function onlyWordsGrew(held: SessionView, next: SessionView): boolean {
+  if (held === next) return true;
+  const keys = Object.keys(next) as (keyof SessionView)[];
+  if (keys.length !== Object.keys(held).length) return false;
+  for (const key of keys) {
+    if (key !== 'items' && key !== 'lastSeq' && held[key] !== next[key]) return false;
+  }
+  const was = held.items;
+  const now = next.items;
+  if (was.length !== now.length) return false;
+  for (let i = now.length - 1; i >= 0; i -= 1) {
+    if (was[i] !== now[i] && !wordsOnly(was[i]!, now[i]!)) return false;
+  }
+  return true;
+}
+
+function wordsOnly(was: TranscriptItem, now: TranscriptItem): boolean {
+  if (was.kind !== now.kind || was.id !== now.id) return false;
+  if (was.kind !== 'thinking' && !(was.kind === 'message' && was.role === 'assistant')) return false;
+  const a = was as unknown as Record<string, unknown>;
+  const b = now as unknown as Record<string, unknown>;
+  const keys = Object.keys(b);
+  if (keys.length !== Object.keys(a).length) return false;
+  for (const key of keys) {
+    if (key !== 'text' && a[key] !== b[key]) return false;
+  }
+  const before = (was as { text: string }).text;
+  const after = (now as { text: string }).text;
+  if (before.trim() === '' || after.trim() === '') return false;
+  return was.kind === 'thinking' || (kitSpoke(before) === null && kitSpoke(after) === null);
+}
+
+const indexes = new WeakMap<readonly TranscriptItem[], Map<string, TranscriptItem>>();
+
+function latestIn(items: readonly TranscriptItem[], item: TranscriptItem): TranscriptItem | undefined {
+  let index = indexes.get(items);
+  if (!index) {
+    index = new Map(items.map((it) => [`${it.kind}:${it.id}`, it]));
+    indexes.set(items, index);
+  }
+  return index.get(`${item.kind}:${item.id}`);
+}
+
+/**
+ * A row as it stands now, when the transcript was drawn from the chat's shape.
+ *
+ * Only an answer or a thought can have grown since (`onlyWordsGrew`), so any
+ * other row is what it was given and subscribes to nothing.
+ */
+export function useLatestItem<T extends TranscriptItem>(sessionId: string, item: T): T {
+  const grows = item.kind === 'thinking' || (item.kind === 'message' && item.role === 'assistant');
+  const subscribe = useCallback((listener: () => void) => {
+    if (!grows || !sessionId) return () => {};
+    const entry = cached(sessionId);
+    entry.listeners.add(listener);
+    return () => entry.listeners.delete(listener);
+  }, [grows, sessionId]);
+  const snapshot = useCallback(() => {
+    if (!grows || !sessionId) return item;
+    const entry = cachedSessions.get(sessionId);
+    const latest = entry ? latestIn(entry.view.items, item) : undefined;
+    return latest && latest.kind === item.kind ? (latest as T) : item;
+  }, [grows, sessionId, item]);
+  return useSyncExternalStore(subscribe, snapshot, () => item);
 }
 
 /** The app-wide feed keeps chats already opened current while another tab is
@@ -329,7 +415,12 @@ async function loadHistory(id: string): Promise<HistoryLoad> {
   }
 }
 
-export function useSession(sessionId: string | null): LoadedSessionView {
+/**
+ * A chat already opened by `useSession`, read without opening it again: the
+ * whole of it, or with `shape` only what moves when more than an answer's
+ * words change.
+ */
+export function useSessionView(sessionId: string | null, shape = false): SessionView {
   const subscribe = useCallback((listener: () => void) => {
     if (!sessionId) return () => {};
     const entry = cached(sessionId);
@@ -337,14 +428,19 @@ export function useSession(sessionId: string | null): LoadedSessionView {
     return () => entry.listeners.delete(listener);
   }, [sessionId]);
   const snapshot = useCallback(
-    () => sessionId ? cached(sessionId).view : EMPTY,
-    [sessionId],
+    () => sessionId ? (shape ? cached(sessionId).shape : cached(sessionId).view) : EMPTY,
+    [sessionId, shape],
   );
-  const view = useSyncExternalStore(
-    subscribe,
-    snapshot,
-    () => EMPTY,
-  );
+  return useSyncExternalStore(subscribe, snapshot, () => EMPTY);
+}
+
+/**
+ * The open chat. `shape` gives the view that moves only when more than an
+ * answer's words changed (`onlyWordsGrew`), for everything that does not draw
+ * those words; its transcript rows then read their own (`useLatestItem`).
+ */
+export function useSession(sessionId: string | null, { shape = false }: { shape?: boolean } = {}): LoadedSessionView {
+  const view = useSessionView(sessionId, shape);
 
   useEffect(() => {
     if (!sessionId) return;

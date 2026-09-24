@@ -1032,20 +1032,10 @@ export const ChatSidebar = memo(function ChatSidebar({
     return () => watch.disconnect();
   }, [shown, rows.length]);
 
-  const groups = groupRows(rows.slice(0, shown));
-
-  return (
-    <aside
-      data-testid="chat-sidebar"
-      className="flex h-full min-h-0 w-72 shrink-0 flex-col border-r border-border/60 md:w-full"
-    >
-      {/*
-        Search, the "everything" switch and New Chat all live here now — they
-        are what this list is for, not decorations on the bar above it. A
-        caller that renders the list on its own (a test, mainly) gets none of
-        these, because each trigger is optional and nothing here reaches for a
-        prop that was not handed in (bw-81wt.5).
-      */}
+  // What does not change with the list, held still while the list does:
+  // a chat starting or finishing its turn changes one row, not these (bw-j29w).
+  const header = useMemo(() => (
+    <>
       {(onSearch || onToggleEverything || onNewChat) && (
         <div data-testid="chat-sidebar-header" className="flex shrink-0 items-center gap-1 border-b border-border/60 p-2">
           {onSearch && <ToolButton icon={<Search />} label="Search chats" data-testid="open-search" onClick={onSearch} />}
@@ -1109,6 +1099,94 @@ export const ChatSidebar = memo(function ChatSidebar({
           )}
         </div>
       )}
+    </>
+  ), [anyProviderAvailable, everything, onNewChat, onSearch, onToggleEverything, providers, startingNewChat]);
+
+  const rowMenu = useMemo(() => (
+    <>
+      <DropdownMenu open={menu !== null} onOpenChange={(open) => { if (!open) setMenu(null); }}>
+        <PointerAnchor at={menu?.at ?? null} />
+        {/* Kept off the edge: a 192px menu hung at the button's left edge on a
+            390px screen ran two points past the side of it (bw-rpgh.1). */}
+        <DropdownMenuContent
+          data-testid="chat-context-menu"
+          className="w-48"
+          align="start"
+          collisionPadding={8}
+        >
+          <DropdownMenuItem
+            data-testid="chat-menu-rename"
+            disabled={!menu?.row.sessionId}
+            onSelect={() => { if (menu) askRename(menu.row); }}
+          >
+            <Pencil aria-hidden="true" /> Rename…
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-testid="chat-menu-copy-id"
+            disabled={!menu || !(menu.row.sessionId ?? menu.row.externalId)}
+            onSelect={() => { if (menu) copyId(menu.row); }}
+          >
+            <Copy aria-hidden="true" /> Copy ID
+          </DropdownMenuItem>
+          {/*
+            Last and behind a rule, because it is the one item here that takes
+            something away. Greyed rather than hidden on a row with nothing of
+            ours attached, so the menu reads the same on every row.
+          */}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            data-testid="chat-menu-close"
+            disabled={!menu || !canClose(menu.row)}
+            onSelect={() => { if (menu) end(menu.row); }}
+          >
+            <Power aria-hidden="true" /> Close chat
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  ), [askRename, copyId, end, menu]);
+
+  const renameDialog = useMemo(() => (
+    <>
+      <Dialog open={renaming !== null} onOpenChange={(open) => { if (!open) setRenaming(null); }}>
+        <DialogContent className="sm:max-w-md" data-testid="chat-rename-dialog">
+          <DialogHeader>
+            <DialogTitle>Rename chat</DialogTitle>
+            <DialogDescription>Enter a new name.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={(event) => { event.preventDefault(); void rename(); }}>
+            <Input
+              autoFocus
+              value={title}
+              maxLength={200}
+              aria-label="Chat name"
+              onChange={(event) => setTitle(event.target.value)}
+            />
+            <DialogFooter className="mt-4">
+              <Button type="button" variant="outline" onClick={() => setRenaming(null)}>Cancel</Button>
+              <Button type="submit" disabled={!title.trim()}>Rename</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  ), [rename, renaming, title]);
+
+  const groups = groupRows(rows.slice(0, shown));
+
+  return (
+    <aside
+      data-testid="chat-sidebar"
+      className="flex h-full min-h-0 w-72 shrink-0 flex-col border-r border-border/60 md:w-full"
+    >
+      {/*
+        Search, the "everything" switch and New Chat all live here now — they
+        are what this list is for, not decorations on the bar above it. A
+        caller that renders the list on its own (a test, mainly) gets none of
+        these, because each trigger is optional and nothing here reaches for a
+        prop that was not handed in (bw-81wt.5).
+      */}
+      {header}
 
       {failed && (
         <Panel asChild shape="strip" tone="danger" className="text-xs text-destructive">
@@ -1164,67 +1242,9 @@ export const ChatSidebar = memo(function ChatSidebar({
         )}
       </div>
 
-      <DropdownMenu open={menu !== null} onOpenChange={(open) => { if (!open) setMenu(null); }}>
-        <PointerAnchor at={menu?.at ?? null} />
-        {/* Kept off the edge: a 192px menu hung at the button's left edge on a
-            390px screen ran two points past the side of it (bw-rpgh.1). */}
-        <DropdownMenuContent
-          data-testid="chat-context-menu"
-          className="w-48"
-          align="start"
-          collisionPadding={8}
-        >
-          <DropdownMenuItem
-            data-testid="chat-menu-rename"
-            disabled={!menu?.row.sessionId}
-            onSelect={() => { if (menu) askRename(menu.row); }}
-          >
-            <Pencil aria-hidden="true" /> Rename…
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            data-testid="chat-menu-copy-id"
-            disabled={!menu || !(menu.row.sessionId ?? menu.row.externalId)}
-            onSelect={() => { if (menu) copyId(menu.row); }}
-          >
-            <Copy aria-hidden="true" /> Copy ID
-          </DropdownMenuItem>
-          {/*
-            Last and behind a rule, because it is the one item here that takes
-            something away. Greyed rather than hidden on a row with nothing of
-            ours attached, so the menu reads the same on every row.
-          */}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            data-testid="chat-menu-close"
-            disabled={!menu || !canClose(menu.row)}
-            onSelect={() => { if (menu) end(menu.row); }}
-          >
-            <Power aria-hidden="true" /> Close chat
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {rowMenu}
 
-      <Dialog open={renaming !== null} onOpenChange={(open) => { if (!open) setRenaming(null); }}>
-        <DialogContent className="sm:max-w-md" data-testid="chat-rename-dialog">
-          <DialogHeader>
-            <DialogTitle>Rename chat</DialogTitle>
-            <DialogDescription>Enter a new name.</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={(event) => { event.preventDefault(); void rename(); }}>
-            <Input
-              autoFocus
-              value={title}
-              maxLength={200}
-              aria-label="Chat name"
-              onChange={(event) => setTitle(event.target.value)}
-            />
-            <DialogFooter className="mt-4">
-              <Button type="button" variant="outline" onClick={() => setRenaming(null)}>Cancel</Button>
-              <Button type="submit" disabled={!title.trim()}>Rename</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {renameDialog}
     </aside>
   );
 });

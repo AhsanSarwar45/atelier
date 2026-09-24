@@ -91,7 +91,7 @@ import { WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
 import { CHIP_GAP, ModeMark, modelName, modelWords, modeWords } from '@/workbench/what-it-runs';
-import { isBusy, isMidTurn, readAndKeep, sendCommand, useSession, useSessionFactsRead, type TranscriptItem } from '@/workbench/use-session';
+import { isBusy, isMidTurn, readAndKeep, sendCommand, useSession, useSessionFactsRead, useSessionView, type TranscriptItem } from '@/workbench/use-session';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import { BrandIcon, ProfileBadge, brandName } from '@/workbench/brand-icon';
 import { workingLine } from '@/workbench/working-line';
@@ -117,6 +117,9 @@ const EVERY_CHAT = 'workbench.every-chat';
 
 /** The starting mark while nothing has been sent — one value, so it never re-renders. */
 const NO_MARK: ReadonlySet<string> = new Set<string>();
+/** A brand whose accounts have not been read yet, the same empty list every time. */
+const NO_ACCOUNTS: ProfileChoice[] = [];
+const NO_ITEMS: TranscriptItem[] = [];
 const LEFT_PANEL_WIDTH = 'workbench.left-panel-width';
 const RIGHT_PANEL_WIDTH = 'workbench.right-panel-width';
 const MIN_CHAT_WIDTH = 320;
@@ -1013,6 +1016,19 @@ const SendButtons = memo(function SendButtons({
   );
 });
 
+/**
+ * The kind filter, reading the rows itself. It counts them, so it has to follow
+ * every new one; the bar it sits on does not (bw-j29w).
+ */
+function ChatKindFilter({ sessionId, off, onChange }: {
+  sessionId: string | null;
+  off: ReadonlySet<KindId>;
+  onChange: (off: ReadonlySet<KindId>) => void;
+}) {
+  const { items } = useSessionView(sessionId, true);
+  return <KindFilter items={items} off={off} onChange={onChange} />;
+}
+
 export default function ChatTab({ projectId, projectPath, openSessionId }: ChatTabProps) {
   // One set of handlers for every file chip in the conversation, wherever it
   // was drawn: in a message, in a command, or on a tool row's own line.
@@ -1184,12 +1200,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // middle of a launch is what kept the new chat's own row out of the list for
   // as long as the launch took (bw-akk9.1, live-wire.ts `open`).
   const reading = starting ? null : sessionId;
-  const view = useSession(reading);
+  const view = useSession(reading, { shape: true });
   const factsRead = useSessionFactsRead(reading);
   const facts = factsRead?.facts ?? null;
   const checklist = useEpicChecklist(view.todos, projectPath);
   // What the board knows plus what this chat has been seen doing since.
-  const cards = Array.from(new Set([...(facts?.beads ?? []), ...view.beads]));
+  const cards = useMemo(
+    () => Array.from(new Set([...(facts?.beads ?? []), ...view.beads])),
+    [facts?.beads, view.beads],
+  );
   // A card the agent NAMED in its own words opens from where it is
   // written. Only ones that exist: English is full of hyphenated words shaped
   // like a card id, so the board's own list and the reports this project has
@@ -1432,7 +1451,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       gone = true;
     };
   }, [showing]);
-  const newAccounts = accounts[newBrand] ?? [];
+  const newAccounts = accounts[newBrand] ?? NO_ACCOUNTS;
   /**
    * The account the chat will start on: the one picked in this dialog, else
    * the starred one, else the system account. A starred account that has since
@@ -1694,7 +1713,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const sessionBrand = live?.brand ?? facts?.brand ?? 'claude';
   /** A local chat with no model chosen cannot send anything, typed or not. */
   const cannotSend = sessionBrand === 'local' && !view.model;
-  const composer = composerMenu(view.menu, sessionBrand, view.model, view.collaborationMode);
+  const composer = useMemo(
+    () => composerMenu(view.menu, sessionBrand, view.model, view.collaborationMode),
+    [view.menu, sessionBrand, view.model, view.collaborationMode],
+  );
   const selectedModel = composer.models.find((model) => model.value === view.model);
   // The chat's own accounts are needed even on the system account: that is the
   // row from which somebody switches to a named one. Names belong to the
@@ -1719,7 +1741,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       gone = true;
     };
   }, [accounts, sessionBrand]);
-  const sessionAccounts = accounts[sessionBrand] ?? [];
+  const sessionAccounts = accounts[sessionBrand] ?? NO_ACCOUNTS;
   const sessionProfile = view.profile ?? 'system';
   const sessionProfileLabel =
     sessionAccounts.find((profile) => profile.id === sessionProfile)?.name ??
@@ -2122,22 +2144,18 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const submitSteady = useSteadyCallback(() => void submit());
   const holdSteady = useSteadyCallback(() => void hold());
 
-  if (!projectId || !projectPath) {
-    return <div className="p-8 text-muted-foreground">Select a project</div>;
-  }
+  // The rail reads the rows only to follow the subagents it lists.
+  const railItems = view.agents.length > 0 ? view.items : NO_ITEMS;
+  const pushHeldSteady = useSteadyCallback((message: HeldMessage) => void pushHeld(message));
+  const editHeldSteady = useSteadyCallback((message: HeldMessage) => void editHeld(message));
+  const dropHeldSteady = useSteadyCallback((message: HeldMessage) => void dropHeld(message));
 
-  /**
-   * On a phone the conversation gets the whole screen and the list of chats
-   * becomes a drawer over it: a 288px rail beside a 390px screen leaves the
-   * transcript unreadable, and the composer is what must stay in reach.
-   */
-  const shell = (inner: React.ReactNode) => (
-    // The height is the shell's to give: this box fills what the bars left.
-    <div ref={shellRef} className="relative flex min-h-0 flex-1">
-      {/* First thing on the row, ahead of Chat/Board/Reports: the way into the
-          chat list is not one tool among this tab's own, it opens a whole other
-          pane, the same reason the right rail's own way in sits on the bar and
-          not inside either pane (bw-81wt.5). */}
+  // The parts of the screen that do not draw the conversation, each held
+  // still until something it shows changes. They are all written inside this
+  // one component, so without this every new row of the transcript ran every
+  // toolbar, rail, picker and dialog on the screen again (bw-j29w).
+  const barLead = useMemo(() => (
+    <>
       <TabLead tab="chat">
         <ToolButton
           icon={phone || leftOpen ? <PanelLeftClose /> : <PanelLeft />}
@@ -2148,21 +2166,24 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           onClick={() => (phone ? setRailOpen((v) => !v) : flipLeft())}
         />
       </TabLead>
+    </>
+  ), [chatListId, flipLeft, leftOpen, phone]);
 
+  const barTools = useMemo(() => (
+    <>
       <TabTools tab="chat">
         {/* Search, "everything" and New Chat used to live here; they moved into
             the list they act on (bw-81wt.5). What is left is the kind filter,
             which reaches into this transcript rather than the list beside it.
             The way into the column on the right is not here: it is a door, and
             a door belongs on the side it opens (bw-81wt.29). */}
-        <KindFilter items={view.items} off={offKinds} onChange={changeKinds} />
+        <ChatKindFilter sessionId={reading} off={offKinds} onChange={changeKinds} />
       </TabTools>
+    </>
+  ), [changeKinds, offKinds, reading]);
 
-      {/* The far right of the bar, mirroring the chat list's button on the far
-          left: the two panels of this screen, each reached from its own edge.
-          Both toggles are pictures a reader learns once; a bar of words for six
-          controls is the bar that put "New Chat" off the edge of a 390px
-          screen (bw-81wt.5, .8). */}
+  const barTrail = useMemo(() => (
+    <>
       <TabTrail tab="chat">
         {/* The one press back to the conversation, and only on a phone.
             Everywhere else the diff is put away with the same button that asked
@@ -2195,7 +2216,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           />
         )}
       </TabTrail>
+    </>
+  ), [detailsId, flipRight, rightOpen, sessionId, showDiff, showTheDiff]);
 
+  const panels = useMemo(() => (
+    <>
       {showing === 'search' && <SearchPanel projectId={projectId} projectPath={projectPath} onClose={() => setShowing(null)} />}
       {showing === 'usage' && <UsageView brand={sessionBrand} profile={view.profile} onClose={() => setShowing(null)} />}
       {showing === 'tokens' && sessionId && (
@@ -2335,10 +2360,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </>
+  ), [newAccount, newAccounts, newAccountsUnread, newBrand, newBrandAvailable, newChatDefault, newChatDefaults.profiles, newWhere, projectId, projectPath, providers, sessionBrand, sessionId, setNewChatDefault, setNewChatProfile, showing, start, starting, view.profile, whereMissing]);
 
-      {/* The library's sheet held inside the work area on a phone, with its own
-          dimming beside it; on a wide screen (`docked`) a column of the row.
-          Kept drawn while shut, so it slides rather than snaps. */}
+  const chatList = useMemo(() => (
+    <>
       <Sheet contained docked={!phone} open={railOpen} onOpenChange={setRailOpen}>
       <SheetContent
         forceMount
@@ -2371,8 +2397,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         )}
       >
         <ChatSidebar
-          projectId={projectId}
-          projectPath={projectPath}
+          projectId={projectId ?? ''}
+          projectPath={projectPath ?? ''}
           openSessionId={sessionId}
           everything={everything}
           onOpen={openFromList}
@@ -2394,9 +2420,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           maximum={() => (shellRef.current?.clientWidth ?? window.innerWidth) - (rightOpen && sessionId ? rightWidth : 0) - MIN_CHAT_WIDTH}
         />
       )}
-      <div className="flex min-w-0 flex-1 flex-col">{inner}</div>
-      {/* The chat's own column. Only when there IS a chat: an empty rail beside
-          an empty screen says nothing and takes width to say it. */}
+    </>
+  ), [changeLeftWidth, chatListId, everything, flipEverything, leftOpen, leftWidth, newChat, openFromList, openSearch, phone, projectId, projectPath, railOpen, rightOpen, rightWidth, sessionId, starting]);
+
+  const rail = useMemo(() => (
+    <>
       {sessionId && (
         <>
           {rightOpen && (
@@ -2412,7 +2440,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             projectId={projectId}
             cards={cards}
             agents={view.agents}
-            items={view.items}
+            items={railItems}
             sessionId={sessionId}
             agentControls={view.menu.agentControls}
             onOpenAgent={setOpenAgent}
@@ -2437,92 +2465,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           />
         </>
       )}
-    </div>
-  );
+    </>
+  ), [cards, changeRightWidth, detailsId, diffOpen, facts, flipRight, gitOpen, leftOpen, leftWidth, openCommit, pickView, projectId, projectPath, resizingRight, rightOpen, rightWidth, sessionId, showCommitInDiff, showFileInDiff, showTheDiff, showWorkingTreeInDiff, view.agents, railItems, view.menu.agentControls]);
 
-  // A chat that has been asked for but does not yet exist. The click moves the
-  // reader here at once and this stands where the transcript will stand, so the
-  // second the server spends making the chat is spent on the chat's own screen
-  // instead of on the screen he just clicked away from (bw-l9cu.1). It comes
-  // before the empty screen on purpose: the empty screen holds the very buttons
-  // he has just used, and leaving them under him read as a click that did
-  // nothing.
-  if (starting) {
-    return shell(
-      <div
-        data-testid="chat-starting"
-        role="status"
-        aria-live="polite"
-        className="flex flex-1 flex-col items-center justify-center gap-3"
-      >
-        <Spinner className="size-6 text-muted-foreground motion-reduce:animate-none" />
-        <p className="text-sm text-muted-foreground">Starting {brandName(starting.brand)} chat…</p>
-      </div>,
-    );
-  }
-
-  if (!sessionId) {
-    return shell(
-      <div className="flex flex-1 flex-col items-center justify-center gap-4">
-        <p className="text-muted-foreground">No chat selected</p>
-        {/* One button, and the dialog behind it. This screen used to ask the
-            dialog's questions over again — which agent, and where to work —
-            so every question the dialog grew had to be answered twice
-            (bw-5ihw.9). */}
-        <Button
-          variant="primary"
-          onClick={() => newChat()}
-          disabled={starting || !availableBrand}
-          data-testid="new-chat"
-        >
-          <Plus data-testid="new-chat-empty-plus" aria-hidden="true" />
-          New Chat
-        </Button>
-        {/* The one thing the dialog cannot say from behind a button that
-            will not open it. */}
-        {!availableBrand && (
-          <ul data-testid="provider-unavailable-reasons" className="flex max-w-md flex-col gap-0.5 text-center text-[11px] text-muted-foreground">
-            {providers
-              .filter((provider) => !provider.available)
-              .map((provider) => (
-                <li key={provider.brand} data-testid={`provider-why-${provider.brand}`}>
-                  <span className="font-medium text-foreground/80">{brandName(provider.brand)}</span>: {whyUnavailable(provider)}
-                </li>
-              ))}
-          </ul>
-        )}
-        {startError && <Panel asChild tone="danger" className="max-w-lg text-center text-sm text-danger"><p>{startError}</p></Panel>}
-      </div>,
-    );
-  }
-
-  return shell(
-    <div className="flex min-h-0 flex-1 flex-col" data-testid="chat-tab" data-session-id={sessionId}>
-      {/* The whole conversation takes a dropped file, not just the one line at
-          the bottom that CodeMirror answers for. A file dropped on the
-          transcript used to leave the app entirely — the browser opened it —
-          which is the worst answer available to a gesture aimed at the biggest
-          target on the screen (bw-p4r3.1). The box keeps its own aim: a drop it
-          took is already prevented by the time it reaches here.
-
-          Wrapped rather than indented: this is one element around six hundred
-          lines that have not otherwise moved, and a diff of the whole pane
-          would hide the one line that changed. */}
-      <FileDropTarget
-        className="flex min-h-0 flex-1 flex-col"
-        onFiles={(files) => void absorb(files)}
-        // Nothing to attach to while another program holds the chat: there is
-        // no box on the screen to put a badge in.
-        disabled={ownership.kind === 'elsewhere'}
-      >
-      {/* Nothing on this line grows with the work: the cards, the reports and
-          what the chat has spent are all in the column beside it
-          (docs/agent-workbench.md §8.2.6). It is drawn as one line wherever
-          there is room for one; short of that it wraps rather than clipping,
-          because a pill that is merely cut off is a pill nobody can read and
-          `overflow-hidden` used to make the wire's own model name push the
-          plan chip and its number straight off a 390px screen with no way
-          back to them (bw-81wt.5). */}
+  const statusLine = useMemo(() => (
+    <>
       <div
         data-testid="chat-status-line"
         // One distance between every two chips on this line, read from the one
@@ -2615,6 +2562,489 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           <TodoPanel items={checklist} />
         </div>
       )}
+    </>
+  ), [checklist, facts, plan, sessionBrand, sessionProfileName, view.context, view.menu.sharedLibrary]);
+
+  const heldList = useMemo(() => (
+    <>
+        <HeldMessages
+          held={view.held}
+          working={midTurn}
+          busyId={heldWorking}
+          onPush={pushHeldSteady}
+          onEdit={editHeldSteady}
+          onDrop={dropHeldSteady}
+        />
+    </>
+  ), [dropHeldSteady, editHeldSteady, heldWorking, midTurn, pushHeldSteady, view.held]);
+
+  const settingsRow = useMemo(() => (
+    <>
+          <div className="mt-1.5 flex items-center gap-1 [container-name:composer] [container-type:inline-size]">
+            {/* A plain button, not the toolbar's: that one speaks through a
+                tooltip and only works inside the bar that hosts one. */}
+            <Tooltip label="Attach a picture or a file">
+              <Button
+                variant="ghost"
+                mode="icon"
+                size="sm"
+                aria-label="Attach a picture or a file"
+                data-testid="attach-picture"
+                radius="full" className="text-muted-foreground"
+                onClick={() => picker.current?.click()}
+              >
+                <Paperclip className="h-4 w-4" />
+              </Button>
+            </Tooltip>
+            {/* Both act on THIS chat, and are kept in his own settings so the
+                next one opens on them too (§8.2.3). */}
+            <div className="hidden items-center gap-1 composer-wide:flex" data-testid="desktop-composer-settings">
+            <Picker
+              icon={<ModeMark mode={view.permissionMode} className="h-3.5 w-3.5" />}
+              label="Permission mode"
+              testid="mode-picker"
+              current={view.permissionMode}
+              currentLabel={modeWords(view.permissionMode)?.label}
+              asleep={asleep}
+              // The setting's own spelling is not a label: `bypassPermissions`
+              // is what he has to read to know whether this chat still asks
+              // (src/workbench/machine-words.ts, bw-iiv6).
+              options={composer.permissionModes.map((m) => ({
+                value: m,
+                label: PERMISSION_MODE[m]?.label ?? inWords(m),
+              }))}
+              defaultValue={sessionBrand === 'local' ? null : permissionDefaults[sessionBrand] ?? null}
+              onDefault={sessionBrand === 'local' ? undefined : (mode) => makeProviderDefault('permission', mode)}
+              onPick={(mode) => {
+                setSteerError(null);
+                void sendCommand({ type: 'session.mode', sessionId: chatId, mode }).catch((e: unknown) =>
+                  setSteerError(e instanceof Error ? e.message : String(e)),
+                );
+              }}
+            />
+            {composer.collaborationModes.length > 0 && (
+              <Picker
+                icon={<Workflow className="h-3.5 w-3.5" />}
+                label="Collaboration mode"
+                testid="collaboration-mode-picker"
+                current={view.collaborationMode}
+                currentLabel={composer.collaborationModes.find((mode) => mode.value === view.collaborationMode)?.displayName}
+                asleep={asleep}
+                options={composer.collaborationModes.map((mode) => ({
+                  value: mode.value,
+                  label: mode.displayName,
+                  hint: mode.description,
+                }))}
+                onPick={(mode) => {
+                  setSteerError(null);
+                  void sendCommand({ type: 'session.collaboration-mode', sessionId: chatId, mode }).catch((e: unknown) =>
+                    setSteerError(e instanceof Error ? e.message : String(e)),
+                  );
+                }}
+              />
+            )}
+            {sessionAccounts.length > 1 && (
+              <Picker
+                icon={<UserRound className="h-3.5 w-3.5" />}
+                label="Account"
+                testid="account-picker"
+                current={sessionProfile}
+                currentLabel={sessionProfileLabel}
+                asleep={asleep}
+                options={sessionAccounts.map((profile) => ({
+                  value: profile.id,
+                  label: profile.name,
+                  hint: profile.system ? 'The account configured on this computer' : undefined,
+                  unavailable: busy && profile.id !== sessionProfile
+                    ? 'Wait for the current response to finish'
+                    : undefined,
+                }))}
+                onPick={switchAccount}
+              />
+            )}
+            <Picker
+              icon={<ModelIcon brand={sessionBrand} model={view.model} identity={selectedModel?.family ?? selectedModel?.publisher} className="h-3.5 w-3.5" />}
+              label="Model"
+              testid="model-picker"
+              // A session that has not been given a model is on the brand's own
+              // default, and the list has a row for exactly that.
+              current={sessionBrand === 'local' ? view.model : view.model ?? BRAND_DEFAULT_MODEL}
+              currentLabel={sessionBrand === 'local' && !view.model ? 'Choose model' : modelWords(view.model ?? BRAND_DEFAULT_MODEL, composer.models)}
+              asleep={asleep}
+              // The list announces ids as often as names — `claude-opus-5[1m]`
+              // is what one chat calls the model it is running — and the chip a
+              // few lines above this said something else about the same build.
+              // One function names it for both (bw-ja9l.11).
+              options={composer.models.map((m) => ({
+                value: m.value,
+                label: modelName(m.value, m.displayName) ?? m.displayName,
+                icon: <ModelIcon brand={sessionBrand} model={m.value} identity={m.family ?? m.publisher} className="h-3.5 w-3.5" />,
+                hint: m.description,
+                group: m.group,
+                unavailable: m.unavailable,
+              }))}
+              defaultValue={sessionBrand === 'local' ? null : modelDefaults[sessionBrand] ?? null}
+              onDefault={sessionBrand === 'local' ? undefined : (model) => makeProviderDefault('model', model)}
+              onPick={(model) => {
+                setSteerError(null);
+                void sendCommand({ type: 'session.model', sessionId: chatId, model }).catch((e: unknown) =>
+                  setSteerError(e instanceof Error ? e.message : String(e)),
+                );
+              }}
+            />
+            <Picker
+              icon={<Gauge className="h-3.5 w-3.5" />}
+              label="Reasoning effort"
+              testid="effort-picker"
+              current={view.effort ?? null}
+              asleep={asleep}
+              options={composer.efforts.map((effort) => ({
+                value: effort.value,
+                label: effort.displayName,
+                hint: effort.description,
+              }))}
+              defaultValue={effortDefaults[sessionBrand] ?? null}
+              onDefault={sessionBrand === 'local' ? undefined : (effort) => makeProviderDefault('effort', effort)}
+              cannotDefault={(effort) => sessionBrand === 'claude' && effort === 'max'
+                ? 'Claude supports Max for the current session only; it cannot be saved as the system default'
+                : null}
+              onPick={(effort) => {
+                setSteerError(null);
+                void sendCommand({ type: 'session.effort', sessionId: chatId, effort }).catch((e: unknown) =>
+                  setSteerError(e instanceof Error ? e.message : String(e)),
+                );
+              }}
+            />
+            <SessionConfigPickers
+              options={view.menu.configOptions}
+              sessionId={chatId}
+              asleep={asleep}
+              onError={setSteerError}
+            />
+            </div>
+            <Tooltip label="Chat settings">
+              <Button
+                variant="ghost"
+                mode="icon"
+                size="sm"
+                aria-label="Chat settings"
+                data-testid="mobile-composer-settings"
+                radius="full" className="text-muted-foreground composer-wide:hidden"
+                onClick={() => setComposerSettingsOpen(true)}
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+              </Button>
+            </Tooltip>
+            {view.menu.agentDefinitions.length > 0 && (
+              <Tooltip label={view.menu.agentDefinitions.map((agent) => `${agent.name}${agent.description ? ` — ${agent.description}` : ''}`).join('\n')}>
+                <Badge
+                  variant="secondary"
+                  appearance="light"
+                  size="sm"
+                  data-testid="agent-definitions"
+                  /* On this row, so it answers this row: at a 900px window the
+                     row is 258px and a chip saying how many agents the chat has
+                     is the first thing that has nowhere to go. */
+                  className="hidden composer-wide:inline-flex"
+                >
+                  {view.menu.agentDefinitions.length} agent{view.menu.agentDefinitions.length === 1 ? '' : 's'}
+                </Badge>
+              </Tooltip>
+            )}
+            <span className="ml-auto" />
+            {/* While it works there are three things a reader can want, and
+                all three are on the row rather than behind a shortcut nobody
+                was told about: stop what is running, hold what was just
+                written, or push it through now. Stop stands alone until there
+                is something written — there is nothing to send or hold until
+                then — and the rightmost button is always the one Enter
+                presses, so the primary action never moves (bw-r54j.4). */}
+            {busy ? (
+              <Button
+                variant="destructive"
+                mode="icon"
+                size="sm"
+                aria-label="Stop"
+                data-testid="stop-button"
+                radius="full"
+                onClick={() => {
+                  setSendError(null);
+                  // A Stop that did not stop anything has to say so. It used to
+                  // fail in silence: the rejection went nowhere, the chip went
+                  // on spinning, and the only chat this ever happens in is one
+                  // already broken enough that Stop is the last thing left to
+                  // try (bw-sxzv.4).
+                  void sendCommand({ type: 'session.stop', sessionId: chatId }).catch((e: unknown) => {
+                    setSendError(`The chat could not be stopped. ${e instanceof Error ? e.message : String(e)}`);
+                  });
+                }}
+              >
+                <Square className="h-4 w-4" />
+              </Button>
+            ) : null}
+            <SendButtons
+              sessionId={chatId}
+              blocked={cannotSend}
+              midTurn={midTurn}
+              onSend={submitSteady}
+              onHold={holdSteady}
+            />
+          </div>
+    </>
+  ), [asleep, busy, cannotSend, chatId, composer.collaborationModes, composer.efforts, composer.models, composer.permissionModes, effortDefaults, holdSteady, makeProviderDefault, midTurn, modelDefaults, permissionDefaults, selectedModel, sessionAccounts, sessionBrand, sessionProfile, sessionProfileLabel, submitSteady, switchAccount, view.collaborationMode, view.effort, view.menu.agentDefinitions, view.menu.configOptions, view.model, view.permissionMode]);
+
+  const mobileSettings = useMemo(() => (
+    <>
+        <Dialog open={composerSettingsOpen} onOpenChange={setComposerSettingsOpen}>
+          <DialogContent className="max-w-[calc(100vw-2rem)] md:hidden" data-testid="mobile-composer-settings-dialog">
+            <DialogHeader>
+              <DialogTitle>Chat settings</DialogTitle>
+            </DialogHeader>
+            <div className="flex flex-col gap-2 [&_[data-testid$='-picker']]:h-10 [&_[data-testid$='-picker']]:w-full [&_[data-testid$='-picker']]:justify-start [&_[data-testid$='-picker']]:rounded-md">
+              <Picker
+                icon={<ModeMark mode={view.permissionMode} className="h-4 w-4" />}
+                label="Permission mode"
+                testid="mobile-mode-picker"
+                current={view.permissionMode}
+                currentLabel={modeWords(view.permissionMode)?.label}
+                asleep={asleep}
+                options={composer.permissionModes.map((mode) => ({
+                  value: mode,
+                  label: PERMISSION_MODE[mode]?.label ?? inWords(mode),
+                }))}
+                defaultValue={sessionBrand === 'local' ? null : permissionDefaults[sessionBrand] ?? null}
+                onDefault={sessionBrand === 'local' ? undefined : (mode) => makeProviderDefault('permission', mode)}
+                onPick={(mode) => {
+                  setSteerError(null);
+                  void sendCommand({ type: 'session.mode', sessionId: chatId, mode }).catch((error: unknown) =>
+                    setSteerError(error instanceof Error ? error.message : String(error)),
+                  );
+                }}
+              />
+              {composer.collaborationModes.length > 0 && (
+                <Picker
+                  icon={<Workflow className="h-4 w-4" />}
+                  label="Collaboration mode"
+                  testid="mobile-collaboration-mode-picker"
+                  current={view.collaborationMode}
+                  currentLabel={composer.collaborationModes.find((mode) => mode.value === view.collaborationMode)?.displayName}
+                  asleep={asleep}
+                  options={composer.collaborationModes.map((mode) => ({
+                    value: mode.value,
+                    label: mode.displayName,
+                    hint: mode.description,
+                  }))}
+                  onPick={(mode) => {
+                    setSteerError(null);
+                    void sendCommand({ type: 'session.collaboration-mode', sessionId: chatId, mode }).catch((error: unknown) =>
+                      setSteerError(error instanceof Error ? error.message : String(error)),
+                    );
+                  }}
+                />
+              )}
+              {sessionAccounts.length > 1 && (
+                <Picker
+                  icon={<UserRound className="h-4 w-4" />}
+                  label="Account"
+                  testid="mobile-account-picker"
+                  current={sessionProfile}
+                  currentLabel={sessionProfileLabel}
+                  asleep={asleep}
+                  options={sessionAccounts.map((profile) => ({
+                    value: profile.id,
+                    label: profile.name,
+                    hint: profile.system ? 'The account configured on this computer' : undefined,
+                    unavailable: busy && profile.id !== sessionProfile
+                      ? 'Wait for the current response to finish'
+                      : undefined,
+                  }))}
+                  onPick={switchAccount}
+                />
+              )}
+              <Picker
+                icon={<ModelIcon brand={sessionBrand} model={view.model} identity={selectedModel?.family ?? selectedModel?.publisher} className="h-4 w-4" />}
+                label="Model"
+                testid="mobile-model-picker"
+                current={sessionBrand === 'local' ? view.model : view.model ?? BRAND_DEFAULT_MODEL}
+                currentLabel={sessionBrand === 'local' && !view.model ? 'Choose model' : modelWords(view.model ?? BRAND_DEFAULT_MODEL, composer.models)}
+                asleep={asleep}
+                options={composer.models.map((model) => ({
+                  value: model.value,
+                  label: modelName(model.value, model.displayName) ?? model.displayName,
+                  icon: <ModelIcon brand={sessionBrand} model={model.value} identity={model.family ?? model.publisher} className="h-3.5 w-3.5" />,
+                  hint: model.description,
+                  group: model.group,
+                  unavailable: model.unavailable,
+                }))}
+                defaultValue={sessionBrand === 'local' ? null : modelDefaults[sessionBrand] ?? null}
+                onDefault={sessionBrand === 'local' ? undefined : (model) => makeProviderDefault('model', model)}
+                onPick={(model) => {
+                  setSteerError(null);
+                  void sendCommand({ type: 'session.model', sessionId: chatId, model }).catch((error: unknown) =>
+                    setSteerError(error instanceof Error ? error.message : String(error)),
+                  );
+                }}
+              />
+              <Picker
+                icon={<Gauge className="h-4 w-4" />}
+                label="Reasoning effort"
+                testid="mobile-effort-picker"
+                current={view.effort ?? null}
+                asleep={asleep}
+                options={composer.efforts.map((effort) => ({
+                  value: effort.value,
+                  label: effort.displayName,
+                  hint: effort.description,
+                }))}
+                defaultValue={effortDefaults[sessionBrand] ?? null}
+                onDefault={sessionBrand === 'local' ? undefined : (effort) => makeProviderDefault('effort', effort)}
+                cannotDefault={(effort) => sessionBrand === 'claude' && effort === 'max'
+                  ? 'Claude supports Max for the current session only; it cannot be saved as the system default'
+                  : null}
+                onPick={(effort) => {
+                  setSteerError(null);
+                  void sendCommand({ type: 'session.effort', sessionId: chatId, effort }).catch((error: unknown) =>
+                    setSteerError(error instanceof Error ? error.message : String(error)),
+                  );
+                }}
+              />
+              <SessionConfigPickers
+                options={view.menu.configOptions}
+                sessionId={chatId}
+                asleep={asleep}
+                mobile
+                onError={setSteerError}
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
+    </>
+  ), [asleep, busy, composer.collaborationModes, composer.efforts, composer.models, composer.permissionModes, composerSettingsOpen, effortDefaults, makeProviderDefault, modelDefaults, permissionDefaults, selectedModel, sessionAccounts, sessionBrand, chatId, sessionProfile, sessionProfileLabel, switchAccount, view.collaborationMode, view.effort, view.menu.configOptions, view.model, view.permissionMode]);
+
+  if (!projectId || !projectPath) {
+    return <div className="p-8 text-muted-foreground">Select a project</div>;
+  }
+
+  /**
+   * On a phone the conversation gets the whole screen and the list of chats
+   * becomes a drawer over it: a 288px rail beside a 390px screen leaves the
+   * transcript unreadable, and the composer is what must stay in reach.
+   */
+  const shell = (inner: React.ReactNode) => (
+    // The height is the shell's to give: this box fills what the bars left.
+    <div ref={shellRef} className="relative flex min-h-0 flex-1">
+      {/* First thing on the row, ahead of Chat/Board/Reports: the way into the
+          chat list is not one tool among this tab's own, it opens a whole other
+          pane, the same reason the right rail's own way in sits on the bar and
+          not inside either pane (bw-81wt.5). */}
+      {barLead}
+
+      {barTools}
+
+      {/* The far right of the bar, mirroring the chat list's button on the far
+          left: the two panels of this screen, each reached from its own edge.
+          Both toggles are pictures a reader learns once; a bar of words for six
+          controls is the bar that put "New Chat" off the edge of a 390px
+          screen (bw-81wt.5, .8). */}
+      {barTrail}
+
+      {panels}
+
+      {/* The library's sheet held inside the work area on a phone, with its own
+          dimming beside it; on a wide screen (`docked`) a column of the row.
+          Kept drawn while shut, so it slides rather than snaps. */}
+      {chatList}
+      <div className="flex min-w-0 flex-1 flex-col">{inner}</div>
+      {/* The chat's own column. Only when there IS a chat: an empty rail beside
+          an empty screen says nothing and takes width to say it. */}
+      {rail}
+    </div>
+  );
+
+  // A chat that has been asked for but does not yet exist. The click moves the
+  // reader here at once and this stands where the transcript will stand, so the
+  // second the server spends making the chat is spent on the chat's own screen
+  // instead of on the screen he just clicked away from (bw-l9cu.1). It comes
+  // before the empty screen on purpose: the empty screen holds the very buttons
+  // he has just used, and leaving them under him read as a click that did
+  // nothing.
+  if (starting) {
+    return shell(
+      <div
+        data-testid="chat-starting"
+        role="status"
+        aria-live="polite"
+        className="flex flex-1 flex-col items-center justify-center gap-3"
+      >
+        <Spinner className="size-6 text-muted-foreground motion-reduce:animate-none" />
+        <p className="text-sm text-muted-foreground">Starting {brandName(starting.brand)} chat…</p>
+      </div>,
+    );
+  }
+
+  if (!sessionId) {
+    return shell(
+      <div className="flex flex-1 flex-col items-center justify-center gap-4">
+        <p className="text-muted-foreground">No chat selected</p>
+        {/* One button, and the dialog behind it. This screen used to ask the
+            dialog's questions over again — which agent, and where to work —
+            so every question the dialog grew had to be answered twice
+            (bw-5ihw.9). */}
+        <Button
+          variant="primary"
+          onClick={() => newChat()}
+          disabled={starting || !availableBrand}
+          data-testid="new-chat"
+        >
+          <Plus data-testid="new-chat-empty-plus" aria-hidden="true" />
+          New Chat
+        </Button>
+        {/* The one thing the dialog cannot say from behind a button that
+            will not open it. */}
+        {!availableBrand && (
+          <ul data-testid="provider-unavailable-reasons" className="flex max-w-md flex-col gap-0.5 text-center text-[11px] text-muted-foreground">
+            {providers
+              .filter((provider) => !provider.available)
+              .map((provider) => (
+                <li key={provider.brand} data-testid={`provider-why-${provider.brand}`}>
+                  <span className="font-medium text-foreground/80">{brandName(provider.brand)}</span>: {whyUnavailable(provider)}
+                </li>
+              ))}
+          </ul>
+        )}
+        {startError && <Panel asChild tone="danger" className="max-w-lg text-center text-sm text-danger"><p>{startError}</p></Panel>}
+      </div>,
+    );
+  }
+
+  return shell(
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="chat-tab" data-session-id={sessionId}>
+      {/* The whole conversation takes a dropped file, not just the one line at
+          the bottom that CodeMirror answers for. A file dropped on the
+          transcript used to leave the app entirely — the browser opened it —
+          which is the worst answer available to a gesture aimed at the biggest
+          target on the screen (bw-p4r3.1). The box keeps its own aim: a drop it
+          took is already prevented by the time it reaches here.
+
+          Wrapped rather than indented: this is one element around six hundred
+          lines that have not otherwise moved, and a diff of the whole pane
+          would hide the one line that changed. */}
+      <FileDropTarget
+        className="flex min-h-0 flex-1 flex-col"
+        onFiles={(files) => void absorb(files)}
+        // Nothing to attach to while another program holds the chat: there is
+        // no box on the screen to put a badge in.
+        disabled={ownership.kind === 'elsewhere'}
+      >
+      {/* Nothing on this line grows with the work: the cards, the reports and
+          what the chat has spent are all in the column beside it
+          (docs/agent-workbench.md §8.2.6). It is drawn as one line wherever
+          there is room for one; short of that it wraps rather than clipping,
+          because a pill that is merely cut off is a pill nobody can read and
+          `overflow-hidden` used to make the wire's own model name push the
+          plan chip and its number straight off a 390px screen with no way
+          back to them (bw-81wt.5). */}
+      {statusLine}
 
       <SplitPaths.Provider value={splitPaths}>
       {/* What this chat's own worktree has changed, standing where the
@@ -2753,14 +3183,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             answer it is waiting on. Drawn even while another program holds the
             chat: those messages are still the reader's, and dropping one is
             something they can still do. */}
-        <HeldMessages
-          held={view.held}
-          working={midTurn}
-          busyId={heldWorking}
-          onPush={(message) => void pushHeld(message)}
-          onEdit={(message) => void editHeld(message)}
-          onDrop={(message) => void dropHeld(message)}
-        />
+        {heldList}
         {ownership.kind === 'elsewhere' ? (
           <p data-testid="held-elsewhere" className="mx-auto w-full max-w-[110ch] px-4 py-3 text-xs text-info">
             {heldLine(state)}
@@ -2807,341 +3230,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               `md:` at every width where the rails are sheets and this row is
               the window, which is everywhere bw-e3dw.11 measured; it differs
               only where the rails are columns. */}
-          <div className="mt-1.5 flex items-center gap-1 [container-name:composer] [container-type:inline-size]">
-            {/* A plain button, not the toolbar's: that one speaks through a
-                tooltip and only works inside the bar that hosts one. */}
-            <Tooltip label="Attach a picture or a file">
-              <Button
-                variant="ghost"
-                mode="icon"
-                size="sm"
-                aria-label="Attach a picture or a file"
-                data-testid="attach-picture"
-                radius="full" className="text-muted-foreground"
-                onClick={() => picker.current?.click()}
-              >
-                <Paperclip className="h-4 w-4" />
-              </Button>
-            </Tooltip>
-            {/* Both act on THIS chat, and are kept in his own settings so the
-                next one opens on them too (§8.2.3). */}
-            <div className="hidden items-center gap-1 composer-wide:flex" data-testid="desktop-composer-settings">
-            <Picker
-              icon={<ModeMark mode={view.permissionMode} className="h-3.5 w-3.5" />}
-              label="Permission mode"
-              testid="mode-picker"
-              current={view.permissionMode}
-              currentLabel={modeWords(view.permissionMode)?.label}
-              asleep={asleep}
-              // The setting's own spelling is not a label: `bypassPermissions`
-              // is what he has to read to know whether this chat still asks
-              // (src/workbench/machine-words.ts, bw-iiv6).
-              options={composer.permissionModes.map((m) => ({
-                value: m,
-                label: PERMISSION_MODE[m]?.label ?? inWords(m),
-              }))}
-              defaultValue={sessionBrand === 'local' ? null : permissionDefaults[sessionBrand] ?? null}
-              onDefault={sessionBrand === 'local' ? undefined : (mode) => makeProviderDefault('permission', mode)}
-              onPick={(mode) => {
-                setSteerError(null);
-                void sendCommand({ type: 'session.mode', sessionId, mode }).catch((e: unknown) =>
-                  setSteerError(e instanceof Error ? e.message : String(e)),
-                );
-              }}
-            />
-            {composer.collaborationModes.length > 0 && (
-              <Picker
-                icon={<Workflow className="h-3.5 w-3.5" />}
-                label="Collaboration mode"
-                testid="collaboration-mode-picker"
-                current={view.collaborationMode}
-                currentLabel={composer.collaborationModes.find((mode) => mode.value === view.collaborationMode)?.displayName}
-                asleep={asleep}
-                options={composer.collaborationModes.map((mode) => ({
-                  value: mode.value,
-                  label: mode.displayName,
-                  hint: mode.description,
-                }))}
-                onPick={(mode) => {
-                  setSteerError(null);
-                  void sendCommand({ type: 'session.collaboration-mode', sessionId, mode }).catch((e: unknown) =>
-                    setSteerError(e instanceof Error ? e.message : String(e)),
-                  );
-                }}
-              />
-            )}
-            {sessionAccounts.length > 1 && (
-              <Picker
-                icon={<UserRound className="h-3.5 w-3.5" />}
-                label="Account"
-                testid="account-picker"
-                current={sessionProfile}
-                currentLabel={sessionProfileLabel}
-                asleep={asleep}
-                options={sessionAccounts.map((profile) => ({
-                  value: profile.id,
-                  label: profile.name,
-                  hint: profile.system ? 'The account configured on this computer' : undefined,
-                  unavailable: busy && profile.id !== sessionProfile
-                    ? 'Wait for the current response to finish'
-                    : undefined,
-                }))}
-                onPick={switchAccount}
-              />
-            )}
-            <Picker
-              icon={<ModelIcon brand={sessionBrand} model={view.model} identity={selectedModel?.family ?? selectedModel?.publisher} className="h-3.5 w-3.5" />}
-              label="Model"
-              testid="model-picker"
-              // A session that has not been given a model is on the brand's own
-              // default, and the list has a row for exactly that.
-              current={sessionBrand === 'local' ? view.model : view.model ?? BRAND_DEFAULT_MODEL}
-              currentLabel={sessionBrand === 'local' && !view.model ? 'Choose model' : modelWords(view.model ?? BRAND_DEFAULT_MODEL, composer.models)}
-              asleep={asleep}
-              // The list announces ids as often as names — `claude-opus-5[1m]`
-              // is what one chat calls the model it is running — and the chip a
-              // few lines above this said something else about the same build.
-              // One function names it for both (bw-ja9l.11).
-              options={composer.models.map((m) => ({
-                value: m.value,
-                label: modelName(m.value, m.displayName) ?? m.displayName,
-                icon: <ModelIcon brand={sessionBrand} model={m.value} identity={m.family ?? m.publisher} className="h-3.5 w-3.5" />,
-                hint: m.description,
-                group: m.group,
-                unavailable: m.unavailable,
-              }))}
-              defaultValue={sessionBrand === 'local' ? null : modelDefaults[sessionBrand] ?? null}
-              onDefault={sessionBrand === 'local' ? undefined : (model) => makeProviderDefault('model', model)}
-              onPick={(model) => {
-                setSteerError(null);
-                void sendCommand({ type: 'session.model', sessionId, model }).catch((e: unknown) =>
-                  setSteerError(e instanceof Error ? e.message : String(e)),
-                );
-              }}
-            />
-            <Picker
-              icon={<Gauge className="h-3.5 w-3.5" />}
-              label="Reasoning effort"
-              testid="effort-picker"
-              current={view.effort ?? null}
-              asleep={asleep}
-              options={composer.efforts.map((effort) => ({
-                value: effort.value,
-                label: effort.displayName,
-                hint: effort.description,
-              }))}
-              defaultValue={effortDefaults[sessionBrand] ?? null}
-              onDefault={sessionBrand === 'local' ? undefined : (effort) => makeProviderDefault('effort', effort)}
-              cannotDefault={(effort) => sessionBrand === 'claude' && effort === 'max'
-                ? 'Claude supports Max for the current session only; it cannot be saved as the system default'
-                : null}
-              onPick={(effort) => {
-                setSteerError(null);
-                void sendCommand({ type: 'session.effort', sessionId, effort }).catch((e: unknown) =>
-                  setSteerError(e instanceof Error ? e.message : String(e)),
-                );
-              }}
-            />
-            <SessionConfigPickers
-              options={view.menu.configOptions}
-              sessionId={sessionId}
-              asleep={asleep}
-              onError={setSteerError}
-            />
-            </div>
-            <Tooltip label="Chat settings">
-              <Button
-                variant="ghost"
-                mode="icon"
-                size="sm"
-                aria-label="Chat settings"
-                data-testid="mobile-composer-settings"
-                radius="full" className="text-muted-foreground composer-wide:hidden"
-                onClick={() => setComposerSettingsOpen(true)}
-              >
-                <SlidersHorizontal className="h-4 w-4" />
-              </Button>
-            </Tooltip>
-            {view.menu.agentDefinitions.length > 0 && (
-              <Tooltip label={view.menu.agentDefinitions.map((agent) => `${agent.name}${agent.description ? ` — ${agent.description}` : ''}`).join('\n')}>
-                <Badge
-                  variant="secondary"
-                  appearance="light"
-                  size="sm"
-                  data-testid="agent-definitions"
-                  /* On this row, so it answers this row: at a 900px window the
-                     row is 258px and a chip saying how many agents the chat has
-                     is the first thing that has nowhere to go. */
-                  className="hidden composer-wide:inline-flex"
-                >
-                  {view.menu.agentDefinitions.length} agent{view.menu.agentDefinitions.length === 1 ? '' : 's'}
-                </Badge>
-              </Tooltip>
-            )}
-            <span className="ml-auto" />
-            {/* While it works there are three things a reader can want, and
-                all three are on the row rather than behind a shortcut nobody
-                was told about: stop what is running, hold what was just
-                written, or push it through now. Stop stands alone until there
-                is something written — there is nothing to send or hold until
-                then — and the rightmost button is always the one Enter
-                presses, so the primary action never moves (bw-r54j.4). */}
-            {busy ? (
-              <Button
-                variant="destructive"
-                mode="icon"
-                size="sm"
-                aria-label="Stop"
-                data-testid="stop-button"
-                radius="full"
-                onClick={() => {
-                  setSendError(null);
-                  // A Stop that did not stop anything has to say so. It used to
-                  // fail in silence: the rejection went nowhere, the chip went
-                  // on spinning, and the only chat this ever happens in is one
-                  // already broken enough that Stop is the last thing left to
-                  // try (bw-sxzv.4).
-                  void sendCommand({ type: 'session.stop', sessionId }).catch((e: unknown) => {
-                    setSendError(`The chat could not be stopped. ${e instanceof Error ? e.message : String(e)}`);
-                  });
-                }}
-              >
-                <Square className="h-4 w-4" />
-              </Button>
-            ) : null}
-            <SendButtons
-              sessionId={chatId}
-              blocked={cannotSend}
-              midTurn={midTurn}
-              onSend={submitSteady}
-              onHold={holdSteady}
-            />
-          </div>
+          {settingsRow}
         </Panel>
         )}
-        <Dialog open={composerSettingsOpen} onOpenChange={setComposerSettingsOpen}>
-          <DialogContent className="max-w-[calc(100vw-2rem)] md:hidden" data-testid="mobile-composer-settings-dialog">
-            <DialogHeader>
-              <DialogTitle>Chat settings</DialogTitle>
-            </DialogHeader>
-            <div className="flex flex-col gap-2 [&_[data-testid$='-picker']]:h-10 [&_[data-testid$='-picker']]:w-full [&_[data-testid$='-picker']]:justify-start [&_[data-testid$='-picker']]:rounded-md">
-              <Picker
-                icon={<ModeMark mode={view.permissionMode} className="h-4 w-4" />}
-                label="Permission mode"
-                testid="mobile-mode-picker"
-                current={view.permissionMode}
-                currentLabel={modeWords(view.permissionMode)?.label}
-                asleep={asleep}
-                options={composer.permissionModes.map((mode) => ({
-                  value: mode,
-                  label: PERMISSION_MODE[mode]?.label ?? inWords(mode),
-                }))}
-                defaultValue={sessionBrand === 'local' ? null : permissionDefaults[sessionBrand] ?? null}
-                onDefault={sessionBrand === 'local' ? undefined : (mode) => makeProviderDefault('permission', mode)}
-                onPick={(mode) => {
-                  setSteerError(null);
-                  void sendCommand({ type: 'session.mode', sessionId, mode }).catch((error: unknown) =>
-                    setSteerError(error instanceof Error ? error.message : String(error)),
-                  );
-                }}
-              />
-              {composer.collaborationModes.length > 0 && (
-                <Picker
-                  icon={<Workflow className="h-4 w-4" />}
-                  label="Collaboration mode"
-                  testid="mobile-collaboration-mode-picker"
-                  current={view.collaborationMode}
-                  currentLabel={composer.collaborationModes.find((mode) => mode.value === view.collaborationMode)?.displayName}
-                  asleep={asleep}
-                  options={composer.collaborationModes.map((mode) => ({
-                    value: mode.value,
-                    label: mode.displayName,
-                    hint: mode.description,
-                  }))}
-                  onPick={(mode) => {
-                    setSteerError(null);
-                    void sendCommand({ type: 'session.collaboration-mode', sessionId, mode }).catch((error: unknown) =>
-                      setSteerError(error instanceof Error ? error.message : String(error)),
-                    );
-                  }}
-                />
-              )}
-              {sessionAccounts.length > 1 && (
-                <Picker
-                  icon={<UserRound className="h-4 w-4" />}
-                  label="Account"
-                  testid="mobile-account-picker"
-                  current={sessionProfile}
-                  currentLabel={sessionProfileLabel}
-                  asleep={asleep}
-                  options={sessionAccounts.map((profile) => ({
-                    value: profile.id,
-                    label: profile.name,
-                    hint: profile.system ? 'The account configured on this computer' : undefined,
-                    unavailable: busy && profile.id !== sessionProfile
-                      ? 'Wait for the current response to finish'
-                      : undefined,
-                  }))}
-                  onPick={switchAccount}
-                />
-              )}
-              <Picker
-                icon={<ModelIcon brand={sessionBrand} model={view.model} identity={selectedModel?.family ?? selectedModel?.publisher} className="h-4 w-4" />}
-                label="Model"
-                testid="mobile-model-picker"
-                current={sessionBrand === 'local' ? view.model : view.model ?? BRAND_DEFAULT_MODEL}
-                currentLabel={sessionBrand === 'local' && !view.model ? 'Choose model' : modelWords(view.model ?? BRAND_DEFAULT_MODEL, composer.models)}
-                asleep={asleep}
-                options={composer.models.map((model) => ({
-                  value: model.value,
-                  label: modelName(model.value, model.displayName) ?? model.displayName,
-                  icon: <ModelIcon brand={sessionBrand} model={model.value} identity={model.family ?? model.publisher} className="h-3.5 w-3.5" />,
-                  hint: model.description,
-                  group: model.group,
-                  unavailable: model.unavailable,
-                }))}
-                defaultValue={sessionBrand === 'local' ? null : modelDefaults[sessionBrand] ?? null}
-                onDefault={sessionBrand === 'local' ? undefined : (model) => makeProviderDefault('model', model)}
-                onPick={(model) => {
-                  setSteerError(null);
-                  void sendCommand({ type: 'session.model', sessionId, model }).catch((error: unknown) =>
-                    setSteerError(error instanceof Error ? error.message : String(error)),
-                  );
-                }}
-              />
-              <Picker
-                icon={<Gauge className="h-4 w-4" />}
-                label="Reasoning effort"
-                testid="mobile-effort-picker"
-                current={view.effort ?? null}
-                asleep={asleep}
-                options={composer.efforts.map((effort) => ({
-                  value: effort.value,
-                  label: effort.displayName,
-                  hint: effort.description,
-                }))}
-                defaultValue={effortDefaults[sessionBrand] ?? null}
-                onDefault={sessionBrand === 'local' ? undefined : (effort) => makeProviderDefault('effort', effort)}
-                cannotDefault={(effort) => sessionBrand === 'claude' && effort === 'max'
-                  ? 'Claude supports Max for the current session only; it cannot be saved as the system default'
-                  : null}
-                onPick={(effort) => {
-                  setSteerError(null);
-                  void sendCommand({ type: 'session.effort', sessionId, effort }).catch((error: unknown) =>
-                    setSteerError(error instanceof Error ? error.message : String(error)),
-                  );
-                }}
-              />
-              <SessionConfigPickers
-                options={view.menu.configOptions}
-                sessionId={sessionId}
-                asleep={asleep}
-                mobile
-                onError={setSteerError}
-              />
-            </div>
-          </DialogContent>
-        </Dialog>
+        {mobileSettings}
       </div>
 
       </FileDropTarget>

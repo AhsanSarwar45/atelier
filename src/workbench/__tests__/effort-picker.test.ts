@@ -16,7 +16,7 @@ describe('the composer effort picker', () => {
   });
 
   it('pins the chosen effort to the chat whose composer owns the picker', () => {
-    expect(block).toContain("type: 'session.effort', sessionId, effort");
+    expect(block).toContain("type: 'session.effort', sessionId: chatId, effort");
     expect(block).toContain('current={view.effort ?? null}');
   });
 });

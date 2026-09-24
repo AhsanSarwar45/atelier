@@ -14,7 +14,7 @@
  * something off before he turns it off, and what tells him a group is empty
  * here without opening it.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { ChevronRight, ListFilter } from 'lucide-react';
 
@@ -166,18 +166,23 @@ function Line({
 /** The toolbar button, and the panel it opens. */
 export function KindFilter({ items, off, onChange }: TreeProps) {
   const filtered = off.size > 0;
+  // The rows it counts change with every one added; the button does not, and
+  // its tooltip is most of what a redraw of it costs (bw-j29w).
+  const button = useMemo(() => (
+    <PopoverTrigger asChild>
+      <ToolButton
+        icon={<ListFilter />}
+        label={filtered ? 'Some kinds of message are hidden' : 'Which kinds of message show'}
+        emphasis="quiet"
+        className={cn('h-10 w-10 sm:h-8 sm:w-8', filtered && 'text-primary')}
+        data-testid="open-kind-filter"
+        data-filtered={filtered}
+      />
+    </PopoverTrigger>
+  ), [filtered]);
   return (
     <Popover>
-      <PopoverTrigger asChild>
-        <ToolButton
-          icon={<ListFilter />}
-          label={filtered ? 'Some kinds of message are hidden' : 'Which kinds of message show'}
-          emphasis="quiet"
-          className={cn('h-10 w-10 sm:h-8 sm:w-8', filtered && 'text-primary')}
-          data-testid="open-kind-filter"
-          data-filtered={filtered}
-        />
-      </PopoverTrigger>
+      {button}
       <PopoverContent align="start" className="w-72 p-2" data-testid="kind-filter-panel">
         <KindTree items={items} off={off} onChange={onChange} />
         <Row
