@@ -140,12 +140,24 @@ describe('the strip on screen', () => {
   });
 
   it('previews on a click and pins on a double click', () => {
-    const handlers = drawn(pinning(NOTHING_OPEN, A));
-    const tab = screen.getByTestId('open-file');
-    fireEvent.click(tab);
+    const handlers = drawn(previewing(pinning(NOTHING_OPEN, A), B));
+    const tab = screen.getAllByTestId('open-file')[0]!;
+    // A tab is taken on the press, as every tab strip does.
+    fireEvent.mouseDown(tab);
     expect(handlers.onPreview).toHaveBeenCalledWith(A);
     fireEvent.doubleClick(tab);
     expect(handlers.onPin).toHaveBeenCalledWith(A);
+  });
+
+  it('is a row of tabs: the one being read is the selected one, and Enter takes another', () => {
+    const handlers = drawn(previewing(pinning(NOTHING_OPEN, A), B));
+    const [a, b] = screen.getAllByRole('tab');
+    expect(screen.getByRole('tablist', { name: 'Open files' })).toBeTruthy();
+    expect(b).toHaveAttribute('aria-selected', 'true');
+    expect(b).toHaveAttribute('data-state', 'active');
+    expect(a).toHaveAttribute('aria-selected', 'false');
+    fireEvent.keyDown(a!, { key: 'Enter' });
+    expect(handlers.onPreview).toHaveBeenCalledWith(A);
   });
 
   it('closes on the × and on a middle click, without also switching to the tab', () => {

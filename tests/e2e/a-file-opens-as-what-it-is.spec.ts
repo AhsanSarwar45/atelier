@@ -250,7 +250,8 @@ test('a picture, a video, an SVG and a Markdown file each open as what they are'
     // on nothing.
     const closing = page.locator(`[data-testid=open-file][data-path="${md}"]`);
     await closing.hover();
-    await closing.getByTestId('open-file-close').click();
+    // The × sits beside its tab, not inside it: both are in the tab's box.
+    await page.locator('[data-slot="tab"]').filter({ has: closing }).getByTestId('open-file-close').click();
     await expect(tabs).toHaveCount(3);
     await expect(page.getByTestId('files-viewer')).toHaveAttribute('data-file', png);
     await page.screenshot({ path: `${SHOTS}/bw-g3o314-strip.png`, animations: 'disabled' });
