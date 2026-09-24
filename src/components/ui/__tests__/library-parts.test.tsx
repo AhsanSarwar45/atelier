@@ -25,6 +25,7 @@ import { Progress } from '@/components/ui/progress';
 import { Spinner } from '@/components/ui/spinner';
 import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Tooltip } from '@/components/ui/tooltip';
 
 describe('Spinner and a busy Button', () => {
   it('hides a spinner with no label and names one with a label', () => {
@@ -151,6 +152,32 @@ describe('ToggleGroup', () => {
     fireEvent.click(source);
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(source).toHaveAttribute('data-state', 'on');
+  });
+
+  it('lets an optional group take its choice back', () => {
+    const onChange = vi.fn();
+    render(
+      <ToggleGroup type="single" optional value="week" onValueChange={onChange}>
+        <ToggleGroupItem value="week">Week</ToggleGroupItem>
+      </ToggleGroup>,
+    );
+    fireEvent.click(screen.getByRole('radio', { name: 'Week' }));
+    expect(onChange).toHaveBeenCalledWith('');
+  });
+
+  it('paints outlined choices with the taken one filled, and keeps it lit under a tooltip', () => {
+    render(
+      <ToggleGroup type="single" variant="outline" size="md" value="new">
+        <Tooltip label="Create a new worktree">
+          <ToggleGroupItem value="new">New</ToggleGroupItem>
+        </Tooltip>
+        <ToggleGroupItem value="existing">Existing</ToggleGroupItem>
+      </ToggleGroup>,
+    );
+    const taken = screen.getByRole('radio', { name: 'New' });
+    expect(taken).toHaveAttribute('data-state', 'on');
+    expect(taken).toHaveClass('border', 'h-9', 'data-[state=on]:bg-primary');
+    expect(screen.getByRole('radio', { name: 'Existing' })).toHaveAttribute('data-state', 'off');
   });
 });
 
