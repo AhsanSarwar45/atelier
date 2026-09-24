@@ -57,7 +57,9 @@ test('a new chat is offered the project, a worktree of it, or one made here', as
     // The project's own checkout is offered by that name; the folder is the
     // tooltip.
     await expect(dialog.getByTestId('where-project')).toHaveText('Project root');
-    await expect(dialog.getByTestId('where-project')).toHaveAttribute('title', FIXTURE);
+    // The folder is the tooltip, not the label.
+    await dialog.getByTestId('where-project').hover();
+    await expect(page.getByRole('tooltip')).toHaveText(FIXTURE);
 
     // The worktree standing beside it was read from git and is offered by
     // name, with the branch it is on.
