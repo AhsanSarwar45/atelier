@@ -641,7 +641,30 @@ fn claude_request(login: &ClaudeLogin, builder: reqwest::RequestBuilder) -> reqw
         .bearer_auth(&login.token)
         .header("anthropic-beta", "oauth-2025-04-20")
         .header("Content-Type", "application/json")
-        .header("User-Agent", "claude-cli (external, beads-web)")
+        .header("User-Agent", claude_user_agent())
+}
+
+/// Claude Code's own User-Agent, with the installed version.
+///
+/// The account API offers resets only to a request that names itself as the
+/// CLI (`claude-cli/<version> (external, cli)`); any other agent reads as
+/// ineligible (measured 2026-09-24 against 2.1.280).
+fn claude_user_agent() -> &'static str {
+    static AGENT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    AGENT.get_or_init(|| {
+        let version = crate::routes::find_tool("claude", &[])
+            .and_then(|claude| std::process::Command::new(claude).arg("--version").output().ok())
+            .and_then(|out| {
+                String::from_utf8(out.stdout)
+                    .ok()?
+                    .split_whitespace()
+                    .next()
+                    .filter(|v| v.chars().next().is_some_and(|c| c.is_ascii_digit()))
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| "2.1.280".into());
+        format!("claude-cli/{version} (external, cli)")
+    })
 }
 
 /// Read the resets a Claude account holds.
