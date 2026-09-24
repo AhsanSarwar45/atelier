@@ -636,6 +636,10 @@ mod tests {
             "isolatedContext",
             "connectOverCDP",
             "Do not point it at `atelier tool chrome`",
+            "reuse it for every\n  page that user opens",
+            "`background: true`",
+            "Close each page with `close_page`",
+            "run `atelier tool chrome down` when the browser work is\n  finished",
         ] {
             assert!(text.contains(want), "guidance lacks {want:?}");
         }

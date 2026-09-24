@@ -159,7 +159,15 @@ Chrome starts headed on the first browser tool call, and stops when the last
 chat using it ends.
 
 - Give each simulated user their own `isolatedContext` name in `new_page`,
-  so their logins never overwrite each other.
+  so their logins never overwrite each other. Each name opens its own window.
+  Pick one short name per user (`admin`, `learner-1`) and reuse it for every
+  page that user opens; never make a second name for the same user.
+- Open pages with `background: true`, so windows do not jump in front of the
+  person's work.
+- Clean up as you go. Close each page with `close_page` as soon as you are done
+  with it, and run `atelier tool chrome down` when the browser work is
+  finished. Chrome otherwise stays open until the chat ends, and its windows
+  stay on the person's screen.
 - For a script or an end-to-end run, use the same Chrome over CDP:
   `eval "$(atelier tool chrome env)"`, then Playwright
   `chromium.connectOverCDP(process.env.CDP_URL)` with one `browser.newContext()`
