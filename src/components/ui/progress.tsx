@@ -15,6 +15,15 @@ import { cn } from "@/lib/utils"
  */
 const progressIndicatorVariants = cva("h-full w-full flex-1 transition-all", {
   variants: {
+    /**
+     * `steady` is for a bar fed a new reading every second or so: it glides
+     * from one reading to the next over that second rather than jumping, so
+     * a slow job reads as moving instead of as a row of steps.
+     */
+    pace: {
+      quick: "",
+      steady: "duration-1000 ease-linear",
+    },
     tone: {
       default: "bg-primary",
       success: "bg-success",
@@ -23,15 +32,34 @@ const progressIndicatorVariants = cva("h-full w-full flex-1 transition-all", {
     },
   },
   defaultVariants: {
+    pace: "quick",
     tone: "default",
+  },
+})
+
+/**
+ * How thick the bar is. `md` is a bar that stands on its own; the thinner ones
+ * sit under a line of words that already say what they measure.
+ */
+const progressVariants = cva("relative w-full overflow-hidden rounded-full bg-primary/20", {
+  variants: {
+    size: {
+      xs: "h-1",
+      sm: "h-1.5",
+      md: "h-2",
+    },
+  },
+  defaultVariants: {
+    size: "md",
   },
 })
 
 const Progress = React.forwardRef<
   React.ElementRef<typeof ProgressPrimitive.Root>,
   React.ComponentPropsWithoutRef<typeof ProgressPrimitive.Root> &
-    VariantProps<typeof progressIndicatorVariants>
->(({ className, value, tone, ...props }, ref) => (
+    VariantProps<typeof progressIndicatorVariants> &
+    VariantProps<typeof progressVariants>
+>(({ className, value, tone, pace, size, ...props }, ref) => (
   <ProgressPrimitive.Root
     ref={ref}
     // Handed to the primitive as well as drawn, so the bar says how full it is
@@ -41,19 +69,16 @@ const Progress = React.forwardRef<
     // `null` is how the primitive spells "no idea yet", which is the honest
     // answer for a download whose size nothing declared.
     value={value ?? null}
-    className={cn(
-      "relative h-2 w-full overflow-hidden rounded-full bg-primary/20",
-      className
-    )}
+    className={cn(progressVariants({ size }), className)}
     {...props}
   >
     <ProgressPrimitive.Indicator
       data-tone={tone ?? "default"}
-      className={progressIndicatorVariants({ tone })}
+      className={progressIndicatorVariants({ tone, pace })}
       style={{ transform: `translateX(-${100 - (value || 0)}%)` }}
     />
   </ProgressPrimitive.Root>
 ))
 Progress.displayName = ProgressPrimitive.Root.displayName
 
-export { Progress, progressIndicatorVariants }
+export { Progress, progressIndicatorVariants, progressVariants }

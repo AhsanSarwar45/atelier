@@ -37,7 +37,7 @@ export interface BadgeButtonProps
   asChild?: boolean;
 }
 
-export type BadgeDotProps = React.HTMLAttributes<HTMLSpanElement>;
+export type BadgeDotProps = React.ComponentPropsWithoutRef<typeof BadgeDot>;
 
 const badgeVariants = cva(
     // Clicked, a chip brightens its OWN border and nothing else. It used to throw
@@ -150,6 +150,13 @@ const badgeVariants = cva(
       shape: {
         default: '',
         circle: 'rounded-full',
+      },
+      // A chip whose words are an address — a file's path — which can be most
+      // of a line by itself. It is let break anywhere and grow as tall as the
+      // lines it needs, rather than running out of the message it sits in.
+      // Listed after `size` so it wins that size's fixed height.
+      wrap: {
+        true: 'h-auto max-w-full whitespace-normal break-all py-px',
       },
     },
     compoundVariants: [
@@ -320,13 +327,19 @@ type BadgeOwnProps = React.ComponentProps<'span'> &
   };
 
 /*
- * The look of a chip drawn in a hex colour. The two-digit suffixes are alpha:
- * `20` is an eighth of the colour, `10` a sixteenth, `50` a third.
+ * The look of a chip drawn in a colour the data carries. The two-digit
+ * suffixes on a hex are alpha: `20` is an eighth of the colour, `10` a
+ * sixteenth, `50` a third. Any other colour — a theme's `var(--…)` handed out
+ * by a chart — is thinned by the same amounts with `color-mix`.
  */
+const HEX = /^#[0-9a-f]{6}$/i;
+const thinned = (color: string, hexAlpha: string, percent: number) =>
+  HEX.test(color) ? `${color}${hexAlpha}` : `color-mix(in srgb, ${color} ${percent}%, transparent)`;
+
 function colorStyle(color: string, fill: 'tint' | 'faint' | 'solid'): React.CSSProperties {
   if (fill === 'solid') return { backgroundColor: color, color: '#fff', borderColor: color };
-  if (fill === 'faint') return { backgroundColor: `${color}10`, color, borderColor: `${color}50` };
-  return { backgroundColor: `${color}20`, color, borderColor: color };
+  if (fill === 'faint') return { backgroundColor: thinned(color, '10', 6), color, borderColor: thinned(color, '50', 31) };
+  return { backgroundColor: thinned(color, '20', 12.5), color, borderColor: color };
 }
 
 /**
@@ -342,7 +355,7 @@ function colorStyle(color: string, fill: 'tint' | 'faint' | 'solid'): React.CSSP
  * running copy 2026-08-19).
  */
 const Badge = React.forwardRef<HTMLSpanElement, BadgeOwnProps>(function Badge(
-  { className, variant, size, appearance, shape, asChild = false, disabled, hue, color, colorFill = 'tint', style, ...props },
+  { className, variant, size, appearance, shape, wrap, asChild = false, disabled, hue, color, colorFill = 'tint', style, ...props },
   ref,
 ) {
   const Comp = asChild ? SlotPrimitive.Slot : 'span';
@@ -354,7 +367,7 @@ const Badge = React.forwardRef<HTMLSpanElement, BadgeOwnProps>(function Badge(
       ref={ref}
       data-slot="badge"
       className={cn(
-        badgeVariants({ variant: hued || colored ? 'outline' : variant, size, appearance, shape, disabled }),
+        badgeVariants({ variant: hued || colored ? 'outline' : variant, size, appearance, shape, wrap, disabled }),
         hued && (appearance === 'light' ? 'badge-hue' : 'badge-hue badge-hue-strong'),
         className,
       )}
@@ -387,15 +400,48 @@ function BadgeButton({
   );
 }
 
-function BadgeDot({ className, ...props }: React.ComponentProps<'span'>) {
+/*
+ * A dot is drawn in the colour of the words around it, so a screen colours it
+ * the way it colours text. Inside a chip it is quieter than the chip's words;
+ * standing on its own as a state's mark — a tool that is running, a file with
+ * unsaved work — it is `solid`, the state's full colour.
+ */
+const badgeDotVariants = cva('shrink-0 rounded-full bg-current', {
+  variants: {
+    size: {
+      xs: 'size-1.5',
+      sm: 'size-2',
+      md: 'size-3',
+    },
+    solid: {
+      true: '',
+      false: 'opacity-75',
+    },
+  },
+  defaultVariants: { size: 'xs', solid: false },
+});
+
+type BadgeDotOwnProps = Omit<React.ComponentProps<'span'>, 'color' | 'ref'> &
+  VariantProps<typeof badgeDotVariants> & {
+    /** A colour the DATA carries as a hex string — a tag's own `#rrggbb`. */
+    color?: string;
+  };
+
+/** Forwards its ref for the same reason the chip does: a tooltip hangs on it. */
+const BadgeDot = React.forwardRef<HTMLSpanElement, BadgeDotOwnProps>(function BadgeDot(
+  { className, size, solid, color, style, ...props },
+  ref,
+) {
   return (
     <span
+      ref={ref}
       data-slot="badge-dot"
-      className={cn('size-1.5 rounded-full bg-[currentColor] opacity-75', className)}
+      className={cn(badgeDotVariants({ size, solid }), className)}
+      style={color ? { color, ...style } : style}
       {...props}
     />
   );
-}
+});
 
 /**
  * The same chip, built as a DOM node rather than rendered.
@@ -428,4 +474,4 @@ export function badgeElement(
   return el;
 }
 
-export { Badge, BadgeButton, BadgeDot, badgeVariants };
+export { Badge, BadgeButton, BadgeDot, badgeDotVariants, badgeVariants };
