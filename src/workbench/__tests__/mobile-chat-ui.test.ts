@@ -95,7 +95,10 @@ describe('the mobile chat chrome', () => {
   it('uses compact cards and equally tall inset toolbar controls', () => {
     expect(source('../transcript-rows.tsx')).toContain("px-2.5 py-1 font-mono text-xs md:py-1.5");
     expect(source('../../components/ui/tabs.tsx')).toContain('inline-flex h-12 items-center');
-    expect(source('../../components/ui/tabs.tsx')).toContain('inline-flex h-10 items-center');
+    // The trigger's base and its default look are separate strings since the
+    // editor-strip variant joined them (bw-weih.3); the default is still h-10.
+    expect(source('../../components/ui/tabs.tsx')).toContain('"inline-flex items-center whitespace-nowrap');
+    expect(source('../../components/ui/tabs.tsx')).toContain('"h-10 justify-center rounded-md');
     const filter = source('../filter-tree.tsx');
     expect(filter).toContain('emphasis="quiet"');
     expect(filter).toContain("'h-10 w-10 sm:h-8 sm:w-8'");
