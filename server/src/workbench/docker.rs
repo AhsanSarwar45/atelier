@@ -288,6 +288,107 @@ fn labelled(body: &[u8], session_id: &str) -> Option<Bytes> {
     serde_json::to_vec(&settings).ok().map(Bytes::from)
 }
 
+/// One running container, as the daemon lists it.
+#[derive(Debug, Clone)]
+pub struct Running {
+    pub id: String,
+    pub name: String,
+    pub image: String,
+    pub labels: HashMap<String, String>,
+    /// The folder under `/sys/fs/cgroup` its memory is charged to, when found.
+    pub group: Option<PathBuf>,
+}
+
+/// Every running container on the daemon a chat's socket passes calls to.
+/// Empty when there is no such daemon or it does not answer quickly: the
+/// memory report is read every few seconds and must not wait on Docker.
+pub async fn running() -> Vec<Running> {
+    let Some(upstream) = upstream() else {
+        return Vec::new();
+    };
+    let listed = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        let listed = get(&upstream, "/containers/json").await?;
+        let mut found = Vec::new();
+        for container in listed.as_array().into_iter().flatten() {
+            let Some(id) = container["Id"].as_str() else {
+                continue;
+            };
+            found.push(Running {
+                id: id.to_owned(),
+                name: container["Names"][0].as_str().unwrap_or(id).trim_start_matches('/').to_owned(),
+                image: container["Image"].as_str().unwrap_or_default().to_owned(),
+                labels: container["Labels"]
+                    .as_object()
+                    .map(|labels| {
+                        labels
+                            .iter()
+                            .filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_owned())))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                group: group_of(&upstream, id).await,
+            });
+        }
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(found)
+    })
+    .await;
+    match listed {
+        Ok(Ok(found)) => found,
+        _ => Vec::new(),
+    }
+}
+
+/// Where a container's memory is charged. The two usual places are tried
+/// first; otherwise the daemon is asked for the container's first process and
+/// the kernel for that process's group, which also finds rootless daemons.
+/// The answer is kept, since it does not change while the container runs.
+async fn group_of(upstream: &Path, id: &str) -> Option<PathBuf> {
+    static KNOWN: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
+    let known = KNOWN.get_or_init(Default::default);
+    let root = Path::new("/sys/fs/cgroup");
+    if let Some(group) = known
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .get(id)
+        .filter(|group| group.is_dir())
+    {
+        return Some(group.clone());
+    }
+    let mut group = [
+        root.join(format!("system.slice/docker-{id}.scope")),
+        root.join("docker").join(id),
+    ]
+    .into_iter()
+    .find(|group| group.is_dir());
+    if group.is_none() {
+        let pid = get(upstream, &format!("/containers/{id}/json")).await.ok()?["State"]["Pid"].as_u64()?;
+        let own = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
+        let path = own.lines().find_map(|line| line.strip_prefix("0::"))?.trim();
+        group = Some(root.join(path.trim_start_matches('/'))).filter(|group| group.is_dir());
+    }
+    let group = group?;
+    known
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .insert(id.to_owned(), group.clone());
+    Some(group)
+}
+
+async fn get(upstream: &Path, path: &str) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    let stream = UnixStream::connect(upstream).await?;
+    let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream)).await?;
+    tokio::spawn(connection);
+    let request = Request::get(path)
+        .header(hyper::header::HOST, "docker")
+        .body(Full::new(Bytes::new()))?;
+    let response = sender.send_request(request).await?;
+    if !response.status().is_success() {
+        return Err(format!("Docker answered {path} with {}", response.status()).into());
+    }
+    let body = response.into_body().collect().await?.to_bytes();
+    Ok(serde_json::from_slice(&body)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

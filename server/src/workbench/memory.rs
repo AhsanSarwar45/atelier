@@ -12,8 +12,37 @@ pub const CHAT_ENV: &str = "ATELIER_CHAT_SESSION_ID";
 pub struct ChatMemory {
     pub session_id: String,
     pub title: String,
+    /// What the chat's own processes hold. The memory limit judges this and
+    /// not the containers below: stopping a chat does not stop its containers,
+    /// so counting them would stop it again every time it restarted.
     pub bytes: u64,
     pub processes: usize,
+    /// What the containers charged to this chat hold, file cache left out.
+    pub container_bytes: u64,
+    pub containers: usize,
+}
+
+/// One running container and the chat it is charged to (bw-meh1.2).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContainerMemory {
+    pub id: String,
+    pub name: String,
+    pub image: String,
+    /// Everything charged to the container's group in RAM and swap, less the
+    /// file cache the kernel can drop. `docker stats` leaves swap out; this
+    /// counts it, as the process figures do, because paged-out memory still
+    /// costs the machine (bw-c4i2.1).
+    pub bytes: u64,
+    pub cache_bytes: u64,
+    pub session_id: Option<String>,
+    pub chat_title: Option<String>,
+    /// How the chat was found: `label`, set when the chat created it, or
+    /// `workingDir`, the folder Compose started it from being the one a
+    /// running chat works in.
+    pub owner: Option<&'static str>,
+    pub project: Option<String>,
+    pub working_dir: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -44,6 +73,10 @@ pub struct MemoryReport {
     pub process_details: Vec<ProcessMemory>,
     /// What the kernel charges the app's own control group, when it has one.
     pub service: Option<ServiceMemory>,
+    /// Containers are started by the Docker daemon, not by this app, so they
+    /// are counted apart from `total_bytes` and by a different measure.
+    pub container_bytes: u64,
+    pub containers: Vec<ContainerMemory>,
 }
 
 /// The kernel's own account of the app's control group. The proportional
@@ -199,6 +232,18 @@ fn full_pressure(pressure: &str) -> Option<f64> {
 
 /// The group's own account, but only when the group is this app's alone: in a
 /// terminal or a desktop session scope it would count unrelated programs.
+/// A group's charge in RAM and swap, and the part of it that is file cache.
+fn group_memory(group: &std::path::Path) -> Option<(u64, u64)> {
+    let read = |name: &str| std::fs::read_to_string(group.join(name)).ok();
+    let current: u64 = read("memory.current")?.trim().parse().ok()?;
+    let swapped: u64 = read("memory.swap.current")
+        .and_then(|text| text.trim().parse().ok())
+        .unwrap_or(0);
+    let stat = read("memory.stat")?;
+    let cache = stat_field(&stat, "file")?.saturating_sub(stat_field(&stat, "shmem").unwrap_or(0));
+    Some((current.saturating_add(swapped), cache))
+}
+
 #[cfg(target_os = "linux")]
 fn service_memory(ours: &[Found]) -> Option<ServiceMemory> {
     let own = std::fs::read_to_string("/proc/self/cgroup").ok()?;
@@ -211,14 +256,9 @@ fn service_memory(ours: &[Found]) -> Option<ServiceMemory> {
     if !members.all(|pid| pids.contains(&pid)) {
         return None;
     }
-    let current: u64 = read("memory.current")?.trim().parse().ok()?;
-    let swapped: u64 = read("memory.swap.current")
-        .and_then(|text| text.trim().parse().ok())
-        .unwrap_or(0);
-    let stat = read("memory.stat")?;
-    let cache = stat_field(&stat, "file")?.saturating_sub(stat_field(&stat, "shmem").unwrap_or(0));
+    let (total, cache) = group_memory(&group)?;
     Some(ServiceMemory {
-        total_bytes: current.saturating_add(swapped),
+        total_bytes: total,
         cache_bytes: cache,
         pressure: read("memory.pressure").as_deref().and_then(full_pressure).unwrap_or(0.0),
     })
@@ -337,10 +377,18 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
     // The table is kept between reports, so a process already known is not
     // built again, and it is file reading, so it runs off the request threads
     // (bw-fbzd.5).
-    let (ours, service) = tokio::task::spawn_blocking(|| {
+    let running = super::docker::running().await;
+    let (ours, service, measured) = tokio::task::spawn_blocking(move || {
         let ours = scan();
         let service = service_memory(&ours);
-        (ours, service)
+        let measured: Vec<(super::docker::Running, (u64, u64))> = running
+            .into_iter()
+            .filter_map(|container| {
+                let memory = group_memory(container.group.as_deref()?)?;
+                Some((container, memory))
+            })
+            .collect();
+        (ours, service, measured)
     })
     .await
         .map_err(|e| format!("process scan failed: {e}"))?;
@@ -360,22 +408,50 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
         .iter()
         .filter_map(|found| effective_chat(found.pid, &process_map, inherited_chat_id.as_ref()))
         .collect();
-    let titles: HashMap<String, String> = if running_chats.is_empty() {
-        HashMap::new()
+    let sessions = if running_chats.is_empty() && measured.is_empty() {
+        Vec::new()
     } else {
-        database
-            .list_sessions(None)
-            .await?
-            .into_iter()
-            .filter(|session| running_chats.contains(&session.id))
-            .map(|session| {
-                // The one naming rule, so a chat is called the same thing here
-                // as on the rail and in the tray (chat_name, bw-altj.7).
-                let name = crate::workbench::chat_name::name_session(&session);
-                (session.id, name)
-            })
-            .collect()
+        database.list_sessions(None).await?
     };
+    let live: Vec<(&str, &str)> = sessions
+        .iter()
+        .filter(|session| running_chats.contains(&session.id))
+        .map(|session| (session.id.as_str(), session.cwd.as_str()))
+        .collect();
+    let known: HashSet<&str> = sessions.iter().map(|session| session.id.as_str()).collect();
+    let containers: Vec<ContainerMemory> = measured
+        .into_iter()
+        .map(|(container, (total, cache))| {
+            let working_dir = container.labels.get(super::docker::WORKING_DIR_LABEL).cloned();
+            let (session_id, owner) = container_owner(&container.labels, &known, &live);
+            ContainerMemory {
+                id: container.id.chars().take(12).collect(),
+                name: container.name,
+                image: container.image,
+                bytes: total.saturating_sub(cache),
+                cache_bytes: cache,
+                session_id,
+                chat_title: None,
+                owner,
+                project: container.labels.get("com.docker.compose.project").cloned(),
+                working_dir,
+            }
+        })
+        .collect();
+    let owning: HashSet<&str> = containers
+        .iter()
+        .filter_map(|container| container.session_id.as_deref())
+        .collect();
+    let titles: HashMap<String, String> = sessions
+        .iter()
+        .filter(|session| running_chats.contains(&session.id) || owning.contains(session.id.as_str()))
+        .map(|session| {
+            // The one naming rule, so a chat is called the same thing here
+            // as on the rail and in the tray (chat_name, bw-altj.7).
+            let name = crate::workbench::chat_name::name_session(session);
+            (session.id.clone(), name)
+        })
+        .collect();
     for found in &ours {
         let Some(cost) = process_cost(found.pid)? else {
             continue;
@@ -403,19 +479,42 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
             start_time: found.start_time,
         });
     }
+    let mut containers = containers;
+    let mut by_chat: HashMap<String, (u64, usize)> = HashMap::new();
+    for container in &mut containers {
+        if let Some(id) = container.session_id.as_ref() {
+            container.chat_title = titles.get(id).cloned();
+            let entry = by_chat.entry(id.clone()).or_default();
+            entry.0 = entry.0.saturating_add(container.bytes);
+            entry.1 += 1;
+        }
+    }
+    for id in by_chat.keys() {
+        grouped.entry(id.clone()).or_default();
+    }
     let mut chats = grouped
         .into_iter()
-        .map(|(session_id, (bytes, processes))| ChatMemory {
-            title: titles
-                .get(&session_id)
-                .cloned()
-                .unwrap_or_else(|| "Active chat".into()),
-            session_id,
-            bytes,
-            processes,
+        .map(|(session_id, (bytes, processes))| {
+            let (container_bytes, container_count) = by_chat.get(&session_id).copied().unwrap_or_default();
+            ChatMemory {
+                title: titles
+                    .get(&session_id)
+                    .cloned()
+                    .unwrap_or_else(|| "Active chat".into()),
+                session_id,
+                bytes,
+                processes,
+                container_bytes,
+                containers: container_count,
+            }
         })
         .collect::<Vec<_>>();
-    chats.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.title.cmp(&b.title)));
+    chats.sort_by(|a, b| {
+        (b.bytes + b.container_bytes)
+            .cmp(&(a.bytes + a.container_bytes))
+            .then_with(|| a.title.cmp(&b.title))
+    });
+    containers.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.name.cmp(&b.name)));
     details.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.pid.cmp(&b.pid)));
     Ok(MemoryReport {
         total_bytes: total,
@@ -425,7 +524,54 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
         chats,
         process_details: details,
         service,
+        container_bytes: containers.iter().map(|container| container.bytes).sum(),
+        containers,
     })
+}
+
+/// The chat a container is charged to. Its label wins, when it names a chat
+/// this app holds; a label from another copy of the app names nobody here.
+/// Without one, a Compose container belongs to the running chat whose folder
+/// it was started from: the same folder, or one inside the other, the closest
+/// match winning. Two chats matching equally closely are both plausible, so
+/// neither is charged.
+fn container_owner(
+    labels: &HashMap<String, String>,
+    known: &HashSet<&str>,
+    live: &[(&str, &str)],
+) -> (Option<String>, Option<&'static str>) {
+    if let Some(chat) = labels.get(super::docker::CHAT_LABEL) {
+        return if known.contains(chat.as_str()) {
+            (Some(chat.clone()), Some("label"))
+        } else {
+            (None, None)
+        };
+    }
+    let Some(folder) = labels.get(super::docker::WORKING_DIR_LABEL) else {
+        return (None, None);
+    };
+    let folder = std::path::Path::new(folder);
+    let mut best: Option<(usize, &str)> = None;
+    let mut tied = false;
+    for (id, cwd) in live {
+        let cwd = std::path::Path::new(cwd);
+        if !(cwd.starts_with(folder) || folder.starts_with(cwd)) {
+            continue;
+        }
+        let closeness = cwd.components().count().min(folder.components().count());
+        match best {
+            Some((score, chat)) if score == closeness && chat != *id => tied = true,
+            Some((score, _)) if score >= closeness => {}
+            _ => {
+                best = Some((closeness, id));
+                tied = false;
+            }
+        }
+    }
+    match best {
+        Some((_, chat)) if !tied => (Some(chat.to_owned()), Some("workingDir")),
+        _ => (None, None),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -542,6 +688,42 @@ mod tests {
         assert_eq!(full_pressure("some avg10=1.00 avg60=0 avg300=0 total=0\n"), None);
     }
 
+    fn labels(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect()
+    }
+
+    #[test]
+    fn a_container_is_charged_to_the_chat_its_label_names_when_this_app_holds_it() {
+        let known = HashSet::from(["chat-1", "chat-2"]);
+        let live = [("chat-2", "/work/shop")];
+        let labelled = labels(&[
+            (super::super::docker::CHAT_LABEL, "chat-1"),
+            (super::super::docker::WORKING_DIR_LABEL, "/work/shop"),
+        ]);
+        assert_eq!(container_owner(&labelled, &known, &live), (Some("chat-1".into()), Some("label")));
+        let elsewhere = labels(&[
+            (super::super::docker::CHAT_LABEL, "another-app"),
+            (super::super::docker::WORKING_DIR_LABEL, "/work/shop"),
+        ]);
+        assert_eq!(container_owner(&elsewhere, &known, &live), (None, None));
+    }
+
+    #[test]
+    fn an_unlabelled_compose_container_goes_to_the_closest_running_chat_or_nobody() {
+        let known = HashSet::from(["root", "server", "other", "twin"]);
+        let stack = labels(&[(super::super::docker::WORKING_DIR_LABEL, "/work/shop")]);
+        let live = [("root", "/work"), ("server", "/work/shop/server"), ("other", "/elsewhere")];
+        assert_eq!(container_owner(&stack, &known, &live), (Some("server".into()), Some("workingDir")));
+        let live = [("other", "/elsewhere")];
+        assert_eq!(container_owner(&stack, &known, &live), (None, None));
+        let live = [("server", "/work/shop"), ("twin", "/work/shop")];
+        assert_eq!(container_owner(&stack, &known, &live), (None, None));
+        // A folder that only shares a prefix of its name is not the same folder.
+        let live = [("other", "/work/shopfront")];
+        assert_eq!(container_owner(&stack, &known, &live), (None, None));
+        assert_eq!(container_owner(&labels(&[]), &known, &live), (None, None));
+    }
+
     #[cfg(target_os = "linux")]
     const ROLLUP: &str = "Rss:               12000 kB\nPss:                4321 kB\nPss_Anon:           4000 kB\nSwap:               9000 kB\nSwapPss:            1234 kB\n";
 
@@ -639,6 +821,21 @@ mod tests {
             role_of(processes[&tool], root, &processes, Some("chat-1")),
             "subprocess"
         );
+    }
+
+    /// Against the machine's real daemon: `cargo test real_container -- --ignored
+    /// --nocapture`, with at least one container running.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn real_containers_are_found_and_measured_by_their_group() {
+        let running = super::super::docker::running().await;
+        assert!(!running.is_empty(), "no running container to measure");
+        for container in &running {
+            let group = container.group.as_deref().expect("every running container has a group");
+            let (total, cache) = group_memory(group).expect("its group has a memory account");
+            println!("{} {} total={total} cache={cache} in {}", container.name, container.image, group.display());
+            assert!(total > 0);
+        }
     }
 
     #[cfg(unix)]

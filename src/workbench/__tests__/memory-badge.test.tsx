@@ -86,4 +86,28 @@ describe('memory badge', () => {
       method: 'POST', body: JSON.stringify({ pid: 14, startTime: 4, sessionId: 'chat-1' }),
     })));
   });
+
+  // Containers are started by Docker, not by the chat's own processes, so
+  // they are measured apart; the chip counts the ones a chat started and
+  // lists the rest without charging Atelier for them (bw-meh1.2).
+  it('charges a chat for the containers it started and lists the rest as nobody\'s', async () => {
+    request.mockResolvedValue({ ok: true, json: async () => ({
+      totalBytes: 1024 ** 3, swapBytes: 0, metric: 'pssWithSwap', processCount: 1,
+      chats: [{ sessionId: 'chat-1', title: 'Build the app', bytes: 512 * 1024 ** 2, processes: 1, containerBytes: 2 * 1024 ** 3, containers: 1 }],
+      processDetails: [],
+      containerBytes: 3 * 1024 ** 3,
+      containers: [
+        { id: 'a', name: 'shop-web', image: 'shop', bytes: 2 * 1024 ** 3, cacheBytes: 0, sessionId: 'chat-1', chatTitle: 'Build the app', owner: 'label', project: 'shop', workingDir: '/work/shop' },
+        { id: 'b', name: 'searxng', image: 'searxng', bytes: 1024 ** 3, cacheBytes: 0, sessionId: null, chatTitle: null, owner: null, project: null, workingDir: null },
+      ],
+    }) });
+    render(<MemoryBadge />);
+    expect(await screen.findByTestId('memory-badge')).toHaveTextContent('3.0 GB');
+    fireEvent.click(screen.getByTestId('memory-badge'));
+    expect(await screen.findByTestId('memory-chat-containers')).toHaveTextContent('512 MB in processes · 2.0 GB in 1 container');
+    const rows = screen.getAllByTestId('memory-container-row');
+    expect(rows[0]).toHaveTextContent('Build the app');
+    expect(rows[1]).toHaveTextContent('No chat');
+    expect(screen.getByTestId('memory-container-line')).toHaveTextContent('Chat containers 2.0 GB');
+  });
 });
