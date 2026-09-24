@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { ChevronDown, Loader2, LogIn, LogOut, Plus, Trash2 } from 'lucide-react';
+import { Loader2, LogIn, LogOut, Plus, Trash2 } from 'lucide-react';
 
 import { KindIcon } from '@/components/settings/kind-icon';
 import { McpCatalogue } from '@/components/settings/mcp-catalogue';
@@ -15,6 +15,7 @@ import { SettingsGroup } from '@/components/settings/section';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Collapsible, CollapsibleContent, CollapsibleTriggerRow } from '@/components/ui/collapsible';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { ReadFailed } from '@/components/ui/read-failed';
@@ -22,7 +23,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
-import { cn } from '@/lib/utils';
 import type { Brand, McpElsewhere, McpServer, McpSource, SettingsScope } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -60,7 +60,6 @@ function launchOf(s: McpServer): string {
  * something true is better than nothing.
  */
 function Subtitle({ server }: { server: McpServer }) {
-  const [open, setOpen] = useState(false);
   const launch = launchOf(server);
   if (!server.description) {
     return (
@@ -70,24 +69,17 @@ function Subtitle({ server }: { server: McpServer }) {
     );
   }
   return (
-    <div className="min-w-0">
+    <Collapsible className="min-w-0">
       <p className="truncate text-xs text-t-muted">{server.description}</p>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="mt-0.5 h-5 px-1 text-xs text-t-tertiary hover:text-t-secondary"
-        onClick={() => setOpen((was) => !was)}
-        data-testid={`mcp-launch-toggle-${server.id}`}
-      >
-        <ChevronDown className={cn('size-3 transition-transform', open && 'rotate-180')} />
+      <CollapsibleTriggerRow size="sm" className="mt-0.5 text-t-tertiary hover:text-t-secondary" data-testid={`mcp-launch-toggle-${server.id}`}>
         Command
-      </Button>
-      {open && (
+      </CollapsibleTriggerRow>
+      <CollapsibleContent asChild>
         <p className="break-all font-mono text-xs text-t-muted" data-testid={`mcp-launch-${server.id}`}>
           {launch}
         </p>
-      )}
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
