@@ -28,7 +28,7 @@ describe('project onboarding', () => {
     expect(await screen.findByLabelText('Project name')).toHaveValue('Keystone');
     expect(screen.getByLabelText('Use task tracking for project work')).toBeChecked();
     expect(screen.getByLabelText('Card ID prefix')).toHaveValue('key');
-    expect(screen.getByLabelText('Finished work lands on')).toHaveValue('ours');
+    expect(screen.getByRole('combobox', { name: 'Finished work lands on' })).toHaveTextContent('ours');
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Project' }));
     // The instructions the probe inferred are added with the project, not

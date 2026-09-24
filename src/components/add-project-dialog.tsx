@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Picker } from "@/components/ui/picker";
 import { Panel } from "@/components/ui/panel";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -366,8 +367,25 @@ export function AddProjectDialog({
                       </div>
                       <div className="space-y-2">
                         <label htmlFor="completed-branch" className="text-sm font-medium text-t-secondary">Finished work lands on</label>
-                        <Input id="completed-branch" list="project-branches" value={manifest.git.completed_work_branch} onChange={(event) => setManifest({ ...manifest, git: { ...manifest.git, completed_work_branch: event.target.value } })} />
-                        <datalist id="project-branches">{branches.map((branch) => <option key={branch} value={branch} />)}</datalist>
+                        {/*
+                          A folder with branches picks one of them; a folder
+                          with none (a repository not made yet) has nothing to
+                          pick from, so the name is typed. It was one input
+                          with a browser `<datalist>` under it, which drew the
+                          browser's own list rather than the app's.
+                        */}
+                        {branches.length > 0 ? (
+                          <Picker
+                            label="Finished work lands on"
+                            data-testid="completed-branch"
+                            searchPlaceholder="Find a branch"
+                            value={manifest.git.completed_work_branch}
+                            onChange={(branch) => setManifest({ ...manifest, git: { ...manifest.git, completed_work_branch: branch } })}
+                            choices={[...new Set([...branches, manifest.git.completed_work_branch].filter(Boolean))].map((branch) => ({ value: branch, label: branch }))}
+                          />
+                        ) : (
+                          <Input id="completed-branch" value={manifest.git.completed_work_branch} onChange={(event) => setManifest({ ...manifest, git: { ...manifest.git, completed_work_branch: event.target.value } })} />
+                        )}
                       </div>
                       <label className="flex items-center gap-2 text-sm text-t-secondary">
                         <Checkbox checked={manifest.git.agents_may_merge_completed_work} onCheckedChange={(checked) => setManifest({ ...manifest, git: { ...manifest.git, agents_may_merge_completed_work: checked === true } })} />
