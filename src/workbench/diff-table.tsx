@@ -26,6 +26,8 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { Copy } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { PopoverAtPoint, type PointerAt } from '@/components/ui/point-anchor';
+import { Popover, PopoverContent } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { paintLines } from '@/workbench/colouring';
 import type { DiffRow } from '@/workbench/line-diff';
@@ -248,7 +250,7 @@ export function DiffTable({
   const above = many ? (window_[0]?.start ?? 0) : 0;
   const below = many ? virtual.getTotalSize() - (window_[window_.length - 1]?.end ?? 0) : 0;
   /** Where the floating button sits, and what it would copy, while there is one. */
-  const [offer, setOffer] = useState<{ at: { left: number; top: number }; copied: CopiedDiff } | null>(null);
+  const [offer, setOffer] = useState<{ at: PointerAt; copied: CopiedDiff } | null>(null);
 
   /**
    * The line the selection being dragged right now was begun in.
@@ -305,8 +307,8 @@ export function DiffTable({
       }
       // A range has no box where there is no layout, which is every test; the
       // button is still offered, it just has nowhere in particular to sit.
-      const box = now.range.getBoundingClientRect?.() ?? { right: 0, bottom: 0 };
-      setOffer({ at: { left: box.right, top: box.bottom + 6 }, copied: now.copied });
+      const box = now.range.getBoundingClientRect?.() ?? { left: 0, top: 0, width: 0, height: 0 };
+      setOffer({ at: { left: box.left, top: box.top, width: box.width, height: box.height }, copied: now.copied });
     };
     document.addEventListener('selectionchange', look);
     return () => document.removeEventListener('selectionchange', look);
@@ -438,26 +440,36 @@ export function DiffTable({
           </tbody>
         </table>
       </div>
-      {offer && (
-        <div
-          data-testid="diff-copy-text"
-          style={{ position: 'fixed', left: offer.at.left, top: offer.at.top, zIndex: 40 }}
-          // Pressing the button must not be what takes the selection away, or
-          // there would be nothing left to copy by the time the click lands.
-          onMouseDown={(event) => event.preventDefault()}
-          className="-translate-x-full"
-        >
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
-            className="shadow-md"
-            onClick={() => void navigator.clipboard?.writeText(offer.copied.text)}
+      {/* Hung off the selection's own box by the library's popover, and gone
+          as soon as the selection is — never dismissed by a press elsewhere. */}
+      <Popover open={offer !== null}>
+        <PopoverAtPoint at={offer?.at ?? null} />
+        {offer && (
+          <PopoverContent
+            data-testid="diff-copy-text"
+            side="bottom"
+            align="end"
+            sideOffset={6}
+            // The keyboard stays where the selection was made.
+            onOpenAutoFocus={(event) => event.preventDefault()}
+            onCloseAutoFocus={(event) => event.preventDefault()}
+            // Pressing the button must not be what takes the selection away, or
+            // there would be nothing left to copy by the time the click lands.
+            onMouseDown={(event) => event.preventDefault()}
+            className="w-auto border-0 bg-transparent p-0 shadow-none"
           >
-            <Copy /> Copy text
-          </Button>
-        </div>
-      )}
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              className="shadow-md"
+              onClick={() => void navigator.clipboard?.writeText(offer.copied.text)}
+            >
+              <Copy /> Copy text
+            </Button>
+          </PopoverContent>
+        )}
+      </Popover>
     </>
   );
 }

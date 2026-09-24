@@ -21,6 +21,8 @@ import { Copy, ExternalLink, FolderOpen, Pencil } from 'lucide-react';
 
 import { isMarkdownPath } from '@/components/file-kinds';
 import { Button } from '@/components/ui/button';
+import { PopoverAtPoint, type PointerAt } from '@/components/ui/point-anchor';
+import { Popover, PopoverContent } from '@/components/ui/popover';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { CodeEditor, type CopiedSelection } from '@/workbench/code-editor';
@@ -192,9 +194,7 @@ export function FileViewer({
   const live = file?.kind === 'text' ? (editableFile ? edits.text : file.text) : '';
 
   /** What is selected in the editor now, and where the offer beside it sits. */
-  const [selection, setSelection] = useState<{ copied: CopiedSelection; at: { left: number; top: number } } | null>(
-    null,
-  );
+  const [selection, setSelection] = useState<{ copied: CopiedSelection; at: PointerAt } | null>(null);
 
   // Where the button goes is the browser's business — the selection CodeMirror
   // reports is in document positions, and only the page knows where those are
@@ -204,10 +204,12 @@ export function FileViewer({
     if (!copied) return setSelection(null);
     const range = typeof window === 'undefined' ? null : window.getSelection();
     const box = (range?.rangeCount ? range.getRangeAt(0).getBoundingClientRect?.() : null) ?? {
-      right: 0,
-      bottom: 0,
+      left: 0,
+      top: 0,
+      width: 0,
+      height: 0,
     };
-    setSelection({ copied, at: { left: box.right, top: box.bottom + 6 } });
+    setSelection({ copied, at: { left: box.left, top: box.top, width: box.width, height: box.height } });
   }, []);
 
   // A different file is a different selection; the one from the last file must
@@ -430,21 +432,33 @@ export function FileViewer({
             />
             )}
           </div>
-          {selection && (
-            <div
-              data-testid="file-copy-text"
-              style={{ position: 'fixed', left: selection.at.left, top: selection.at.top, zIndex: 40 }}
-              // Pressing the button must not be what takes the selection away,
-              // or there would be nothing left to copy by the time the click
-              // lands.
-              onMouseDown={(event) => event.preventDefault()}
-              className="-translate-x-full"
-            >
-              <Button type="button" size="xs" variant="outline" className="shadow-md" onClick={copyText}>
-                <Copy /> Copy text
-              </Button>
-            </div>
-          )}
+          {/* The offer hangs off the selection's own box, placed by the
+              library's popover: under its end, and flipped when there is no
+              room below. It is not dismissed by a press elsewhere — it stands
+              exactly as long as the selection does. */}
+          <Popover open={selection !== null}>
+            <PopoverAtPoint at={selection?.at ?? null} />
+            {selection && (
+              <PopoverContent
+                data-testid="file-copy-text"
+                side="bottom"
+                align="end"
+                sideOffset={6}
+                // The keyboard stays in the editor, where the selection is.
+                onOpenAutoFocus={(event) => event.preventDefault()}
+                onCloseAutoFocus={(event) => event.preventDefault()}
+                // Pressing the button must not be what takes the selection away,
+                // or there would be nothing left to copy by the time the click
+                // lands.
+                onMouseDown={(event) => event.preventDefault()}
+                className="w-auto border-0 bg-transparent p-0 shadow-none"
+              >
+                <Button type="button" size="xs" variant="outline" className="shadow-md" onClick={copyText}>
+                  <Copy /> Copy text
+                </Button>
+              </PopoverContent>
+            )}
+          </Popover>
         </div>
       )}
     </div>
