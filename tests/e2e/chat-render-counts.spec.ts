@@ -256,14 +256,15 @@ test('what one keystroke, one word and one new row cause React to run', async ({
   // in a minified build. A chat that redrew its list of chats, or its whole
   // transcript, ran close to two thousand for every one of these (bw-4slk.1);
   // bw-j29w then kept the frame around a chat still while its words stream:
-  // a word runs about fifty, a new row under two hundred. The ceilings sit
-  // just above that, so the surrounding screen coming back is caught.
+  // a word must run under sixty and a new row under a hundred and fifty. A
+  // new message is three events — the last one finishing, the next starting,
+  // its first word — so it may run three rows' worth.
   const ran = (c: Counts) => Object.values(c.rendered).reduce((a, b) => a + b, 0);
   expect(ran(keystroke), 'a keystroke redrew more than the box it was typed in').toBeLessThanOrEqual(60);
   expect(ran(keyWhileStreaming), 'a keystroke while the agent talks redrew more than the box').toBeLessThanOrEqual(80);
-  expect(ran(word), 'one streamed word redrew far more than the message it lands in').toBeLessThanOrEqual(80);
+  expect(ran(word), 'one streamed word redrew far more than the message it lands in').toBeLessThan(60);
   expect(Object.keys(word.mounted), 'one streamed word rebuilt parts of the screen').toEqual([]);
-  expect(ran(toolCall), 'a new tool call redrew far more than its own row').toBeLessThanOrEqual(150);
-  expect(ran(toolDone), 'a tool finishing redrew far more than its own row').toBeLessThanOrEqual(150);
-  expect(ran(message), 'a new message redrew far more than its own row').toBeLessThanOrEqual(300);
+  expect(ran(toolCall), 'a new tool call redrew far more than its own row').toBeLessThan(150);
+  expect(ran(toolDone), 'a tool finishing redrew far more than its own row').toBeLessThan(150);
+  expect(ran(message), 'a new message redrew far more than its own row').toBeLessThan(3 * 150);
 });
