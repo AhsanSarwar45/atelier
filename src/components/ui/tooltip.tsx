@@ -117,6 +117,14 @@ export const Tooltip = React.forwardRef<HTMLElement, TooltipProps>(function Tool
           {...passed}
           onPointerDownCapture={() => { dismissed.current = true; setOpen(false); }}
           onPointerLeave={() => { dismissed.current = false; setOpen(false); }}
+          // Focus handed back by a closing sheet or window, after a tap, is not
+          // the keyboard arriving: the browser does not mark it focus-visible.
+          // A label opened by it covered the bar's back arrow on a phone
+          // (bw-weih.5). Only keyboard focus asks for the label.
+          onFocus={(event: React.FocusEvent<HTMLElement>) => {
+            if (!focusVisible(event.currentTarget)) { dismissed.current = true; setOpen(false); }
+          }}
+          onBlur={() => { dismissed.current = false; }}
         >{inner}</Slot>
       </TooltipPrimitive.Trigger>
       <TooltipContent side={side} align={align} className={className}>
@@ -130,6 +138,15 @@ export const Tooltip = React.forwardRef<HTMLElement, TooltipProps>(function Tool
   // is supplied here when there is none.
   return mounted ? tooltip : <TooltipProvider>{tooltip}</TooltipProvider>;
 });
+
+/** Whether the browser drew a focus ring for this focus; true where it cannot say. */
+function focusVisible(el: HTMLElement) {
+  try {
+    return el.matches(':focus-visible');
+  } catch {
+    return true;
+  }
+}
 
 const TooltipContent = React.forwardRef<
   React.ElementRef<typeof TooltipPrimitive.Content>,
